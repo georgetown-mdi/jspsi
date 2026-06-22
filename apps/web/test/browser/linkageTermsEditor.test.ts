@@ -267,4 +267,35 @@ describe("LinkageTermsEditor", () => {
     );
     await expect.element(generateButton()).toBeEnabled();
   });
+
+  test("removing an element keeps focus on that key's Add control", async () => {
+    // The removed element row held focus on its trash button; without a deliberate
+    // move, focus would fall to document.body. It must land on the owning key's
+    // always-present "Add an element" button. (.first() scopes to the first key,
+    // whose element labels also appear under other ssn-leading keys.)
+    mount();
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    const firstAddElement = page
+      .getByRole("button", { name: "Add an element" })
+      .first();
+    await userEvent.click(
+      page.getByRole("button", { name: "Remove element 1 (ssn)" }).first(),
+    );
+    await expect.element(firstAddElement).toHaveFocus();
+  });
+
+  test("removing a key keeps focus on the Add a key control", async () => {
+    mount();
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: /^Remove key / }).first(),
+    );
+    await expect
+      .element(page.getByRole("button", { name: "Add a key" }))
+      .toHaveFocus();
+  });
 });

@@ -59,13 +59,15 @@ export default tseslint.config(
   },
   {
     // Force all parsing of operator config and credential files (psilink.yaml,
-    // .psilink.key, the signing identity) through the single hardened chokepoint
-    // in apps/cli/src/sensitiveFile.ts. The raw parsers leak source bytes -- a
-    // credential -- into errors (YAML/JSON throw messages, parseDocument's
-    // doc.errors and deferred-alias toString) and stderr (YAML's non-fatal
-    // warnings). Routing through sensitiveFile.ts closes every channel in one
-    // place; banning the raw calls here stops a new reader silently reopening any
-    // of them. The chokepoint module itself is exempt (it owns the raw calls), as
+    // .psilink.key, the signing identity) through the single hardened chokepoint.
+    // The chokepoint now lives in packages/core/src/sensitiveFile.ts (promoted
+    // from the CLI); apps/cli/src/sensitiveFile.ts is a thin re-export the CLI
+    // call sites import. The raw parsers leak source bytes -- a credential -- into
+    // errors (YAML/JSON throw messages, parseDocument's doc.errors and
+    // deferred-alias toString) and stderr (YAML's non-fatal warnings). Routing
+    // through the chokepoint closes every channel in one place; banning the raw
+    // calls here stops a new reader silently reopening any of them. The CLI's
+    // re-export shim is exempt (it owns no raw calls but mirrors the boundary), as
     // are tests. A genuinely non-sensitive parse (e.g. parsing a command's JSON
     // output) opts out with an eslint-disable-next-line carrying a one-line why.
     files: ["apps/cli/src/**/*.ts"],
@@ -120,16 +122,51 @@ export default tseslint.config(
     // structurally bounds the body before JSON.parse so a pathological object or
     // array cannot drive the parser into an uncatchable, process-terminating
     // abort. Banning the raw access here stops a new reader silently reopening
-    // the crash at a fresh parse site. The chokepoint module itself is exempt
-    // (it owns the raw parse); tests are not matched. A genuinely trusted parse
-    // opts out with an eslint-disable-next-line carrying a one-line why.
+    // the crash at a fresh parse site.
+    //
+    // And it bans the raw YAML parsers: sensitiveFile.ts (the secret-redacting
+    // chokepoint, parseSensitiveYaml / editSensitiveYamlDocument) was promoted
+    // from apps/cli into core, so the same ban that guards apps/cli/src and
+    // apps/web/src must guard core/src -- a raw YAML.parse leaks source bytes (a
+    // credential) into its error and warning channels, and core is now where the
+    // chokepoint and any future config reader live. The two chokepoint modules
+    // are exempt (each owns its raw parser); tests are not matched. A genuinely
+    // trusted/non-sensitive parse opts out with an eslint-disable-next-line
+    // carrying a one-line why.
     files: ["packages/core/src/**/*.ts"],
-    ignores: ["packages/core/src/utils/boundedJson.ts"],
+    ignores: [
+      "packages/core/src/utils/boundedJson.ts",
+      "packages/core/src/sensitiveFile.ts",
+    ],
     // Fail CI on a stray or rule-silencing disable so the ban cannot be quietly
     // turned off on an untrusted parse (a bare `eslint .` only warns).
     linterOptions: { reportUnusedDisableDirectives: "error" },
     rules: {
-      "no-restricted-syntax": ["error", noBareRootLoglevelEmit],
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression[callee.object.name='YAML'][callee.property.name=/^(parse|parseDocument|parseAllDocuments)$/]",
+          message:
+            "Parse operator/credential files through packages/core/src/sensitiveFile.ts (parseSensitiveYaml / editSensitiveYamlDocument); raw YAML.parse leaks source into errors and the warning channel. Non-sensitive parse: eslint-disable-next-line with a one-line justification.",
+        },
+        noBareRootLoglevelEmit,
+      ],
+      // Close the named-import bypass (`import { parse } from "yaml"`); the
+      // chokepoint imports the YAML default, so this never hits legitimate code.
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "yaml",
+              importNames: ["parse", "parseDocument", "parseAllDocuments"],
+              message:
+                "Parse operator/credential files through packages/core/src/sensitiveFile.ts; do not import yaml's raw parsers directly.",
+            },
+          ],
+        },
+      ],
       // no-restricted-properties (a property-access ban, not a CallExpression
       // selector) so the ban catches not just a direct `JSON.parse(...)` call
       // but also an alias `const p = JSON.parse`, a computed `JSON['parse']`,

@@ -297,11 +297,18 @@ export function StepListEditor({
     return id;
   };
 
+  // Removing a step unmounts the row that held focus, which would otherwise fall
+  // to document.body. The "add a step" button is always present and not in the
+  // removed row, so move focus there after a removal.
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+
   const addStep = (functionName: string) =>
     onStepsChange([...steps, newStep(functionName)]);
 
-  const removeStep = (index: number) =>
+  const removeStep = (index: number) => {
     onStepsChange(steps.filter((_, i) => i !== index));
+    addButtonRef.current?.focus();
+  };
 
   const moveStep = (index: number, direction: -1 | 1) => {
     const target = index + direction;
@@ -364,6 +371,7 @@ export function StepListEditor({
       <Menu position="bottom-start" withinPortal>
         <Menu.Target>
           <Button
+            ref={addButtonRef}
             variant="light"
             size="xs"
             leftSection={<IconPlus size={14} aria-hidden />}

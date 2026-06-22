@@ -14,10 +14,11 @@ import { parseBoundedJson } from "./utils/boundedJson.js";
 //
 // Shared by both apps. Imports nothing host-specific (just `yaml` and core's
 // UsageError), so it is browser-safe: the web app routes its YAML/JSON config
-// import through these instead of a raw parser (an ESLint ban forbids the raw
-// parsers in apps/web/src, the same ban already in force across apps/cli/src
-// outside the CLI's thin re-export of this module). The filesystem READ stays
-// with each CLI caller -- an errno carries only a path and code, no content.
+// import through these instead of a raw parser. An ESLint ban forbids the raw
+// parsers across packages/core/src (this module is the exempt chokepoint),
+// apps/web/src, and apps/cli/src (outside the CLI's thin re-export of this
+// module), so no caller can silently reopen a leak channel. The filesystem READ
+// stays with each CLI caller -- an errno carries only a path and code, no content.
 //
 // Centralizing matters because the parsers leak through several independent
 // channels that are easy to reintroduce one call site at a time:

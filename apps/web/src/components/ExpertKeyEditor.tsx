@@ -120,6 +120,16 @@ export function ExpertKeyEditor({
     if (id !== undefined) map.set(to, id);
   };
 
+  // Removing a key or element unmounts the row that held focus, which would
+  // otherwise fall to document.body. Move focus to a stable, always-present
+  // control in the same scope instead: the "Add a key" button after a key
+  // removal, and the owning key's "Add an element" button after an element
+  // removal. Both buttons survive the removal (they are not in the removed row),
+  // so focusing them synchronously after the change keeps focus where the next
+  // action lives. Per-key add-element buttons are tracked by the key's stable id.
+  const addKeyRef = useRef<HTMLButtonElement>(null);
+  const addElementRefs = useRef(new Map<string, HTMLButtonElement>());
+
   const fieldOptions = declaredFields.map((field) => ({
     value: field.name,
     // The type label, qualified by the field name only when it differs (an
@@ -159,6 +169,20 @@ export function ExpertKeyEditor({
     const afterKey = next.keys[keyIndex].key;
     carry(keyIds.current, beforeKey, afterKey);
     carry(elementIds.current, beforeEl, afterKey.elements[elementIndex]);
+    onChange(next);
+  };
+
+  // A structural element edit (add/remove/move) produced by the pure helpers
+  // replaces the containing key object; carry the key's id so its card stays
+  // mounted across the edit (otherwise the whole card -- and every element row,
+  // and the "Add an element" button focus lands on -- remounts). Surviving element
+  // objects keep their identity through the helpers, so their ids carry on their
+  // own; only the replaced key object needs the carry.
+  const applyKeyStructureEdit = (
+    keyIndex: number,
+    next: AdvancedInviteDraft,
+  ): void => {
+    carry(keyIds.current, draft.keys[keyIndex].key, next.keys[keyIndex].key);
     onChange(next);
   };
 
@@ -250,6 +274,8 @@ export function ExpertKeyEditor({
                       onClick={() => {
                         onChange(removeKey(draft, keyIndex));
                         announce(`Removed key ${key.name}.`);
+                        // Keep focus in the editor (the removed card held it).
+                        addKeyRef.current?.focus();
                       }}
                       aria-label={`Remove key ${key.name}`}
                     >
@@ -264,146 +290,176 @@ export function ExpertKeyEditor({
                   aria-label={`Elements of ${key.name}`}
                   style={{ listStyle: "none", padding: 0, margin: 0 }}
                 >
-                  {key.elements.map((element, elementIndex) => (
-                    <Paper
-                      key={idFor(elementIds.current, element)}
-                      withBorder
-                      p="xs"
-                      component="li"
-                      bg="var(--mantine-color-default-hover)"
-                    >
-                      <Stack gap="xs">
-                        <Group
-                          justify="space-between"
-                          wrap="nowrap"
-                          align="flex-end"
-                        >
-                          <Select
-                            label="Field"
-                            data={fieldOptions}
-                            value={element.field}
-                            allowDeselect={false}
-                            onChange={(value) =>
-                              value !== null &&
-                              editElement(keyIndex, elementIndex, (el) => ({
-                                ...el,
-                                field: value,
-                              }))
-                            }
-                            style={{ flex: 1 }}
-                          />
-                          <Group gap={2} wrap="nowrap">
-                            <ActionIcon
-                              variant="subtle"
-                              disabled={elementIndex === 0}
-                              onClick={() => {
-                                onChange(
-                                  moveElement(
-                                    draft,
-                                    keyIndex,
-                                    elementIndex,
-                                    -1,
-                                  ),
-                                );
-                                announce("Moved element earlier.");
-                              }}
-                              aria-label={`Move element ${elementIndex + 1} earlier`}
-                            >
-                              <IconArrowUp size={16} />
-                            </ActionIcon>
-                            <ActionIcon
-                              variant="subtle"
-                              disabled={
-                                elementIndex === key.elements.length - 1
+                  {key.elements.map((element, elementIndex) => {
+                    // The element's own identifier (alias or field), named in its
+                    // controls and announcements -- matching the key/step controls,
+                    // which name their item rather than its bare ordinal.
+                    const elementLabel = sanitizeForDisplay(
+                      elementIdentifier(element),
+                    );
+                    return (
+                      <Paper
+                        key={idFor(elementIds.current, element)}
+                        withBorder
+                        p="xs"
+                        component="li"
+                        bg="var(--mantine-color-default-hover)"
+                      >
+                        <Stack gap="xs">
+                          <Group
+                            justify="space-between"
+                            wrap="nowrap"
+                            align="flex-end"
+                          >
+                            <Select
+                              label="Field"
+                              data={fieldOptions}
+                              value={element.field}
+                              allowDeselect={false}
+                              onChange={(value) =>
+                                value !== null &&
+                                editElement(keyIndex, elementIndex, (el) => ({
+                                  ...el,
+                                  field: value,
+                                }))
                               }
-                              onClick={() => {
-                                onChange(
-                                  moveElement(draft, keyIndex, elementIndex, 1),
-                                );
-                                announce("Moved element later.");
-                              }}
-                              aria-label={`Move element ${elementIndex + 1} later`}
-                            >
-                              <IconArrowDown size={16} />
-                            </ActionIcon>
-                            <ActionIcon
-                              variant="subtle"
-                              color="red"
-                              disabled={key.elements.length === 1}
-                              onClick={() => {
-                                onChange(
-                                  removeElement(draft, keyIndex, elementIndex),
-                                );
-                                announce("Removed element.");
-                              }}
-                              aria-label={`Remove element ${elementIndex + 1}`}
-                            >
-                              <IconTrash size={16} />
-                            </ActionIcon>
+                              style={{ flex: 1 }}
+                            />
+                            <Group gap={2} wrap="nowrap">
+                              <ActionIcon
+                                variant="subtle"
+                                disabled={elementIndex === 0}
+                                onClick={() => {
+                                  applyKeyStructureEdit(
+                                    keyIndex,
+                                    moveElement(
+                                      draft,
+                                      keyIndex,
+                                      elementIndex,
+                                      -1,
+                                    ),
+                                  );
+                                  // Name + new position so each announcement differs
+                                  // (a repeated identical string is not re-announced).
+                                  announce(
+                                    `Moved ${elementLabel} to position ${elementIndex} of ${key.elements.length}.`,
+                                  );
+                                }}
+                                aria-label={`Move element ${elementIndex + 1} (${elementLabel}) earlier`}
+                              >
+                                <IconArrowUp size={16} />
+                              </ActionIcon>
+                              <ActionIcon
+                                variant="subtle"
+                                disabled={
+                                  elementIndex === key.elements.length - 1
+                                }
+                                onClick={() => {
+                                  applyKeyStructureEdit(
+                                    keyIndex,
+                                    moveElement(
+                                      draft,
+                                      keyIndex,
+                                      elementIndex,
+                                      1,
+                                    ),
+                                  );
+                                  announce(
+                                    `Moved ${elementLabel} to position ${elementIndex + 2} of ${key.elements.length}.`,
+                                  );
+                                }}
+                                aria-label={`Move element ${elementIndex + 1} (${elementLabel}) later`}
+                              >
+                                <IconArrowDown size={16} />
+                              </ActionIcon>
+                              <ActionIcon
+                                variant="subtle"
+                                color="red"
+                                disabled={key.elements.length === 1}
+                                onClick={() => {
+                                  applyKeyStructureEdit(
+                                    keyIndex,
+                                    removeElement(
+                                      draft,
+                                      keyIndex,
+                                      elementIndex,
+                                    ),
+                                  );
+                                  announce(`Removed ${elementLabel}.`);
+                                  // Keep focus in the key (the removed row held it).
+                                  addElementRefs.current
+                                    .get(idFor(keyIds.current, key))
+                                    ?.focus();
+                                }}
+                                aria-label={`Remove element ${elementIndex + 1} (${elementLabel})`}
+                              >
+                                <IconTrash size={16} />
+                              </ActionIcon>
+                            </Group>
                           </Group>
-                        </Group>
 
-                        <TextInput
-                          label="Alias (optional)"
-                          description="A name for this element, needed only to tell two elements of the same field apart or to target a swap"
-                          value={element.name ?? ""}
-                          onChange={(e) =>
-                            editElement(keyIndex, elementIndex, (el) => {
-                              const name = e.target.value;
-                              const next = { ...el };
-                              if (name === "") delete next.name;
-                              else next.name = name;
-                              return next;
-                            })
-                          }
-                        />
-
-                        <div>
-                          <Text size="xs" fw={600} mb={4}>
-                            Transform before matching
-                          </Text>
-                          <StepListEditor
-                            steps={element.transform ?? []}
-                            addStepLabel="Add a transform"
-                            emptyHint="No transforms: the field value is matched as-is."
-                            onStepsChange={(steps) =>
+                          <TextInput
+                            label="Alias (optional)"
+                            description="A name for this element, needed only to tell two elements of the same field apart or to target a swap"
+                            value={element.name ?? ""}
+                            onChange={(e) =>
                               editElement(keyIndex, elementIndex, (el) => {
+                                const name = e.target.value;
                                 const next = { ...el };
-                                if (steps.length === 0) delete next.transform;
-                                else next.transform = steps;
+                                if (name === "") delete next.name;
+                                else next.name = name;
                                 return next;
                               })
                             }
                           />
-                        </div>
 
-                        <Select
-                          label="Fuzzy comparison"
-                          data={FUZZY_OPTIONS}
-                          value={element.generateFuzzyComparisons ?? null}
-                          clearable
-                          disabled={!fuzzyApplied}
-                          description={
-                            fuzzyApplied
-                              ? "Expand this value into near-matches before hashing"
-                              : "Not available: this version of the exchange does not yet apply fuzzy comparisons"
-                          }
-                          onChange={(value) =>
-                            editElement(keyIndex, elementIndex, (el) => {
-                              const next = { ...el };
-                              // Mantine infers the value type from the typed
-                              // FUZZY_OPTIONS data, so it is a FuzzyComparison
-                              // (or null) without an assertion.
-                              if (value === null)
-                                delete next.generateFuzzyComparisons;
-                              else next.generateFuzzyComparisons = value;
-                              return next;
-                            })
-                          }
-                        />
-                      </Stack>
-                    </Paper>
-                  ))}
+                          <div>
+                            <Text size="xs" fw={600} mb={4}>
+                              Transform before matching
+                            </Text>
+                            <StepListEditor
+                              steps={element.transform ?? []}
+                              addStepLabel="Add a transform"
+                              emptyHint="No transforms: the field value is matched as-is."
+                              onStepsChange={(steps) =>
+                                editElement(keyIndex, elementIndex, (el) => {
+                                  const next = { ...el };
+                                  if (steps.length === 0) delete next.transform;
+                                  else next.transform = steps;
+                                  return next;
+                                })
+                              }
+                            />
+                          </div>
+
+                          <Select
+                            label="Fuzzy comparison"
+                            data={FUZZY_OPTIONS}
+                            value={element.generateFuzzyComparisons ?? null}
+                            clearable
+                            disabled={!fuzzyApplied}
+                            description={
+                              fuzzyApplied
+                                ? "Expand this value into near-matches before hashing"
+                                : "Not available: this version of the exchange does not yet apply fuzzy comparisons"
+                            }
+                            onChange={(value) =>
+                              editElement(keyIndex, elementIndex, (el) => {
+                                const next = { ...el };
+                                // Mantine infers the value type from the typed
+                                // FUZZY_OPTIONS data, so it is a FuzzyComparison
+                                // (or null) without an assertion.
+                                if (value === null)
+                                  delete next.generateFuzzyComparisons;
+                                else next.generateFuzzyComparisons = value;
+                                return next;
+                              })
+                            }
+                          />
+                        </Stack>
+                      </Paper>
+                    );
+                  })}
                 </Stack>
 
                 <Group justify="space-between" wrap="nowrap" align="flex-end">
@@ -411,9 +467,18 @@ export function ExpertKeyEditor({
                     variant="light"
                     size="xs"
                     leftSection={<IconPlus size={14} aria-hidden />}
-                    onClick={() =>
-                      onChange(addElement(draft, keyIndex, firstField))
-                    }
+                    ref={(el) => {
+                      const id = idFor(keyIds.current, key);
+                      if (el) addElementRefs.current.set(id, el);
+                      else addElementRefs.current.delete(id);
+                    }}
+                    onClick={() => {
+                      applyKeyStructureEdit(
+                        keyIndex,
+                        addElement(draft, keyIndex, firstField),
+                      );
+                      announce("Added an element.");
+                    }}
                   >
                     Add an element
                   </Button>
@@ -446,6 +511,7 @@ export function ExpertKeyEditor({
       <Divider />
       <Box>
         <Button
+          ref={addKeyRef}
           variant="light"
           leftSection={<IconPlus size={16} aria-hidden />}
           onClick={() => {

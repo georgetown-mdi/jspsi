@@ -206,6 +206,27 @@ describe("StandardizationStepEditor", () => {
     expect(page.getByTestId("outcome-dropped").elements()).toHaveLength(0);
   });
 
+  test("removing a step moves focus to the add control, not document.body", async () => {
+    // The removed row held focus on its trash button; that button unmounts, so
+    // without a deliberate move focus would fall to document.body. It must land on
+    // the always-present add-step button instead.
+    render(
+      createElement(EditorWithPreview, {
+        field: FIRST_NAME,
+        inputColumn: "n",
+        initialSteps: [
+          { function: "coalesce", params: { default: "Z" } },
+          { function: "null_if", params: { values: ["X"] } },
+        ],
+        rawRows: [{ n: "X" }],
+      }),
+    );
+    await userEvent.click(page.getByRole("button", { name: "Remove Null if" }));
+    await expect
+      .element(page.getByRole("button", { name: "Add a step" }))
+      .toHaveFocus();
+  });
+
   test("a typed param input rejects an out-of-type value and accepts a valid one", async () => {
     // substring.start refuses 0 (positions are 1-indexed); seeding 0 shows the
     // descriptor's own message, and a valid value clears it.
