@@ -70,9 +70,9 @@ export const Route = createRootRoute({
 
 function RootComponent() {
   // Read the active route's declared content width here, above the shell, so the
-  // header chrome and the route's content are sized from one value (the route
-  // cannot pass it up from inside the Outlet). select returns a primitive, so the
-  // root re-renders only when the resolved width actually changes.
+  // shell can size the content column from one value (the route cannot pass it up
+  // from inside the Outlet). select returns a primitive, so the root re-renders
+  // only when the resolved width actually changes.
   const contentWidth = useMatches({ select: resolveContentWidth });
   return (
     <RootDocument>

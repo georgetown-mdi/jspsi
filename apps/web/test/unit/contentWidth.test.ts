@@ -7,9 +7,8 @@ import {
 
 // The route-side half of the content-width seam: a route declares its width in
 // staticData, and resolveContentWidth projects the active match chain to the one
-// value the shell sizes both chrome and content to. The render side -- that the
-// value reaches both the header and the content container -- is covered in
-// test/browser/appShell.test.ts.
+// value the shell sizes its content container to. The render side -- that the value
+// reaches the content container -- is covered in test/browser/appShell.test.ts.
 describe("resolveContentWidth", () => {
   test("returns the leaf route's declared width", () => {
     expect(

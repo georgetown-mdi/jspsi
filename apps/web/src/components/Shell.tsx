@@ -1,33 +1,26 @@
-import { Container } from "@mantine/core";
-import { Link } from "@tanstack/react-router";
+import { Box, Container } from "@mantine/core";
 
 import { DEFAULT_CONTENT_WIDTH } from "@components/contentWidth";
-
-import classes from "./Shell.module.css";
 
 import type { ContainerWidth } from "@theme";
 import type { ReactNode } from "react";
 
-/** The id shared by the skip link's target and the `<main>` landmark, declared
- * once so the two cannot drift apart. */
-const MAIN_CONTENT_ID = "main-content";
-
 /**
- * The application shell shared by every route: a "skip to content" link, a
- * banner header whose product wordmark links home, and the single `<main>`
- * landmark routes render their page into. Mounted once in the root route around
- * the router `Outlet`, so each route supplies only its own page content and its
- * own single `<h1>`.
+ * The application shell shared by every route: the single `<main>` landmark each
+ * route renders its page into, sized to the route's declared content width.
+ * Mounted once in the root route around the router `Outlet`, so each route supplies
+ * only its own page content and its own single `<h1>`.
  *
- * `contentWidth` is the seam that keeps chrome and content aligned: the header
- * and the content container both size to this one value (see
- * {@link resolveContentWidth}), so their left/right edges line up whether a route
- * runs wide or narrows to a single legible column. The route supplies plain
- * content; it does not pick its own `Container` width.
+ * `contentWidth` is the one value a route declares (see {@link resolveContentWidth});
+ * the shell sizes the content column to it, so a route can run wide or narrow to a
+ * single legible column without picking its own `Container`.
  *
- * Built as a plain layout rather than Mantine's AppShell, whose responsive
- * navbar/aside machinery is unneeded for a single header link; revisit that
- * choice if the planned IA restructure adds real navigation or nested layouts.
+ * Deliberately a bare `<main>` + container -- no banner, product wordmark, or
+ * navigation chrome, and so no "skip to content" link (a skip link only earns its
+ * place bypassing repeated blocks, and there are none here). This is a small
+ * multi-route flow with no cross-page navigation; revisit if a real IA with
+ * navigation lands, at which point a header and its skip link would come back
+ * together.
  */
 export function Shell({
   children,
@@ -36,44 +29,11 @@ export function Shell({
   children: ReactNode;
   contentWidth?: ContainerWidth;
 }) {
+  // The landmark stays full-width (the vertical padding lives on it); the container
+  // inside sizes the content to contentWidth.
   return (
-    // position: relative (in the stylesheet) anchors the absolutely positioned
-    // skip link's containing block here rather than to an arbitrary ancestor.
-    <div className={classes.shell}>
-      {/* First focusable element in the document, so a keyboard or screen-reader
-          user can jump past the header straight to the page content. Visually
-          hidden until focused (see Shell.module.css). The onClick moves focus to
-          the main landmark in JS rather than letting the browser navigate to the
-          fragment, because the accept route carries the invitation token in
-          window.location.hash -- a default "#main-content" jump would overwrite
-          it, breaking a reload or a copied link. The href is kept so the control
-          is announced as a link. (The href is the fallback only before this
-          handler is attached; an SPA is interactive post-hydration, which is the
-          realistic production path.) */}
-      <a
-        href={`#${MAIN_CONTENT_ID}`}
-        className={classes.skipLink}
-        onClick={(event) => {
-          event.preventDefault();
-          document.getElementById(MAIN_CONTENT_ID)?.focus();
-        }}
-      >
-        Skip to content
-      </a>
-      <header className={classes.header}>
-        <Container size={contentWidth}>
-          <Link to="/" className={classes.brand}>
-            PSI-Link
-          </Link>
-        </Container>
-      </header>
-      {/* tabIndex -1 so the skip link can move focus into the landmark itself.
-          The single <main> landmark stays full-width (the focus outline and
-          padding live on it); the content container inside it, sized to the same
-          contentWidth as the header above, is what aligns the two edges. */}
-      <main id={MAIN_CONTENT_ID} tabIndex={-1} className={classes.main}>
-        <Container size={contentWidth}>{children}</Container>
-      </main>
-    </div>
+    <Box component="main" py="lg">
+      <Container size={contentWidth}>{children}</Container>
+    </Box>
   );
 }

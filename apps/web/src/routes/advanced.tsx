@@ -10,6 +10,6 @@ export const Route = createFileRoute("/advanced")({
   component: AdvancedInvite,
   // The widest named width: the editor lays out an edit rail beside a live preview
   // of the (dense) linkage terms, so it wants the same room the accept consent
-  // screen takes. The shell sizes its chrome and this route's content to it.
+  // screen takes. The shell sizes this route's content to it.
   staticData: { contentWidth: "xxl" },
 });

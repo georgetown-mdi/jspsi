@@ -34,15 +34,15 @@ vi.mock("@components/ExchangeView", () => ({
     createElement("div", { "data-testid": "exchange-mounted" }, "exchange"),
 }));
 
-// Stub the router seams the shell and the home form touch (the shell's home link
-// and the form's navigate). This suite asserts shell structure and the heading
-// outline, not navigation, so rendering the routes directly with createRoot --
-// the acceptConsentGate pattern -- is simpler and avoids a RouterProvider (which
-// trips a duplicate-React dispatcher error under the browser runner).
+// Stub the router seams the rendered graph touches (any in-page link and the home
+// form's navigate). This suite asserts shell structure and the heading outline, not
+// navigation, so rendering the routes directly with createRoot -- the
+// acceptConsentGate pattern -- is simpler and avoids a RouterProvider (which trips a
+// duplicate-React dispatcher error under the browser runner).
 vi.mock("@tanstack/react-router", () => ({
-  // The only router seams the rendered graph touches: the shell's home link and
-  // the home form's navigate. NotFound/DefaultCatchBoundary and the route files
-  // (the other react-router importers) are not in this test's import graph.
+  // The only router seams the rendered graph touches: any in-page Link and the home
+  // form's navigate. NotFound/DefaultCatchBoundary and the route files (the other
+  // react-router importers) are not in this test's import graph.
   Link: ({
     to,
     className,
@@ -97,28 +97,18 @@ afterEach(() => {
   window.location.hash = "";
 });
 
-// The shell's structural guarantees, asserted on whichever route is mounted: a
-// single banner header and <main> landmark, plus a skip link whose fragment
-// resolves to that main landmark.
+// The shell's structural guarantee, asserted on whichever route is mounted: the
+// single <main> landmark the route's content renders into. The shell is a bare main
+// + container now, so the banner header and its skip link are gone -- assert their
+// absence so a reintroduced header is caught.
 function expectShell() {
-  expect(document.querySelectorAll("header").length).toBe(1);
-
-  const mains = document.querySelectorAll("main");
-  expect(mains.length).toBe(1);
-  const main = mains[0];
-  expect(main.id).toBe("main-content");
-
-  const skip = skipLink();
-  expect(skip).toBeTruthy();
-  expect(skip?.getAttribute("href")).toBe(`#${main.id}`);
-}
-
-// The skip link located by its accessible name rather than by attribute, so the
-// lookup stays unambiguous regardless of any other anchors a page renders.
-function skipLink(): HTMLAnchorElement | undefined {
-  return Array.from(document.querySelectorAll("a")).find(
-    (anchor) => anchor.textContent === "Skip to content",
-  );
+  expect(document.querySelectorAll("main").length).toBe(1);
+  expect(document.querySelectorAll("header").length).toBe(0);
+  expect(
+    Array.from(document.querySelectorAll("a")).some(
+      (anchor) => anchor.textContent === "Skip to content",
+    ),
+  ).toBe(false);
 }
 
 describe("application shell", () => {
@@ -152,31 +142,6 @@ describe("application shell", () => {
     expect(h1s.length).toBe(1);
     expect(h1s[0].textContent).toBe("Accept an invitation");
   });
-
-  test("skip link moves focus to main without clobbering the hash", async () => {
-    // The accept route carries the invitation token in window.location.hash;
-    // activating the skip link must move focus to the main landmark without
-    // overwriting that fragment (which would break a reload or a copied link).
-    window.location.hash = await encodeAcceptToken();
-    mountInShell(createElement(AcceptInvitation));
-
-    await expect
-      .element(page.getByText("Invitation from County Health Department"))
-      .toBeInTheDocument();
-
-    const hashBefore = window.location.hash;
-    // Native click (not a Playwright click): the skip link sits off-screen until
-    // focused, and a native dispatch still drives React's onClick, which
-    // preventDefaults the fragment navigation.
-    skipLink()?.click();
-
-    expect(window.location.hash).toBe(hashBefore);
-    const main = document.getElementById("main-content");
-    expect(document.activeElement).toBe(main);
-    // The focused landing has a visible indicator (the .main:focus outline),
-    // since main is otherwise outside the tab order.
-    expect(main && getComputedStyle(main).outlineWidth).not.toBe("0px");
-  });
 });
 
 // Mount under the real app theme so the Container size scale (CONTAINER_SIZES)
@@ -206,12 +171,11 @@ function containerWidth(label: string, el: Element | null | undefined): string {
 }
 
 describe("content width seam", () => {
-  // The header chrome and the route's content both size to the one width the
-  // route declares, so their left/right edges align; a route choosing a
-  // different width moves both together. The route-declaration -> resolved-width
-  // half is covered in test/unit/contentWidth.test.ts.
+  // The route's content container sizes to the one width the route declares; a
+  // route choosing a different width moves it. The route-declaration ->
+  // resolved-width half is covered in test/unit/contentWidth.test.ts.
   test.each(["lg", "xl"] as const)(
-    "sizes chrome and content to the declared %s width",
+    "sizes content to the declared %s width",
     async (width) => {
       const other = width === "lg" ? "xl" : "lg";
       mountThemed(
@@ -240,10 +204,6 @@ describe("content width seam", () => {
       // Wait for React to commit the mount before reading the rendered DOM.
       await expect.element(page.getByText("page content")).toBeInTheDocument();
 
-      const header = containerWidth(
-        "header",
-        document.querySelector("header")?.firstElementChild,
-      );
       const main = containerWidth(
         "main",
         document.querySelector("main")?.firstElementChild,
@@ -257,9 +217,8 @@ describe("content width seam", () => {
         document.querySelector('[data-testid="ref-other"]')?.firstElementChild,
       );
 
-      // Chrome and content resolve to one shared width: their edges align.
-      expect(header).toBe(main);
-      // ...and it is exactly the route's declared named size, not the other one.
+      // The content resolves to exactly the route's declared named size, not the
+      // other one.
       expect(main).toBe(sameSize);
       expect(sameSize).not.toBe(otherSize);
     },

@@ -8,6 +8,7 @@ import { commitAcceptance } from "@psi/acceptConsent";
 import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
 import { AcceptInvitationPanel } from "@components/AcceptInvitationPanel";
+import { EXCHANGE_READING_WIDTH } from "@components/contentWidth";
 import { ExchangeView } from "@components/ExchangeView";
 import { PrepareData } from "@components/PrepareData";
 
@@ -129,7 +130,19 @@ export function AcceptInvitation() {
   };
 
   return (
-    <Paper>
+    <Paper
+      // The review and exchange screens are a single reading column, so the panel
+      // self-constrains to EXCHANGE_READING_WIDTH (centered) rather than filling the
+      // route's wide container. The full route width is kept for exactly the state
+      // that renders the "Prepare your data" editor below -- the same
+      // ready+preparing predicate, so the panel width cannot diverge from the phase
+      // showing -- because that editor is a genuine two-column layout.
+      style={
+        decode.status === "ready" && phase.status === "preparing"
+          ? undefined
+          : { width: EXCHANGE_READING_WIDTH, marginInline: "auto" }
+      }
+    >
       {/* A generic page h1 rather than the party-specific "Invitation from X"
           (which is the terms section's h2 on the review screen): it must read
           sensibly in the pending, error, prepare, and exchange states too. */}
