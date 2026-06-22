@@ -166,7 +166,14 @@ function removeAffixes(s: string): string {
     .trim();
 }
 
-type DateFormatToken = "YYYY" | "MM" | "DD";
+/**
+ * The date-component tokens a `parse_date` format layout is built from. Exported
+ * so the web consent screen can pin its own date-component detection (which
+ * decides whether a `parse_date` drops a component and so broadens matching)
+ * against this exact set: adding a token here breaks that consumer's build rather
+ * than letting it silently miss the new component.
+ */
+export type DateFormatToken = "YYYY" | "MM" | "DD";
 
 interface ParsedDateFormat {
   /** Anchored regex source compiled to match an input date string. */

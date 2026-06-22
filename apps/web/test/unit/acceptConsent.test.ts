@@ -283,7 +283,7 @@ describe("summarizeInvitation", () => {
     expect(label).toContain("\\x07");
   });
 
-  test("surfaces a transform, swap, and fuzzy expansion, flagging only the affected keys", () => {
+  test("surfaces a transform, swap, and fuzzy expansion on the affected elements", () => {
     const summary = summarizeInvitation(
       makeToken({
         linkageFields: [
@@ -323,8 +323,7 @@ describe("summarizeInvitation", () => {
 
     const [plain, transformed, swapped, fuzzy] = summary.linkageKeys;
 
-    // A plain key carries no rule and raises no flag.
-    expect(plain.hasNonDefaultRule).toBe(false);
+    // A plain key carries no rule.
     expect(plain.swap).toBeUndefined();
     expect(
       plain.elements.every(
@@ -334,24 +333,21 @@ describe("summarizeInvitation", () => {
       ),
     ).toBe(true);
 
-    // A transform is flagged, and its (sanitized) function name and
-    // plain-language description surface on the element it applies to.
-    expect(transformed.hasNonDefaultRule).toBe(true);
+    // A substring on a name field leads with the literal slice phrase (effect),
+    // which suppresses the now-redundant glossary description.
     expect(transformed.elements[1].transforms).toEqual([
       {
         function: "substring",
         params: ["start: 1", "length: 1"],
-        description: TRANSFORM_FUNCTION_GLOSSARY["substring"],
+        effect: "the first character",
       },
     ]);
 
-    // A swap is flagged, and resolves to the swapped elements' field labels.
-    expect(swapped.hasNonDefaultRule).toBe(true);
+    // A swap resolves to the swapped elements' field labels.
     expect(swapped.hasSwap).toBe(true);
     expect(swapped.swap).toEqual(["Last name", "First name"]);
 
-    // A fuzzy expansion is flagged, and maps to its plain-language label.
-    expect(fuzzy.hasNonDefaultRule).toBe(true);
+    // A fuzzy expansion maps to its plain-language label.
     expect(fuzzy.elements[0].fuzzyComparison).toBe("adjacent years");
   });
 
@@ -384,9 +380,8 @@ describe("summarizeInvitation", () => {
     );
 
     for (const key of summary.linkageKeys) {
-      // The swap is still flagged so it is never silently consented to ...
+      // The swap is still surfaced so it is never silently consented to ...
       expect(key.hasSwap).toBe(true);
-      expect(key.hasNonDefaultRule).toBe(true);
       // ... but the specific labels are withheld, so the renderer falls back to
       // a generic note rather than a duplicated or raw-identifier one.
       expect(key.swap).toBeUndefined();
@@ -868,6 +863,494 @@ describe("summarizeInvitation", () => {
     expect(summary.algorithm).toBe("psi-c");
     expect(summary.psiCApplied).toBe(false);
   });
+
+  test("leads a substring on a name field with a literal slice phrase", () => {
+    // first_name/last_name are free text, so a character position maps to what
+    // the acceptor sees: the slice is rendered literally and the now-redundant
+    // glossary description is suppressed.
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [
+          { name: "first_name", type: "first_name" },
+          { name: "last_name", type: "last_name" },
+        ],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [
+              {
+                field: "first_name",
+                transform: [
+                  { function: "substring", params: { start: 1, length: 1 } },
+                ],
+              },
+              {
+                field: "last_name",
+                transform: [
+                  { function: "substring", params: { start: 1, length: 3 } },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const [fn, ln] = summary.linkageKeys[0].elements;
+    expect(fn.transforms[0].effect).toBe("the first character");
+    expect(fn.transforms[0].description).toBeUndefined();
+    expect(ln.transforms[0].effect).toBe("the first 3 characters");
+  });
+
+  test("renders an interior substring slice as a character range", () => {
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [{ name: "last_name", type: "last_name" }],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [
+              {
+                field: "last_name",
+                transform: [
+                  { function: "substring", params: { start: 3, length: 2 } },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(summary.linkageKeys[0].elements[0].transforms[0].effect).toBe(
+      "characters 3 to 4",
+    );
+  });
+
+  test("does not render a positional slice for a reformatted field", () => {
+    // A date is canonicalized by a standardization the token does not carry, so a
+    // positional phrase ("the first 6 characters") would be unverifiable; the
+    // element falls back to the glossary description, with the "(partial)" header
+    // marker still carrying the breadth.
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [{ name: "dob", type: "date_of_birth" }],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [
+              {
+                field: "dob",
+                transform: [
+                  { function: "substring", params: { start: 1, length: 6 } },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const transform = summary.linkageKeys[0].elements[0].transforms[0];
+    expect(transform.effect).toBeUndefined();
+    expect(transform.description).toBe(
+      TRANSFORM_FUNCTION_GLOSSARY["substring"],
+    );
+  });
+
+  test("falls back to the glossary for a negative or non-integer substring slice", () => {
+    // A negative start counts from the end (no faithful "first N") and a
+    // non-integer or missing param is not a usable slice; all fall back to the
+    // description rather than assert a wrong literal.
+    const effectFor = (params: Record<string, unknown>) =>
+      summarizeInvitation(
+        makeToken({
+          linkageFields: [{ name: "last_name", type: "last_name" }],
+          linkageKeys: [
+            {
+              name: "K",
+              elements: [
+                {
+                  field: "last_name",
+                  transform: [{ function: "substring", params }],
+                },
+              ],
+            },
+          ],
+        }),
+      ).linkageKeys[0].elements[0].transforms[0];
+    expect(effectFor({ start: -3, length: 3 }).effect).toBeUndefined();
+    expect(effectFor({ start: -3, length: 3 }).description).toBe(
+      TRANSFORM_FUNCTION_GLOSSARY["substring"],
+    );
+    expect(effectFor({ start: 1.5, length: 2 }).effect).toBeUndefined();
+    expect(effectFor({ length: 2 }).effect).toBeUndefined();
+  });
+
+  test("does not render a substring literal after an earlier reformatting step", () => {
+    // On a name field, phonetic then substring takes the first 3 characters of
+    // the sound-alike code, not the name, so the positional literal would misstate
+    // the match -- the substring step falls back to the glossary description.
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [{ name: "last_name", type: "last_name" }],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [
+              {
+                field: "last_name",
+                transform: [
+                  { function: "phonetic" },
+                  { function: "substring", params: { start: 1, length: 3 } },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const [phonetic, substring] = summary.linkageKeys[0].elements[0].transforms;
+    expect(phonetic.description).toBe(TRANSFORM_FUNCTION_GLOSSARY["phonetic"]);
+    expect(substring.effect).toBeUndefined();
+    expect(substring.description).toBe(
+      TRANSFORM_FUNCTION_GLOSSARY["substring"],
+    );
+  });
+
+  test("builds the header one-liner from compact field labels", () => {
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [
+          { name: "ssn", type: "ssn" },
+          { name: "ssn4", type: "ssn4" },
+          { name: "last_name", type: "last_name" },
+          { name: "dob", type: "date_of_birth" },
+        ],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [
+              { field: "ssn" },
+              { field: "ssn4" },
+              { field: "last_name" },
+              { field: "dob" },
+            ],
+          },
+        ],
+      }),
+    );
+    // ssn4 keeps its "(last 4)" qualifier -- the full-vs-last-4 difference is a
+    // real disclosure distinction the bare "SSN" would hide.
+    expect(summary.linkageKeys[0].headerFields).toEqual([
+      "SSN",
+      "SSN (last 4)",
+      "last name",
+      "date of birth",
+    ]);
+  });
+
+  test("marks a loosening element in the header, reserving 'fuzzy' for fuzzy comparisons", () => {
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [
+          { name: "first_name", type: "first_name" },
+          { name: "last_name", type: "last_name" },
+          { name: "dob", type: "date_of_birth" },
+        ],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [
+              {
+                field: "first_name",
+                transform: [
+                  { function: "substring", params: { start: 1, length: 1 } },
+                ],
+              },
+              { field: "last_name", transform: [{ function: "phonetic" }] },
+              { field: "dob", generateFuzzyComparisons: "adjacent_years" },
+            ],
+          },
+        ],
+      }),
+    );
+    // substring -> "partial", phonetic -> "sound-alike", a fuzzy comparison ->
+    // "fuzzy" (the genuine approximate-match feature, distinct from truncation).
+    expect(summary.linkageKeys[0].headerFields).toEqual([
+      "first name (partial)",
+      "last name (sound-alike)",
+      "date of birth (fuzzy)",
+    ]);
+  });
+
+  test("does not mark a pure normalizer in the header", () => {
+    // Case-folding does not change which distinct values match, so it carries no
+    // breadth marker.
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [{ name: "last_name", type: "last_name" }],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [
+              {
+                field: "last_name",
+                transform: [{ function: "to_upper_case" }],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(summary.linkageKeys[0].headerFields).toEqual(["last name"]);
+  });
+
+  test("names each materially-altering rule in the header by effect or directly", () => {
+    // The header entry a single last-name element produces under a given rule.
+    // Guards the whole categorization: an effect name where the matching
+    // direction is determinable, a direct name where a partner pattern/value list
+    // makes it indeterminate, and nothing for routine standardization.
+    const headerFor = (transform: LinkageKeyElement["transform"]) =>
+      summarizeInvitation(
+        makeToken({
+          linkageFields: [{ name: "ln", type: "last_name" }],
+          linkageKeys: [
+            {
+              name: "K",
+              elements: [{ field: "ln", ...(transform && { transform }) }],
+            },
+          ],
+        }),
+      ).linkageKeys[0].headerFields[0];
+
+    // Effect named where the direction is determinable.
+    expect(
+      headerFor([{ function: "substring", params: { start: 1, length: 3 } }]),
+    ).toBe("last name (partial)");
+    expect(headerFor([{ function: "phonetic" }])).toBe(
+      "last name (sound-alike)",
+    );
+    expect(
+      headerFor([{ function: "split_on", params: { delimiter: " " } }]),
+    ).toBe("last name (multiple)");
+    expect(
+      headerFor([{ function: "coalesce", params: { default: "X" } }]),
+    ).toBe("last name (fallback)");
+
+    // Rule named directly where a partner pattern/value list makes the direction
+    // indeterminate -- including the narrowing ones, which are surfaced too.
+    expect(
+      headerFor([
+        {
+          function: "replace_regex",
+          params: { pattern: "a", replacement: "b" },
+        },
+      ]),
+    ).toBe("last name (pattern replacement)");
+    expect(
+      headerFor([{ function: "extract_regex", params: { pattern: "(.*)" } }]),
+    ).toBe("last name (pattern extraction)");
+    expect(
+      headerFor([{ function: "filter_regex", params: { pattern: ".*" } }]),
+    ).toBe("last name (pattern filter)");
+    expect(
+      headerFor([{ function: "null_if", params: { values: ["x"] } }]),
+    ).toBe("last name (excludes values)");
+
+    // parse_date is routine canonicalization when it reformats between full
+    // layouts, but matches on only part of the date when its output drops a
+    // component its input carries (a year-only output collapses every date in a
+    // year; a tokenless output collapses every date to a constant).
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYY" },
+        },
+      ]),
+    ).toBe("last name (partial)");
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "SAME" },
+        },
+      ]),
+    ).toBe("last name (partial)");
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+        },
+      ]),
+    ).toBe("last name");
+
+    // Routine standardization is not flagged.
+    expect(headerFor([{ function: "pad_left", params: { length: 5 } }])).toBe(
+      "last name",
+    );
+    // A bare parse_date defaults to the full layout on both sides -- no drop.
+    expect(headerFor([{ function: "parse_date" }])).toBe("last name");
+    expect(headerFor(undefined)).toBe("last name");
+  });
+
+  test("shows a single most-salient marker, effect-named before directly-named", () => {
+    const headerFor = (transform: LinkageKeyElement["transform"]) =>
+      summarizeInvitation(
+        makeToken({
+          linkageFields: [{ name: "ln", type: "last_name" }],
+          linkageKeys: [
+            {
+              name: "K",
+              elements: [{ field: "ln", ...(transform && { transform }) }],
+            },
+          ],
+        }),
+      ).linkageKeys[0].headerFields[0];
+
+    // An element carrying more than one rule shows just the most salient: an
+    // effect-named rule wins over a directly-named one ...
+    expect(
+      headerFor([
+        {
+          function: "replace_regex",
+          params: { pattern: "a", replacement: "b" },
+        },
+        { function: "substring", params: { start: 1, length: 3 } },
+      ]),
+    ).toBe("last name (partial)");
+    // ... and a component-dropping parse_date (effect "partial") wins over a
+    // directly-named null_if ...
+    expect(
+      headerFor([
+        { function: "null_if", params: { values: ["x"] } },
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYY" },
+        },
+      ]),
+    ).toBe("last name (partial)");
+    // ... but a non-dropping parse_date adds no marker, so the directly-named
+    // null_if shows instead.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+        },
+        { function: "null_if", params: { values: ["x"] } },
+      ]),
+    ).toBe("last name (excludes values)");
+  });
+
+  test("classifies every core standardization function as marked or routine", () => {
+    // The header marker is a hand-maintained classification; pin it against core's
+    // full function set in both directions, so a new core function cannot ship
+    // without a deliberate marked/routine decision here (the glossary sync test
+    // guards the one-expand-down description, not this always-visible marker).
+    // Param-dependent edges (parse_date drops, substring positions) have their own
+    // tests; here each function is shown with the params that yield its baseline.
+    const EXPECTED: Record<string, string | null> = {
+      // Effect named where the matching direction is determinable.
+      substring: "partial",
+      phonetic: "sound-alike",
+      split_on: "multiple",
+      coalesce: "fallback",
+      // Rule named directly where a partner pattern or value list makes the
+      // direction indeterminate.
+      replace_regex: "pattern replacement",
+      extract_regex: "pattern extraction",
+      filter_regex: "pattern filter",
+      null_if: "excludes values",
+      // Routine standardization, not flagged (parse_date is routine until its
+      // output drops a component).
+      remove_non_ascii: null,
+      replace_separators_with_spaces: null,
+      squash_spaces: null,
+      remove_punctuation: null,
+      remove_dashes: null,
+      trim_whitespace: null,
+      to_upper_case: null,
+      to_lower_case: null,
+      remove_accents: null,
+      remove_affixes: null,
+      pad_left: null,
+      parse_date: null,
+    };
+    // Two-directional: the classification covers exactly core's function set.
+    expect(Object.keys(EXPECTED).sort()).toEqual(
+      [...STANDARDIZATION_FUNCTION_NAMES].sort(),
+    );
+    for (const [fn, marker] of Object.entries(EXPECTED)) {
+      const params = fn === "substring" ? { start: 1, length: 3 } : undefined;
+      const entry = summarizeInvitation(
+        makeToken({
+          linkageFields: [{ name: "ln", type: "last_name" }],
+          linkageKeys: [
+            {
+              name: "K",
+              elements: [
+                {
+                  field: "ln",
+                  transform: [{ function: fn, ...(params && { params }) }],
+                },
+              ],
+            },
+          ],
+        }),
+      ).linkageKeys[0].headerFields[0];
+      expect(entry).toBe(
+        marker === null ? "last name" : `last name (${marker})`,
+      );
+    }
+  });
+
+  test("dedupes header entries by label and marker, keeping a truncated field distinct", () => {
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [
+          { name: "given", type: "first_name" },
+          { name: "preferred", type: "first_name" },
+          { name: "legal", type: "first_name" },
+        ],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [
+              { field: "given" },
+              { field: "preferred" },
+              {
+                field: "legal",
+                transform: [
+                  { function: "substring", params: { start: 1, length: 1 } },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    // Two whole "first name" elements collapse to one; the truncated one stays
+    // distinct so the looser match is not hidden behind the dedup.
+    expect(summary.linkageKeys[0].headerFields).toEqual([
+      "first name",
+      "first name (partial)",
+    ]);
+  });
+
+  test("sanitizes an unknown field in the header one-liner", () => {
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [{ name: "ssn", type: "ssn" }],
+        linkageKeys: [{ name: "K", elements: [{ field: "mystery" + BEL }] }],
+      }),
+    );
+    // An element whose field resolves to no declared type falls back to its
+    // sanitized identifier -- the one partner-influenced header entry, escaped.
+    const [entry] = summary.linkageKeys[0].headerFields;
+    expect(entry).toContain("mystery");
+    expect(entry).not.toContain(BEL);
+    expect(entry).toContain("\\x07");
+  });
 });
 
 describe("accept screen: terms render from a decoded token", () => {
@@ -956,11 +1439,9 @@ describe("accept screen: terms render from a decoded token", () => {
         }),
       },
     });
-    // The non-default-rule flag is present (both keys carry a rule).
-    expect(html).toContain("Non-standard matching");
-    // The transform's function name and the fuzzy expansion's plain-language
-    // label surface on the elements.
-    expect(html).toContain("transformed (substring)");
+    // The transform leads with its literal slice phrase, and the fuzzy expansion
+    // surfaces its plain-language label on the elements.
+    expect(html).toContain("Matches on the first character");
     // ... including its parameters, each on its own line, never joined: a
     // separator inside one value must not read as additional parameters
     // (mirrors the payload-column disambiguation below).
@@ -995,24 +1476,25 @@ describe("accept screen: terms render from a decoded token", () => {
         }),
       },
     });
-    // The swap is still flagged, but the note is generic rather than naming
+    // The swap is still surfaced, but the note is generic rather than naming
     // "First name and First name".
-    expect(html).toContain("Non-standard matching");
     expect(html).toContain(
       "Two of these elements may be matched in either order",
     );
     expect(html).not.toContain("First name and First name");
   });
 
-  test("shows no non-default-rule flag for a plain term", () => {
+  test("shows no breadth marker for a plain term", () => {
     const html = renderPanel({
       decode: { status: "ready", invitation: makeInvitation() },
     });
-    // baseTerms carries a single key with no transform, swap, or fuzzy rule.
-    expect(html).not.toContain("Non-standard matching");
+    // baseTerms carries a single key with no transform, swap, or fuzzy rule, so
+    // its header one-liner names the fields with no breadth marker.
+    expect(html).toContain("Matches on SSN - last name - date of birth");
+    expect(html).not.toContain("(partial)");
   });
 
-  test("flags only the keys that carry a non-default rule", () => {
+  test("marks only the elements that loosen matching in the header one-liner", () => {
     const html = renderPanel({
       decode: {
         status: "ready",
@@ -1036,11 +1518,13 @@ describe("accept screen: terms render from a decoded token", () => {
         }),
       },
     });
-    // Exactly one of the two keys carries a rule, so the visible flag appears
-    // once -- the plain key is not flagged. (The match is case-sensitive, so it
-    // counts the badge text, not the lowercase aria-label.)
-    const flags = html.match(/Non-standard matching/g) ?? [];
-    expect(flags.length).toBe(1);
+    // The fuzzy key's header carries the "(fuzzy)" marker; the plain key's header
+    // names its fields with none. Exactly one element loosens matching, so the
+    // header marker appears once.
+    expect(html).toContain("Matches on date of birth (fuzzy)");
+    expect(html).toContain("Matches on SSN - date of birth");
+    const markers = html.match(/\(fuzzy\)/g) ?? [];
+    expect(markers.length).toBe(1);
   });
 
   test("renders payload columns as separate items so a comma in a name cannot merge them", () => {
