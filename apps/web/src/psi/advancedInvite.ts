@@ -499,13 +499,17 @@ export function validateAdvancedInvite(
   // exchange would emit no key strings and yield a silent empty result), the same
   // gate generateInvitation and the acceptor pre-flight apply.
   if (enabledCount > 0 && errors.keys === undefined) {
-    // Assess against the draft's edited metadata, the same binding the inviter's
-    // exchange uses (it is threaded into the spec), so a column remap that makes a
-    // key offerable is judged satisfiable here exactly when the run can produce it.
+    // Assess against the draft's edited metadata AND its authored standardization,
+    // the same binding the inviter's exchange uses (both are threaded into the
+    // spec), so the verdict matches the run: a column remap that makes a key
+    // offerable is judged satisfiable here exactly when the run can produce it, and
+    // two same-typed fields each resolve to their own bound column rather than the
+    // type's first-match fallback (which would bind both to one column and mis-judge
+    // a key needing the second).
     const { satisfiableKeyCount } = assessLinkageSatisfiability(
       seed.columns,
       terms,
-      undefined,
+      draft.standardization,
       draft.metadata,
     );
     if (satisfiableKeyCount === 0) {

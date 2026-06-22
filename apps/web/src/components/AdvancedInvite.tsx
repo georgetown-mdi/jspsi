@@ -121,7 +121,7 @@ export function AdvancedInvite() {
     // navigation to /advanced -- which does not pass through the compose screen's
     // Advanced click -- falls back to the picker rather than re-seeding from this
     // now-stale file. Safe under React StrictMode: this runs only after
-    // loadCSVColumns resolves, i.e. after the double-invoked render initializer and
+    // loadCSVFile resolves, i.e. after the double-invoked render initializer and
     // the setup/cleanup/setup effect cycle have already read the hand-off
     // synchronously, so neither mount loses it.
     clearAdvancedHandoff();

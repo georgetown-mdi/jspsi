@@ -25,6 +25,7 @@ import {
 
 import type {
   AdvancedInviteDraft,
+  AdvancedInviteSeed,
   OutputDirection,
 } from "../../src/psi/advancedInvite.js";
 
@@ -565,6 +566,46 @@ describe("inviter standardization: per-field column binding and multi-field", ()
       }),
     );
     expect(edited).toEqual(baseline);
+  });
+
+  test("the satisfiability gate binds each field through the authored standardization, not the type fallback", () => {
+    // A single key referencing the SECOND same-typed field, bound to current_col. If
+    // the file lacks current_col, that field is unproducible and the only key is
+    // unsatisfiable -- the exchange would emit no key strings and yield a silent
+    // empty result. The gate sees this only by resolving first_name_2 through the
+    // standardization (to current_col); the bare type fallback binds every first_name
+    // field to the first such column (maiden_col, present) and would wrongly pass.
+    const draft: AdvancedInviteDraft = {
+      identity: "Inviter",
+      lifetimeSeconds: 3600,
+      outputDirection: "both",
+      algorithm: "psi",
+      deduplicate: false,
+      metadata,
+      standardization: [
+        { output: "first_name", input: "maiden_col", steps: NAME_STEPS },
+        { output: "first_name_2", input: "current_col", steps: NAME_STEPS },
+      ],
+      keys: [
+        {
+          key: { name: "current", elements: [{ field: "first_name_2" }] },
+          enabled: true,
+        },
+      ],
+    };
+    // The file carries maiden_col but not current_col (the second field's column).
+    const seed: AdvancedInviteSeed = {
+      terms: getDefaultLinkageTerms("Inviter", metadata),
+      metadata,
+      columns: ["maiden_col", "dob_col"],
+    };
+    const result = validateAdvancedInvite(
+      draft,
+      seed,
+      new Date("2026-06-20T00:00:00.000Z"),
+    );
+    expect(result.errors.keys).toBeDefined();
+    expect(result.canGenerate).toBe(false);
   });
 
   test("the seeded default standardization yields the same terms as no standardization (guided path unchanged)", () => {

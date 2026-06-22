@@ -57,10 +57,13 @@ export function StandardizationWorkbench({
   const fieldByName = new Map(
     declaredFields.map((field) => [field.name, field]),
   );
-  const columnType = (column: string): LinkageField["type"] | undefined =>
-    metadata.find((c) => c.name === column)?.type as
-      | LinkageField["type"]
-      | undefined;
+  // A transformation's declared field, or undefined when it declares none (its
+  // input column is ignored/absent or a non-matchable type, so authoredLinkageFields
+  // emitted no field and it renders no card). Keying the counts below on this -- not
+  // on the raw column type -- keeps the component's internal tallies equal to what it
+  // actually renders, and yields a `LinkageField["type"]` with no cast.
+  const fieldForTransform = (output: string): LinkageField | undefined =>
+    fieldByName.get(output);
 
   // The operator's non-ignored columns of a semantic type, in metadata order -- the
   // columns a field of that type MAY bind to. More than one makes the input column a
@@ -93,24 +96,30 @@ export function StandardizationWorkbench({
     const bound = new Set(standardization.map((t) => t.input));
     const freeColumn = columnsForType(type).find((c) => !bound.has(c));
     if (freeColumn === undefined) return;
-    const sibling = standardization.find((t) => columnType(t.input) === type);
+    const sibling = standardization.find(
+      (t) => fieldForTransform(t.output)?.type === type,
+    );
     const base = sibling?.output ?? type;
     const taken = new Set(standardization.map((t) => t.output));
-    let output = `${base}_2`;
-    for (let n = 2; taken.has(output); n++) output = `${base}_${n}`;
+    let n = 2;
+    let output = `${base}_${n}`;
+    while (taken.has(output)) output = `${base}_${++n}`;
     onChange([
       ...standardization,
       { output, input: freeColumn, steps: sibling?.steps ?? [] },
     ]);
   };
 
-  // The transformation count bound to each type, so the add control offers only a
-  // type with a column still free to bind.
+  // The rendered-card count per type, so the add control offers only a type with a
+  // column still free to bind and the remove control appears only on a same-typed
+  // pair. Counted over declared fields (one card each), so a transformation that
+  // declares no field -- ignored/non-matchable input column -- never inflates the
+  // tally past what is on screen.
   const boundByType = new Map<LinkageField["type"], number>();
   for (const t of standardization) {
-    const type = columnType(t.input);
-    if (type !== undefined)
-      boundByType.set(type, (boundByType.get(type) ?? 0) + 1);
+    const field = fieldForTransform(t.output);
+    if (field !== undefined)
+      boundByType.set(field.type, (boundByType.get(field.type) ?? 0) + 1);
   }
   const addableTypes = [...boundByType.keys()].filter(
     (type) => columnsForType(type).length > (boundByType.get(type) ?? 0),
