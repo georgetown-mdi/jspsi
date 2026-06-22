@@ -267,6 +267,54 @@ test("safeParseMetadata accepts names differing only in case (matching is exact)
   expect(result.success).toBe(true);
 });
 
+// ─── column-name length bound ─────────────────────────────────────────────────
+
+test("safeParseMetadata rejects an empty column name", () => {
+  // An empty name is now rejected at config parse rather than parsing cleanly and
+  // being skipped later at record build (the build-time governance validation).
+  const result = safeParseMetadata([
+    { name: "", type: "other", role: "payload", is_payload: true },
+  ]);
+  expect(result.success).toBe(false);
+});
+
+test("safeParseMetadata rejects a column name over the length bound", () => {
+  // MAX_NAME_LENGTH is 256; 257 characters exceeds it.
+  const result = safeParseMetadata([
+    { name: "a".repeat(257), type: "other", role: "payload", is_payload: true },
+  ]);
+  expect(result.success).toBe(false);
+});
+
+test("safeParseMetadata accepts a column name at the length bound", () => {
+  const result = safeParseMetadata([
+    { name: "a".repeat(256), type: "other", role: "payload", is_payload: true },
+  ]);
+  expect(result.success).toBe(true);
+});
+
+test("safeParseMetadata accepts a normal column name (no regression)", () => {
+  const result = safeParseMetadata([
+    { name: "COUNTY", type: "other", role: "payload", is_payload: true },
+  ]);
+  expect(result.success).toBe(true);
+});
+
+test("safeParseMetadata does not echo an over-long name in the error", () => {
+  // The name is operator-authored and may carry control/ANSI/bidi bytes; the
+  // length bound reports a static message, never the offending name.
+  const evil = "\x1b[31m" + "D".repeat(300) + "\x1b[0m‮";
+  const result = safeParseMetadata([
+    { name: evil, type: "other", role: "payload", is_payload: true },
+  ]);
+  expect(result.success).toBe(false);
+  if (!result.success) {
+    expect(result.error.message).not.toContain("D".repeat(300));
+    expect(result.error.message).not.toContain("\x1b");
+    expect(result.error.message).not.toContain("‮");
+  }
+});
+
 // ─── role: ignored ────────────────────────────────────────────────────────────
 
 test("safeParseMetadata accepts role: ignored", () => {

@@ -826,7 +826,7 @@ metadata:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | yes | Column name in the input CSV; must be unique within the metadata block (matched case-sensitively) |
+| `name` | string | yes | Column name in the input CSV; must be non-empty, at most 256 characters, and unique within the metadata block (matched case-sensitively). A violation is rejected at config parse |
 | `type` | string | no | Semantic type (see [Semantic Types](#semantic-types) above); inferred from name if omitted |
 | `role` | enum | no | `linkage`, `identifier`, `payload`, or `ignored`; inferred if omitted (inference never assigns `ignored` -- it is opt-in only) |
 | `is_payload` | boolean | no | Whether this column is transmitted as payload data after the intersection is identified; defaults to `true` when `role` is `payload`, `false` otherwise |
