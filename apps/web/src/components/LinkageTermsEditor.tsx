@@ -33,11 +33,11 @@ import {
   assessLinkageSatisfiability,
   authoredLinkageFields,
   getDefaultLinkageTerms,
-  getDefaultStandardization,
 } from "@psilink/core";
 
 import {
   buildAdvancedTerms,
+  defaultStandardizationForRows,
   draftFromTerms,
   setDraftMetadata,
   validateAdvancedInvite,
@@ -168,9 +168,14 @@ export function LinkageTermsEditor({
     algorithm: seed.terms.algorithm,
     deduplicate: seed.terms.deduplicate,
     metadata: seed.metadata,
-    // The recommended per-type cleaning; authoredLinkageFields over it reproduces
-    // the default field set, so the restated draft's terms equal the seed's.
-    standardization: getDefaultStandardization(seed.metadata, seed.terms),
+    // The recommended per-type cleaning, with the dob format inferred from the
+    // rows; authoredLinkageFields over it reproduces the default field set, so the
+    // restated draft's terms equal the seed's.
+    standardization: defaultStandardizationForRows(
+      seed.metadata,
+      seed.terms,
+      rawRows,
+    ),
     keys: seed.terms.linkageKeys.map((key) => ({ key, enabled: true })),
   });
   const [draft, setDraft] = useState<AdvancedInviteDraft>(freshDraft);
@@ -297,7 +302,9 @@ export function LinkageTermsEditor({
     // batched key edit.
     const reconcile = !keysAuthored;
     setDraft((prev) =>
-      reconcile ? setDraftMetadata(prev, metadata) : { ...prev, metadata },
+      reconcile
+        ? setDraftMetadata(prev, metadata, rawRows)
+        : { ...prev, metadata },
     );
   };
 
@@ -358,7 +365,7 @@ export function LinkageTermsEditor({
   // own columns -- terms carry no per-party binding -- so an imported key the
   // columns cannot satisfy shows as not-satisfiable rather than silently breaking.
   const handleImport = (terms: LinkageTerms) => {
-    setDraft(draftFromTerms(terms, seed, draft.lifetimeSeconds));
+    setDraft(draftFromTerms(terms, seed, draft.lifetimeSeconds, rawRows));
     // The imported keys are author-controlled (not the metadata template), so a
     // later metadata edit must not reconcile them away.
     setKeysAuthored(true);

@@ -156,7 +156,7 @@ export function AdvancedInvite() {
       return;
     }
 
-    const { seed } = seedAdvancedInvite(name, columns);
+    const { seed } = seedAdvancedInvite(name, columns, rawRows);
     setPhase({ status: "editing", seed, identity: name, file, rawRows });
   };
 

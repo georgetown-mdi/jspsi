@@ -608,6 +608,35 @@ describe("inviter standardization: per-field column binding and multi-field", ()
     expect(result.canGenerate).toBe(false);
   });
 
+  test("seeding infers the date-of-birth input format from the rows, not the MM/DD/YYYY default", () => {
+    // The advanced path always supplies an explicit standardization, so the exchange
+    // no longer infers the date layout for it; the seed must, or an ISO-dated file
+    // would be parsed as MM/DD/YYYY and under-match every dob key. Dashed dates with
+    // a day past 12 parse only as YYYY-MM-DD, so the inference is unambiguous.
+    const isoRows = [
+      {
+        ssn: "123456789",
+        ssn4: "6789",
+        first_name: "A",
+        last_name: "B",
+        dob: "1990-01-31",
+      },
+      {
+        ssn: "987654321",
+        ssn4: "4321",
+        first_name: "C",
+        last_name: "D",
+        dob: "1985-12-25",
+      },
+    ];
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS, isoRows);
+    const dob = draft.standardization.find((t) => t.output === "date_of_birth");
+    expect(dob?.steps).toContainEqual({
+      function: "parse_date",
+      params: { inputFormat: "YYYY-MM-DD", outputFormat: "YYYYMMDD" },
+    });
+  });
+
   test("the seeded default standardization yields the same terms as no standardization (guided path unchanged)", () => {
     // authoredLinkageFields over getDefaultStandardization reproduces the default
     // per-type field set, so seeding the draft with the recommended cleaning does

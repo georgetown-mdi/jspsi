@@ -7,6 +7,7 @@ import {
   canonicalString,
   getDefaultLinkageTerms,
   getDefaultStandardization,
+  inferDateFormat,
   inferMetadata,
   safeParseLinkageTerms,
 } from "@psilink/core";
@@ -198,15 +199,49 @@ export interface AdvancedValidation {
 }
 
 /**
- * Seed an editor session from the inviter's identity and CSV columns. The terms
- * are the metadata-aware defaults ({@link getDefaultLinkageTerms} over
- * {@link inferMetadata}), so only keys the columns can satisfy are present and the
- * editor never opens on a blank form. Calling this again is exactly the
- * "Reset to recommended" action.
+ * The default standardization for a metadata/terms pair with the `date_of_birth`
+ * pipeline's input format inferred from the operator's own rows, rather than the
+ * fixed `MM/DD/YYYY` {@link getDefaultStandardization} assumes. The quick path
+ * auto-detects the layout because it supplies no explicit standardization (the
+ * exchange infers when none is given); the advanced path always supplies one, so
+ * it must infer here or it would silently parse a non-US date file with the wrong
+ * format and under-match every date-of-birth key. Mirrors the exchange's own
+ * inference: the first present, non-`ignored` date_of_birth column's values drive
+ * {@link inferDateFormat}, falling back to the `MM/DD/YYYY` default when there is no
+ * such column or the format cannot be inferred (e.g. seeded with no rows).
+ *
+ * The inferred format lives only in the local cleaning steps; the cross-party terms
+ * carry the field, not its cleaning ({@link authoredLinkageFields} ignores steps),
+ * so this never moves the agreement bytes.
+ */
+export function defaultStandardizationForRows(
+  metadata: Metadata,
+  terms: LinkageTerms,
+  rawRows: ReadonlyArray<Record<string, string>>,
+): Standardization {
+  const dobColumn = metadata.find(
+    (column) => column.type === "date_of_birth" && column.role !== "ignored",
+  );
+  const dateInputFormat =
+    dobColumn !== undefined
+      ? inferDateFormat(rawRows.map((row) => row[dobColumn.name] ?? ""))
+      : undefined;
+  return getDefaultStandardization(metadata, terms, { dateInputFormat });
+}
+
+/**
+ * Seed an editor session from the inviter's identity, CSV columns, and parsed
+ * rows. The terms are the metadata-aware defaults ({@link getDefaultLinkageTerms}
+ * over {@link inferMetadata}), so only keys the columns can satisfy are present and
+ * the editor never opens on a blank form; the seeded standardization infers the
+ * date-of-birth format from `rawRows` (see {@link defaultStandardizationForRows}).
+ * Calling this again is exactly the "Reset to recommended" action. `rawRows`
+ * defaults to empty, which yields the `MM/DD/YYYY` date default.
  */
 export function seedAdvancedInvite(
   identity: string,
   columns: Array<string>,
+  rawRows: ReadonlyArray<Record<string, string>> = [],
 ): { draft: AdvancedInviteDraft; seed: AdvancedInviteSeed } {
   // Normalized so the collapsed disclosure control opens on a faithful diagonal
   // (an inferred identifier column is not silently disclosed). Normalization only
@@ -227,11 +262,13 @@ export function seedAdvancedInvite(
       algorithm: terms.algorithm,
       deduplicate: terms.deduplicate,
       metadata,
-      // The recommended per-type cleaning for these columns. authoredLinkageFields
-      // over this reproduces the default per-type field set (one field per type),
-      // so the seeded draft's terms equal getDefaultLinkageTerms' -- the editor opens
-      // on a known-good valid state, byte-identical to the quick path's.
-      standardization: getDefaultStandardization(metadata, terms),
+      // The recommended per-type cleaning for these columns, with the dob format
+      // inferred from the rows. authoredLinkageFields over this reproduces the
+      // default per-type field set (one field per type), so the seeded draft's terms
+      // equal getDefaultLinkageTerms' -- the editor opens on a known-good valid
+      // state, byte-identical to the quick path's (the inferred format lives only in
+      // the local steps, which the terms do not carry).
+      standardization: defaultStandardizationForRows(metadata, terms, rawRows),
       keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),
     },
     seed: { terms, metadata, columns },
@@ -251,6 +288,7 @@ export function seedAdvancedInvite(
 export function setDraftMetadata(
   draft: AdvancedInviteDraft,
   metadata: Metadata,
+  rawRows: ReadonlyArray<Record<string, string>> = [],
 ): AdvancedInviteDraft {
   const offerable = getDefaultLinkageTerms(
     draft.identity,
@@ -263,6 +301,7 @@ export function setDraftMetadata(
       draft.standardization,
       metadata,
       draft.identity,
+      rawRows,
     ),
     keys: reconcileKeys(draft.keys, offerable),
   };
@@ -284,6 +323,7 @@ function reconcileStandardization(
   prev: Standardization,
   metadata: Metadata,
   identity: string,
+  rawRows: ReadonlyArray<Record<string, string>>,
 ): Standardization {
   const columnByName = new Map(metadata.map((column) => [column.name, column]));
   const kept = prev.filter((transformation) => {
@@ -296,11 +336,14 @@ function reconcileStandardization(
       .filter((type) => type !== undefined),
   );
   // Default cleaning for a present type the kept set does not cover. Derived the
-  // same way the seed is (getDefaultStandardization over the metadata's default
-  // terms), so a newly-typed column gains exactly the recommended per-type pipeline.
-  const fullDefault = getDefaultStandardization(
+  // same way the seed is (defaultStandardizationForRows over the metadata's default
+  // terms), so a newly-typed column gains exactly the recommended per-type pipeline
+  // -- including the row-inferred date format for a column just retyped to
+  // date_of_birth.
+  const fullDefault = defaultStandardizationForRows(
     metadata,
     getDefaultLinkageTerms(identity, metadata),
+    rawRows,
   );
   const additions = fullDefault.filter((transformation) => {
     const column = columnByName.get(transformation.input);
@@ -807,6 +850,7 @@ export function draftFromTerms(
   terms: LinkageTerms,
   seed: AdvancedInviteSeed,
   lifetimeSeconds: number = INVITATION_LIFETIME_SECONDS,
+  rawRows: ReadonlyArray<Record<string, string>> = [],
 ): AdvancedInviteDraft {
   return {
     identity: terms.identity,
@@ -825,10 +869,15 @@ export function draftFromTerms(
     metadata: seed.metadata,
     // Imported terms carry no per-party binding (standardization is local), so the
     // cleaning stays the inviter's own default for its columns -- the same default
-    // the guided path seeds. An imported key referencing a custom multi-field name
-    // therefore finds no such field and surfaces as unsatisfiable (the deferred
-    // import-of-multi-field case noted above), rather than silently mis-binding.
-    standardization: getDefaultStandardization(seed.metadata, seed.terms),
+    // the guided path seeds, with the dob format inferred from the rows. An imported
+    // key referencing a custom multi-field name therefore finds no such field and
+    // surfaces as unsatisfiable (the deferred import-of-multi-field case noted
+    // above), rather than silently mis-binding.
+    standardization: defaultStandardizationForRows(
+      seed.metadata,
+      seed.terms,
+      rawRows,
+    ),
     keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),
   };
 }
