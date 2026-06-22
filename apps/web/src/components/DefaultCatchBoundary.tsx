@@ -19,40 +19,23 @@ export function DefaultCatchBoundary({ error }: ErrorComponentProps) {
   console.error("DefaultCatchBoundary Error:", error);
 
   return (
-    <Stack align="center" gap="xl" p="md">
+    <Stack gap="sm" p="sm">
       <ErrorComponent error={error} />
-      <Group gap="2xs">
+      <Group gap="sm">
         <Button
-          color="gray"
-          size="compact-sm"
-          tt="uppercase"
-          fw={800}
           onClick={() => {
             router.invalidate();
           }}
         >
-          Try Again
+          Try again
         </Button>
         {isRoot ? (
-          <Button
-            component={Link}
-            to="/"
-            color="gray"
-            size="compact-sm"
-            tt="uppercase"
-            fw={800}
-          >
+          <Button component={Link} to="/" variant="default">
             Home
           </Button>
         ) : (
-          <Button
-            color="gray"
-            size="compact-sm"
-            tt="uppercase"
-            fw={800}
-            onClick={() => window.history.back()}
-          >
-            Go Back
+          <Button variant="default" onClick={() => window.history.back()}>
+            Go back
           </Button>
         )}
       </Group>
