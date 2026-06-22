@@ -16,6 +16,14 @@ const SSN_STEPS: StandardizationStep[] = [
   { function: "remove_dashes" },
   // Remove any remaining non-digit characters (spaces, dots, parens).
   { function: "replace_regex", params: { pattern: "[^0-9]", replacement: "" } },
+  // Drop a value that cleaned to empty (a blank or all-non-digit cell) here,
+  // before pad_left can mask it: an empty string would otherwise pad to
+  // "000000000" and be dropped only as a side effect of the placeholder null_if
+  // below happening to list that value. Since item 203074741 the linkage layer
+  // no longer drops "" together with the no-key sentinel, so the blank-cell
+  // footgun is prevented explicitly here -- and stays prevented even if an
+  // operator removes "000000000" from the placeholder list for their own data.
+  { function: "null_if", params: { value: "" } },
   // Zero-pad to 9 digits for SSNs stored without a leading zero.
   { function: "pad_left", params: { length: 9 } },
   // Reject anything that isn't exactly 9 digits.
@@ -33,6 +41,9 @@ const SSN4_STEPS: StandardizationStep[] = [
   { function: "remove_non_ascii" },
   { function: "remove_dashes" },
   { function: "replace_regex", params: { pattern: "[^0-9]", replacement: "" } },
+  // Drop a value that cleaned to empty before pad_left masks it as "0000"; see
+  // SSN_STEPS for why this explicit blank-drop is needed since item 203074741.
+  { function: "null_if", params: { value: "" } },
   // Zero-pad to 4 digits for SSN4 values stored without a leading zero.
   { function: "pad_left", params: { length: 4 } },
   { function: "extract_regex", params: { pattern: "(\\d{4})$" } },
