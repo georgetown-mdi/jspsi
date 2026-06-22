@@ -170,6 +170,15 @@ describe("LinkageTermsEditor", () => {
       .element(page.getByText("Resolve the highlighted items to continue."))
       .toBeInTheDocument();
 
+    // The block is announced, not a silent visual-only footer swap: the footer
+    // status sits in a polite live region (the acceptor verdict idiom), so a
+    // screen reader hears the gate engage and later release.
+    const footerStatus = page
+      .getByText("Resolve the highlighted items to continue.")
+      .element()
+      .closest('[role="status"]');
+    expect(footerStatus?.getAttribute("aria-live")).toBe("polite");
+
     // Demote one identifier to Ignored, leaving a single row identifier: the grid
     // error clears and Generate re-enables. The disclosure dropdown opens
     // highlighting the current "Row identifier - not sent" choice; two steps down

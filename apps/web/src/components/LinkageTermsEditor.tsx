@@ -687,7 +687,15 @@ export function LinkageTermsEditor({
         }}
       >
         <Group justify="space-between">
-          <Group gap="xs">
+          {/* The validation status lives in ONE stable, polite, atomic live
+              region -- the same idiom as the acceptor's PrepareData verdict. The
+              wrapper persists across renders while the inner text swaps, so a
+              screen reader hears the Ready <-> Resolve transition (including the
+              inviter newly blocking on the two-identifier state), not only the
+              sighted footer change; a bare swap of two separately-mounted nodes
+              would not reliably announce it. Polite, not assertive, so it does
+              not fight the heading focus on mount. */}
+          <div role="status" aria-live="polite" aria-atomic="true">
             {canGenerate ? (
               <Text size="sm" c="dimmed">
                 Ready to generate.
@@ -702,7 +710,7 @@ export function LinkageTermsEditor({
                 Resolve the highlighted items to continue.
               </Text>
             )}
-          </Group>
+          </div>
           <Group gap="sm">
             <Button variant="default" onClick={handleReset}>
               Reset to recommended
