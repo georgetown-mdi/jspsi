@@ -4,9 +4,13 @@ import {
   preparePayload,
   exchangePayloads,
   buildOutputTable,
+  assertPayloadSendDisclosed,
 } from "../src/payloadExchange";
+import { prepareForExchange } from "../src/exchange";
+import { UsageError } from "../src/errors";
 
 import type { Metadata } from "../src/config/metadata";
+import type { Payload } from "../src/config/linkageTerms";
 import type { PartnerPayload } from "../src/payloadExchange";
 
 import {
@@ -140,6 +144,114 @@ test("buildOutputTable: an ignored column is not treated as the identifier", () 
     partnerPayload,
   );
   expect(headers[0]).toBe("row_id");
+});
+
+// --- assertPayloadSendDisclosed ----------------------------------------------
+
+// The payload.send data dictionary (exchanged, consented to, and written into
+// the exchange record) must not over-declare relative to what metadata actually
+// transmits (isDisclosedToPartner = isPayload && role !== "ignored"). Forward
+// direction only; an over-declaration is rejected (UsageError -> CLI exit 64).
+
+test("assertPayloadSendDisclosed: a send column with isPayload:false is rejected", () => {
+  const meta: Metadata = [
+    { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+    { name: "diagnosis", type: "other", role: "payload", isPayload: false },
+  ];
+  const payload: Payload = { send: [{ name: "diagnosis" }] };
+  expect(() => assertPayloadSendDisclosed(payload, meta)).toThrow(UsageError);
+  // The offending column is named so the operator can reconcile it.
+  expect(() => assertPayloadSendDisclosed(payload, meta)).toThrow(/diagnosis/);
+});
+
+test("assertPayloadSendDisclosed: a send column with role:ignored is rejected", () => {
+  const meta: Metadata = [
+    { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+    { name: "county", type: "other", role: "ignored", isPayload: true },
+  ];
+  const payload: Payload = { send: [{ name: "county" }] };
+  expect(() => assertPayloadSendDisclosed(payload, meta)).toThrow(UsageError);
+  expect(() => assertPayloadSendDisclosed(payload, meta)).toThrow(/county/);
+});
+
+test("assertPayloadSendDisclosed: a send column absent from metadata is rejected", () => {
+  const meta: Metadata = [
+    { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+  ];
+  const payload: Payload = { send: [{ name: "ghost" }] };
+  expect(() => assertPayloadSendDisclosed(payload, meta)).toThrow(UsageError);
+});
+
+test("assertPayloadSendDisclosed: a fully disclosed send dictionary is accepted", () => {
+  const meta: Metadata = [
+    { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+    { name: "diagnosis", type: "other", role: "payload", isPayload: true },
+    { name: "enrollment", type: "other", role: "payload", isPayload: true },
+  ];
+  const payload: Payload = {
+    send: [{ name: "diagnosis" }, { name: "enrollment" }],
+  };
+  expect(() => assertPayloadSendDisclosed(payload, meta)).not.toThrow();
+});
+
+test("assertPayloadSendDisclosed: an absent or empty payload is a no-op", () => {
+  const meta: Metadata = [
+    { name: "diagnosis", type: "other", role: "payload", isPayload: true },
+  ];
+  expect(() => assertPayloadSendDisclosed(undefined, meta)).not.toThrow();
+  expect(() => assertPayloadSendDisclosed({ send: [] }, meta)).not.toThrow();
+});
+
+test("assertPayloadSendDisclosed: every over-declared column is named, disclosed ones are not", () => {
+  const meta: Metadata = [
+    { name: "kept", type: "other", role: "payload", isPayload: true },
+    { name: "off", type: "other", role: "payload", isPayload: false },
+    { name: "skip", type: "other", role: "ignored", isPayload: true },
+  ];
+  const payload: Payload = {
+    send: [{ name: "kept" }, { name: "off" }, { name: "skip" }],
+  };
+  let message = "";
+  try {
+    assertPayloadSendDisclosed(payload, meta);
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err);
+  }
+  // Both gated-off columns are listed, in send order; the disclosed one is not.
+  expect(message).toContain("[off, skip]");
+  expect(message).not.toContain("kept");
+});
+
+test("prepareForExchange: rejects a config whose payload.send over-declares", () => {
+  const metadata: Metadata = [
+    {
+      name: "first_name",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+    { name: "secret", type: "other", role: "ignored", isPayload: true },
+  ];
+  const linkageTerms = {
+    version: "1.0.0",
+    identity: "Tester",
+    date: "2026-01-01",
+    algorithm: "psi" as const,
+    output: { expectsOutput: true, shareWithPartner: true },
+    deduplicate: false,
+    linkageFields: [{ name: "first_name", type: "first_name" as const }],
+    linkageKeys: [{ name: "FN", elements: [{ field: "first_name" }] }],
+    payload: { send: [{ name: "secret" }] },
+  };
+  // The check fires during preparation, before any connection or dataset build.
+  expect(() =>
+    prepareForExchange(
+      { linkageTerms, metadata },
+      "Tester",
+      [{ first_name: "Alice", secret: "x" }],
+      ["first_name", "secret"],
+    ),
+  ).toThrow(UsageError);
 });
 
 // --- exchangePayloads --------------------------------------------------------

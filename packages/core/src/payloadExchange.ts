@@ -2,11 +2,17 @@ import * as z from "zod";
 
 import type { HandshakeRole, AssociationTable } from "./types.js";
 import type { Metadata } from "./config/metadata.js";
-import { isDisclosedToPartner } from "./config/metadata.js";
+import {
+  isDisclosedToPartner,
+  disclosedColumnNames,
+} from "./config/metadata.js";
+import type { Payload } from "./config/linkageTerms.js";
 import type { CommittedPayload } from "./exchangeRecord.js";
 import type { MessageConnection } from "./connection/messageConnection.js";
 import { receiveParsed } from "./connection/messageConnection.js";
 import { singleIssueArray } from "./utils/singleIssueArray.js";
+import { UsageError } from "./errors.js";
+import { sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
 
 /** The payload received from the exchange partner after PSI linkage. */
 export interface PartnerPayload {
@@ -121,6 +127,72 @@ export function preparePayload(
   );
 
   return { hasData: true, columns, rowIndices, rows };
+}
+
+/**
+ * Reject a `payload.send` data dictionary that over-declares what this party
+ * actually transmits.
+ *
+ * `payload.send` is the operator-authored data dictionary: it is exchanged with
+ * the partner, shown on the consent screen, and written verbatim into the
+ * self-attested exchange record's `payloadSent`. What actually leaves the
+ * machine is decided independently by each column's metadata via
+ * {@link isDisclosedToPartner} (`isPayload && role !== "ignored"`) -- the single
+ * source of truth for disclosure, the exact set {@link preparePayload}
+ * transmits. The two surfaces are wired independently, so a dictionary can name
+ * a column whose metadata gates its value off, making the exchanged, consented,
+ * and recorded dictionary over-state what flows.
+ *
+ * Metadata is authoritative for transmission; the declared dictionary must be a
+ * subset of it. Every column named in `payload.send` must be one metadata
+ * actually discloses; a name that is `isPayload: false`, `role: ignored`, or
+ * absent from metadata is an over-declaration and is rejected here (fail closed)
+ * rather than silently producing a consent surface and a disclosure record that
+ * claim more than was sent. The mismatch never leaks -- it only ever
+ * over-declares and under-sends -- so this is a consent-and-record-accuracy
+ * guarantee, not a leak control.
+ *
+ * Scope is the forward direction only. A column transmitted by metadata but
+ * absent from `payload.send` (under-declaration) is NOT checked: the guided and
+ * default paths author no `payload.send` while metadata still transmits, so a
+ * reverse rule would reject every such exchange. `payload.receive` is likewise
+ * out of scope -- it has no local-metadata counterpart (metadata gates sending,
+ * not receiving) and is already cross-checked against the partner's advertised
+ * `send` in `validateCompatibility`.
+ *
+ * Enforced from `prepareForExchange`, the one step with both the parsed terms
+ * and the metadata in scope, so the CLI and web paths get identical behavior.
+ * Offending names are partner-controlled on the accept side (the adopted
+ * inviter terms), so the message routes each through {@link sanitizeForDisplay},
+ * matching `validateCompatibility`'s payload-mismatch messages.
+ *
+ * @throws {UsageError} when `payload.send` names any column metadata does not
+ *   disclose. A {@link UsageError} so the CLI classifies it as a configuration
+ *   error (exit 64), not a transport failure.
+ */
+export function assertPayloadSendDisclosed(
+  payload: Payload | undefined,
+  metadata: Metadata,
+): void {
+  const send = payload?.send ?? [];
+  if (send.length === 0) return;
+  const disclosed = new Set(disclosedColumnNames(metadata));
+  const overDeclared = send
+    .map((column) => column.name)
+    .filter((name) => !disclosed.has(name));
+  if (overDeclared.length === 0) return;
+  const shown = overDeclared.map((name) => sanitizeForDisplay(name)).join(", ");
+  const plural = overDeclared.length > 1;
+  throw new UsageError(
+    `payload.send declares ${plural ? "columns" : "a column"} the column ` +
+      `metadata does not transmit: [${shown}]. A payload column's values are ` +
+      `sent only when its metadata has is_payload: true and role is not ` +
+      `ignored; otherwise the data dictionary exchanged with the partner, shown ` +
+      `for consent, and written into the exchange record over-states what is ` +
+      `actually sent. Remove ${plural ? "them" : "it"} from payload.send, or ` +
+      `set the column's metadata to transmit (is_payload: true and role not ` +
+      `ignored).`,
+  );
 }
 
 /** Maps a validated payload wire message into a {@link PartnerPayload}. */

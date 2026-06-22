@@ -296,6 +296,8 @@ linkage_terms:
 
 A party that declares it receives no output (`output.expects_output: false`) may not list `payload.receive` columns: it cannot receive payload for matched records it never gets, so the combination is rejected at parse and compatibility time. A non-receiving party may still `send` payload.
 
+`payload.send` is a data dictionary: it states what flows, but whether a column's values are actually transmitted is governed by that column's [input metadata](#input-metadata) (`is_payload` and `role`), which is the single source of truth for disclosure. The two must agree. Every column named in `payload.send` must be one its metadata actually transmits -- `is_payload: true` with `role` not `ignored`. A `send` entry whose column is `is_payload: false`, `role: ignored`, or absent from the metadata over-declares: the dictionary exchanged with the partner, shown for consent, and written into the [exchange record](spec/EXCHANGE_RECORD.md) would claim a column that never flows. This is rejected during data preparation, before any connection is made (exit 64). The mismatch can only over-declare -- it never transmits a column that was not declared -- so no value is disclosed beyond the dictionary; the check guards consent and record accuracy, not confidentiality.
+
 ---
 
 ## Connection
