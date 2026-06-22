@@ -1,5 +1,8 @@
 import {
+  ActionIcon,
+  Button,
   Card,
+  Checkbox,
   Container,
   Paper,
   Select,
@@ -8,6 +11,40 @@ import {
 } from "@mantine/core";
 
 import type { CSSVariablesResolver, MantineThemeOverride } from "@mantine/core";
+
+/**
+ * True for a filled surface rendered in the primary color -- the default
+ * (`filled`, no explicit `color`) Button / ActionIcon / Checkbox. Used to scope the
+ * per-scheme contrast-text overrides below so they touch only the primary-filled
+ * surfaces, leaving `default`/`subtle`/`light` variants and any future non-primary
+ * filled surface on their own text color. See {@link FILLED_PRIMARY_CONTRAST}.
+ */
+const isFilledPrimary = (
+  variant: string | undefined,
+  color: string | undefined,
+) => (variant === undefined || variant === "filled") && color === undefined;
+
+/**
+ * Route a filled-primary surface's text/icon color through Mantine's per-scheme
+ * `--mantine-primary-color-contrast` variable instead of the static white its own
+ * varsResolver emits.
+ *
+ * Mantine resolves a filled theme-color surface's text color color-scheme-blind:
+ * the Button/ActionIcon/Checkbox `varsResolver`s call the variant resolver with no
+ * color scheme, so `autoContrast` parses the primary against its LIGHT shade
+ * (cyan-9, luminance 0.14 -> not light) and picks white for BOTH schemes. That
+ * leaves the dark filled-primary text white on the brighter cyan-6 dark fill =
+ * 2.79:1, below the 1.4.3 floor. `--mantine-primary-color-contrast` is the one
+ * contrast value Mantine computes per scheme (white on the light cyan-9 fill, black
+ * on the dark cyan-6 fill -- the latter is why `autoContrast` must stay enabled, as
+ * it drives that pick), so pointing the filled-primary text at it yields black-on-
+ * cyan-6 = 7.53:1 in dark while staying white in light (byte-identical to the static
+ * default). Each component names this color through a different CSS variable, hence
+ * three near-identical overrides. The resolved ratios are enforced by
+ * test/unit/themeContrast.test.ts and the rendered colors by
+ * test/browser/themeContrast.test.ts.
+ */
+const FILLED_PRIMARY_CONTRAST = "var(--mantine-primary-color-contrast)";
 
 const CONTAINER_SIZES = {
   xxs: rem("200px"),
@@ -52,22 +89,62 @@ export const mantineTheme: MantineThemeOverride = createTheme({
     "3xl": rem("32px"),
   },
   primaryColor: "cyan",
-  // Light-scheme primary shade raised 6 -> 9 for WCAG 2.1 AA contrast. The
-  // default cyan-6 (#15aabf) fails wherever the primary is used: white-on-cyan-6
-  // filled buttons (and the filled copy ActionIcon glyph and the consent Checkbox
-  // checkmark) = 2.79:1; the cyan-6 anchor/link and the cyan-6 focus-visible
-  // outline / input focus border on the white page = 2.79:1. autoContrast does
-  // not solve this -- it only recolours text sitting on a filled surface, so it
-  // cannot lift the anchor, focus ring, or input border (cyan-on-white, not
-  // text-on-fill). cyan-8 is also short (white text 4.35:1, under the 4.5 floor);
-  // cyan-9 (#0b7285) is the first shade that clears it, fixing all of those at
-  // once: white-on-cyan-9 = 5.59:1 and cyan-9-on-white = 5.59:1. The filled hover
-  // step resolves to cyan-8 (4.35:1) -- transient, and AA is judged on the resting
-  // state. dark stays at its 8 default (stated so it cannot drift); the dark
-  // scheme is unchanged. The ratios are enforced by test/unit/themeContrast.test.ts.
-  primaryShade: { light: 9, dark: 8 },
+  // Enabled so Mantine computes `--mantine-primary-color-contrast` per scheme (white
+  // on the light cyan-9 fill, black on the dark cyan-6 fill), the variable the
+  // filled-primary overrides below route their text/icon color to; without it that
+  // variable is white in both schemes and the dark text fix would not hold.
+  // autoContrast does NOT by itself recolor filled theme-color text per scheme -- see
+  // FILLED_PRIMARY_CONTRAST above for why the overrides, not autoContrast, are the fix.
+  autoContrast: true,
+  // Per-scheme primary shade, each tuned to WCAG 2.1 AA (1.4.3 text 4.5:1, 1.4.11
+  // non-text 3:1) against its own surfaces; enforced by
+  // test/unit/themeContrast.test.ts.
+  //
+  // Light raised 6 -> 9. The default cyan-6 (#15aabf) fails wherever the primary is
+  // used: white-on-cyan-6 filled buttons (and the copy ActionIcon glyph and the
+  // consent Checkbox checkmark) = 2.79:1; the cyan-6 anchor/link and the cyan-6
+  // focus-visible outline / input focus border on the white page = 2.79:1. cyan-8
+  // is also short (white text 4.35:1); cyan-9 (#0b7285) is the first shade clearing
+  // it, fixing all of those at once: white-on-cyan-9 = 5.59:1 and cyan-9-on-white =
+  // 5.59:1. The filled hover step resolves to cyan-8 (4.35:1) -- transient, and AA
+  // is judged on the resting state.
+  //
+  // Dark moved 8 -> 6. No single cyan shade satisfies both dark bars with WHITE
+  // filled text: cyan-8 (the old default) left the filled button text at
+  // white-on-cyan-8 = 4.35:1 (under 4.5), and darkening to cyan-9 fixes the button
+  // but drops the focus ring / input border on the dark body to 2.78:1 / 2.43:1
+  // (under 3). cyan-6 is bright enough that the focus ring on the dark-7 body reaches
+  // 5.57:1 and the input focus border on the dark-6 input 4.87:1, and the
+  // filled-primary text -- routed through --mantine-primary-color-contrast (black on
+  // cyan-6) by the component overrides below -- reaches 7.53:1. All three clear with
+  // margin.
+  primaryShade: { light: 9, dark: 6 },
   components: {
     /** Put your mantine component override here */
+    // Filled-primary text/icon -> per-scheme contrast color (see
+    // FILLED_PRIMARY_CONTRAST). Each names the color through its own CSS variable;
+    // the merge keeps the rest of each component's vars (background, sizing).
+    Button: Button.extend({
+      vars: (_, { variant, color }) => ({
+        root: isFilledPrimary(variant, color)
+          ? { "--button-color": FILLED_PRIMARY_CONTRAST }
+          : {},
+      }),
+    }),
+    ActionIcon: ActionIcon.extend({
+      vars: (_, { variant, color }) => ({
+        root: isFilledPrimary(variant, color)
+          ? { "--ai-color": FILLED_PRIMARY_CONTRAST }
+          : {},
+      }),
+    }),
+    Checkbox: Checkbox.extend({
+      vars: (_, { variant, color }) => ({
+        root: isFilledPrimary(variant, color)
+          ? { "--checkbox-icon-color": FILLED_PRIMARY_CONTRAST }
+          : {},
+      }),
+    }),
     Container: Container.extend({
       vars: (_, { size, fluid }) => ({
         root: {
