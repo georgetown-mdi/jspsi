@@ -501,32 +501,42 @@ function summarizeTransform(
 }
 
 /**
- * The terse breadth marker for a key element's collapsed-header entry, or
- * undefined when the element matches exactly or only canonicalizes its value.
- * Mechanical -- keyed on the rule that loosens matching, in priority order -- so
- * it never editorializes and never fires on a pure normalizer (case, whitespace,
- * accents): `substring` truncates to part of the value; a fuzzy comparison adds
- * approximate variants; `phonetic` buckets by sound; `split_on` fans one value
- * into several; `coalesce` substitutes a fallback that can create new matches.
- * Value-dropping functions (`filter_regex`, `extract_regex`, `null_if`) narrow
- * matching rather than broaden it, so they carry no marker. "fuzzy" is reserved
- * for the genuine fuzzy-comparison expansion, distinct from `substring`'s
- * "partial".
+ * The terse informative marker for a key element's collapsed-header entry, or
+ * undefined when the element matches exactly or only canonicalizes its value
+ * (case, whitespace, accents, affixes, padding, date reformatting -- routine
+ * standardization, deliberately not flagged so the recommended setup stays
+ * clean). It names any rule that materially changes which records match: where the
+ * direction is determinable from the terms it names the EFFECT ("partial" for a
+ * truncation; "fuzzy" / "sound-alike" / "multiple" / "fallback" for an expansion),
+ * and where an arbitrary partner-authored pattern makes the direction
+ * indeterminate it names the RULE directly ("pattern replacement", "pattern
+ * extraction", "pattern filter", "value exclusion"). Informative, not a
+ * broaden-only warning: `filter_regex` and `null_if` narrow matching but are still
+ * surfaced. "fuzzy" is reserved for the genuine fuzzy-comparison expansion,
+ * distinct from `substring`'s "partial". None of the regex/value rules appear on
+ * the default or guided path (only `substring` and `swap` do), so an
+ * expert-authored rule is what trips those markers.
  *
  * Returns a SINGLE, most-salient marker, not one per rule: the always-visible
- * header is deliberately terse, so an element carrying more than one loosening
- * rule -- a `substring` AND a fuzzy comparison, say -- shows just the first while
- * its complete rule set sits one expand down in {@link MatchKeyDetails}. The
- * element stays flagged as loose either way, the property the always-visible
- * signal must preserve.
+ * header is deliberately terse, so an element carrying more than one rule shows
+ * just the first -- effect-named rules take precedence over the directly-named
+ * ones -- while its complete rule set sits one expand down in
+ * {@link MatchKeyDetails}. The element stays flagged either way.
  */
 function elementBreadthMarker(element: LinkageKeyElement): string | undefined {
   const functions = new Set((element.transform ?? []).map((s) => s.function));
+  // Effect named where the direction is determinable from the terms.
   if (functions.has("substring")) return "partial";
   if (element.generateFuzzyComparisons !== undefined) return "fuzzy";
   if (functions.has("phonetic")) return "sound-alike";
   if (functions.has("split_on")) return "multiple";
   if (functions.has("coalesce")) return "fallback";
+  // Rule named directly where a partner-authored pattern or value list makes the
+  // matching direction indeterminate from the terms alone.
+  if (functions.has("replace_regex")) return "pattern replacement";
+  if (functions.has("extract_regex")) return "pattern extraction";
+  if (functions.has("filter_regex")) return "pattern filter";
+  if (functions.has("null_if")) return "value exclusion";
   return undefined;
 }
 

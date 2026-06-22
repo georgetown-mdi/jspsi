@@ -1103,6 +1103,66 @@ describe("summarizeInvitation", () => {
     expect(summary.linkageKeys[0].headerFields).toEqual(["last name"]);
   });
 
+  test("names each materially-altering rule in the header by effect or directly", () => {
+    // The header entry a single last-name element produces under a given rule.
+    // Guards the whole categorization: an effect name where the matching
+    // direction is determinable, a direct name where a partner pattern/value list
+    // makes it indeterminate, and nothing for routine standardization.
+    const headerFor = (transform: LinkageKeyElement["transform"]) =>
+      summarizeInvitation(
+        makeToken({
+          linkageFields: [{ name: "ln", type: "last_name" }],
+          linkageKeys: [
+            {
+              name: "K",
+              elements: [{ field: "ln", ...(transform && { transform }) }],
+            },
+          ],
+        }),
+      ).linkageKeys[0].headerFields[0];
+
+    // Effect named where the direction is determinable.
+    expect(
+      headerFor([{ function: "substring", params: { start: 1, length: 3 } }]),
+    ).toBe("last name (partial)");
+    expect(headerFor([{ function: "phonetic" }])).toBe(
+      "last name (sound-alike)",
+    );
+    expect(
+      headerFor([{ function: "split_on", params: { delimiter: " " } }]),
+    ).toBe("last name (multiple)");
+    expect(
+      headerFor([{ function: "coalesce", params: { default: "X" } }]),
+    ).toBe("last name (fallback)");
+
+    // Rule named directly where a partner pattern/value list makes the direction
+    // indeterminate -- including the narrowing ones, which are surfaced too.
+    expect(
+      headerFor([
+        {
+          function: "replace_regex",
+          params: { pattern: "a", replacement: "b" },
+        },
+      ]),
+    ).toBe("last name (pattern replacement)");
+    expect(
+      headerFor([{ function: "extract_regex", params: { pattern: "(.*)" } }]),
+    ).toBe("last name (pattern extraction)");
+    expect(
+      headerFor([{ function: "filter_regex", params: { pattern: ".*" } }]),
+    ).toBe("last name (pattern filter)");
+    expect(
+      headerFor([{ function: "null_if", params: { values: ["x"] } }]),
+    ).toBe("last name (value exclusion)");
+
+    // Routine standardization is not flagged.
+    expect(headerFor([{ function: "pad_left", params: { length: 5 } }])).toBe(
+      "last name",
+    );
+    expect(headerFor([{ function: "parse_date" }])).toBe("last name");
+    expect(headerFor(undefined)).toBe("last name");
+  });
+
   test("dedupes header entries by label and marker, keeping a truncated field distinct", () => {
     const summary = summarizeInvitation(
       makeToken({
