@@ -1862,20 +1862,26 @@ export function summarizeDatasetConstraintViolations(
   dataset: StandardizedDataset,
   rowCount: number,
 ): ConstraintViolationSummary[] {
-  // Keyed "field/kind" so two fields sharing a kind stay distinct; the NUL
-  // separator cannot appear in a `kind` literal, so the join is unambiguous.
-  const summaries = new Map<string, ConstraintViolationSummary>();
+  const summaries: ConstraintViolationSummary[] = [];
   for (const field of terms.linkageFields) {
     if (field.constraints === undefined) continue;
     const standardized = dataset.getField(field.name);
     if (standardized === undefined) continue;
+    // Tally this field's violations keyed only by the closed `kind` enum, so no
+    // partner-controlled field name ever enters a map key. A field is a single
+    // iteration of this loop (names are unique across linkageFields), so its
+    // counts cannot be misattributed to or from another field's regardless of
+    // what bytes its name carries.
+    const byKind = new Map<
+      ConstraintViolationKind,
+      ConstraintViolationSummary
+    >();
     for (let index = 0; index < rowCount; index++) {
       for (const value of standardized.get(index)) {
         for (const violation of checkValueConstraints(field, value)) {
-          const key = `${field.name}\u0000${violation.kind}`;
-          const existing = summaries.get(key);
+          const existing = byKind.get(violation.kind);
           if (existing === undefined)
-            summaries.set(key, {
+            byKind.set(violation.kind, {
               field: field.name,
               kind: violation.kind,
               label: violation.label,
@@ -1885,6 +1891,7 @@ export function summarizeDatasetConstraintViolations(
         }
       }
     }
+    summaries.push(...byKind.values());
   }
-  return [...summaries.values()];
+  return summaries;
 }
