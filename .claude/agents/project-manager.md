@@ -26,7 +26,7 @@ spawned you owns the loop and will re-spawn you with the answers folded in.
 1. **Understand the input.** It is a finding, question, or note from a working
    session, plus whatever context the caller passed. Treat it as complete; do
    not go spelunking through the codebase for more.
-2. **Load context.** Read `.claude/pm/ruleset.md` (always) and `CLAUDE.local.md`.
+2. **Load context.** Read `.claude/pm/ruleset.md` (always) and `CLAUDE.md`.
    Read `docs/EXCHANGE_REFERENCE.md`, source under `packages/core/src/`, `apps/cli/src/`,
    or `apps/web/src/` only when the task's affected areas genuinely require it.
    Keep reads targeted -- you are a consult, not an explorer.
