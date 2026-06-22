@@ -38,6 +38,7 @@ export function StandardizationStepEditor({
   inputColumn,
   steps,
   onStepsChange,
+  expert = false,
 }: {
   /** Human-readable label for the field this pipeline produces (a safe
    * semantic-type label, never the partner-controlled field name). */
@@ -48,6 +49,9 @@ export function StandardizationStepEditor({
   steps: Array<StandardizationStep>;
   /** Emit the next step array on any add, remove, reorder, or param edit. */
   onStepsChange: (steps: Array<StandardizationStep>) => void;
+  /** Forwarded to {@link StepListEditor}: when set, the gated expert tier (raw
+   * regular-expression steps) is authorable here. Defaults to off. */
+  expert?: boolean;
 }) {
   // Announce the step-list summary on a debounce: a burst of add/remove/reorder
   // edits announces once, not per action, and a reorder (which leaves the count
@@ -85,7 +89,11 @@ export function StandardizationStepEditor({
         </Text>
       </div>
 
-      <StepListEditor steps={steps} onStepsChange={onStepsChange} />
+      <StepListEditor
+        steps={steps}
+        onStepsChange={onStepsChange}
+        expert={expert}
+      />
 
       {/* One polite, atomic live region for this field's step list: announces the
           debounced summary after an add, remove, or reorder, never the whole card

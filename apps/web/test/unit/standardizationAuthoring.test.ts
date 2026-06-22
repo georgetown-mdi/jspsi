@@ -1,17 +1,21 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  MAX_TRANSFORM_PATTERN_LENGTH,
   STANDARDIZATION_FUNCTION_DESCRIPTORS,
   getDefaultStandardization,
+  runPipeline,
 } from "@psilink/core";
 
 import {
+  STANDARDIZATION_EXPERT_FUNCTION_GROUPS,
   STANDARDIZATION_FUNCTION_GROUPS,
   applyStepOverrides,
   authorableFunctionNames,
   checkValueConstraints,
   describeParamFields,
   descriptorFor,
+  expertFunctionNames,
   functionDisplay,
   isStepValid,
   validateParamValue,
@@ -41,7 +45,7 @@ describe("function grouping parity with the descriptor table", () => {
     );
   });
 
-  test("excludes every regex-tier function (deferred expert tier)", () => {
+  test("the standard menu excludes every regex-tier function (those are gated to the expert menu)", () => {
     const regexTier = Object.values(STANDARDIZATION_FUNCTION_DESCRIPTORS)
       .filter((d) => d.tier === "regex")
       .map((d) => d.name);
@@ -80,6 +84,32 @@ describe("function grouping parity with the descriptor table", () => {
     expect(display.label).not.toContain(bel);
     // The printable ASCII prefix is preserved; the dangerous bytes are escaped.
     expect(display.label).toContain("to_upper_case");
+  });
+});
+
+describe("expert (regex-tier) function grouping parity with the descriptor table", () => {
+  // The gated expert menu is the raw-pattern add-step source of truth; pin it to
+  // core's regex tier in both directions so a regex-tier function added to core
+  // cannot ship without an expert group, and a standard-tier function cannot leak
+  // into the expert menu.
+  const regexTierNames = Object.values(STANDARDIZATION_FUNCTION_DESCRIPTORS)
+    .filter((d) => d.tier === "regex")
+    .map((d) => d.name);
+
+  test("offers exactly the regex-tier functions", () => {
+    expect([...expertFunctionNames].sort()).toEqual([...regexTierNames].sort());
+  });
+
+  test("is disjoint from the standard menu", () => {
+    for (const name of expertFunctionNames)
+      expect(authorableFunctionNames.has(name)).toBe(false);
+  });
+
+  test("lists each expert function in exactly one group", () => {
+    const flat = STANDARDIZATION_EXPERT_FUNCTION_GROUPS.flatMap(
+      (g) => g.functionNames,
+    );
+    expect(flat.length).toBe(new Set(flat).size);
   });
 });
 
@@ -128,14 +158,14 @@ describe("descriptor-driven typed param fields", () => {
     ).toEqual([]);
   });
 
-  test("every param field carries a non-empty plain-language label", () => {
-    for (const name of authorableFunctionNames)
+  test("every param field carries a non-empty plain-language label (standard and expert tiers)", () => {
+    for (const name of [...authorableFunctionNames, ...expertFunctionNames])
       for (const field of describeParamFields(
         STANDARDIZATION_FUNCTION_DESCRIPTORS[name],
       )) {
         expect(field.label.length).toBeGreaterThan(0);
         // A camelCase key (the raw snake-free runtime key) must be relabeled, not
-        // shown verbatim.
+        // shown verbatim -- e.g. split_on's includeOriginal.
         if (/[A-Z]/.test(field.key)) expect(field.label).not.toBe(field.key);
       }
   });
@@ -165,6 +195,33 @@ describe("descriptor-driven typed param fields", () => {
       STANDARDIZATION_FUNCTION_DESCRIPTORS["coalesce"],
     ).find((f) => f.key === "default");
     expect(coalesceDefault).toMatchObject({ kind: "string", optional: true });
+  });
+
+  test("classifies the regex-tier params: a pattern as a string, includeOriginal as a boolean switch", () => {
+    const splitOn = describeParamFields(
+      STANDARDIZATION_FUNCTION_DESCRIPTORS["split_on"],
+    );
+    // The pattern/delimiter render as a text input (validated against the dialect
+    // schema); the new boolean kind drives includeOriginal's switch.
+    expect(splitOn.find((f) => f.key === "delimiter")?.kind).toBe("string");
+    expect(splitOn.find((f) => f.key === "includeOriginal")).toMatchObject({
+      kind: "boolean",
+      defaultValue: false,
+    });
+    // Every expert (regex-tier) descriptor's params resolve to a known widget kind,
+    // including the boolean kind, so the editor renders a typed control for each
+    // rather than a raw text box.
+    for (const name of expertFunctionNames)
+      for (const field of describeParamFields(
+        STANDARDIZATION_FUNCTION_DESCRIPTORS[name],
+      ))
+        expect([
+          "number",
+          "string",
+          "enum",
+          "stringArray",
+          "boolean",
+        ]).toContain(field.kind);
   });
 });
 
@@ -255,6 +312,56 @@ describe("param value validation per the descriptor's declared type", () => {
   });
 });
 
+describe("raw-pattern (regex-tier) param validation through the editor's path", () => {
+  const filterRegex = STANDARDIZATION_FUNCTION_DESCRIPTORS["filter_regex"];
+  const splitOn = STANDARDIZATION_FUNCTION_DESCRIPTORS["split_on"];
+
+  test("accepts an in-dialect pattern", () => {
+    expect(validateParamValue(filterRegex, "pattern", "^\\d{9}$").ok).toBe(
+      true,
+    );
+    expect(validateParamValue(splitOn, "delimiter", "[ ,]").ok).toBe(true);
+  });
+
+  test("rejects an out-of-dialect pattern (lookaround / backreference)", () => {
+    // Exactly what the linear-time engine cannot compile and the runtime gate
+    // rejects -- so the editor refuses a pattern an exchange would refuse.
+    expect(validateParamValue(filterRegex, "pattern", "a(?=b)").ok).toBe(false);
+  });
+
+  test("rejects an over-length pattern (the editor compile-cost guard)", () => {
+    const overLimit = "a".repeat(MAX_TRANSFORM_PATTERN_LENGTH + 1);
+    expect(validateParamValue(filterRegex, "pattern", overLimit).ok).toBe(
+      false,
+    );
+  });
+});
+
+describe("raw-pattern authoring is bounded by the linear-time engine", () => {
+  test("a pathological RE2-conformant pattern terminates rather than hanging the preview", () => {
+    const pattern = "(a+)+$";
+    // (a+)+$ is the classic catastrophic-backtracking pattern: on a backtracking
+    // engine it hangs on a long non-matching input, freezing the tab the live
+    // preview runs on. It is in-dialect (no backreference/lookaround), so the editor
+    // accepts it...
+    expect(
+      validateParamValue(
+        STANDARDIZATION_FUNCTION_DESCRIPTORS["filter_regex"],
+        "pattern",
+        pattern,
+      ).ok,
+    ).toBe(true);
+    // ...and core compiles it under the linear-time engine, so runPipeline -- the
+    // exact function StandardizationPreview runs over the operator's sample --
+    // returns in linear time. The test completing well under the default timeout IS
+    // the bound; a backtracking engine would not return here.
+    const hostile = "a".repeat(50000) + "!";
+    expect(
+      runPipeline(hostile, [{ function: "filter_regex", params: { pattern } }]),
+    ).toBeNull();
+  });
+});
+
 describe("isStepValid (the launch gate's basis)", () => {
   test("a fully-specified or no-param step is valid", () => {
     expect(
@@ -281,7 +388,7 @@ describe("isStepValid (the launch gate's basis)", () => {
     );
   });
 
-  test("a regex-tier default step is valid (its params are not authored here)", () => {
+  test("a regex-tier step with valid params is valid (default pipelines and authored expert steps alike)", () => {
     expect(
       isStepValid({
         function: "replace_regex",
@@ -294,6 +401,13 @@ describe("isStepValid (the launch gate's basis)", () => {
         params: { pattern: "^\\d{9}$" },
       }),
     ).toBe(true);
+  });
+
+  test("gates a regex step on its pattern: a missing pattern is invalid", () => {
+    expect(
+      isStepValid({ function: "filter_regex", params: { pattern: "^A" } }),
+    ).toBe(true);
+    expect(isStepValid({ function: "filter_regex" })).toBe(false);
   });
 
   test("a function core does not recognize is treated as valid", () => {

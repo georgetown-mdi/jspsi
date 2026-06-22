@@ -11,6 +11,7 @@ import {
   Paper,
   Select,
   Stack,
+  Switch,
   Text,
   Title,
   VisuallyHidden,
@@ -258,6 +259,13 @@ export function PrepareData({
   const [confirmOpen, { open: openConfirm, close: closeConfirm }] =
     useDisclosure(false);
 
+  // The gated expert tier (board item 202533670): off by default, so the standard
+  // guided authoring is unchanged unless the operator opts in. When on, the
+  // per-field step editors let an operator author and edit raw-pattern (regex)
+  // cleaning steps. Editor-wide rather than per-card so the affordance is a single,
+  // discoverable switch, not one buried in each field.
+  const [expert, setExpert] = useState(false);
+
   // Remap: bind a field type to a chosen column by setting that column's semantic
   // type. The derived standardization regenerates the recommended cleaning for the
   // new binding, so a remap both makes the field satisfiable and cleans it.
@@ -419,6 +427,18 @@ export function PrepareData({
               rate; it is never sent to your partner.
             </Text>
           </div>
+          {/* The gated expert affordance. Raw patterns run under a linear-time
+              engine (they cannot freeze the tab), but a wrong pattern silently
+              changes which of your rows match, so the capability is opt-in and
+              never offered as a recommended fix. */}
+          <Switch
+            checked={expert}
+            onChange={(event) => setExpert(event.currentTarget.checked)}
+            label="Advanced: author raw patterns"
+            description="Add or edit regular-expression cleaning steps. A wrong pattern changes which of your rows match."
+            size="sm"
+            style={{ alignSelf: "flex-start" }}
+          />
           {standardization.map((transformation) => {
             const field = fieldByName.get(transformation.output);
             // Every standardization output is a declared linkage field (both
@@ -441,6 +461,7 @@ export function PrepareData({
                         fieldLabel={SEMANTIC_TYPE_LABELS[field.type]}
                         inputColumn={transformation.input}
                         steps={steps}
+                        expert={expert}
                         onStepsChange={(next) =>
                           setFieldSteps(
                             transformation.output,

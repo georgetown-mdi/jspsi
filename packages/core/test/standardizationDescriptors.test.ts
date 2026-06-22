@@ -6,6 +6,8 @@ import {
   runPipeline,
 } from "../src/standardization";
 
+import { MAX_TRANSFORM_PATTERN_LENGTH } from "../src/config/linkageTerms";
+
 // --- Descriptor / registry parity --------------------------------------------
 
 // STANDARDIZATION_FUNCTION_NAMES is derived from the STANDARDIZING_FUNCTIONS
@@ -339,6 +341,36 @@ describe("param schemas", () => {
       const parsed = schemaFor("split_on").safeParse({ delimiter: "-" });
       expect(parsed.success).toBe(true);
       expect(parsed.data).toEqual({ delimiter: "-", includeOriginal: false });
+    });
+
+    // The pattern schema rejects out-of-dialect syntax (backreferences, lookaround)
+    // -- exactly what the linear-time engine cannot compile and the runtime gate
+    // rejects -- so the editor never accepts a pattern an exchange would refuse.
+    test("rejects an out-of-dialect pattern (lookaround / backreference)", () => {
+      expect(
+        schemaFor("filter_regex").safeParse({ pattern: "a(?=b)" }).success,
+      ).toBe(false);
+      expect(
+        schemaFor("replace_regex").safeParse({ pattern: "(a)\\1" }).success,
+      ).toBe(false);
+    });
+
+    // The pattern schema caps length at MAX_TRANSFORM_PATTERN_LENGTH (the same bound
+    // the linkage-terms gate applies to wire patterns), checked before the dialect
+    // compile, so a pathological-length pattern is rejected without the editor
+    // paying the super-linear compile cost on its live-preview thread.
+    test("rejects a pattern longer than MAX_TRANSFORM_PATTERN_LENGTH", () => {
+      const atLimit = "a".repeat(MAX_TRANSFORM_PATTERN_LENGTH);
+      const overLimit = "a".repeat(MAX_TRANSFORM_PATTERN_LENGTH + 1);
+      expect(
+        schemaFor("filter_regex").safeParse({ pattern: atLimit }).success,
+      ).toBe(true);
+      expect(
+        schemaFor("filter_regex").safeParse({ pattern: overLimit }).success,
+      ).toBe(false);
+      expect(
+        schemaFor("split_on").safeParse({ delimiter: overLimit }).success,
+      ).toBe(false);
     });
   });
 

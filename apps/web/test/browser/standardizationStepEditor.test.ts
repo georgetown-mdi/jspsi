@@ -45,11 +45,13 @@ function EditorWithPreview({
   inputColumn,
   initialSteps,
   rawRows,
+  expert = false,
 }: {
   field: LinkageField;
   inputColumn: string;
   initialSteps: Array<StandardizationStep>;
   rawRows: Array<Record<string, string>>;
+  expert?: boolean;
 }) {
   const [steps, setSteps] = useState(initialSteps);
   return createElement(
@@ -60,6 +62,7 @@ function EditorWithPreview({
       inputColumn,
       steps,
       onStepsChange: setSteps,
+      expert,
     }),
     createElement(StandardizationPreview, {
       field,
@@ -323,6 +326,123 @@ describe("StandardizationStepEditor", () => {
     await expect
       .element(page.getByTestId("outcome-value"))
       .toHaveTextContent("mary");
+  });
+});
+
+describe("StandardizationStepEditor raw-pattern expert tier", () => {
+  test("the standard add menu does not offer raw-pattern steps", async () => {
+    render(
+      createElement(EditorWithPreview, {
+        field: FIRST_NAME,
+        inputColumn: "n",
+        initialSteps: [],
+        rawRows: [{ n: "mary" }],
+        expert: false,
+      }),
+    );
+    await userEvent.click(page.getByRole("button", { name: "Add a step" }));
+    // The standard menu is present...
+    await expect
+      .element(page.getByRole("menuitem", { name: "Uppercase" }))
+      .toBeInTheDocument();
+    // ...but the gated raw-pattern group and its items are not, so raw regex is
+    // never offered without the opt-in.
+    expect(page.getByText("Raw patterns (advanced)").elements()).toHaveLength(
+      0,
+    );
+    expect(
+      page.getByRole("menuitem", { name: "Filter (regex)" }).elements(),
+    ).toHaveLength(0);
+  });
+
+  test("a default pipeline's regex step is read-only without the expert opt-in", async () => {
+    render(
+      createElement(EditorWithPreview, {
+        field: FIRST_NAME,
+        inputColumn: "n",
+        initialSteps: [
+          { function: "filter_regex", params: { pattern: "^[A-Z]+$" } },
+        ],
+        rawRows: [{ n: "MARY" }],
+        expert: false,
+      }),
+    );
+    // The step renders (labeled, with the advanced badge) but its pattern is shown
+    // read-only, not as an editable input.
+    await expect.element(page.getByText("Filter (regex)")).toBeInTheDocument();
+    await expect.element(page.getByText("advanced")).toBeInTheDocument();
+    expect(
+      page.getByRole("textbox", { name: "Pattern" }).elements(),
+    ).toHaveLength(0);
+  });
+
+  test("the expert opt-in offers raw-pattern authoring and the preview reflects the typed pattern", async () => {
+    render(
+      createElement(EditorWithPreview, {
+        field: FIRST_NAME,
+        inputColumn: "n",
+        initialSteps: [],
+        rawRows: [{ n: "mary" }],
+        expert: true,
+      }),
+    );
+    await userEvent.click(page.getByRole("button", { name: "Add a step" }));
+    await expect
+      .element(page.getByText("Raw patterns (advanced)"))
+      .toBeInTheDocument();
+    await userEvent.click(
+      page.getByRole("menuitem", { name: "Filter (regex)" }),
+    );
+    // The new regex step exposes an editable, labeled Pattern input.
+    const pattern = page.getByRole("textbox", { name: "Pattern" });
+    await expect.element(pattern).toBeInTheDocument();
+    // A matching pattern keeps the value; the preview tracks the edit.
+    await userEvent.fill(pattern, "^m");
+    await expect
+      .element(page.getByTestId("outcome-value"))
+      .toHaveTextContent("mary");
+  });
+
+  test("an out-of-dialect pattern surfaces the dialect error inline", async () => {
+    render(
+      createElement(EditorWithPreview, {
+        field: FIRST_NAME,
+        inputColumn: "n",
+        initialSteps: [{ function: "filter_regex", params: { pattern: "^A" } }],
+        rawRows: [{ n: "MARY" }],
+        expert: true,
+      }),
+    );
+    // A lookahead is out of the linear-time dialect; the editor rejects it with the
+    // descriptor's own message, surfaced inline as an alert, exactly as the exchange
+    // would refuse it.
+    await userEvent.fill(
+      page.getByRole("textbox", { name: "Pattern" }),
+      "a(?=b)",
+    );
+    await expect.element(page.getByText(/RE2 syntax/i)).toBeInTheDocument();
+  });
+
+  test("split_on's includeOriginal renders as a labeled switch, its delimiter as a pattern input", async () => {
+    render(
+      createElement(EditorWithPreview, {
+        field: FIRST_NAME,
+        inputColumn: "n",
+        initialSteps: [{ function: "split_on", params: { delimiter: " " } }],
+        rawRows: [{ n: "A B" }],
+        expert: true,
+      }),
+    );
+    // The boolean param is a switch (never a raw text box), labeled in plain
+    // language; the delimiter is an editable pattern input.
+    await expect
+      .element(
+        page.getByRole("switch", { name: "Keep the original value too" }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("textbox", { name: "Delimiter pattern" }))
+      .toBeInTheDocument();
   });
 });
 
