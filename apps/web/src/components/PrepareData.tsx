@@ -569,6 +569,10 @@ export function PrepareData({
             setMetadata(initialMetadata);
             setStepOverrides(new Map());
             setInputOverrides(new Map());
+            // Reset returns the editor to its seeded state (see initialMetadata),
+            // which has the expert tier off, so close the raw-pattern affordance
+            // too rather than leaving it on over reset-to-default state.
+            setExpert(false);
           }}
         >
           Reset to recommended
