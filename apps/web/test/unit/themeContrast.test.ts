@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { DEFAULT_THEME, mergeMantineTheme } from "@mantine/core";
+import { DEFAULT_THEME, darken, mergeMantineTheme } from "@mantine/core";
 
 import { cssVariablesResolver, mantineTheme } from "@theme";
 
@@ -15,16 +15,18 @@ import { cssVariablesResolver, mantineTheme } from "@theme";
 // rather than hardcoded hex, so changing primaryShade or an override re-runs the
 // arithmetic against the new value -- a real check, not a restatement.
 
-/** WCAG 2.1 relative luminance of an `#rgb` or `#rrggbb` colour. */
-function relativeLuminance(hex: string): number {
-  // 0.03928 is the threshold in WCAG 2.1's published relative-luminance formula
-  // (and in Mantine's own luminance(), which drives its autoContrast picks). The
-  // mathematically-exact sRGB break is 0.04045; the two differ only for a channel
-  // landing in that narrow gap, which none of the tested colours do. Matching the
-  // spec text and Mantine is deliberate -- do not "correct" it to 0.04045.
-  const linearize = (v: number) =>
-    v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
-  let n = hex.replace("#", "");
+/** sRGB 0..255 channels of an `#rgb`/`#rrggbb` hex or an `rgb()/rgba()` string
+ * -- the latter the form Mantine's `darken()` returns for the dark-scheme
+ * light-variant tints, so a computed tint feeds the same arithmetic as a hex. */
+function srgbChannels(color: string): [number, number, number] {
+  if (color.startsWith("rgb")) {
+    const [r, g, b] = color
+      .slice(color.indexOf("(") + 1, color.indexOf(")"))
+      .split(",", 3)
+      .map((c) => parseInt(c, 10));
+    return [r, g, b];
+  }
+  let n = color.replace("#", "");
   // Expand the 3-digit shorthand (Mantine's white is "#fff") to 6 digits.
   if (n.length === 3) {
     n = n
@@ -32,11 +34,27 @@ function relativeLuminance(hex: string): number {
       .map((c) => c + c)
       .join("");
   }
-  const [r, g, b] = [0, 2, 4].map((i) => parseInt(n.slice(i, i + 2), 16) / 255);
+  return [0, 2, 4].map((i) => parseInt(n.slice(i, i + 2), 16)) as [
+    number,
+    number,
+    number,
+  ];
+}
+
+/** WCAG 2.1 relative luminance of an `#rgb`/`#rrggbb` or `rgb()/rgba()` colour. */
+function relativeLuminance(color: string): number {
+  // 0.03928 is the threshold in WCAG 2.1's published relative-luminance formula
+  // (and in Mantine's own luminance(), which drives its autoContrast picks). The
+  // mathematically-exact sRGB break is 0.04045; the two differ only for a channel
+  // landing in that narrow gap, which none of the tested colours do. Matching the
+  // spec text and Mantine is deliberate -- do not "correct" it to 0.04045.
+  const linearize = (v: number) =>
+    v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  const [r, g, b] = srgbChannels(color).map((c) => c / 255);
   return 0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b);
 }
 
-/** WCAG contrast ratio between two `#rrggbb` colours (1..21). */
+/** WCAG contrast ratio between two colours (1..21). */
 function contrast(a: string, b: string): number {
   const la = relativeLuminance(a);
   const lb = relativeLuminance(b);
@@ -59,6 +77,23 @@ const yellow1 = theme.colors.yellow[1];
 const red1 = theme.colors.red[1];
 const dark7 = theme.colors.dark[7];
 const dark6 = theme.colors.dark[6];
+
+// Per-component Dropzone drag-state icon overrides (FileSelect.tsx), not theme
+// tokens, so these are read straight off the palette and checked against the
+// Dropzone's light-variant drag-over tints. The tint inverts with the scheme so
+// the icon shade does too (light shade 8, dark shade 6, via light-dark):
+//   - light tints: accept = primary colour shade 1 (Dropzone's acceptColor
+//     defaults to theme.primaryColor), reject = red-1 (its default rejectColor);
+//   - dark tints: darken(shade-9, .5), Mantine's dark `-light` variant -- the
+//     real darken() so a resolver change re-runs the arithmetic, not a restated
+//     constant.
+const dropzoneAcceptIconLight = theme.colors.blue[8];
+const dropzoneRejectIconLight = theme.colors.red[8];
+const dropzoneAcceptIconDark = theme.colors.blue[6];
+const dropzoneRejectIconDark = theme.colors.red[6];
+const dropzoneAcceptTintLight = theme.colors[theme.primaryColor][1];
+const dropzoneAcceptTintDark = darken(theme.colors[theme.primaryColor][9], 0.5);
+const dropzoneRejectTintDark = darken(theme.colors.red[9], 0.5);
 
 const warningText = vars.light["--mantine-color-yellow-light-color"];
 const errorText = vars.light["--mantine-color-red-light-color"];
@@ -151,6 +186,37 @@ describe("theme colour contrast (WCAG 2.1 AA)", () => {
         fg: placeholderDark,
         bg: dark6,
         floor: 4.5,
+      },
+      // Dropzone drag-state icons (FileSelect.tsx per-component overrides) on
+      // their light-variant drag-over tints, both colour schemes -- non-text
+      // graphics, so the 3:1 1.4.11 floor. Light shade 6 was a marginal accept
+      // pass (3.04) and a reject failure (2.71); shade 8 clears both. The dark
+      // tint inverts to a dark surface where shade 8 instead drops below the
+      // floor (2.50 / 2.78), so dark keeps shade 6 (3.53 / 3.83) -- both branches
+      // of the FileSelect light-dark() pinned here so neither scheme regresses.
+      {
+        name: "dropzone drag-accept icon (light): blue-8 on primary-1 tint",
+        fg: dropzoneAcceptIconLight,
+        bg: dropzoneAcceptTintLight,
+        floor: 3,
+      },
+      {
+        name: "dropzone drag-reject icon (light): red-8 on red-1 tint",
+        fg: dropzoneRejectIconLight,
+        bg: red1,
+        floor: 3,
+      },
+      {
+        name: "dropzone drag-accept icon (dark): blue-6 on darkened primary tint",
+        fg: dropzoneAcceptIconDark,
+        bg: dropzoneAcceptTintDark,
+        floor: 3,
+      },
+      {
+        name: "dropzone drag-reject icon (dark): red-6 on darkened red tint",
+        fg: dropzoneRejectIconDark,
+        bg: dropzoneRejectTintDark,
+        floor: 3,
       },
     ];
 
