@@ -1727,6 +1727,33 @@ function isStructurallyValidSsn4(value: string): boolean {
   return value !== "0000";
 }
 
+// Memoized `exclude` denylists, keyed by the constraint's `exclude` ARRAY
+// identity, so the membership test is an O(1) Set lookup rather than an O(n)
+// `Array.includes` scan. The dataset sweep (summarizeDatasetConstraintViolations)
+// calls checkValueConstraints once per produced value per row against the SAME
+// field -- hence the same `exclude` array reference -- so without this a
+// hostile-but-schema-valid denylist (partner-controlled, count-bounded only at the
+// generous MAX_EXCLUDE_ENTRIES) would re-scan up to that bound on every row, a
+// per-row cost unbounded by row count over a large dataset. This is the
+// exclude-denylist sibling of {@link compiledElementTransforms}' per-row recompile
+// guard. A WeakMap keyed on the array releases the Set with the terms, and the
+// parsed terms reuse the array reference across rows, so a legitimate sweep builds
+// each Set once; Set membership is byte-identical to Array.includes for strings.
+const excludeDenylistSets = new WeakMap<readonly string[], Set<string>>();
+
+function isExcludedValue(
+  exclude: readonly string[] | undefined,
+  value: string,
+): boolean {
+  if (exclude === undefined) return false;
+  let set = excludeDenylistSets.get(exclude);
+  if (set === undefined) {
+    set = new Set(exclude);
+    excludeDenylistSets.set(exclude, set);
+  }
+  return set.has(value);
+}
+
 /**
  * Report which of a linkage `field`'s declared constraints a single cleaned
  * `value` violates -- the value-level constraint check the web workbench renders
@@ -1751,8 +1778,9 @@ export function checkValueConstraints(
   const violations: ConstraintViolation[] = [];
 
   // `exclude` is shared by every constraint shape: the cleaned value must not be
-  // one of the listed values.
-  if (constraints.exclude?.includes(value))
+  // one of the listed values. Membership is memoized per denylist (see
+  // {@link isExcludedValue}) so a per-row sweep does not re-scan it each row.
+  if (isExcludedValue(constraints.exclude, value))
     violations.push({
       kind: "excluded",
       label: "excluded value",
