@@ -67,7 +67,11 @@ function removeDuplicatesAndUndefineds(
 ): [Array<string>, Array<number>] {
   const elementToIndexMap: Map<string, Array<number>> = new Map();
   dataWithDuplicatesAndUndefineds.forEach((value, i) => {
-    if (!value) return;
+    // Drop only the "no key" sentinel. "" is a real, matchable key value
+    // distinct from undefined (testing `!value` here would conflate them), and
+    // participates in matching subject to the within-dataset uniqueness rule
+    // applied below. See docs/spec/PROTOCOL.md (Key input data).
+    if (value === undefined) return;
     const arr = elementToIndexMap.get(value);
     if (arr) {
       arr.push(i);

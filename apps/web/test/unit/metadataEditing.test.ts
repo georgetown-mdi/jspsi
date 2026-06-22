@@ -4,6 +4,7 @@ import {
   SEMANTIC_TYPES,
   inferMetadata,
   isDisclosedToPartner,
+  preparePayload,
 } from "@psilink/core";
 
 import {
@@ -13,6 +14,7 @@ import {
   disclosureOf,
   hasMultipleIdentifiers,
   normalizeForEditor,
+  quickInviteDisclosedColumns,
   setColumnDisclosure,
   setColumnType,
 } from "../../src/psi/metadataEditing.js";
@@ -98,6 +100,49 @@ describe("disclosedColumnNames mirrors what is sent", () => {
       col({ name: "d", role: "payload", isPayload: true }),
     ];
     expect(disclosedColumnNames(md)).toEqual(["b", "d"]);
+  });
+});
+
+describe("quickInviteDisclosedColumns mirrors the quick path's wire", () => {
+  // A representative inviter file: a linkage column (not sent), an inferred row
+  // identifier (a sole `_id` column -- the off-diagonal isPayload:true state the
+  // editor normalizes away but the quick path keeps and sends), and an inferred
+  // `other` column (sent). The quick path does NOT normalize, so both the
+  // identifier and the other column leave the machine.
+  const columns = ["first_name", "record_id", "notes"];
+
+  test("lists exactly the disclosed columns, in order (an _id and an other column, not the linkage column)", () => {
+    expect(quickInviteDisclosedColumns(columns)).toEqual([
+      "record_id",
+      "notes",
+    ]);
+  });
+
+  test("is empty when the quick path would send nothing", () => {
+    // Every column is a linkage type, so none is disclosed -- the condition under
+    // which InvitePanel shows no statement.
+    expect(quickInviteDisclosedColumns(["first_name", "ssn"])).toEqual([]);
+  });
+
+  test("no drift: equals disclosedColumnNames over the same inferred metadata", () => {
+    // The displayed set MUST derive from the same predicate the wire gates on, not
+    // a hand-rolled second list. Pinned over a fuller column mix.
+    const mixed = ["first_name", "record_id", "notes", "email", "extra_id"];
+    expect(quickInviteDisclosedColumns(mixed)).toEqual(
+      disclosedColumnNames(inferMetadata(mixed)),
+    );
+  });
+
+  test("no drift: equals the columns preparePayload actually transmits", () => {
+    // Anchored to the bytes on the wire, not just to disclosedColumnNames: the
+    // quick path runs prepareForExchange with inferMetadata (no authored metadata)
+    // and preparePayload gathers exactly the isDisclosedToPartner columns, so the
+    // statement and the transmitted column set are one and the same.
+    const rawRows = [{ first_name: "Alice", record_id: "1", notes: "vip" }];
+    const sent = preparePayload(rawRows, inferMetadata(columns), [[0], [0]]);
+    expect(sent.hasData).toBe(true);
+    if (sent.hasData)
+      expect(sent.columns).toEqual(quickInviteDisclosedColumns(columns));
   });
 });
 

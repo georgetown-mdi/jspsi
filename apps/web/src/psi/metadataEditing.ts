@@ -1,4 +1,4 @@
-import { disclosedColumnNames } from "@psilink/core";
+import { disclosedColumnNames, inferMetadata } from "@psilink/core";
 
 import type { ColumnMetadata, Metadata, SemanticType } from "@psilink/core";
 
@@ -237,6 +237,27 @@ export function setColumnType(
  * as a live error and the host gates launch on it until the operator picks one. */
 export function hasMultipleIdentifiers(metadata: Metadata): boolean {
   return metadata.filter((column) => column.role === "identifier").length > 1;
+}
+
+/**
+ * The columns the quick (name-only) invite path will send to the partner for a
+ * file with these column names. Composes the SAME two core primitives the
+ * inviter's quick-path exchange runs on -- {@link inferMetadata} (the metadata
+ * `prepareForExchange` falls back to when none is authored) filtered by
+ * {@link disclosedColumnNames} (the `isDisclosedToPartner` predicate
+ * `preparePayload` gathers on) -- so an awareness summary built from it cannot
+ * drift from the bytes the quick path actually transmits.
+ *
+ * This deliberately does NOT apply {@link normalizeForEditor}: the quick path does
+ * not normalize, so an inferred row-identifier column it still sends must show as
+ * sent here. Routing the quick path's awareness through the editor's normalized
+ * view would under-state what leaves the machine -- the exact drift this seam
+ * exists to prevent.
+ */
+export function quickInviteDisclosedColumns(
+  columns: Array<string>,
+): Array<string> {
+  return disclosedColumnNames(inferMetadata(columns));
 }
 
 export { disclosedColumnNames };
