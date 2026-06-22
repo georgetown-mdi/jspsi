@@ -15,10 +15,11 @@ import type { Root } from "react-dom/client";
 
 import type { LinkageTerms } from "@psilink/core";
 
-// Terms that populate every block split across the always-visible core and the
-// Details disclosure: a non-standard (transformed) key, a constrained field,
-// payload columns, a legal agreement, and a deduplicate setting -- so the test can
-// assert which side of the partition each lands on.
+// Terms with two linkage keys whose breadth differs -- an exact key and a
+// first-initial-truncated one -- plus a constrained field, payload columns, and a
+// legal agreement, so the test can assert where each lands: the per-key matching
+// detail in that key's own disclosure, and the non-key blocks in the master "Other
+// details" disclosure.
 const terms: LinkageTerms = {
   version: "1.0.0",
   identity: "County Health Department",
@@ -27,24 +28,33 @@ const terms: LinkageTerms = {
   output: { expectsOutput: true, shareWithPartner: true },
   deduplicate: true,
   linkageFields: [
+    { name: "ssn", type: "ssn" },
     {
       name: "first_name",
       type: "first_name",
       constraints: { allowedCharacters: "A-Z " },
     },
+    { name: "last_name", type: "last_name" },
     { name: "dob", type: "date_of_birth" },
   ],
   linkageKeys: [
+    // Exact: no breadth marker in its header one-liner.
     {
-      name: "FN + DOB",
+      name: "SSN + LN + DOB",
+      elements: [{ field: "ssn" }, { field: "last_name" }, { field: "dob" }],
+    },
+    // Truncated: the first-initial substring loosens the match, so the first-name
+    // entry carries a "(partial)" marker and the body leads with the slice phrase.
+    {
+      name: "SSN + FN1",
       elements: [
+        { field: "ssn" },
         {
           field: "first_name",
           transform: [
             { function: "substring", params: { start: 1, length: 1 } },
           ],
         },
-        { field: "dob" },
       ],
     },
   ],
@@ -82,91 +92,143 @@ function renderTerms() {
   );
 }
 
-// The stable wrapper the toggle's aria-controls points at, resolved the same way
-// assistive tech follows the reference. The id lives on this always-mounted
-// wrapper (not the Collapse panel) so it never dangles when Mantine unmounts the
-// closed panel under a reduced-motion preference.
-function detailsPanel(): HTMLElement {
-  const toggle = container!.querySelector("[aria-controls]");
-  const id = toggle?.getAttribute("aria-controls");
+// A disclosure toggle by its accessible name (a key name, or "Other details").
+function toggle(name: string) {
+  return page.getByRole("button", { name });
+}
+
+// The always-mounted wrapper a toggle's aria-controls points at, resolved the way
+// assistive tech follows the reference. The id lives on this wrapper (not the
+// Collapse panel) so it never dangles when Mantine unmounts the closed panel under
+// a reduced-motion preference.
+function panelFor(name: string): HTMLElement {
+  const id = toggle(name).element().getAttribute("aria-controls");
   const panel = id ? document.getElementById(id) : null;
-  if (!panel) throw new Error("details panel not found");
+  if (!panel) throw new Error(`disclosure panel not found for ${name}`);
   return panel;
 }
 
-// The Mantine Collapse panel itself: the wrapper's only child, carrying the
-// aria-hidden + inert (and display:none) that hide the collapsed detail from
-// assistive tech. Separate from the wrapper because aria-controls resolves to the
-// always-mounted wrapper, while these hidden-state attributes sit on the panel
-// Mantine mounts inside it.
-function collapsePanel(): HTMLElement {
-  const panel = detailsPanel().firstElementChild;
+// The Mantine Collapse panel inside the wrapper, carrying the aria-hidden + inert
+// (and display:none) that hide the collapsed detail from assistive tech.
+function collapseFor(name: string): HTMLElement {
+  const panel = panelFor(name).firstElementChild;
   if (!(panel instanceof HTMLElement))
-    throw new Error("collapse panel not found");
+    throw new Error(`collapse panel not found for ${name}`);
   return panel;
 }
 
-describe("InvitationTerms: always-visible core vs Details disclosure", () => {
-  test("keeps the badge and core terms outside the disclosure, details collapsed and hidden from AT", async () => {
+describe("InvitationTerms: per-key matching disclosures", () => {
+  test("each key is its own disclosure, the rule detail collapsed and hidden from AT while the header stays visible", async () => {
     renderTerms();
 
-    // A real disclosure toggle: a button wired to its panel and collapsed to start.
-    const toggle = page.getByRole("button", { name: "Details" });
-    await expect.element(toggle).toBeInTheDocument();
-    expect(toggle.element().getAttribute("aria-expanded")).toBe("false");
+    // Each key is a disclosure button, collapsed to start.
+    const exact = toggle("SSN + LN + DOB");
+    const truncated = toggle("SSN + FN1");
+    await expect.element(exact).toBeInTheDocument();
+    await expect.element(truncated).toBeInTheDocument();
+    expect(exact.element().getAttribute("aria-expanded")).toBe("false");
+    expect(truncated.element().getAttribute("aria-expanded")).toBe("false");
 
-    const panel = detailsPanel();
-    // Collapsed: Mantine marks the Collapse panel inside the wrapper aria-hidden +
-    // inert, so the dense detail is out of the accessibility tree and the tab order
-    // until opened. The wrapper that holds aria-controls stays mounted regardless.
-    const collapse = collapsePanel();
+    // The truncated key's collapsed body is out of the accessibility tree and the
+    // tab order until opened.
+    const collapse = collapseFor("SSN + FN1");
     expect(collapse.getAttribute("aria-hidden")).toBe("true");
     expect(collapse.hasAttribute("inert")).toBe(true);
 
-    // The always-visible core stays OUTSIDE the disclosure: the non-standard
-    // badge -- which must never be hidden in collapsed content -- the matching
-    // method, and result sharing are all absent from the panel but present on the
-    // screen.
-    expect(panel.textContent).not.toContain("Non-standard matching");
-    expect(panel.textContent).not.toContain("shared identifiers");
-    expect(panel.textContent).not.toContain(
-      "You will receive the matched result",
+    // The per-element rule detail (the literal slice phrase) lives in the
+    // collapsed body, not the always-visible header.
+    expect(panelFor("SSN + FN1").textContent).toContain(
+      "Matches on the first character",
     );
-    expect(container!.textContent).toContain("Non-standard matching");
-    expect(container!.textContent).toContain("shared identifiers");
-    expect(container!.textContent).toContain(
-      "You will receive the matched result",
-    );
-    // The key name is the always-visible anchor for its collapsed detail.
-    expect(container!.textContent).toContain("FN + DOB");
 
-    // The dense detail lives INSIDE the disclosure: per-element transforms, field
-    // constraints, payload columns, the legal agreement, and the dedup note.
-    expect(panel.textContent).toContain("transformed (substring)");
+    // The always-visible header one-liner is the honest anchor: the truncated
+    // element carries the "(partial)" breadth marker, the exact key carries none.
+    // The marker is always-visible (a top-level signal), not buried in the
+    // collapsed body.
+    expect(container!.textContent).toContain(
+      "Matches on SSN - first name (partial)",
+    );
+    expect(container!.textContent).toContain(
+      "Matches on SSN - last name - date of birth",
+    );
+    expect(panelFor("SSN + FN1").textContent).not.toContain("(partial)");
+  });
+
+  test("opening one key disclosure exposes its detail to AT and leaves the others collapsed", async () => {
+    renderTerms();
+
+    await userEvent.click(toggle("SSN + FN1"));
+
+    expect(toggle("SSN + FN1").element().getAttribute("aria-expanded")).toBe(
+      "true",
+    );
+    const opened = collapseFor("SSN + FN1");
+    expect(opened.getAttribute("aria-hidden")).toBe("false");
+    expect(opened.hasAttribute("inert")).toBe(false);
+
+    // Independent disclosure state: the other key stays collapsed.
+    expect(
+      toggle("SSN + LN + DOB").element().getAttribute("aria-expanded"),
+    ).toBe("false");
+    expect(collapseFor("SSN + LN + DOB").getAttribute("aria-hidden")).toBe(
+      "true",
+    );
+  });
+
+  test("the toggle's accessible name is the key name; the field one-liner is its description", async () => {
+    renderTerms();
+    await expect.element(toggle("SSN + FN1")).toBeInTheDocument();
+
+    // getByRole resolving on the exact key name already proves the name is the
+    // key name alone (the field one-liner is not folded into it).
+    const button = toggle("SSN + FN1").element();
+    expect(button.textContent).not.toContain("Matches on");
+
+    // The field one-liner is associated as the toggle's description.
+    const describedById = button.getAttribute("aria-describedby");
+    expect(describedById).toBeTruthy();
+    const subline = document.getElementById(describedById!);
+    expect(subline?.textContent).toContain(
+      "Matches on SSN - first name (partial)",
+    );
+  });
+
+  test("every disclosure on the screen has a distinct aria-controls id", async () => {
+    renderTerms();
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+
+    const ids = Array.from(container!.querySelectorAll("[aria-controls]")).map(
+      (el) => el.getAttribute("aria-controls"),
+    );
+    // Two per-key disclosures plus the master "Other details" disclosure.
+    expect(ids.length).toBe(3);
+    expect(new Set(ids).size).toBe(3);
+  });
+
+  test("the master 'Other details' disclosure holds the non-key blocks, not the per-key matching detail", async () => {
+    renderTerms();
+
+    const other = toggle("Other details");
+    await expect.element(other).toBeInTheDocument();
+
+    // The non-key blocks (field constraints, payload, legal agreement, dedup) are
+    // in the master disclosure ...
+    const panel = panelFor("Other details");
     expect(panel.textContent).toContain("characters limited to A-Z");
     expect(panel.textContent).toContain("risk_score");
     expect(panel.textContent).toContain("MOU-2025-0042");
     expect(panel.textContent).toContain("may match more than one");
-  });
-
-  test("opening the disclosure exposes the details to assistive tech", async () => {
-    renderTerms();
-
-    const toggle = page.getByRole("button", { name: "Details" });
-    await userEvent.click(toggle);
-
-    expect(toggle.element().getAttribute("aria-expanded")).toBe("true");
-    const collapse = collapsePanel();
-    expect(collapse.getAttribute("aria-hidden")).toBe("false");
-    expect(collapse.hasAttribute("inert")).toBe(false);
+    // ... but the per-key matching detail moved out, into the key's own
+    // disclosure.
+    expect(panel.textContent).not.toContain("Matches on the first character");
   });
 });
 
-describe("InvitationTerms: the disclosure's aria-controls survives a reduced-motion preference", () => {
-  // With respectReducedMotion on, Mantine's Collapse unmounts the closed panel for
-  // a reduced-motion user -- the configuration that would dangle an aria-controls
-  // pointing at the panel itself. Force both halves of it: the OS reduced-motion
-  // signal (matchMedia) and the theme switch that honors it.
+describe("InvitationTerms: a key disclosure's aria-controls survives a reduced-motion preference", () => {
+  // With respectReducedMotion on, Mantine's Collapse unmounts each closed panel
+  // for a reduced-motion user -- the configuration that would dangle an
+  // aria-controls pointing at the panel itself. Force both halves of it: the OS
+  // reduced-motion signal (matchMedia) and the theme switch that honors it.
   let originalMatchMedia: typeof window.matchMedia;
 
   beforeEach(() => {
@@ -187,7 +249,7 @@ describe("InvitationTerms: the disclosure's aria-controls survives a reduced-mot
     window.matchMedia = originalMatchMedia;
   });
 
-  test("aria-controls resolves to a present element while collapsed under reduced motion", async () => {
+  test("a key disclosure's aria-controls resolves to a present wrapper while collapsed under reduced motion", async () => {
     root!.render(
       createElement(
         MantineProvider,
@@ -196,11 +258,11 @@ describe("InvitationTerms: the disclosure's aria-controls survives a reduced-mot
       ),
     );
 
-    const toggle = page.getByRole("button", { name: "Details" });
-    await expect.element(toggle).toBeInTheDocument();
-    expect(toggle.element().getAttribute("aria-expanded")).toBe("false");
+    const button = toggle("SSN + FN1");
+    await expect.element(button).toBeInTheDocument();
+    expect(button.element().getAttribute("aria-expanded")).toBe("false");
 
-    const id = toggle.element().getAttribute("aria-controls");
+    const id = button.element().getAttribute("aria-controls");
     expect(id).toBeTruthy();
 
     // The reduced-motion media effect resolves after mount and unmounts the closed

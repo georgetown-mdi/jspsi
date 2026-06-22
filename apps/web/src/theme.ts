@@ -223,7 +223,8 @@ const MUTED_TEXT = {
 /**
  * Accessible text color for the yellow "warning" and red "error" Mantine `light`
  * variant surfaces in the light scheme -- the Alert title and icon, and the
- * yellow "Non-standard matching" Badge label. Mantine's default
+ * yellow constraint-warning Badge label (the StandardizationPreview violation
+ * badge). Mantine's default
  * `--mantine-color-{c}-light-color` is the color's shade 9 on its shade-1 tint,
  * which fails WCAG 2.1 AA 1.4.3 for normal-weight text:
  * - yellow-9 (#e67700) on yellow-1 (#fff3bf) = 2.69:1 -- and no yellow/orange
