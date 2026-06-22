@@ -255,10 +255,14 @@ export interface RecordLinkageField {
  * categories of data involved, identifying what was disclosed without consulting
  * the original config. Every field is a name, category, description, or reference
  * -- never a payload value, linkage-field value, or matched identifier. The
- * fields are drawn from terms both parties validated at exchange time, so both
- * parties' records carry consistent governance metadata for the same exchange;
- * the lone exception is a column's free-text {@link RecordPayloadColumn.description},
- * which is not cross-party validated.
+ * algorithm, legal agreement, and matching basis are drawn from terms both
+ * parties validated at exchange time; the payload column sets are drawn from the
+ * committed payloads instead. Both parties'
+ * records still carry consistent governance metadata for the same exchange -- the
+ * committed payloads are byte-identical across parties, so one party's
+ * {@link payloadSent} equals the other's {@link payloadReceived} -- with the lone
+ * exception of a column's free-text {@link RecordPayloadColumn.description}, which
+ * is not cross-party validated.
  */
 export interface ExchangeRecordGovernance {
   /** The matching algorithm: `psi` revealed matched identifiers, `psi-c` revealed
@@ -546,9 +550,12 @@ export type CommittedPayload = {
 /**
  * The inputs needed to build an {@link ExchangeRecord}, gathered at the end of a
  * successful exchange. `localTerms`/`partnerTerms` supply the agreed-terms hash,
- * the two identities, and the readable governance metadata (algorithm, legal
- * agreement, matching basis, and payload categories -- all read from
- * `localTerms`). `recordsExposed` is this party's own input row count
+ * the two identities, and most of the readable governance metadata (algorithm,
+ * legal agreement, and matching basis -- read from `localTerms`); the payload
+ * categories are instead read from the committed `localPayloadSent`/
+ * `partnerPayloadReceived` below (with descriptions looked up in `localTerms`'s
+ * payload dictionary), so they reflect what was committed. `recordsExposed` is
+ * this party's own input row count
  * (always supplied); `resultSize` is set only when both parties are entitled to it
  * (the both-output case); `associationTable` only when this party holds it;
  * `retentionDisposition` is an optional self-facing pointer from this party's local
