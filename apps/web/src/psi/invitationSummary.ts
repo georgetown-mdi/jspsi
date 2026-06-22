@@ -256,12 +256,13 @@ export interface InvitationKeySummary {
    * element, each a COMPACT semantic-type label carrying a terse breadth marker
    * when its element loosens matching ("last name (partial)", "date of birth
    * (fuzzy)"). Deduped by the full entry (label + marker) so a truncated and a
-   * whole-value element of the same field stay distinct. Derived from the
-   * schema-validated type (injection-safe); an unresolved field falls back to its
-   * sanitized identifier. An array, not a joined string, so a sanitized fallback
-   * label cannot forge the renderer's separator. The honest anchor a
-   * partner-controlled key {@link name} cannot misrepresent; the swap "either
-   * order" note is carried by {@link hasSwap}.
+   * whole-value element of the same field stay distinct. Each entry is a fixed
+   * compact label for the element's schema-validated type plus a fixed marker; an
+   * unresolved field would fall back to its sanitized identifier, but a dangling
+   * field reference is rejected at decode, so that fallback is unreachable for a
+   * decoded token (and cosmetic-only if ever reached -- the renderer joins these
+   * for display). The honest anchor a partner-controlled key {@link name} cannot
+   * misrepresent; the swap "either order" note is carried by {@link hasSwap}.
    */
   headerFields: Array<string>;
 }

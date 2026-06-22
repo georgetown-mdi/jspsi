@@ -84,9 +84,10 @@ function MatchKeyDisclosure({ summary }: { summary: InvitationKeySummary }) {
         </Group>
       </UnstyledButton>
       {/* Always-visible, AT-associated breadth signal. The "Matches on " lead-in
-          is static JSX (injection-safe); the field entries are derived compact
-          labels with terse markers, joined here -- the array form keeps a
-          sanitized unknown-field label from forging the separator. */}
+          and the markers are fixed copy, and each field entry is a fixed compact
+          label: the sanitized unknown-field fallback is unreachable for a decoded
+          token (a dangling field reference is rejected at decode) and cosmetic-only
+          if ever reached, so the joined line carries no unescaped partner text. */}
       <Text id={sublineId} size="xs" c="dimmed">
         Matches on {summary.headerFields.join(" - ")}
         {summary.hasSwap && " (matched in either order)"}
