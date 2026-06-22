@@ -52,4 +52,15 @@ describe("withSecurityHeaders", () => {
     );
     expect(hardened.headers.get("X-Frame-Options")).toBe("DENY");
   });
+
+  test("passes a status-outside-200-599 response through unchanged", () => {
+    // Response.error() has status 0; the Response constructor accepts only
+    // 200-599, so the rebuild cannot apply to it. The helper must return it as
+    // is rather than throw and turn a response into a 500 -- nothing about a
+    // network-error response is frameable or carries a referrer to suppress.
+    const errored = Response.error();
+    const hardened = withSecurityHeaders(errored);
+    expect(hardened).toBe(errored);
+    expect(hardened.status).toBe(0);
+  });
 });
