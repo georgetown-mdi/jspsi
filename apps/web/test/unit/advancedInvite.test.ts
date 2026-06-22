@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   MAX_INVITATION_LIFETIME_SECONDS,
+  assessLinkageSatisfiability,
   canonicalString,
   deriveAcceptedLinkageTerms,
   getDefaultLinkageTerms,
@@ -13,6 +14,8 @@ import {
 
 import {
   buildAdvancedTerms,
+  defaultStandardizationForRows,
+  draftFromTerms,
   outputForDirection,
   seedAdvancedInvite,
   setDraftMetadata,
@@ -647,5 +650,234 @@ describe("inviter standardization: per-field column binding and multi-field", ()
       buildAdvancedTerms({ ...draft, standardization: [] }),
     );
     expect(seeded).toEqual(empty);
+  });
+});
+
+describe("draftFromTerms reconstructs multi-field bindings on import", () => {
+  // Two first_name columns (a maiden and a current name) and a date: enough for the
+  // inviter to bind two distinct first_name fields. NAME_STEPS uppercases, so two
+  // differing name columns yield two distinct cleaned values.
+  const NAME_STEPS = [{ function: "to_upper_case" }];
+  const metadata: Metadata = [
+    {
+      name: "maiden_col",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+    {
+      name: "current_col",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+    {
+      name: "dob_col",
+      type: "date_of_birth",
+      role: "linkage",
+      isPayload: false,
+    },
+  ];
+  const columns = ["maiden_col", "current_col", "dob_col"];
+  const rawRows = [{ maiden_col: "Smith", current_col: "Jones", dob_col: "X" }];
+
+  /** The exported terms a multi-field draft produces: two first_name fields bound
+   * to distinct columns, each referenced by its own key. */
+  function multiFieldDraft(): AdvancedInviteDraft {
+    return {
+      identity: "Inviter",
+      lifetimeSeconds: 3600,
+      outputDirection: "both",
+      algorithm: "psi",
+      deduplicate: false,
+      metadata,
+      standardization: [
+        { output: "first_name", input: "maiden_col", steps: NAME_STEPS },
+        { output: "first_name_2", input: "current_col", steps: NAME_STEPS },
+      ],
+      keys: [
+        {
+          key: { name: "maiden", elements: [{ field: "first_name" }] },
+          enabled: true,
+        },
+        {
+          key: { name: "current", elements: [{ field: "first_name_2" }] },
+          enabled: true,
+        },
+      ],
+    };
+  }
+
+  /** A fresh editor seed over the given columns, the import target. */
+  function seedFor(forColumns: Array<string>, m: Metadata): AdvancedInviteSeed {
+    return {
+      terms: getDefaultLinkageTerms("Inviter", m),
+      metadata: m,
+      columns: forColumns,
+    };
+  }
+
+  test("a two-fields-of-one-type document round-trips: both bindings and both distinct values are reconstructed", () => {
+    const exported = buildAdvancedTerms(multiFieldDraft());
+    // The export carries both declared fields (the binding itself is local and does
+    // not travel), so this is the document an operator would re-import.
+    expect(
+      exported.linkageFields
+        .filter((field) => field.type === "first_name")
+        .map((field) => field.name),
+    ).toEqual(["first_name", "first_name_2"]);
+
+    const seed = seedFor(columns, metadata);
+    const imported = draftFromTerms(exported, seed, 3600, rawRows);
+
+    // The reconstructed standardization binds each first_name field to its OWN
+    // column (the second to the next free one), not both to the first.
+    const firstNameBindings = imported.standardization
+      .filter((t) =>
+        metadata.some((c) => c.name === t.input && c.type === "first_name"),
+      )
+      .map((t) => ({ output: t.output, input: t.input }));
+    expect(firstNameBindings).toEqual([
+      { output: "first_name", input: "maiden_col" },
+      { output: "first_name_2", input: "current_col" },
+    ]);
+
+    // Both keys are satisfiable and the draft can generate again.
+    const validation = validateAdvancedInvite(
+      imported,
+      seed,
+      new Date("2026-06-20T00:00:00.000Z"),
+    );
+    expect(validation.errors.keys).toBeUndefined();
+    expect(validation.canGenerate).toBe(true);
+
+    // Each field reads its own column, so the two name columns produce distinct
+    // values rather than the collapsed identical pair a one-field-per-type rebuild
+    // would give.
+    const prepared = prepareForExchange(
+      {
+        linkageTerms: buildAdvancedTerms(imported),
+        metadata,
+        standardization: imported.standardization,
+      },
+      "Inviter",
+      rawRows,
+      columns,
+    );
+    expect(prepared.dataset.getField("first_name")?.get(0)).toEqual(["SMITH"]);
+    expect(prepared.dataset.getField("first_name_2")?.get(0)).toEqual([
+      "JONES",
+    ]);
+  });
+
+  test("reconstructing the local binding on import does not change the agreement (cross-party-hash invariant)", () => {
+    // The import side rebuilds only the LOCAL standardization; the cross-party terms
+    // -- field names/types/constraints and keys -- are reproduced byte-for-byte, so
+    // the agreement and its receipt are unchanged. The import mirror of the
+    // local-only invariance test above. Scope: this covers terms the editor itself
+    // produced (default constraints, default field order). An externally-authored
+    // document carrying custom field constraints or a different cross-type field order
+    // is normalized by authoredLinkageFields on rebuild -- a separate, pre-existing
+    // limitation tracked on its own, not exercised here.
+    const exported = buildAdvancedTerms(multiFieldDraft());
+    const seed = seedFor(columns, metadata);
+    const imported = draftFromTerms(exported, seed, 3600, rawRows);
+    expect(canonicalString(buildAdvancedTerms(imported))).toEqual(
+      canonicalString(exported),
+    );
+  });
+
+  test("a field no column can supply stays unsatisfiable (fail-closed; never binds an absent column)", () => {
+    // The importer's file has only ONE first_name column, so the second field's
+    // binding cannot be reconstructed.
+    const oneNameMetadata: Metadata = [
+      {
+        name: "maiden_col",
+        type: "first_name",
+        role: "linkage",
+        isPayload: false,
+      },
+      {
+        name: "dob_col",
+        type: "date_of_birth",
+        role: "linkage",
+        isPayload: false,
+      },
+    ];
+    const exported = buildAdvancedTerms(multiFieldDraft());
+    const seed = seedFor(["maiden_col", "dob_col"], oneNameMetadata);
+    const imported = draftFromTerms(exported, seed, 3600, []);
+
+    // No binding was invented: first_name_2 has no transformation, and nothing binds
+    // to a column the file does not have.
+    expect(
+      imported.standardization.some((t) => t.output === "first_name_2"),
+    ).toBe(false);
+    expect(
+      imported.standardization.every((t) =>
+        oneNameMetadata.some((c) => c.name === t.input),
+      ),
+    ).toBe(true);
+
+    // The first_name field still binds; only the second-field key is unsatisfiable.
+    expect(
+      buildAdvancedTerms(imported).linkageFields.map((field) => field.name),
+    ).toEqual(["first_name"]);
+    const { satisfiableKeyCount } = assessLinkageSatisfiability(
+      seed.columns,
+      buildAdvancedTerms(imported),
+      imported.standardization,
+      imported.metadata,
+    );
+    expect(satisfiableKeyCount).toBe(1);
+  });
+
+  test("never reconstructs a binding to an ignored column", () => {
+    // The second name column is present but role: ignored, so it must not back the
+    // second field -- ignored means "never participates in linkage".
+    const ignoredMetadata: Metadata = [
+      {
+        name: "maiden_col",
+        type: "first_name",
+        role: "linkage",
+        isPayload: false,
+      },
+      {
+        name: "current_col",
+        type: "first_name",
+        role: "ignored",
+        isPayload: false,
+      },
+      {
+        name: "dob_col",
+        type: "date_of_birth",
+        role: "linkage",
+        isPayload: false,
+      },
+    ];
+    const exported = buildAdvancedTerms(multiFieldDraft());
+    const seed = seedFor(columns, ignoredMetadata);
+    const imported = draftFromTerms(exported, seed, 3600, rawRows);
+    expect(
+      imported.standardization.some((t) => t.input === "current_col"),
+    ).toBe(false);
+    expect(
+      imported.standardization.some((t) => t.output === "first_name_2"),
+    ).toBe(false);
+  });
+
+  test("a single-field import reconstructs the seed's default standardization byte-for-byte", () => {
+    // No multi-field fields means no extras, so the reconstruction is exactly the
+    // default per-type standardization the import path has always opened on.
+    const { draft, seed } = seedAdvancedInvite("Inviter", ALL_COLUMNS);
+    const exported = buildAdvancedTerms(draft);
+    const imported = draftFromTerms(exported, seed);
+    expect(imported.standardization).toEqual(
+      defaultStandardizationForRows(seed.metadata, seed.terms, []),
+    );
+    // And the round-trip preserves the agreement.
+    expect(canonicalString(buildAdvancedTerms(imported))).toEqual(
+      canonicalString(exported),
+    );
   });
 });
