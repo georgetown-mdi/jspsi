@@ -14,7 +14,7 @@ import { IconAlertCircle } from "@tabler/icons-react";
 import {
   assessLinkageSatisfiability,
   getDefaultLinkageTerms,
-  loadCSVColumns,
+  loadCSVFile,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
 } from "@psilink/core";
@@ -31,7 +31,7 @@ import { ExchangeView } from "@components/ExchangeView";
 import FileSelect from "@components/FileSelect";
 import { LinkageTermsEditor } from "@components/LinkageTermsEditor";
 
-import type { LinkageTerms, Metadata } from "@psilink/core";
+import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 
 import type { AdvancedInviteSeed } from "@psi/advancedInvite";
 import type { AlertContent } from "@components/FileAcquire";
@@ -46,10 +46,13 @@ import type { GeneratedInvitation } from "@psi/invitation";
  * the authored terms and transitions in place to the shared {@link ExchangeView},
  * mirroring the quick compose screen's session -> exchange handoff.
  *
- * The full CSV parse is deferred to Generate (`generateInvitation`), so the edit
- * session holds only the file handle and its headers, never the parsed rows. A
- * cold load (deep link or reload) cannot recover a previously chosen file -- the
- * browser does not allow it -- so it falls back to the file picker here.
+ * The CSV is parsed in full on entry to the editor (not just its headers): the
+ * data-prep workbench's before/after preview runs the authored cleaning over a
+ * sample of the parsed rows, so the edit session holds them. Generate re-parses the
+ * same in-memory file through `generateInvitation` (its parse boundary stays the
+ * authority for the unreadable/unlinkable gates). A cold load (deep link or reload)
+ * cannot recover a previously chosen file -- the browser does not allow it -- so it
+ * falls back to the file picker here.
  */
 type Phase =
   | { status: "acquire" }
@@ -59,6 +62,8 @@ type Phase =
       seed: AdvancedInviteSeed;
       identity: string;
       file: File;
+      /** The parsed rows, for the workbench's before/after preview. */
+      rawRows: Array<Record<string, string>>;
     }
   | {
       status: "exchange";
@@ -94,8 +99,11 @@ export function AdvancedInvite() {
     setError(undefined);
     setPhase({ status: "loading" });
     let columns: Array<string>;
+    let rawRows: Array<Record<string, string>>;
     try {
-      columns = await loadCSVColumns(file);
+      const csv = await loadCSVFile(file);
+      rawRows = csv.data as Array<Record<string, string>>;
+      columns = csv.meta.fields ?? [];
     } catch (cause) {
       if (!mountedRef.current) return;
       clearAdvancedHandoff();
@@ -149,7 +157,7 @@ export function AdvancedInvite() {
     }
 
     const { seed } = seedAdvancedInvite(name, columns);
-    setPhase({ status: "editing", seed, identity: name, file });
+    setPhase({ status: "editing", seed, identity: name, file, rawRows });
   };
 
   // On mount, consume a warm hand-off if one is present. Latched so it runs once
@@ -173,6 +181,7 @@ export function AdvancedInvite() {
     terms: LinkageTerms,
     lifetimeSeconds: number,
     metadata: Metadata,
+    standardization: Standardization,
   ) => {
     if (phase.status !== "editing") return;
     setError(undefined);
@@ -185,6 +194,7 @@ export function AdvancedInvite() {
         linkageTerms: terms,
         lifetimeSeconds,
         metadata,
+        standardization,
       });
       if (!mountedRef.current) return;
       // Reset before the transition: the editing UI unmounts here so the flag is
@@ -276,8 +286,14 @@ export function AdvancedInvite() {
             key={phase.seed.columns.join(" ")}
             seed={phase.seed}
             initialIdentity={phase.identity}
-            onGenerate={(terms, lifetimeSeconds, metadata) =>
-              void handleGenerate(terms, lifetimeSeconds, metadata)
+            rawRows={phase.rawRows}
+            onGenerate={(terms, lifetimeSeconds, metadata, standardization) =>
+              void handleGenerate(
+                terms,
+                lifetimeSeconds,
+                metadata,
+                standardization,
+              )
             }
             generating={generating}
           />
@@ -305,6 +321,7 @@ export function AdvancedInvite() {
             expires={phase.invitation.expires}
             linkageTerms={phase.invitation.linkageTerms}
             metadata={phase.invitation.metadata}
+            standardization={phase.invitation.standardization}
             share={{
               deepLink: phase.invitation.deepLink,
               encoded: phase.invitation.encoded,

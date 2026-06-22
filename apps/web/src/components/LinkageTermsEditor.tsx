@@ -48,9 +48,15 @@ import { hasMultipleIdentifiers } from "@psi/metadataEditing";
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 import { InvitationTerms } from "@components/InvitationTerms";
 import { MetadataGrid } from "@components/MetadataGrid";
+import { StandardizationWorkbench } from "@components/StandardizationWorkbench";
 import { TermsImportExport } from "@components/TermsImportExport";
 
-import type { Algorithm, LinkageTerms, Metadata } from "@psilink/core";
+import type {
+  Algorithm,
+  LinkageTerms,
+  Metadata,
+  Standardization,
+} from "@psilink/core";
 
 import type {
   AdvancedInviteDraft,
@@ -122,6 +128,7 @@ export function LinkageTermsEditor({
   seed,
   initialIdentity,
   onGenerate,
+  rawRows,
   generating = false,
 }: {
   /** The starting point: the auto-derived terms for the inviter's columns, plus
@@ -139,7 +146,10 @@ export function LinkageTermsEditor({
     terms: LinkageTerms,
     lifetimeSeconds: number,
     metadata: Metadata,
+    standardization: Standardization,
   ) => void;
+  /** The parsed rows, for the data-prep workbench's before/after preview. */
+  rawRows: Array<Record<string, string>>;
   /** Holds Generate disabled while an invitation is being generated. */
   generating?: boolean;
 }) {
@@ -349,7 +359,12 @@ export function LinkageTermsEditor({
 
   const handleGenerate = () => {
     if (!canGenerate || validation.terms === undefined) return;
-    onGenerate(validation.terms, draft.lifetimeSeconds, draft.metadata);
+    onGenerate(
+      validation.terms,
+      draft.lifetimeSeconds,
+      draft.metadata,
+      draft.standardization,
+    );
   };
 
   // Focus the first legal-agreement field when the block is disclosed, so a
@@ -444,6 +459,36 @@ export function LinkageTermsEditor({
                 caption="Your columns, their types, and how each is used"
               />
             </Stack>
+
+            {/* The per-party data-prep workbench, in expert mode only: the guided
+                path keeps the recommended one-field-per-type cleaning untouched.
+                Binding two columns of one type to separate fields here is what makes
+                the expert key editor below offer both (authoredLinkageFields derives
+                the declared fields from this standardization). Per-party and local --
+                never embedded in the token. */}
+            {expertMode && (
+              <Stack gap="xs">
+                <Text size="sm" fw={600}>
+                  Clean and bind your fields
+                </Text>
+                <Text size="xs" c="dimmed">
+                  Each field is read from one of your columns and cleaned by an
+                  ordered list of steps. Bind two columns of the same type to
+                  separate fields -- a maiden and a current name, say -- to
+                  match on both. Cleaning runs on your device and is never sent
+                  to your partner.
+                </Text>
+                <StandardizationWorkbench
+                  standardization={draft.standardization}
+                  declaredFields={declaredFields}
+                  metadata={draft.metadata}
+                  rawRows={rawRows}
+                  onChange={(next) =>
+                    setDraft((prev) => ({ ...prev, standardization: next }))
+                  }
+                />
+              </Stack>
+            )}
 
             <Stack gap="xs">
               <Text size="sm" fw={600}>
