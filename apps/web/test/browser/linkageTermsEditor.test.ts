@@ -172,8 +172,9 @@ describe("LinkageTermsEditor", () => {
 
     // Demote one identifier to Ignored, leaving a single row identifier: the grid
     // error clears and Generate re-enables. The disclosure dropdown opens
-    // highlighting the current "Row identifier" choice; two steps down reach
-    // "Ignored" (Row identifier -> Sent to your partner -> Ignored).
+    // highlighting the current "Row identifier - not sent" choice; two steps down
+    // reach "Ignored" ("Row identifier - not sent" -> "Sent to your partner" ->
+    // "Ignored").
     await userEvent.click(
       page.getByRole("combobox", { name: "How column id is used" }),
     );
