@@ -183,15 +183,17 @@ export function assertPayloadSendDisclosed(
   if (overDeclared.length === 0) return;
   const shown = overDeclared.map((name) => sanitizeForDisplay(name)).join(", ");
   const plural = overDeclared.length > 1;
+  const noun = plural ? "columns" : "a column";
+  const remove = plural ? "these columns" : "this column";
+  const possessive = plural ? "their" : "its";
   throw new UsageError(
-    `payload.send declares ${plural ? "columns" : "a column"} the column ` +
-      `metadata does not transmit: [${shown}]. A payload column's values are ` +
-      `sent only when its metadata has is_payload: true and role is not ` +
-      `ignored; otherwise the data dictionary exchanged with the partner, shown ` +
-      `for consent, and written into the exchange record over-states what is ` +
-      `actually sent. Remove ${plural ? "them" : "it"} from payload.send, or ` +
-      `set the column's metadata to transmit (is_payload: true and role not ` +
-      `ignored).`,
+    `payload.send declares ${noun} that this party's metadata does not ` +
+      `transmit: [${shown}]. A payload column's values are sent only when its ` +
+      `metadata has is_payload: true and role is not ignored; otherwise the ` +
+      `data dictionary exchanged with the partner, shown for consent, and ` +
+      `written into the exchange record over-states what is actually sent. ` +
+      `Remove ${remove} from payload.send, or set ${possessive} metadata to ` +
+      `transmit (is_payload: true and role not ignored).`,
   );
 }
 
