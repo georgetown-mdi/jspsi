@@ -32,6 +32,7 @@ const onGenerate =
 function mount(
   initialIdentity = "County Health Dept",
   columns: Array<string> = ALL_COLUMNS,
+  rawRows: Array<Record<string, string>> = [],
 ): AdvancedInviteSeed {
   const { seed } = seedAdvancedInvite(initialIdentity, columns);
   container = document.createElement("div");
@@ -41,7 +42,12 @@ function mount(
     createElement(
       MantineProvider,
       null,
-      createElement(LinkageTermsEditor, { seed, initialIdentity, onGenerate }),
+      createElement(LinkageTermsEditor, {
+        seed,
+        initialIdentity,
+        rawRows,
+        onGenerate,
+      }),
     ),
   );
   return seed;

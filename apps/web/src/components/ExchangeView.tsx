@@ -88,6 +88,13 @@ export type ExchangeConfig =
        * bindings match the keys it authored. Absent on the quick path, where the
        * inviter's metadata is inferred from its columns. */
       metadata?: Metadata;
+      /** The inviter's authored per-party standardization from the Advanced-options
+       * workbench, paired with {@link metadata} and threaded into its own
+       * `prepareForExchange` (never the token), so its cleaning and per-field
+       * input-column binding match the keys it authored. Absent on the quick path
+       * (and when the inviter authored no cleaning), where standardization is
+       * inferred from the columns. */
+      standardization?: Standardization;
       /** The shareable artifacts the inviter copies out-of-band, surfaced in the
        * exchange screen's share block (the inviter waits here for the partner to
        * accept). Both decode to the same token; the deep link prefills the accept
@@ -408,12 +415,16 @@ export function ExchangeView(config: ExchangeConfig) {
             })
           : {
               linkageTerms: config.linkageTerms,
-              // The inviter threads its edited metadata when it prepared data in
-              // the Advanced editor; the quick path omits it and metadata is
-              // inferred. standardization stays inferred for the inviter this slice
-              // (it authors none yet).
+              // The inviter threads its edited metadata and authored standardization
+              // when it prepared data in the Advanced editor; the quick path omits
+              // both and they are inferred from the columns. Each is included only
+              // when present, so an inviter that edited metadata but authored no
+              // cleaning still falls back to inferred standardization.
               ...(config.metadata !== undefined && {
                 metadata: config.metadata,
+              }),
+              ...(config.standardization !== undefined && {
+                standardization: config.standardization,
               }),
             };
       const prepared = prepareForExchange(

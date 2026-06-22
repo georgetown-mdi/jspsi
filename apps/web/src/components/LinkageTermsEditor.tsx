@@ -31,11 +31,13 @@ import {
   MAX_NAME_LENGTH,
   MAX_TEXT_LENGTH,
   assessLinkageSatisfiability,
+  authoredLinkageFields,
   getDefaultLinkageTerms,
 } from "@psilink/core";
 
 import {
   buildAdvancedTerms,
+  defaultStandardizationForRows,
   draftFromTerms,
   setDraftMetadata,
   validateAdvancedInvite,
@@ -46,9 +48,15 @@ import { hasMultipleIdentifiers } from "@psi/metadataEditing";
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 import { InvitationTerms } from "@components/InvitationTerms";
 import { MetadataGrid } from "@components/MetadataGrid";
+import { StandardizationWorkbench } from "@components/StandardizationWorkbench";
 import { TermsImportExport } from "@components/TermsImportExport";
 
-import type { Algorithm, LinkageTerms, Metadata } from "@psilink/core";
+import type {
+  Algorithm,
+  LinkageTerms,
+  Metadata,
+  Standardization,
+} from "@psilink/core";
 
 import type {
   AdvancedInviteDraft,
@@ -120,6 +128,7 @@ export function LinkageTermsEditor({
   seed,
   initialIdentity,
   onGenerate,
+  rawRows,
   generating = false,
 }: {
   /** The starting point: the auto-derived terms for the inviter's columns, plus
@@ -137,7 +146,10 @@ export function LinkageTermsEditor({
     terms: LinkageTerms,
     lifetimeSeconds: number,
     metadata: Metadata,
+    standardization: Standardization,
   ) => void;
+  /** The parsed rows, for the data-prep workbench's before/after preview. */
+  rawRows: Array<Record<string, string>>;
   /** Holds Generate disabled while an invitation is being generated. */
   generating?: boolean;
 }) {
@@ -156,6 +168,14 @@ export function LinkageTermsEditor({
     algorithm: seed.terms.algorithm,
     deduplicate: seed.terms.deduplicate,
     metadata: seed.metadata,
+    // The recommended per-type cleaning, with the dob format inferred from the
+    // rows; authoredLinkageFields over it reproduces the default field set, so the
+    // restated draft's terms equal the seed's.
+    standardization: defaultStandardizationForRows(
+      seed.metadata,
+      seed.terms,
+      rawRows,
+    ),
     keys: seed.terms.linkageKeys.map((key) => ({ key, enabled: true })),
   });
   const [draft, setDraft] = useState<AdvancedInviteDraft>(freshDraft);
@@ -206,31 +226,41 @@ export function LinkageTermsEditor({
   const canGenerate =
     validation.canGenerate && !hasMultipleIdentifiers(draft.metadata);
 
-  // Per-key satisfiability badge, derived from the draft's CURRENT metadata so it
-  // tracks column-type edits. A field is producible when the edited metadata has a
-  // non-ignored column of its type; the offerable terms for that metadata declare
-  // exactly the producible fields, so a reconciled key (all of whose fields are
-  // offerable) shows satisfiable and stays correct after a remap.
+  // Per-key satisfiability badge, derived from the draft's CURRENT metadata AND
+  // authored standardization so it tracks both column-type edits and per-field
+  // column bindings. A field is producible when the shared resolution binds it to a
+  // present column; deriving the field universe from authoredLinkageFields (not the
+  // one-field-per-type default) and resolving through draft.standardization -- the
+  // same inputs the Generate gate and the declared-field list use -- is what lets an
+  // authored same-typed second field (e.g. first_name_2) read as satisfiable. With
+  // the bare default field set and no standardization, such a field is absent from
+  // the universe and its key would wrongly badge unsatisfiable while it generates
+  // and produces at the exchange.
   const producibleFieldNames = useMemo(() => {
     // identity is deliberately NOT a dependency: getDefaultLinkageTerms uses it
     // only to populate terms.identity, never to derive the field or key set, so
     // it cannot change which fields are producible. Pass a constant so a keystroke
     // in the name field does not recompute this (and the real input sensitivity --
-    // the column metadata -- stays legible in the dependency array).
-    const offerable = getDefaultLinkageTerms("", draft.metadata);
+    // the column metadata and standardization -- stays legible in the dependency
+    // array). The probe restates the authored fields onto default terms; only its
+    // linkageFields are read (resolveFieldColumns ignores linkageKeys), so the
+    // default keys are inert.
+    const fields = authoredLinkageFields(draft.metadata, draft.standardization);
+    const probe: LinkageTerms = {
+      ...getDefaultLinkageTerms("", draft.metadata),
+      linkageFields: fields,
+    };
     const { unsatisfied } = assessLinkageSatisfiability(
       seed.columns,
-      offerable,
-      undefined,
+      probe,
+      draft.standardization,
       draft.metadata,
     );
     const unsatisfiedNames = new Set(unsatisfied.map((f) => f.name));
     return new Set(
-      offerable.linkageFields
-        .map((f) => f.name)
-        .filter((name) => !unsatisfiedNames.has(name)),
+      fields.map((f) => f.name).filter((name) => !unsatisfiedNames.has(name)),
     );
-  }, [draft.metadata, seed.columns]);
+  }, [draft.metadata, draft.standardization, seed.columns]);
   const keyIsSatisfiable = (index: number): boolean =>
     draft.keys[index].key.elements.every((el) =>
       producibleFieldNames.has(el.field),
@@ -239,9 +269,14 @@ export function LinkageTermsEditor({
   // The fields a key element may reference, metadata-derived (one per non-ignored
   // typed column). The expert field-pickers offer exactly these, so a key authored
   // in the editor can only reference a declared field.
+  // The fields a key element may reference: derived from the authored standardization
+  // (not the one-field-per-type default), so when the operator binds two transformations
+  // of one semantic type to distinct columns the expert key editor offers BOTH fields.
+  // With no authored cleaning this equals the default per-type field set (the seed's
+  // standardization reproduces it), so the guided path is unchanged.
   const declaredFields = useMemo(
-    () => getDefaultLinkageTerms("", draft.metadata).linkageFields,
-    [draft.metadata],
+    () => authoredLinkageFields(draft.metadata, draft.standardization),
+    [draft.metadata, draft.standardization],
   );
 
   const updateDraft = (next: Partial<AdvancedInviteDraft>) => {
@@ -267,7 +302,9 @@ export function LinkageTermsEditor({
     // batched key edit.
     const reconcile = !keysAuthored;
     setDraft((prev) =>
-      reconcile ? setDraftMetadata(prev, metadata) : { ...prev, metadata },
+      reconcile
+        ? setDraftMetadata(prev, metadata, rawRows)
+        : { ...prev, metadata },
     );
   };
 
@@ -328,7 +365,7 @@ export function LinkageTermsEditor({
   // own columns -- terms carry no per-party binding -- so an imported key the
   // columns cannot satisfy shows as not-satisfiable rather than silently breaking.
   const handleImport = (terms: LinkageTerms) => {
-    setDraft(draftFromTerms(terms, seed, draft.lifetimeSeconds));
+    setDraft(draftFromTerms(terms, seed, draft.lifetimeSeconds, rawRows));
     // The imported keys are author-controlled (not the metadata template), so a
     // later metadata edit must not reconcile them away.
     setKeysAuthored(true);
@@ -339,7 +376,12 @@ export function LinkageTermsEditor({
 
   const handleGenerate = () => {
     if (!canGenerate || validation.terms === undefined) return;
-    onGenerate(validation.terms, draft.lifetimeSeconds, draft.metadata);
+    onGenerate(
+      validation.terms,
+      draft.lifetimeSeconds,
+      draft.metadata,
+      draft.standardization,
+    );
   };
 
   // Focus the first legal-agreement field when the block is disclosed, so a
@@ -434,6 +476,36 @@ export function LinkageTermsEditor({
                 caption="Your columns, their types, and how each is used"
               />
             </Stack>
+
+            {/* The per-party data-prep workbench, in expert mode only: the guided
+                path keeps the recommended one-field-per-type cleaning untouched.
+                Binding two columns of one type to separate fields here is what makes
+                the expert key editor below offer both (authoredLinkageFields derives
+                the declared fields from this standardization). Per-party and local --
+                never embedded in the token. */}
+            {expertMode && (
+              <Stack gap="xs">
+                <Text size="sm" fw={600}>
+                  Clean and bind your fields
+                </Text>
+                <Text size="xs" c="dimmed">
+                  Each field is read from one of your columns and cleaned by an
+                  ordered list of steps. Bind two columns of the same type to
+                  separate fields -- a maiden and a current name, say -- to
+                  match on both. Cleaning runs on your device and is never sent
+                  to your partner.
+                </Text>
+                <StandardizationWorkbench
+                  standardization={draft.standardization}
+                  declaredFields={declaredFields}
+                  metadata={draft.metadata}
+                  rawRows={rawRows}
+                  onChange={(next) =>
+                    setDraft((prev) => ({ ...prev, standardization: next }))
+                  }
+                />
+              </Stack>
+            )}
 
             <Stack gap="xs">
               <Text size="sm" fw={600}>

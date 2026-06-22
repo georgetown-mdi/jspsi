@@ -14,6 +14,7 @@ import type {
   LinkageField,
   LinkageTerms,
   Metadata,
+  Standardization,
   WebRTCEndpoint,
 } from "@psilink/core";
 
@@ -127,6 +128,16 @@ export interface GeneratedInvitation {
    * downstream as before. Local-only.
    */
   metadata?: Metadata;
+  /**
+   * The inviter's authored per-party standardization, from the Advanced-options
+   * editor's data-prep workbench. Paired with {@link metadata} and threaded into
+   * the inviter's own `prepareForExchange` (never embedded in the token), so the
+   * cleaning -- and the per-field input-column binding that lets two fields of one
+   * semantic type bind to distinct columns -- matches the run the authored fields
+   * were derived from. Absent on the quick path, where standardization is inferred
+   * downstream. Local-only.
+   */
+  standardization?: Standardization;
 }
 
 /** Why {@link generateInvitation} refused to mint an invitation for the given
@@ -220,10 +231,11 @@ export function deepLinkFor(origin: string, encoded: string): string {
  * the parsed rows. The inviter's own exchange must run on this same returned
  * `linkageTerms` object and `rawRows`/`columns`: a file is required at invite
  * time precisely so the embedded terms (which the acceptor adopts) and the terms
- * the inviter runs on are one and the same. The web app authors no explicit
- * fields or keys (deferred to the configuration-GUI roadmap item); standardization
- * is intentionally left to per-CSV inference (the proven acceptor path), so none
- * is supplied here.
+ * the inviter runs on are one and the same. The quick path leaves metadata and
+ * standardization to per-CSV inference; the Advanced-options editor may supply
+ * both (`metadata`/`standardization`), authored against this file's columns, and
+ * they are threaded into the inviter's own exchange and the satisfiability
+ * re-check -- never embedded in the token (they are per-party and local).
  *
  * Fails closed BEFORE minting the secret: a file that cannot be read/parsed, or
  * whose columns satisfy zero linkage keys, throws an {@link InvitationFileError}
@@ -277,6 +289,16 @@ export async function generateInvitation(params: {
    * Omitted on the quick path, where metadata is inferred downstream.
    */
   metadata?: Metadata;
+  /**
+   * The inviter's authored per-party standardization from the Advanced-options
+   * data-prep workbench, paired with `metadata`/`linkageTerms`. Returned on
+   * {@link GeneratedInvitation} for the inviter's own exchange and threaded into
+   * the fail-closed satisfiability re-check (which binds against it, mirroring how
+   * `metadata` already does), so the verdict matches the run that produces the
+   * authored fields' keys. Never embedded in the token. Omitted on the quick path,
+   * where standardization is inferred downstream.
+   */
+  standardization?: Standardization;
 }): Promise<GeneratedInvitation> {
   const {
     inviterName,
@@ -334,7 +356,7 @@ export async function generateInvitation(params: {
     const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
       columns,
       linkageTerms,
-      undefined,
+      params.standardization,
       params.metadata,
     );
     if (satisfiableKeyCount === 0)
@@ -387,5 +409,6 @@ export async function generateInvitation(params: {
     rawRows,
     columns,
     metadata: params.metadata,
+    standardization: params.standardization,
   };
 }
