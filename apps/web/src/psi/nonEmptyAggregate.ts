@@ -41,10 +41,36 @@ import type { Standardization } from "@psilink/core";
  */
 export const NON_EMPTY_WORKER_ROW_THRESHOLD = 5000;
 
-/** Whether a CSV of `rowCount` rows crosses {@link NON_EMPTY_WORKER_ROW_THRESHOLD}
- * and so should have its coverage computed off the main thread. */
-export function shouldComputeOffThread(rowCount: number): boolean {
-  return rowCount > NON_EMPTY_WORKER_ROW_THRESHOLD;
+/**
+ * Total cell-text budget (characters) above which the sweep moves off the main thread
+ * regardless of row count. Row count alone under-estimates the work: the sweep cost is
+ * rows x fields x per-cell, so a file with a few very large cells (many bytes, few
+ * rows) -- or wide rows across many fields' columns -- can block the main thread well
+ * below {@link NON_EMPTY_WORKER_ROW_THRESHOLD}. Settled empirically alongside the row
+ * threshold and tunable the same way.
+ */
+export const NON_EMPTY_WORKER_CHAR_THRESHOLD = 2_000_000;
+
+/**
+ * Whether a CSV should have its coverage swept off the main thread: above the row
+ * threshold, or once its total cell text crosses {@link NON_EMPTY_WORKER_CHAR_THRESHOLD}
+ * (the size scan short-circuits as soon as the budget is passed, so it stays cheap even
+ * for a huge file -- a many-row file returns on the row check before scanning, and a
+ * few-huge-cells file trips the budget within the first cells). Field count is not known
+ * here, so a degenerate terms set with very many linkage fields all bound to one narrow
+ * column could still sweep inline; that is an out-of-shape, partner-bounded config.
+ */
+export function shouldComputeOffThread(
+  rawRows: ReadonlyArray<Record<string, string>>,
+): boolean {
+  if (rawRows.length > NON_EMPTY_WORKER_ROW_THRESHOLD) return true;
+  let chars = 0;
+  for (const row of rawRows)
+    for (const value of Object.values(row)) {
+      chars += value.length;
+      if (chars > NON_EMPTY_WORKER_CHAR_THRESHOLD) return true;
+    }
+  return false;
 }
 
 /**

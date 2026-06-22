@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 
 import {
+  NON_EMPTY_WORKER_CHAR_THRESHOLD,
   NON_EMPTY_WORKER_ROW_THRESHOLD,
   computeFieldCoverage,
   isSilentEmpty,
@@ -201,10 +202,21 @@ const UPPER: Standardization = [
 
 describe("NonEmptyRateController: off-main-thread dispatch above the threshold", () => {
   test("the threshold predicate moves to the worker strictly above the row cap", () => {
-    expect(shouldComputeOffThread(NON_EMPTY_WORKER_ROW_THRESHOLD)).toBe(false);
-    expect(shouldComputeOffThread(NON_EMPTY_WORKER_ROW_THRESHOLD + 1)).toBe(
-      true,
+    expect(shouldComputeOffThread(rowsOf(NON_EMPTY_WORKER_ROW_THRESHOLD))).toBe(
+      false,
     );
+    expect(
+      shouldComputeOffThread(rowsOf(NON_EMPTY_WORKER_ROW_THRESHOLD + 1)),
+    ).toBe(true);
+  });
+
+  test("a few very large cells move off-thread even below the row cap", () => {
+    // The sweep cost is rows x fields x per-cell, so a tiny-row file with huge cells
+    // would freeze the main thread inline; the size budget catches it. A normal small
+    // file stays inline.
+    const huge = "x".repeat(NON_EMPTY_WORKER_CHAR_THRESHOLD + 1);
+    expect(shouldComputeOffThread([{ n: huge }])).toBe(true);
+    expect(shouldComputeOffThread([{ n: "small" }, { n: "rows" }])).toBe(false);
   });
 
   test("computes inline below the threshold without spawning a worker", async () => {

@@ -63,7 +63,7 @@ export class NonEmptyRateController {
     spawnWorker: SpawnAggregateWorker,
   ) {
     this.rawRows = rawRows;
-    if (!shouldComputeOffThread(rawRows.length)) {
+    if (!shouldComputeOffThread(rawRows)) {
       this.worker = undefined;
       return;
     }
