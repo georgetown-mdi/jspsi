@@ -70,6 +70,11 @@ const lightShade =
     ? theme.primaryShade
     : theme.primaryShade.light;
 const primary = theme.colors[theme.primaryColor][lightShade];
+const darkShade =
+  typeof theme.primaryShade === "number"
+    ? theme.primaryShade
+    : theme.primaryShade.dark;
+const darkPrimary = theme.colors[theme.primaryColor][darkShade];
 const white = theme.white;
 const gray0 = theme.colors.gray[0];
 const cyan1 = theme.colors.cyan[1];
@@ -103,13 +108,36 @@ const placeholderLight = vars.light["--mantine-color-placeholder"];
 const dimmedDark = vars.dark["--mantine-color-dimmed"];
 const placeholderDark = vars.dark["--mantine-color-placeholder"];
 
+// Resolves Mantine's `--mantine-primary-color-contrast` for a given primary fill,
+// mirroring getPrimaryContrastColor -> getContrastColor: with autoContrast on, the
+// contrast color is black when the fill is "light" (luminance strictly above the
+// theme's luminanceThreshold, the same comparison as Mantine's isLightColor) else
+// white; with autoContrast off it is always white. The filled-primary Button /
+// ActionIcon / Checkbox text is routed to this variable by the theme (Mantine
+// resolves a filled surface's own text color color-scheme-blind, so it would
+// otherwise be white in both schemes); the "filled-primary text is routed..." test
+// below pins that wiring. Reading the value from the theme rather than hardcoding it
+// means flipping autoContrast off or picking a darker dark shade re-runs the
+// arithmetic here -- a real check, not a restated constant.
+function primaryContrast(fill: string): string {
+  return theme.autoContrast &&
+    relativeLuminance(fill) > theme.luminanceThreshold
+    ? theme.black
+    : theme.white;
+}
+const darkButtonText = primaryContrast(darkPrimary);
+
 describe("theme colour contrast (WCAG 2.1 AA)", () => {
   const cases: Array<{ name: string; fg: string; bg: string; floor: number }> =
     [
       // Primary (raised to cyan-9): one shade covers every surface it touches.
+      // The text colour is read through primaryContrast (the per-scheme contrast
+      // variable the filled-primary text is routed to) so this tracks what actually
+      // renders; the light guard test below locks it to white (byte-identical to the
+      // pre-autoContrast static default).
       {
-        name: "filled button text: white on primary",
-        fg: white,
+        name: "filled button text: contrast text on primary",
+        fg: primaryContrast(primary),
         bg: primary,
         floor: 4.5,
       },
@@ -135,6 +163,33 @@ describe("theme colour contrast (WCAG 2.1 AA)", () => {
         name: "copied-state copy icon: primary on cyan-1 (non-text)",
         fg: primary,
         bg: cyan1,
+        floor: 3,
+      },
+      // Dark scheme primary (shade 6): the counterpart to the light primary fix. A
+      // lighter dark shade lifts the focus indicators on the dark surfaces, and the
+      // filled-primary text -- routed to --mantine-primary-color-contrast (black on
+      // cyan-6) -- clears the text floor. Modeled like the light primary cases above:
+      // button text on the fill, focus ring on the dark-7 body, input focus border on
+      // the dark-6 input. cyan-8 (the old default) left the button text at 4.35:1
+      // (under 4.5); darkening to cyan-9 instead would drop the focus ring / input
+      // border to 2.78:1 / 2.43:1 (under 3), which is why the shade went lighter, not
+      // darker (and why the text fix is the contrast-var route, not a shade move).
+      {
+        name: "filled button text (dark): contrast var on dark primary",
+        fg: darkButtonText,
+        bg: darkPrimary,
+        floor: 4.5,
+      },
+      {
+        name: "focus ring (dark): dark primary on dark-7 body (non-text)",
+        fg: darkPrimary,
+        bg: dark7,
+        floor: 3,
+      },
+      {
+        name: "input focus border (dark): dark primary on dark-6 input (non-text)",
+        fg: darkPrimary,
+        bg: dark6,
         floor: 3,
       },
       // Status light-variant text (overridden tokens) on their shade-1 tints.
@@ -232,5 +287,54 @@ describe("theme colour contrast (WCAG 2.1 AA)", () => {
     // if every other surface happened to compensate.
     expect(lightShade).toBeGreaterThanOrEqual(9);
     expect(contrast(white, primary)).toBeGreaterThanOrEqual(4.5);
+    // Enabling autoContrast (for the dark fix) must leave the light scheme
+    // byte-identical: the light primary cyan-9 sits below the luminanceThreshold, so
+    // --mantine-primary-color-contrast stays white -- the same colour the static
+    // default produced. A future shade light enough to flip it to black would fail
+    // here.
+    expect(primaryContrast(primary)).toBe(white);
+  });
+
+  test("dark primary clears AA via the per-scheme contrast variable", () => {
+    // autoContrast must be on so --mantine-primary-color-contrast computes per scheme,
+    // and the dark shade must be light enough (luminance above the threshold) that it
+    // resolves to black -- white-on-cyan-6 is only 2.79:1, so without the flip the
+    // dark filled-primary text fails. Guards both halves so dropping autoContrast or
+    // choosing a darker dark shade fails here, not only through whichever case above
+    // happened to still pass.
+    expect(theme.autoContrast).toBe(true);
+    expect(relativeLuminance(darkPrimary)).toBeGreaterThan(
+      theme.luminanceThreshold,
+    );
+    expect(darkButtonText).toBe(theme.black);
+    expect(contrast(darkButtonText, darkPrimary)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  test("filled-primary text is routed through the per-scheme contrast variable", () => {
+    // The dark contrast cases above model --mantine-primary-color-contrast, which the
+    // filled-primary Button / ActionIcon / Checkbox text must actually be pointed at
+    // (Mantine resolves a filled surface's own text colour color-scheme-blind, so it
+    // would otherwise be white in both schemes -- the failure this whole change
+    // corrects). Pin that wiring: each component's vars override must emit the
+    // contrast variable for the filled primary (default variant, no colour) and must
+    // NOT touch a default/subtle/light or explicitly-coloured instance, which keep
+    // their own text colour. The rendered colours themselves are checked in
+    // test/browser/themeContrast.test.ts.
+    const contrastVar = "var(--mantine-primary-color-contrast)";
+    const wiring: Array<[string, string]> = [
+      ["Button", "--button-color"],
+      ["ActionIcon", "--ai-color"],
+      ["Checkbox", "--checkbox-icon-color"],
+    ];
+    for (const [name, cssVar] of wiring) {
+      const resolve = theme.components[name].vars;
+      expect(resolve, `${name} vars override`).toBeDefined();
+      const at = (props: Record<string, unknown>) =>
+        resolve!(theme, props, {}).root[cssVar];
+      expect(at({ variant: "filled" })).toBe(contrastVar);
+      expect(at({})).toBe(contrastVar); // default variant is filled
+      expect(at({ variant: "default" })).toBeUndefined();
+      expect(at({ variant: "filled", color: "red" })).toBeUndefined();
+    }
   });
 });

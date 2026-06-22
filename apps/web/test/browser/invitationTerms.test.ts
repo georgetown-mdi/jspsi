@@ -82,13 +82,27 @@ function renderTerms() {
   );
 }
 
-// The disclosure panel, resolved from the toggle's aria-controls so the test
-// follows the same wiring assistive tech does.
+// The stable wrapper the toggle's aria-controls points at, resolved the same way
+// assistive tech follows the reference. The id lives on this always-mounted
+// wrapper (not the Collapse panel) so it never dangles when Mantine unmounts the
+// closed panel under a reduced-motion preference.
 function detailsPanel(): HTMLElement {
   const toggle = container!.querySelector("[aria-controls]");
   const id = toggle?.getAttribute("aria-controls");
   const panel = id ? document.getElementById(id) : null;
   if (!panel) throw new Error("details panel not found");
+  return panel;
+}
+
+// The Mantine Collapse panel itself: the wrapper's only child, carrying the
+// aria-hidden + inert (and display:none) that hide the collapsed detail from
+// assistive tech. Separate from the wrapper because aria-controls resolves to the
+// always-mounted wrapper, while these hidden-state attributes sit on the panel
+// Mantine mounts inside it.
+function collapsePanel(): HTMLElement {
+  const panel = detailsPanel().firstElementChild;
+  if (!(panel instanceof HTMLElement))
+    throw new Error("collapse panel not found");
   return panel;
 }
 
@@ -102,10 +116,12 @@ describe("InvitationTerms: always-visible core vs Details disclosure", () => {
     expect(toggle.element().getAttribute("aria-expanded")).toBe("false");
 
     const panel = detailsPanel();
-    // Collapsed: Mantine marks the panel aria-hidden + inert, so the dense detail
-    // is out of the accessibility tree and the tab order until opened.
-    expect(panel.getAttribute("aria-hidden")).toBe("true");
-    expect(panel.hasAttribute("inert")).toBe(true);
+    // Collapsed: Mantine marks the Collapse panel inside the wrapper aria-hidden +
+    // inert, so the dense detail is out of the accessibility tree and the tab order
+    // until opened. The wrapper that holds aria-controls stays mounted regardless.
+    const collapse = collapsePanel();
+    expect(collapse.getAttribute("aria-hidden")).toBe("true");
+    expect(collapse.hasAttribute("inert")).toBe(true);
 
     // The always-visible core stays OUTSIDE the disclosure: the non-standard
     // badge -- which must never be hidden in collapsed content -- the matching
@@ -140,9 +156,67 @@ describe("InvitationTerms: always-visible core vs Details disclosure", () => {
     await userEvent.click(toggle);
 
     expect(toggle.element().getAttribute("aria-expanded")).toBe("true");
-    const panel = detailsPanel();
-    expect(panel.getAttribute("aria-hidden")).toBe("false");
-    expect(panel.hasAttribute("inert")).toBe(false);
+    const collapse = collapsePanel();
+    expect(collapse.getAttribute("aria-hidden")).toBe("false");
+    expect(collapse.hasAttribute("inert")).toBe(false);
+  });
+});
+
+describe("InvitationTerms: the disclosure's aria-controls survives a reduced-motion preference", () => {
+  // With respectReducedMotion on, Mantine's Collapse unmounts the closed panel for
+  // a reduced-motion user -- the configuration that would dangle an aria-controls
+  // pointing at the panel itself. Force both halves of it: the OS reduced-motion
+  // signal (matchMedia) and the theme switch that honors it.
+  let originalMatchMedia: typeof window.matchMedia;
+
+  beforeEach(() => {
+    originalMatchMedia = window.matchMedia;
+    window.matchMedia = (query: string) => ({
+      matches: query.includes("prefers-reduced-motion"),
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    });
+  });
+
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia;
+  });
+
+  test("aria-controls resolves to a present element while collapsed under reduced motion", async () => {
+    root!.render(
+      createElement(
+        MantineProvider,
+        { theme: { respectReducedMotion: true } },
+        createElement(InvitationTerms, { linkageTerms: terms }),
+      ),
+    );
+
+    const toggle = page.getByRole("button", { name: "Details" });
+    await expect.element(toggle).toBeInTheDocument();
+    expect(toggle.element().getAttribute("aria-expanded")).toBe("false");
+
+    const id = toggle.element().getAttribute("aria-controls");
+    expect(id).toBeTruthy();
+
+    // The reduced-motion media effect resolves after mount and unmounts the closed
+    // Collapse panel, emptying the wrapper -- the state in which an id held on the
+    // panel itself would dangle. Wait for that unmount so the assertion exercises
+    // it rather than the pre-effect mounted-but-hidden panel.
+    await expect
+      .poll(() => document.getElementById(id!)?.children.length)
+      .toBe(0);
+
+    // The stable wrapper holding aria-controls stays mounted, so the reference
+    // still resolves to a present element; the unmounted panel keeps the collapsed
+    // detail out of the accessibility tree.
+    const panel = document.getElementById(id!);
+    expect(panel).not.toBeNull();
+    expect(panel!.textContent).toBe("");
   });
 });
 
