@@ -84,3 +84,13 @@ export { runKex } from "./kex";
 export type { KexResult } from "./kex";
 export { deriveRendezvousPeerId, RENDEZVOUS_ROLES } from "./rendezvous";
 export type { RendezvousRole } from "./rendezvous";
+// The shared chokepoint for parsing config/credential documents that may hold
+// secrets, so a parse error never leaks source bytes. Consumed by the CLI (file
+// reads, via its thin re-export) and the web app (an imported linkage-terms
+// document); the raw `yaml` parsers are ESLint-banned outside this module in
+// both apps.
+export {
+  parseSensitiveYaml,
+  editSensitiveYamlDocument,
+  parseSensitiveJson,
+} from "./sensitiveFile";

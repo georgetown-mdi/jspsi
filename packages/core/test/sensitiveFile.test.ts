@@ -1,11 +1,12 @@
 import { afterEach, expect, test, vi } from "vitest";
 import YAML from "yaml";
-import { UsageError } from "@psilink/core";
+
+import { UsageError } from "../src/errors";
 import {
   parseSensitiveYaml,
   editSensitiveYamlDocument,
   parseSensitiveJson,
-} from "../../src/sensitiveFile";
+} from "../src/sensitiveFile";
 
 // A distinctive credential value that must never appear in a surfaced message.
 const SECRET = "S3cr3tCredentialValue_2026";
@@ -74,8 +75,8 @@ test("the warning channel really leaks by default (guards the suppression test)"
   // YAML.parse emits a warning whose text carries the secret.
   const spy = vi.spyOn(process, "emitWarning").mockImplementation(() => {});
   // Intentionally exercises the unguarded default YAML.parse to prove the
-  // chokepoint closes a real channel. (The no-restricted-syntax ban is scoped to
-  // apps/cli/src, so test files may call the raw parser directly.)
+  // chokepoint closes a real channel. (No raw-parser ESLint ban applies to core
+  // test files; the ban is scoped to src.)
   YAML.parse(`password: !secret ${SECRET}\n`);
   expect(spy).toHaveBeenCalled();
   const allArgs = spy.mock.calls.flat().map(String).join(" ");

@@ -26,16 +26,16 @@ export default [
     },
   },
   {
-    // Pre-stage the sensitive-file parsing ban: the web app will gain YAML config
-    // import/export and browser-stored configs/secrets. It parses no YAML today,
-    // so this is a zero-cost tripwire -- the first YAML.parse / parseDocument (or
-    // a yaml named import) fails CI and points the author at the chokepoint,
-    // instead of silently reopening the credential-leak-via-parse channel in the
-    // browser. The chokepoint (apps/cli/src/sensitiveFile.ts) must be promoted to
-    // a shared module (packages/core) before web can route through it. JSON.parse
-    // is not banned yet: the web app's existing JSON.parse is non-secret peer/wire
-    // data; the JSON half lands with the browser secret-store work (tracked on the
-    // board).
+    // The sensitive-file parsing ban for the web app. The credential-leak-via-
+    // parse channel is real in the browser too -- a raw YAML parser echoes a span
+    // of source into its error, and an imported config document an operator pastes
+    // could hold a secret by mistake -- so raw `yaml` parsers are banned here:
+    // route YAML/JSON parsing through the shared chokepoint now promoted to
+    // packages/core (`@psilink/core`'s parseSensitiveYaml / parseSensitiveJson),
+    // which reports path-only. `stringify` carries no such channel and is allowed.
+    // JSON.parse is not banned yet: the web app's existing JSON.parse is
+    // non-secret peer/wire data; the JSON half lands with the browser secret-store
+    // work (tracked on the board).
     files: ["src/**/*.{ts,tsx}"],
     // Fail CI on a stray or rule-silencing disable so the tripwire cannot be
     // quietly turned off on a sensitive parse (a bare `eslint .` only warns).
@@ -47,7 +47,7 @@ export default [
           selector:
             "CallExpression[callee.object.name='YAML'][callee.property.name=/^(parse|parseDocument|parseAllDocuments)$/]",
           message:
-            "Parse operator/credential files through the sensitive-file chokepoint, not a raw YAML parser (it leaks source into errors). Promote apps/cli/src/sensitiveFile.ts to a shared module (packages/core) before parsing configs in the web app. See the board item for the web sensitive-file parsing work.",
+            "Parse config/credential or imported documents through @psilink/core's sensitive-file chokepoint (parseSensitiveYaml / parseSensitiveJson), not a raw YAML parser (it leaks source into errors).",
         },
       ],
       "no-restricted-imports": [
@@ -58,7 +58,7 @@ export default [
               name: "yaml",
               importNames: ["parse", "parseDocument", "parseAllDocuments"],
               message:
-                "Do not import yaml's raw parsers in the web app; route config parsing through the shared sensitive-file chokepoint (promote apps/cli/src/sensitiveFile.ts to packages/core first). See the board item for the web sensitive-file parsing work.",
+                "Do not import yaml's raw parsers in the web app; route parsing through @psilink/core's parseSensitiveYaml / parseSensitiveJson (the shared sensitive-file chokepoint). yaml's `stringify` is allowed.",
             },
           ],
         },

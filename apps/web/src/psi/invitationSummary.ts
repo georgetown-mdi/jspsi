@@ -1,5 +1,7 @@
 import { describeTransformCoercions, sanitizeForDisplay } from "@psilink/core";
 
+import { APPLIED_SETTINGS } from "@psi/appliedSettings";
+
 import type {
   Algorithm,
   InvitationToken,
@@ -100,22 +102,6 @@ export const TRANSFORM_FUNCTION_GLOSSARY: Record<string, string> = {
     "Substitutes a fallback value for an empty field, which can create matches that would not otherwise occur.",
 };
 
-/**
- * Whether today's PSI exchange actually applies the inviter's `deduplicate`
- * setting and per-element `generateFuzzyComparisons`. Both are surfaced on the
- * consent screen under the terms-as-proposed model, but the run does not yet
- * honor them -- matching is hard-wired to one-to-one cardinality and fuzzy
- * expansion is unimplemented. The screen flags the affected rows as
- * proposed-but-not-applied off these flags, rather than stating a matching
- * behavior that does not occur. Flip a flag to `true` when the exchange wires
- * the feature in (tracked on the product board); the on-screen flag then
- * disappears, and the paired render tests fail loudly so the consent copy is
- * not left stale. Left as bare literals (not annotated) so they read as the
- * single source of truth for that status.
- */
-const DEDUPLICATE_APPLIED = false;
-const FUZZY_COMPARISONS_APPLIED = false;
-
 /** Legal-agreement context, with the partner-controlled free text sanitized. */
 export interface InvitationLegalAgreementSummary {
   /** Agreement identifier (e.g. "MOU-2025-0042"), sanitized for display. */
@@ -194,7 +180,7 @@ export interface InvitationKeyElementSummary {
   fuzzyComparison?: string;
   /**
    * Whether today's exchange actually applies the fuzzy comparison above (see
-   * {@link FUZZY_COMPARISONS_APPLIED}). Meaningful only alongside a
+   * {@link APPLIED_SETTINGS}). Meaningful only alongside a
    * `fuzzyComparison`; the renderer flags that annotation as proposed-but-not-
    * applied when this is false.
    */
@@ -277,6 +263,14 @@ export interface InvitationSummary {
   invitingParty: string;
   /** `psi` reveals matched identifiers; `psi-c` reveals only the count. */
   algorithm: Algorithm;
+  /**
+   * Whether today's exchange actually applies `psi-c` when it is proposed (see
+   * {@link APPLIED_SETTINGS}). Meaningful only when {@link algorithm} is
+   * `psi-c`; the renderer flags a proposed `psi-c` as not-yet-applied -- the run
+   * still reveals matched identifiers -- when this is false, so a count-only
+   * claim cannot read as in force while it is not.
+   */
+  psiCApplied: boolean;
   /** Whether the inviter expects to receive the intersection result. */
   inviterReceivesOutput: boolean;
   /** Whether the inviter will share the result with the accepting partner. */
@@ -288,7 +282,7 @@ export interface InvitationSummary {
   deduplicate: boolean;
   /**
    * Whether today's exchange actually applies the deduplicate setting above
-   * (see {@link DEDUPLICATE_APPLIED}). False while matching is hard-wired
+   * (see {@link APPLIED_SETTINGS}). False while matching is hard-wired
    * one-to-one; the renderer flags the duplicate-matches row as proposed-but-
    * not-applied when a looser setting is proposed but this is false.
    */
@@ -445,7 +439,7 @@ function summarizeKey(
         element.generateFuzzyComparisons !== undefined
           ? FUZZY_COMPARISON_LABELS[element.generateFuzzyComparisons]
           : undefined,
-      fuzzyComparisonApplied: FUZZY_COMPARISONS_APPLIED,
+      fuzzyComparisonApplied: APPLIED_SETTINGS.fuzzyComparisons,
     }),
   );
 
@@ -556,10 +550,11 @@ export function summarizeInvitation(
   const summary: InvitationSummary = {
     invitingParty: sanitizeForDisplay(terms.identity),
     algorithm: terms.algorithm,
+    psiCApplied: APPLIED_SETTINGS.psiC,
     inviterReceivesOutput: terms.output.expectsOutput,
     inviterSharesResult: terms.output.shareWithPartner,
     deduplicate: terms.deduplicate,
-    deduplicateApplied: DEDUPLICATE_APPLIED,
+    deduplicateApplied: APPLIED_SETTINGS.deduplicate,
     linkageKeys: terms.linkageKeys.map((key) => summarizeKey(key, fieldByName)),
     linkageFields,
   };

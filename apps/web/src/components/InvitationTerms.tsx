@@ -251,6 +251,16 @@ export function InvitationTerms({
               ? "Only the number of records you have in common is revealed, not which records match."
               : "The shared identifiers of records you have in common are revealed to whoever receives the result."}
           </Text>
+          {/* psi-c is a disclosure guarantee: flag a proposed count-only setting
+              the run does not yet honor, so the line above cannot read as in
+              force while the exchange still reveals matched identifiers. */}
+          {summary.algorithm === "psi-c" && !summary.psiCApplied && (
+            <Text size="xs" c="dimmed">
+              Your partner proposes this, but this version of the exchange does
+              not yet apply it; the shared identifiers of matched records are
+              still revealed.
+            </Text>
+          )}
         </Term>
 
         <Term label="Records are matched on">
