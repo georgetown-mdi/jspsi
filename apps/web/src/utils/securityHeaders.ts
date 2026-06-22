@@ -1,5 +1,9 @@
 /**
- * Defense-in-depth response headers set on every response the web app serves.
+ * Defense-in-depth response headers set on every response routed through the web
+ * app's server entry -- every rendered document and API route. (Static public
+ * assets, served by Nitro's own asset handler, bypass that entry and are neither
+ * a frameable document nor a referrer-bearing surface, so they need none of
+ * these.)
  *
  * The confidential invitation token rides in the URL fragment, which browsers
  * already withhold from `Referer`; `Referrer-Policy: no-referrer` extends that

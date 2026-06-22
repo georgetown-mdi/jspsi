@@ -2,7 +2,8 @@ import { describe, expect, test } from "vitest";
 
 // The dev-server globalSetup stands up the Vite/TanStack server; these assert at
 // the HTTP boundary that the defense-in-depth response headers reach the wire on
-// both an SSR document route and an API route -- i.e. app-wide, not one page. The
+// both an SSR document route and an API route -- the two response kinds that flow
+// through the server-entry chokepoint, not one page. The
 // server entry (src/server.ts) is the single fetch chokepoint every response
 // flows through in dev, preview, and the built Nitro server, so covering one of
 // each route kind exercises the seam end to end. Values are pinned here as the
