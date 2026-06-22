@@ -648,15 +648,18 @@ export function moveElement(
 
 /** A name not already in `taken`, preferring `base` then `base 2`, `base 3`, ...
  * Keeps authored key names unique (the schema rejects duplicates). Bounded by the
- * taken-set size: among `base` and `base 2..base (size+2)` there are more
- * candidates than taken names, so one is always free within the loop. */
+ * taken-set size: among `base` and `base 2..base (size+2)` there are `taken.size + 2`
+ * distinct candidates against `taken.size` taken names, so at least two are always
+ * free and the loop always returns. */
 function uniqueKeyName(base: string, taken: ReadonlySet<string>): string {
   if (!taken.has(base)) return base;
   for (let n = 2; n <= taken.size + 2; n++) {
     const candidate = `${base} ${n}`;
     if (!taken.has(candidate)) return candidate;
   }
-  return `${base} ${taken.size + 3}`;
+  // Unreachable given the pigeonhole bound above; encode that as a check rather
+  // than return a candidate that could itself collide if the bound ever regressed.
+  throw new Error("uniqueKeyName exhausted its candidate range");
 }
 
 // --- Import ------------------------------------------------------------------

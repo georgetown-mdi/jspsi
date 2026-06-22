@@ -245,10 +245,13 @@ export function LinkageTermsEditor({
   // the functional updater so it composes with a batched key edit.
   const updateMetadata = (metadata: Metadata) => {
     setAnnouncement("");
+    // Decide whether to reconcile at event time (reading the current expertMode /
+    // keysAuthored), not inside the functional updater -- the updater stays a pure
+    // function of `prev` (the latest draft), which is all it needs `prev` for: to
+    // compose with a batched key edit.
+    const reconcile = !expertMode && !keysAuthored;
     setDraft((prev) =>
-      expertMode || keysAuthored
-        ? { ...prev, metadata }
-        : setDraftMetadata(prev, metadata),
+      reconcile ? setDraftMetadata(prev, metadata) : { ...prev, metadata },
     );
   };
 

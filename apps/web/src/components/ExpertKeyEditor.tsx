@@ -43,7 +43,6 @@ import type {
 } from "@psilink/core";
 
 import type { AdvancedInviteDraft, FuzzyComparison } from "@psi/advancedInvite";
-import type { EditableStep } from "@components/StepListEditor";
 
 /** The fuzzy-comparison expansions an element can declare, with plain-language
  * labels. Disabled wholesale until the run applies fuzzy comparisons (see
@@ -308,7 +307,7 @@ export function ExpertKeyEditor({
                                 );
                                 announce("Moved element earlier.");
                               }}
-                              aria-label="Move element earlier"
+                              aria-label={`Move element ${elementIndex + 1} earlier`}
                             >
                               <IconArrowUp size={16} />
                             </ActionIcon>
@@ -323,7 +322,7 @@ export function ExpertKeyEditor({
                                 );
                                 announce("Moved element later.");
                               }}
-                              aria-label="Move element later"
+                              aria-label={`Move element ${elementIndex + 1} later`}
                             >
                               <IconArrowDown size={16} />
                             </ActionIcon>
@@ -337,7 +336,7 @@ export function ExpertKeyEditor({
                                 );
                                 announce("Removed element.");
                               }}
-                              aria-label="Remove element"
+                              aria-label={`Remove element ${elementIndex + 1}`}
                             >
                               <IconTrash size={16} />
                             </ActionIcon>
@@ -364,9 +363,7 @@ export function ExpertKeyEditor({
                             Transform before matching
                           </Text>
                           <StepListEditor
-                            steps={
-                              (element.transform ?? []) as Array<EditableStep>
-                            }
+                            steps={element.transform ?? []}
                             addStepLabel="Add a transform"
                             emptyHint="No transforms: the field value is matched as-is."
                             onStepsChange={(steps) =>

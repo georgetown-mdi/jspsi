@@ -25,9 +25,15 @@ function downloadDocument(
   // honor the download attribute when the anchor is in the live document; append
   // it before clicking and remove it after so the save fires everywhere.
   document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+  try {
+    anchor.click();
+  } finally {
+    anchor.remove();
+    // Defer the revoke to a later task: a synchronous revoke after click() can
+    // abort the save in browsers that copy the blob asynchronously, and the
+    // finally makes cleanup unconditional even if click() throws.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
 }
 
 /**

@@ -56,9 +56,36 @@ describe("importLinkageTerms round-trip", () => {
     if (result.success) expect(result.terms).toEqual(TERMS);
   });
 
-  test("accepts a hand-written snake_case document directly", () => {
-    const result = importLinkageTerms(exportLinkageTerms(TERMS, "json"));
+  test("accepts a hand-written snake_case YAML document directly", () => {
+    // A document a human authored by hand (not produced by exportLinkageTerms):
+    // snake_case keys, its own formatting, a single key. It must parse through the
+    // same path -- snake_case is the on-disk form the importer camelizes.
+    const handWritten = [
+      "version: 1.0.0",
+      "identity: County Records Office",
+      "date: 2026-01-15",
+      "algorithm: psi",
+      "output:",
+      "  expects_output: true",
+      "  share_with_partner: true",
+      "deduplicate: false",
+      "linkage_fields:",
+      "  - name: ssn",
+      "    type: ssn",
+      "linkage_keys:",
+      "  - name: SSN only",
+      "    elements:",
+      "      - field: ssn",
+      "",
+    ].join("\n");
+    const result = importLinkageTerms(handWritten);
     expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.terms.identity).toBe("County Records Office");
+      expect(result.terms.linkageKeys.map((key) => key.name)).toEqual([
+        "SSN only",
+      ]);
+    }
   });
 });
 
