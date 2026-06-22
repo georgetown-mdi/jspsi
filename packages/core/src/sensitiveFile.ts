@@ -30,11 +30,15 @@ import { parseBoundedJson } from "./utils/boundedJson.js";
 //      and throws only when the document is materialized (toString / toJS),
 //      echoing the alias token. Both are guarded here.
 //   3. YAML.parse / parseDocument emit NON-fatal warnings (an unresolved custom
-//      tag, a bad !!int/!!float cast) via process.emitWarning -- which writes the
-//      full source line to STDERR and then returns normally, so no try/catch
-//      fires. logLevel "error" suppresses those warnings while still THROWING on
-//      fatal errors. (logLevel "silent" would also swallow the fatal-error throw,
-//      returning a mangled partial object, so it is NOT used.)
+//      tag, a bad !!int/!!float cast) and then return normally, so no try/catch
+//      fires. The warning carries the full source line; the yaml package routes it
+//      to process.emitWarning (STDERR) under Node, or to console.warn in a browser
+//      where process is absent (the same secret-bearing text, just a different
+//      sink). logLevel "error" suppresses BOTH sinks while still THROWING on fatal
+//      errors -- this module is shared with the browser, so closing the
+//      console.warn sink matters as much as the Node one. (logLevel "silent" would
+//      also swallow the fatal-error throw, returning a mangled partial object, so
+//      it is NOT used.)
 //   4. JSON.parse throws a SyntaxError that, on a non-JSON document start, echoes
 //      a leading span of the source (the shared secret / private key if the
 //      document leads with it). Path only.

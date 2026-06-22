@@ -129,6 +129,30 @@ describe("importLinkageTerms rejection", () => {
     }
   });
 
+  test("forwards a custom refine message without echoing a partner value", () => {
+    // readableTermsError forwards issue.message verbatim ONLY for `custom`-code
+    // issues, trusting the schema's referential-integrity refines to use static,
+    // value-free messages (the useful, safe ones). Pin that contract at the door: a
+    // refine fired on a hostile value must surface its static message and never the
+    // value. A swap target that matches no element identifier triggers such a refine
+    // with the hostile target in the offending position.
+    const hostile = "HOSTILE<script>VALUE";
+    const broken = {
+      ...TERMS,
+      linkageKeys: [
+        { name: "k", elements: [{ field: "ssn" }], swap: [hostile, "ssn"] },
+      ],
+    };
+    const result = importLinkageTerms(JSON.stringify(broken));
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).not.toContain("HOSTILE");
+      expect(result.error).not.toContain("script");
+      // The static refine message is still forwarded, locating the problem.
+      expect(result.error).toMatch(/swap/i);
+    }
+  });
+
   test("never echoes a transform params key (a partner-controlled path segment)", () => {
     // The one partner-controlled segment a Zod issue path can carry is a transform
     // `params` record key (params is a record over arbitrary keys). An over-long

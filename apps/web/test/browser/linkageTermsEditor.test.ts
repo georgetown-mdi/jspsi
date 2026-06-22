@@ -244,4 +244,27 @@ describe("LinkageTermsEditor", () => {
     // The authored key is still present -- the metadata edit did not clobber it.
     await expect.element(authoredKeyControl()).toBeInTheDocument();
   });
+
+  test("a column-type change in expert mode still reconciles keys when none were authored", async () => {
+    // Opening expert mode does not make the keys author-controlled: they are still
+    // the metadata template, so a column-type change must re-derive the offerable
+    // key set. If reconciliation were suppressed merely because the expert panel is
+    // open, a key would keep referencing the dropped field and block Generate.
+    mount();
+    await expect.element(generateButton()).toBeEnabled();
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    // Retype dob to "Other" (four options past Date of birth) without touching any
+    // key. The date-of-birth-backed keys must drop; Generate stays valid through the
+    // remaining ssn/name keys. Keyboard-select so it is independent of option pixel
+    // position in the narrow test viewport.
+    await userEvent.click(
+      page.getByRole("combobox", { name: "Type for column dob" }),
+    );
+    await userEvent.keyboard(
+      "{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{Enter}",
+    );
+    await expect.element(generateButton()).toBeEnabled();
+  });
 });

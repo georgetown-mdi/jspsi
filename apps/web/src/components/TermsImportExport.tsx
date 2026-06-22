@@ -1,12 +1,27 @@
 import { useState } from "react";
 
-import { Alert, Button, Group, Stack, Text, Textarea } from "@mantine/core";
+import {
+  Alert,
+  Button,
+  Group,
+  Stack,
+  Text,
+  Textarea,
+  VisuallyHidden,
+} from "@mantine/core";
 import { IconAlertCircle, IconDownload, IconUpload } from "@tabler/icons-react";
 
 import { exportLinkageTerms, importLinkageTerms } from "@psi/linkageTermsIO";
 import { gatedActiveSettingMessage } from "@psi/advancedInvite";
 
 import type { LinkageTerms } from "@psilink/core";
+
+/** How long to keep a download's object URL alive after the click before revoking
+ * it. The browser may copy the blob asynchronously, so revoking too soon (even on
+ * the next task) can abort the save; a generous fixed delay outlives the transfer
+ * while still freeing the URL rather than leaking it for the document lifetime.
+ * Matches the long-standing file-saver convention. */
+const REVOKE_DELAY_MS = 60_000;
 
 /** Trigger a client-side download of `content` as `filename`. The terms never
  * leave the browser; this writes them to the user's disk the same way the file is
@@ -29,10 +44,10 @@ function downloadDocument(
     anchor.click();
   } finally {
     anchor.remove();
-    // Defer the revoke to a later task: a synchronous revoke after click() can
-    // abort the save in browsers that copy the blob asynchronously, and the
-    // finally makes cleanup unconditional even if click() throws.
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+    // Defer the revoke well past the click (see REVOKE_DELAY_MS): a synchronous or
+    // next-task revoke can abort a save in browsers that copy the blob
+    // asynchronously. The finally makes cleanup unconditional even if click throws.
+    setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
   }
 }
 
@@ -59,6 +74,8 @@ export function TermsImportExport({
   const [error, setError] = useState<string>();
   const [imported, setImported] = useState(false);
 
+  const IMPORT_SUCCESS = "Imported. Review the loaded terms before generating.";
+
   const handleImport = () => {
     setImported(false);
     const result = importLinkageTerms(text);
@@ -74,7 +91,15 @@ export function TermsImportExport({
     setError(undefined);
     onImport(result.terms);
     setImported(true);
+    // Clear the consumed document so a later Reset + Import cannot silently
+    // re-import this now-stale paste (the Import button disables on empty text).
+    setText("");
   };
+
+  // A single message for the persistent live region below. Conditionally-mounted
+  // alerts are missed by screen readers that only watch regions already in the DOM,
+  // so the announcement lives in an always-present region whose content changes.
+  const liveMessage = error ?? (imported ? IMPORT_SUCCESS : "");
 
   return (
     <Stack gap="sm">
@@ -132,19 +157,20 @@ export function TermsImportExport({
         placeholder="{ ... }"
         styles={{ input: { fontFamily: "monospace" } }}
       />
+      {/* Visual-only status; the announcement is carried by the persistent live
+          region at the end so it is not missed when newly mounted. */}
       {error !== undefined && (
         <Alert
           color="red"
           icon={<IconAlertCircle aria-hidden />}
           title="Could not import these terms"
-          role="alert"
         >
           {error}
         </Alert>
       )}
       {imported && (
-        <Text size="xs" c="green" role="status">
-          Imported. Review the loaded terms before generating.
+        <Text size="xs" c="green">
+          {IMPORT_SUCCESS}
         </Text>
       )}
       <Group>
@@ -157,6 +183,13 @@ export function TermsImportExport({
           Import
         </Button>
       </Group>
+
+      {/* Persistent polite live region: always in the DOM, only its text changes,
+          so the import result is announced reliably (the visual alert/text above
+          mirror it). */}
+      <VisuallyHidden role="status" aria-live="polite">
+        {liveMessage}
+      </VisuallyHidden>
     </Stack>
   );
 }

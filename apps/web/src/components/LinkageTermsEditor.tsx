@@ -240,16 +240,18 @@ export function LinkageTermsEditor({
   // Once the keys are author-controlled (keysAuthored: an expert edit or an
   // import), reconciliation (which is template-driven) would drop authored keys, so
   // the edit then updates only the metadata and the satisfiability badges
-  // re-evaluate against it. This keys off keysAuthored, not the transient expertMode
-  // toggle, so toggling expert mode off does not re-arm the clobber. Read prev in
-  // the functional updater so it composes with a batched key edit.
+  // re-evaluate against it. The decision keys off keysAuthored ALONE, not the
+  // expertMode toggle: merely opening expert mode (no edits yet) leaves the keys as
+  // the metadata template, so a type change there must still reconcile -- and after
+  // Reset (keysAuthored cleared) reconciliation resumes even while expert mode
+  // stays open.
   const updateMetadata = (metadata: Metadata) => {
     setAnnouncement("");
-    // Decide whether to reconcile at event time (reading the current expertMode /
-    // keysAuthored), not inside the functional updater -- the updater stays a pure
-    // function of `prev` (the latest draft), which is all it needs `prev` for: to
-    // compose with a batched key edit.
-    const reconcile = !expertMode && !keysAuthored;
+    // Decide whether to reconcile at event time (reading the current keysAuthored),
+    // not inside the functional updater -- the updater stays a pure function of
+    // `prev` (the latest draft), which is all it needs `prev` for: to compose with a
+    // batched key edit.
+    const reconcile = !keysAuthored;
     setDraft((prev) =>
       reconcile ? setDraftMetadata(prev, metadata) : { ...prev, metadata },
     );
