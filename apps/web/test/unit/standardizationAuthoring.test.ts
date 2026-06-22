@@ -62,6 +62,25 @@ describe("function grouping parity with the descriptor table", () => {
     expect(display.label.toLowerCase()).toContain("substitute a default");
     expect(display.label).not.toBe("Coalesce");
   });
+
+  test("an unrecognized (imported) function name is sanitized for display", () => {
+    // The add-step menu only offers descriptor-backed functions, but an imported
+    // linkage-terms document carries a free-text transform `function`. An
+    // unrecognized name falls back to the raw name as its label -- which the editor
+    // renders as text and into aria-labels -- so it must be sanitized: a bidi /
+    // control / homoglyph payload must not survive into the DOM to spoof a benign
+    // function name.
+    // Construct the payload from code points so the test source stays ASCII.
+    const rlo = String.fromCharCode(0x202e); // right-to-left override (bidi)
+    const bel = String.fromCharCode(0x07); // a C0 control char
+    const hostile = `to_upper_case${rlo}evomer${bel}`;
+    const display = functionDisplay(hostile);
+    // The raw bidi-override and control code points must not survive the render.
+    expect(display.label).not.toContain(rlo);
+    expect(display.label).not.toContain(bel);
+    // The printable ASCII prefix is preserved; the dangerous bytes are escaped.
+    expect(display.label).toContain("to_upper_case");
+  });
 });
 
 describe("descriptor-driven typed param fields", () => {

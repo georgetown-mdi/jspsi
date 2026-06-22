@@ -1,6 +1,7 @@
 import {
   STANDARDIZATION_FUNCTION_DESCRIPTORS,
   compileLinearRegex,
+  sanitizeForDisplay,
 } from "@psilink/core";
 
 import type {
@@ -149,8 +150,15 @@ export const authorableFunctionNames: ReadonlySet<string> = new Set(
  * descriptor -- except `coalesce`, whose generic "Coalesce" name is replaced with
  * the plain-language framing the acceptance criteria call for ("If empty,
  * substitute a default"), since an operator should not need to know the SQL term.
- * Returns the raw name as a last-resort label for a function with no descriptor
- * (unreachable for an authorable function; the parity test guarantees coverage).
+ * Falls back to the function name as the label when no descriptor matches. That
+ * branch is unreachable from the add-step menu (which only offers descriptor-backed
+ * functions, asserted by the parity test) BUT IS reachable via an imported linkage-
+ * terms document, whose transform `function` is free text: an unrecognized name is
+ * rendered raw here. So the fallback name is run through {@link sanitizeForDisplay}
+ * -- a partner-controlled string must never reach the DOM (even as escaped text or
+ * an aria-label) carrying control / bidi-override / homoglyph bytes that could spoof
+ * a different, benign function name. The acceptor consent screen sanitizes the same
+ * value; this closes it on the inviter's editing surface too.
  */
 export function functionDisplay(functionName: string): {
   label: string;
@@ -164,7 +172,7 @@ export function functionDisplay(functionName: string): {
     };
   const descriptor = descriptorFor(functionName);
   return descriptor === undefined
-    ? { label: functionName, blurb: "" }
+    ? { label: sanitizeForDisplay(functionName), blurb: "" }
     : { label: descriptor.label, blurb: descriptor.blurb };
 }
 

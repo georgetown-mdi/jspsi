@@ -51,9 +51,15 @@ import { parseBoundedJson } from "./utils/boundedJson.js";
 /**
  * yaml parse options for a credential-bearing document: suppress non-fatal
  * warnings (they echo source to stderr; see channel 3 above) while still
- * throwing on fatal errors.
+ * throwing on fatal errors, and cap alias expansion so an alias bomb
+ * (billion-laughs) cannot blow up memory before the schema's own bounds bite.
+ *
+ * `maxAliasCount: 100` is the library's current default; pinning it makes the
+ * alias-bomb bound an explicit, enforced check here rather than an implicit
+ * reliance on a default a future yaml release could change. The web import path
+ * also length-caps the input before this runs.
  */
-const SAFE_YAML_OPTIONS = { logLevel: "error" } as const;
+const SAFE_YAML_OPTIONS = { logLevel: "error", maxAliasCount: 100 } as const;
 
 /** Reason appended after the caller's path-only label; never the parser message. */
 function yamlParseFailure(fileLabel: string): UsageError {

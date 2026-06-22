@@ -193,7 +193,7 @@ export function ExpertKeyEditor({
     [keys[keyIndex], keys[target]] = [keys[target], keys[keyIndex]];
     onChange({ ...draft, keys });
     announce(
-      `Moved ${keys[target].key.name} to position ${target + 1} of ${keys.length}. ` +
+      `Moved ${sanitizeForDisplay(keys[target].key.name)} to position ${target + 1} of ${keys.length}. ` +
         "Keys earlier in the list match first.",
     );
   };
@@ -216,6 +216,12 @@ export function ExpertKeyEditor({
       >
         {draft.keys.map((entry, keyIndex) => {
           const key = entry.key;
+          // Sanitized for use in aria-labels and live-region announcements: an
+          // imported key name is partner-controlled free text, so control / bidi /
+          // homoglyph bytes must not reach an attribute or announcement raw. The
+          // editable Key name input below shows the raw value (it is what the
+          // inviter edits and owns).
+          const keyLabel = sanitizeForDisplay(key.name);
           const satisfiable = keyIsSatisfiable(keyIndex);
           const swapData = key.elements.map((el) => ({
             value: elementIdentifier(el),
@@ -256,7 +262,7 @@ export function ExpertKeyEditor({
                       variant="subtle"
                       disabled={keyIndex === 0}
                       onClick={() => moveKey(keyIndex, -1)}
-                      aria-label={`Move ${key.name} earlier`}
+                      aria-label={`Move ${keyLabel} earlier`}
                     >
                       <IconArrowUp size={16} />
                     </ActionIcon>
@@ -264,7 +270,7 @@ export function ExpertKeyEditor({
                       variant="subtle"
                       disabled={keyIndex === draft.keys.length - 1}
                       onClick={() => moveKey(keyIndex, 1)}
-                      aria-label={`Move ${key.name} later`}
+                      aria-label={`Move ${keyLabel} later`}
                     >
                       <IconArrowDown size={16} />
                     </ActionIcon>
@@ -273,11 +279,11 @@ export function ExpertKeyEditor({
                       color="red"
                       onClick={() => {
                         onChange(removeKey(draft, keyIndex));
-                        announce(`Removed key ${key.name}.`);
+                        announce(`Removed key ${keyLabel}.`);
                         // Keep focus in the editor (the removed card held it).
                         addKeyRef.current?.focus();
                       }}
-                      aria-label={`Remove key ${key.name}`}
+                      aria-label={`Remove key ${keyLabel}`}
                     >
                       <IconTrash size={16} />
                     </ActionIcon>
@@ -287,7 +293,7 @@ export function ExpertKeyEditor({
                 <Stack
                   gap="xs"
                   component="ol"
-                  aria-label={`Elements of ${key.name}`}
+                  aria-label={`Elements of ${keyLabel}`}
                   style={{ listStyle: "none", padding: 0, margin: 0 }}
                 >
                   {key.elements.map((element, elementIndex) => {
