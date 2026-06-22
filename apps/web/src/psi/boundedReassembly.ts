@@ -67,12 +67,17 @@ export const MAX_CONCURRENT_REASSEMBLIES = 8;
  *   SMI/oddball in the one machine word (8 bytes) of its parent container's
  *   backing slot, with no separate heap allocation. A `bin`/`raw` value is also
  *   charged `scalar`: its payload is ~1x its wire bytes and so already bounded by
- *   {@link MAX_WEBRTC_FRAME_BYTES}, not by this structural budget. (The few number
+ *   {@link MAX_WEBRTC_FRAME_BYTES}, not by this structural budget. (The number
  *   markers that unpack to a HeapNumber rather than a SMI -- `float`, `double`,
  *   `uint32`/`int32` past the SMI range, `uint64`/`int64` -- retain ~24 bytes
- *   incl. their slot, more than the 8 charged here; but each costs >= 5 wire
- *   bytes, so the wire-byte cap bounds an all-HeapNumber frame to well within this
- *   budget's envelope regardless.)
+ *   incl. their slot, more than the 8 charged here. A homogeneous numeric array
+ *   stores them unboxed at ~8 bytes, matching the charge; but a peer can force
+ *   per-element boxing by mixing in one non-number to make the array
+ *   general-elements kind, reaching ~24 bytes/value. Each such value costs >= 5
+ *   wire bytes, so the wire-byte cap -- not this structure budget -- is the
+ *   binding control for a number-heavy frame, bounding even an all-boxed one to
+ *   ~1.2 GiB: on the order of, and slightly above, this budget, a fixed transient
+ *   freed once the schema layer rejects the frame.)
  * - `string` (`stringBase` 16 + `stringPerByte` 2 per declared wire byte): a
  *   SeqString header (~16 bytes) plus its characters. `unpack_string` decodes the
  *   declared UTF-8 wire length into a JS string of at most that many UTF-16 code

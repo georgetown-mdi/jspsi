@@ -606,6 +606,16 @@ describe("structureOverBudget: the per-value cost model", () => {
     atBoundary(new Uint8Array([0x01]), WEBRTC_VALUE_WEIGHTS.scalar); // fixint
   });
 
+  test("charges a wide number marker (double) the scalar weight", () => {
+    // double (0xcb + 8 payload bytes) is a HeapNumber at runtime but is charged
+    // the scalar slot here; this pins the documented under-count -- the wire-byte
+    // cap, not the structure budget, is the backstop for a number-heavy frame.
+    atBoundary(
+      new Uint8Array([0xcb, 0, 0, 0, 0, 0, 0, 0, 0]),
+      WEBRTC_VALUE_WEIGHTS.scalar,
+    );
+  });
+
   test("charges a string its header plus per-byte weight", () => {
     // fixstr "abcd": stringBase + 4 * stringPerByte.
     atBoundary(new Uint8Array(fixstr("abcd")), stringWeightOf(4));
