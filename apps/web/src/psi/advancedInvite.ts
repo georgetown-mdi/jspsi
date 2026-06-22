@@ -912,10 +912,12 @@ function standardizationForImportedTerms(
   const extras: Standardization = [];
   for (const field of terms.linkageFields) {
     if (baseOutputs.has(field.name)) continue;
-    // The default standardization over the imported terms emitted no transformation
-    // for this field -- its type has no non-`ignored` column to bind, or no default
-    // cleaning pipeline -- so it cannot be reconstructed and is left undeclared
-    // (fail-closed). Reading the steps here (rather than a separate `.has()` probe)
+    // First of two fail-closed gates that leave a field undeclared. Here the default
+    // standardization over the imported terms emitted no transformation for this
+    // field at all -- its type has no non-`ignored` column, or no default cleaning
+    // pipeline -- so there is no binding to reconstruct. (The second gate is the
+    // `freeColumn === undefined` check below: steps exist, but no `role: linkage`
+    // column is free.) Reading the steps here (rather than a separate `.has()` probe)
     // also narrows them to a defined array for the push below.
     const steps = stepsByField.get(field.name);
     if (steps === undefined) continue;
