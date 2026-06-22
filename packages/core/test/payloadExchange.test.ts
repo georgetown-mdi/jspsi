@@ -7,10 +7,11 @@ import {
   assertPayloadSendDisclosed,
 } from "../src/payloadExchange";
 import { prepareForExchange } from "../src/exchange";
+import { deriveAcceptedLinkageTerms } from "../src/config/linkageTerms";
 import { UsageError } from "../src/errors";
 
 import type { Metadata } from "../src/config/metadata";
-import type { Payload } from "../src/config/linkageTerms";
+import type { LinkageTerms, Payload } from "../src/config/linkageTerms";
 import type { PartnerPayload } from "../src/payloadExchange";
 
 import {
@@ -269,6 +270,111 @@ test("prepareForExchange: rejects a config whose payload.send over-declares", ()
       ["first_name", "secret"],
     ),
   ).toThrow(UsageError);
+});
+
+// --- assertPayloadSendDisclosed on the ACCEPTOR path -------------------------
+
+// assertPayloadSendDisclosed runs in prepareForExchange for EVERY party,
+// including the acceptor, whose payload is the MIRROR of the inviter's
+// (deriveAcceptedLinkageTerms): the acceptor's `send` is the inviter's `receive`
+// -- the PARTNER's columns the inviter requested, which are in the ACCEPTOR's own
+// column namespace. Validating that mirrored send against the acceptor's own
+// metadata is therefore the correct, same-namespace comparison. (The earlier
+// verbatim adoption put the inviter's send -- in the INVITER's namespace -- onto
+// the acceptor, so checking it against the acceptor's metadata cross-referenced
+// the wrong namespace; the mirror removes that. Item 203461508.)
+
+const inviterBaseTerms: LinkageTerms = {
+  version: "1.0.0",
+  identity: "Inviter",
+  date: "2026-01-01",
+  algorithm: "psi",
+  output: { expectsOutput: true, shareWithPartner: true },
+  deduplicate: false,
+  linkageFields: [{ name: "first_name", type: "first_name" }],
+  linkageKeys: [{ name: "FN", elements: [{ field: "first_name" }] }],
+};
+
+test("assertPayloadSendDisclosed (acceptor path): a mirrored send the acceptor discloses is accepted", () => {
+  // The inviter REQUESTS case_id from the partner (payload.receive); the mirror
+  // makes it the acceptor's payload.send, in the acceptor's own namespace.
+  const inviter: LinkageTerms = {
+    ...inviterBaseTerms,
+    payload: { receive: [{ name: "case_id" }] },
+  };
+  const acceptor = deriveAcceptedLinkageTerms(inviter, "Acceptor");
+  expect(acceptor.payload).toStrictEqual({ send: [{ name: "case_id" }] });
+  // The acceptor discloses case_id in its OWN metadata, so the same-namespace
+  // check accepts the mirrored send.
+  const acceptorMeta: Metadata = [
+    {
+      name: "first_name",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+    { name: "case_id", type: "other", role: "payload", isPayload: true },
+  ];
+  expect(() =>
+    assertPayloadSendDisclosed(acceptor.payload, acceptorMeta),
+  ).not.toThrow();
+});
+
+test("assertPayloadSendDisclosed (acceptor path): a mirrored send the acceptor does NOT disclose is rejected", () => {
+  // Same inviter request, but the acceptor never marked case_id as sent (role
+  // ignored wins over isPayload). The mirrored send over-declares against the
+  // acceptor's OWN metadata -- a genuine acceptor over-declaration, correctly
+  // rejected, preserving the forward-only subset guarantee on the acceptor too.
+  const inviter: LinkageTerms = {
+    ...inviterBaseTerms,
+    payload: { receive: [{ name: "case_id" }] },
+  };
+  const acceptor = deriveAcceptedLinkageTerms(inviter, "Acceptor");
+  const acceptorMeta: Metadata = [
+    {
+      name: "first_name",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+    { name: "case_id", type: "other", role: "ignored", isPayload: true },
+  ];
+  expect(() =>
+    assertPayloadSendDisclosed(acceptor.payload, acceptorMeta),
+  ).toThrow(UsageError);
+  expect(() =>
+    assertPayloadSendDisclosed(acceptor.payload, acceptorMeta),
+  ).toThrow(/case_id/);
+});
+
+test("assertPayloadSendDisclosed (acceptor path): the common inviter-send shape leaves the acceptor send empty (dormant early-return)", () => {
+  // The common shape: the inviter authors a send and NO receive. The mirror puts
+  // the inviter's send into the acceptor's RECEIVE, leaving the acceptor's send
+  // absent -- so the check early-returns regardless of the acceptor's metadata,
+  // and a legitimate inviter-authored send (in the inviter's namespace) is never
+  // falsely rejected on the acceptor.
+  const inviter: LinkageTerms = {
+    ...inviterBaseTerms,
+    payload: { send: [{ name: "enrollment_date" }] },
+  };
+  const acceptor = deriveAcceptedLinkageTerms(inviter, "Acceptor");
+  expect(acceptor.payload).toStrictEqual({
+    receive: [{ name: "enrollment_date" }],
+  });
+  expect(acceptor.payload?.send).toBeUndefined();
+  // enrollment_date is the INVITER's column; the acceptor need not have it, and
+  // the check does not consult it because the acceptor's send is empty.
+  const acceptorMeta: Metadata = [
+    {
+      name: "first_name",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+  ];
+  expect(() =>
+    assertPayloadSendDisclosed(acceptor.payload, acceptorMeta),
+  ).not.toThrow();
 });
 
 // --- exchangePayloads --------------------------------------------------------
