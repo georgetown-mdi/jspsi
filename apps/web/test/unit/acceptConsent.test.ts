@@ -901,7 +901,7 @@ describe("summarizeInvitation", () => {
     expect(ln.transforms[0].effect).toBe("the first 3 characters");
   });
 
-  test("renders a non-first substring slice as a character range", () => {
+  test("renders an interior substring slice as a character range", () => {
     const summary = summarizeInvitation(
       makeToken({
         linkageFields: [{ name: "last_name", type: "last_name" }],
@@ -1191,6 +1191,117 @@ describe("summarizeInvitation", () => {
     // A bare parse_date defaults to the full layout on both sides -- no drop.
     expect(headerFor([{ function: "parse_date" }])).toBe("last name");
     expect(headerFor(undefined)).toBe("last name");
+  });
+
+  test("shows a single most-salient marker, effect-named before directly-named", () => {
+    const headerFor = (transform: LinkageKeyElement["transform"]) =>
+      summarizeInvitation(
+        makeToken({
+          linkageFields: [{ name: "ln", type: "last_name" }],
+          linkageKeys: [
+            {
+              name: "K",
+              elements: [{ field: "ln", ...(transform && { transform }) }],
+            },
+          ],
+        }),
+      ).linkageKeys[0].headerFields[0];
+
+    // An element carrying more than one rule shows just the most salient: an
+    // effect-named rule wins over a directly-named one ...
+    expect(
+      headerFor([
+        {
+          function: "replace_regex",
+          params: { pattern: "a", replacement: "b" },
+        },
+        { function: "substring", params: { start: 1, length: 3 } },
+      ]),
+    ).toBe("last name (partial)");
+    // ... and a component-dropping parse_date (effect "partial") wins over a
+    // directly-named null_if ...
+    expect(
+      headerFor([
+        { function: "null_if", params: { values: ["x"] } },
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYY" },
+        },
+      ]),
+    ).toBe("last name (partial)");
+    // ... but a non-dropping parse_date adds no marker, so the directly-named
+    // null_if shows instead.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+        },
+        { function: "null_if", params: { values: ["x"] } },
+      ]),
+    ).toBe("last name (excludes values)");
+  });
+
+  test("classifies every core standardization function as marked or routine", () => {
+    // The header marker is a hand-maintained classification; pin it against core's
+    // full function set in both directions, so a new core function cannot ship
+    // without a deliberate marked/routine decision here (the glossary sync test
+    // guards the one-expand-down description, not this always-visible marker).
+    // Param-dependent edges (parse_date drops, substring positions) have their own
+    // tests; here each function is shown with the params that yield its baseline.
+    const EXPECTED: Record<string, string | null> = {
+      // Effect named where the matching direction is determinable.
+      substring: "partial",
+      phonetic: "sound-alike",
+      split_on: "multiple",
+      coalesce: "fallback",
+      // Rule named directly where a partner pattern or value list makes the
+      // direction indeterminate.
+      replace_regex: "pattern replacement",
+      extract_regex: "pattern extraction",
+      filter_regex: "pattern filter",
+      null_if: "excludes values",
+      // Routine standardization, not flagged (parse_date is routine until its
+      // output drops a component).
+      remove_non_ascii: null,
+      replace_separators_with_spaces: null,
+      squash_spaces: null,
+      remove_punctuation: null,
+      remove_dashes: null,
+      trim_whitespace: null,
+      to_upper_case: null,
+      to_lower_case: null,
+      remove_accents: null,
+      remove_affixes: null,
+      pad_left: null,
+      parse_date: null,
+    };
+    // Two-directional: the classification covers exactly core's function set.
+    expect(Object.keys(EXPECTED).sort()).toEqual(
+      [...STANDARDIZATION_FUNCTION_NAMES].sort(),
+    );
+    for (const [fn, marker] of Object.entries(EXPECTED)) {
+      const params = fn === "substring" ? { start: 1, length: 3 } : undefined;
+      const entry = summarizeInvitation(
+        makeToken({
+          linkageFields: [{ name: "ln", type: "last_name" }],
+          linkageKeys: [
+            {
+              name: "K",
+              elements: [
+                {
+                  field: "ln",
+                  transform: [{ function: fn, ...(params && { params }) }],
+                },
+              ],
+            },
+          ],
+        }),
+      ).linkageKeys[0].headerFields[0];
+      expect(entry).toBe(
+        marker === null ? "last name" : `last name (${marker})`,
+      );
+    }
   });
 
   test("dedupes header entries by label and marker, keeping a truncated field distinct", () => {
