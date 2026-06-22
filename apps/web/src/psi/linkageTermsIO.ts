@@ -103,7 +103,9 @@ export function exportLinkageTerms(
  * document produced by {@link exportLinkageTerms} round-trips.
  *
  * Bounds, applied before the schema's own: the input is length-capped at
- * {@link MAX_IMPORT_CHARS}, and YAML alias expansion at {@link MAX_YAML_ALIAS_COUNT}.
+ * {@link MAX_IMPORT_CHARS}; YAML alias expansion is bounded by the `yaml` parser's
+ * built-in `maxAliasCount` default (the sensitive-file chokepoint does not raise
+ * it), which caps a billion-laughs alias blow-up before the schema's own bounds.
  */
 export function importLinkageTerms(text: string): LinkageTermsImportResult {
   if (text.length > MAX_IMPORT_CHARS)
@@ -181,11 +183,17 @@ function readableTermsError(error: ZodError): string {
       ? issue.message
       : issue.code === "invalid_type"
         ? "is missing or has the wrong type"
-        : issue.code === "too_big" || issue.code === "too_small"
-          ? "is out of the allowed range"
-          : issue.code === "invalid_value" || issue.code === "invalid_union"
-            ? "is not an allowed value"
-            : "is not valid";
+        : // `invalid_format` is Zod 4's code for a string-format failure (a
+          // `.regex()` like the version field, or a `z.iso.date()` like a date);
+          // its default message can quote the failing pattern, so map it to fixed
+          // copy rather than forward issue.message.
+          issue.code === "invalid_format"
+          ? "is not in the expected format"
+          : issue.code === "too_big" || issue.code === "too_small"
+            ? "is out of the allowed range"
+            : issue.code === "invalid_value" || issue.code === "invalid_union"
+              ? "is not an allowed value"
+              : "is not valid";
 
   const more =
     error.issues.length > 1

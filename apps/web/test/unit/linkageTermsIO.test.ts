@@ -129,6 +129,24 @@ describe("importLinkageTerms rejection", () => {
     if (!result.success) expect(result.error).not.toContain("PWNEDKEY");
   });
 
+  test("localizes a string-format failure (version regex) without echoing the value", () => {
+    // `version` is a `.regex()` field, so a malformed value fails with Zod 4's
+    // `invalid_format` code. The readable error must locate it ("version") and use
+    // fixed copy ("not in the expected format"), never the hostile value Zod's own
+    // message could quote.
+    const hostile = "9.9.9<script>PWNED";
+    const result = importLinkageTerms(
+      JSON.stringify({ ...TERMS, version: hostile }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toMatch(/version/);
+      expect(result.error).toMatch(/format/i);
+      expect(result.error).not.toContain("PWNED");
+      expect(result.error).not.toContain("script");
+    }
+  });
+
   test("rejects an over-length document before parsing", () => {
     const huge = " ".repeat(MAX_IMPORT_CHARS + 1);
     const result = importLinkageTerms(huge);

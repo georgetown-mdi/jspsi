@@ -200,7 +200,7 @@ describe("LinkageTermsEditor", () => {
     await expect
       .element(
         page.getByRole("checkbox", {
-          name: "Allow a record to match more than one of your partner's",
+          name: "Allow more than one of your records to match the same partner record",
         }),
       )
       .toBeDisabled();
@@ -212,5 +212,36 @@ describe("LinkageTermsEditor", () => {
     await expect
       .element(page.getByRole("button", { name: "Download JSON" }))
       .toBeInTheDocument();
+  });
+
+  test("an expert-authored key survives a metadata edit after expert mode is toggled off", async () => {
+    // Regression: authoring a key, turning expert mode OFF, then editing a column
+    // must not silently re-derive the key list from the template and drop the
+    // authored key (the keys are author-controlled once an expert edit occurs).
+    mount();
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    // Author a new key (appended as "New key"), which marks the key list
+    // author-controlled. Locate it by its edit-rail reorder control (unique to the
+    // editor; the name also appears in the live preview, so plain text is
+    // ambiguous).
+    const authoredKeyControl = () =>
+      page.getByRole("button", { name: "Move New key earlier" });
+    await userEvent.click(page.getByRole("button", { name: "Add a key" }));
+    await expect.element(authoredKeyControl()).toBeInTheDocument();
+    // Back to the guided view; the authored key is still listed.
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    await expect.element(authoredKeyControl()).toBeInTheDocument();
+    // Edit a column's disclosure (any metadata change drives the reconcile path).
+    // first_name opens at "match"; one step down selects "payload".
+    await userEvent.click(
+      page.getByRole("combobox", { name: "How column first_name is used" }),
+    );
+    await userEvent.keyboard("{ArrowDown}{Enter}");
+    // The authored key is still present -- the metadata edit did not clobber it.
+    await expect.element(authoredKeyControl()).toBeInTheDocument();
   });
 });

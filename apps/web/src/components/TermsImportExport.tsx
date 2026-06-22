@@ -21,7 +21,12 @@ function downloadDocument(
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = filename;
+  // Some environments (older Firefox/Safari, certain sandboxed contexts) only
+  // honor the download attribute when the anchor is in the live document; append
+  // it before clicking and remove it after so the save fires everywhere.
+  document.body.appendChild(anchor);
   anchor.click();
+  anchor.remove();
   URL.revokeObjectURL(url);
 }
 

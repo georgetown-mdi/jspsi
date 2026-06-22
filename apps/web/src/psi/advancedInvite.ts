@@ -125,9 +125,11 @@ export interface AdvancedInviteDraft {
    * count-only setting the run does not yet honor (the editor control is disabled
    * to match). Carried so the control unlocks the moment the flag flips. */
   algorithm: Algorithm;
-  /** Whether a record may match more than one of the partner's. Gated:
-   * {@link buildAdvancedTerms} clamps it to `false` while
-   * {@link APPLIED_SETTINGS}.deduplicate is false. */
+  /** Whether more than one of the holder's records may match the same partner
+   * record -- deduplication of the holder's OWN inputs, which lets multiple of its
+   * inputs map to the same matched output (see EXCHANGE_REFERENCE
+   * `linkage_terms.deduplicate`). Gated: {@link buildAdvancedTerms} clamps it to
+   * `false` while {@link APPLIED_SETTINGS}.deduplicate is false. */
   deduplicate: boolean;
   legalAgreement?: DraftLegalAgreement;
   /** The inviter's per-party column metadata (semantic type + disclosure role),
@@ -660,10 +662,14 @@ function uniqueKeyName(base: string, taken: ReadonlySet<string>): string {
 // --- Import ------------------------------------------------------------------
 
 /** Inverse of {@link outputForDirection}: map an {@link Output} pair to the 3-way
- * direction for an imported terms set. The "neither receives" pair has no
- * direction, but validated terms never carry it (the schema rejects it), so an
- * imported set always maps to one of the three; the final fallback only keeps the
- * function total. */
+ * direction for an imported terms set. The "neither receives"
+ * `{ expectsOutput: false, shareWithPartner: false }` pair has no direction; it is
+ * NOT rejected by {@link safeParseLinkageTerms} (the schema accepts any two output
+ * booleans -- the "neither party expects output" check runs later, in
+ * `validateCompatibility` at exchange time), so an imported set could carry it. The
+ * final branch maps that (malformed, exchange-rejected) pair to the safe `"both"`
+ * default, which the inviter sees selected and reviews before generating, rather
+ * than loading a forbidden state silently. */
 function directionForOutput(output: Output): OutputDirection {
   if (output.expectsOutput && output.shareWithPartner) return "both";
   if (output.expectsOutput) return "inviter";

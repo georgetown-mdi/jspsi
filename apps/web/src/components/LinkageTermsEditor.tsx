@@ -165,6 +165,14 @@ export function LinkageTermsEditor({
   // data mode -- both views edit the same draft.keys.
   const [expertMode, setExpertMode] = useState(false);
 
+  // Set once the key list becomes author-controlled (an expert key edit or an
+  // import), and never cleared except by Reset. It, not the transient expertMode
+  // toggle, governs whether a metadata edit reconciles the keys (see
+  // updateMetadata): without it, authoring keys then toggling expert mode off would
+  // let the next metadata edit silently re-derive the key list and drop the
+  // authored keys.
+  const [keysAuthored, setKeysAuthored] = useState(false);
+
   // A polite live region for validation and reorder announcements, kept in a
   // stable wrapper so assistive tech announces updates (the Status component uses
   // the same idiom). Reorder sets a specific message; it is cleared by the next
@@ -228,15 +236,19 @@ export function LinkageTermsEditor({
   };
 
   // A column-metadata edit re-derives the offerable key set (a type change adds or
-  // drops keys) and reconciles the enabled/order state -- see setDraftMetadata. In
-  // expert mode the keys are author-controlled, so reconciliation (which is
-  // template-driven) would drop authored keys; there the edit updates only the
-  // metadata, and the satisfiability badges re-evaluate against it. Read prev in
+  // drops keys) and reconciles the enabled/order state -- see setDraftMetadata.
+  // Once the keys are author-controlled (keysAuthored: an expert edit or an
+  // import), reconciliation (which is template-driven) would drop authored keys, so
+  // the edit then updates only the metadata and the satisfiability badges
+  // re-evaluate against it. This keys off keysAuthored, not the transient expertMode
+  // toggle, so toggling expert mode off does not re-arm the clobber. Read prev in
   // the functional updater so it composes with a batched key edit.
   const updateMetadata = (metadata: Metadata) => {
     setAnnouncement("");
     setDraft((prev) =>
-      expertMode ? { ...prev, metadata } : setDraftMetadata(prev, metadata),
+      expertMode || keysAuthored
+        ? { ...prev, metadata }
+        : setDraftMetadata(prev, metadata),
     );
   };
 
@@ -286,6 +298,9 @@ export function LinkageTermsEditor({
 
   const handleReset = () => {
     setDraft(freshDraft());
+    // Reset returns to the guided, metadata-derived key set, so metadata edits
+    // reconcile again.
+    setKeysAuthored(false);
     setAnnouncement("Reset to the recommended settings.");
   };
 
@@ -295,6 +310,9 @@ export function LinkageTermsEditor({
   // columns cannot satisfy shows as not-satisfiable rather than silently breaking.
   const handleImport = (terms: LinkageTerms) => {
     setDraft(draftFromTerms(terms, seed, draft.lifetimeSeconds));
+    // The imported keys are author-controlled (not the metadata template), so a
+    // later metadata edit must not reconcile them away.
+    setKeysAuthored(true);
     setAnnouncement(
       "Loaded the imported terms. Review them, then generate the invitation.",
     );
@@ -420,6 +438,9 @@ export function LinkageTermsEditor({
                   fuzzyApplied={APPLIED_SETTINGS.fuzzyComparisons}
                   onChange={(next) => {
                     setAnnouncement("");
+                    // The keys are now author-controlled; suppress metadata-driven
+                    // reconciliation from here on (even after expert mode is off).
+                    setKeysAuthored(true);
                     setDraft(next);
                   }}
                   announce={setAnnouncement}
@@ -579,7 +600,7 @@ export function LinkageTermsEditor({
                     }
                   />
                   <Checkbox
-                    label="Allow a record to match more than one of your partner's"
+                    label="Allow more than one of your records to match the same partner record"
                     checked={draft.deduplicate}
                     disabled={!APPLIED_SETTINGS.deduplicate}
                     description={
