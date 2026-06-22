@@ -1,6 +1,7 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
 import { afterEach, describe, expect, test } from "vitest";
+import { userEvent } from "vitest/browser";
 
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -72,6 +73,24 @@ async function waitForEl(selector: string): Promise<HTMLElement> {
   return container!.querySelector(selector) as HTMLElement;
 }
 
+/** Move the pointer off `el`, then return its resting (non-hover) background.
+ *
+ * Under full-suite browser load a freshly mounted surface can inherit `:hover`
+ * from wherever the previous test left the shared pointer -- over this test's
+ * small top-left mount often enough to flake. A filled-primary surface's hover
+ * fill is one shade lighter than its resting fill (light cyan-9 -> cyan-8), which
+ * drops white-on-fill from 5.59:1 to 4.35:1, just under the AA floor that the
+ * resting state (the one AA is judged on) clears with margin. `unhover` ignores
+ * its argument and hovers `html > body`, moving the pointer to the body centre --
+ * off this test's small top-left mount -- so polling `el` off `:hover` before reading
+ * the live background is deterministic and reads what actually renders (a real
+ * contrast regression then fails the assertion, not this poll). */
+async function restingBackground(el: HTMLElement): Promise<string> {
+  await userEvent.unhover(el);
+  await expect.poll(() => el.matches(":hover")).toBe(false);
+  return getComputedStyle(el).backgroundColor;
+}
+
 /** sRGB channels of a computed `rgb(r, g, b)` / `rgba(...)` color string. */
 function channels(color: string): [number, number, number] {
   const m = color.match(/-?\d+(\.\d+)?/g);
@@ -97,8 +116,11 @@ function contrast(a: string, b: string): number {
 
 describe("rendered theme colour contrast (WCAG 2.1 AA)", () => {
   // Black resolves brighter on cyan-6 (7.53) than white does on cyan-9 (5.59), so a
-  // single >= 4.5 floor covers both schemes; the per-scheme text assertions below
-  // pin WHICH colour renders, which is the half that regressed before.
+  // single >= 4.5 floor covers both schemes; expectedText pins WHICH text colour
+  // renders, the half that regressed before. The background is read through
+  // restingBackground so a stale-pointer hover -- a lighter fill that dips the light
+  // case under the floor (only light: dark's hover fill is darker and raises the
+  // black-on-fill ratio) -- is never sampled in place of the resting fill.
   for (const { scheme, expectedText } of [
     { scheme: "light" as const, expectedText: "rgb(255, 255, 255)" },
     { scheme: "dark" as const, expectedText: "rgb(0, 0, 0)" },
@@ -107,7 +129,8 @@ describe("rendered theme colour contrast (WCAG 2.1 AA)", () => {
       mount(scheme, createElement(FilledButton, null, "Continue"));
       const btn = await waitForEl(".mantine-Button-root");
       await expect.poll(() => getComputedStyle(btn).color).toBe(expectedText);
-      const { color, backgroundColor } = getComputedStyle(btn);
+      const backgroundColor = await restingBackground(btn);
+      const { color } = getComputedStyle(btn);
       expect(contrast(color, backgroundColor)).toBeGreaterThanOrEqual(4.5);
     });
 
@@ -124,7 +147,7 @@ describe("rendered theme colour contrast (WCAG 2.1 AA)", () => {
       const input = await waitForEl(".mantine-Checkbox-input");
       const icon = await waitForEl(".mantine-Checkbox-icon");
       await expect.poll(() => getComputedStyle(icon).color).toBe(expectedText);
-      const fill = getComputedStyle(input).backgroundColor;
+      const fill = await restingBackground(input);
       expect(
         contrast(getComputedStyle(icon).color, fill),
       ).toBeGreaterThanOrEqual(4.5);
@@ -144,8 +167,37 @@ describe("rendered theme colour contrast (WCAG 2.1 AA)", () => {
       );
       const ai = await waitForEl(".mantine-ActionIcon-root");
       await expect.poll(() => getComputedStyle(ai).color).toBe(expectedText);
-      const { color, backgroundColor } = getComputedStyle(ai);
+      const backgroundColor = await restingBackground(ai);
+      const { color } = getComputedStyle(ai);
       expect(contrast(color, backgroundColor)).toBeGreaterThanOrEqual(4.5);
     });
   }
+
+  // Exercises the de-flake mechanism directly, so the guard the cases above rely
+  // on is a tested invariant rather than only the absence of a rare natural flake
+  // (which a finite number of green runs cannot prove). Force the stale-hover
+  // state on the light button -- where the hover fill (cyan-8) genuinely renders
+  // a lower contrast than the resting fill (cyan-9) -- then prove restingBackground
+  // moves the pointer off, clears :hover, and reads a resting fill clearing AA.
+  test("restingBackground clears a stale hover before measuring", async () => {
+    mount("light", createElement(FilledButton, null, "Continue"));
+    const btn = await waitForEl(".mantine-Button-root");
+    await expect
+      .poll(() => getComputedStyle(btn).color)
+      .toBe("rgb(255, 255, 255)");
+    await userEvent.hover(btn);
+    await expect.poll(() => btn.matches(":hover")).toBe(true);
+    const hoverContrast = contrast(
+      getComputedStyle(btn).color,
+      getComputedStyle(btn).backgroundColor,
+    );
+    const backgroundColor = await restingBackground(btn);
+    expect(btn.matches(":hover")).toBe(false);
+    const { color } = getComputedStyle(btn);
+    const restingContrast = contrast(color, backgroundColor);
+    // The hover state is the one the cases above must avoid sampling; resting must
+    // clear the floor and read brighter than the hover fill it replaced.
+    expect(restingContrast).toBeGreaterThanOrEqual(4.5);
+    expect(restingContrast).toBeGreaterThan(hoverContrast);
+  });
 });
