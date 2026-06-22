@@ -2485,11 +2485,11 @@ describe("checkValueConstraints", () => {
     ).toBe(true);
   });
 
-  test("a partner-crafted allowedCharacters cannot silently suppress the disallowed-characters warning", () => {
+  test("a multi-character match-everything allowedCharacters breakout cannot suppress the warning", () => {
     // `a]|.*[b` breaks the class into match-anything alternation that, applied to
     // the whole value, would never warn. Tested per character, a genuinely
-    // disallowed value is still flagged -- the warning cannot be turned off by
-    // class breakout.
+    // disallowed value is still flagged -- a multi-character construct cannot match
+    // a single code point, so this breakout family cannot turn the warning off.
     const field: LinkageField = {
       name: "fn",
       type: "first_name",
@@ -2497,6 +2497,34 @@ describe("checkValueConstraints", () => {
     };
     expect(
       checkValueConstraints(field, "Z@#$").some(
+        (v) => v.kind === "disallowedCharacters",
+      ),
+    ).toBe(true);
+  });
+
+  test("a shorthand-in-class allowedCharacters admits the code point (accepted advisory limit, not a hole)", () => {
+    // The per-code-point test defeats multi-character breakouts but NOT a class
+    // that genuinely admits the code point: `]|\w|[` parses (leading `]` literal)
+    // as one class admitting every word character, so a "disallowed" letter is not
+    // flagged. This is the class behaving as a class; because allowedCharacters is
+    // warn-not-enforce, the only effect is a suppressed advisory badge -- never a
+    // data-filtering or match-correctness effect. Pinned so the documented limit in
+    // withinAllowedCharacters cannot silently drift, in either direction.
+    const field: LinkageField = {
+      name: "fn",
+      type: "first_name",
+      constraints: { allowedCharacters: "]|\\w|[" },
+    };
+    // "Z" is a word character the shorthand admits -> not flagged.
+    expect(
+      checkValueConstraints(field, "Z").some(
+        (v) => v.kind === "disallowedCharacters",
+      ),
+    ).toBe(false);
+    // A non-word character is still outside the class -> still flagged, so the
+    // class is genuinely evaluated (not blanket-suppressed).
+    expect(
+      checkValueConstraints(field, "!").some(
         (v) => v.kind === "disallowedCharacters",
       ),
     ).toBe(true);

@@ -1667,12 +1667,20 @@ export interface ConstraintViolation {
  * throwing. {@link NameConstraintsSchema} validates the class under this SAME
  * engine, so for a decoded token that fail-open is a backstop, not a path: a class
  * that would not compile here is rejected at terms validation. (2) Warning
- * suppression: a breakout that matches everything (e.g. `a]|.*[b`) would silently
- * pass disallowed values. Testing one code point at a time against `^[allowed]$`
- * defeats it -- a multi-character breakout construct cannot match a single
- * character -- so a genuinely disallowed value is still flagged. For a legitimate
- * class this is exactly `^[allowed]*$` (every character must be in the class). The
- * empty string trivially conforms. */
+ * suppression: a breakout that relies on matching a MULTI-character span (e.g.
+ * `a]|.*[b`, `(a+)+`) would silently pass disallowed values if the whole value were
+ * matched at once. Testing one code point at a time against `^[allowed]$` defeats
+ * that family -- a multi-character construct cannot match a single code point, so
+ * such a value is still flagged. It does NOT, and need not, defeat a class that
+ * genuinely ADMITS the code point -- including a character-class shorthand smuggled
+ * in via the leading-`]`-is-literal trick (e.g. `]|\w|[`, which parses as one class
+ * admitting every word character, so a "disallowed" letter is not flagged). That is
+ * the class behaving as a class; because the check is warn-not-enforce the only
+ * consequence is a suppressed advisory badge, never a data-filtering or
+ * match-correctness effect -- so it is an accepted limit, not a hole. (Encoded by
+ * the suppression tests in standardization.test.ts.) For a legitimate class the
+ * per-code-point test is exactly `^[allowed]*$` (every character must be in the
+ * class). The empty string trivially conforms. */
 function withinAllowedCharacters(value: string, allowed: string): boolean {
   let oneOf: CompiledLinearRegex;
   try {
