@@ -101,9 +101,12 @@ describe("DefaultCatchBoundary", () => {
   test("renders the error component and the retry action", async () => {
     mountBoundary(new Error("boom"));
 
+    // The boundary forwards `error` into <ErrorComponent error={error} />; the
+    // mock surfaces error.message, so asserting the text (not just the marker's
+    // presence) proves the prop is wired through and would catch a dropped error.
     await expect
       .element(page.getByTestId("error-component"))
-      .toBeInTheDocument();
+      .toHaveTextContent("boom");
     await expect
       .element(page.getByRole("button", { name: "Try again" }))
       .toBeInTheDocument();
