@@ -20,6 +20,7 @@ import {
   IconPlus,
   IconTrash,
 } from "@tabler/icons-react";
+import { useIsomorphicEffect } from "@mantine/hooks";
 
 import { sanitizeForDisplay } from "@psilink/core";
 
@@ -211,6 +212,7 @@ function StepRow({
             disabled={index === 0}
             onClick={() => onMove(-1)}
             aria-label={`Move ${label} earlier`}
+            data-step-action="up"
           >
             <IconArrowUp size={16} />
           </ActionIcon>
@@ -219,6 +221,7 @@ function StepRow({
             disabled={index === count - 1}
             onClick={() => onMove(1)}
             aria-label={`Move ${label} later`}
+            data-step-action="down"
           >
             <IconArrowDown size={16} />
           </ActionIcon>
@@ -227,6 +230,7 @@ function StepRow({
             color="red"
             onClick={onRemove}
             aria-label={`Remove ${label}`}
+            data-step-action="remove"
           >
             <IconTrash size={16} />
           </ActionIcon>
@@ -297,17 +301,30 @@ export function StepListEditor({
     return id;
   };
 
-  // Removing a step unmounts the row that held focus, which would otherwise fall
-  // to document.body. The "add a step" button is always present and not in the
-  // removed row, so move focus there after a removal.
+  // Where to land focus after a structural edit commits. A removed or moved step's
+  // control vanishes (remove) or disables at an edge (move), which otherwise drops
+  // focus to <body>; this records the intended target, and the layout effect below
+  // applies it against the committed list -- matching the focus guard the rest of
+  // the app's editors use on removal.
+  // Typed HTMLDivElement to match Mantine's polymorphic Stack ref (it does not
+  // narrow to <ol> from `component`); the element is the rendered `<ol>` at runtime
+  // and only its base `.children` / `.querySelector` are used.
+  const listRef = useRef<HTMLDivElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
+  const pendingFocusRef = useRef<{
+    action: "remove" | "move";
+    index: number;
+    direction?: -1 | 1;
+  } | null>(null);
 
   const addStep = (functionName: string) =>
     onStepsChange([...steps, newStep(functionName)]);
 
   const removeStep = (index: number) => {
+    // Land focus on the step that slides into this slot, or the last one if this was
+    // the tail; on the Add button when the list empties.
+    pendingFocusRef.current = { action: "remove", index };
     onStepsChange(steps.filter((_, i) => i !== index));
-    addButtonRef.current?.focus();
   };
 
   const moveStep = (index: number, direction: -1 | 1) => {
@@ -315,8 +332,53 @@ export function StepListEditor({
     if (target < 0 || target >= steps.length) return;
     const next = [...steps];
     [next[index], next[target]] = [next[target], next[index]];
+    // Keep focus on the moved step at its new position; the layout effect picks the
+    // same-direction control, or the opposite one when the move reached an edge and
+    // disabled it.
+    pendingFocusRef.current = { action: "move", index: target, direction };
     onStepsChange(next);
   };
+
+  // Apply the pending focus once the new list is in the DOM. A layout effect (not a
+  // passive one) so focus lands synchronously before paint -- otherwise a removed or
+  // moved control leaves focus on <body> for a frame, a visible flicker. Keyed on the
+  // step array, so it also fires on a param edit (which produces a new array); that is
+  // a no-op because only the move/remove handlers set pendingFocusRef -- the null
+  // guard below exits at once when no structural edit queued a target. (Isomorphic so
+  // it degrades to a passive effect under SSR rather than warning.)
+  useIsomorphicEffect(() => {
+    const pending = pendingFocusRef.current;
+    if (pending === null) return;
+    pendingFocusRef.current = null;
+    const rows = listRef.current?.children;
+    if (pending.action === "remove") {
+      if (rows === undefined || rows.length === 0) {
+        addButtonRef.current?.focus();
+        return;
+      }
+      const landing = rows[Math.min(pending.index, rows.length - 1)];
+      landing
+        .querySelector<HTMLButtonElement>('[data-step-action="remove"]')
+        ?.focus();
+      return;
+    }
+    const row = rows?.[pending.index];
+    const sameDirection = pending.direction === -1 ? "up" : "down";
+    const same = row?.querySelector<HTMLButtonElement>(
+      `[data-step-action="${sameDirection}"]`,
+    );
+    // The control is disabled when the moved step reached the first/last slot; fall
+    // back to the opposite-direction control, which is always enabled there.
+    if (same !== null && same !== undefined && !same.disabled) {
+      same.focus();
+      return;
+    }
+    row
+      ?.querySelector<HTMLButtonElement>(
+        `[data-step-action="${pending.direction === -1 ? "down" : "up"}"]`,
+      )
+      ?.focus();
+  }, [steps]);
 
   const setParam = (index: number, key: string, value: unknown) =>
     onStepsChange(
@@ -350,6 +412,7 @@ export function StepListEditor({
         </Text>
       ) : (
         <Stack
+          ref={listRef}
           gap="xs"
           component="ol"
           style={{ listStyle: "none", padding: 0, margin: 0 }}

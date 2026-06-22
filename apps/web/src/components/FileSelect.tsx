@@ -121,18 +121,38 @@ export default function FileSelect(props: FileSelectProps) {
             mih={220}
             style={{ pointerEvents: "none" }}
           >
+            {/* Drag-state icon colors must clear WCAG 2.1 1.4.11's 3:1
+                non-text-contrast bar against the Dropzone's light-variant
+                drag-over tint -- and that tint inverts with the color scheme, so
+                the icon shade has to invert too. In light the tints are the
+                accept primary cyan-1 and the reject red-1, where shade 8 clears
+                the bar (blue-8 = 4.29:1, red-8 = 3.73:1) and the prior shade 6
+                was a marginal accept pass (3.04:1) and an outright reject
+                failure (2.71:1). In dark the tint becomes the dark surface
+                darken(shade-9, .5), where a deeper icon drops the other way
+                below the bar, so dark stays at shade 6 (blue-6 = 3.53:1, red-6 =
+                3.83:1). light-dark() selects per scheme; the icon takes no
+                `color` prop so its stroke follows currentColor, which this
+                inline color sets. Both schemes' ratios are enforced by
+                test/unit/themeContrast.test.ts. */}
             <Dropzone.Accept>
               <IconUpload
                 size={52}
-                color="var(--mantine-color-blue-6)"
                 stroke={1.5}
+                style={{
+                  color:
+                    "light-dark(var(--mantine-color-blue-8), var(--mantine-color-blue-6))",
+                }}
               />
             </Dropzone.Accept>
             <Dropzone.Reject>
               <IconX
                 size={52}
-                color="var(--mantine-color-red-6)"
                 stroke={1.5}
+                style={{
+                  color:
+                    "light-dark(var(--mantine-color-red-8), var(--mantine-color-red-6))",
+                }}
               />
             </Dropzone.Reject>
             <Dropzone.Idle>
