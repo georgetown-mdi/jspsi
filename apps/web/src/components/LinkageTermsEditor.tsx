@@ -221,31 +221,41 @@ export function LinkageTermsEditor({
   const canGenerate =
     validation.canGenerate && !hasMultipleIdentifiers(draft.metadata);
 
-  // Per-key satisfiability badge, derived from the draft's CURRENT metadata so it
-  // tracks column-type edits. A field is producible when the edited metadata has a
-  // non-ignored column of its type; the offerable terms for that metadata declare
-  // exactly the producible fields, so a reconciled key (all of whose fields are
-  // offerable) shows satisfiable and stays correct after a remap.
+  // Per-key satisfiability badge, derived from the draft's CURRENT metadata AND
+  // authored standardization so it tracks both column-type edits and per-field
+  // column bindings. A field is producible when the shared resolution binds it to a
+  // present column; deriving the field universe from authoredLinkageFields (not the
+  // one-field-per-type default) and resolving through draft.standardization -- the
+  // same inputs the Generate gate and the declared-field list use -- is what lets an
+  // authored same-typed second field (e.g. first_name_2) read as satisfiable. With
+  // the bare default field set and no standardization, such a field is absent from
+  // the universe and its key would wrongly badge unsatisfiable while it generates
+  // and produces at the exchange.
   const producibleFieldNames = useMemo(() => {
     // identity is deliberately NOT a dependency: getDefaultLinkageTerms uses it
     // only to populate terms.identity, never to derive the field or key set, so
     // it cannot change which fields are producible. Pass a constant so a keystroke
     // in the name field does not recompute this (and the real input sensitivity --
-    // the column metadata -- stays legible in the dependency array).
-    const offerable = getDefaultLinkageTerms("", draft.metadata);
+    // the column metadata and standardization -- stays legible in the dependency
+    // array). The probe restates the authored fields onto default terms; only its
+    // linkageFields are read (resolveFieldColumns ignores linkageKeys), so the
+    // default keys are inert.
+    const fields = authoredLinkageFields(draft.metadata, draft.standardization);
+    const probe: LinkageTerms = {
+      ...getDefaultLinkageTerms("", draft.metadata),
+      linkageFields: fields,
+    };
     const { unsatisfied } = assessLinkageSatisfiability(
       seed.columns,
-      offerable,
-      undefined,
+      probe,
+      draft.standardization,
       draft.metadata,
     );
     const unsatisfiedNames = new Set(unsatisfied.map((f) => f.name));
     return new Set(
-      offerable.linkageFields
-        .map((f) => f.name)
-        .filter((name) => !unsatisfiedNames.has(name)),
+      fields.map((f) => f.name).filter((name) => !unsatisfiedNames.has(name)),
     );
-  }, [draft.metadata, seed.columns]);
+  }, [draft.metadata, draft.standardization, seed.columns]);
   const keyIsSatisfiable = (index: number): boolean =>
     draft.keys[index].key.elements.every((el) =>
       producibleFieldNames.has(el.field),
