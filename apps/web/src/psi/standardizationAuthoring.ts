@@ -1,12 +1,9 @@
 import {
   STANDARDIZATION_FUNCTION_DESCRIPTORS,
-  compileLinearRegex,
   sanitizeForDisplay,
 } from "@psilink/core";
 
 import type {
-  CompiledLinearRegex,
-  LinkageField,
   Standardization,
   StandardizationFunctionDescriptor,
   StandardizationStep,
@@ -92,9 +89,10 @@ export function descriptorFor(
 /**
  * The pure, React-free model behind the web standardization-authoring workbench:
  * the intent-grouped function menu, the descriptor-driven typed param-field model,
- * per-param validation, and the thin web value-level constraint check. The single
- * tested boundary -- the function grouping, the Zod-shape introspection, and the
- * constraint check are all exercised here rather than through the UI.
+ * and per-param validation. The single tested boundary -- the function grouping and
+ * the Zod-shape introspection are exercised here rather than through the UI. The
+ * value-level constraint check the workbench renders as badges lives in core's
+ * `checkValueConstraints` (shared with the CLI), not here.
  *
  * Everything authoring-related is driven from core's
  * {@link STANDARDIZATION_FUNCTION_DESCRIPTORS}, the shared descriptor table, so the
@@ -448,160 +446,4 @@ export function isStepValid(step: StandardizationStep): boolean {
     if (field.optional && isEmpty) return true;
     return validateParamValue(descriptor, field.key, value).ok;
   });
-}
-
-// --- Value-level constraint check --------------------------------------------
-
-/**
- * A single value-level constraint violation, a warn-not-enforce signal the
- * workbench surfaces as a badge: a cleaned value does not meet one of the field's
- * declared constraints. `label` is a short badge caption; `detail` is a one-line
- * explanation. Both are fixed copy keyed off the constraint kind -- never a
- * partner-controlled value -- so they are safe to render verbatim.
- */
-export interface ConstraintViolation {
-  /** Short badge caption (e.g. "excluded value"). */
-  label: string;
-  /** One-line plain-language explanation of the violation. */
-  detail: string;
-}
-
-/** Whether `value` contains only characters in the field's `allowedCharacters`
- * class. `allowedCharacters` is partner-controlled (it arrives in the invitation
- * token), and NameConstraintsSchema only checks that it compiles as the body of a
- * `[...]` class -- NOT that it cannot break out of one. A crafted value can close
- * the class and inject arbitrary regex structure (e.g. `x](a+)+b[y`).
- *
- * Two hazards follow, each guarded here. (1) ReDoS: matching against an attacker-
- * chosen pattern on the native `RegExp` engine could backtrack catastrophically and
- * hang the local thread. The class is compiled under the linear-time engine the
- * transform-regex paths use (#248, re2js) instead, so the blow-up is impossible by
- * construction -- no partner pattern ever touches the backtracking engine, and a
- * pattern that engine cannot compile is treated as "cannot check" (no violation,
- * fail-open) rather than throwing. NameConstraintsSchema validates the class under
- * this same engine, so for a decoded token that fail-open is a backstop, not a
- * path: a class that would not compile here is rejected at terms validation.
- * (2) Warning suppression: a breakout that matches
- * everything (e.g. `a]|.*[b`) would silently pass disallowed values. Testing one
- * code point at a time against `^[allowed]$` defeats it -- a multi-character breakout
- * construct cannot match a single character -- so a genuinely disallowed value is
- * still flagged. For a legitimate class this is exactly `^[allowed]*$` (every
- * character must be in the class). The empty string trivially conforms. */
-function withinAllowedCharacters(value: string, allowed: string): boolean {
-  let oneOf: CompiledLinearRegex;
-  try {
-    oneOf = compileLinearRegex(`^[${allowed}]$`);
-  } catch {
-    return true;
-  }
-  for (const character of value) if (!oneOf.test(character)) return false;
-  return true;
-}
-
-/** Whether a standardized value is a valid calendar date in canonical YYYYMMDD
- * form -- the output the default `date_of_birth` pipeline produces. A value not in
- * that form is not flagged (the operator may target a different output format and a
- * false "invalid date" badge would mislead); only an 8-digit value that names no
- * real calendar day is. */
-function isValidStandardizedDate(value: string): boolean {
-  const match = /^(\d{4})(\d{2})(\d{2})$/.exec(value);
-  if (match === null) return true;
-  const [, year, month, day] = match;
-  const date = new Date(`${year}-${month}-${day}T00:00:00Z`);
-  return (
-    !Number.isNaN(date.getTime()) &&
-    date.getUTCFullYear() === Number(year) &&
-    date.getUTCMonth() + 1 === Number(month) &&
-    date.getUTCDate() === Number(day)
-  );
-}
-
-/** Whether a 9-digit value satisfies the SSA structural rules: area not 000 or
- * 666 and below 900, group not 00, serial not 0000. A value that is not exactly 9
- * digits is left to the format-shaped pipeline and not flagged here. */
-function isStructurallyValidSsn(value: string): boolean {
-  if (!/^\d{9}$/.test(value)) return true;
-  const area = Number(value.slice(0, 3));
-  const group = Number(value.slice(3, 5));
-  const serial = Number(value.slice(5, 9));
-  return (
-    area !== 0 && area !== 666 && area < 900 && group !== 0 && serial !== 0
-  );
-}
-
-/**
- * The thin web value-level constraint check: does a single cleaned `value` meet
- * the declared constraints of the linkage `field` it is produced for? Returns the
- * violations as warn-not-enforce signals; an empty array means the value conforms
- * to every checkable constraint. Warn, never block -- a violation surfaces as a
- * badge, mirroring the application's "warns if violated but does not enforce"
- * contract for constraints (see `LinkageField`).
- *
- * Web-LOCAL and intentionally thin: core's `validateStandardizationAgainstTerms`
- * checks only names, so this is the first value-level check, and a follow-up
- * promotes it to core for CLI reuse (board item filed alongside this slice).
- * Covered today: the `exclude` denylist (every field type), name
- * `allowedCharacters`, `date_of_birth` `validOnly` (canonical YYYYMMDD), and `ssn`
- * `validOnly` (SSA structural rules). Constraints with no clean value-level test --
- * name `affixesAllowed` and `ssn4` `validOnly` -- are deliberately not flagged
- * rather than guessed, so a badge never fires on a value it cannot actually judge.
- */
-export function checkValueConstraints(
-  field: LinkageField,
-  value: string,
-): Array<ConstraintViolation> {
-  const constraints = field.constraints;
-  if (constraints === undefined) return [];
-  const violations: Array<ConstraintViolation> = [];
-
-  // `exclude` is shared by every constraint shape: the cleaned value must not be
-  // one of the listed values.
-  if (constraints.exclude?.includes(value))
-    violations.push({
-      label: "excluded value",
-      detail: "This cleaned value is on the agreed excluded-values list.",
-    });
-
-  switch (field.type) {
-    case "first_name":
-    case "last_name": {
-      const allowed = field.constraints?.allowedCharacters;
-      if (allowed !== undefined && !withinAllowedCharacters(value, allowed))
-        violations.push({
-          label: "disallowed characters",
-          detail:
-            "This cleaned value contains characters outside the field's allowed set.",
-        });
-      break;
-    }
-    case "date_of_birth":
-      if (
-        field.constraints?.validOnly === true &&
-        !isValidStandardizedDate(value)
-      )
-        violations.push({
-          label: "invalid date",
-          detail: "This cleaned value is not a valid calendar date.",
-        });
-      break;
-    case "ssn":
-      if (
-        field.constraints?.validOnly === true &&
-        !isStructurallyValidSsn(value)
-      )
-        violations.push({
-          label: "invalid SSN",
-          detail:
-            "This cleaned value does not meet the Social Security Administration's structural rules.",
-        });
-      break;
-    case "ssn4":
-    case "phone_number":
-    case "email_address":
-      // Only `exclude` (handled above) has a clean value-level test for these
-      // types; nothing further to check.
-      break;
-  }
-
-  return violations;
 }

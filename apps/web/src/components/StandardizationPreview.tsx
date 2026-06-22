@@ -10,12 +10,13 @@ import {
   VisuallyHidden,
 } from "@mantine/core";
 
-import { runPipeline, sanitizeForDisplay } from "@psilink/core";
-
 import {
   checkValueConstraints,
-  isStepValid,
-} from "@psi/standardizationAuthoring";
+  runPipeline,
+  sanitizeForDisplay,
+} from "@psilink/core";
+
+import { isStepValid } from "@psi/standardizationAuthoring";
 
 import type {
   FieldValue,
@@ -98,7 +99,7 @@ function CleanedValue({
       )}
       {violations.map((violation) => (
         <Tooltip
-          key={violation.label}
+          key={violation.kind}
           label={violation.detail}
           multiline
           w={220}
