@@ -312,12 +312,15 @@ export function InvitationTerms({
       {/* A real disclosure: the toggle carries aria-expanded and aria-controls,
           and Mantine's Collapse sets aria-hidden + inert (and display:none) on the
           panel while closed, so the dense detail is hidden from assistive tech and
-          the tab order until opened. This holds because the app theme leaves
-          respectReducedMotion off, so Collapse animates and keeps the panel
-          mounted-but-hidden. Turning respectReducedMotion on would make Collapse
-          unmount the closed panel for a reduced-motion user, dangling this
-          aria-controls -- revisit (e.g. a stable wrapper holding the id) before
-          enabling it. */}
+          the tab order until opened. aria-controls points at the stable wrapper
+          below, not the Collapse panel: with respectReducedMotion on, Collapse
+          unmounts the closed panel for a reduced-motion user, which would dangle an
+          id held on the panel itself; the always-mounted wrapper keeps the
+          reference resolvable in every state and under either motion preference
+          (collapsed content is hidden from AT when the panel is mounted-but-hidden,
+          and absent when it is unmounted). A render test pins this against the
+          accessibility tree, so the wrapper is not safe to inline back onto the
+          panel. */}
       <UnstyledButton
         onClick={() => setDetailsOpen((open) => !open)}
         aria-expanded={detailsOpen}
@@ -338,107 +341,109 @@ export function InvitationTerms({
         </Group>
       </UnstyledButton>
 
-      <Collapse id={detailsId} expanded={detailsOpen}>
-        <Stack gap="sm">
-          <Term label="Matching rules">
-            {/* A Stack of key blocks, not a Mantine List: each key renders flow
+      <div id={detailsId}>
+        <Collapse expanded={detailsOpen}>
+          <Stack gap="sm">
+            <Term label="Matching rules">
+              {/* A Stack of key blocks, not a Mantine List: each key renders flow
                 content (see MatchKeyDetails), which a List.Item would nest
                 invalidly. Keyed by index -- the list is static and key names are
                 not unique once sanitized. */}
-            <Stack gap="sm">
-              {summary.linkageKeys.map((key, index) => (
-                <MatchKeyDetails key={index} summary={key} />
-              ))}
-            </Stack>
-          </Term>
+              <Stack gap="sm">
+                {summary.linkageKeys.map((key, index) => (
+                  <MatchKeyDetails key={index} summary={key} />
+                ))}
+              </Stack>
+            </Term>
 
-          <Term label="Personal data used">
-            <Stack gap="xs">
-              {summary.linkageFields.map((field, index) =>
-                field.constraints.length > 0 ? (
-                  <Stack key={index} gap={2}>
-                    <Text size="sm">{field.label}</Text>
-                    {/* Each constraint as its own item rather than a joined
+            <Term label="Personal data used">
+              <Stack gap="xs">
+                {summary.linkageFields.map((field, index) =>
+                  field.constraints.length > 0 ? (
+                    <Stack key={index} gap={2}>
+                      <Text size="sm">{field.label}</Text>
+                      {/* Each constraint as its own item rather than a joined
                         string: a partner-controlled allowedCharacters class may
                         contain the separator, which joined text would render as
                         spurious extra clauses. Keyed by index -- order is fixed
                         for a field. */}
-                    <List size="xs" withPadding listStyleType="circle">
-                      {field.constraints.map((constraint, ci) => (
-                        <List.Item key={ci}>
-                          <Text span size="xs" c="dimmed">
-                            {constraint}
-                          </Text>
-                        </List.Item>
-                      ))}
-                    </List>
-                  </Stack>
-                ) : (
-                  <Text key={index} size="sm">
-                    {field.label}
-                  </Text>
-                ),
-              )}
-            </Stack>
-          </Term>
+                      <List size="xs" withPadding listStyleType="circle">
+                        {field.constraints.map((constraint, ci) => (
+                          <List.Item key={ci}>
+                            <Text span size="xs" c="dimmed">
+                              {constraint}
+                            </Text>
+                          </List.Item>
+                        ))}
+                      </List>
+                    </Stack>
+                  ) : (
+                    <Text key={index} size="sm">
+                      {field.label}
+                    </Text>
+                  ),
+                )}
+              </Stack>
+            </Term>
 
-          {summary.payload !== undefined && (
-            <Term label="Additional data for matched records">
-              {summary.payload.send.length > 0 && (
-                <Stack gap={2}>
-                  <Text size="sm">Your partner will send:</Text>
-                  {/* One column per item rather than a joined string: a
+            {summary.payload !== undefined && (
+              <Term label="Additional data for matched records">
+                {summary.payload.send.length > 0 && (
+                  <Stack gap={2}>
+                    <Text size="sm">Your partner will send:</Text>
+                    {/* One column per item rather than a joined string: a
                       partner-controlled column name may contain the separator,
                       which joined text would render as spurious extra columns.
                       Keyed by index -- column order is fixed and a sanitized
                       name is not unique. */}
-                  <List size="sm" withPadding listStyleType="circle">
-                    {summary.payload.send.map((column, index) => (
-                      <List.Item key={index}>{column}</List.Item>
-                    ))}
-                  </List>
-                </Stack>
-              )}
-              {summary.payload.receive.length > 0 && (
-                <Stack gap={2}>
-                  <Text size="sm">Your partner requests from you:</Text>
-                  <List size="sm" withPadding listStyleType="circle">
-                    {summary.payload.receive.map((column, index) => (
-                      <List.Item key={index}>{column}</List.Item>
-                    ))}
-                  </List>
-                </Stack>
-              )}
-            </Term>
-          )}
-
-          {summary.legalAgreement !== undefined && (
-            <Term label="Legal agreement">
-              <Text size="sm">{summary.legalAgreement.reference}</Text>
-              <Text size="sm">{summary.legalAgreement.purpose}</Text>
-              <Text size="xs" c="dimmed">
-                Valid through {summary.legalAgreement.expirationDate}
-              </Text>
-            </Term>
-          )}
-
-          <Term label="Duplicate matches">
-            <Text size="sm">
-              {summary.deduplicate
-                ? "A record may match more than one of the partner's records."
-                : "Each record matches at most one of the partner's records."}
-            </Text>
-            {/* A proposed looser setting the run does not yet honor: flag it
-                rather than let the line above read as the behavior in force. */}
-            {summary.deduplicate && !summary.deduplicateApplied && (
-              <Text size="xs" c="dimmed">
-                Your partner proposes this, but this version of the exchange
-                does not yet apply it; each record still matches at most one.
-              </Text>
+                    <List size="sm" withPadding listStyleType="circle">
+                      {summary.payload.send.map((column, index) => (
+                        <List.Item key={index}>{column}</List.Item>
+                      ))}
+                    </List>
+                  </Stack>
+                )}
+                {summary.payload.receive.length > 0 && (
+                  <Stack gap={2}>
+                    <Text size="sm">Your partner requests from you:</Text>
+                    <List size="sm" withPadding listStyleType="circle">
+                      {summary.payload.receive.map((column, index) => (
+                        <List.Item key={index}>{column}</List.Item>
+                      ))}
+                    </List>
+                  </Stack>
+                )}
+              </Term>
             )}
-          </Term>
-        </Stack>
-      </Collapse>
+
+            {summary.legalAgreement !== undefined && (
+              <Term label="Legal agreement">
+                <Text size="sm">{summary.legalAgreement.reference}</Text>
+                <Text size="sm">{summary.legalAgreement.purpose}</Text>
+                <Text size="xs" c="dimmed">
+                  Valid through {summary.legalAgreement.expirationDate}
+                </Text>
+              </Term>
+            )}
+
+            <Term label="Duplicate matches">
+              <Text size="sm">
+                {summary.deduplicate
+                  ? "A record may match more than one of the partner's records."
+                  : "Each record matches at most one of the partner's records."}
+              </Text>
+              {/* A proposed looser setting the run does not yet honor: flag it
+                rather than let the line above read as the behavior in force. */}
+              {summary.deduplicate && !summary.deduplicateApplied && (
+                <Text size="xs" c="dimmed">
+                  Your partner proposes this, but this version of the exchange
+                  does not yet apply it; each record still matches at most one.
+                </Text>
+              )}
+            </Term>
+          </Stack>
+        </Collapse>
+      </div>
 
       {summary.expires !== undefined && (
         <Text size="xs" c="dimmed">
