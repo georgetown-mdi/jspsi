@@ -40,6 +40,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 
 ### Changed
 
+- An empty-string linkage key (`""`) is now a matchable key value distinct from a null/missing key, instead of being dropped from matching along with nulls; it participates subject to the existing within-dataset uniqueness rule (a `""` duplicated within a dataset is still dropped from that round). The default per-type standardization maps empty values to null, so default exchanges are unaffected; this matters only for operator-authored standardization that emits `""`. See `docs/spec/PROTOCOL.md`.
 - A `metadata` block with duplicate column names is now rejected at parse time; names must be unique (matched case-sensitively). See `docs/EXCHANGE_REFERENCE.md`.
 - BREAKING: the CLI authenticates recurring exchanges with the X25519 authenticated key exchange instead of SPAKE2, and the shared credential is renamed `pake_token` -> `shared_secret` in config. Old and new builds do not interoperate; pre-release, no migration shim. `exchange` now requires a `.psilink.key`. See `docs/spec/PROTOCOL.md`.
 - BREAKING: the `authentication` block moves from per-channel `connection` config to the top level of the exchange spec, and the WebRTC role moves to `connection.role`. Authentication, rotation, and expiry behavior are unchanged. See `docs/EXCHANGE_REFERENCE.md`.
