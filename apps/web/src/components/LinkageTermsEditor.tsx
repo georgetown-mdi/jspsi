@@ -13,6 +13,7 @@ import {
   Paper,
   Select,
   Stack,
+  Switch,
   Text,
   TextInput,
   Title,
@@ -35,20 +36,32 @@ import {
 
 import {
   buildAdvancedTerms,
+  draftFromTerms,
   setDraftMetadata,
   validateAdvancedInvite,
 } from "@psi/advancedInvite";
+import { APPLIED_SETTINGS } from "@psi/appliedSettings";
 
+import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 import { InvitationTerms } from "@components/InvitationTerms";
 import { MetadataGrid } from "@components/MetadataGrid";
+import { TermsImportExport } from "@components/TermsImportExport";
 
-import type { LinkageTerms, Metadata } from "@psilink/core";
+import type { Algorithm, LinkageTerms, Metadata } from "@psilink/core";
 
 import type {
   AdvancedInviteDraft,
   AdvancedInviteSeed,
   OutputDirection,
 } from "@psi/advancedInvite";
+
+/** The two matching-algorithm choices. `psi-c` (count-only) is gated behind
+ * {@link APPLIED_SETTINGS}.psiC -- the control is disabled until the run honors
+ * it, since a count-only claim the exchange does not apply is a privacy footgun. */
+const ALGORITHM_OPTIONS: Array<{ value: Algorithm; label: string }> = [
+  { value: "psi", label: "Reveal the matched identifiers (standard)" },
+  { value: "psi-c", label: "Reveal only the count (psi-c)" },
+];
 
 /** The three output-direction choices, in the order shown. The first
  * ({@link OutputDirection} `"both"`) is the recommended default; the labels are
@@ -137,10 +150,20 @@ export function LinkageTermsEditor({
     lifetimeSeconds: INVITATION_LIFETIME_SECONDS,
     // The recommended default is the symmetric both-receive exchange.
     outputDirection: "both",
+    // The recommended psi / no-dedup settings; the gated controls hold these here
+    // until APPLIED_SETTINGS flips (buildAdvancedTerms clamps them regardless).
+    algorithm: seed.terms.algorithm,
+    deduplicate: seed.terms.deduplicate,
     metadata: seed.metadata,
     keys: seed.terms.linkageKeys.map((key) => ({ key, enabled: true })),
   });
   const [draft, setDraft] = useState<AdvancedInviteDraft>(freshDraft);
+
+  // Expert authoring discloses direct key/element/transform/swap editing, the
+  // gated matching settings, and the import/export escape hatch on the same draft;
+  // the guided controls stay for the common path. A UI disclosure level, not a
+  // data mode -- both views edit the same draft.keys.
+  const [expertMode, setExpertMode] = useState(false);
 
   // A polite live region for validation and reorder announcements, kept in a
   // stable wrapper so assistive tech announces updates (the Status component uses
@@ -191,17 +214,30 @@ export function LinkageTermsEditor({
       producibleFieldNames.has(el.field),
     );
 
+  // The fields a key element may reference, metadata-derived (one per non-ignored
+  // typed column). The expert field-pickers offer exactly these, so a key authored
+  // in the editor can only reference a declared field.
+  const declaredFields = useMemo(
+    () => getDefaultLinkageTerms("", draft.metadata).linkageFields,
+    [draft.metadata],
+  );
+
   const updateDraft = (next: Partial<AdvancedInviteDraft>) => {
     setAnnouncement("");
     setDraft((prev) => ({ ...prev, ...next }));
   };
 
   // A column-metadata edit re-derives the offerable key set (a type change adds or
-  // drops keys) and reconciles the enabled/order state -- see setDraftMetadata.
-  // Read prev in the functional updater so it composes with a batched key edit.
+  // drops keys) and reconciles the enabled/order state -- see setDraftMetadata. In
+  // expert mode the keys are author-controlled, so reconciliation (which is
+  // template-driven) would drop authored keys; there the edit updates only the
+  // metadata, and the satisfiability badges re-evaluate against it. Read prev in
+  // the functional updater so it composes with a batched key edit.
   const updateMetadata = (metadata: Metadata) => {
     setAnnouncement("");
-    setDraft((prev) => setDraftMetadata(prev, metadata));
+    setDraft((prev) =>
+      expertMode ? { ...prev, metadata } : setDraftMetadata(prev, metadata),
+    );
   };
 
   const toggleKey = (index: number, enabled: boolean) => {
@@ -253,6 +289,17 @@ export function LinkageTermsEditor({
     setAnnouncement("Reset to the recommended settings.");
   };
 
+  // Load an imported, validated terms set into the draft (the import panel has
+  // already refused any gated-active setting). The metadata stays the inviter's
+  // own columns -- terms carry no per-party binding -- so an imported key the
+  // columns cannot satisfy shows as not-satisfiable rather than silently breaking.
+  const handleImport = (terms: LinkageTerms) => {
+    setDraft(draftFromTerms(terms, seed, draft.lifetimeSeconds));
+    setAnnouncement(
+      "Loaded the imported terms. Review them, then generate the invitation.",
+    );
+  };
+
   const handleGenerate = () => {
     if (!validation.canGenerate || validation.terms === undefined) return;
     onGenerate(validation.terms, draft.lifetimeSeconds, draft.metadata);
@@ -284,6 +331,13 @@ export function LinkageTermsEditor({
               them, then generate the invitation. Choose Reset to recommended to
               return to the defaults at any time.
             </Text>
+
+            <Switch
+              checked={expertMode}
+              onChange={(e) => setExpertMode(e.currentTarget.checked)}
+              label="Expert authoring"
+              description="Build linkage keys element by element, edit transforms and swaps, and import or export the terms as JSON or YAML."
+            />
 
             <TextInput
               value={draft.identity}
@@ -349,79 +403,94 @@ export function LinkageTermsEditor({
                 Records are matched on
               </Text>
               <Text size="xs" c="dimmed" id="key-order-help">
-                Each enabled key is tried in order; earlier keys match first, so
-                order the most precise keys first. Turn off a key to exclude it.
+                {expertMode
+                  ? "Build each key from elements that reference your declared fields. Earlier keys match first, so order the most precise keys first."
+                  : "Each enabled key is tried in order; earlier keys match first, so order the most precise keys first. Turn off a key to exclude it."}
               </Text>
               {errors.keys && (
                 <Text size="xs" c="red" role="alert">
                   {errors.keys}
                 </Text>
               )}
-              <Stack
-                gap="xs"
-                component="ul"
-                aria-describedby="key-order-help"
-                style={{ listStyle: "none", padding: 0, margin: 0 }}
-              >
-                {draft.keys.map((entry, index) => {
-                  const satisfiable = keyIsSatisfiable(index);
-                  return (
-                    <Paper
-                      key={entry.key.name}
-                      withBorder
-                      p="xs"
-                      component="li"
-                    >
-                      <Group justify="space-between" wrap="nowrap">
-                        <Checkbox
-                          checked={entry.enabled}
-                          onChange={(e) =>
-                            toggleKey(index, e.currentTarget.checked)
-                          }
-                          label={
-                            <Group gap="xs" wrap="nowrap">
-                              <Text size="sm">{entry.key.name}</Text>
-                              <Badge
-                                size="xs"
-                                variant="light"
-                                color={satisfiable ? "green" : "red"}
-                                role="img"
-                                aria-label={
-                                  satisfiable
-                                    ? "Your columns can satisfy this key"
-                                    : "Your columns cannot satisfy this key"
-                                }
-                              >
-                                {satisfiable
-                                  ? "satisfiable"
-                                  : "not satisfiable"}
-                              </Badge>
-                            </Group>
-                          }
-                        />
-                        <Group gap={4} wrap="nowrap">
-                          <ActionIcon
-                            variant="subtle"
-                            disabled={index === 0}
-                            onClick={() => moveKey(index, -1)}
-                            aria-label={`Move ${entry.key.name} earlier`}
-                          >
-                            <IconArrowUp size={16} />
-                          </ActionIcon>
-                          <ActionIcon
-                            variant="subtle"
-                            disabled={index === draft.keys.length - 1}
-                            onClick={() => moveKey(index, 1)}
-                            aria-label={`Move ${entry.key.name} later`}
-                          >
-                            <IconArrowDown size={16} />
-                          </ActionIcon>
+              {expertMode ? (
+                <ExpertKeyEditor
+                  draft={draft}
+                  declaredFields={declaredFields}
+                  keyIsSatisfiable={keyIsSatisfiable}
+                  fuzzyApplied={APPLIED_SETTINGS.fuzzyComparisons}
+                  onChange={(next) => {
+                    setAnnouncement("");
+                    setDraft(next);
+                  }}
+                  announce={setAnnouncement}
+                />
+              ) : (
+                <Stack
+                  gap="xs"
+                  component="ul"
+                  aria-describedby="key-order-help"
+                  style={{ listStyle: "none", padding: 0, margin: 0 }}
+                >
+                  {draft.keys.map((entry, index) => {
+                    const satisfiable = keyIsSatisfiable(index);
+                    return (
+                      <Paper
+                        key={entry.key.name}
+                        withBorder
+                        p="xs"
+                        component="li"
+                      >
+                        <Group justify="space-between" wrap="nowrap">
+                          <Checkbox
+                            checked={entry.enabled}
+                            onChange={(e) =>
+                              toggleKey(index, e.currentTarget.checked)
+                            }
+                            label={
+                              <Group gap="xs" wrap="nowrap">
+                                <Text size="sm">{entry.key.name}</Text>
+                                <Badge
+                                  size="xs"
+                                  variant="light"
+                                  color={satisfiable ? "green" : "red"}
+                                  role="img"
+                                  aria-label={
+                                    satisfiable
+                                      ? "Your columns can satisfy this key"
+                                      : "Your columns cannot satisfy this key"
+                                  }
+                                >
+                                  {satisfiable
+                                    ? "satisfiable"
+                                    : "not satisfiable"}
+                                </Badge>
+                              </Group>
+                            }
+                          />
+                          <Group gap={4} wrap="nowrap">
+                            <ActionIcon
+                              variant="subtle"
+                              disabled={index === 0}
+                              onClick={() => moveKey(index, -1)}
+                              aria-label={`Move ${entry.key.name} earlier`}
+                            >
+                              <IconArrowUp size={16} />
+                            </ActionIcon>
+                            <ActionIcon
+                              variant="subtle"
+                              disabled={index === draft.keys.length - 1}
+                              onClick={() => moveKey(index, 1)}
+                              aria-label={`Move ${entry.key.name} later`}
+                            >
+                              <IconArrowDown size={16} />
+                            </ActionIcon>
+                          </Group>
                         </Group>
-                      </Group>
-                    </Paper>
-                  );
-                })}
-              </Stack>
+                      </Paper>
+                    );
+                  })}
+                </Stack>
+              )}
             </Stack>
 
             <Divider />
@@ -480,18 +549,70 @@ export function LinkageTermsEditor({
               )}
             </Stack>
 
-            <Alert
-              variant="light"
-              color="gray"
-              icon={<IconInfoCircle aria-hidden />}
-              title="Fixed in this version"
-            >
-              Matched identifiers are revealed (not just a count), and each
-              record matches at most one of your partner&apos;s. These are not
-              adjustable yet. Who receives the matched results is set above;
-              which of your columns are sent to your partner is set per column
-              under Your columns above.
-            </Alert>
+            {expertMode ? (
+              <>
+                <Divider />
+                <Stack gap="xs">
+                  <Text size="sm" fw={600}>
+                    Matching settings
+                  </Text>
+                  {/* psi-c and deduplicate are surfaced disabled until the run
+                      applies them (APPLIED_SETTINGS), so the capability is
+                      discoverable but cannot mint an invitation whose headline
+                      behavior silently does not happen. buildAdvancedTerms clamps
+                      them regardless, so a disabled control can never leak through. */}
+                  <Select
+                    label="Matching method"
+                    data={ALGORITHM_OPTIONS}
+                    value={draft.algorithm}
+                    allowDeselect={false}
+                    disabled={!APPLIED_SETTINGS.psiC}
+                    description={
+                      APPLIED_SETTINGS.psiC
+                        ? "Reveal the matched identifiers, or only the count."
+                        : "Count-only (psi-c) is not available yet: this version of the exchange reveals the matched identifiers regardless."
+                    }
+                    onChange={(value) =>
+                      // Mantine infers the value type from the typed data, so it is
+                      // already an Algorithm after the null guard.
+                      value !== null && updateDraft({ algorithm: value })
+                    }
+                  />
+                  <Checkbox
+                    label="Allow a record to match more than one of your partner's"
+                    checked={draft.deduplicate}
+                    disabled={!APPLIED_SETTINGS.deduplicate}
+                    description={
+                      APPLIED_SETTINGS.deduplicate
+                        ? undefined
+                        : "Not available yet: each record matches at most one regardless."
+                    }
+                    onChange={(e) =>
+                      updateDraft({ deduplicate: e.currentTarget.checked })
+                    }
+                  />
+                </Stack>
+                <Divider />
+                <TermsImportExport
+                  currentTerms={previewTerms}
+                  onImport={handleImport}
+                />
+              </>
+            ) : (
+              <Alert
+                variant="light"
+                color="gray"
+                icon={<IconInfoCircle aria-hidden />}
+                title="Fixed in this version"
+              >
+                Matched identifiers are revealed (not just a count), and each
+                record matches at most one of your partner&apos;s. These are not
+                adjustable yet. Who receives the matched results is set above;
+                which of your columns are sent to your partner is set per column
+                under Your columns above. Turn on Expert authoring to build keys
+                directly or import and export the terms.
+              </Alert>
+            )}
           </Stack>
         </Grid.Col>
 

@@ -218,6 +218,22 @@ describe("param value validation per the descriptor's declared type", () => {
   test("rejects an unknown parameter key", () => {
     expect(validateParamValue(substring, "nope", 1).ok).toBe(false);
   });
+
+  test("rejects an integer beyond the safe range (canonical-encoding hazard)", () => {
+    // A transform param is embedded in the cross-party token and canonically
+    // encoded; an integer at or beyond 2^53 cannot round-trip reproducibly
+    // (canonicalString throws on a non-safe integer), so the descriptor's
+    // z.number().int() must reject it before it can be authored. This pins the
+    // boundary against a future zod change that could regress it.
+    expect(validateParamValue(substring, "start", 2 ** 53).ok).toBe(false);
+    expect(validateParamValue(substring, "length", 2 ** 53).ok).toBe(false);
+    expect(validateParamValue(padLeft, "length", 2 ** 53).ok).toBe(false);
+    // The largest safe integer is still within range, so the bound sits exactly
+    // at the safe-integer edge, not below any legitimate value.
+    expect(
+      validateParamValue(substring, "start", Number.MAX_SAFE_INTEGER).ok,
+    ).toBe(true);
+  });
 });
 
 describe("isStepValid (the launch gate's basis)", () => {
