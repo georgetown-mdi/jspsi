@@ -282,8 +282,9 @@ export interface ExchangeRecordGovernance {
   /** The payload columns this party committed as sent for matched records (names
    * and any data-dictionary descriptions) -- the columns the disclosure gate
    * actually transmitted, not a declared dictionary that may under-state them.
-   * Empty when this party committed no payload (count-only `psi-c`, no columns
-   * disclosed, or no matched records) -- represented explicitly, not by omission. */
+   * Empty when this party committed no payload for matched records -- no columns
+   * were disclosed, or no records matched -- represented explicitly, not by
+   * omission. */
   payloadSent: RecordPayloadColumn[];
   /** The payload columns this party committed as received for matched records.
    * Empty when this party received no payload. */
@@ -766,10 +767,19 @@ export async function buildExchangeRecord(
     // by construction); the payload column sets come from the committed payloads, so
     // the readable disclosure cannot diverge from the committed bytes. Carries no
     // values -- only names, categories, descriptions, and the agreement reference.
-    governance: governanceFromTerms(
-      inputs.localTerms,
-      inputs.localPayloadSent,
-      inputs.partnerPayloadReceived,
+    // Validate on build with the same schema the parser uses, as createdAt and the
+    // identities above: payloadReceived's column names are taken from the partner's
+    // payload wire message, which is validated only as strings (payloadExchange.ts),
+    // looser than this record's RecordPayloadColumn (a name must be non-empty). A
+    // malformed partner column name therefore throws here (caught by the non-fatal
+    // build guard in runExchange, so the exchange and its result are unaffected)
+    // rather than silently writing an audit record the parser would later reject.
+    governance: ExchangeRecordGovernanceSchema.parse(
+      governanceFromTerms(
+        inputs.localTerms,
+        inputs.localPayloadSent,
+        inputs.partnerPayloadReceived,
+      ),
     ),
     // This party's own input row count, validated on build with the
     // same schema the parser uses (as createdAt/resultSize below): a negative or

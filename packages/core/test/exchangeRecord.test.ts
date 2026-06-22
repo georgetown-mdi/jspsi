@@ -601,6 +601,46 @@ describe("governance metadata", () => {
     ]);
   });
 
+  test("payload category names equal the committed columns (cannot drift from the commitment)", async () => {
+    // The load-bearing invariant: payloadSent/payloadReceived names ARE the
+    // committed columns, so the readable disclosure cannot diverge from the
+    // committed bytes. Pin it as a check against the opening's committed data, not
+    // just prose.
+    const { record, opening } = await buildExchangeRecord(
+      baseInputs,
+      fixedRandomness,
+    );
+    const committedColumns = (
+      name: "localPayloadSent" | "partnerPayloadReceived",
+    ): string[] =>
+      (opening.commitments[name].data as unknown as CommittedPayload).columns;
+    expect(record.governance.payloadSent.map((c) => c.name)).toEqual(
+      committedColumns("localPayloadSent"),
+    );
+    expect(record.governance.payloadReceived.map((c) => c.name)).toEqual(
+      committedColumns("partnerPayloadReceived"),
+    );
+  });
+
+  test("rejects a committed column name the record schema forbids (empty partner-sent name)", async () => {
+    // payloadReceived's names come from the partner's payload wire message, which
+    // validates columns only as strings -- looser than the record's non-empty name
+    // rule. Build-validating governance turns a malformed partner column name into a
+    // throw (the non-fatal build guard in runExchange then skips the record) rather
+    // than a silently unparseable audit artifact.
+    const badReceived: CommittedPayload = {
+      columns: [""],
+      rowIndices: [0],
+      rows: [["x"]],
+    };
+    await expect(
+      buildExchangeRecord(
+        { ...baseInputs, partnerPayloadReceived: badReceived },
+        fixedRandomness,
+      ),
+    ).rejects.toThrow();
+  });
+
   // The privacy invariant on the record body: it carries only readable governance
   // metadata (names, types, descriptions, references) and never value-level data
   // (payload row values, linkage-field values, the matched-identifier table),
