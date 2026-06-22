@@ -90,7 +90,12 @@ export function useNonEmptyRates(
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [rawRows, standardization]);
+    // `spawnWorker` is a dep even though it is not read here: when it changes the
+    // controller effect rebuilds the controller, and this effect must re-run to
+    // dispatch a compute against the new one -- otherwise the readout wedges in the
+    // pending state with no compute in flight. Production passes the stable default,
+    // so this only matters for a caller that varies spawnWorker (e.g. a test).
+  }, [rawRows, standardization, spawnWorker]);
 
   return { rates, pending };
 }
