@@ -849,8 +849,10 @@ export function gatedActiveSettingMessage(
  * always opened on, and the seed's own), then adds a binding for each imported
  * linkage field the default does not already declare: the multi-field fields, a
  * second-or-later field of one semantic type (e.g. `first_name_2`). Each such field
- * binds to the next non-`ignored` column of its type not already bound, reusing its
- * type's recommended cleaning steps (derived from {@link defaultStandardizationForRows}
+ * binds to the next `role: linkage` column of its type not already bound -- one the
+ * operator designated for matching, NOT an `identifier`- or `payload`-roled column
+ * (see the binding rationale at the column search below) -- reusing its type's
+ * recommended cleaning steps (derived from {@link defaultStandardizationForRows}
  * over the IMPORTED terms, so the steps and the row-inferred date format hold even
  * when the seed's default terms declare no field of that type).
  *
@@ -866,9 +868,10 @@ export function gatedActiveSettingMessage(
  * a pre-existing editor-model limitation, independent of this binding reconstruction
  * (tracked as its own follow-up).
  *
- * Fail-closed: a field whose type has no free, non-`ignored` column left (the
- * inviter's columns cannot supply a distinct binding) gets no transformation -- it is
- * never bound to an absent, `ignored`, wrong-typed, or already-taken column, so a
+ * Fail-closed: a field whose type has no free `role: linkage` column left (the
+ * inviter's columns cannot supply a distinct binding the operator marked for
+ * matching) gets no transformation -- it is never bound to an absent, `ignored`,
+ * `identifier`/`payload`-roled, wrong-typed, or already-taken column, so a
  * reconstructed binding is never a silent mis-bind. The field stays undeclared; a key
  * that references only reconstructed fields is satisfiable, while one that still
  * references the undeclared field cannot generate (the built terms would reference an
@@ -901,8 +904,7 @@ function standardizationForImportedTerms(
     base.map((transformation) => transformation.output),
   );
   // Columns already bound -- by the default base, then by each extra added below --
-  // so every reconstructed same-typed field takes its OWN column (mirroring
-  // addFieldForType's free-column search, which produced these bindings).
+  // so every reconstructed same-typed field takes its OWN column, never doubling up.
   const boundColumns = new Set(
     base.map((transformation) => transformation.input),
   );
@@ -910,17 +912,34 @@ function standardizationForImportedTerms(
   const extras: Standardization = [];
   for (const field of terms.linkageFields) {
     if (baseOutputs.has(field.name)) continue;
-    // The default standardization over the imported terms emitted no transformation
-    // for this field -- its type has no non-`ignored` column to bind, or no default
-    // cleaning pipeline -- so it cannot be reconstructed and is left undeclared
-    // (fail-closed). Reading the steps here (rather than a separate `.has()` probe)
+    // First of two fail-closed gates that leave a field undeclared. Here the default
+    // standardization over the imported terms emitted no transformation for this
+    // field at all -- its type has no non-`ignored` column, or no default cleaning
+    // pipeline -- so there is no binding to reconstruct. (The second gate is the
+    // `freeColumn === undefined` check below: steps exist, but no `role: linkage`
+    // column is free.) Reading the steps here (rather than a separate `.has()` probe)
     // also narrows them to a defined array for the push below.
     const steps = stepsByField.get(field.name);
     if (steps === undefined) continue;
+    // Bind only to a `role: linkage` column -- one the operator designated for
+    // matching -- not merely a non-`ignored` one. An imported terms document is
+    // attacker-influenceable (any schema-valid document is accepted on import), so a
+    // crafted document declaring an extra same-typed field must not be able to
+    // auto-bind it to a column the operator roled `identifier` (row-identifier) or
+    // `payload` (sent-to-partner) and so hash that column's value into a PSI key
+    // without consent -- the always-visible preview shows only the field's type
+    // label, not its bound column, so such a binding would otherwise be visible only
+    // in the expert workbench. Deliberately stricter than that workbench's
+    // `addFieldForType`, where the same binding is an explicit, per-field-visible
+    // operator action rather than an import side effect; an extra field with no free
+    // `linkage` column stays undeclared (fail-closed), and the operator can still
+    // establish the binding by hand in the workbench or by roling the column
+    // `linkage`. The default base's FIRST-column-per-type binding is unchanged (it
+    // is core's documented `resolveFieldColumns` rule, out of scope here).
     const freeColumn = metadata.find(
       (column) =>
         column.type === field.type &&
-        column.role !== "ignored" &&
+        column.role === "linkage" &&
         !boundColumns.has(column.name),
     );
     if (freeColumn === undefined) continue;
