@@ -1,6 +1,14 @@
 import { useMemo } from "react";
 
-import { Badge, Group, Stack, Table, Text, Tooltip } from "@mantine/core";
+import {
+  Badge,
+  Group,
+  Stack,
+  Table,
+  Text,
+  Tooltip,
+  VisuallyHidden,
+} from "@mantine/core";
 
 import { runPipeline, sanitizeForDisplay } from "@psilink/core";
 
@@ -13,11 +21,13 @@ import type {
 } from "@psilink/core";
 
 /**
- * Provisional row-sample size for the before->after preview: the first few rows
- * with a non-empty value for the field's input column. Slice 3 settles the sample
- * size empirically (coordinated with the full-CSV non-empty-rate aggregate and the
- * off-main-thread threshold); until then a small fixed window keeps the preview
- * cheap and legible.
+ * Row-sample size for the before->after preview: the first few rows with a non-empty
+ * value for the field's input column. The preview is for inspecting the transform on
+ * representative values, so a small fixed window keeps it cheap and legible; the
+ * whole-file coverage question (does the transform collapse the field?) is answered
+ * separately and exhaustively by the off-main-thread non-empty-rate aggregate
+ * ({@link ../psi/nonEmptyAggregate}), not by widening this sample. Settled at 5,
+ * coordinated with that aggregate and its row threshold.
  */
 export const PREVIEW_SAMPLE_SIZE = 5;
 
@@ -211,6 +221,10 @@ export function StandardizationPreview({
 
   return (
     <Table verticalSpacing="xs" withRowBorders={false}>
+      <VisuallyHidden component="caption">
+        A sample of your rows, before and after this field&apos;s cleaning
+        steps.
+      </VisuallyHidden>
       <Table.Thead>
         <Table.Tr>
           <Table.Th scope="col">Original</Table.Th>
