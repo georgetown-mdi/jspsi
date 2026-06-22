@@ -17,6 +17,15 @@ updates:
           - "node-forge"
           - "ssh2"
           - "ssh2-sftp-client"
+      # The WebRTC stack is grouped (not batched into non-critical) because the
+      # web inbound bound drives peerjs internals and parses the peerjs-js-binarypack
+      # wire format past their public APIs, so every bump must re-verify that coupling
+      # before it merges -- see the "Upgrading the PeerJS stack" checklist in
+      # CONTRIBUTING.md, mirroring the SFTP stack's exact-pin + review treatment.
+      webrtc-stack:
+        patterns:
+          - "peerjs"
+          - "peerjs-js-binarypack"
       # Batch routine dependency bumps to reduce noise.
       non-critical:
         update-types:
@@ -28,6 +37,8 @@ updates:
           - "node-forge"
           - "ssh2"
           - "ssh2-sftp-client"
+          - "peerjs"
+          - "peerjs-js-binarypack"
     ignore:
       # The OpenMined PSI module is vendored; updates require manual review
       # of the tarball and NOTICE file before the lock file is updated.
