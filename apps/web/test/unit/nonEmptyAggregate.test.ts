@@ -156,6 +156,27 @@ describe("computeFieldCoverage: the silent-empty defense", () => {
     expect(coverage.unavailable).toBe(true);
     expect(isSilentEmpty(coverage)).toBe(false);
   });
+
+  test("an over-length regex source is unavailable and never compiled", () => {
+    // An in-dialect pattern longer than MAX_TRANSFORM_PATTERN_LENGTH (a 1001-char
+    // literal) passes the dialect refine and would NOT throw, but compiling it pays
+    // the super-linear RE2 compile cost the cap exists to bound. The sweep runs
+    // inline on the main thread below the off-thread threshold, so the validity gate
+    // reports the field unavailable WITHOUT compiling, never reading it as a collapse.
+    const rows = [{ n: "mary" }];
+    const standardization: Standardization = [
+      {
+        output: "first_name",
+        input: "n",
+        steps: [
+          { function: "filter_regex", params: { pattern: "a".repeat(1001) } },
+        ],
+      },
+    ];
+    const [coverage] = computeFieldCoverage(rows, standardization);
+    expect(coverage.unavailable).toBe(true);
+    expect(isSilentEmpty(coverage)).toBe(false);
+  });
 });
 
 function stdFor(input: string): Standardization {
