@@ -410,9 +410,14 @@ function describeExecutedValue(value: unknown): string {
 
 /**
  * The literal slice phrase for a `substring` step on a name field, or undefined
- * when no faithful literal applies. `positionalSafe` gates the field kind: a date
- * or other reformatted field is canonicalized by a standardization the token does
- * not carry, so "the first 6 characters" there would be unverifiable. The params
+ * when no faithful literal applies. `positionalSafe` gates both the field kind and
+ * the pipeline position -- the caller passes true only for a name field's FIRST
+ * step, so the slice runs on the unmodified field value. A date or other
+ * reformatted field is canonicalized by a standardization the token does not carry
+ * (so "the first 6 characters" there would be unverifiable), and a substring after
+ * an earlier step that already rewrote the value (e.g. phonetic then substring)
+ * takes the first N of that intermediate value, not the field -- both are left to
+ * the glossary description rather than a misstating literal. The params
  * are partner-controlled and typed `unknown`, so they are narrowed to integers
  * before use; only a positive integer start yields a literal. A non-positive start
  * has no faithful "first N" -- a negative counts from the end, and 0 is a no-op
@@ -560,8 +565,12 @@ function summarizeKey(
       const positionalSafe = type === "first_name" || type === "last_name";
       return {
         fieldLabel: labelForField(element.field),
-        transforms: (element.transform ?? []).map((step) =>
-          summarizeTransform(step, positionalSafe),
+        // The substring literal is faithful only on a name field's FIRST step: a
+        // later step runs on a value an earlier one already rewrote (e.g.
+        // phonetic then substring takes the first N of the sound-alike code, not
+        // the name), so "the first N characters" of the original would be wrong.
+        transforms: (element.transform ?? []).map((step, stepIndex) =>
+          summarizeTransform(step, positionalSafe && stepIndex === 0),
         ),
         fuzzyComparison:
           element.generateFuzzyComparisons !== undefined

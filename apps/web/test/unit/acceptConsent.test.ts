@@ -984,6 +984,37 @@ describe("summarizeInvitation", () => {
     expect(effectFor({ length: 2 }).effect).toBeUndefined();
   });
 
+  test("does not render a substring literal after an earlier reformatting step", () => {
+    // On a name field, phonetic then substring takes the first 3 characters of
+    // the sound-alike code, not the name, so the positional literal would misstate
+    // the match -- the substring step falls back to the glossary description.
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [{ name: "last_name", type: "last_name" }],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [
+              {
+                field: "last_name",
+                transform: [
+                  { function: "phonetic" },
+                  { function: "substring", params: { start: 1, length: 3 } },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const [phonetic, substring] = summary.linkageKeys[0].elements[0].transforms;
+    expect(phonetic.description).toBe(TRANSFORM_FUNCTION_GLOSSARY["phonetic"]);
+    expect(substring.effect).toBeUndefined();
+    expect(substring.description).toBe(
+      TRANSFORM_FUNCTION_GLOSSARY["substring"],
+    );
+  });
+
   test("builds the header one-liner from compact field labels", () => {
     const summary = summarizeInvitation(
       makeToken({

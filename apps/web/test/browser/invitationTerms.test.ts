@@ -211,6 +211,13 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     const other = toggle("Other details");
     await expect.element(other).toBeInTheDocument();
 
+    // The master collapse is hidden from AT + the tab order while closed, like
+    // each per-key disclosure (so its dense legal/payload detail cannot leak into
+    // the tab order or accessibility tree while visually hidden).
+    const masterCollapse = collapseFor("Other details");
+    expect(masterCollapse.getAttribute("aria-hidden")).toBe("true");
+    expect(masterCollapse.hasAttribute("inert")).toBe(true);
+
     // The non-key blocks (field constraints, payload, legal agreement, dedup) are
     // in the master disclosure ...
     const panel = panelFor("Other details");
@@ -249,7 +256,7 @@ describe("InvitationTerms: a key disclosure's aria-controls survives a reduced-m
     window.matchMedia = originalMatchMedia;
   });
 
-  test("a key disclosure's aria-controls resolves to a present wrapper while collapsed under reduced motion", async () => {
+  test("every disclosure's aria-controls resolves to a present wrapper while collapsed under reduced motion", async () => {
     root!.render(
       createElement(
         MantineProvider,
@@ -258,27 +265,36 @@ describe("InvitationTerms: a key disclosure's aria-controls survives a reduced-m
       ),
     );
 
-    const button = toggle("SSN + FN1");
-    await expect.element(button).toBeInTheDocument();
-    expect(button.element().getAttribute("aria-expanded")).toBe("false");
+    // Every disclosure on the screen -- both per-key widgets AND the master "Other
+    // details" -- relies on the always-mounted-wrapper design, so assert the
+    // unmount for all of them, not just one key.
+    const names = ["SSN + LN + DOB", "SSN + FN1", "Other details"];
+    for (const name of names) {
+      await expect.element(toggle(name)).toBeInTheDocument();
+      expect(toggle(name).element().getAttribute("aria-expanded")).toBe(
+        "false",
+      );
+    }
+    const ids = names.map((name) =>
+      toggle(name).element().getAttribute("aria-controls"),
+    );
+    ids.forEach((id) => expect(id).toBeTruthy());
 
-    const id = button.element().getAttribute("aria-controls");
-    expect(id).toBeTruthy();
-
-    // The reduced-motion media effect resolves after mount and unmounts the closed
-    // Collapse panel, emptying the wrapper -- the state in which an id held on the
+    // The reduced-motion media effect resolves after mount and unmounts each closed
+    // Collapse panel, emptying its wrapper -- the state in which an id held on the
     // panel itself would dangle. Wait for that unmount so the assertion exercises
     // it rather than the pre-effect mounted-but-hidden panel.
-    await expect
-      .poll(() => document.getElementById(id!)?.children.length)
-      .toBe(0);
-
-    // The stable wrapper holding aria-controls stays mounted, so the reference
-    // still resolves to a present element; the unmounted panel keeps the collapsed
-    // detail out of the accessibility tree.
-    const panel = document.getElementById(id!);
-    expect(panel).not.toBeNull();
-    expect(panel!.textContent).toBe("");
+    for (const id of ids) {
+      await expect
+        .poll(() => document.getElementById(id!)?.children.length)
+        .toBe(0);
+      // The stable wrapper holding aria-controls stays mounted, so the reference
+      // still resolves to a present element; the unmounted panel keeps the
+      // collapsed detail out of the accessibility tree.
+      const panel = document.getElementById(id!);
+      expect(panel).not.toBeNull();
+      expect(panel!.textContent).toBe("");
+    }
   });
 });
 
