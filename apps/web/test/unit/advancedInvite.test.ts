@@ -774,7 +774,11 @@ describe("draftFromTerms reconstructs multi-field bindings on import", () => {
     // The import side rebuilds only the LOCAL standardization; the cross-party terms
     // -- field names/types/constraints and keys -- are reproduced byte-for-byte, so
     // the agreement and its receipt are unchanged. The import mirror of the
-    // local-only invariance test above.
+    // local-only invariance test above. Scope: this covers terms the editor itself
+    // produced (default constraints, default field order). An externally-authored
+    // document carrying custom field constraints or a different cross-type field order
+    // is normalized by authoredLinkageFields on rebuild -- a separate, pre-existing
+    // limitation tracked on its own, not exercised here.
     const exported = buildAdvancedTerms(multiFieldDraft());
     const seed = seedFor(columns, metadata);
     const imported = draftFromTerms(exported, seed, 3600, rawRows);

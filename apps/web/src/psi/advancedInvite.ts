@@ -852,17 +852,29 @@ export function gatedActiveSettingMessage(
  * binds to the next non-`ignored` column of its type not already bound, reusing its
  * type's recommended cleaning steps (derived from {@link defaultStandardizationForRows}
  * over the IMPORTED terms, so the steps and the row-inferred date format hold even
- * when the seed's default terms declare no field of that type). `authoredLinkageFields`
- * over the result then re-emits the imported fields' names in their original order,
- * so {@link buildAdvancedTerms} reproduces the imported `linkageFields` and the
- * cross-party hash is unchanged.
+ * when the seed's default terms declare no field of that type).
+ *
+ * The reconstructed binding is local and never enters the token, so it cannot move
+ * the cross-party hash; `authoredLinkageFields` over the result re-declares the
+ * imported fields by name and type, bound to their reconstructed columns, which lets
+ * {@link buildAdvancedTerms} build and validate terms referencing them. For terms the
+ * editor itself produced this reproduces the imported `linkageFields` exactly (see the
+ * import round-trip test). It is NOT a faithful round-trip for an externally-authored
+ * document: `authoredLinkageFields` normalizes each field's `constraints` to its type
+ * default and emits fields in the fixed default-field order, so a document carrying
+ * custom constraints or a different cross-type field order is normalized on rebuild --
+ * a pre-existing editor-model limitation, independent of this binding reconstruction
+ * (tracked as its own follow-up).
  *
  * Fail-closed: a field whose type has no free, non-`ignored` column left (the
- * inviter's columns cannot supply a distinct binding) gets no transformation, so it
- * stays undeclared and the key referencing it surfaces as unsatisfiable -- it is
- * never bound to an absent, `ignored`, or already-taken column. An import that
- * declares only the single default field per type adds nothing, so it reconstructs
- * the seed's default standardization byte-for-byte.
+ * inviter's columns cannot supply a distinct binding) gets no transformation -- it is
+ * never bound to an absent, `ignored`, wrong-typed, or already-taken column, so a
+ * reconstructed binding is never a silent mis-bind. The field stays undeclared; a key
+ * that references only reconstructed fields is satisfiable, while one that still
+ * references the undeclared field cannot generate (the built terms would reference an
+ * undeclared field, which the schema rejects). An import that declares only the single
+ * default field per type adds nothing, so it reconstructs the seed's default
+ * standardization byte-for-byte.
  */
 function standardizationForImportedTerms(
   metadata: Metadata,
@@ -930,10 +942,11 @@ function standardizationForImportedTerms(
  * it). The local standardization is reconstructed from the imported field
  * declarations against the inviter's columns (see
  * {@link standardizationForImportedTerms}), so a multi-field document's distinct
- * same-typed bindings are restored when the columns can supply them and the
- * import/export round-trip holds; a field no column can satisfy stays undeclared
- * and its key surfaces as unsatisfiable rather than silently mis-binding. The
- * caller refuses a gated-active import first (see {@link gatedActiveSettingMessage}). */
+ * same-typed bindings are restored when the columns can supply them and the editor's
+ * own multi-field export round-trips; a field no column can satisfy stays undeclared
+ * and is never silently mis-bound (see {@link standardizationForImportedTerms} for the
+ * round-trip's limits on an externally-authored document). The caller refuses a
+ * gated-active import first (see {@link gatedActiveSettingMessage}). */
 export function draftFromTerms(
   terms: LinkageTerms,
   seed: AdvancedInviteSeed,
