@@ -3,8 +3,10 @@ import {
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
   assessLinkageSatisfiability,
+  authoredLinkageFields,
   canonicalString,
   getDefaultLinkageTerms,
+  getDefaultStandardization,
   inferMetadata,
   safeParseLinkageTerms,
 } from "@psilink/core";
@@ -19,6 +21,7 @@ import type {
   LinkageTerms,
   Metadata,
   Output,
+  Standardization,
 } from "@psilink/core";
 
 /** The per-element fuzzy-comparison expansion, derived from the core element type
@@ -139,6 +142,19 @@ export interface AdvancedInviteDraft {
    * {@link inferMetadata}, normalized so the collapsed disclosure control is
    * faithful. */
   metadata: Metadata;
+  /**
+   * The inviter's per-party standardization: the ordered cleaning steps and the
+   * input-column binding for each field. Seeded from {@link getDefaultStandardization}
+   * (so the editor opens on the recommended per-type cleaning, and -- with no edits --
+   * {@link authoredLinkageFields} over it reproduces the guided default field set
+   * byte-for-byte, keeping the cross-party terms unchanged). The data-prep workbench
+   * edits it; {@link buildAdvancedTerms} derives the linkage FIELDS from it via
+   * {@link authoredLinkageFields}, which is what lets two transformations of one
+   * semantic type bind to distinct columns and declare two fields. Threaded into the
+   * inviter's own `prepareForExchange` (never the token), so the cleaning it authors
+   * is the cleaning the run applies. Reconciled against a metadata edit by
+   * {@link setDraftMetadata}. */
+  standardization: Standardization;
   keys: Array<DraftKey>;
 }
 
@@ -211,6 +227,11 @@ export function seedAdvancedInvite(
       algorithm: terms.algorithm,
       deduplicate: terms.deduplicate,
       metadata,
+      // The recommended per-type cleaning for these columns. authoredLinkageFields
+      // over this reproduces the default per-type field set (one field per type),
+      // so the seeded draft's terms equal getDefaultLinkageTerms' -- the editor opens
+      // on a known-good valid state, byte-identical to the quick path's.
+      standardization: getDefaultStandardization(metadata, terms),
       keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),
     },
     seed: { terms, metadata, columns },
@@ -235,7 +256,57 @@ export function setDraftMetadata(
     draft.identity,
     metadata,
   ).linkageKeys;
-  return { ...draft, metadata, keys: reconcileKeys(draft.keys, offerable) };
+  return {
+    ...draft,
+    metadata,
+    standardization: reconcileStandardization(
+      draft.standardization,
+      metadata,
+      draft.identity,
+    ),
+    keys: reconcileKeys(draft.keys, offerable),
+  };
+}
+
+/**
+ * Reconcile the draft's standardization against a freshly-edited metadata, the
+ * standardization analogue of {@link reconcileKeys}. A transformation is kept when
+ * its input column is still present and non-ignored (so an operator's authored
+ * cleaning and any second-column binding it added survive a metadata edit), and
+ * dropped when its column was removed or marked ignored -- so a stale transformation
+ * never cleans a column the operator excluded. A semantic type the kept set no longer
+ * covers (e.g. a newly-typed column) gains the recommended default cleaning, mirroring
+ * how {@link reconcileKeys} appends a newly-offerable key. With no edits this returns
+ * the unchanged default standardization (every default transformation is kept and
+ * every type covered), so a metadata-untouched draft stays byte-identical.
+ */
+function reconcileStandardization(
+  prev: Standardization,
+  metadata: Metadata,
+  identity: string,
+): Standardization {
+  const columnByName = new Map(metadata.map((column) => [column.name, column]));
+  const kept = prev.filter((transformation) => {
+    const column = columnByName.get(transformation.input);
+    return column !== undefined && column.role !== "ignored";
+  });
+  const coveredTypes = new Set(
+    kept
+      .map((transformation) => columnByName.get(transformation.input)?.type)
+      .filter((type) => type !== undefined),
+  );
+  // Default cleaning for a present type the kept set does not cover. Derived the
+  // same way the seed is (getDefaultStandardization over the metadata's default
+  // terms), so a newly-typed column gains exactly the recommended per-type pipeline.
+  const fullDefault = getDefaultStandardization(
+    metadata,
+    getDefaultLinkageTerms(identity, metadata),
+  );
+  const additions = fullDefault.filter((transformation) => {
+    const column = columnByName.get(transformation.input);
+    return column !== undefined && !coveredTypes.has(column.type);
+  });
+  return [...kept, ...additions];
 }
 
 /** Reconcile the draft's keys against a freshly-derived offerable set: keep the
@@ -306,9 +377,19 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   const referenced = new Set(
     enabledKeys.flatMap((key) => key.elements.map((el) => el.field)),
   );
-  const linkageFields = baseTerms.linkageFields.filter((field) =>
-    referenced.has(field.name),
-  );
+  // Derive the linkage fields from the authored standardization, not the
+  // one-field-per-type default: a transformation per type declares its own field
+  // (named by its output, bound to its input column), so two transformations of one
+  // semantic type yield two distinct fields (maiden + current name). With no authored
+  // cleaning this equals baseTerms.linkageFields byte-for-byte (the seed's
+  // standardization is getDefaultStandardization, whose outputs are the default field
+  // names), so the guided path's terms -- and the cross-party hash -- are unchanged.
+  // Filtered to the fields the enabled keys reference, mirroring the prior derivation
+  // so disabling a key still drops a now-unreferenced field.
+  const linkageFields = authoredLinkageFields(
+    draft.metadata,
+    draft.standardization,
+  ).filter((field) => referenced.has(field.name));
 
   const terms: LinkageTerms = {
     ...baseTerms,
@@ -738,6 +819,12 @@ export function draftFromTerms(
           }
         : undefined,
     metadata: seed.metadata,
+    // Imported terms carry no per-party binding (standardization is local), so the
+    // cleaning stays the inviter's own default for its columns -- the same default
+    // the guided path seeds. An imported key referencing a custom multi-field name
+    // therefore finds no such field and surfaces as unsatisfiable (the deferred
+    // import-of-multi-field case noted above), rather than silently mis-binding.
+    standardization: getDefaultStandardization(seed.metadata, seed.terms),
     keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),
   };
 }

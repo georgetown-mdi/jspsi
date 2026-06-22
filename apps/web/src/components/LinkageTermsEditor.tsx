@@ -31,7 +31,9 @@ import {
   MAX_NAME_LENGTH,
   MAX_TEXT_LENGTH,
   assessLinkageSatisfiability,
+  authoredLinkageFields,
   getDefaultLinkageTerms,
+  getDefaultStandardization,
 } from "@psilink/core";
 
 import {
@@ -156,6 +158,9 @@ export function LinkageTermsEditor({
     algorithm: seed.terms.algorithm,
     deduplicate: seed.terms.deduplicate,
     metadata: seed.metadata,
+    // The recommended per-type cleaning; authoredLinkageFields over it reproduces
+    // the default field set, so the restated draft's terms equal the seed's.
+    standardization: getDefaultStandardization(seed.metadata, seed.terms),
     keys: seed.terms.linkageKeys.map((key) => ({ key, enabled: true })),
   });
   const [draft, setDraft] = useState<AdvancedInviteDraft>(freshDraft);
@@ -239,9 +244,14 @@ export function LinkageTermsEditor({
   // The fields a key element may reference, metadata-derived (one per non-ignored
   // typed column). The expert field-pickers offer exactly these, so a key authored
   // in the editor can only reference a declared field.
+  // The fields a key element may reference: derived from the authored standardization
+  // (not the one-field-per-type default), so when the operator binds two transformations
+  // of one semantic type to distinct columns the expert key editor offers BOTH fields.
+  // With no authored cleaning this equals the default per-type field set (the seed's
+  // standardization reproduces it), so the guided path is unchanged.
   const declaredFields = useMemo(
-    () => getDefaultLinkageTerms("", draft.metadata).linkageFields,
-    [draft.metadata],
+    () => authoredLinkageFields(draft.metadata, draft.standardization),
+    [draft.metadata, draft.standardization],
   );
 
   const updateDraft = (next: Partial<AdvancedInviteDraft>) => {
