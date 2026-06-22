@@ -156,6 +156,34 @@ describe("StandardizationPreview renders each pipeline outcome distinctly", () =
       .toBeInTheDocument();
   });
 
+  test("an over-length regex source shows guidance and is never compiled", async () => {
+    // The length cap rejects an in-dialect pattern longer than
+    // MAX_TRANSFORM_PATTERN_LENGTH (here a 1001-char literal): it is valid RE2
+    // syntax so it would NOT throw, but compiling it pays the super-linear RE2
+    // compile cost the cap exists to bound. The preview gates on isStepValid, so
+    // the oversized source never reaches compile and the operator sees the same
+    // guidance the inline length error already explains.
+    render(
+      createElement(StandardizationPreview, {
+        field: FIRST_NAME,
+        inputColumn: "n",
+        steps: [
+          { function: "filter_regex", params: { pattern: "a".repeat(1001) } },
+        ],
+        rawRows: [{ n: "mary" }],
+      }),
+    );
+    await expect
+      .element(
+        page.getByText(
+          "Finish configuring the steps above to see the preview.",
+        ),
+      )
+      .toBeInTheDocument();
+    expect(page.getByTestId("outcome-value").elements()).toHaveLength(0);
+    expect(page.getByTestId("outcome-dropped").elements()).toHaveLength(0);
+  });
+
   test("a value that violates a field constraint is badged (warn, not blocked)", async () => {
     render(
       createElement(StandardizationPreview, {

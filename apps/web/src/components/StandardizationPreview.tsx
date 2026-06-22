@@ -12,7 +12,10 @@ import {
 
 import { runPipeline, sanitizeForDisplay } from "@psilink/core";
 
-import { checkValueConstraints } from "@psi/standardizationAuthoring";
+import {
+  checkValueConstraints,
+  isStepValid,
+} from "@psi/standardizationAuthoring";
 
 import type {
   FieldValue,
@@ -190,14 +193,20 @@ export function StandardizationPreview({
   );
   // Recompute the outcomes whenever the steps or sample change; `steps` is a new
   // array on every edit/reorder, so the pipeline re-runs and the preview tracks
-  // the current pipeline order. A step factory can throw while a param is still
-  // being authored (e.g. `pad_left` with no length yet), so compile/run is guarded
-  // and an incomplete pipeline shows guidance rather than crashing the preview --
-  // the offending step's own typed input already carries the inline error.
+  // the current pipeline order. A step the editor flags invalid is never compiled:
+  // this guards two cases at once. A step factory can throw while a param is still
+  // being authored (e.g. `pad_left` with no length yet) -- caught below; and an
+  // in-dialect but over-length regex source, which `regexPatternSchema`'s length
+  // cap rejects (so `isStepValid` is false) yet RE2 would still compile, paying the
+  // super-linear-in-length compile cost the cap exists to bound, on the main thread
+  // per keystroke. Gating on `isStepValid` keeps that paste off the compile path
+  // (the throw-catch alone would not, since an oversized pattern does not throw).
+  // Both cases show the same guidance; the offending step carries its own inline error.
   const rows = useMemo<Array<{
     raw: string;
     result: FieldValue;
   }> | null>(() => {
+    if (!steps.every(isStepValid)) return null;
     try {
       return sample.map((raw) => ({ raw, result: runPipeline(raw, steps) }));
     } catch {
