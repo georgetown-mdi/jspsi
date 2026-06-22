@@ -597,6 +597,43 @@ test("exchangePayloads: an empty partner column name is accepted at the wire", a
   expect(received.columns).toEqual([""]);
 });
 
+test("exchangePayloads: the column-name length bound counts UTF-16 code units", async () => {
+  // The bound is value.length (UTF-16 code units), matching every other
+  // MAX_NAME_LENGTH use in the codebase, and the wire and record bounds use the
+  // identical unit so they cannot disagree. Pin the unit so a future switch to
+  // code points or graphemes fails here: an astral (surrogate-pair) character
+  // counts as its two code units, not one visible character.
+  const astral = "\u{1D54F}"; // U+1D54F, one visible char, two UTF-16 code units
+  const atBound = astral.repeat(MAX_NAME_LENGTH / 2); // exactly MAX_NAME_LENGTH units
+  expect(atBound.length).toBe(MAX_NAME_LENGTH);
+
+  // At the bound: accepted and round-tripped unchanged.
+  const [acceptA, acceptB] = createMessagePipe();
+  const acceptP = exchangePayloads(acceptA, "initiator", { hasData: false });
+  await acceptB.receive();
+  await acceptB.send({
+    hasData: true,
+    columns: [atBound],
+    rowIndices: [0],
+    rows: [["v"]],
+  });
+  expect((await acceptP).columns).toEqual([atBound]);
+
+  // One code unit over: rejected as a clean protocol error.
+  const [rejectA, rejectB] = createMessagePipe();
+  const rejectP = exchangePayloads(rejectA, "initiator", { hasData: false });
+  await rejectB.receive();
+  await rejectB.send({
+    hasData: true,
+    columns: [atBound + "a"],
+    rowIndices: [0],
+    rows: [["v"]],
+  });
+  const err = await rejectP.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+});
+
 // --- buildOutputTable --------------------------------------------------------
 
 test("buildOutputTable: our header uses identifier column name", () => {
