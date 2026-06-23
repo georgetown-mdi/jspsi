@@ -289,11 +289,13 @@ function disclosedColumnsForToken(metadata: Metadata): Array<string> {
  * @throws {InvitationFileError} when the file is unreadable or unlinkable (before
  *                               any secret is minted).
  * @throws {UsageError} (from core) when authored terms declare a `payload.send`
- *                      column the edited metadata does not transmit, so the token
- *                      and the partner's consent screen cannot over-declare. The
- *                      Advanced editor derives `payload.send` from the disclosed
- *                      columns, so its send is structurally a subset of what
- *                      metadata transmits and this never fires on editor output;
+ *                      that does not match the edited metadata's disclosed set (a
+ *                      named column metadata does not transmit, or a transmitted
+ *                      column the dictionary omits), so the token and the partner's
+ *                      consent screen cannot misstate what is sent. The Advanced
+ *                      editor derives `payload.send` from the disclosed columns, so
+ *                      its send equals what metadata transmits and this never fires
+ *                      on editor output;
  *                      it is the mint-boundary backstop (against a regression or a
  *                      non-editor caller), since `prepareForExchange`'s identical
  *                      check runs too late for the consent surface.
@@ -432,10 +434,11 @@ export async function generateInvitation(params: {
     );
     if (satisfiableKeyCount === 0)
       throw new InvitationFileError({ kind: "unlinkable", unsatisfied });
-    // Reject an over-declaring payload.send before the token is minted, so the
-    // partner's consent screen never carries a column this party's metadata gates
-    // off. The Advanced editor derives payload.send from the disclosed columns, so
-    // its send is structurally a subset and this is a defense-in-depth backstop
+    // Reject a payload.send that does not match the disclosed set before the token
+    // is minted, so the partner's consent screen never misstates what is sent (a
+    // column metadata gates off, or one it transmits but the dictionary omits). The
+    // Advanced editor derives payload.send from the disclosed columns, so its send
+    // equals what metadata transmits and this is a defense-in-depth backstop
     // (against a regression or a non-editor caller) rather than a gate the editor
     // reaches; it runs here because the exchange-time check in prepareForExchange
     // runs too late for the consent surface. The quick path (else) authors its own

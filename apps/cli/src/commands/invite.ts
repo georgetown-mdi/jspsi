@@ -419,11 +419,12 @@ export async function validateInvite(params: {
       );
     }
 
-    // Reject an over-declaring payload.send before the token is minted, so the
-    // partner's consent screen and the encoded token never carry a dictionary
-    // that names a column this party's metadata gates off; the exchange-time
-    // check in prepareForExchange protects the record but runs too late for the
-    // consent surface. Only this config-as-source path can carry a hand-authored
+    // Reject a payload.send that does not match what this party's metadata
+    // discloses before the token is minted, so the partner's consent screen and
+    // the encoded token never carry a dictionary that misstates what is sent (a
+    // column metadata gates off, or one it transmits but the dictionary omits);
+    // the exchange-time check in prepareForExchange protects the record but runs
+    // too late for the consent surface. Only this config-as-source path can carry a hand-authored
     // payload.send -- the online and infer paths build terms from columns and
     // author none. Gated on an explicit metadata block: without one, metadata is
     // inferred from the exchange's input columns (unknown here), so that case is

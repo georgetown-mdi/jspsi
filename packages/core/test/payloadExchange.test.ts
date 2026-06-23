@@ -364,7 +364,8 @@ test("assertPayloadSendDisclosed (acceptor path): a mirrored send the acceptor d
   // Same inviter request, but the acceptor never marked case_id as sent (role
   // ignored wins over isPayload). The mirrored send over-declares against the
   // acceptor's OWN metadata -- a genuine acceptor over-declaration, correctly
-  // rejected, preserving the forward-only subset guarantee on the acceptor too.
+  // rejected, preserving the exact-match disclosure guarantee on the acceptor too
+  // (over-declaration is one half of it; under-declaration is the other).
   const inviter: LinkageTerms = {
     ...inviterBaseTerms,
     payload: { receive: [{ name: "case_id" }] },
