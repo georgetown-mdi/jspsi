@@ -591,10 +591,14 @@ export async function prepareDataset(
   // the exchange. The canonical, local source is the top-level expectedPayloadColumns
   // (written by an offline acceptance from the invitation's disclosedPayloadColumns);
   // it falls back to the negotiated payload.receive names for an authored recurring
-  // config that carries only the data dictionary. An empty set is enforced strictly
-  // ("receive nothing"); an absent source reconciles lazily, as before. A no-output
-  // party's "receive nothing" is enforced independently by runExchange regardless of
-  // this field.
+  // config that carries only the data dictionary. That fallback is exact because
+  // assertPayloadSendDisclosed holds a present payload.send to the partner's full
+  // disclosed set, so payload.receive (the mirror of that send) equals what the
+  // partner actually transmits; without that invariant a partner whose send
+  // under-declared its metadata would transmit more than the mirror and false-abort.
+  // An empty set is enforced strictly ("receive nothing"); an absent source
+  // reconciles lazily, as before. A no-output party's "receive nothing" is enforced
+  // independently by runExchange regardless of this field.
   const expectedFromConfig =
     exchangeDataSpec.expectedPayloadColumns ??
     exchangeDataSpec.linkageTerms?.payload?.receive?.map((c) => c.name);

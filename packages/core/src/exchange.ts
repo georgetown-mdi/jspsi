@@ -147,13 +147,13 @@ export function prepareForExchange(
   const linkageTerms =
     exchangeDataSpec.linkageTerms ?? getDefaultLinkageTerms(identity, metadata);
 
-  // Reject a payload data dictionary that over-declares what metadata transmits.
-  // `payload.send` is exchanged, consented to, and written into the exchange
-  // record, while metadata's isPayload/role is the single source of truth for
-  // what actually leaves the machine. This is the one step with both in scope, so
-  // the CLI and web paths inherit the same fail-closed check; it is a no-op on the
-  // default and guided paths, which author no payload block. See
-  // assertPayloadSendDisclosed.
+  // Reject a payload data dictionary that does not match what metadata transmits.
+  // `payload.send` is exchanged, consented to, written into the exchange record,
+  // and mirrored into a recurring partner's lock-in, while metadata's
+  // isPayload/role is the single source of truth for what actually leaves the
+  // machine. This is the one step with both in scope, so the CLI and web paths
+  // inherit the same fail-closed check; it is a no-op on the default and guided
+  // paths, which author no payload block. See assertPayloadSendDisclosed.
   assertPayloadSendDisclosed(linkageTerms.payload, metadata);
 
   let dateInputFormat: string | undefined;

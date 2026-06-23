@@ -452,7 +452,8 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   // draft metadata DISCLOSES, via the shared payloadSendForMetadata derivation (the
   // quick path authors the same way over its inferred metadata, so the two cannot
   // drift). The send equals the disclosed set, so it can never trip core's
-  // assertPayloadSendDisclosed over-declaration reject -- the structural form of the
+  // assertPayloadSendDisclosed reject (which requires a present send to match the
+  // disclosed set exactly) -- the structural form of the
   // task's footgun guard; `receive` is left unauthored for lazy reconciliation. The
   // send is emitted regardless of output direction so the preview states honestly
   // what transmits; the incoherent "send while only I receive" case is blocked by

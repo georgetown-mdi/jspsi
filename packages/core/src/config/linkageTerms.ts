@@ -1459,7 +1459,7 @@ export function validateCompatibility(
   //
   // Laziness relaxes only this cross-party DECLARATION check; it never widens what a
   // party sends. Transmission is governed by each party's own metadata
-  // (`isDisclosedToPartner`) and the forward-only `assertPayloadSendDisclosed`, both
+  // (`isDisclosedToPartner`) and `assertPayloadSendDisclosed`, both
   // unchanged -- so a lazy receiver accepts only what the sender's own consented
   // metadata discloses, and receiving is not disclosing. The gate is symmetric: each
   // direction keys on the same receiver's declared `receive`, so the two parties

@@ -152,10 +152,12 @@ test("buildOutputTable: an ignored column is not treated as the identifier", () 
 
 // --- assertPayloadSendDisclosed ----------------------------------------------
 
-// The payload.send data dictionary (exchanged, consented to, and written into
-// the exchange record) must not over-declare relative to what metadata actually
-// transmits (isDisclosedToPartner = isPayload && role !== "ignored"). Forward
-// direction only; an over-declaration is rejected (UsageError -> CLI exit 64).
+// The payload.send data dictionary (exchanged, consented to, written into the
+// exchange record, and mirrored into a recurring partner's lock-in) must name
+// EXACTLY what metadata actually transmits (isDisclosedToPartner = isPayload &&
+// role !== "ignored") when present: an over-declaration (a name not transmitted)
+// or an under-declaration (a transmitted column omitted) is rejected (UsageError
+// -> CLI exit 64). An absent or empty dictionary is a no-op.
 
 test("assertPayloadSendDisclosed: a send column with isPayload:false is rejected", () => {
   const meta: Metadata = [
@@ -213,6 +215,41 @@ test("assertPayloadSendDisclosed: an identifier column left isPayload:true is di
   ];
   const payload: Payload = { send: [{ name: "patient_id" }] };
   expect(() => assertPayloadSendDisclosed(payload, meta)).not.toThrow();
+});
+
+test("assertPayloadSendDisclosed: a non-empty send omitting a disclosed column is rejected (under-declaration)", () => {
+  // A present dictionary must name the FULL disclosed set: metadata discloses
+  // {diagnosis, enrollment} but the dictionary lists only diagnosis, so it
+  // under-states what is sent -- and a recurring partner that mirrors this send
+  // into its receive lock-in would lock in too few columns and false-abort the
+  // honest exchange when the metadata-governed transmission delivers enrollment.
+  const meta: Metadata = [
+    { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+    { name: "diagnosis", type: "other", role: "payload", isPayload: true },
+    { name: "enrollment", type: "other", role: "payload", isPayload: true },
+  ];
+  const payload: Payload = { send: [{ name: "diagnosis" }] };
+  expect(() => assertPayloadSendDisclosed(payload, meta)).toThrow(UsageError);
+  // The omitted disclosed column is named so the operator can reconcile it.
+  expect(() => assertPayloadSendDisclosed(payload, meta)).toThrow(/enrollment/);
+});
+
+test("assertPayloadSendDisclosed: a send that both over- and under-declares names both directions", () => {
+  // metadata discloses {kept}; the dictionary names an undisclosed column (off)
+  // and omits the disclosed one (kept), so both directions of the mismatch fire.
+  const meta: Metadata = [
+    { name: "kept", type: "other", role: "payload", isPayload: true },
+    { name: "off", type: "other", role: "ignored", isPayload: true },
+  ];
+  const payload: Payload = { send: [{ name: "off" }] };
+  let message = "";
+  try {
+    assertPayloadSendDisclosed(payload, meta);
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err);
+  }
+  expect(message).toContain("[off]"); // over-declared (named, not transmitted)
+  expect(message).toContain("[kept]"); // under-declared (transmitted, omitted)
 });
 
 test("assertPayloadSendDisclosed: an absent or empty payload is a no-op", () => {
