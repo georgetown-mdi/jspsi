@@ -395,13 +395,15 @@ export interface InvitationToken {
    * columns that are not transmitted are not included and do not leave the
    * inviter's machine.
    *
-   * Optional and lazy: omitted on a mint path that does not know its metadata
-   * (so the acceptor reconciles lazily from the first transmission), and omitted
-   * when nothing is disclosed (the acceptor receives no payload regardless, so a
-   * declared empty set would never differ from the empty payload it gets). When
-   * present it LOCKS IN the acceptor's expectation: a later received payload whose
-   * column set differs aborts the exchange as a protocol error (the party
-   * promised one set and delivered another). See {@link reconcileReceivedPayload}.
+   * Optional. Omitted ONLY on a mint path that does not know its metadata, and
+   * then the acceptor reconciles lazily from the first transmission. When the
+   * metadata IS known the subset is carried verbatim, INCLUDING the empty set when
+   * nothing is disclosed -- an empty set is NOT the lazy case: it LOCKS IN "receive
+   * nothing," so a later non-empty payload aborts. Whenever present (empty or not)
+   * it locks in the acceptor's expectation: a received payload whose column set
+   * differs aborts the exchange as a protocol error (the party promised one set and
+   * delivered another). Only an OMITTED (undefined) field is lazy. See
+   * {@link reconcileReceivedPayload}.
    */
   disclosedPayloadColumns?: string[];
 }
@@ -490,9 +492,11 @@ const InvitationTokenSchema: z.ZodType<InvitationToken> = z.object({
   // reach a consent surface or a diagnostic. The `.min(1)` floor rejects an empty
   // name, matching the metadata/payload name floors -- an honest inviter derives
   // these from metadata whose names are already non-empty. There is deliberately
-  // no array-level minimum: an empty array is consumed as lazy (equivalent to the
-  // field being omitted) by reconcileReceivedPayload, so it carries no enforceable
-  // constraint and need not be rejected at decode.
+  // no array-level minimum: an empty array is MEANINGFUL -- it is the strict
+  // "receive nothing" lock-in carried when an inviter that knows its metadata
+  // discloses no payload column, which reconcileReceivedPayload enforces (a later
+  // non-empty payload aborts) -- so it must not be rejected at decode. Only an
+  // OMITTED field reconciles lazily.
   disclosedPayloadColumns: boundedArray(
     z.string().min(1).max(MAX_NAME_LENGTH),
     MAX_PAYLOAD_ENTRIES,
