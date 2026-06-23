@@ -189,15 +189,16 @@ const dobTerms: LinkageTerms = {
 describe("PrepareData surfaces a silent-empty collapse before launch", () => {
   test("a shape-satisfiable file whose dates the transform drops shows the alarm and announces it", async () => {
     // The column infers to date_of_birth, so the verdict (SHAPE) is satisfiable --
-    // yet the default parse_date expects MM/DD/YYYY and these ISO dates all drop to
-    // null. This is the exact hazard the aggregate guards: shape passes, value
-    // collapses. Two rows keep the sweep inline (below the worker threshold), so no
-    // worker is spawned and the result is deterministic.
+    // yet these values parse as a date in no candidate format, so format inference
+    // finds no signal, the dob pipeline falls back to MM/DD/YYYY, and every value
+    // drops to null. This is the exact hazard the aggregate guards: shape passes,
+    // value collapses. Two rows keep the sweep inline (below the worker threshold),
+    // so no worker is spawned and the result is deterministic.
     render(
       createElement(PrepareData, {
         linkageTerms: dobTerms,
         columns: ["dob"],
-        rawRows: [{ dob: "1990-01-01" }, { dob: "1985-12-31" }],
+        rawRows: [{ dob: "unknown" }, { dob: "unknown" }],
         onLaunch: vi.fn(),
         onBack: vi.fn(),
       }),
@@ -226,6 +227,31 @@ describe("PrepareData surfaces a silent-empty collapse before launch", () => {
         ),
       )
       .toBe(true);
+  });
+
+  test("an ISO-dated file produces full coverage: the acceptor infers the date format from its own rows", async () => {
+    // The acceptor editor always supplies an explicit standardization, so the
+    // exchange skips its own inference -- the editor must infer the date layout
+    // itself or an ISO file would be parsed as MM/DD/YYYY and drop every dob value.
+    // A day past 12 makes YYYY-MM-DD the only candidate, so the inference is
+    // unambiguous; with it the dob pipeline parses all rows and coverage is full
+    // (no silent-empty alarm). Two rows keep the sweep inline and deterministic.
+    render(
+      createElement(PrepareData, {
+        linkageTerms: dobTerms,
+        columns: ["dob"],
+        rawRows: [{ dob: "1990-01-31" }, { dob: "1985-12-25" }],
+        onLaunch: vi.fn(),
+        onBack: vi.fn(),
+      }),
+    );
+
+    await expect
+      .element(page.getByTestId("coverage-rate"))
+      .toHaveTextContent("2 of 2 rows produce a value (100%)");
+    expect(page.getByTestId("coverage-silent-empty").elements()).toHaveLength(
+      0,
+    );
   });
 
   test('"Reset to recommended" turns the expert tier back off', async () => {

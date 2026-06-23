@@ -3,6 +3,7 @@ import { expect, test, describe } from "vitest";
 import { getDefaultStandardization } from "../src/defaults/standardization";
 import {
   inferDateFormat,
+  columnValues,
   CANDIDATE_DATE_FORMATS,
   INFER_DATE_SCAN_CAP,
 } from "../src/utils/date";
@@ -751,6 +752,66 @@ describe("inferDateFormat — scanning", () => {
     for (const fmt of CANDIDATE_DATE_FORMATS) {
       expect(inferDateFormat(samples[fmt]), `format: ${fmt}`).toBe(fmt);
     }
+  });
+
+  test("interleaved empties do not consume the scan budget", () => {
+    // Empties are skipped lazily and must not spend the cap: a run of empty
+    // values longer than INFER_DATE_SCAN_CAP, followed by real dates, must still
+    // infer. If empties counted toward the cap the budget would be exhausted
+    // before any date was reached and the result would be undefined.
+    const values = [
+      ...Array.from({ length: INFER_DATE_SCAN_CAP * 2 }, () => ""),
+      "01/15/1990",
+      "12/31/2000",
+      "06/28/1975",
+    ];
+    expect(inferDateFormat(values)).toBe("MM/DD/YYYY");
+  });
+
+  test("consumes the source lazily, stopping at the scan cap", () => {
+    // All days and months <= 12 keep both MM/DD/YYYY and DD/MM/YYYY alive, so the
+    // candidate set never narrows to one and the cap alone governs how far we
+    // scan. The generator can yield far past the cap; inferDateFormat must stop
+    // pulling at INFER_DATE_SCAN_CAP rather than draining the whole source -- the
+    // property that lets a large file be scanned without materializing its column.
+    let yielded = 0;
+    function* ambiguousDates(): Generator<string> {
+      for (let i = 0; i < INFER_DATE_SCAN_CAP * 3; i++) {
+        yielded++;
+        yield "01/05/1990";
+      }
+    }
+    expect(inferDateFormat(ambiguousDates())).toBe("MM/DD/YYYY");
+    expect(yielded).toBeLessThanOrEqual(INFER_DATE_SCAN_CAP + 1);
+  });
+});
+
+describe("columnValues", () => {
+  test("yields each row's value for the named column", () => {
+    expect([...columnValues([{ dob: "a" }, { dob: "b" }], "dob")]).toEqual([
+      "a",
+      "b",
+    ]);
+  });
+
+  test("yields the empty string for a row missing the column", () => {
+    expect([
+      ...columnValues([{ dob: "a" }, { other: "x" }, { dob: "c" }], "dob"),
+    ]).toEqual(["a", "", "c"]);
+  });
+
+  test("is lazy: pulls a row only as the consumer advances", () => {
+    let yielded = 0;
+    function* rows(): Generator<Record<string, string>> {
+      for (let i = 0; i < 100; i++) {
+        yielded++;
+        yield { dob: "01/15/1990" };
+      }
+    }
+    const gen = columnValues(rows(), "dob");
+    gen.next();
+    gen.next();
+    expect(yielded).toBe(2);
   });
 });
 

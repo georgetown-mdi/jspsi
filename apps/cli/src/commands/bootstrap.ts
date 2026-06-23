@@ -10,6 +10,7 @@ import {
   inferMetadata,
   getDefaultLinkageTerms,
   getDefaultStandardization,
+  columnValues,
   inferDateFormat,
   MAX_ENDPOINT_HOST_LENGTH,
   MAX_ENDPOINT_PATH_LENGTH,
@@ -844,7 +845,7 @@ export function buildDataSpec(args: {
   const dobCol = metadata.find((c) => c.type === "date_of_birth");
   const dateInputFormat =
     dobCol !== undefined
-      ? inferDateFormat(rows.rawRows.map((r) => r[dobCol.name] ?? ""))
+      ? inferDateFormat(columnValues(rows.rawRows, dobCol.name))
       : undefined;
 
   try {

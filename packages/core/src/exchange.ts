@@ -7,7 +7,7 @@ import {
   validateStandardizationAgainstTerms,
   StandardizedKeyIterable,
 } from "./standardization.js";
-import { inferDateFormat } from "./utils/date.js";
+import { columnValues, inferDateFormat } from "./utils/date.js";
 import { sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
 import { PSIParticipant } from "./participant.js";
 import {
@@ -166,9 +166,7 @@ export function prepareForExchange(
       (c) => c.type === "date_of_birth" && c.role === "linkage",
     );
     if (dobCol !== undefined) {
-      dateInputFormat = inferDateFormat(
-        rawRows.map((row) => row[dobCol.name] ?? ""),
-      );
+      dateInputFormat = inferDateFormat(columnValues(rawRows, dobCol.name));
       if (dateInputFormat !== undefined)
         log.info(`inferred date of birth format: ${dateInputFormat}`);
     }
