@@ -62,7 +62,7 @@ export * from "./signingIdentity";
 export * from "./standardization";
 export { loadCSVFile, loadCSVColumns } from "./file";
 
-export { inferDateFormat } from "./utils/date.js";
+export { inferDateFormat, columnValues } from "./utils/date.js";
 export {
   computeHostKeyFingerprint,
   verifyHostKeyFingerprint,

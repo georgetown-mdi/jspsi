@@ -5,6 +5,7 @@ import {
   assessLinkageSatisfiability,
   authoredLinkageFields,
   canonicalString,
+  columnValues,
   disclosedColumnNames,
   getDefaultLinkageTerms,
   getDefaultStandardization,
@@ -228,7 +229,7 @@ export function defaultStandardizationForRows(
   );
   const dateInputFormat =
     dobColumn !== undefined
-      ? inferDateFormat(rawRows.map((row) => row[dobColumn.name] ?? ""))
+      ? inferDateFormat(columnValues(rawRows, dobColumn.name))
       : undefined;
   return getDefaultStandardization(metadata, terms, { dateInputFormat });
 }
