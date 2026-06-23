@@ -26,6 +26,7 @@ format is for and what it protects against; the spec says how it is constructed.
 | [COMMUNICATION.md](COMMUNICATION.md) | The transport-contract complement to the communication overview: the deferred-decision rationale for the core library's terminal `ConnectionErrorKind` taxonomy. | Developers extending the transport layer | The channels, synchronization, message-delivery contract, and supporting services (see [COMMUNICATION.md](../COMMUNICATION.md)) |
 | [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md) | The self-attested exchange record **format**: the record and opening file shapes, the format version, the HMAC commitment scheme and agreed-terms hash, the governance metadata, the disclosure framing, and the record's privacy properties. | Security auditors, external implementors, compliance reviewers, developers | The PSI protocol that produces the exchange (see [PROTOCOL.md](PROTOCOL.md)); the exchange-agreement format that supplies the governance fields (see [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md)); the canonical byte encoding (see [CANONICAL_ENCODING.md](CANONICAL_ENCODING.md)) |
 | [CANONICAL_ENCODING.md](CANONICAL_ENCODING.md) | The normative RFC 8785 (JCS) byte encoding the receipts, record commitments, and agreed-terms hash are computed over, with worked examples. Written so an independent implementation reproduces byte-identical output. | External implementors, security auditors | What the encoding is for and what it protects against -- that is the **Canonical encoding** overview in [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#canonical-encoding); how receipts use these bytes (see [PROTOCOL.md](PROTOCOL.md#non-repudiation)); the record format (see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)) |
+| [CREDENTIAL_STORAGE.md](CREDENTIAL_STORAGE.md) | The owner-only on-disk write path shared by the credential, signing-identity, exchange-record, and result-CSV files: the POSIX exclusive-create and atomic-rename discipline, the `fsync` durability and cross-write crash-ordering guarantee, the macOS `F_FULLFSYNC` and NFSv4-ACL caveats, the writable-and-readable-parent pre-flight, and the Windows ACL-narrowing and load-check internals. | Security auditors, implementors | What the files contain and the operator-facing required permissions, warnings, and remediation -- that is the **Key file security** overview in [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#key-file-security) |
 
 ## Where does my content go?
 
@@ -41,6 +42,7 @@ Within this tier, route by topic:
 - **The file-sync directory state machine, filename taxonomy, or enforcement sites** -> [FILE_SYNC.md](FILE_SYNC.md).
 - **The exchange-record on-disk format or commitment scheme** -> [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md).
 - **The canonical byte encoding any of the above commits over** -> [CANONICAL_ENCODING.md](CANONICAL_ENCODING.md).
+- **The owner-only on-disk write path (exclusive-create, atomic rename, fsync durability, ACL narrowing) or its crash-ordering guarantee** -> [CREDENTIAL_STORAGE.md](CREDENTIAL_STORAGE.md).
 - **A `ConnectionErrorKind` classification decision** -> [COMMUNICATION.md](COMMUNICATION.md).
 
 ### Two overlaps to disambiguate

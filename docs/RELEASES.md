@@ -14,7 +14,7 @@ PSI-Link uses [semantic versioning](https://semver.org/) (MAJOR.MINOR.PATCH):
 - **MINOR**: backwards-compatible new features or new configuration fields. Exchange specification files written for an earlier MINOR version of the same MAJOR must continue to work.
 - **MAJOR**: breaking changes to the exchange protocol, configuration schema, or CLI interface. A MAJOR bump means existing key files or exchange specs may need to be updated.
 
-Packages version independently. `apps/cli/package.json` is the canonical release version: Docker image tags and GitHub Release tags reflect the CLI version. `packages/core` (and any future sub-packages) version independently — a patch to the core library does not require a CLI release unless the CLI itself is also affected. `apps/web` is continuously deployed and carries no release version. The root `package.json` version is a monorepo workspace marker and is not independently meaningful.
+Packages version independently. `apps/cli/package.json` is the canonical release version: Docker image tags and GitHub Release tags reflect the CLI version. `packages/core` (and any future sub-packages) version independently -- a patch to the core library does not require a CLI release unless the CLI itself is also affected. `apps/web` is continuously deployed and carries no release version. The root `package.json` version is a monorepo workspace marker and is not independently meaningful.
 
 Compatibility between the CLI and its core dependency is recorded by the lockfile and embedded in the Docker image; no separate compatibility matrix is maintained.
 

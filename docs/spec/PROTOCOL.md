@@ -203,6 +203,33 @@ The responder confirms first (in msg2); the initiator verifies `responder_confir
 
 **Test vectors and interoperability.** The key-schedule mix chain above is faithful Noise NNpsk0, but the overall handshake is pinned by psilink's own checked-in known-answer vector (`packages/core/test/vectors/kex-vectors.json`) rather than being wire-compatible with generic Noise. Two things diverge from a stock Noise NNpsk0 session: the protocol name differs (so the initial `h` differs), and instead of Noise `Split()` the session key uses a custom KDF over `ck || h` with an added explicit confirmation round. So no end-to-end Noise vector corresponds. What does correspond is the underlying machinery, cross-checked against its published references in `packages/core/test/kex.test.ts`: the X25519 Diffie-Hellman against [RFC 7748](https://www.rfc-editor.org/rfc/rfc7748) section 6.1, and the Noise chaining HKDF against [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869) test case 3. The vectors fix the pre-shared secret and both ephemeral private keys and record, for all four `(initiator, responder)` request-encryption flag combinations, the handshake hash, session key, and both confirmation tags (the chaining key and confirmation key are flag-independent and recorded once); they are reproduced by the independent generator at `packages/core/test/vectors/generate-kex-vectors.mjs`.
 
+## Shared-secret rotation
+
+The pre-shared secret that authenticates a recurring exchange is a 32-byte value encoded as unpadded base64url (43 characters). Two mechanisms mint one, differing only in how the 32 bytes are produced:
+
+- **Invitation tokens** are generated directly from a CSPRNG (`crypto.getRandomValues`), giving 256 bits of entropy.
+- **Rotation tokens** are derived from the 32-byte session key (above) with the application HKDF (`hkdfDerive`: HKDF-SHA-256, 32-byte zero salt), so a rotated secret carries the same 256-bit security level as the session key it derives from:
+
+```
+rotated_secret = HKDF(session_key, "psilink-shared-secret-rotation-v1", 32)
+```
+
+The rotation runs after every successful handshake and before the data exchange begins: both parties recompute it independently from the shared `session_key`, so it adds no message or round-trip, and each persists the result as the secret for the next exchange. The `psilink-shared-secret-rotation-v1` info string is a single fixed label (not a per-party or per-context family) and is disjoint from every other domain-separation label in the system (`psilink-kex-v1:*`, `psilink-aead-v1:*`, `psilink-abort-token-v1:*`, `psilink-webrtc-peerid-v1:*`, and the `psilink-signing-*` labels), so a rotated secret can never collide with a session, AEAD, abort-marker, peer-id, or signing derivation.
+
+The operator-facing rotation policy -- that the secret is never reused, that a rotated token carries no expiry by default, and the recovery path when the two parties' tokens desynchronize -- is in [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#recurring-exchange-authentication).
+
+### `expires` enforcement and the 'expiring soon' advisory
+
+A `.psilink.key` token may carry an `expires` instant written by either of two mechanisms -- an invitation setup lifetime or the `token_max_age_days` policy -- and enforcement is kind-agnostic by construction: it reads only the stored `expires`, never its origin, and the same recovery (re-invite) applies to both, so no consumer branches on origin and no provenance marker is stored (a marker would add state to the key file without changing any decision taken from it, and could be present on one party's key file and absent on the other's, in a model whose recoverability depends on both parties holding uniformly-interpreted key files). The operator-facing policy is in [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#two-sources-one-expires).
+
+**Enforcement sites.** Four checks read `expires`. Three are kind-agnostic and abort on any `expires` at or before the current time, directing both parties to re-invite: the load-time check before an exchange, the pre-handshake check, and the post-handshake check (which catches a token that lapses during the key-exchange round-trip). The fourth, the accept-time invitation check, is the only single-kind site -- unavoidably, since it validates the encoded invitation, which carries only an invitation lifetime. There is no expired state in which the two kinds call for different recovery, so the expired-side message is uniform by intent rather than branched on origin.
+
+**'Expiring soon' threshold.** The advisory fires when the loaded `expires` is within `token_max_age_days / 3` days of the current time -- a fraction of the configured age rather than a fixed number of days, so it scales with the policy (a 90-day age warns with 30 days remaining, a 30-day age with 10) and is silent unless a policy is configured. It is suppressed when the exchange that surfaces it succeeds (rotation then stamps a farther-out `expires`) and shown only when no successful rotation refreshed the token -- a failed exchange.
+
+**Invitation token flagged 'expiring soon'.** Because the advisory does not consult origin, a freshly minted invitation token can be flagged. This is reachable only on the offline re-invitation path (the inviter's key file is the only one that persists an invitation `expires`; the acceptor's offline key file carries none, and the online flow persists only the rotated token), before the first exchange rotates the token, and it survives only past a *failed* first exchange. The notice is accurate and its guidance is correct for either kind, so it is accepted rather than suppressed; suppressing it for invitation tokens alone would require persisting a per-file origin marker -- the invisible cross-party state the unified representation deliberately avoids.
+
+**Design rationale.** The unification rests on the two sources sharing one recovery. No migration arises: an existing key file holds a bare `expires`, which is exactly what the uniform interpretation reads. It would need revisiting only if an expired max-age token were ever made recoverable without re-invitation, so that the expired-side action diverged by origin -- not the case today.
+
 ## WebRTC rendezvous peer-id derivation
 
 The WebRTC transport meets its peer with no coordination backend: both web parties derive their PeerJS rendezvous peer ids deterministically from the invitation's 32-byte shared secret, so each side computes the other's id locally and they rendezvous on the PeerJS signaling broker without exchanging an id out of band. This precedes and is independent of the X25519 handshake above -- it places the two parties on the same WebRTC connection, over which the handshake then runs.
