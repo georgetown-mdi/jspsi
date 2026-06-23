@@ -88,6 +88,7 @@ import type { FieldStepOverride } from "@psi/standardizationAuthoring";
  */
 export function PrepareData({
   linkageTerms,
+  disclosedPayloadColumns,
   columns,
   rawRows,
   onLaunch,
@@ -96,6 +97,10 @@ export function PrepareData({
   /** The adopted (agreed) linkage terms the operator is matching against, shown
    * read-only via {@link InvitationTerms}. */
   linkageTerms: LinkageTerms;
+  /** The columns the invitation declared the inviter will send (its
+   * `disclosedPayloadColumns`), passed through to {@link InvitationTerms} so the
+   * "what you will receive" line matches the review screen. */
+  disclosedPayloadColumns?: Array<string>;
   /** The acceptor's own CSV column names, from the parsed file. */
   columns: Array<string>;
   /** The parsed CSV rows, the sample source for the before->after preview. */
@@ -372,6 +377,7 @@ export function PrepareData({
         </Text>
         <InvitationTerms
           linkageTerms={linkageTerms}
+          disclosedPayloadColumns={disclosedPayloadColumns}
           perspective="accepted"
           headingOrder={3}
         />

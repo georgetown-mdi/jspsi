@@ -22,6 +22,7 @@ import {
   exchangePayloads,
   toCommittedPayload,
   assertPayloadSendDisclosed,
+  reconcileReceivedPayload,
 } from "./payloadExchange.js";
 import { buildExchangeRecord } from "./exchangeRecord.js";
 
@@ -68,6 +69,21 @@ export interface PreparedExchange {
    * and never folded into the agreed-terms hash.
    */
   retentionDisposition?: string;
+  /**
+   * The payload column set this party has LOCKED IN as what it will receive, if
+   * any -- the inviter's `disclosedPayloadColumns` carried on an accepted
+   * invitation, or a recurring party's persisted `payload.receive`. When set,
+   * {@link runExchange} verifies the partner's transmitted payload columns match
+   * it exactly and aborts the exchange otherwise (see
+   * {@link reconcileReceivedPayload}); when absent, this party reconciles lazily
+   * and accepts whatever the sender's own disclosure metadata transmits.
+   *
+   * Populated by the caller (the accept/exchange front end that holds the token
+   * or the persisted config), NOT by {@link prepareForExchange}: it is a
+   * consent-fidelity expectation, not a property derived from this party's local
+   * data, and the party that is lazy on this direction leaves it undefined.
+   */
+  expectedPayloadColumns?: string[];
   dataset: StandardizedDataset;
   /**
    * The original parsed CSV rows, retained for payload extraction after
@@ -481,6 +497,16 @@ export async function runExchange(
     handshakeRole,
     localPayload,
   );
+
+  // Lock-in enforcement: when this party consented to a specific received-column
+  // set (a fresh acceptor carrying the invitation's disclosedPayloadColumns, or a
+  // recurring party with a persisted payload.receive), the partner must have
+  // transmitted exactly that set. A divergence aborts here -- after the payload
+  // is received but before the result or the audit record is built -- so a party
+  // that promised one disclosure and delivered another never has its mismatched
+  // payload written to disk or surfaced. A lazy party (expectedPayloadColumns
+  // undefined) takes whatever the sender's own disclosure metadata transmits.
+  reconcileReceivedPayload(partnerPayload, prepared.expectedPayloadColumns);
 
   // Self-attested record: produced from data both sides already hold, with no
   // extra round-trip and no private key. Two disclosure figures, gated

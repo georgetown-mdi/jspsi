@@ -45,12 +45,16 @@ vi.mock("@psilink/core", async (importActual) => {
     // (warnOnValueConstraints) reads -- it scopes to key-referenced fields, so it
     // walks both -- so the sweep is a no-op here rather than tripping on a partial
     // stub.
-    prepareForExchange: vi.fn().mockReturnValue({
+    // A FRESH object per call (not a shared mockReturnValue ref), matching the real
+    // prepareForExchange: prepareDataset mutates the returned object (it sets
+    // expectedPayloadColumns from a committed payload.receive), so a shared ref
+    // would leak that field between tests.
+    prepareForExchange: vi.fn(() => ({
       warnings: [],
       linkageTerms: { linkageFields: [], linkageKeys: [] },
       dataset: { getField: () => undefined },
       rowCount: 0,
-    }),
+    })),
   };
 });
 
@@ -967,4 +971,33 @@ test("prepareDataset: an explicit metadata type that retypes the column away blo
       input,
     ),
   ).rejects.toThrow(/cannot satisfy any of the configuration's linkage keys/);
+});
+
+// --- prepareDataset: recurring payload lock-in -------------------------------
+
+test("prepareDataset: a committed payload.receive locks in the expected received columns", async () => {
+  // A recurring config that declares what it expects to receive locks that set in
+  // as prepared.expectedPayloadColumns; runExchange then verifies the partner's
+  // transmitted payload matches it exactly (the recurring half of the lock-in).
+  const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
+  const terms: LinkageTerms = {
+    ...ssnAndNameDobTerms,
+    payload: { receive: [{ name: "diagnosis" }, { name: "notes" }] },
+  };
+  const prepared = await prepareDataset(
+    { linkageTerms: terms },
+    "Test Party",
+    input,
+  );
+  expect(prepared.expectedPayloadColumns).toEqual(["diagnosis", "notes"]);
+});
+
+test("prepareDataset: a config without payload.receive locks in nothing (lazy)", async () => {
+  const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
+  const prepared = await prepareDataset(
+    { linkageTerms: ssnAndNameDobTerms },
+    "Test Party",
+    input,
+  );
+  expect(prepared.expectedPayloadColumns).toBeUndefined();
 });

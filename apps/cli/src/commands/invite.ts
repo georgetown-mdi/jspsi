@@ -6,6 +6,8 @@ import {
   getLogger,
   encodeInvitation,
   assertPayloadSendDisclosed,
+  disclosedColumnNames,
+  inferMetadata,
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
   UsageError,
@@ -14,6 +16,7 @@ import type {
   ConnectionConfig,
   ExchangeSpec,
   LinkageTerms,
+  Metadata,
   PreparedExchange,
 } from "@psilink/core";
 
@@ -137,6 +140,25 @@ export function resolveInvitePositionals(
   }
 
   return { mode: "offline", input: arg0 };
+}
+
+/**
+ * The disclosed-columns subset to carry on the invitation: exactly the columns
+ * the acceptor will RECEIVE for matched records, derived from this party's
+ * metadata via the same `isDisclosedToPartner` predicate `preparePayload`
+ * transmits on. Returns undefined -- so the field is omitted and the acceptor
+ * reconciles lazily -- when the metadata is unknown at mint (a config-as-source
+ * invite whose config carries no explicit metadata block, where the run infers
+ * metadata from the exchange input the invite command never sees) or when nothing
+ * is disclosed (the acceptor receives no payload either way, so a declared empty
+ * set could never differ from what it gets). See the InvitationToken field.
+ */
+function disclosedColumnsFor(
+  metadata: Metadata | undefined,
+): string[] | undefined {
+  if (metadata === undefined) return undefined;
+  const columns = disclosedColumnNames(metadata);
+  return columns.length > 0 ? columns : undefined;
 }
 
 // --- Validation (the no-commit phase) ----------------------------------------
@@ -295,6 +317,14 @@ export async function validateInvite(params: {
       // or `--outbound-path` override is reflected; carries no credentials by
       // construction (see endpointFromConnection).
       connectionEndpoint: endpointFromConnection(connection),
+      // Carry the columns this party will transmit for matched records so the
+      // acceptor's consent screen and runtime lock-in derive from the wire's own
+      // disclosure predicate. Computed over the same metadata prepareForExchange
+      // will use (dataSpec.metadata, or inferred from the input columns), so the
+      // declared set equals what preparePayload transmits.
+      disclosedPayloadColumns: disclosedColumnsFor(
+        dataSpec.metadata ?? inferMetadata(rows.columns),
+      ),
     });
     // prepareForOnlineExchange can throw; run it here, before the token print in
     // the caller's commit step, so a failure never follows disclosure.
@@ -407,6 +437,11 @@ export async function validateInvite(params: {
       linkageTerms: configTerms,
       sharedSecret,
       expires,
+      // Carry the disclosed-columns subset only when the config declares an
+      // explicit metadata block: without one the run infers metadata from the
+      // exchange input (which this offline invite never reads), so the
+      // transmitted set is unknown at mint and the acceptor reconciles lazily.
+      disclosedPayloadColumns: disclosedColumnsFor(configSource.metadata),
     });
 
     return {
@@ -441,6 +476,12 @@ export async function validateInvite(params: {
     linkageTerms: dataSpec.linkageTerms,
     sharedSecret,
     expires,
+    // Carry the disclosed-columns subset over the same metadata the inferred
+    // terms (and the eventual exchange) use, so the acceptor's consent and
+    // lock-in derive from what preparePayload will actually transmit.
+    disclosedPayloadColumns: disclosedColumnsFor(
+      dataSpec.metadata ?? inferMetadata(rows.columns),
+    ),
   });
 
   return { mode: "offline", dataSpec, invitation, expires, sharedSecret };

@@ -358,6 +358,55 @@ describe("generateInvitation", () => {
     expect(summary.payload?.receive).toEqual([]);
   });
 
+  test("quick path carries the disclosed-columns subset on the token", async () => {
+    const disclosed = disclosedColumnNames(inferMetadata(DISCLOSING_COLUMNS));
+    const { encoded } = await generateInvitation({
+      inviterName: "Org",
+      file: csvStream(DISCLOSING_CSV),
+      location,
+    });
+    const token = await decodeInvitation(encoded);
+    // The dedicated wire field carries exactly what preparePayload transmits.
+    expect(token.disclosedPayloadColumns).toEqual(disclosed);
+  });
+
+  test("quick path carries no disclosed subset when the file discloses nothing", async () => {
+    const { encoded } = await generateInvitation({
+      inviterName: "Org",
+      file: csvStream(ALL_COLUMNS_CSV),
+      location,
+    });
+    const token = await decodeInvitation(encoded);
+    expect(token.disclosedPayloadColumns).toBeUndefined();
+  });
+
+  test("summarizeInvitation derives the received set from the carried subset with no payload.send authored", () => {
+    // A CLI-style invitation: the terms author no payload block, but the token
+    // carries the disclosed-columns subset. The acceptor's consent display must
+    // derive the columns-it-will-receive from that carried set -- the same
+    // predicate the wire transmits on -- not from the (absent) payload.send. This
+    // is the under-declaration gap the dedicated field closes, and the no-drift
+    // invariant: the displayed set equals the transmitted set over one metadata.
+    const metadata = inferMetadata(DISCLOSING_COLUMNS);
+    const disclosed = disclosedColumnNames(metadata);
+    const terms = getDefaultLinkageTerms("Inviter", metadata);
+    expect(terms.payload).toBeUndefined();
+    const summary = summarizeInvitation({
+      linkageTerms: terms,
+      disclosedPayloadColumns: disclosed,
+    });
+    expect(summary.payload?.send).toEqual(disclosed);
+  });
+
+  test("summarizeInvitation shows no received columns when nothing is carried or authored", () => {
+    const terms = getDefaultLinkageTerms(
+      "Inviter",
+      inferMetadata(["ssn", "first_name", "last_name", "dob"]),
+    );
+    const summary = summarizeInvitation({ linkageTerms: terms });
+    expect(summary.payload).toBeUndefined();
+  });
+
   test("quick path authors no payload when the file discloses no column", async () => {
     // ALL_COLUMNS_CSV is all linkage-typed columns: the inferred metadata discloses
     // nothing, so no (empty) payload block is authored.

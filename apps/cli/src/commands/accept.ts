@@ -213,6 +213,20 @@ export function displayInvitation(
     `  linkage keys: ` +
       `${t.linkageKeys.map((k) => sanitizeForDisplay(k.name)).join(", ")}`,
   );
+  // The columns the inviter declared it will transmit for matched records, in the
+  // inviter's namespace -- what this party will RECEIVE. Derived from the wire's
+  // own disclosure predicate (disclosedPayloadColumns), the same set the runtime
+  // lock-in enforces. Partner-controlled, so escaped. Shown only when the
+  // invitation carried the subset (an older or metadata-unknown mint omits it,
+  // and reconciles lazily).
+  if (
+    token.disclosedPayloadColumns !== undefined &&
+    token.disclosedPayloadColumns.length > 0
+  )
+    log.info(
+      `  columns you will receive: ` +
+        `${token.disclosedPayloadColumns.map((c) => sanitizeForDisplay(c)).join(", ")}`,
+    );
   if (token.expires !== undefined) log.info(`  expires: ${token.expires}`);
 }
 
@@ -344,6 +358,12 @@ export async function validateAccept(params: {
     for (const w of warnings) log.warn(w);
 
     const prepared = await prepareForOnlineExchange(dataSpec, myIdentity, rows);
+    // Lock in the columns the invitation declared the inviter will send, so the
+    // exchange aborts if the payload actually received does not match what the
+    // operator consented to (see reconcileReceivedPayload). Absent on an
+    // invitation that carried no disclosed-subset (an older or metadata-unknown
+    // mint path) -- then this party reconciles lazily, as before.
+    prepared.expectedPayloadColumns = token.disclosedPayloadColumns;
     return {
       mode: "online",
       url,

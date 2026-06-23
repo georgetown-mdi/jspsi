@@ -4,7 +4,10 @@ import PSI from "@openmined/psi.js";
 
 import { prepareForExchange, runExchange } from "../src/exchange";
 import { verifyRecordCommitments } from "../src/exchangeRecord";
-import { createMessagePipe } from "../src/connection/messageConnection";
+import {
+  ConnectionError,
+  createMessagePipe,
+} from "../src/connection/messageConnection";
 
 import type { BuiltExchangeRecord } from "../src/exchangeRecord";
 import type { Output } from "../src/config/linkageTerms";
@@ -326,4 +329,56 @@ test("single-output (responder receives): the gate withholds from the initiator"
   // And the record gate matches: only the entitled responder commits the table.
   expect(built(responder).record.commitments.associationTable).toBeDefined();
   expect(built(initiator).record.commitments.associationTable).toBeUndefined();
+});
+
+// --- Acceptor payload lock-in (live) -----------------------------------------
+
+// The responder's inferred metadata discloses `note` (role: other -> payload),
+// so for the matched rows it transmits exactly ["note"]. These two tests pin the
+// runtime lock-in end to end: when the initiator has locked in an expected
+// received-column set (a fresh acceptor's carried disclosedPayloadColumns, or a
+// recurring party's payload.receive, both threaded as prepared.expectedPayload-
+// Columns), runExchange enforces it after the payload exchange.
+
+const bothOut: Output = { expectsOutput: true, shareWithPartner: true };
+
+test("lock-in: a received payload diverging from the consented set aborts the exchange", async () => {
+  const initiatorPrepared = prepared("Initiator Co", bothOut, clientRows);
+  // The initiator consented to receive a column the responder will never send.
+  initiatorPrepared.expectedPayloadColumns = ["a_column_not_sent"];
+  const [connInitiator, connResponder] = createMessagePipe();
+  const [initResult, respResult] = await Promise.allSettled([
+    runExchange(connInitiator, "initiator", initiatorPrepared, { psiLibrary }),
+    runExchange(
+      connResponder,
+      "responder",
+      prepared("Responder Co", bothOut, serverRows),
+      { psiLibrary },
+    ),
+  ]);
+  // The locked-in party aborts as a protocol error; the lazy responder, which
+  // locked in nothing, completes its own half (the abort is local to the receiver
+  // and fires after the payload exchange itself finished).
+  expect(initResult.status).toBe("rejected");
+  const reason = (initResult as PromiseRejectedResult).reason;
+  expect(reason).toBeInstanceOf(ConnectionError);
+  expect((reason as ConnectionError).kind).toBe("protocol");
+  expect(respResult.status).toBe("fulfilled");
+});
+
+test("lock-in: a received payload matching the consented set completes", async () => {
+  const initiatorPrepared = prepared("Initiator Co", bothOut, clientRows);
+  // Exactly what the responder's metadata discloses for the matched rows.
+  initiatorPrepared.expectedPayloadColumns = ["note"];
+  const [connInitiator, connResponder] = createMessagePipe();
+  const [initiator] = await Promise.all([
+    runExchange(connInitiator, "initiator", initiatorPrepared, { psiLibrary }),
+    runExchange(
+      connResponder,
+      "responder",
+      prepared("Responder Co", bothOut, serverRows),
+      { psiLibrary },
+    ),
+  ]);
+  expect(initiator.partnerPayload.columns).toEqual(["note"]);
 });

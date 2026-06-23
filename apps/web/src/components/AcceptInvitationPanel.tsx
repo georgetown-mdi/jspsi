@@ -106,6 +106,9 @@ export function AcceptInvitationPanel({
           <InvitationTerms
             linkageTerms={decode.invitation.token.linkageTerms}
             expires={decode.invitation.token.expires}
+            disclosedPayloadColumns={
+              decode.invitation.token.disclosedPayloadColumns
+            }
             headingRef={headingRef}
           />
           <Divider my="sm" label="Accept and exchange" labelPosition="center" />

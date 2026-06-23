@@ -3,6 +3,7 @@ import {
   MAX_INVITATION_LIFETIME_SECONDS,
   assertPayloadSendDisclosed,
   assessLinkageSatisfiability,
+  disclosedColumnNames,
   encodeInvitation,
   generateSharedSecret,
   getDefaultLinkageTerms,
@@ -235,6 +236,20 @@ export function deepLinkFor(origin: string, encoded: string): string {
 }
 
 /**
+ * The disclosed-columns subset to carry on the token for this metadata: the
+ * column names `disclosedColumnNames` selects (exactly what `preparePayload`
+ * transmits), or undefined when nothing is disclosed -- the field is then omitted
+ * and the acceptor receives no payload regardless, so a declared empty set could
+ * never differ from what it gets. See the InvitationToken field.
+ */
+function disclosedColumnsForToken(
+  metadata: Metadata,
+): Array<string> | undefined {
+  const columns = disclosedColumnNames(metadata);
+  return columns.length > 0 ? columns : undefined;
+}
+
+/**
  * Generate a fresh single-use invitation from the inviter's CSV: a new shared
  * secret, the linkage terms derived from the file, and this app's PeerJS
  * endpoint, encoded to a string and also wrapped as a deep-link URL. Each call
@@ -387,6 +402,14 @@ export async function generateInvitation(params: {
   // filter the inviter's own exchange would otherwise re-derive -- and authors a
   // payload.send for the columns that metadata discloses, below). standardization
   // is left to CSV inference downstream in both cases.
+  // The columns this party will transmit for matched records, carried on the
+  // token so the acceptor's consent screen and runtime lock-in derive from the
+  // wire's own disclosure predicate (disclosedColumnNames) rather than the
+  // separately-authored payload.send dictionary. Computed over the same metadata
+  // the inviter's own exchange uses -- the Advanced editor's edited metadata, or
+  // (quick path, and the editor when it authored none) the metadata inferred from
+  // the columns -- so the declared set equals what preparePayload transmits.
+  let disclosedPayloadColumns: Array<string> | undefined;
   let linkageTerms: LinkageTerms;
   if (params.linkageTerms !== undefined) {
     linkageTerms = params.linkageTerms;
@@ -415,6 +438,9 @@ export async function generateInvitation(params: {
     // payload from the inferred metadata and runs the same backstop there.
     if (params.metadata !== undefined)
       assertPayloadSendDisclosed(linkageTerms.payload, params.metadata);
+    disclosedPayloadColumns = disclosedColumnsForToken(
+      params.metadata ?? inferMetadata(columns),
+    );
   } else {
     const metadata = inferMetadata(columns);
     linkageTerms = getDefaultLinkageTerms(inviterName, metadata);
@@ -451,6 +477,7 @@ export async function generateInvitation(params: {
     // it would leave a `payload: undefined` key, diverging from the default terms).
     const payload = payloadSendForMetadata(metadata);
     if (payload !== undefined) linkageTerms.payload = payload;
+    disclosedPayloadColumns = disclosedColumnsForToken(metadata);
     // Mint-boundary backstop, mirroring the authored path above: the send is a
     // subset of (equal to) the disclosed set by construction, so this never throws
     // on quick-path output, but it keeps the consent surface honest as an executable
@@ -472,6 +499,7 @@ export async function generateInvitation(params: {
     sharedSecret,
     expires,
     connectionEndpoint: webrtcEndpointFromLocation(location),
+    disclosedPayloadColumns,
   };
 
   const encoded = await encodeInvitation(token);

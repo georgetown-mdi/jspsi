@@ -5,9 +5,11 @@ import {
   exchangePayloads,
   buildOutputTable,
   assertPayloadSendDisclosed,
+  reconcileReceivedPayload,
 } from "../src/payloadExchange";
 import { prepareForExchange } from "../src/exchange";
 import { deriveAcceptedLinkageTerms } from "../src/config/linkageTerms";
+import { disclosedColumnNames } from "../src/config/metadata";
 import { UsageError } from "../src/errors";
 
 import type { Metadata } from "../src/config/metadata";
@@ -376,6 +378,87 @@ test("assertPayloadSendDisclosed (acceptor path): the common inviter-send shape 
   expect(() =>
     assertPayloadSendDisclosed(acceptor.payload, acceptorMeta),
   ).not.toThrow();
+});
+
+// --- No-drift: the carried disclosed subset equals what is transmitted -------
+
+test("disclosedColumnNames equals preparePayload's transmitted columns over the same metadata", () => {
+  // The set carried on the invitation (disclosedColumnNames) and the set
+  // preparePayload actually transmits are both isDisclosedToPartner over the same
+  // metadata, so they cannot diverge -- the no-drift invariant the consent
+  // display and lock-in rest on. ssn (role: linkage, isPayload:false) is excluded;
+  // patient_id (role: identifier, isPayload:true) and diagnosis are included.
+  const carried = disclosedColumnNames(metaWithId);
+  expect(carried).toEqual(["patient_id", "diagnosis"]);
+  const transmitted = preparePayload(rawRows, metaWithId, [[0], [0]]);
+  if (!transmitted.hasData) throw new Error("expected hasData:true");
+  expect(transmitted.columns).toEqual(carried);
+});
+
+test("disclosedColumnNames excludes a role: ignored column even with isPayload:true", () => {
+  const metaWithIgnored: Metadata = [
+    { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+    { name: "diagnosis", type: "other", role: "payload", isPayload: true },
+    { name: "county", type: "other", role: "ignored", isPayload: true },
+  ];
+  expect(disclosedColumnNames(metaWithIgnored)).toEqual(["diagnosis"]);
+});
+
+// --- reconcileReceivedPayload (runtime lock-in) ------------------------------
+
+const received = (columns: string[]): PartnerPayload => ({
+  columns,
+  rowIndices: columns.length > 0 ? [0] : [],
+  rows: columns.length > 0 ? [columns.map(() => "x")] : [],
+});
+
+test("reconcileReceivedPayload: lazy (no declared set) accepts any payload", () => {
+  expect(() =>
+    reconcileReceivedPayload(received(["a", "b"]), undefined),
+  ).not.toThrow();
+});
+
+test("reconcileReceivedPayload: an empty received set is accepted against any declared set", () => {
+  // The partner sent no payload (no transmittable columns, or no matched rows),
+  // which can never exceed consent -- so it is accepted even when a non-empty set
+  // was locked in.
+  expect(() =>
+    reconcileReceivedPayload(received([]), ["a", "b"]),
+  ).not.toThrow();
+});
+
+test("reconcileReceivedPayload: an exact match (any order) does not throw", () => {
+  expect(() =>
+    reconcileReceivedPayload(received(["b", "a"]), ["a", "b"]),
+  ).not.toThrow();
+});
+
+test("reconcileReceivedPayload: a divergent received set aborts as a protocol error", () => {
+  const err = (() => {
+    try {
+      reconcileReceivedPayload(received(["a", "secret"]), ["a", "b"]);
+    } catch (e) {
+      return e;
+    }
+    return undefined;
+  })();
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as ConnectionError).message).toMatch(
+    /payload disclosure mismatch/,
+  );
+});
+
+test("reconcileReceivedPayload: receiving fewer columns than declared also aborts", () => {
+  expect(() => reconcileReceivedPayload(received(["a"]), ["a", "b"])).toThrow(
+    ConnectionError,
+  );
+});
+
+test("reconcileReceivedPayload: receiving more columns than declared aborts (over-delivery)", () => {
+  expect(() =>
+    reconcileReceivedPayload(received(["a", "b", "c"]), ["a", "b"]),
+  ).toThrow(ConnectionError);
 });
 
 // --- exchangePayloads --------------------------------------------------------

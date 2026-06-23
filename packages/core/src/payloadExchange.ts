@@ -10,7 +10,10 @@ import type { Payload } from "./config/linkageTerms.js";
 import { MAX_NAME_LENGTH } from "./config/linkageTerms.js";
 import type { CommittedPayload } from "./exchangeRecord.js";
 import type { MessageConnection } from "./connection/messageConnection.js";
-import { receiveParsed } from "./connection/messageConnection.js";
+import {
+  ConnectionError,
+  receiveParsed,
+} from "./connection/messageConnection.js";
 import { singleIssueArray } from "./utils/singleIssueArray.js";
 import { UsageError } from "./errors.js";
 import { sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
@@ -226,6 +229,66 @@ export function assertPayloadSendDisclosed(
       `written into the exchange record over-states what is actually sent. ` +
       `Remove ${remove} from payload.send, or set ${possessive} metadata to ` +
       `transmit (is_payload: true and role not ignored).`,
+  );
+}
+
+/**
+ * Enforce, at runtime, that a received payload discloses no column the receiving
+ * party did not consent to receive.
+ *
+ * `declared` is the column set this party LOCKED IN as what it will receive --
+ * the inviter's `disclosedPayloadColumns` carried on the invitation (the set the
+ * acceptor consented to on its review screen), or a recurring party's persisted
+ * `payload.receive`. `assertPayloadSendDisclosed` is the mint-boundary, forward
+ * (send-side) counterpart of this guard: that one keeps a party from
+ * over-DECLARING what it sends; this one keeps a party from over-DELIVERING past
+ * what the other consented to receive. The party promised one set on the
+ * invitation and must deliver exactly that, or the exchange aborts.
+ *
+ * The match is byte-exact and element-wise over the sorted column names (NOT a
+ * delimiter-joined string, so a partner-controlled name containing the separator
+ * cannot make two distinct sets compare equal), mirroring
+ * {@link validateCompatibility}'s payload mirror.
+ *
+ * Two cases are deliberately NOT a mismatch:
+ * - `declared` ABSENT (undefined) is the LAZY reconciliation path: the party did
+ *   not lock in an expectation, so it takes whatever it is given (zero-setup, and
+ *   the inviter's own receive side, which it leaves blank and fills lazily). This
+ *   never widens disclosure -- transmission is governed by the SENDER's own
+ *   `isDisclosedToPartner` metadata and `assertPayloadSendDisclosed`, both
+ *   unchanged; receiving is not disclosing.
+ * - An EMPTY received column set (the partner sent no payload data -- no
+ *   transmittable columns, or no matched rows) cannot exceed any consent, so it
+ *   is accepted even against a non-empty `declared`. A partner with matched rows
+ *   and disclosed columns sends them as a non-empty set; a partner that sends an
+ *   empty set discloses nothing, which is always within what was consented.
+ *
+ * @throws {ConnectionError} of kind `"protocol"` when `declared` is present and
+ *   the received non-empty column set is not exactly it. A protocol error
+ *   because the peer violated the disclosure contract the invitation established;
+ *   the receiving party's callers surface it as a failed exchange. The offending
+ *   names are partner-controlled, so both sides of the message route through
+ *   {@link sanitizeForDisplay}.
+ */
+export function reconcileReceivedPayload(
+  received: PartnerPayload,
+  declared: string[] | undefined,
+): void {
+  if (declared === undefined) return;
+  if (received.columns.length === 0) return;
+  const got = [...received.columns].sort();
+  const want = [...declared].sort();
+  const matches =
+    got.length === want.length && got.every((name, i) => name === want[i]);
+  if (matches) return;
+  const gotShown = got.map((name) => sanitizeForDisplay(name)).join(", ");
+  const wantShown = want.map((name) => sanitizeForDisplay(name)).join(", ");
+  throw new ConnectionError(
+    `payload disclosure mismatch: the partner transmitted columns ` +
+      `[${gotShown}] but the invitation declared it would send [${wantShown}]. ` +
+      `The exchange is aborted because the data received does not match what ` +
+      `was consented to.`,
+    "protocol",
   );
 }
 

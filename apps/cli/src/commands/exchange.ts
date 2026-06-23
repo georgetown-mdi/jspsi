@@ -585,6 +585,15 @@ export async function prepareDataset(
   for (const warning of prepared.warnings)
     log.warn("cleaning configuration issue:", warning);
   warnOnValueConstraints(prepared, log);
+  // Recurring lock-in: a committed config that declares a payload.receive
+  // expectation has its received payload verified against exactly those columns
+  // at runtime (see reconcileReceivedPayload), so a partner that transmits a
+  // different set aborts the exchange. Both parties' persisted configs carry the
+  // agreed payload, so the check is symmetric; a config with no declared receive
+  // (the default-terms path) reconciles lazily, as before.
+  const declaredReceive = exchangeDataSpec.linkageTerms?.payload?.receive;
+  if (declaredReceive !== undefined)
+    prepared.expectedPayloadColumns = declaredReceive.map((c) => c.name);
   return prepared;
 }
 

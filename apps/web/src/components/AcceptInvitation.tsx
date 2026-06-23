@@ -160,6 +160,9 @@ export function AcceptInvitation() {
           expires={decode.invitation.token.expires}
           endpoint={decode.invitation.endpoint}
           linkageTerms={decode.invitation.token.linkageTerms}
+          disclosedPayloadColumns={
+            decode.invitation.token.disclosedPayloadColumns
+          }
           acquired={phase.bundle}
           metadata={phase.edits.metadata}
           standardization={phase.edits.standardization}
@@ -172,6 +175,9 @@ export function AcceptInvitation() {
         // exchange screen threads into prepareForExchange.
         <PrepareData
           linkageTerms={decode.invitation.token.linkageTerms}
+          disclosedPayloadColumns={
+            decode.invitation.token.disclosedPayloadColumns
+          }
           columns={phase.bundle.columns}
           rawRows={phase.bundle.rawRows}
           onBack={() => setPhase({ status: "reviewing" })}

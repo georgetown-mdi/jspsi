@@ -242,6 +242,7 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
 export function InvitationTerms({
   linkageTerms,
   expires,
+  disclosedPayloadColumns,
   perspective = "review",
   headingOrder = 2,
   headingRef,
@@ -249,6 +250,12 @@ export function InvitationTerms({
   linkageTerms: LinkageTerms;
   /** The invitation's expiry instant (ISO 8601), if it carries one. */
   expires?: string;
+  /** The columns the invitation declared the inviter will send (its
+   * `disclosedPayloadColumns`). When present, the "your partner will send" line
+   * derives from it -- the wire's own disclosure predicate -- rather than the
+   * authored `payload.send`; absent for the inviter's pre-mint "proposing"
+   * preview and older tokens, which fall back to `payload.send`. */
+  disclosedPayloadColumns?: Array<string>;
   /** Which context this renders in. Changes only the heading and intro copy; the
    * body is identical. */
   perspective?: "review" | "accepted" | "proposing";
@@ -260,7 +267,11 @@ export function InvitationTerms({
   // appear, announcing them to assistive tech.
   headingRef?: Ref<HTMLHeadingElement>;
 }) {
-  const summary = summarizeInvitation({ linkageTerms, expires });
+  const summary = summarizeInvitation({
+    linkageTerms,
+    expires,
+    disclosedPayloadColumns,
+  });
   const [detailsOpen, setDetailsOpen] = useState(false);
   // Stable id linking the disclosure toggle (aria-controls) to its panel; useId
   // keeps it consistent across SSR and hydration.

@@ -716,15 +716,22 @@ function summarizeKey(
 
 /**
  * Build a display-ready {@link InvitationSummary} from an invitation's linkage
- * terms and optional expiry. The parameter is a structural subset of
- * {@link InvitationToken} (its `linkageTerms` and `expires`), so a full decoded
+ * terms, optional expiry, and optional carried disclosed-columns subset. The
+ * parameter is a structural subset of {@link InvitationToken} (its
+ * `linkageTerms`, `expires`, and `disclosedPayloadColumns`), so a full decoded
  * token is accepted as-is, but so is the terms/expiry pair the exchange screen
- * carries without a token. Pure and side-effect-free: it derives only what the
- * terms screen renders and sanitizes every partner-controlled string, so it is
- * the single tested boundary for that escaping.
+ * carries without a token. The "columns your partner will send" line derives from
+ * the carried `disclosedPayloadColumns` when present (the wire's own disclosure
+ * predicate), falling back to the authored `payload.send` otherwise. Pure and
+ * side-effect-free: it derives only what the terms screen renders and sanitizes
+ * every partner-controlled string, so it is the single tested boundary for that
+ * escaping.
  */
 export function summarizeInvitation(
-  source: Pick<InvitationToken, "linkageTerms" | "expires">,
+  source: Pick<
+    InvitationToken,
+    "linkageTerms" | "expires" | "disclosedPayloadColumns"
+  >,
 ): InvitationSummary {
   const terms = source.linkageTerms;
 
@@ -785,12 +792,23 @@ export function summarizeInvitation(
     };
   }
 
-  const send = terms.payload?.send ?? [];
-  const receive = terms.payload?.receive ?? [];
+  // The columns the acceptor will RECEIVE derive from the carried
+  // disclosedPayloadColumns -- the inviter's own isDisclosedToPartner predicate
+  // output, exactly the set preparePayload transmits -- so the displayed and
+  // consented set cannot drift from the bytes that flow. Fall back to the
+  // authored payload.send names for an invitation that carried no disclosed
+  // subset (an older or metadata-unknown mint) and for the inviter's own pre-mint
+  // "proposing" preview, which has authored its send but holds no token field
+  // yet. `receive` (what the inviter requests FROM the acceptor) is unaffected:
+  // it has no transmission predicate to derive from and stays the authored list.
+  const send =
+    source.disclosedPayloadColumns ??
+    (terms.payload?.send ?? []).map((column) => column.name);
+  const receive = (terms.payload?.receive ?? []).map((column) => column.name);
   if (send.length > 0 || receive.length > 0) {
     summary.payload = {
-      send: send.map((column) => sanitizeForDisplay(column.name)),
-      receive: receive.map((column) => sanitizeForDisplay(column.name)),
+      send: send.map((name) => sanitizeForDisplay(name)),
+      receive: receive.map((name) => sanitizeForDisplay(name)),
     };
   }
 
