@@ -270,12 +270,13 @@ export function InvitationTerms({
   const summary = summarizeInvitation({ linkageTerms, expires });
   // Always-visible egress notice: the count of columns the inviter requests FROM
   // the acceptor (summary.payload.receive) -- the acceptor's own data egress.
-  // A count, not the column names: the receive list is already sanitized and its
-  // length is a bounded integer, so it carries no partner free text into the
-  // always-visible core, while the names themselves stay in Details. The columns
-  // the inviter SENDS are data the acceptor receives, not an egress, so they do
-  // not trip this notice. Undefined when nothing is requested, so the notice is
-  // absent rather than reading "0 columns".
+  // A count, not the column names: the length is a bounded integer (the column
+  // count is capped at decode, MAX_PAYLOAD_ENTRIES), so it carries no partner
+  // free text into the always-visible core regardless of what the names contain;
+  // the names themselves stay sanitized in Details. The columns the inviter SENDS
+  // are data the acceptor receives, not an egress, so they do not trip this
+  // notice. Undefined when nothing is requested, so the notice is absent rather
+  // than reading "0 columns".
   const receiveCount = summary.payload?.receive.length ?? 0;
   const egressNotice =
     receiveCount > 0
