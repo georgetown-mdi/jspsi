@@ -387,9 +387,10 @@ describe("InvitationTerms: always-visible egress and legal-agreement presence hi
     });
     await expect.element(toggle("Other details")).toBeInTheDocument();
 
-    // The presence/count hint is on screen ...
+    // The presence/count hint is on screen ... (the trailing period pins the
+    // exact rendered copy: a presence assertion of the full sentence).
     expect(container!.textContent).toContain(
-      "This invitation requests 2 additional data columns from you",
+      "This invitation requests 2 additional data columns from you.",
     );
     // ... and OUTSIDE the disclosure (structure, not styling): the hint text is
     // not inside the "Other details" panel, which carries the collapsed detail
@@ -409,7 +410,7 @@ describe("InvitationTerms: always-visible egress and legal-agreement presence hi
     });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(container!.textContent).toContain(
-      "This invitation requests 1 additional data column from you",
+      "This invitation requests 1 additional data column from you.",
     );
   });
 
@@ -423,7 +424,7 @@ describe("InvitationTerms: always-visible egress and legal-agreement presence hi
     );
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(container!.textContent).toContain(
-      "This invitation requests 2 additional data columns from your partner",
+      "This invitation requests 2 additional data columns from your partner.",
     );
   });
 
@@ -441,7 +442,7 @@ describe("InvitationTerms: always-visible egress and legal-agreement presence hi
     await expect.element(toggle("Other details")).toBeInTheDocument();
 
     expect(container!.textContent).toContain(
-      "This invitation attaches a legal agreement",
+      "This invitation attaches a legal agreement.",
     );
     // Outside the disclosure, by structure ...
     expect(panelFor("Other details").textContent).not.toContain(
