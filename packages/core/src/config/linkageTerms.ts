@@ -1133,10 +1133,14 @@ export function safeParseLinkageTerms(raw: unknown) {
  * embedded in the token); this function shapes only the agreed linkage terms.
  *
  * It fails closed. A config that is valid for the INVITER can mirror to one that is
- * incoherent for the acceptor: an inviter that is the sole receiver
- * (`expectsOutput: true`) may carry `deduplicate: true` or a non-empty
- * `payload.receive`, both of which require receiving output -- but the acceptor
- * mirrors to `expectsOutput: false`, which the schema's cross-field rules forbid.
+ * incoherent for the acceptor: an inviter that is the sole receiver (it shares no
+ * result with the partner) may carry `deduplicate: true` or a non-empty
+ * `payload.send`, both of which require the PARTNER to receive output --
+ * `deduplicate` is adopted onto the acceptor, and the inviter's `send` mirrors to
+ * the acceptor's `receive` -- but the acceptor mirrors to `expectsOutput: false`,
+ * which the schema's cross-field rules forbid. (The inviter's own `payload.receive`
+ * mirrors to the acceptor's `send`, which needs no output, so it is never the
+ * trigger.)
  * The front ends above never produce such an inviter config, but a hand-authored
  * CLI config or a crafted invitation token could, and the derived terms are not
  * otherwise re-validated before the run. So the derived terms are re-checked
@@ -1179,8 +1183,11 @@ export function deriveAcceptedLinkageTerms(
     throw new Error(
       "the invitation's linkage terms cannot be accepted unchanged: mirroring " +
         "the output direction for the accepting party produced an incompatible " +
-        "configuration (a party that receives no output cannot deduplicate or " +
-        "receive payload columns)",
+        "configuration. The inviter is the sole receiver of the matched result, " +
+        "yet its terms also have the accepting party deduplicate or receive " +
+        "payload columns the inviter sends -- neither is possible for a party " +
+        "that receives no result. Ask the inviter to share the result, or to " +
+        "drop those settings.",
     );
   }
   return derived;
