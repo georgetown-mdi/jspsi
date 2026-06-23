@@ -40,8 +40,8 @@ export function unnameableColumnsAlert(positions: ReadonlyArray<number>): {
     message:
       `Column${plural ? "s" : ""} ${positions.join(", ")} in your CSV ` +
       `${plural ? "have" : "has"} no name. A trailing comma, a blank cell, or a ` +
-      `leading comma in the header row produces an unnamed column, which cannot ` +
-      `be used for matching or sent to your partner. Fix the header row -- name ` +
-      `the column${plural ? "s" : ""} or remove the empty field${plural ? "s" : ""} -- and choose the file again.`,
+      `leading delimiter in the header row produces an unnamed column, which ` +
+      `cannot be used for matching or sent to your partner. Fix the header row -- ` +
+      `name the column${plural ? "s" : ""} or remove the empty field${plural ? "s" : ""} -- and choose the file again.`,
   };
 }

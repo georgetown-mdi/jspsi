@@ -231,12 +231,20 @@ export function AdvancedInvite() {
         // (the editing phase has no picker).
         setFiles([]);
         setPhase({ status: "acquire" });
-        setError({
-          title: "Could not generate invitation",
-          message:
-            "Your file could not back this invitation. Choose another file and " +
-            "try again.",
-        });
+        // An unnamed-column file is caught by enterEditor before the editor opens,
+        // so reaching here with one means the file changed under us; still surface
+        // the specific column positions (matching the quick path) rather than the
+        // generic message used for the unreadable/unlinkable kinds.
+        setError(
+          e.failure.kind === "unnameable"
+            ? unnameableColumnsAlert(e.failure.positions)
+            : {
+                title: "Could not generate invitation",
+                message:
+                  "Your file could not back this invitation. Choose another " +
+                  "file and try again.",
+              },
+        );
       } else {
         // Internal fault (a schema/encoding error). Keep error internals out of
         // a secret-bearing flow; log only the type. Mirrors InvitePanel.
