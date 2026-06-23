@@ -418,6 +418,17 @@ test("reconcileReceivedPayload: lazy (no declared set) accepts any payload", () 
   ).not.toThrow();
 });
 
+test("reconcileReceivedPayload: an empty declared set is lazy (collapses to absent)", () => {
+  // An empty expected set carries no constraint: an honest mint omits the field
+  // when nothing is disclosed, and a no-output recurring helper's payload.receive
+  // is empty by schema. Both must read as "no expectation," never as "expect
+  // exactly zero columns" -- so a partner that does transmit columns is accepted,
+  // exactly as the undefined (absent) case is.
+  expect(() =>
+    reconcileReceivedPayload(received(["a", "b"]), []),
+  ).not.toThrow();
+});
+
 test("reconcileReceivedPayload: an empty received set is accepted against any declared set", () => {
   // The partner sent no payload (no transmittable columns, or no matched rows),
   // which can never exceed consent -- so it is accepted even when a non-empty set

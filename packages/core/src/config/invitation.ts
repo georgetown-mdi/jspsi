@@ -489,7 +489,10 @@ const InvitationTokenSchema: z.ZodType<InvitationToken> = z.object({
   // crafts the token) and are routed through sanitizeForDisplay wherever they
   // reach a consent surface or a diagnostic. The `.min(1)` floor rejects an empty
   // name, matching the metadata/payload name floors -- an honest inviter derives
-  // these from metadata whose names are already non-empty.
+  // these from metadata whose names are already non-empty. There is deliberately
+  // no array-level minimum: an empty array is consumed as lazy (equivalent to the
+  // field being omitted) by reconcileReceivedPayload, so it carries no enforceable
+  // constraint and need not be rejected at decode.
   disclosedPayloadColumns: boundedArray(
     z.string().min(1).max(MAX_NAME_LENGTH),
     MAX_PAYLOAD_ENTRIES,

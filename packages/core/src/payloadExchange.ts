@@ -251,12 +251,16 @@ export function assertPayloadSendDisclosed(
  * {@link validateCompatibility}'s payload mirror.
  *
  * Two cases are deliberately NOT a mismatch:
- * - `declared` ABSENT (undefined) is the LAZY reconciliation path: the party did
- *   not lock in an expectation, so it takes whatever it is given (zero-setup, and
- *   the inviter's own receive side, which it leaves blank and fills lazily). This
- *   never widens disclosure -- transmission is governed by the SENDER's own
- *   `isDisclosedToPartner` metadata and `assertPayloadSendDisclosed`, both
- *   unchanged; receiving is not disclosing.
+ * - `declared` ABSENT (undefined) OR EMPTY is the LAZY reconciliation path: the
+ *   party did not lock in a non-trivial expectation, so it takes whatever it is
+ *   given (zero-setup, and the inviter's own receive side, which it leaves blank
+ *   and fills lazily). Empty collapses to absent because an empty disclosed set
+ *   carries no constraint to enforce -- an honest mint omits the field entirely
+ *   when nothing is disclosed, and a no-output recurring helper's `payload.receive`
+ *   is empty by schema, so both must read as "no expectation," never as "expect
+ *   exactly zero columns, abort on any." This never widens disclosure --
+ *   transmission is governed by the SENDER's own `isDisclosedToPartner` metadata
+ *   and `assertPayloadSendDisclosed`, both unchanged; receiving is not disclosing.
  * - An EMPTY received column set (the partner sent no payload data -- no
  *   transmittable columns, or no matched rows) cannot exceed any consent, so it
  *   is accepted even against a non-empty `declared`. A partner with matched rows
@@ -274,7 +278,7 @@ export function reconcileReceivedPayload(
   received: PartnerPayload,
   declared: string[] | undefined,
 ): void {
-  if (declared === undefined) return;
+  if (declared === undefined || declared.length === 0) return;
   if (received.columns.length === 0) return;
   const got = [...received.columns].sort();
   const want = [...declared].sort();

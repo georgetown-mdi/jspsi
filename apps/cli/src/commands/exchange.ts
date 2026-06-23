@@ -585,12 +585,15 @@ export async function prepareDataset(
   for (const warning of prepared.warnings)
     log.warn("cleaning configuration issue:", warning);
   warnOnValueConstraints(prepared, log);
-  // Recurring lock-in: a committed config that declares a payload.receive
-  // expectation has its received payload verified against exactly those columns
-  // at runtime (see reconcileReceivedPayload), so a partner that transmits a
-  // different set aborts the exchange. Both parties' persisted configs carry the
-  // agreed payload, so the check is symmetric; a config with no declared receive
-  // (the default-terms path) reconciles lazily, as before.
+  // Recurring lock-in: a committed config that declares a non-empty
+  // payload.receive expectation has its received payload verified against exactly
+  // those columns at runtime (see reconcileReceivedPayload), so a partner that
+  // transmits a different set aborts the exchange. Both parties' persisted configs
+  // carry the agreed payload, so the check is symmetric. A config with no declared
+  // receive (the default-terms path) reconciles lazily; so does an empty declared
+  // receive (the no-output helper, whose receive is empty by schema), since an
+  // empty set carries no constraint -- reconcileReceivedPayload collapses it to
+  // the lazy path rather than "expect exactly zero columns."
   const declaredReceive = exchangeDataSpec.linkageTerms?.payload?.receive;
   if (declaredReceive !== undefined)
     prepared.expectedPayloadColumns = declaredReceive.map((c) => c.name);
