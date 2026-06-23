@@ -139,7 +139,7 @@ export function normalizeForEditor(metadata: Metadata): Metadata {
  * disclosure on its own -- EXCEPT a column sitting at `ignored` that is retyped to
  * a matchable type (any linkage type or `identifier`), which is promoted to the
  * type's natural usable choice so the quick-fix remap cannot silently leave a
- * field unsatisfiable (`resolveFieldColumns` skips `role: ignored`). Otherwise the
+ * field unsatisfiable (`resolveFieldColumns` binds only `role: linkage`). Otherwise the
  * column falls back to that natural choice: `match` for a linkage type,
  * `identifier` for the identifier type, `ignored` for `other`. The fallback is
  * never `payload`, so a type change can never START disclosing a column.

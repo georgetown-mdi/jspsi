@@ -165,18 +165,22 @@ export function PrepareData({
     [linkageTerms],
   );
 
-  // The operator's non-ignored columns of a semantic type, in metadata order -- the
-  // columns a field of that type MAY bind to. More than one makes the input column a
-  // real choice (and lets two same-typed fields each take their own).
+  // The operator's `role: linkage` columns of a semantic type, in metadata order
+  // -- the columns a field of that type MAY bind to. Only a linkage column
+  // participates in matching (core's resolveFieldColumns binds only `role:
+  // linkage`), so a column roled identifier/payload/ignored is never offered as a
+  // match input the core would refuse. More than one makes the input column a real
+  // choice (and lets two same-typed fields each take their own).
   const columnsForType = (type: LinkageField["type"]): Array<string> =>
     metadata
-      .filter((column) => column.role !== "ignored" && column.type === type)
+      .filter((column) => column.role === "linkage" && column.type === type)
       .map((column) => column.name);
 
   // The input-column overrides that still apply: an override is dropped when its
-  // chosen column is no longer a non-ignored column of the field's type (a metadata
-  // remap can invalidate one), so a stale binding never drives a wrong-typed column
-  // -- the field falls back to the default type-fallback binding instead.
+  // chosen column is no longer a `role: linkage` column of the field's type (a
+  // metadata remap or re-role can invalidate one), so a stale binding never drives
+  // a column the core would refuse -- the field falls back to the default
+  // type-fallback binding instead.
   const effectiveInputOverrides = useMemo(() => {
     const valid = new Map<string, string>();
     for (const [output, column] of inputOverrides) {
@@ -185,7 +189,7 @@ export function PrepareData({
         field !== undefined &&
         metadata.some(
           (c) =>
-            c.name === column && c.role !== "ignored" && c.type === field.type,
+            c.name === column && c.role === "linkage" && c.type === field.type,
         )
       )
         valid.set(output, column);

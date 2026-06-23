@@ -895,10 +895,21 @@ test("prepareDataset: an explicit standardization remap satisfies a field the co
   // ...but a remap binding ssn <- ssn_source makes the field producible, so the
   // same CSV proceeds with no block and no warning. This is the exchange-path
   // wrinkle accept does not have: a committed config can carry a column remap.
+  // The remap binds only a `role: linkage` column (matching participation is the
+  // explicit linkage role), so the config roles ssn_source linkage while leaving
+  // its type non-ssn -- the remap, not the type fallback, is what binds it.
   const prepared = await prepareDataset(
     {
       linkageTerms: ssnOnlyTerms,
       standardization: [{ output: "ssn", input: "ssn_source" }],
+      metadata: [
+        {
+          name: "ssn_source",
+          type: "other",
+          role: "linkage",
+          isPayload: false,
+        },
+      ],
     },
     "Test Party",
     input,

@@ -477,14 +477,32 @@ test("validateInvite: a config's explicit standardization lets an otherwise-unsa
   const terms = defaultTerms();
   // The config maps tax_id -> ssn explicitly; the input carries tax_id (inferred
   // as an identifier, not ssn) rather than an ssn column, so without the
-  // standardization the ssn field would be unsatisfiable.
-  const { dir, configPath, keyPath } = withConfig(terms, [
+  // standardization the ssn field would be unsatisfiable. The remap binds only a
+  // `role: linkage` column (matching participation is the explicit linkage role),
+  // so the config roles tax_id linkage while leaving its type non-ssn -- the
+  // remap, not the type fallback, is what binds it.
+  const metadata: Metadata = [
     {
-      output: "ssn",
-      input: "tax_id",
-      steps: [{ function: "trim_whitespace" }],
+      name: "first_name",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
     },
-  ]);
+    { name: "last_name", type: "last_name", role: "linkage", isPayload: false },
+    { name: "dob", type: "date_of_birth", role: "linkage", isPayload: false },
+    { name: "tax_id", type: "identifier", role: "linkage", isPayload: false },
+  ];
+  const { dir, configPath, keyPath } = withConfig(
+    terms,
+    [
+      {
+        output: "ssn",
+        input: "tax_id",
+        steps: [{ function: "trim_whitespace" }],
+      },
+    ],
+    metadata,
+  );
   try {
     const input = writeCsv(dir, "first_name,last_name,dob,tax_id");
     const ready = await validateInvite({

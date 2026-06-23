@@ -223,7 +223,7 @@ export function defaultStandardizationForRows(
   rawRows: ReadonlyArray<Record<string, string>>,
 ): Standardization {
   const dobColumn = metadata.find(
-    (column) => column.type === "date_of_birth" && column.role !== "ignored",
+    (column) => column.type === "date_of_birth" && column.role === "linkage",
   );
   const dateInputFormat =
     dobColumn !== undefined
@@ -313,10 +313,11 @@ export function setDraftMetadata(
 /**
  * Reconcile the draft's standardization against a freshly-edited metadata, the
  * standardization analogue of {@link reconcileKeys}. A transformation is kept when
- * its input column is still present and non-ignored (so an operator's authored
+ * its input column is still present and `role: linkage` (so an operator's authored
  * cleaning and any second-column binding it added survive a metadata edit), and
- * dropped when its column was removed or marked ignored -- so a stale transformation
- * never cleans a column the operator excluded. A semantic type the kept set no longer
+ * dropped when its column was removed or re-roled off linkage -- so a stale
+ * transformation never cleans a column the core would refuse to bind (matching
+ * participation requires `role: linkage`). A semantic type the kept set no longer
  * covers (e.g. a newly-typed column) gains the recommended default cleaning, mirroring
  * how {@link reconcileKeys} appends a newly-offerable key. With no edits this returns
  * the unchanged default standardization (every default transformation is kept and
@@ -331,7 +332,7 @@ function reconcileStandardization(
   const columnByName = new Map(metadata.map((column) => [column.name, column]));
   const kept = prev.filter((transformation) => {
     const column = columnByName.get(transformation.input);
-    return column !== undefined && column.role !== "ignored";
+    return column !== undefined && column.role === "linkage";
   });
   const coveredTypes = new Set(
     kept
@@ -1032,20 +1033,20 @@ function standardizationForImportedTerms(
     const steps = stepsByField.get(field.name);
     if (steps === undefined) continue;
     // Bind only to a `role: linkage` column -- one the operator designated for
-    // matching -- not merely a non-`ignored` one. An imported terms document is
-    // attacker-influenceable (any schema-valid document is accepted on import), so a
-    // crafted document declaring an extra same-typed field must not be able to
-    // auto-bind it to a column the operator roled `identifier` (row-identifier) or
-    // `payload` (sent-to-partner) and so hash that column's value into a PSI key
-    // without consent -- the always-visible preview shows only the field's type
-    // label, not its bound column, so such a binding would otherwise be visible only
-    // in the expert workbench. Deliberately stricter than that workbench's
-    // `addFieldForType`, where the same binding is an explicit, per-field-visible
-    // operator action rather than an import side effect; an extra field with no free
-    // `linkage` column stays undeclared (fail-closed), and the operator can still
-    // establish the binding by hand in the workbench or by roling the column
-    // `linkage`. The default base's FIRST-column-per-type binding is unchanged (it
-    // is core's documented `resolveFieldColumns` rule, out of scope here).
+    // matching. An imported terms document is attacker-influenceable (any
+    // schema-valid document is accepted on import), so a crafted document declaring
+    // an extra same-typed field must not be able to auto-bind it to a column the
+    // operator roled `identifier` (row-identifier) or `payload` (sent-to-partner)
+    // and so hash that column's value into a PSI key without consent. This now
+    // matches core's own rule on every path: {@link resolveFieldColumns} binds only
+    // a `role: linkage` column, and the workbench's `addFieldForType` /
+    // `columnsForType` likewise offer only linkage columns -- so the import path is
+    // no longer stricter than the rest, it applies the same `role: linkage`
+    // requirement here. An extra field with no free `linkage` column stays
+    // undeclared (fail-closed); the operator establishes the binding by roling the
+    // column `linkage` and binding it in the workbench. The default base's
+    // first-column-per-type binding comes from the same core rule, so it too binds
+    // only `role: linkage` columns.
     const freeColumn = metadata.find(
       (column) =>
         column.type === field.type &&

@@ -1122,17 +1122,27 @@ export interface FieldColumnResolution {
  * 1. Explicit standardization preempts the type fallback: if `standardization`
  *    carries a transformation whose `output` is the field name, the field binds
  *    to that transformation's `input` column -- whether or not the column is
- *    present in the data -- UNLESS that column is `role: ignored`, in which case
- *    the field binds to nothing: `ignored` ("never participates in linkage")
- *    wins over a contradictory explicit transform. (When two transformations name
- *    the same output the last wins, matching the builder's field map and the
+ *    present in the data -- UNLESS that column is present and is not
+ *    `role: linkage`, in which case the field binds to nothing: matching
+ *    participation is the operator's explicit `linkage` role, and that role wins
+ *    over a contradictory explicit transform naming an `identifier`, `payload`,
+ *    or `ignored` column. (An ABSENT named column still binds, so the field is
+ *    surfaced as unsatisfiable by presence, unchanged. When two transformations
+ *    name the same output the last wins, matching the builder's field map and the
  *    checker's old mapping.)
  * 2. Type fallback: otherwise the field binds to the FIRST `metadata` column of
- *    its semantic type that is not `role: ignored`
- *    (`metadata.find(c => c.type === field.type && c.role !== "ignored")`), or to
+ *    its semantic type that is `role: linkage`
+ *    (`metadata.find(c => c.type === field.type && c.role === "linkage")`), or to
  *    nothing when no such column exists. First-match -- not "any same-typed
- *    column" -- because the exchange reads exactly that column. An ignored column
- *    is skipped even when it is the only one of its type, so it never links.
+ *    column" -- because the exchange reads exactly that column. A column roled
+ *    `identifier`, `payload`, or `ignored` is skipped even when it is the only
+ *    one of its type, so it never participates in matching by type alone.
+ *
+ * Matching participation keys on `role: linkage`, NOT on semantic type: a
+ * column is hashed into a PSI key only when the operator roled it for linkage.
+ * That is a separate axis from transmission ({@link isDisclosedToPartner} =
+ * `isPayload && role !== "ignored"`); a column that both matches and is sent is
+ * `role: linkage` with `isPayload: true`, which binds here unchanged.
  *
  * Binding is independent of whether the bound column is present in the input:
  * the builder reads rows from the column and a presence-only consumer layers the
@@ -1162,27 +1172,37 @@ export function resolveFieldColumns(
   for (const field of terms.linkageFields) {
     const transform = explicit.get(field.name);
     if (transform !== undefined) {
-      // An explicit standardization naming a `role: ignored` column must not
-      // bind it into linkage: `ignored` means "never participates in linkage",
-      // and that wins over a contradictory explicit transform. The field then
-      // resolves to no column (surfacing as unsatisfiable through the shared
-      // checker) rather than silently linking a column the operator excluded.
-      const inputIgnored =
-        metadata.find((c) => c.name === transform.input)?.role === "ignored";
-      if (inputIgnored) {
+      // An explicit standardization binds its input column into linkage only
+      // when the operator roled that column `linkage`. Matching participation is
+      // a single explicit axis keyed on `role`, so a present column roled
+      // `identifier` (a local row index), `payload` (sent to the partner), or
+      // `ignored` (used for nothing) does NOT participate -- and that role wins
+      // over a contradictory explicit transform. The field then resolves to no
+      // column (surfacing as unsatisfiable through the shared checker) rather
+      // than silently hashing a column the operator did not designate for
+      // matching into a PSI key. An ABSENT named column is not refused here: it
+      // still binds and is surfaced as unsatisfiable by presence downstream
+      // (the documented preempt-the-fallback behavior). "Match and send" stays
+      // expressible as a `role: linkage` column with `isPayload: true`.
+      const inputColumn = metadata.find((c) => c.name === transform.input);
+      if (inputColumn !== undefined && inputColumn.role !== "linkage") {
         resolution.set(field.name, { column: undefined, transform: undefined });
       } else {
         resolution.set(field.name, { column: transform.input, transform });
       }
       continue;
     }
-    // Skip `role: ignored` columns: the linkage path keys on `type`, not
-    // `role`, so an ignored column of the field's type would otherwise bind here
-    // and participate in linkage. This is the one chokepoint the builder, the
-    // satisfiability checker, and the default-standardization derivation share,
-    // so excluding it once keeps an ignored column out of all three.
+    // Bind only a `role: linkage` column: matching participation is the
+    // operator's explicit `linkage` role, not merely a matching semantic `type`.
+    // A column roled `identifier`, `payload`, or `ignored` is never a default
+    // match field even when its type matches the field -- so a column marked
+    // sent-to-partner or row-identifier is not silently hashed into a PSI key.
+    // This is the one chokepoint the builder, the satisfiability checker, and the
+    // default-standardization derivation share, so narrowing it once keeps a
+    // non-linkage column out of all three. Transmission is a separate axis
+    // (`isDisclosedToPartner`); see this function's header.
     const col = metadata.find(
-      (c) => c.type === field.type && c.role !== "ignored",
+      (c) => c.type === field.type && c.role === "linkage",
     );
     resolution.set(field.name, { column: col?.name, transform: undefined });
   }
@@ -1193,8 +1213,8 @@ export function resolveFieldColumns(
  * Build a {@link StandardizedDataset} for the linkage fields in `terms`, binding
  * each field to an input column via {@link resolveFieldColumns}: an explicit
  * standardization transformation when one names the field (its steps run on the
- * bound column), otherwise the identity transformation over the first metadata
- * column of the field's semantic type that is not `role: ignored`.
+ * bound column), otherwise the identity transformation over the first
+ * `role: linkage` metadata column of the field's semantic type.
  *
  * Linkage fields that resolve to no column are absent from the dataset; records
  * referencing those fields are excluded from the corresponding linkage keys.

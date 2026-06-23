@@ -10,7 +10,7 @@ import type { SemanticType } from "../types";
 /**
  * The role a declared input column plays in an exchange:
  *
- * - `linkage` -- participates in the PSI protocol via its semantic type.
+ * - `linkage` -- participates in the PSI protocol (matching) via its semantic type.
  * - `identifier` -- indexes this party's matched records in the output.
  * - `payload` -- transmitted to the partner for matched members (the default
  *   for any column not used for linkage or identification).
@@ -18,12 +18,23 @@ import type { SemanticType } from "../types";
  *   an identifier, and never transmitted as payload (regardless of `isPayload`).
  *   Opt-in only -- {@link inferMetadata} never assigns it.
  *
- * Nothing in the linkage/key-building path consults `role` (it branches on the
- * column's semantic `type`), so an `ignored` column is not coerced out of
- * linkage by a role default -- it would otherwise leak in via its `type`. Each
- * type- or payload-driven consumer therefore excludes `ignored` explicitly:
- * `preparePayload`, `resolveFieldColumns` (both binding rules), `getDefaultLinkageTerms`,
- * and the date-format inference in `prepareForExchange`.
+ * Two independent axes derive from `role`, each consulted explicitly so neither
+ * leaks in via a column's semantic `type` alone:
+ *
+ * - MATCHING participation requires `role: linkage`. The linkage/key-building
+ *   path binds a field to a column only when that column is roled `linkage` and
+ *   its `type` matches, so a column roled `identifier`, `payload`, or `ignored`
+ *   is never hashed into a PSI key merely because its type matches a linkage
+ *   field. Enforced at the one chokepoint {@link resolveFieldColumns} (both
+ *   binding rules) and mirrored by `getDefaultLinkageTerms`,
+ *   `authoredLinkageFields`, and the date-format inference in `prepareForExchange`.
+ * - TRANSMISSION requires `isPayload && role !== "ignored"`
+ *   ({@link isDisclosedToPartner}, the single source of truth `preparePayload`
+ *   gathers on): an `ignored` column is never sent regardless of `isPayload`.
+ *
+ * A column can do both -- `role: linkage` with `isPayload: true` both matches and
+ * is transmitted -- but each axis is opted into explicitly; neither implies the
+ * other.
  */
 export const ColumnRoleSchema = z.enum([
   "linkage",
