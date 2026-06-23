@@ -1564,6 +1564,26 @@ test("a declared receive still aborts when the partner's send does not satisfy i
   ).toBe(true);
 });
 
+test("payload comparison is element-wise: a comma in a column name does not alias the set", () => {
+  // The column-name sets are compared per sorted element, not by a comma-joined
+  // string. A partner-controlled name containing the separator must not collapse
+  // two distinct sets into an equal join: send ["a,b"] against receive ["a","b"]
+  // is a genuine mismatch, not a match.
+  const local = {
+    ...termsA,
+    payload: { send: [{ name: "a,b" }], receive: [{ name: "z" }] },
+  };
+  const partner = {
+    ...termsB,
+    payload: { send: [{ name: "z" }], receive: [{ name: "a" }, { name: "b" }] },
+  };
+  expect(
+    validateCompatibility(local, partner).errors.some((e) =>
+      e.includes("payload mismatch"),
+    ),
+  ).toBe(true);
+});
+
 // ─── validateCompatibility: partner-string sanitization ──────────────────────
 // A mismatch echoes a partner-supplied value into operator-facing output; these
 // pin that every such value is routed through sanitizeForDisplay (control/ANSI

@@ -1421,8 +1421,14 @@ export function validateCompatibility(
   // metadata discloses, and receiving is not disclosing. The gate is symmetric: each
   // direction keys on the same receiver's declared `receive`, so the two parties
   // (which call this with swapped arguments) compute identical verdicts. Names are
-  // displayed sanitized (partner-controlled free text) while the equality stays
-  // byte-exact, matching the messages elsewhere in this function.
+  // displayed sanitized (partner-controlled free text) while the equality is
+  // byte-exact and element-wise -- compared per sorted column, NOT by a
+  // delimiter-joined string, so a partner-controlled name containing the separator
+  // cannot make two distinct sets join equal (`["a,b"]` vs `["a","b"]`) and slip a
+  // genuine mismatch past the check. Matching the messages elsewhere.
+  const sameColumnSet = (a: Array<string>, b: Array<string>): boolean =>
+    a.length === b.length && a.every((name, i) => name === b[i]);
+
   if (partner.payload?.receive !== undefined) {
     const partnerReceiveNames = partner.payload.receive
       .map((c) => c.name)
@@ -1430,7 +1436,7 @@ export function validateCompatibility(
     const localSendNames = (local.payload?.send ?? [])
       .map((c) => c.name)
       .sort();
-    if (localSendNames.join(",") !== partnerReceiveNames.join(",")) {
+    if (!sameColumnSet(localSendNames, partnerReceiveNames)) {
       const localShown = localSendNames
         .map((n) => sanitizeForDisplay(n))
         .join(",");
@@ -1449,7 +1455,7 @@ export function validateCompatibility(
     const partnerSendNames = (partner.payload?.send ?? [])
       .map((c) => c.name)
       .sort();
-    if (localReceiveNames.join(",") !== partnerSendNames.join(",")) {
+    if (!sameColumnSet(localReceiveNames, partnerSendNames)) {
       const localShown = localReceiveNames
         .map((n) => sanitizeForDisplay(n))
         .join(",");
