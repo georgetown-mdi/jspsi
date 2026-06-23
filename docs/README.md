@@ -41,3 +41,4 @@ The documentation is organized in two tiers: this **overview** tier (`docs/`) of
 - [COMMUNICATION.md](spec/COMMUNICATION.md) - transport-contract complement to the overview: the terminal `ConnectionErrorKind` classification rationale
 - [EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md) - format specification for the self-attested exchange record: file shapes, commitment scheme, governance metadata, and privacy properties
 - [CANONICAL_ENCODING.md](spec/CANONICAL_ENCODING.md) - the RFC 8785 byte encoding the receipts, record commitments, and agreed-terms hash are computed over
+- [CREDENTIAL_STORAGE.md](spec/CREDENTIAL_STORAGE.md) - the owner-only write path (exclusive-create, atomic rename, fsync durability, ACL narrowing) for the key file, signing identity, exchange record, and result CSV
