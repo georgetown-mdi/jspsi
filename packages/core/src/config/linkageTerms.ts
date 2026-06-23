@@ -712,6 +712,47 @@ const LinkageKeySchema: z.ZodType<LinkageKey> = z.object({
     .optional(),
 });
 
+/**
+ * The set of linkage-field names referenced by at least one element of
+ * `linkageKeys` -- the union of every element's `field`. The exchange standardizes
+ * and consumes exactly these fields, so a caller filters its declared linkage
+ * fields down to this set (a declared field no key references is read by nothing in
+ * the exchange): the constraint sweep, the default-terms field derivation, and the
+ * advanced-invite field derivation all apply the same
+ * `field => referenced.has(field.name)` filter, and share this one definition of
+ * "referenced" rather than re-deriving it.
+ *
+ * DISCLOSURE-RELEVANT: two of those callers -- the default-terms and
+ * advanced-invite field derivations -- use the result to choose which
+ * `linkageFields` enter the constructed terms, and so the cross-party terms hash
+ * (the canonical encoding both parties agree on); only the constraint sweep is
+ * warn-only and off the wire. A change to which names this set includes or excludes
+ * therefore silently moves that hash and breaks interop, so it is in the
+ * security-review scope: preserve the exact membership. A change here that altered a
+ * constructed-terms field set would fail the field-set regression tests for the
+ * default and advanced-invite paths (which derive one side without this function),
+ * rather than silently moving the hash.
+ *
+ * `swap` does not widen the result: it only permutes `field` among a key's existing
+ * elements at receive time, so the union over the authored (un-swapped) elements
+ * already names every field any swapped order could reference. Callers pass keys as
+ * authored, without resolving swap.
+ *
+ * This is the UNION, distinct from the per-key satisfiability predicate
+ * (`key.elements.every(...)`) the satisfiability checker and {@link LinkageTermsSchema}'s
+ * referential-integrity refine compute. The returned set may include a name that is
+ * not a declared linkage field for a terms object not built through that schema
+ * (whose refine forbids a dangling element `field`); used as a membership filter,
+ * such a stray name matches no declared field and is harmless.
+ */
+export function referencedLinkageFieldNames(
+  linkageKeys: readonly LinkageKey[],
+): Set<string> {
+  return new Set(
+    linkageKeys.flatMap((key) => key.elements.map((e) => e.field)),
+  );
+}
+
 // --- Payload -----------------------------------------------------------------
 
 interface PayloadColumn {

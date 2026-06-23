@@ -22,6 +22,7 @@ import type {
 import {
   MAX_DATE_FORMAT_LENGTH,
   MAX_TRANSFORM_PATTERN_LENGTH,
+  referencedLinkageFieldNames,
 } from "./config/linkageTerms.js";
 import { inferMetadata } from "./config/metadata.js";
 import type { ColumnMetadata } from "./config/metadata.js";
@@ -1913,12 +1914,9 @@ export function summarizeDatasetConstraintViolations(
   dataset: StandardizedDataset,
   rowCount: number,
 ): ConstraintViolationSummary[] {
-  // The fields at least one linkage key references -- the only fields the exchange
-  // standardizes and consumes. `swap` only permutes `field` among existing
-  // elements, so the un-swapped elements already name every referenced field.
-  const referencedFields = new Set(
-    terms.linkageKeys.flatMap((key) => key.elements.map((e) => e.field)),
-  );
+  // Scope to the fields a linkage key references -- the only fields the exchange
+  // standardizes and consumes; see referencedLinkageFieldNames.
+  const referencedFields = referencedLinkageFieldNames(terms.linkageKeys);
   const summaries: ConstraintViolationSummary[] = [];
   for (const field of terms.linkageFields) {
     if (field.constraints === undefined) continue;
