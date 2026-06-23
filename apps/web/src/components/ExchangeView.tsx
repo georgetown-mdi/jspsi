@@ -609,7 +609,13 @@ export function ExchangeView(config: ExchangeConfig) {
         // The acceptor shows what it will RECEIVE from the carried disclosed set
         // (the same set the consent screen showed); the inviter previews its own
         // proposal, which has no carried field and falls back to its authored
-        // payload.send.
+        // payload.send. That fallback is faithful only because both web mint paths
+        // author payload.send to equal the disclosed predicate
+        // (disclosedColumnNames over the same metadata, asserted by
+        // assertPayloadSendDisclosed at the mint boundary); if a future path ever
+        // authored a payload.send narrower than what its metadata discloses, the
+        // inviter's own preview would understate its send, so pass the inviter's
+        // disclosed set here too rather than relying on the equality.
         disclosedPayloadColumns={
           config.role === "acceptor"
             ? config.disclosedPayloadColumns

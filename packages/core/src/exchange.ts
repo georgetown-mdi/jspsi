@@ -208,6 +208,14 @@ export function prepareForExchange(
     // A self-facing operator note, passed through untouched from the local
     // config to the record builder; absent when the config omits it.
     retentionDisposition: exchangeDataSpec.retentionDisposition,
+    // NOTE: expectedPayloadColumns (the received-payload lock-in) is deliberately
+    // NOT threaded here, unlike retentionDisposition above. The caller sets it on
+    // the returned PreparedExchange after this returns, because the accept path's
+    // source is the invitation token (not this dataSpec) and the recurring path
+    // applies a fallback (config expectedPayloadColumns, else payload.receive). A
+    // caller that wants the lock-in must set it explicitly; see
+    // PreparedExchange.expectedPayloadColumns. (It rides ExchangeDataSpec only so
+    // the exchange command can read it off the parsed config.)
     dataset,
     rawRows,
     rowCount: rawRows.length,

@@ -134,8 +134,20 @@ export interface InvitationLegalAgreementSummary {
 
 /** The optional data columns the inviter declares, with names sanitized. */
 export interface InvitationPayloadSummary {
-  /** Columns the inviter will send for matched records. */
+  /** Columns the inviter will send for matched records (what the acceptor
+   * receives), in the inviter's namespace. Empty when the declared set is empty;
+   * read {@link sendDeclared} to tell that apart from the lazy case. */
   send: Array<string>;
+  /**
+   * Whether the send set is a definite DECLARATION the acceptor is locked in to --
+   * the carried disclosed subset (possibly empty), or an authored `payload.send` --
+   * as opposed to the lazy case (the inviter sends whatever its own metadata
+   * discloses, nothing declared up front). When true and {@link send} is empty the
+   * acceptor is locked in to "receive nothing" (a later non-empty payload aborts),
+   * so the renderer states that explicitly ("(none)") rather than omitting the
+   * line; when false the send side is lazy and is not shown.
+   */
+  sendDeclared: boolean;
   /** Columns the inviter requests from the acceptor for matched records. */
   receive: Array<string>;
 }
@@ -801,13 +813,26 @@ export function summarizeInvitation(
   // "proposing" preview, which has authored its send but holds no token field
   // yet. `receive` (what the inviter requests FROM the acceptor) is unaffected:
   // it has no transmission predicate to derive from and stays the authored list.
+  //
+  // sendDeclared distinguishes a definite declaration (the carried subset --
+  // present even when empty -- or an authored send) from the lazy case (no carried
+  // subset and no authored send: the inviter sends whatever its metadata
+  // discloses). A declared-but-empty set is the strict "receive nothing" lock-in,
+  // which the renderer shows as "(none)" rather than suppressing -- so it is not
+  // confused with the lazy case, which has the opposite runtime behavior (a stray
+  // payload aborts under the lock-in, is accepted under lazy). The section renders
+  // whenever the send is declared OR a receive is listed.
+  const sendDeclared =
+    source.disclosedPayloadColumns !== undefined ||
+    (terms.payload?.send ?? []).length > 0;
   const send =
     source.disclosedPayloadColumns ??
     (terms.payload?.send ?? []).map((column) => column.name);
   const receive = (terms.payload?.receive ?? []).map((column) => column.name);
-  if (send.length > 0 || receive.length > 0) {
+  if (sendDeclared || receive.length > 0) {
     summary.payload = {
       send: send.map((name) => sanitizeForDisplay(name)),
+      sendDeclared,
       receive: receive.map((name) => sanitizeForDisplay(name)),
     };
   }

@@ -410,12 +410,13 @@ describe("generateInvitation", () => {
     expect(summary.payload).toBeUndefined();
   });
 
-  test("summarizeInvitation suppresses the payload section for an empty carried subset", () => {
+  test("summarizeInvitation surfaces an empty carried subset as a declared 'receive nothing'", () => {
     // The web inviter always carries the disclosed subset, possibly empty. An empty
-    // carried set means "you receive no payload columns"; the consent screen shows
-    // no payload-receive section, which faithfully reads as "no payload" -- and the
-    // acceptor's runtime lock-in still enforces it (a sent payload aborts), so a
-    // suppressed section is not a hidden constraint. Only a non-empty set renders.
+    // carried set is the strict "receive nothing" lock-in (a later non-empty payload
+    // aborts), NOT the lazy case -- so the section is rendered with an empty,
+    // DECLARED send (the renderer shows "(none)"), distinct from a lazy/absent set
+    // which suppresses the section. This keeps the consent screen and the runtime
+    // enforcement aligned.
     const terms = getDefaultLinkageTerms(
       "Inviter",
       inferMetadata(["ssn", "first_name", "last_name", "dob"]),
@@ -424,6 +425,22 @@ describe("generateInvitation", () => {
       linkageTerms: terms,
       disclosedPayloadColumns: [],
     });
+    expect(summary.payload).toEqual({
+      send: [],
+      sendDeclared: true,
+      receive: [],
+    });
+  });
+
+  test("summarizeInvitation suppresses the payload section for a lazy (absent) subset", () => {
+    // No carried subset and no authored payload.send: the send side is lazy (the
+    // inviter sends whatever its metadata discloses, nothing declared up front), so
+    // the section is omitted -- distinct from the declared-empty case above.
+    const terms = getDefaultLinkageTerms(
+      "Inviter",
+      inferMetadata(["ssn", "first_name", "last_name", "dob"]),
+    );
+    const summary = summarizeInvitation({ linkageTerms: terms });
     expect(summary.payload).toBeUndefined();
   });
 
