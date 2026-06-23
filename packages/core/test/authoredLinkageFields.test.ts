@@ -98,6 +98,26 @@ describe("authoredLinkageFields", () => {
     ).toEqual(["current_name"]);
   });
 
+  test("a transformation bound to a payload or identifier column declares no field (role wins)", () => {
+    // Matching participation requires role: linkage, so a transformation naming a
+    // payload- or identifier-roled column declares nothing -- mirroring
+    // resolveFieldColumns, where the role wins over an explicit binding for any
+    // non-linkage column, not only ignored.
+    const metadata: Metadata = [
+      col("sent", "first_name", "payload"),
+      col("rowid", "last_name", "identifier"),
+      col("current", "first_name"),
+    ];
+    const standardization: Standardization = [
+      { output: "sent_name", input: "sent", steps: [] },
+      { output: "rowid_name", input: "rowid", steps: [] },
+      { output: "current_name", input: "current", steps: [] },
+    ];
+    expect(
+      authoredLinkageFields(metadata, standardization).map((f) => f.name),
+    ).toEqual(["current_name"]);
+  });
+
   test("an explicit binding for a type with no default field declares a constraint-free field", () => {
     const metadata: Metadata = [col("ph", "phone_number")];
     const standardization: Standardization = [

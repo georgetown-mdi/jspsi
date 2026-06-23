@@ -212,6 +212,26 @@ describe("setDraftMetadata re-derives offerable keys", () => {
         .every((e) => e.enabled),
     ).toBe(true);
   });
+
+  test("re-rolling a column off linkage drops its standardization transformation", () => {
+    // first_name seeds as role: linkage with a default cleaning transform. Re-rolling
+    // it to payload (sent, not matched) drops that transform on reconcile, since
+    // matching participation requires role: linkage -- a stale transform must not
+    // clean a column the core would no longer bind.
+    const { draft } = seedAdvancedInvite("Org", COLS);
+    expect(draft.standardization.some((t) => t.input === "first_name")).toBe(
+      true,
+    );
+    const repurposed = setColumnDisclosure(
+      draft.metadata,
+      "first_name",
+      "payload",
+    ).metadata;
+    const next = setDraftMetadata(draft, repurposed);
+    expect(next.standardization.some((t) => t.input === "first_name")).toBe(
+      false,
+    );
+  });
 });
 
 describe("validateAdvancedInvite", () => {

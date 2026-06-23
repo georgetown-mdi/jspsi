@@ -209,7 +209,7 @@ export interface AdvancedValidation {
  * exchange infers when none is given); the advanced path always supplies one, so
  * it must infer here or it would silently parse a non-US date file with the wrong
  * format and under-match every date-of-birth key. Mirrors the exchange's own
- * inference: the first present, non-`ignored` date_of_birth column's values drive
+ * inference: the first present `role: linkage` date_of_birth column's values drive
  * {@link inferDateFormat}, falling back to the `MM/DD/YYYY` default when there is no
  * such column or the format cannot be inferred (e.g. seeded with no rows).
  *
@@ -249,7 +249,7 @@ export function seedAdvancedInvite(
   // Normalized so the collapsed disclosure control opens on a faithful diagonal
   // (an inferred identifier column is not silently disclosed). Normalization only
   // re-derives isPayload from role, so the offerable key set -- which
-  // getDefaultLinkageTerms derives from the non-ignored column TYPES -- is
+  // getDefaultLinkageTerms derives from the `role: linkage` column TYPES -- is
   // unchanged by it.
   const metadata = normalizeForEditor(inferMetadata(columns));
   const terms = getDefaultLinkageTerms(identity, metadata);
@@ -281,7 +281,7 @@ export function seedAdvancedInvite(
 /**
  * Re-derive the editor's draft for a new column metadata: editing a column's
  * semantic type changes which linkage keys are offerable ({@link getDefaultLinkageTerms}
- * filters by the non-ignored column types present), so this recomputes the
+ * filters by the `role: linkage` column types present), so this recomputes the
  * offerable key set and reconciles it with the current draft -- keys still
  * offerable keep their enabled flag and position, newly-offerable keys are
  * appended (enabled), and keys no longer offerable drop. The threaded metadata is
@@ -1025,7 +1025,7 @@ function standardizationForImportedTerms(
     if (baseOutputs.has(field.name)) continue;
     // First of two fail-closed gates that leave a field undeclared. Here the default
     // standardization over the imported terms emitted no transformation for this
-    // field at all -- its type has no non-`ignored` column, or no default cleaning
+    // field at all -- its type has no `role: linkage` column, or no default cleaning
     // pipeline -- so there is no binding to reconstruct. (The second gate is the
     // `freeColumn === undefined` check below: steps exist, but no `role: linkage`
     // column is free.) Reading the steps here (rather than a separate `.has()` probe)

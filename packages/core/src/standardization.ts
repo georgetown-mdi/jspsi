@@ -1499,7 +1499,7 @@ export function validateStandardizationAgainstTerms(
  * Because the binding is shared, the resolution rules apply unchanged: an
  * explicit standardization preempts the type fallback (a field whose explicit
  * source column is absent is unsatisfiable even when a same-typed column exists),
- * and the type fallback binds to the FIRST non-`ignored` metadata column of the
+ * and the type fallback binds to the FIRST `role: linkage` metadata column of the
  * field's type. An empty result means every configured field can be produced; a
  * non-empty result names the fields that cannot.
  *

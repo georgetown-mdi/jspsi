@@ -272,7 +272,7 @@ export function LinkageTermsEditor({
       producibleFieldNames.has(el.field),
     );
 
-  // The fields a key element may reference, metadata-derived (one per non-ignored
+  // The fields a key element may reference, metadata-derived (one per `role: linkage`
   // typed column). The expert field-pickers offer exactly these, so a key authored
   // in the editor can only reference a declared field.
   // The fields a key element may reference: derived from the authored standardization

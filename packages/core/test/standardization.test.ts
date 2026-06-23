@@ -1588,12 +1588,13 @@ describe("resolveFieldColumns", () => {
   });
 
   test("an explicit mapping binds to its (role: linkage) input column", () => {
-    // The named input column is roled linkage, so the explicit mapping binds it
-    // even though `ssn_src` is not a recognized ssn alias.
+    // ssn_src is typed `other` and roled linkage, so the type fallback cannot bind
+    // it to the ssn field -- only the explicit mapping does, isolating rule 1. (A
+    // non-linkage input would be refused; see the role tests below.)
     const resolution = resolveFieldColumns(
       terms,
       [{ output: "ssn", input: "ssn_src" }],
-      [col("ssn_src", "ssn"), col("last_name", "last_name")],
+      [col("ssn_src", "other"), col("last_name", "last_name")],
     );
     expect(resolution.get("ssn")?.column).toBe("ssn_src");
   });
