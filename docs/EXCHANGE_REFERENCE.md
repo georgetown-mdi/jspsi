@@ -840,6 +840,8 @@ metadata:
 
 `role: ignored` is the explicit opposite of that default: a column present in the input but used for nothing. An ignored column is never used for linkage, never treated as an identifier, and never transmitted as payload -- the role wins over `is_payload`, so an ignored column is not sent even if it carries `is_payload: true`. Use it to keep a column in the input file (so the file need not be edited) while declaring that this exchange must not touch it. Inference never assigns `ignored`; it must be set explicitly.
 
+Matching participation requires `role: linkage`. A column's standardized value is hashed into a linkage key only when it is roled `linkage` and its semantic `type` matches a linkage field -- or an explicit [data standardizing transformation](#data-standardizing-transformations) whose `input` is a `role: linkage` column names the field. A column roled `identifier`, `payload`, or `ignored` never participates in matching, even when its `type` matches a linkage field and even when an explicit transformation names it: `role` is the single, explicit statement of whether a column is used for matching, and it wins. This keeps matching distinct from transmission (`is_payload`, above) -- a column that should both match and be sent to the partner is `role: linkage` with `is_payload: true`, the one combination that does both. A field left with no `role: linkage` column of its type is reported as unsatisfiable before the exchange runs, never silently dropped.
+
 ---
 
 ## Data standardizing transformations

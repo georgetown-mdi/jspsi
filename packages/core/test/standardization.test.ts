@@ -1587,11 +1587,14 @@ describe("resolveFieldColumns", () => {
     expect(resolution.get("ssn")?.column).toBe("absent_ssn");
   });
 
-  test("an explicit mapping binds to its input column", () => {
+  test("an explicit mapping binds to its (role: linkage) input column", () => {
+    // ssn_src is typed `other` and roled linkage, so the type fallback cannot bind
+    // it to the ssn field -- only the explicit mapping does, isolating rule 1. (A
+    // non-linkage input would be refused; see the role tests below.)
     const resolution = resolveFieldColumns(
       terms,
       [{ output: "ssn", input: "ssn_src" }],
-      inferMetadata(["ssn_src", "last_name"]),
+      [col("ssn_src", "other"), col("last_name", "last_name")],
     );
     expect(resolution.get("ssn")?.column).toBe("ssn_src");
   });
@@ -1679,9 +1682,74 @@ describe("resolveFieldColumns", () => {
         { output: "ssn", input: "first_src" },
         { output: "ssn", input: "second_src" },
       ],
-      inferMetadata(["first_src", "second_src"]),
+      [col("first_src", "ssn"), col("second_src", "ssn")],
     );
     expect(resolution.get("ssn")?.column).toBe("second_src");
+  });
+
+  // --- matching participation requires role: linkage ------------------------
+  // The narrowing: a column roled identifier/payload does NOT participate in
+  // matching, even when its semantic type matches the field. Asserted here on the
+  // one resolution the builder, the checker, and the default derivation share, so
+  // a single chokepoint test covers all three (the differential `test.each` above
+  // pins builder-vs-checker agreement on the same rule).
+
+  test("a payload column is not linkage-eligible by type, even as the only one of its type", () => {
+    // Its type matches the ssn field, but `role: payload` means "sent to the
+    // partner", not "matched" -- so it must resolve to no column rather than be
+    // silently hashed into a PSI key.
+    const resolution = resolveFieldColumns(terms, undefined, [
+      { name: "ssn", type: "ssn", role: "payload", isPayload: true },
+      roledCol("last_name", "last_name", "linkage"),
+    ]);
+    expect(resolution.get("ssn")?.column).toBeUndefined();
+    expect(resolution.get("lastName")?.column).toBe("last_name");
+  });
+
+  test("an identifier column is not linkage-eligible by type, even as the only one of its type", () => {
+    const resolution = resolveFieldColumns(terms, undefined, [
+      roledCol("ssn", "ssn", "identifier"),
+      roledCol("last_name", "last_name", "linkage"),
+    ]);
+    expect(resolution.get("ssn")?.column).toBeUndefined();
+  });
+
+  test("the type fallback skips a payload column to bind a later linkage one", () => {
+    // First-match would pick the payload column; the role narrowing makes the
+    // fallback bind the `role: linkage` same-typed column listed after it.
+    const resolution = resolveFieldColumns(terms, undefined, [
+      { name: "sent_ssn", type: "ssn", role: "payload", isPayload: true },
+      roledCol("real_ssn", "ssn", "linkage"),
+      roledCol("last_name", "last_name", "linkage"),
+    ]);
+    expect(resolution.get("ssn")?.column).toBe("real_ssn");
+  });
+
+  test("an explicit standardization naming a payload column does not bind it into linkage", () => {
+    // role wins over a contradictory explicit transform -- the same guard that
+    // protects an ignored column now protects payload/identifier, so a column the
+    // operator marked sent-to-partner is never dragged onto the match axis.
+    const resolution = resolveFieldColumns(
+      terms,
+      [{ output: "ssn", input: "sent_ssn" }],
+      [
+        { name: "sent_ssn", type: "ssn", role: "payload", isPayload: true },
+        roledCol("last_name", "last_name", "linkage"),
+      ],
+    );
+    expect(resolution.get("ssn")?.column).toBeUndefined();
+    expect(resolution.get("ssn")?.transform).toBeUndefined();
+  });
+
+  test("a role: linkage column with isPayload still binds (match-and-send)", () => {
+    // The documented way to both match and transmit a column: role linkage +
+    // isPayload true. The narrowing leaves this unchanged -- it binds for matching
+    // (transmission is the separate isDisclosedToPartner axis).
+    const resolution = resolveFieldColumns(terms, undefined, [
+      { name: "ssn", type: "ssn", role: "linkage", isPayload: true },
+      roledCol("last_name", "last_name", "linkage"),
+    ]);
+    expect(resolution.get("ssn")?.column).toBe("ssn");
   });
 });
 
@@ -1768,16 +1836,44 @@ describe("unsatisfiedLinkageFields", () => {
     expect(unsatisfied).toEqual([]);
   });
 
-  test("an explicit standardization mapping a present column satisfies a field its type does not", () => {
-    // `tax_id` is not inferred as ssn, but an explicit mapping makes it so.
+  test("an explicit standardization mapping a present role:linkage column satisfies a field its type does not", () => {
+    // `tax_id` is not inferred as ssn; an explicit mapping makes it so, but only
+    // when the column is roled `linkage`. With name-inferred metadata `tax_id`
+    // infers as `role: identifier`, so the mapping is refused (role wins) and ssn
+    // stays unsatisfiable; roling it `linkage` in explicit metadata satisfies it.
     const columns = ["first_name", "last_name", "dob", "tax_id"];
-    expect(
-      unsatisfiedLinkageFields(columns, fullTerms).map((f) => f.name),
-    ).toContain("ssn");
     expect(
       unsatisfiedLinkageFields(columns, fullTerms, [
         { output: "ssn", input: "tax_id" },
-      ]),
+      ]).map((f) => f.name),
+    ).toContain("ssn");
+    expect(
+      unsatisfiedLinkageFields(
+        columns,
+        fullTerms,
+        [{ output: "ssn", input: "tax_id" }],
+        [
+          {
+            name: "first_name",
+            type: "first_name",
+            role: "linkage",
+            isPayload: false,
+          },
+          {
+            name: "last_name",
+            type: "last_name",
+            role: "linkage",
+            isPayload: false,
+          },
+          {
+            name: "dob",
+            type: "date_of_birth",
+            role: "linkage",
+            isPayload: false,
+          },
+          { name: "tax_id", type: "ssn", role: "linkage", isPayload: false },
+        ],
+      ),
     ).toEqual([]);
   });
 
@@ -2155,15 +2251,52 @@ describe("assessLinkageSatisfiability matches buildStandardizedDataset", () => {
       expected: 1,
     },
     {
-      name: "explicit standardization remaps to a present column",
+      // The remap target is roled `linkage`, so the explicit mapping binds it
+      // even though its type is not `ssn` (the type fallback alone would not).
+      name: "explicit standardization remaps to a present role:linkage column",
       columns: ["ssn_src", "last_name"],
       standardization: [{ output: "ssn", input: "ssn_src" }],
+      metadata: [col("ssn_src", "other"), col("last_name", "last_name")],
       expected: 2,
+    },
+    {
+      // Same remap, but the target is roled `payload`: matching requires
+      // `role: linkage`, so the role wins over the explicit transform and ssn is
+      // refused -- builder and checker agree (only the name key survives).
+      name: "explicit standardization remaps to a present payload column (refused)",
+      columns: ["ssn_src", "last_name"],
+      standardization: [{ output: "ssn", input: "ssn_src" }],
+      metadata: [
+        { name: "ssn_src", type: "ssn", role: "payload", isPayload: true },
+        col("last_name", "last_name"),
+      ],
+      expected: 1,
     },
     {
       name: "explicit standardization remaps to an absent column",
       columns: ["ssn", "last_name"],
       standardization: [{ output: "ssn", input: "tax_id" }],
+      expected: 1,
+    },
+    {
+      // A same-typed ssn column roled `payload` is NOT a default match field:
+      // the type fallback binds only `role: linkage`, so ssn is unsatisfiable.
+      name: "a payload-roled same-typed column is not a default match field",
+      columns: ["ssn", "last_name"],
+      metadata: [
+        { name: "ssn", type: "ssn", role: "payload", isPayload: true },
+        col("last_name", "last_name"),
+      ],
+      expected: 1,
+    },
+    {
+      // Likewise a same-typed ssn column roled `identifier`.
+      name: "an identifier-roled same-typed column is not a default match field",
+      columns: ["ssn", "last_name"],
+      metadata: [
+        { name: "ssn", type: "ssn", role: "identifier", isPayload: false },
+        col("last_name", "last_name"),
+      ],
       expected: 1,
     },
   ];

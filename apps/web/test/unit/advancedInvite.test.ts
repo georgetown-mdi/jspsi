@@ -142,16 +142,21 @@ describe("seedAdvancedInvite + buildAdvancedTerms", () => {
 describe("setDraftMetadata re-derives offerable keys", () => {
   const COLS = ["first_name", "last_name", "dob", "extra"];
 
-  test("editing a column type adds the keys its type makes offerable", () => {
+  test("retyping then rolling a column for matching adds the keys its type makes offerable", () => {
     // No ssn column: no ssn-referencing key is offerable.
     const { draft } = seedAdvancedInvite("Org", COLS);
     expect(ssnKeyNames(draft)).toEqual([]);
 
-    // Remap `extra` -> ssn: ssn keys become offerable and appear in the draft.
-    const next = setDraftMetadata(
-      draft,
-      setColumnType(draft.metadata, "extra", "ssn").metadata,
-    );
+    // Remap `extra` -> ssn alone: a type change keeps its inferred `payload`
+    // disclosure (a sent column stays sent), and a payload column is not matched,
+    // so no ssn key is offerable yet -- matching participation is the explicit
+    // `linkage` role, not the type alone.
+    const retyped = setColumnType(draft.metadata, "extra", "ssn").metadata;
+    expect(ssnKeyNames(setDraftMetadata(draft, retyped))).toEqual([]);
+
+    // Rolling `extra` for matching (role: linkage) makes its ssn keys offerable.
+    const matched = setColumnDisclosure(retyped, "extra", "match").metadata;
+    const next = setDraftMetadata(draft, matched);
     expect(ssnKeyNames(next).length).toBeGreaterThan(0);
     // The terms built from the new draft now declare ssn, so the run can produce
     // it -- the metadata that re-derived the keys is the metadata the run binds on.
@@ -179,8 +184,10 @@ describe("setDraftMetadata re-derives offerable keys", () => {
 
   test("a remap that only adds keys preserves the enabled/order of existing keys", () => {
     const { draft } = seedAdvancedInvite("Org", COLS);
-    // Disable the first key, then remap to add ssn keys (which does not drop any
-    // existing key, since no default key references the `other`-typed `extra`).
+    // Disable the first key, then remap+roll `extra` to add ssn keys (which does
+    // not drop any existing key, since no default key references the `other`-typed
+    // `extra`). The type change keeps `payload`; rolling it `match` (role: linkage)
+    // is what makes its keys offerable.
     const firstName = draft.keys[0].key.name;
     const withDisabled: AdvancedInviteDraft = {
       ...draft,
@@ -188,10 +195,12 @@ describe("setDraftMetadata re-derives offerable keys", () => {
         i === 0 ? { ...entry, enabled: false } : entry,
       ),
     };
-    const next = setDraftMetadata(
-      withDisabled,
+    const matched = setColumnDisclosure(
       setColumnType(withDisabled.metadata, "extra", "ssn").metadata,
-    );
+      "extra",
+      "match",
+    ).metadata;
+    const next = setDraftMetadata(withDisabled, matched);
     // The disabled key kept its position and disabled flag; the new ssn keys are
     // appended enabled.
     expect(next.keys[0].key.name).toBe(firstName);
@@ -202,6 +211,26 @@ describe("setDraftMetadata re-derives offerable keys", () => {
         .filter((e) => e.key.elements.some((el) => el.field === "ssn"))
         .every((e) => e.enabled),
     ).toBe(true);
+  });
+
+  test("re-rolling a column off linkage drops its standardization transformation", () => {
+    // first_name seeds as role: linkage with a default cleaning transform. Re-rolling
+    // it to payload (sent, not matched) drops that transform on reconcile, since
+    // matching participation requires role: linkage -- a stale transform must not
+    // clean a column the core would no longer bind.
+    const { draft } = seedAdvancedInvite("Org", COLS);
+    expect(draft.standardization.some((t) => t.input === "first_name")).toBe(
+      true,
+    );
+    const repurposed = setColumnDisclosure(
+      draft.metadata,
+      "first_name",
+      "payload",
+    ).metadata;
+    const next = setDraftMetadata(draft, repurposed);
+    expect(next.standardization.some((t) => t.input === "first_name")).toBe(
+      false,
+    );
   });
 });
 

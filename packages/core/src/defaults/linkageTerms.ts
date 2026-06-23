@@ -213,12 +213,13 @@ export function getDefaultLinkageTerms(
 ): LinkageTerms {
   let linkageKeys: LinkageKey[];
   if (metadata !== undefined && metadata.length > 0) {
-    // Exclude `role: ignored` columns: a key kept solely because an ignored
-    // column supplies the only instance of its type would then bind that ignored
-    // column at exchange time (resolveFieldColumns skips it, so the field would
-    // resolve to nothing) -- drop the key here instead of building an unusable one.
+    // Only `role: linkage` columns supply a matchable type: a key kept because a
+    // non-linkage column (identifier/payload/ignored) is the only instance of its
+    // type would bind nothing at exchange time (resolveFieldColumns binds only a
+    // `role: linkage` column, so the field would resolve to nothing) -- drop the
+    // key here instead of building an unusable one.
     const availableTypes = new Set(
-      metadata.filter((m) => m.role !== "ignored").map((m) => m.type),
+      metadata.filter((m) => m.role === "linkage").map((m) => m.type),
     );
     linkageKeys = DEFAULT_LINKAGE_KEYS.filter((key) =>
       key.elements.every((el) => availableTypes.has(el.field as SemanticType)),
@@ -268,7 +269,7 @@ function isLinkageFieldType(type: SemanticType): type is LinkageField["type"] {
  * same type -- e.g. a maiden and a current name -- bound to different columns; this
  * can.
  *
- * Per present, non-`ignored` semantic type in `metadata`:
+ * Per present `role: linkage` semantic type in `metadata`:
  *
  * - When `standardization` carries one or more transformations whose `input`
  *   column has that type, one field is emitted per transformation: `name` is the
@@ -282,8 +283,9 @@ function isLinkageFieldType(type: SemanticType): type is LinkageField["type"] {
  *   emitted, so a metadata-only pair (no `standardization`) yields exactly the
  *   default per-type field set and the guided path is unchanged.
  *
- * A transformation whose `input` is a `role: ignored` (or absent) column declares
- * no field: `ignored` wins over an explicit binding in
+ * A transformation whose `input` is a non-`linkage` (identifier/payload/ignored)
+ * or absent column declares no field: matching participation requires
+ * `role: linkage`, which wins over an explicit binding in
  * {@link resolveFieldColumns}, so the field would resolve to no column anyway.
  *
  * Field order follows {@link DEFAULT_LINKAGE_FIELDS}, with a default type's explicit
@@ -300,17 +302,18 @@ export function authoredLinkageFields(
 ): LinkageField[] {
   const columnByName = new Map(metadata.map((column) => [column.name, column]));
   // Explicit transformations grouped by their input column's semantic type. A
-  // transformation is skipped when its input column is absent, `role: ignored`
-  // (`ignored` wins over an explicit binding -- see resolveFieldColumns), or of a
-  // type that cannot be a linkage field (`identifier` / `other` are not matchable),
-  // so none of these declares a field.
+  // transformation is skipped when its input column is absent, not `role: linkage`
+  // (only a linkage column participates in matching -- the role wins over an
+  // explicit binding, see resolveFieldColumns), or of a type that cannot be a
+  // linkage field (`identifier` / `other` are not matchable), so none of these
+  // declares a field.
   const explicitByType = new Map<
     LinkageField["type"],
     StandardizationTransformation[]
   >();
   for (const transformation of standardization ?? []) {
     const column = columnByName.get(transformation.input);
-    if (column === undefined || column.role === "ignored") continue;
+    if (column === undefined || column.role !== "linkage") continue;
     if (!isLinkageFieldType(column.type)) continue;
     const forType = explicitByType.get(column.type) ?? [];
     forType.push(transformation);
@@ -318,7 +321,7 @@ export function authoredLinkageFields(
   }
 
   const presentTypes = new Set(
-    metadata.filter((column) => column.role !== "ignored").map((c) => c.type),
+    metadata.filter((column) => column.role === "linkage").map((c) => c.type),
   );
 
   const fields: LinkageField[] = [];
