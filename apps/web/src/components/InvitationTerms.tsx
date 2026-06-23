@@ -224,6 +224,13 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
  * a single default-collapsed "Other details" disclosure. The matching method and
  * result sharing stay always-visible.
  *
+ * Two facts whose detail lives in that disclosure also carry an always-visible
+ * PRESENCE hint in the core, since either would otherwise be invisible until the
+ * acceptor expands Details: an extra-payload-egress request (a count of the columns
+ * the inviter requests FROM the acceptor) and an attached legal agreement (a
+ * fixed-copy flag). Only the presence is surfaced -- the column list and the
+ * agreement text stay in Details, not duplicated into the core.
+ *
  * `perspective` chooses only the heading and intro copy for the three contexts
  * this renders in: the acceptor `review`ing a partner's proposal (pre-consent),
  * the acceptor viewing the terms it has `accepted` (during the run, so the copy is
@@ -261,6 +268,21 @@ export function InvitationTerms({
   headingRef?: Ref<HTMLHeadingElement>;
 }) {
   const summary = summarizeInvitation({ linkageTerms, expires });
+  // Always-visible egress notice: the count of columns the inviter requests FROM
+  // the acceptor (summary.payload.receive) -- the acceptor's own data egress.
+  // A count, not the column names: the receive list is already sanitized and its
+  // length is a bounded integer, so it carries no partner free text into the
+  // always-visible core, while the names themselves stay in Details. The columns
+  // the inviter SENDS are data the acceptor receives, not an egress, so they do
+  // not trip this notice. Undefined when nothing is requested, so the notice is
+  // absent rather than reading "0 columns".
+  const receiveCount = summary.payload?.receive.length ?? 0;
+  const egressNotice =
+    receiveCount > 0
+      ? `This invitation requests ${receiveCount} additional data ` +
+        `${receiveCount === 1 ? "column" : "columns"} ` +
+        `${perspective === "proposing" ? "from your partner" : "from you"}.`
+      : undefined;
   const [detailsOpen, setDetailsOpen] = useState(false);
   // Stable id linking the disclosure toggle (aria-controls) to its panel; useId
   // keeps it consistent across SSR and hydration.
@@ -351,6 +373,32 @@ export function InvitationTerms({
             </>
           )}
         </Term>
+
+        {/* Always-visible presence hints, kept OUTSIDE the "Other details"
+            disclosure (the same out-of-disclosure pattern the per-key breadth
+            markers follow): an extra-payload-egress request and an attached legal
+            agreement otherwise have NO surfaced signal that they exist at all --
+            both sit only inside the default-collapsed Details, unlike the matching
+            breadth, which is always visible in each key's header. This surfaces
+            only the PRESENCE (a count, or a fixed-copy flag), never the detail: the
+            column list and the agreement text stay one expand down, so the acceptor
+            is on notice to open Details before consenting without the dense detail
+            being duplicated into the core. */}
+        {(egressNotice !== undefined ||
+          summary.legalAgreement !== undefined) && (
+          <Stack gap={4}>
+            {egressNotice !== undefined && (
+              <Text size="sm" fw={500}>
+                {egressNotice}
+              </Text>
+            )}
+            {summary.legalAgreement !== undefined && (
+              <Text size="sm" fw={500}>
+                This invitation attaches a legal agreement.
+              </Text>
+            )}
+          </Stack>
+        )}
       </Stack>
 
       {/* A real disclosure: the toggle carries aria-expanded and aria-controls,
