@@ -74,8 +74,17 @@ export function HomePage() {
           {/* One shared drop below both panels. Required to send an invitation
               (it gates Generate above) and optional when accepting one, where it
               simply rides along to the consent screen. Read in the browser only --
-              never uploaded -- in either case. */}
-          <Paper>
+              never uploaded -- in either case.
+
+              Unlike the two panels (which split the route width via the grid), the
+              drop is a single full-bleed element, so it self-caps to the same
+              reading measure the exchange column uses (EXCHANGE_READING_WIDTH,
+              centered) rather than stretching a lone dropzone across a wide route:
+              it fills the width on a narrow window and stops growing -- leaving a
+              gap at the edges -- once past the cap. */}
+          <Paper
+            style={{ width: EXCHANGE_READING_WIDTH, marginInline: "auto" }}
+          >
             <Title order={2}>Your data file</Title>
             <Stack mt="md">
               <Text size="sm" c="dimmed">

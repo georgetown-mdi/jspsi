@@ -179,7 +179,9 @@ describe("InvitePanel compose screen", () => {
     const advanced = page.getByText("Advanced Options");
     await expect.element(advanced).toBeInTheDocument();
     const el = advanced.element() as HTMLElement;
+    // A real, enabled control -- a BUTTON, not aria-disabled.
     expect(el.tagName).toBe("BUTTON");
+    expect(el.getAttribute("aria-disabled")).not.toBe("true");
 
     await userEvent.click(advanced);
     expect(nav.calls).toContainEqual({ to: "/advanced" });
@@ -229,7 +231,7 @@ describe("InvitePanel compose screen", () => {
     mount();
     await userEvent.click(page.getByTestId("select-file"));
     await expect
-      .element(page.getByText(/For each row that matches/))
+      .element(page.getByText(/For each row in your file that matches/))
       .toBeInTheDocument();
 
     // ...then choose a file whose columns are all linkage types, so nothing is
@@ -244,7 +246,11 @@ describe("InvitePanel compose screen", () => {
         }),
       )
       .toBeInTheDocument();
-    expect(page.getByText(/For each row that matches/).query()).toBeNull();
+    // The chip sentence is gone -- awaited (not a synchronous query), so the async
+    // header re-read has settled before its absence is asserted.
+    await expect
+      .element(page.getByText(/For each row in your file that matches/))
+      .not.toBeInTheDocument();
     await expect
       .element(page.getByText("Advanced Options"))
       .toBeInTheDocument();

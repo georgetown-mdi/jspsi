@@ -27,11 +27,8 @@ import { invitationLocation } from "@psi/invitationLocation";
 import { quickInviteDisclosedColumns } from "@psi/metadataEditing";
 import { unnameableColumnsAlert } from "@psi/columnNames";
 
-import {
-  clearAdvancedHandoff,
-  stashAdvancedHandoff,
-} from "@components/advancedHandoff";
 import { ExchangeView } from "@components/ExchangeView";
+import { stashAdvancedHandoff } from "@components/advancedHandoff";
 
 import type { AlertContent } from "@components/FileAcquire";
 import type { GeneratedInvitation } from "@psi/invitation";
@@ -207,16 +204,14 @@ export function InvitePanel({ session, setSession, files }: InvitePanelProps) {
   // Open the column-aware editor, handing off the already-chosen file and name in
   // memory (a File cannot ride the URL) so the editor opens seeded without a
   // re-drop. The lone "Advanced Options" link lives inside the disclosure, which
-  // shows only once a file is chosen, so a file is normally present here; the
-  // clear-on-empty branch is kept defensive (a header read that has not resolved
-  // yet leaves no disclosure but also no stale hand-off to resurrect).
+  // renders only after a file's header has been read, so a file is always present
+  // when this fires; guard defensively rather than hand off an undefined file.
   const openAdvanced = () => {
-    if (filesRef.current.length > 0)
-      stashAdvancedHandoff({
-        file: filesRef.current[0],
-        name: form.state.values.inviterName.trim(),
-      });
-    else clearAdvancedHandoff();
+    if (filesRef.current.length === 0) return;
+    stashAdvancedHandoff({
+      file: filesRef.current[0],
+      name: form.state.values.inviterName.trim(),
+    });
     void navigate({ to: "/advanced" });
   };
 
@@ -300,7 +295,8 @@ export function InvitePanel({ session, setSession, files }: InvitePanelProps) {
                 {disclosedColumns.length > 0 ? (
                   <>
                     <Text size="sm">
-                      For each row that matches, your partner receives{" "}
+                      For each row in your file that matches, your partner
+                      receives{" "}
                       {disclosedColumns.length === 1
                         ? "this column"
                         : `these ${disclosedColumns.length} columns`}
@@ -335,8 +331,8 @@ export function InvitePanel({ session, setSession, files }: InvitePanelProps) {
                       ))}
                     </Group>
                     <Text size="xs" c="dimmed" mt="xs">
-                      Only matching rows are sent; everything else stays on your
-                      device.
+                      Your partner never receives the values in your
+                      non-matching rows.
                     </Text>
                   </>
                 ) : (

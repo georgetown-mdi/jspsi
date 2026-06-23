@@ -91,6 +91,13 @@ export function AcceptInvitation() {
     handoffClearedRef.current = true;
     clearAcceptHandoff();
   }, []);
+  // The hand-off seeds the acquire dropzone only on its FIRST mount. Once the
+  // operator has acquired a file (handleAcquired), a later back edge
+  // preparing -> reviewing re-mounts the acquire phase, and without this latch it
+  // would re-seed the stale home-page file -- silently discarding whatever file the
+  // operator chose in-route. After the first acquire we pass no seed, so the
+  // re-mounted dropzone starts empty for a deliberate re-pick.
+  const handoffConsumedRef = useRef(false);
 
   useEffect(() => {
     // The token is the URL fragment minus the leading "#".
@@ -151,6 +158,9 @@ export function AcceptInvitation() {
     // not rest on the disabled state alone.
     const name = commitAcceptance({ consented, name: acceptorName });
     if (name === undefined) return;
+    // The seed has now done its job; a back edge to reviewing must not resurrect it
+    // over the file just acquired (see handoffConsumedRef).
+    handoffConsumedRef.current = true;
     setPhase({ status: "preparing", name, bundle });
   };
 
@@ -225,7 +235,7 @@ export function AcceptInvitation() {
           onConsentedChange={setConsented}
           acceptorName={acceptorName}
           onAcceptorNameChange={setAcceptorName}
-          initialFiles={handoffFiles}
+          initialFiles={handoffConsumedRef.current ? undefined : handoffFiles}
           error={acquireError}
           onAcquireError={setAcquireError}
           onAcquired={handleAcquired}

@@ -21,8 +21,8 @@ import type { LinkageTerms } from "@psilink/core";
 // AcceptForm) plus the shared file drop below them give way to a single centered
 // exchange panel with the accept form and the drop dropped. This suite drives a
 // generate through InvitePanel's form -- seeding the lifted file via the (mocked)
-// shared drop -- and asserts that takeover, the layout choice invitePanel.test.ts,
-// which mounts InvitePanel alone, cannot see.
+// shared drop -- and asserts that takeover, the layout choice that
+// invitePanel.test.ts, which mounts InvitePanel alone, cannot see.
 
 // The only router seam the rendered graph touches: InvitePanel's Advanced link and
 // AcceptForm's submit navigate. This suite asserts layout, not navigation.

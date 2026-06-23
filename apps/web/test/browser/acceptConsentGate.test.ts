@@ -13,6 +13,7 @@ import { encodeInvitation, generateSharedSecret } from "@psilink/core";
 
 import {
   clearAcceptHandoff,
+  peekAcceptHandoff,
   stashAcceptHandoff,
 } from "@components/acceptHandoff";
 import { AcceptInvitation } from "@components/AcceptInvitation";
@@ -235,6 +236,12 @@ describe("accept review screen (consent + file before any connection)", () => {
     // need not re-drop the same file.
     await expect.element(page.getByTestId("file-count")).toHaveTextContent("1");
 
+    // The module stash is consumed exactly once on mount: a later back/forward
+    // navigation to /accept finds nothing and falls back to the picker rather than
+    // re-seeding from this now-captured file. (afterEach also clears it, so this
+    // asserts the component did the consume, not the cleanup.)
+    expect(peekAcceptHandoff()).toBeUndefined();
+
     // But the file is only SELECTED, not parsed: with no consent yet the action
     // stays disabled and nothing has transitioned, so the consent gate is intact.
     await expect.element(page.getByTestId("accept")).toBeDisabled();
@@ -245,6 +252,38 @@ describe("accept review screen (consent + file before any connection)", () => {
     await userEvent.click(page.getByRole("checkbox"));
     await userEvent.fill(page.getByRole("textbox"), "Dana");
     await expect.element(page.getByTestId("accept")).toBeEnabled();
+  });
+
+  test("after acquiring, a back edge does not re-seed the stale home-page file", async () => {
+    window.location.hash = await encodeAcceptToken();
+    stashAcceptHandoff(csvFile("first_name,last_name\nAlice,Smith\n"));
+    mountAcceptRoute();
+
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+    // Seeded from the hand-off on the first mount.
+    await expect.element(page.getByTestId("file-count")).toHaveTextContent("1");
+
+    // Consent, name, accept -> reaches the prepare editor (the seed is now consumed).
+    await userEvent.click(page.getByRole("checkbox"));
+    await userEvent.fill(page.getByRole("textbox"), "Dana");
+    await expect.element(page.getByTestId("accept")).toBeEnabled();
+    await userEvent.click(page.getByTestId("accept"));
+    await expect
+      .element(page.getByRole("heading", { name: "Prepare your data" }))
+      .toBeInTheDocument();
+
+    // Back to the review screen: the dropzone must start EMPTY, not resurrect the
+    // home-page file over whatever the operator would now choose. Re-seeding here
+    // would silently revert an in-route file change to the original hand-off.
+    await userEvent.click(
+      page.getByRole("button", { name: "Choose a different file" }),
+    );
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+    await expect.element(page.getByTestId("file-count")).toHaveTextContent("0");
   });
 
   test("does not enable accept (or mount anything) without consent", async () => {
