@@ -2735,6 +2735,46 @@ describe("checkValueConstraints", () => {
     ).toBe(true);
   });
 
+  test("an alternation-breakout allowedCharacters is still flagged (full match, not unanchored find)", () => {
+    // `a]*|` compiles `^[a]*|]$`, which re2js reads as `(^[a]*) | (]$)`: the first
+    // branch matches the empty string at the start anchor. An UNANCHORED find would
+    // then return true for every value and suppress the advisory entirely. The check
+    // tests each code point as a FULL match, so a branch matching only a zero-width
+    // span does not satisfy it and a disallowed value is still flagged. Pinned so a
+    // regression from full-match back to an unanchored find cannot reopen the hole.
+    for (const allowedCharacters of ["a]*|", "\\w]*|", "0]?|"]) {
+      const field: LinkageField = {
+        name: "fn",
+        type: "first_name",
+        constraints: { allowedCharacters },
+      };
+      expect(
+        checkValueConstraints(field, "!").some(
+          (v) => v.kind === "disallowedCharacters",
+        ),
+      ).toBe(true);
+    }
+  });
+
+  test("an alternation-breakout class that admits the code point is an accepted limit", () => {
+    // `a]|.|[b` compiles `^[a]|.|[b]$` = `(^[a]) | (.) | ([b]$)`: the `.` branch
+    // full-matches any single code point, so the class effectively admits everything.
+    // Unlike the empty-/zero-width-branch breakout above (closed by full match), a
+    // branch that genuinely matches one code point cannot be neutralized without
+    // rejecting a legitimately permissive class like `[\s\S]` -- only the top-level
+    // `|` a real class never contains distinguishes them, which would take a full
+    // class parser, out of proportion to a warn-only advisory. Same accepted-limit
+    // category as the `]|\w|[` shorthand smuggle: warn-not-enforce, so the only effect
+    // is a suppressed badge. Pinned (the closed/accepted boundary, in both directions).
+    const field: LinkageField = {
+      name: "fn",
+      type: "first_name",
+      constraints: { allowedCharacters: "a]|.|[b" },
+    };
+    expect(checkValueConstraints(field, "!")).toEqual([]);
+    expect(checkValueConstraints(field, "Z")).toEqual([]);
+  });
+
   test("an exotic leading-^ class whose escaped form will not compile over-flags, never suppresses", () => {
     // Escaping the leading `^` in `^]A[` to `\^` lets the following `]` close the
     // class, so `[\^]A[]` does not compile. The raw class `[^]A[]` does (a `]` right

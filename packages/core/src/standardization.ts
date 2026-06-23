@@ -1700,11 +1700,16 @@ export interface ConstraintViolation {
  *
  * (2) Warning suppression has three sub-cases, handled differently:
  *
- *   - A breakout matching a MULTI-character span (e.g. `a]|.*[b`, `(a+)+`) would
- *     silently pass disallowed values if the whole value were matched at once.
- *     Testing one code point at a time against `^[allowed]$` defeats that family --
- *     a multi-character construct cannot match a single code point, so the value is
- *     still flagged.
+ *   - A breakout closes the class and injects regex structure: a multi-character
+ *     span (`a]|.*[b`, `(a+)+`), or an alternation with an empty-matchable branch
+ *     (`a]*|` becomes `^[a]*|]$` = `(^[a]*) | (]$)`). Each value is tested one code
+ *     point at a time AND as a FULL match (re2js `matches()`, anchored both ends),
+ *     not an unanchored find: a multi-character span cannot match a single code
+ *     point, and a branch matching only a zero-width or leading span does not satisfy
+ *     a full match (an unanchored test would instead let `^[a]*`, which matches the
+ *     empty string at the start anchor, pass every value). A breakout branch that
+ *     genuinely matches a SINGLE code point is a different case -- see the accepted-
+ *     limit sub-case below.
  *
  *   - A leading `^` makes re2js read the class as a NEGATION (`^A-Z` compiles to
  *     `[^A-Z]`), inverting the advisory: the class would admit every character
@@ -1721,17 +1726,24 @@ export interface ConstraintViolation {
  *     caret is otherwise written non-first (`A-Z^`) or escaped (`\^`), so the escape
  *     never narrows a legitimate class.
  *
- *   - A class that genuinely ADMITS the code point via a character-class shorthand
- *     (`\w`, `\d`, `\s`) or a Unicode/POSIX property class -- whether or not dressed
- *     up with the leading-`]`-is-literal trick (e.g. `]|\w|[`, one class admitting
- *     every word character) -- is NOT defeated, and is an accepted limit. There is no
- *     transform or parse-time rule that suppresses these without rejecting or
- *     narrowing a legitimate class: `\p{L}` ("any letter") is the natural constraint
- *     for international names and is indistinguishable at the engine level from a
- *     smuggle, so neutralizing it would false-flag real non-Latin names. The class is
- *     behaving as a class; because the check is warn-not-enforce the only consequence
- *     is a suppressed advisory badge, never a data-filtering or match-correctness
- *     effect -- so it is an accepted limit, not a hole.
+ *   - A class -- or an injected alternation branch -- that genuinely ADMITS the single
+ *     code point is NOT defeated, and is an accepted limit. This covers a character-
+ *     class shorthand (`\w`, `\d`, `\s`) or Unicode/POSIX property class, whether or
+ *     not dressed up with the leading-`]`-is-literal trick (e.g. `]|\w|[`, one class
+ *     admitting every word character); it equally covers an alternation breakout whose
+ *     branch admits one code point (`a]|.|[b` compiles to `(^[a]) | (.) | ([b]$)`,
+ *     whose `.` branch full-matches any code point, so the class effectively admits
+ *     everything). There is no transform or parse-time rule that suppresses these
+ *     without rejecting or narrowing a legitimate class: `\p{L}` ("any letter") is the
+ *     natural constraint for international names and is indistinguishable at the engine
+ *     level from a smuggle, so neutralizing it would false-flag real non-Latin names;
+ *     and an effective allow-all reached via breakout is indistinguishable by matching
+ *     behavior from a legitimately permissive class such as `[\s\S]` -- only the syntax
+ *     (a top-level `|`, which a genuine character class never contains) differs, and
+ *     detecting that would take a full class parser, out of proportion to a warn-only
+ *     advisory. The class is behaving as a class; because the check is warn-not-enforce
+ *     the only consequence is a suppressed advisory badge, never a data-filtering or
+ *     match-correctness effect -- so it is an accepted limit, not a hole.
  *
  * Every sub-case is pinned by tests in standardization.test.ts so the boundary
  * between what is closed and what is accepted cannot silently drift. For a
@@ -1766,7 +1778,7 @@ function withinAllowedCharacters(value: string, allowed: string): boolean {
     }
     return false;
   }
-  for (const character of value) if (!oneOf.test(character)) return false;
+  for (const character of value) if (!oneOf.matches(character)) return false;
   return true;
 }
 

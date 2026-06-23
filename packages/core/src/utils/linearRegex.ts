@@ -100,6 +100,15 @@ export interface CompiledLinearRegex {
    */
   test(input: string): boolean;
   /**
+   * Whether the pattern matches the ENTIRE `input` (anchored at both ends), as
+   * RE2JS `Matcher.matches`. Unlike {@link test} (an unanchored find), a branch
+   * that matches only a zero-width span or a leading substring does not satisfy it
+   * -- the whole input must match. Mirrors `new RegExp(`^(?:${pattern})$`).test(input)`
+   * for an in-dialect pattern. Used where the pattern's own `^`/`$` anchors could be
+   * defeated by an alternation breakout (see `withinAllowedCharacters`).
+   */
+  matches(input: string): boolean;
+  /**
    * Split `input` around matches of the pattern. Uses RE2 split semantics: unlike
    * `String.prototype.split`, capture groups in the pattern are NOT emitted as
    * output elements (see the dialect spec). Trailing empty strings are retained
@@ -144,6 +153,7 @@ export function compileLinearRegex(pattern: string): CompiledLinearRegex {
       return (group1 ?? m.group(0)) || null;
     },
     test: (input) => re.test(input),
+    matches: (input) => re.matcher(input).matches(),
     split: (input) => re.split(input, -1),
     matchGroups: (input) => {
       const m = re.matcher(input);
