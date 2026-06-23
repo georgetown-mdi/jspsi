@@ -45,12 +45,16 @@ vi.mock("@psilink/core", async (importActual) => {
     // (warnOnValueConstraints) reads -- it scopes to key-referenced fields, so it
     // walks both -- so the sweep is a no-op here rather than tripping on a partial
     // stub.
-    prepareForExchange: vi.fn().mockReturnValue({
+    // A FRESH object per call (not a shared mockReturnValue ref), matching the real
+    // prepareForExchange: prepareDataset mutates the returned object (it sets
+    // expectedPayloadColumns from a committed payload.receive), so a shared ref
+    // would leak that field between tests.
+    prepareForExchange: vi.fn(() => ({
       warnings: [],
       linkageTerms: { linkageFields: [], linkageKeys: [] },
       dataset: { getField: () => undefined },
       rowCount: 0,
-    }),
+    })),
   };
 });
 
@@ -895,10 +899,21 @@ test("prepareDataset: an explicit standardization remap satisfies a field the co
   // ...but a remap binding ssn <- ssn_source makes the field producible, so the
   // same CSV proceeds with no block and no warning. This is the exchange-path
   // wrinkle accept does not have: a committed config can carry a column remap.
+  // The remap binds only a `role: linkage` column (matching participation is the
+  // explicit linkage role), so the config roles ssn_source linkage while leaving
+  // its type non-ssn -- the remap, not the type fallback, is what binds it.
   const prepared = await prepareDataset(
     {
       linkageTerms: ssnOnlyTerms,
       standardization: [{ output: "ssn", input: "ssn_source" }],
+      metadata: [
+        {
+          name: "ssn_source",
+          type: "other",
+          role: "linkage",
+          isPayload: false,
+        },
+      ],
     },
     "Test Party",
     input,
@@ -956,4 +971,64 @@ test("prepareDataset: an explicit metadata type that retypes the column away blo
       input,
     ),
   ).rejects.toThrow(/cannot satisfy any of the configuration's linkage keys/);
+});
+
+// --- prepareDataset: recurring payload lock-in -------------------------------
+
+test("prepareDataset: a committed payload.receive locks in the expected received columns", async () => {
+  // A recurring config that declares what it expects to receive locks that set in
+  // as prepared.expectedPayloadColumns; runExchange then verifies the partner's
+  // transmitted payload matches it exactly (the recurring half of the lock-in).
+  const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
+  const terms: LinkageTerms = {
+    ...ssnAndNameDobTerms,
+    payload: { receive: [{ name: "diagnosis" }, { name: "notes" }] },
+  };
+  const prepared = await prepareDataset(
+    { linkageTerms: terms },
+    "Test Party",
+    input,
+  );
+  expect(prepared.expectedPayloadColumns).toEqual(["diagnosis", "notes"]);
+});
+
+test("prepareDataset: a config without payload.receive locks in nothing (lazy)", async () => {
+  const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
+  const prepared = await prepareDataset(
+    { linkageTerms: ssnAndNameDobTerms },
+    "Test Party",
+    input,
+  );
+  expect(prepared.expectedPayloadColumns).toBeUndefined();
+});
+
+test("prepareDataset: the top-level expectedPayloadColumns is the canonical lock-in source", async () => {
+  // The local expectedPayloadColumns field (written by an offline accept from the
+  // invitation's disclosedPayloadColumns) is the canonical lock-in and takes
+  // precedence over the negotiated payload.receive. Distinct from payload.receive
+  // so it does not trip the validateCompatibility mirror against an inviter that
+  // advertised no payload.send.
+  const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
+  const terms: LinkageTerms = {
+    ...ssnAndNameDobTerms,
+    payload: { receive: [{ name: "ignored_by_precedence" }] },
+  };
+  const prepared = await prepareDataset(
+    { linkageTerms: terms, expectedPayloadColumns: ["diagnosis", "notes"] },
+    "Test Party",
+    input,
+  );
+  expect(prepared.expectedPayloadColumns).toEqual(["diagnosis", "notes"]);
+});
+
+test("prepareDataset: an empty expectedPayloadColumns locks in the strict empty set", async () => {
+  // An offline accept of an invitation that disclosed nothing persists the empty
+  // set; it is a strict "receive nothing" lock-in, not the absent/lazy case.
+  const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
+  const prepared = await prepareDataset(
+    { linkageTerms: ssnAndNameDobTerms, expectedPayloadColumns: [] },
+    "Test Party",
+    input,
+  );
+  expect(prepared.expectedPayloadColumns).toEqual([]);
 });

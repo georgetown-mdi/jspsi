@@ -5,9 +5,11 @@ import {
   exchangePayloads,
   buildOutputTable,
   assertPayloadSendDisclosed,
+  reconcileReceivedPayload,
 } from "../src/payloadExchange";
 import { prepareForExchange } from "../src/exchange";
 import { deriveAcceptedLinkageTerms } from "../src/config/linkageTerms";
+import { disclosedColumnNames } from "../src/config/metadata";
 import { UsageError } from "../src/errors";
 
 import type { Metadata } from "../src/config/metadata";
@@ -150,10 +152,12 @@ test("buildOutputTable: an ignored column is not treated as the identifier", () 
 
 // --- assertPayloadSendDisclosed ----------------------------------------------
 
-// The payload.send data dictionary (exchanged, consented to, and written into
-// the exchange record) must not over-declare relative to what metadata actually
-// transmits (isDisclosedToPartner = isPayload && role !== "ignored"). Forward
-// direction only; an over-declaration is rejected (UsageError -> CLI exit 64).
+// The payload.send data dictionary (exchanged, consented to, written into the
+// exchange record, and mirrored into a recurring partner's lock-in) must name
+// EXACTLY what metadata actually transmits (isDisclosedToPartner = isPayload &&
+// role !== "ignored") when present: an over-declaration (a name not transmitted)
+// or an under-declaration (a transmitted column omitted) is rejected (UsageError
+// -> CLI exit 64). An absent or empty dictionary is a no-op.
 
 test("assertPayloadSendDisclosed: a send column with isPayload:false is rejected", () => {
   const meta: Metadata = [
@@ -211,6 +215,41 @@ test("assertPayloadSendDisclosed: an identifier column left isPayload:true is di
   ];
   const payload: Payload = { send: [{ name: "patient_id" }] };
   expect(() => assertPayloadSendDisclosed(payload, meta)).not.toThrow();
+});
+
+test("assertPayloadSendDisclosed: a non-empty send omitting a disclosed column is rejected (under-declaration)", () => {
+  // A present dictionary must name the FULL disclosed set: metadata discloses
+  // {diagnosis, enrollment} but the dictionary lists only diagnosis, so it
+  // under-states what is sent -- and a recurring partner that mirrors this send
+  // into its receive lock-in would lock in too few columns and false-abort the
+  // honest exchange when the metadata-governed transmission delivers enrollment.
+  const meta: Metadata = [
+    { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+    { name: "diagnosis", type: "other", role: "payload", isPayload: true },
+    { name: "enrollment", type: "other", role: "payload", isPayload: true },
+  ];
+  const payload: Payload = { send: [{ name: "diagnosis" }] };
+  expect(() => assertPayloadSendDisclosed(payload, meta)).toThrow(UsageError);
+  // The omitted disclosed column is named so the operator can reconcile it.
+  expect(() => assertPayloadSendDisclosed(payload, meta)).toThrow(/enrollment/);
+});
+
+test("assertPayloadSendDisclosed: a send that both over- and under-declares names both directions", () => {
+  // metadata discloses {kept}; the dictionary names an undisclosed column (off)
+  // and omits the disclosed one (kept), so both directions of the mismatch fire.
+  const meta: Metadata = [
+    { name: "kept", type: "other", role: "payload", isPayload: true },
+    { name: "off", type: "other", role: "ignored", isPayload: true },
+  ];
+  const payload: Payload = { send: [{ name: "off" }] };
+  let message = "";
+  try {
+    assertPayloadSendDisclosed(payload, meta);
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err);
+  }
+  expect(message).toContain("[off]"); // over-declared (named, not transmitted)
+  expect(message).toContain("[kept]"); // under-declared (transmitted, omitted)
 });
 
 test("assertPayloadSendDisclosed: an absent or empty payload is a no-op", () => {
@@ -325,7 +364,8 @@ test("assertPayloadSendDisclosed (acceptor path): a mirrored send the acceptor d
   // Same inviter request, but the acceptor never marked case_id as sent (role
   // ignored wins over isPayload). The mirrored send over-declares against the
   // acceptor's OWN metadata -- a genuine acceptor over-declaration, correctly
-  // rejected, preserving the forward-only subset guarantee on the acceptor too.
+  // rejected, preserving the exact-match disclosure guarantee on the acceptor too
+  // (over-declaration is one half of it; under-declaration is the other).
   const inviter: LinkageTerms = {
     ...inviterBaseTerms,
     payload: { receive: [{ name: "case_id" }] },
@@ -376,6 +416,100 @@ test("assertPayloadSendDisclosed (acceptor path): the common inviter-send shape 
   expect(() =>
     assertPayloadSendDisclosed(acceptor.payload, acceptorMeta),
   ).not.toThrow();
+});
+
+// --- No-drift: the carried disclosed subset equals what is transmitted -------
+
+test("disclosedColumnNames equals preparePayload's transmitted columns over the same metadata", () => {
+  // The set carried on the invitation (disclosedColumnNames) and the set
+  // preparePayload actually transmits are both isDisclosedToPartner over the same
+  // metadata, so they cannot diverge -- the no-drift invariant the consent
+  // display and lock-in rest on. ssn (role: linkage, isPayload:false) is excluded;
+  // patient_id (role: identifier, isPayload:true) and diagnosis are included.
+  const carried = disclosedColumnNames(metaWithId);
+  expect(carried).toEqual(["patient_id", "diagnosis"]);
+  const transmitted = preparePayload(rawRows, metaWithId, [[0], [0]]);
+  if (!transmitted.hasData) throw new Error("expected hasData:true");
+  expect(transmitted.columns).toEqual(carried);
+});
+
+test("disclosedColumnNames excludes a role: ignored column even with isPayload:true", () => {
+  const metaWithIgnored: Metadata = [
+    { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+    { name: "diagnosis", type: "other", role: "payload", isPayload: true },
+    { name: "county", type: "other", role: "ignored", isPayload: true },
+  ];
+  expect(disclosedColumnNames(metaWithIgnored)).toEqual(["diagnosis"]);
+});
+
+// --- reconcileReceivedPayload (runtime lock-in) ------------------------------
+
+const received = (columns: string[]): PartnerPayload => ({
+  columns,
+  rowIndices: columns.length > 0 ? [0] : [],
+  rows: columns.length > 0 ? [columns.map(() => "x")] : [],
+});
+
+test("reconcileReceivedPayload: lazy (no declared set) accepts any payload", () => {
+  expect(() =>
+    reconcileReceivedPayload(received(["a", "b"]), undefined),
+  ).not.toThrow();
+});
+
+test("reconcileReceivedPayload: a present empty declared set is strict (receive nothing)", () => {
+  // An empty expected set is NOT lazy -- it means "receive nothing." A party not
+  // entitled to output (runExchange passes []) and an inviter that disclosed nothing
+  // (the mint carries []) both lock in the empty set, and a non-empty received
+  // payload against it aborts. Only an absent (undefined) declared set is lazy.
+  expect(() => reconcileReceivedPayload(received(["a", "b"]), [])).toThrow(
+    ConnectionError,
+  );
+  // An empty received set against the empty declared set passes (the no-output
+  // party correctly received nothing; also the zero-match case).
+  expect(() => reconcileReceivedPayload(received([]), [])).not.toThrow();
+});
+
+test("reconcileReceivedPayload: an empty received set is accepted against any declared set", () => {
+  // The partner sent no payload (no transmittable columns, or no matched rows),
+  // which can never exceed consent -- so it is accepted even when a non-empty set
+  // was locked in.
+  expect(() =>
+    reconcileReceivedPayload(received([]), ["a", "b"]),
+  ).not.toThrow();
+});
+
+test("reconcileReceivedPayload: an exact match (any order) does not throw", () => {
+  expect(() =>
+    reconcileReceivedPayload(received(["b", "a"]), ["a", "b"]),
+  ).not.toThrow();
+});
+
+test("reconcileReceivedPayload: a divergent received set aborts as a protocol error", () => {
+  const err = (() => {
+    try {
+      reconcileReceivedPayload(received(["a", "secret"]), ["a", "b"]);
+    } catch (e) {
+      return e;
+    }
+    return undefined;
+  })();
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as ConnectionError).message).toMatch(
+    /payload disclosure mismatch/,
+  );
+});
+
+test("reconcileReceivedPayload: receiving fewer columns than declared also aborts", () => {
+  expect(() => reconcileReceivedPayload(received(["a"]), ["a", "b"])).toThrow(
+    ConnectionError,
+  );
+});
+
+test("reconcileReceivedPayload: receiving more columns than declared aborts (over-delivery)", () => {
+  expect(() =>
+    reconcileReceivedPayload(received(["a", "b", "c"]), ["a", "b"]),
+  ).toThrow(ConnectionError);
 });
 
 // --- exchangePayloads --------------------------------------------------------

@@ -139,7 +139,7 @@ export function normalizeForEditor(metadata: Metadata): Metadata {
  * disclosure on its own -- EXCEPT a column sitting at `ignored` that is retyped to
  * a matchable type (any linkage type or `identifier`), which is promoted to the
  * type's natural usable choice so the quick-fix remap cannot silently leave a
- * field unsatisfiable (`resolveFieldColumns` skips `role: ignored`). Otherwise the
+ * field unsatisfiable (`resolveFieldColumns` binds only `role: linkage`). Otherwise the
  * column falls back to that natural choice: `match` for a linkage type,
  * `identifier` for the identifier type, `ignored` for `other`. The fallback is
  * never `payload`, so a type change can never START disclosing a column.
@@ -271,8 +271,9 @@ export function quickInviteDisclosedColumns(
  * minted). The send list is exactly {@link disclosedColumnNames} over `metadata`
  * -- the same `isDisclosedToPartner` predicate {@link preparePayload} gathers the
  * transmitted columns on -- so the declared dictionary equals what actually leaves
- * the machine and can never over-declare (core's `assertPayloadSendDisclosed`
- * accepts it by construction). It NEVER authors `receive`: an inviter does not know
+ * the machine and can neither over- nor under-declare (core's
+ * `assertPayloadSendDisclosed` accepts it by construction). It NEVER authors
+ * `receive`: an inviter does not know
  * the partner's schema, so it declares only its own send and reconciles lazily (the
  * acceptor mirrors this send into its own receive and validates that exactly).
  *

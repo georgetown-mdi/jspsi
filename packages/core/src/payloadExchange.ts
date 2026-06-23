@@ -10,7 +10,10 @@ import type { Payload } from "./config/linkageTerms.js";
 import { MAX_NAME_LENGTH } from "./config/linkageTerms.js";
 import type { CommittedPayload } from "./exchangeRecord.js";
 import type { MessageConnection } from "./connection/messageConnection.js";
-import { receiveParsed } from "./connection/messageConnection.js";
+import {
+  ConnectionError,
+  receiveParsed,
+} from "./connection/messageConnection.js";
 import { singleIssueArray } from "./utils/singleIssueArray.js";
 import { UsageError } from "./errors.js";
 import { sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
@@ -153,54 +156,61 @@ export function preparePayload(
 }
 
 /**
- * Reject a `payload.send` data dictionary that over-declares what this party
- * actually transmits.
+ * Reject a non-empty `payload.send` data dictionary that does not name EXACTLY
+ * the columns this party transmits.
  *
  * `payload.send` is the operator-authored data dictionary: it is exchanged with
- * the partner, shown on the consent screen, and written verbatim into the
- * self-attested exchange record's `payloadSent`. What actually leaves the
- * machine is decided independently by each column's metadata via
- * {@link isDisclosedToPartner} (`isPayload && role !== "ignored"`) -- the single
- * source of truth for disclosure, the exact set {@link preparePayload}
- * transmits. The two surfaces are wired independently, so a dictionary can name
- * a column whose metadata gates its value off, making the exchanged, consented,
- * and recorded dictionary over-state what flows.
+ * the partner, shown on the consent screen, written verbatim into the
+ * self-attested exchange record's `payloadSent`, and mirrored by a recurring
+ * partner into its received-payload lock-in. What actually leaves the machine is
+ * decided independently by each column's metadata via {@link isDisclosedToPartner}
+ * (`isPayload && role !== "ignored"`) -- the single source of truth for
+ * disclosure, the exact set {@link preparePayload} transmits. The two surfaces are
+ * wired independently, so a dictionary can drift from what metadata sends in
+ * either direction.
  *
- * Metadata is authoritative for transmission; the declared dictionary must be a
- * subset of it. Every column named in `payload.send` must be one metadata
- * actually discloses; a name that is `isPayload: false`, `role: ignored`, or
- * absent from metadata is an over-declaration and is rejected here (fail closed)
- * rather than silently producing a consent surface and a disclosure record that
- * claim more than was sent. The mismatch never leaks -- it only ever
- * over-declares and under-sends -- so this is a consent-and-record-accuracy
- * guarantee, not a leak control.
+ * A non-empty `payload.send` must therefore name exactly the disclosed set -- no
+ * more and no less:
+ * - OVER-declaration (a name metadata does not transmit: `isPayload: false`,
+ *   `role: ignored`, or absent from metadata) makes the exchanged, consented, and
+ *   recorded dictionary claim MORE than was sent.
+ * - UNDER-declaration (a column metadata transmits but the dictionary omits)
+ *   makes those surfaces claim LESS than was sent, and -- because a recurring
+ *   partner mirrors this dictionary into its `payload.receive` and locks in on it
+ *   ({@link reconcileReceivedPayload}) -- causes that partner to lock in too few
+ *   columns and abort an otherwise-honest exchange when the metadata-governed
+ *   transmission delivers the omitted column.
  *
- * Scope is the forward direction only. A column transmitted by metadata but
- * absent from `payload.send` (under-declaration) is NOT checked: the guided and
- * default paths author no `payload.send` while metadata still transmits, so a
- * reverse rule would reject every such exchange. `payload.receive` is likewise
- * out of scope -- it has no local-metadata counterpart (metadata gates sending,
- * not receiving) and is already cross-checked against the partner's advertised
- * `send` in `validateCompatibility`.
+ * Neither direction leaks: transmission is governed by metadata, which the
+ * operator set, so this is a consent-, record-, and lock-in-accuracy guarantee,
+ * not a leak control.
+ *
+ * An ABSENT or EMPTY `payload.send` is the deliberate exception (early return):
+ * the guided and default paths author no dictionary while metadata still
+ * transmits, and the cross-party mirror is lazy on an unauthored `receive`, so
+ * holding an unauthored dictionary to equality would reject every such exchange.
+ * Only a non-empty dictionary -- an explicit declaration -- is held to the
+ * disclosed set. `payload.receive` is out of scope here: it has no local-metadata
+ * counterpart (metadata gates sending, not receiving) and is cross-checked against
+ * the partner's advertised `send` in `validateCompatibility`.
  *
  * Enforced at two points, both of which have the local metadata beside the
  * terms. `prepareForExchange` covers every exchange -- including the paths that
  * never mint an invitation (zero-setup, the acceptor, a hand-authored exchange
  * config) -- and protects the exchange record, which is built downstream of it.
- * But the over-declared dictionary also reaches the partner's consent screen via
- * the invitation token, which is encoded BEFORE `prepareForExchange` runs, so the
- * check also runs at the invitation-mint boundary (the CLI `validateInvite`
- * config path and the web `generateInvitation` authoring path) to keep the
- * consent surface and the token honest. The two points are disjoint entry paths,
- * not redundant: neither alone covers both the consent screen and the
- * non-invite exchanges. Offending names are partner-controlled on the accept
- * side (the adopted inviter terms), so the message routes each through
- * {@link sanitizeForDisplay}, matching `validateCompatibility`'s payload-mismatch
- * messages.
+ * But the dictionary also reaches the partner's consent screen via the invitation
+ * token, which is encoded BEFORE `prepareForExchange` runs, so the check also runs
+ * at the invitation-mint boundary (the CLI `validateInvite` config path and the
+ * web `generateInvitation` authoring path) to keep the consent surface and the
+ * token honest. The two points are disjoint entry paths, not redundant: neither
+ * alone covers both the consent screen and the non-invite exchanges. Offending
+ * names are partner-controlled on the accept side (the adopted inviter terms), so
+ * the message routes each through {@link sanitizeForDisplay}, matching
+ * `validateCompatibility`'s payload-mismatch messages.
  *
- * @throws {UsageError} when `payload.send` names any column metadata does not
- *   disclose. A {@link UsageError} so the CLI classifies it as a configuration
- *   error (exit 64), not a transport failure.
+ * @throws {UsageError} when a non-empty `payload.send` does not name exactly the
+ *   columns metadata discloses. A {@link UsageError} so the CLI classifies it as a
+ *   configuration error (exit 64), not a transport failure.
  */
 export function assertPayloadSendDisclosed(
   payload: Payload | undefined,
@@ -208,24 +218,120 @@ export function assertPayloadSendDisclosed(
 ): void {
   const send = payload?.send ?? [];
   if (send.length === 0) return;
-  const disclosed = new Set(disclosedColumnNames(metadata));
-  const overDeclared = send
-    .map((column) => column.name)
-    .filter((name) => !disclosed.has(name));
-  if (overDeclared.length === 0) return;
-  const shown = overDeclared.map((name) => sanitizeForDisplay(name)).join(", ");
-  const plural = overDeclared.length > 1;
-  const noun = plural ? "columns" : "a column";
-  const remove = plural ? "these columns" : "this column";
-  const possessive = plural ? "their" : "its";
+  const sendNames = send.map((column) => column.name);
+  const disclosed = disclosedColumnNames(metadata);
+  const disclosedSet = new Set(disclosed);
+  const sendSet = new Set(sendNames);
+  const overDeclared = sendNames.filter((name) => !disclosedSet.has(name));
+  const underDeclared = disclosed.filter((name) => !sendSet.has(name));
+  if (overDeclared.length === 0 && underDeclared.length === 0) return;
+  const problems: string[] = [];
+  const remedies: string[] = [];
+  if (overDeclared.length > 0) {
+    const shown = overDeclared
+      .map((name) => sanitizeForDisplay(name))
+      .join(", ");
+    const plural = overDeclared.length > 1;
+    problems.push(
+      `names ${plural ? "columns" : "a column"} metadata does not transmit ([${shown}])`,
+    );
+    remedies.push(
+      `Remove [${shown}] from payload.send, or set ${plural ? "their" : "its"} ` +
+        `metadata to transmit (is_payload: true and role not ignored).`,
+    );
+  }
+  if (underDeclared.length > 0) {
+    const shown = underDeclared
+      .map((name) => sanitizeForDisplay(name))
+      .join(", ");
+    const plural = underDeclared.length > 1;
+    problems.push(
+      `omits ${plural ? "columns" : "a column"} metadata does transmit ([${shown}])`,
+    );
+    remedies.push(
+      `Add [${shown}] to payload.send, or set ${plural ? "their" : "its"} ` +
+        `metadata not to transmit (is_payload: false or role ignored).`,
+    );
+  }
   throw new UsageError(
-    `payload.send declares ${noun} that this party's metadata does not ` +
-      `transmit: [${shown}]. A payload column's values are sent only when its ` +
-      `metadata has is_payload: true and role is not ignored; otherwise the ` +
-      `data dictionary exchanged with the partner, shown for consent, and ` +
-      `written into the exchange record over-states what is actually sent. ` +
-      `Remove ${remove} from payload.send, or set ${possessive} metadata to ` +
-      `transmit (is_payload: true and role not ignored).`,
+    `payload.send must name exactly the columns this party's metadata ` +
+      `discloses, but it ${problems.join(" and ")}. A payload column's values ` +
+      `are sent only when its metadata has is_payload: true and role is not ` +
+      `ignored; payload.send is the data dictionary exchanged with the partner, ` +
+      `shown for consent, written into the exchange record, and mirrored into a ` +
+      `recurring partner's received-payload lock-in, so a dictionary that does ` +
+      `not match the disclosed set mis-states what is actually sent. ` +
+      `${remedies.join(" ")}`,
+  );
+}
+
+/**
+ * Enforce, at runtime, that a received payload discloses no column the receiving
+ * party did not consent to receive.
+ *
+ * `declared` is the column set this party LOCKED IN as what it will receive --
+ * the inviter's `disclosedPayloadColumns` carried on the invitation (the set the
+ * acceptor consented to on its review screen), a recurring party's persisted
+ * lock-in, or the EMPTY set for a party not entitled to the result (which must
+ * receive no payload at all). `assertPayloadSendDisclosed` is the mint-boundary,
+ * forward (send-side) counterpart of this guard: that one keeps a party from
+ * over-DECLARING what it sends; this one keeps a party from over-DELIVERING past
+ * what the other consented to receive. The party must deliver exactly the
+ * locked-in set, or the exchange aborts.
+ *
+ * The match is byte-exact and element-wise over the sorted column names (NOT a
+ * delimiter-joined string, so a partner-controlled name containing the separator
+ * cannot make two distinct sets compare equal), mirroring
+ * {@link validateCompatibility}'s payload mirror.
+ *
+ * A PRESENT `declared` -- INCLUDING the empty set -- is enforced strictly: an
+ * empty `declared` means "receive nothing," so a non-empty received set against it
+ * aborts. That is the fail-closed path for a party not entitled to the result (the
+ * caller passes `[]` when its own `expectsOutput` is false) and for an inviter that
+ * disclosed nothing (the mint carries `[]`, not an omitted field). Only an ABSENT
+ * (undefined) `declared` is lazy -- empty is NOT absent.
+ *
+ * Two cases are deliberately NOT a mismatch:
+ * - `declared` ABSENT (undefined) is the LAZY reconciliation path: the party did
+ *   not lock in an expectation, so it takes whatever it is given (zero-setup, and
+ *   an output party's own receive side, left blank and filled lazily). This never
+ *   widens disclosure -- transmission is governed by the SENDER's own
+ *   `isDisclosedToPartner` metadata and `assertPayloadSendDisclosed`, both
+ *   unchanged; receiving is not disclosing. A present-but-empty array is NOT this
+ *   case: empty is a strict "receive nothing," not "no expectation."
+ * - An EMPTY received column set (the partner sent no payload data -- no
+ *   transmittable columns, or no matched rows) cannot exceed any consent, so it is
+ *   accepted even against a non-empty `declared`. This is also what lets a
+ *   correctly-gated no-output party (declared empty, received empty) pass, and
+ *   avoids a false abort on a zero-match exchange.
+ *
+ * @throws {ConnectionError} of kind `"protocol"` when `declared` is present and
+ *   the received non-empty column set is not exactly it. A protocol error because
+ *   the peer violated the disclosure contract; the receiving party's callers
+ *   surface it as a failed exchange. The offending names are partner-controlled,
+ *   so both sides of the message route through {@link sanitizeForDisplay}.
+ */
+export function reconcileReceivedPayload(
+  received: PartnerPayload,
+  declared: string[] | undefined,
+): void {
+  if (declared === undefined) return;
+  if (received.columns.length === 0) return;
+  const got = [...received.columns].sort();
+  const want = [...declared].sort();
+  const matches =
+    got.length === want.length && got.every((name, i) => name === want[i]);
+  if (matches) return;
+  const gotShown = got.map((name) => sanitizeForDisplay(name)).join(", ");
+  const wantShown = want.map((name) => sanitizeForDisplay(name)).join(", ");
+  const wantDescription =
+    want.length === 0 ? `no payload at all` : `only [${wantShown}]`;
+  throw new ConnectionError(
+    `payload disclosure mismatch: the partner transmitted columns ` +
+      `[${gotShown}] but this party expected to receive ${wantDescription}. ` +
+      `The exchange is aborted because the payload received does not match what ` +
+      `was consented to.`,
+    "protocol",
   );
 }
 

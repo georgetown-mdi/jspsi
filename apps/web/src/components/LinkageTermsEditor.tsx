@@ -272,7 +272,7 @@ export function LinkageTermsEditor({
       producibleFieldNames.has(el.field),
     );
 
-  // The fields a key element may reference, metadata-derived (one per non-ignored
+  // The fields a key element may reference, metadata-derived (one per `role: linkage`
   // typed column). The expert field-pickers offer exactly these, so a key authored
   // in the editor can only reference a declared field.
   // The fields a key element may reference: derived from the authored standardization
@@ -539,7 +539,16 @@ export function LinkageTermsEditor({
                 </Text>
               )}
               {errors.payload && (
-                <Text size="xs" c="red" role="alert">
+                // The payload control can carry two distinct problems at once (a
+                // schema/column error and the send-direction conflict), joined with
+                // a newline by validateAdvancedInvite; pre-line renders them as
+                // separate lines rather than one run-on paragraph.
+                <Text
+                  size="xs"
+                  c="red"
+                  role="alert"
+                  style={{ whiteSpace: "pre-line" }}
+                >
                   {errors.payload}
                 </Text>
               )}

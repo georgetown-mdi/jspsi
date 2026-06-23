@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   MAX_INVITATION_LIFETIME_SECONDS,
+  MAX_NAME_LENGTH,
   assertPayloadSendDisclosed,
   assessLinkageSatisfiability,
   canonicalString,
@@ -142,16 +143,21 @@ describe("seedAdvancedInvite + buildAdvancedTerms", () => {
 describe("setDraftMetadata re-derives offerable keys", () => {
   const COLS = ["first_name", "last_name", "dob", "extra"];
 
-  test("editing a column type adds the keys its type makes offerable", () => {
+  test("retyping then rolling a column for matching adds the keys its type makes offerable", () => {
     // No ssn column: no ssn-referencing key is offerable.
     const { draft } = seedAdvancedInvite("Org", COLS);
     expect(ssnKeyNames(draft)).toEqual([]);
 
-    // Remap `extra` -> ssn: ssn keys become offerable and appear in the draft.
-    const next = setDraftMetadata(
-      draft,
-      setColumnType(draft.metadata, "extra", "ssn").metadata,
-    );
+    // Remap `extra` -> ssn alone: a type change keeps its inferred `payload`
+    // disclosure (a sent column stays sent), and a payload column is not matched,
+    // so no ssn key is offerable yet -- matching participation is the explicit
+    // `linkage` role, not the type alone.
+    const retyped = setColumnType(draft.metadata, "extra", "ssn").metadata;
+    expect(ssnKeyNames(setDraftMetadata(draft, retyped))).toEqual([]);
+
+    // Rolling `extra` for matching (role: linkage) makes its ssn keys offerable.
+    const matched = setColumnDisclosure(retyped, "extra", "match").metadata;
+    const next = setDraftMetadata(draft, matched);
     expect(ssnKeyNames(next).length).toBeGreaterThan(0);
     // The terms built from the new draft now declare ssn, so the run can produce
     // it -- the metadata that re-derived the keys is the metadata the run binds on.
@@ -179,8 +185,10 @@ describe("setDraftMetadata re-derives offerable keys", () => {
 
   test("a remap that only adds keys preserves the enabled/order of existing keys", () => {
     const { draft } = seedAdvancedInvite("Org", COLS);
-    // Disable the first key, then remap to add ssn keys (which does not drop any
-    // existing key, since no default key references the `other`-typed `extra`).
+    // Disable the first key, then remap+roll `extra` to add ssn keys (which does
+    // not drop any existing key, since no default key references the `other`-typed
+    // `extra`). The type change keeps `payload`; rolling it `match` (role: linkage)
+    // is what makes its keys offerable.
     const firstName = draft.keys[0].key.name;
     const withDisabled: AdvancedInviteDraft = {
       ...draft,
@@ -188,10 +196,12 @@ describe("setDraftMetadata re-derives offerable keys", () => {
         i === 0 ? { ...entry, enabled: false } : entry,
       ),
     };
-    const next = setDraftMetadata(
-      withDisabled,
+    const matched = setColumnDisclosure(
       setColumnType(withDisabled.metadata, "extra", "ssn").metadata,
-    );
+      "extra",
+      "match",
+    ).metadata;
+    const next = setDraftMetadata(withDisabled, matched);
     // The disabled key kept its position and disabled flag; the new ssn keys are
     // appended enabled.
     expect(next.keys[0].key.name).toBe(firstName);
@@ -202,6 +212,26 @@ describe("setDraftMetadata re-derives offerable keys", () => {
         .filter((e) => e.key.elements.some((el) => el.field === "ssn"))
         .every((e) => e.enabled),
     ).toBe(true);
+  });
+
+  test("re-rolling a column off linkage drops its standardization transformation", () => {
+    // first_name seeds as role: linkage with a default cleaning transform. Re-rolling
+    // it to payload (sent, not matched) drops that transform on reconcile, since
+    // matching participation requires role: linkage -- a stale transform must not
+    // clean a column the core would no longer bind.
+    const { draft } = seedAdvancedInvite("Org", COLS);
+    expect(draft.standardization.some((t) => t.input === "first_name")).toBe(
+      true,
+    );
+    const repurposed = setColumnDisclosure(
+      draft.metadata,
+      "first_name",
+      "payload",
+    ).metadata;
+    const next = setDraftMetadata(draft, repurposed);
+    expect(next.standardization.some((t) => t.input === "first_name")).toBe(
+      false,
+    );
   });
 });
 
@@ -525,6 +555,59 @@ describe("payload authoring", () => {
       validateAdvancedInvite({ ...draft, outputDirection: "both" }, seed).errors
         .payload,
     ).toBeUndefined();
+  });
+
+  test("a schema payload error is surfaced even behind the direction conflict, not masked", () => {
+    // A disclosed (sent) column whose name exceeds the schema's MAX_NAME_LENGTH is a
+    // payload-path schema failure; choosing inviter-only output while disclosing
+    // columns is the direction conflict. Both attach to the payload control, where a
+    // first-message-wins guard would otherwise drop the schema error behind the (more
+    // common) direction conflict -- hiding a second obstacle that still blocks Generate.
+    const overLong = "x".repeat(MAX_NAME_LENGTH + 1);
+    // The over-long header infers as an `other` column, disclosed (sent) by default.
+    const { draft, seed } = seedAdvancedInvite("Org", [
+      ...ALL_COLUMNS,
+      overLong,
+    ]);
+    expect(disclosedColumnNames(draft.metadata)).toContain(overLong);
+
+    // Single-problem baselines, so the both-problems assertion compares against the
+    // actual messages rather than hard-coding the copy.
+    // (1) Schema-payload-error only: output shared, so no direction conflict.
+    const schemaOnly = validateAdvancedInvite(
+      { ...draft, outputDirection: "both" },
+      seed,
+    );
+    const schemaMessage = schemaOnly.errors.payload ?? "";
+    expect(schemaMessage.length).toBeGreaterThan(0);
+    expect(schemaOnly.canGenerate).toBe(false);
+
+    // (2) Direction-conflict only: a normally-named disclosed column, inviter-only.
+    const conflict = seedAdvancedInvite("Org", [...ALL_COLUMNS, "notes"]);
+    const conflictOnly = validateAdvancedInvite(
+      { ...conflict.draft, outputDirection: "inviter" },
+      conflict.seed,
+    );
+    const directionMessage = conflictOnly.errors.payload ?? "";
+    expect(directionMessage.length).toBeGreaterThan(0);
+    expect(conflictOnly.canGenerate).toBe(false);
+
+    // The single-problem cases stay clean: neither carries the other's message.
+    expect(schemaMessage).not.toContain(directionMessage);
+    expect(directionMessage).not.toContain(schemaMessage);
+
+    // (3) Both problems at once: the payload message surfaces BOTH, so the schema
+    // error is no longer masked by the direction conflict. They are newline-separated
+    // (the editor renders them as a stacked list) with the more-persistent schema
+    // error leading -- it is the obstacle that remains after the one-click direction
+    // choice is reversed.
+    const both = validateAdvancedInvite(
+      { ...draft, outputDirection: "inviter" },
+      seed,
+    );
+    const bothMessage = both.errors.payload ?? "";
+    expect(bothMessage.split("\n")).toEqual([schemaMessage, directionMessage]);
+    expect(both.canGenerate).toBe(false);
   });
 
   test("a disclosed-payload invitation round-trips through the acceptor mirror", () => {

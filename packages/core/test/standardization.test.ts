@@ -1587,11 +1587,14 @@ describe("resolveFieldColumns", () => {
     expect(resolution.get("ssn")?.column).toBe("absent_ssn");
   });
 
-  test("an explicit mapping binds to its input column", () => {
+  test("an explicit mapping binds to its (role: linkage) input column", () => {
+    // ssn_src is typed `other` and roled linkage, so the type fallback cannot bind
+    // it to the ssn field -- only the explicit mapping does, isolating rule 1. (A
+    // non-linkage input would be refused; see the role tests below.)
     const resolution = resolveFieldColumns(
       terms,
       [{ output: "ssn", input: "ssn_src" }],
-      inferMetadata(["ssn_src", "last_name"]),
+      [col("ssn_src", "other"), col("last_name", "last_name")],
     );
     expect(resolution.get("ssn")?.column).toBe("ssn_src");
   });
@@ -1679,9 +1682,74 @@ describe("resolveFieldColumns", () => {
         { output: "ssn", input: "first_src" },
         { output: "ssn", input: "second_src" },
       ],
-      inferMetadata(["first_src", "second_src"]),
+      [col("first_src", "ssn"), col("second_src", "ssn")],
     );
     expect(resolution.get("ssn")?.column).toBe("second_src");
+  });
+
+  // --- matching participation requires role: linkage ------------------------
+  // The narrowing: a column roled identifier/payload does NOT participate in
+  // matching, even when its semantic type matches the field. Asserted here on the
+  // one resolution the builder, the checker, and the default derivation share, so
+  // a single chokepoint test covers all three (the differential `test.each` above
+  // pins builder-vs-checker agreement on the same rule).
+
+  test("a payload column is not linkage-eligible by type, even as the only one of its type", () => {
+    // Its type matches the ssn field, but `role: payload` means "sent to the
+    // partner", not "matched" -- so it must resolve to no column rather than be
+    // silently hashed into a PSI key.
+    const resolution = resolveFieldColumns(terms, undefined, [
+      { name: "ssn", type: "ssn", role: "payload", isPayload: true },
+      roledCol("last_name", "last_name", "linkage"),
+    ]);
+    expect(resolution.get("ssn")?.column).toBeUndefined();
+    expect(resolution.get("lastName")?.column).toBe("last_name");
+  });
+
+  test("an identifier column is not linkage-eligible by type, even as the only one of its type", () => {
+    const resolution = resolveFieldColumns(terms, undefined, [
+      roledCol("ssn", "ssn", "identifier"),
+      roledCol("last_name", "last_name", "linkage"),
+    ]);
+    expect(resolution.get("ssn")?.column).toBeUndefined();
+  });
+
+  test("the type fallback skips a payload column to bind a later linkage one", () => {
+    // First-match would pick the payload column; the role narrowing makes the
+    // fallback bind the `role: linkage` same-typed column listed after it.
+    const resolution = resolveFieldColumns(terms, undefined, [
+      { name: "sent_ssn", type: "ssn", role: "payload", isPayload: true },
+      roledCol("real_ssn", "ssn", "linkage"),
+      roledCol("last_name", "last_name", "linkage"),
+    ]);
+    expect(resolution.get("ssn")?.column).toBe("real_ssn");
+  });
+
+  test("an explicit standardization naming a payload column does not bind it into linkage", () => {
+    // role wins over a contradictory explicit transform -- the same guard that
+    // protects an ignored column now protects payload/identifier, so a column the
+    // operator marked sent-to-partner is never dragged onto the match axis.
+    const resolution = resolveFieldColumns(
+      terms,
+      [{ output: "ssn", input: "sent_ssn" }],
+      [
+        { name: "sent_ssn", type: "ssn", role: "payload", isPayload: true },
+        roledCol("last_name", "last_name", "linkage"),
+      ],
+    );
+    expect(resolution.get("ssn")?.column).toBeUndefined();
+    expect(resolution.get("ssn")?.transform).toBeUndefined();
+  });
+
+  test("a role: linkage column with isPayload still binds (match-and-send)", () => {
+    // The documented way to both match and transmit a column: role linkage +
+    // isPayload true. The narrowing leaves this unchanged -- it binds for matching
+    // (transmission is the separate isDisclosedToPartner axis).
+    const resolution = resolveFieldColumns(terms, undefined, [
+      { name: "ssn", type: "ssn", role: "linkage", isPayload: true },
+      roledCol("last_name", "last_name", "linkage"),
+    ]);
+    expect(resolution.get("ssn")?.column).toBe("ssn");
   });
 });
 
@@ -1768,16 +1836,44 @@ describe("unsatisfiedLinkageFields", () => {
     expect(unsatisfied).toEqual([]);
   });
 
-  test("an explicit standardization mapping a present column satisfies a field its type does not", () => {
-    // `tax_id` is not inferred as ssn, but an explicit mapping makes it so.
+  test("an explicit standardization mapping a present role:linkage column satisfies a field its type does not", () => {
+    // `tax_id` is not inferred as ssn; an explicit mapping makes it so, but only
+    // when the column is roled `linkage`. With name-inferred metadata `tax_id`
+    // infers as `role: identifier`, so the mapping is refused (role wins) and ssn
+    // stays unsatisfiable; roling it `linkage` in explicit metadata satisfies it.
     const columns = ["first_name", "last_name", "dob", "tax_id"];
-    expect(
-      unsatisfiedLinkageFields(columns, fullTerms).map((f) => f.name),
-    ).toContain("ssn");
     expect(
       unsatisfiedLinkageFields(columns, fullTerms, [
         { output: "ssn", input: "tax_id" },
-      ]),
+      ]).map((f) => f.name),
+    ).toContain("ssn");
+    expect(
+      unsatisfiedLinkageFields(
+        columns,
+        fullTerms,
+        [{ output: "ssn", input: "tax_id" }],
+        [
+          {
+            name: "first_name",
+            type: "first_name",
+            role: "linkage",
+            isPayload: false,
+          },
+          {
+            name: "last_name",
+            type: "last_name",
+            role: "linkage",
+            isPayload: false,
+          },
+          {
+            name: "dob",
+            type: "date_of_birth",
+            role: "linkage",
+            isPayload: false,
+          },
+          { name: "tax_id", type: "ssn", role: "linkage", isPayload: false },
+        ],
+      ),
     ).toEqual([]);
   });
 
@@ -2155,15 +2251,52 @@ describe("assessLinkageSatisfiability matches buildStandardizedDataset", () => {
       expected: 1,
     },
     {
-      name: "explicit standardization remaps to a present column",
+      // The remap target is roled `linkage`, so the explicit mapping binds it
+      // even though its type is not `ssn` (the type fallback alone would not).
+      name: "explicit standardization remaps to a present role:linkage column",
       columns: ["ssn_src", "last_name"],
       standardization: [{ output: "ssn", input: "ssn_src" }],
+      metadata: [col("ssn_src", "other"), col("last_name", "last_name")],
       expected: 2,
+    },
+    {
+      // Same remap, but the target is roled `payload`: matching requires
+      // `role: linkage`, so the role wins over the explicit transform and ssn is
+      // refused -- builder and checker agree (only the name key survives).
+      name: "explicit standardization remaps to a present payload column (refused)",
+      columns: ["ssn_src", "last_name"],
+      standardization: [{ output: "ssn", input: "ssn_src" }],
+      metadata: [
+        { name: "ssn_src", type: "ssn", role: "payload", isPayload: true },
+        col("last_name", "last_name"),
+      ],
+      expected: 1,
     },
     {
       name: "explicit standardization remaps to an absent column",
       columns: ["ssn", "last_name"],
       standardization: [{ output: "ssn", input: "tax_id" }],
+      expected: 1,
+    },
+    {
+      // A same-typed ssn column roled `payload` is NOT a default match field:
+      // the type fallback binds only `role: linkage`, so ssn is unsatisfiable.
+      name: "a payload-roled same-typed column is not a default match field",
+      columns: ["ssn", "last_name"],
+      metadata: [
+        { name: "ssn", type: "ssn", role: "payload", isPayload: true },
+        col("last_name", "last_name"),
+      ],
+      expected: 1,
+    },
+    {
+      // Likewise a same-typed ssn column roled `identifier`.
+      name: "an identifier-roled same-typed column is not a default match field",
+      columns: ["ssn", "last_name"],
+      metadata: [
+        { name: "ssn", type: "ssn", role: "identifier", isPayload: false },
+        col("last_name", "last_name"),
+      ],
       expected: 1,
     },
   ];
@@ -2503,12 +2636,13 @@ describe("checkValueConstraints", () => {
   });
 
   test("a shorthand-in-class allowedCharacters admits the code point (accepted advisory limit, not a hole)", () => {
-    // The per-code-point test defeats multi-character breakouts but NOT a class
-    // that genuinely admits the code point: `]|\w|[` parses (leading `]` literal)
-    // as one class admitting every word character, so a "disallowed" letter is not
-    // flagged. This is the class behaving as a class; because allowedCharacters is
-    // warn-not-enforce, the only effect is a suppressed advisory badge -- never a
-    // data-filtering or match-correctness effect. Pinned so the documented limit in
+    // The per-code-point test defeats multi-character breakouts, and the leading-^
+    // negation is closed separately (see the caret tests below); neither touches a
+    // class that genuinely admits the code point: `]|\w|[` parses (leading `]`
+    // literal) as one class admitting every word character, so a "disallowed" letter
+    // is not flagged. This is the class behaving as a class; because allowedCharacters
+    // is warn-not-enforce, the only effect is a suppressed advisory badge -- never a
+    // data-filtering or match-correctness effect. Pinned so the accepted limit in
     // withinAllowedCharacters cannot silently drift, in either direction.
     const field: LinkageField = {
       name: "fn",
@@ -2525,6 +2659,191 @@ describe("checkValueConstraints", () => {
     // class is genuinely evaluated (not blanket-suppressed).
     expect(
       checkValueConstraints(field, "!").some(
+        (v) => v.kind === "disallowedCharacters",
+      ),
+    ).toBe(true);
+  });
+
+  test("a leading-^ negated allowedCharacters no longer inverts the advisory", () => {
+    // A leading `^` makes re2js read `[^A-Z]` -- the NEGATION of A-Z -- so the class
+    // would admit every character EXCEPT A-Z and suppress the warning on arbitrary
+    // disallowed input, the opposite of the plain reading ("allow `^` and A-Z, flag
+    // the rest"). withinAllowedCharacters escapes the leading `^` to a literal caret,
+    // restoring the plain reading. Distinct from the genuine-admission shorthand
+    // limit above: this polarity inversion is CLOSED, not accepted.
+    const field: LinkageField = {
+      name: "fn",
+      type: "first_name",
+      constraints: { allowedCharacters: "^A-Z" },
+    };
+    // A character the plain reading excludes is now flagged -- the negation admitted
+    // it (unflagged) before the escape.
+    expect(
+      checkValueConstraints(field, "!").some(
+        (v) => v.kind === "disallowedCharacters",
+      ),
+    ).toBe(true);
+    // A character the plain reading admits -- an uppercase letter, and the caret
+    // itself, now a literal member -- is not flagged.
+    expect(checkValueConstraints(field, "A")).toEqual([]);
+    expect(checkValueConstraints(field, "^")).toEqual([]);
+  });
+
+  test("a non-leading caret in allowedCharacters stays a literal allowed character", () => {
+    // `^` is special only as the FIRST character of a class; written non-first it is
+    // a literal. The leading-^ neutralization must not disturb that: `A-Z^` allows
+    // the caret and still flags a genuine outsider.
+    const field: LinkageField = {
+      name: "fn",
+      type: "first_name",
+      constraints: { allowedCharacters: "A-Z^" },
+    };
+    expect(checkValueConstraints(field, "^")).toEqual([]);
+    expect(
+      checkValueConstraints(field, "!").some(
+        (v) => v.kind === "disallowedCharacters",
+      ),
+    ).toBe(true);
+  });
+
+  test("a leading `^-` reads as a literal allow-list, not a reversed range", () => {
+    // Escaping only the caret would turn `^-Z` into `[\^-Z]` -- a range from `^`
+    // (0x5E) down to `Z` (0x5A), which re2js rejects; the compile failure fails open
+    // and suppresses the advisory on EVERY value, the unsafe direction. Escaping the
+    // `-` after the caret too makes `[\^\-Z]` -- the literal set {`^`, `-`, `Z`} the
+    // operator meant -- so the class compiles and the leading-^ vector never
+    // suppresses. Pinned because the per-code-point escape is the only thing
+    // standing between this family and a blanket fail-open.
+    const field: LinkageField = {
+      name: "fn",
+      type: "first_name",
+      constraints: { allowedCharacters: "^-Z" },
+    };
+    expect(checkValueConstraints(field, "^")).toEqual([]);
+    expect(checkValueConstraints(field, "-")).toEqual([]);
+    expect(checkValueConstraints(field, "Z")).toEqual([]);
+    // Characters outside the literal set are still flagged -- not blanket-suppressed.
+    expect(
+      checkValueConstraints(field, "A").some(
+        (v) => v.kind === "disallowedCharacters",
+      ),
+    ).toBe(true);
+    expect(
+      checkValueConstraints(field, "!").some(
+        (v) => v.kind === "disallowedCharacters",
+      ),
+    ).toBe(true);
+  });
+
+  test("an alternation-breakout allowedCharacters is still flagged (full match, not unanchored find)", () => {
+    // `a]*|` compiles `^[a]*|]$`, which re2js reads as `(^[a]*) | (]$)`: the first
+    // branch matches the empty string at the start anchor. An UNANCHORED find would
+    // then return true for every value and suppress the advisory entirely. The check
+    // tests each code point as a FULL match, so a branch matching only a zero-width
+    // span does not satisfy it and a disallowed value is still flagged. Pinned so a
+    // regression from full-match back to an unanchored find cannot reopen the hole.
+    for (const allowedCharacters of ["a]*|", "\\w]*|", "0]?|"]) {
+      const field: LinkageField = {
+        name: "fn",
+        type: "first_name",
+        constraints: { allowedCharacters },
+      };
+      expect(
+        checkValueConstraints(field, "!").some(
+          (v) => v.kind === "disallowedCharacters",
+        ),
+      ).toBe(true);
+    }
+  });
+
+  test("an alternation-breakout class that admits the code point is an accepted limit", () => {
+    // `a]|.|[b` compiles `^[a]|.|[b]$` = `(^[a]) | (.) | ([b]$)`: the `.` branch
+    // full-matches any single code point, so the class effectively admits everything.
+    // Unlike the empty-/zero-width-branch breakout above (closed by full match), a
+    // branch that genuinely matches one code point cannot be neutralized without
+    // rejecting a legitimately permissive class like `[\s\S]` -- only the top-level
+    // `|` a real class never contains distinguishes them, which would take a full
+    // class parser, out of proportion to a warn-only advisory. Same accepted-limit
+    // category as the `]|\w|[` shorthand smuggle: warn-not-enforce, so the only effect
+    // is a suppressed badge. Pinned (the closed/accepted boundary, in both directions).
+    const field: LinkageField = {
+      name: "fn",
+      type: "first_name",
+      constraints: { allowedCharacters: "a]|.|[b" },
+    };
+    expect(checkValueConstraints(field, "!")).toEqual([]);
+    expect(checkValueConstraints(field, "Z")).toEqual([]);
+  });
+
+  test("an exotic leading-^ class whose escaped form will not compile over-flags, never suppresses", () => {
+    // Escaping the leading `^` in `^]A[` to `\^` lets the following `]` close the
+    // class, so `[\^]A[]` does not compile. The raw class `[^]A[]` does (a `]` right
+    // after `[^` is a literal member), so the escape -- not the partner -- broke it.
+    // The check must OVER-flag (the warn-not-enforce safe direction), not fail open
+    // and suppress the advisory on every value, which a leading-^ negation would
+    // otherwise still achieve for this family. Pinned so the over-flag fallback
+    // cannot regress to a blanket fail-open.
+    const field: LinkageField = {
+      name: "fn",
+      type: "first_name",
+      constraints: { allowedCharacters: "^]A[" },
+    };
+    // Every value is flagged -- the advisory is raised, not suppressed.
+    expect(
+      checkValueConstraints(field, "A").some(
+        (v) => v.kind === "disallowedCharacters",
+      ),
+    ).toBe(true);
+    expect(
+      checkValueConstraints(field, "!").some(
+        (v) => v.kind === "disallowedCharacters",
+      ),
+    ).toBe(true);
+  });
+
+  test("the empty string conforms to any allowedCharacters class", () => {
+    // The per-code-point loop is vacuously true on an empty value: there is no code
+    // point to fall outside the class. Pinned so a refactor of the iteration cannot
+    // start flagging empty values.
+    const field: LinkageField = {
+      name: "fn",
+      type: "first_name",
+      constraints: { allowedCharacters: "A-Z" },
+    };
+    expect(checkValueConstraints(field, "")).toEqual([]);
+  });
+
+  test("an allowedCharacters class that cannot compile fails open (no violation)", () => {
+    // A class the linear-time engine cannot compile is treated as "cannot check"
+    // rather than throwing -- the advisory reports, never blocks, so an
+    // uncheckable class must not crash the run or fabricate violations. `z-a` is a
+    // reversed range re2js rejects. (For a decoded token NameConstraintsSchema is
+    // the backstop; checkValueConstraints is the last line.)
+    const field: LinkageField = {
+      name: "fn",
+      type: "first_name",
+      constraints: { allowedCharacters: "z-a" },
+    };
+    expect(checkValueConstraints(field, "Q")).toEqual([]);
+  });
+
+  test("a Unicode property class admits its code points (accepted advisory limit)", () => {
+    // `\p{L}` ("any letter") is the natural allowedCharacters for international names
+    // and is indistinguishable at the engine level from a shorthand smuggle, so it is
+    // an accepted limit, not a hole: neutralizing it would false-flag real non-Latin
+    // names. Also pins that the per-code-point iteration handles astral code points
+    // (a surrogate pair is one `for...of` step), which a switch to index-based
+    // iteration would silently break.
+    const field: LinkageField = {
+      name: "fn",
+      type: "first_name",
+      constraints: { allowedCharacters: "\\p{L}" },
+    };
+    expect(checkValueConstraints(field, "中")).toEqual([]); // CJK letter
+    expect(checkValueConstraints(field, "\u{1D4CD}")).toEqual([]); // astral letter
+    // A non-letter is still outside the class -> still flagged.
+    expect(
+      checkValueConstraints(field, "9").some(
         (v) => v.kind === "disallowedCharacters",
       ),
     ).toBe(true);

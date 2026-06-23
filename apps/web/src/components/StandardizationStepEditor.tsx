@@ -54,8 +54,8 @@ export function StandardizationStepEditor({
   /** Forwarded to {@link StepListEditor}: when set, the gated expert tier (raw
    * regular-expression steps) is authorable here. Defaults to off. */
   expert?: boolean;
-  /** The columns this field MAY bind to -- the operator's non-ignored columns of
-   * the field's semantic type. When more than one is offered and
+  /** The columns this field MAY bind to -- the operator's `role: linkage` columns
+   * of the field's semantic type. When more than one is offered and
    * {@link onInputColumnChange} is set, the input column becomes a selectable
    * control (so two fields of one type can take distinct columns); otherwise the
    * single bound column is shown read-only. */

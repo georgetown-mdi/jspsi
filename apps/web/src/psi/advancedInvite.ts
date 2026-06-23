@@ -209,7 +209,7 @@ export interface AdvancedValidation {
  * exchange infers when none is given); the advanced path always supplies one, so
  * it must infer here or it would silently parse a non-US date file with the wrong
  * format and under-match every date-of-birth key. Mirrors the exchange's own
- * inference: the first present, non-`ignored` date_of_birth column's values drive
+ * inference: the first present `role: linkage` date_of_birth column's values drive
  * {@link inferDateFormat}, falling back to the `MM/DD/YYYY` default when there is no
  * such column or the format cannot be inferred (e.g. seeded with no rows).
  *
@@ -223,7 +223,7 @@ export function defaultStandardizationForRows(
   rawRows: ReadonlyArray<Record<string, string>>,
 ): Standardization {
   const dobColumn = metadata.find(
-    (column) => column.type === "date_of_birth" && column.role !== "ignored",
+    (column) => column.type === "date_of_birth" && column.role === "linkage",
   );
   const dateInputFormat =
     dobColumn !== undefined
@@ -249,7 +249,7 @@ export function seedAdvancedInvite(
   // Normalized so the collapsed disclosure control opens on a faithful diagonal
   // (an inferred identifier column is not silently disclosed). Normalization only
   // re-derives isPayload from role, so the offerable key set -- which
-  // getDefaultLinkageTerms derives from the non-ignored column TYPES -- is
+  // getDefaultLinkageTerms derives from the `role: linkage` column TYPES -- is
   // unchanged by it.
   const metadata = normalizeForEditor(inferMetadata(columns));
   const terms = getDefaultLinkageTerms(identity, metadata);
@@ -281,7 +281,7 @@ export function seedAdvancedInvite(
 /**
  * Re-derive the editor's draft for a new column metadata: editing a column's
  * semantic type changes which linkage keys are offerable ({@link getDefaultLinkageTerms}
- * filters by the non-ignored column types present), so this recomputes the
+ * filters by the `role: linkage` column types present), so this recomputes the
  * offerable key set and reconciles it with the current draft -- keys still
  * offerable keep their enabled flag and position, newly-offerable keys are
  * appended (enabled), and keys no longer offerable drop. The threaded metadata is
@@ -313,10 +313,11 @@ export function setDraftMetadata(
 /**
  * Reconcile the draft's standardization against a freshly-edited metadata, the
  * standardization analogue of {@link reconcileKeys}. A transformation is kept when
- * its input column is still present and non-ignored (so an operator's authored
+ * its input column is still present and `role: linkage` (so an operator's authored
  * cleaning and any second-column binding it added survive a metadata edit), and
- * dropped when its column was removed or marked ignored -- so a stale transformation
- * never cleans a column the operator excluded. A semantic type the kept set no longer
+ * dropped when its column was removed or re-roled off linkage -- so a stale
+ * transformation never cleans a column the core would refuse to bind (matching
+ * participation requires `role: linkage`). A semantic type the kept set no longer
  * covers (e.g. a newly-typed column) gains the recommended default cleaning, mirroring
  * how {@link reconcileKeys} appends a newly-offerable key. With no edits this returns
  * the unchanged default standardization (every default transformation is kept and
@@ -331,7 +332,7 @@ function reconcileStandardization(
   const columnByName = new Map(metadata.map((column) => [column.name, column]));
   const kept = prev.filter((transformation) => {
     const column = columnByName.get(transformation.input);
-    return column !== undefined && column.role !== "ignored";
+    return column !== undefined && column.role === "linkage";
   });
   const coveredTypes = new Set(
     kept
@@ -451,7 +452,8 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   // draft metadata DISCLOSES, via the shared payloadSendForMetadata derivation (the
   // quick path authors the same way over its inferred metadata, so the two cannot
   // drift). The send equals the disclosed set, so it can never trip core's
-  // assertPayloadSendDisclosed over-declaration reject -- the structural form of the
+  // assertPayloadSendDisclosed reject (which requires a present send to match the
+  // disclosed set exactly) -- the structural form of the
   // task's footgun guard; `receive` is left unauthored for lazy reconciliation. The
   // send is emitted regardless of output direction so the preview states honestly
   // what transmits; the incoherent "send while only I receive" case is blocked by
@@ -615,11 +617,31 @@ export function validateAdvancedInvite(
 
   const parsed = safeParseLinkageTerms(terms);
   if (!parsed.success) {
-    for (const issue of parsed.error.issues) {
-      const field = fieldForIssuePath(issue.path);
-      // Keep the first message per control; the schema reports the most specific
-      // issue first, and stacking several on one input is noise.
-      if (errors[field] === undefined) errors[field] = messageForField(field);
+    // Each control touched by a schema issue gets its control-specific message
+    // (the message is keyed on the control, not the individual issue, so the set of
+    // affected controls is all that matters). Keep the first message per control:
+    // the keys control deliberately sets its accurate message up front so it wins
+    // over the generic schema mapping, and stacking several messages on one input
+    // is noise. The payload control is the one exception -- a schema payload error
+    // (e.g. an over-long sent column name) is a second, distinct obstacle from the
+    // direction-conflict message that may already occupy it, so both are surfaced
+    // rather than letting the direction conflict mask the schema problem and leave
+    // the operator unaware of an obstacle that still blocks generation.
+    const schemaFields = new Set(
+      parsed.error.issues.map((issue) => fieldForIssuePath(issue.path)),
+    );
+    for (const field of schemaFields) {
+      const existing = errors[field];
+      if (existing === undefined) {
+        errors[field] = messageForField(field);
+      } else if (field === "payload") {
+        // Lead with the schema/column error and trail the direction conflict: the
+        // schema error is the obstacle that persists after the operator reverses
+        // the one-click direction choice, so it earns first position. Joined with a
+        // newline (not a space) so the editor renders the two problems as separate
+        // lines rather than one run-on paragraph.
+        errors.payload = `${messageForField("payload")}\n${existing}`;
+      }
     }
   }
 
@@ -1024,7 +1046,7 @@ function standardizationForImportedTerms(
     if (baseOutputs.has(field.name)) continue;
     // First of two fail-closed gates that leave a field undeclared. Here the default
     // standardization over the imported terms emitted no transformation for this
-    // field at all -- its type has no non-`ignored` column, or no default cleaning
+    // field at all -- its type has no `role: linkage` column, or no default cleaning
     // pipeline -- so there is no binding to reconstruct. (The second gate is the
     // `freeColumn === undefined` check below: steps exist, but no `role: linkage`
     // column is free.) Reading the steps here (rather than a separate `.has()` probe)
@@ -1032,20 +1054,20 @@ function standardizationForImportedTerms(
     const steps = stepsByField.get(field.name);
     if (steps === undefined) continue;
     // Bind only to a `role: linkage` column -- one the operator designated for
-    // matching -- not merely a non-`ignored` one. An imported terms document is
-    // attacker-influenceable (any schema-valid document is accepted on import), so a
-    // crafted document declaring an extra same-typed field must not be able to
-    // auto-bind it to a column the operator roled `identifier` (row-identifier) or
-    // `payload` (sent-to-partner) and so hash that column's value into a PSI key
-    // without consent -- the always-visible preview shows only the field's type
-    // label, not its bound column, so such a binding would otherwise be visible only
-    // in the expert workbench. Deliberately stricter than that workbench's
-    // `addFieldForType`, where the same binding is an explicit, per-field-visible
-    // operator action rather than an import side effect; an extra field with no free
-    // `linkage` column stays undeclared (fail-closed), and the operator can still
-    // establish the binding by hand in the workbench or by roling the column
-    // `linkage`. The default base's FIRST-column-per-type binding is unchanged (it
-    // is core's documented `resolveFieldColumns` rule, out of scope here).
+    // matching. An imported terms document is attacker-influenceable (any
+    // schema-valid document is accepted on import), so a crafted document declaring
+    // an extra same-typed field must not be able to auto-bind it to a column the
+    // operator roled `identifier` (row-identifier) or `payload` (sent-to-partner)
+    // and so hash that column's value into a PSI key without consent. This now
+    // matches core's own rule on every path: {@link resolveFieldColumns} binds only
+    // a `role: linkage` column, and the workbench's `addFieldForType` /
+    // `columnsForType` likewise offer only linkage columns -- so the import path is
+    // no longer stricter than the rest, it applies the same `role: linkage`
+    // requirement here. An extra field with no free `linkage` column stays
+    // undeclared (fail-closed); the operator establishes the binding by roling the
+    // column `linkage` and binding it in the workbench. The default base's
+    // first-column-per-type binding comes from the same core rule, so it too binds
+    // only `role: linkage` columns.
     const freeColumn = metadata.find(
       (column) =>
         column.type === field.type &&

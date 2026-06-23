@@ -146,10 +146,10 @@ function stepsForType(
  * `terms`, sourcing input column names from `metadata`.
  *
  * For each linkage field whose semantic type has a known default pipeline, a
- * transformation is produced that maps the first matching metadata column to
- * the field name. Semantic types without defaults (`identifier`, `other`) are
- * silently skipped, as are linkage fields whose type cannot be found in
- * metadata.
+ * transformation is produced that maps the first `role: linkage` metadata column
+ * of that type to the field name. Semantic types without defaults (`identifier`,
+ * `other`) are silently skipped, as are linkage fields with no `role: linkage`
+ * column of their type.
  *
  * The returned value can be passed directly to {@link buildStandardizedDataset}
  * and is appropriate when the user has not provided explicit standardization
@@ -167,10 +167,10 @@ export function getDefaultStandardization(
   // Derive each field's input column from the same resolution primitive the
   // builder and satisfiability checker use, so the default-term mapping cannot
   // diverge from how the exchange actually binds columns. With no explicit
-  // standardization this is the pure type fallback (first metadata column of the
-  // field's type). Fields whose semantic type has no default pipeline
-  // (`identifier`/`other`) are still skipped here and fall through to the
-  // builder's own identity type-fallback at exchange time.
+  // standardization this is the pure type fallback (first `role: linkage`
+  // metadata column of the field's type). Fields whose semantic type has no
+  // default pipeline (`identifier`/`other`) are still skipped here and fall
+  // through to the builder's own identity type-fallback at exchange time.
   const resolution = resolveFieldColumns(terms, undefined, metadata);
   const result: Standardization = [];
 

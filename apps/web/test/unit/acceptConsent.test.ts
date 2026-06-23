@@ -169,6 +169,7 @@ describe("summarizeInvitation", () => {
     });
     expect(summary.payload).toEqual({
       send: ["risk_score"],
+      sendDeclared: true,
       receive: ["program_outcome"],
     });
   });

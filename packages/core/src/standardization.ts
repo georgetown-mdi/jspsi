@@ -1122,17 +1122,27 @@ export interface FieldColumnResolution {
  * 1. Explicit standardization preempts the type fallback: if `standardization`
  *    carries a transformation whose `output` is the field name, the field binds
  *    to that transformation's `input` column -- whether or not the column is
- *    present in the data -- UNLESS that column is `role: ignored`, in which case
- *    the field binds to nothing: `ignored` ("never participates in linkage")
- *    wins over a contradictory explicit transform. (When two transformations name
- *    the same output the last wins, matching the builder's field map and the
+ *    present in the data -- UNLESS that column is present and is not
+ *    `role: linkage`, in which case the field binds to nothing: matching
+ *    participation is the operator's explicit `linkage` role, and that role wins
+ *    over a contradictory explicit transform naming an `identifier`, `payload`,
+ *    or `ignored` column. (An ABSENT named column still binds, so the field is
+ *    surfaced as unsatisfiable by presence, unchanged. When two transformations
+ *    name the same output the last wins, matching the builder's field map and the
  *    checker's old mapping.)
  * 2. Type fallback: otherwise the field binds to the FIRST `metadata` column of
- *    its semantic type that is not `role: ignored`
- *    (`metadata.find(c => c.type === field.type && c.role !== "ignored")`), or to
+ *    its semantic type that is `role: linkage`
+ *    (`metadata.find(c => c.type === field.type && c.role === "linkage")`), or to
  *    nothing when no such column exists. First-match -- not "any same-typed
- *    column" -- because the exchange reads exactly that column. An ignored column
- *    is skipped even when it is the only one of its type, so it never links.
+ *    column" -- because the exchange reads exactly that column. A column roled
+ *    `identifier`, `payload`, or `ignored` is skipped even when it is the only
+ *    one of its type, so it never participates in matching by type alone.
+ *
+ * Matching participation keys on `role: linkage`, NOT on semantic type: a
+ * column is hashed into a PSI key only when the operator roled it for linkage.
+ * That is a separate axis from transmission ({@link isDisclosedToPartner} =
+ * `isPayload && role !== "ignored"`); a column that both matches and is sent is
+ * `role: linkage` with `isPayload: true`, which binds here unchanged.
  *
  * Binding is independent of whether the bound column is present in the input:
  * the builder reads rows from the column and a presence-only consumer layers the
@@ -1162,27 +1172,37 @@ export function resolveFieldColumns(
   for (const field of terms.linkageFields) {
     const transform = explicit.get(field.name);
     if (transform !== undefined) {
-      // An explicit standardization naming a `role: ignored` column must not
-      // bind it into linkage: `ignored` means "never participates in linkage",
-      // and that wins over a contradictory explicit transform. The field then
-      // resolves to no column (surfacing as unsatisfiable through the shared
-      // checker) rather than silently linking a column the operator excluded.
-      const inputIgnored =
-        metadata.find((c) => c.name === transform.input)?.role === "ignored";
-      if (inputIgnored) {
+      // An explicit standardization binds its input column into linkage only
+      // when the operator roled that column `linkage`. Matching participation is
+      // a single explicit axis keyed on `role`, so a present column roled
+      // `identifier` (a local row index), `payload` (sent to the partner), or
+      // `ignored` (used for nothing) does NOT participate -- and that role wins
+      // over a contradictory explicit transform. The field then resolves to no
+      // column (surfacing as unsatisfiable through the shared checker) rather
+      // than silently hashing a column the operator did not designate for
+      // matching into a PSI key. An ABSENT named column is not refused here: it
+      // still binds and is surfaced as unsatisfiable by presence downstream
+      // (the documented preempt-the-fallback behavior). "Match and send" stays
+      // expressible as a `role: linkage` column with `isPayload: true`.
+      const inputColumn = metadata.find((c) => c.name === transform.input);
+      if (inputColumn !== undefined && inputColumn.role !== "linkage") {
         resolution.set(field.name, { column: undefined, transform: undefined });
       } else {
         resolution.set(field.name, { column: transform.input, transform });
       }
       continue;
     }
-    // Skip `role: ignored` columns: the linkage path keys on `type`, not
-    // `role`, so an ignored column of the field's type would otherwise bind here
-    // and participate in linkage. This is the one chokepoint the builder, the
-    // satisfiability checker, and the default-standardization derivation share,
-    // so excluding it once keeps an ignored column out of all three.
+    // Bind only a `role: linkage` column: matching participation is the
+    // operator's explicit `linkage` role, not merely a matching semantic `type`.
+    // A column roled `identifier`, `payload`, or `ignored` is never a default
+    // match field even when its type matches the field -- so a column marked
+    // sent-to-partner or row-identifier is not silently hashed into a PSI key.
+    // This is the one chokepoint the builder, the satisfiability checker, and the
+    // default-standardization derivation share, so narrowing it once keeps a
+    // non-linkage column out of all three. Transmission is a separate axis
+    // (`isDisclosedToPartner`); see this function's header.
     const col = metadata.find(
-      (c) => c.type === field.type && c.role !== "ignored",
+      (c) => c.type === field.type && c.role === "linkage",
     );
     resolution.set(field.name, { column: col?.name, transform: undefined });
   }
@@ -1193,8 +1213,8 @@ export function resolveFieldColumns(
  * Build a {@link StandardizedDataset} for the linkage fields in `terms`, binding
  * each field to an input column via {@link resolveFieldColumns}: an explicit
  * standardization transformation when one names the field (its steps run on the
- * bound column), otherwise the identity transformation over the first metadata
- * column of the field's semantic type that is not `role: ignored`.
+ * bound column), otherwise the identity transformation over the first
+ * `role: linkage` metadata column of the field's semantic type.
  *
  * Linkage fields that resolve to no column are absent from the dataset; records
  * referencing those fields are excluded from the corresponding linkage keys.
@@ -1479,7 +1499,7 @@ export function validateStandardizationAgainstTerms(
  * Because the binding is shared, the resolution rules apply unchanged: an
  * explicit standardization preempts the type fallback (a field whose explicit
  * source column is absent is unsatisfiable even when a same-typed column exists),
- * and the type fallback binds to the FIRST non-`ignored` metadata column of the
+ * and the type fallback binds to the FIRST `role: linkage` metadata column of the
  * field's type. An empty result means every configured field can be produced; a
  * non-empty result names the fields that cannot.
  *
@@ -1665,38 +1685,100 @@ export interface ConstraintViolation {
  * body of a `[...]` class -- NOT that it cannot break out of one. A crafted value
  * can close the class and inject arbitrary regex structure (e.g. `x](a+)+b[y`).
  *
- * Two hazards follow, each guarded here. (1) ReDoS: matching against an attacker-
- * chosen pattern on the native `RegExp` engine could backtrack catastrophically
- * and hang the single, non-interruptible thread. The class is compiled under the
- * linear-time engine the transform-regex paths use ({@link compileLinearRegex},
- * re2js) instead, so the blow-up is impossible by construction -- no partner
- * pattern ever touches the backtracking engine -- and a pattern that engine cannot
- * compile is treated as "cannot check" (no violation, fail-open) rather than
- * throwing. {@link NameConstraintsSchema} validates the class under this SAME
- * engine, so for a decoded token that fail-open is a backstop, not a path: a class
- * that would not compile here is rejected at terms validation. (2) Warning
- * suppression: a breakout that relies on matching a MULTI-character span (e.g.
- * `a]|.*[b`, `(a+)+`) would silently pass disallowed values if the whole value were
- * matched at once. Testing one code point at a time against `^[allowed]$` defeats
- * that family -- a multi-character construct cannot match a single code point, so
- * such a value is still flagged. It does NOT, and need not, defeat a class that
- * genuinely ADMITS the code point -- including a character-class shorthand smuggled
- * in via the leading-`]`-is-literal trick (e.g. `]|\w|[`, which parses as one class
- * admitting every word character, so a "disallowed" letter is not flagged). That is
- * the class behaving as a class; because the check is warn-not-enforce the only
- * consequence is a suppressed advisory badge, never a data-filtering or
- * match-correctness effect -- so it is an accepted limit, not a hole. (Encoded by
- * the suppression tests in standardization.test.ts.) For a legitimate class the
- * per-code-point test is exactly `^[allowed]*$` (every character must be in the
- * class). The empty string trivially conforms. */
+ * Hazards follow, each guarded here.
+ *
+ * (1) ReDoS: matching against an attacker-chosen pattern on the native `RegExp`
+ * engine could backtrack catastrophically and hang the single, non-interruptible
+ * thread. The class is compiled under the linear-time engine the transform-regex
+ * paths use ({@link compileLinearRegex}, re2js) instead, so the blow-up is
+ * impossible by construction -- no partner pattern ever touches the backtracking
+ * engine -- and a pattern that engine cannot compile is treated as "cannot check"
+ * (no violation, fail-open) rather than throwing. {@link NameConstraintsSchema}
+ * validates the class under this SAME engine, so for a decoded token that fail-open
+ * is a backstop, not a path: a class that would not compile here is rejected at
+ * terms validation.
+ *
+ * (2) Warning suppression has three sub-cases, handled differently:
+ *
+ *   - A breakout closes the class and injects regex structure: a multi-character
+ *     span (`a]|.*[b`, `(a+)+`), or an alternation with an empty-matchable branch
+ *     (`a]*|` becomes `^[a]*|]$` = `(^[a]*) | (]$)`). Each value is tested one code
+ *     point at a time AND as a FULL match (re2js `matches()`, anchored both ends),
+ *     not an unanchored find: a multi-character span cannot match a single code
+ *     point, and a branch matching only a zero-width or leading span does not satisfy
+ *     a full match (an unanchored test would instead let `^[a]*`, which matches the
+ *     empty string at the start anchor, pass every value). A breakout branch that
+ *     genuinely matches a SINGLE code point is a different case -- see the accepted-
+ *     limit sub-case below.
+ *
+ *   - A leading `^` makes re2js read the class as a NEGATION (`^A-Z` compiles to
+ *     `[^A-Z]`), inverting the advisory: the class would admit every character
+ *     EXCEPT the listed ones and so suppress the warning on arbitrary disallowed
+ *     input, the opposite of a plain reading ("allow `^` and A-Z, flag the rest").
+ *     This is CLOSED: a leading `^` is escaped to a literal `\^` before compiling,
+ *     and a `-` immediately after it is escaped too (otherwise `\^-X` would read as
+ *     a range -- `^-Z` -> `\^-Z` is reversed -- rather than the literal caret the
+ *     operator meant). An exotic leading-`^` combination can still escape to a class
+ *     re2js cannot compile (e.g. `^]A[`, where the literal `\^` lets a following `]`
+ *     close the class): when the raw class compiled but the escaped one does not, the
+ *     value is OVER-flagged rather than failed open, so a leading `^` never suppresses
+ *     the advisory -- the worst case is the warn-not-enforce safe direction. A literal
+ *     caret is otherwise written non-first (`A-Z^`) or escaped (`\^`), so the escape
+ *     never narrows a legitimate class.
+ *
+ *   - A class -- or an injected alternation branch -- that genuinely ADMITS the single
+ *     code point is NOT defeated, and is an accepted limit. This covers a character-
+ *     class shorthand (`\w`, `\d`, `\s`) or Unicode/POSIX property class, whether or
+ *     not dressed up with the leading-`]`-is-literal trick (e.g. `]|\w|[`, one class
+ *     admitting every word character); it equally covers an alternation breakout whose
+ *     branch admits one code point (`a]|.|[b` compiles to `(^[a]) | (.) | ([b]$)`,
+ *     whose `.` branch full-matches any code point, so the class effectively admits
+ *     everything). There is no transform or parse-time rule that suppresses these
+ *     without rejecting or narrowing a legitimate class: `\p{L}` ("any letter") is the
+ *     natural constraint for international names and is indistinguishable at the engine
+ *     level from a smuggle, so neutralizing it would false-flag real non-Latin names;
+ *     and an effective allow-all reached via breakout is indistinguishable by matching
+ *     behavior from a legitimately permissive class such as `[\s\S]` -- only the syntax
+ *     (a top-level `|`, which a genuine character class never contains) differs, and
+ *     detecting that would take a full class parser, out of proportion to a warn-only
+ *     advisory. The class is behaving as a class; because the check is warn-not-enforce
+ *     the only consequence is a suppressed advisory badge, never a data-filtering or
+ *     match-correctness effect -- so it is an accepted limit, not a hole.
+ *
+ * Every sub-case is pinned by tests in standardization.test.ts so the boundary
+ * between what is closed and what is accepted cannot silently drift. For a
+ * legitimate class the per-code-point test is exactly `^[allowed]*$` (every
+ * character must be in the class). The empty string trivially conforms.
+ */
 function withinAllowedCharacters(value: string, allowed: string): boolean {
+  // A leading `^` is class NEGATION in re2js (`[^...]`), which would invert this
+  // check and suppress the advisory on every UNLISTED character. Escape it to a
+  // literal caret; escape a `-` immediately after it too, or `\^-X` would read as a
+  // range instead of a literal caret. If the escaped class still will not compile
+  // (an exotic leading-`^` combination), the catch over-flags rather than failing
+  // open. See the header (2) for the families this does and does not close.
+  let classBody = allowed;
+  if (allowed.startsWith("^-")) classBody = `\\^\\-${allowed.slice(2)}`;
+  else if (allowed.startsWith("^")) classBody = `\\^${allowed.slice(1)}`;
   let oneOf: CompiledLinearRegex;
   try {
-    oneOf = compileLinearRegex(`^[${allowed}]$`);
+    oneOf = compileLinearRegex(`^[${classBody}]$`);
   } catch {
-    return true;
+    // The escaped form did not compile. If the raw class does (an exotic leading-`^`
+    // combination such as `^]A[`, where the literal `\^` lets a following `]` close
+    // the class), our escape -- not the partner's class -- broke it: over-flag (the
+    // warn-not-enforce safe direction) instead of failing open and suppressing the
+    // advisory on every value, which a leading-`^` negation would otherwise achieve.
+    // A class that compiles neither way is genuinely uncheckable: fail open, as
+    // header (1) describes.
+    try {
+      compileLinearRegex(`^[${allowed}]$`);
+    } catch {
+      return true;
+    }
+    return false;
   }
-  for (const character of value) if (!oneOf.test(character)) return false;
+  for (const character of value) if (!oneOf.matches(character)) return false;
   return true;
 }
 

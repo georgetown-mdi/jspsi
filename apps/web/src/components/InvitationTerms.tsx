@@ -249,6 +249,7 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
 export function InvitationTerms({
   linkageTerms,
   expires,
+  disclosedPayloadColumns,
   perspective = "review",
   headingOrder = 2,
   headingRef,
@@ -256,6 +257,12 @@ export function InvitationTerms({
   linkageTerms: LinkageTerms;
   /** The invitation's expiry instant (ISO 8601), if it carries one. */
   expires?: string;
+  /** The columns the invitation declared the inviter will send (its
+   * `disclosedPayloadColumns`). When present, the "your partner will send" line
+   * derives from it -- the wire's own disclosure predicate -- rather than the
+   * authored `payload.send`; absent for the inviter's pre-mint "proposing"
+   * preview and older tokens, which fall back to `payload.send`. */
+  disclosedPayloadColumns?: Array<string>;
   /** Which context this renders in. Changes only the heading and intro copy; the
    * body is identical. */
   perspective?: "review" | "accepted" | "proposing";
@@ -267,7 +274,11 @@ export function InvitationTerms({
   // appear, announcing them to assistive tech.
   headingRef?: Ref<HTMLHeadingElement>;
 }) {
-  const summary = summarizeInvitation({ linkageTerms, expires });
+  const summary = summarizeInvitation({
+    linkageTerms,
+    expires,
+    disclosedPayloadColumns,
+  });
   // Always-visible egress notice: the count of columns the inviter requests FROM
   // the acceptor (summary.payload.receive) -- the acceptor's own data egress.
   // A count, not the column names: the length is a bounded integer (the column
@@ -473,23 +484,34 @@ export function InvitationTerms({
                     inviter reads its OWN send/receive first-person ("You will
                     send"), while the acceptor reads them as the partner's ("Your
                     partner will send"). The columns are the same either way. */}
-                {summary.payload.send.length > 0 && (
+                {/* Shown whenever the send set is a definite declaration --
+                    including the empty set, rendered "(none)" so the strict
+                    "receive nothing" lock-in is visible rather than inferred from a
+                    missing line (the CLI's displayInvitation shows the same). A
+                    lazy send (not declared) is omitted instead. */}
+                {summary.payload.sendDeclared && (
                   <Stack gap={2}>
                     <Text size="sm">
                       {perspective === "proposing"
                         ? "You will send:"
                         : "Your partner will send:"}
                     </Text>
-                    {/* One column per item rather than a joined string: a
-                      partner-controlled column name may contain the separator,
-                      which joined text would render as spurious extra columns.
-                      Keyed by index -- column order is fixed and a sanitized
-                      name is not unique. */}
-                    <List size="sm" withPadding listStyleType="circle">
-                      {summary.payload.send.map((column, index) => (
-                        <List.Item key={index}>{column}</List.Item>
-                      ))}
-                    </List>
+                    {summary.payload.send.length > 0 ? (
+                      // One column per item rather than a joined string: a
+                      // partner-controlled column name may contain the separator,
+                      // which joined text would render as spurious extra columns.
+                      // Keyed by index -- column order is fixed and a sanitized
+                      // name is not unique.
+                      <List size="sm" withPadding listStyleType="circle">
+                        {summary.payload.send.map((column, index) => (
+                          <List.Item key={index}>{column}</List.Item>
+                        ))}
+                      </List>
+                    ) : (
+                      <Text size="sm" c="dimmed">
+                        (none)
+                      </Text>
+                    )}
                   </Stack>
                 )}
                 {summary.payload.receive.length > 0 && (

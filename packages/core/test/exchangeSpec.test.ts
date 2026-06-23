@@ -47,6 +47,34 @@ test("metadata and standardization are optional", () => {
   expect(result.success).toBe(true);
 });
 
+test("expectedPayloadColumns: the local lock-in field round-trips, including the empty set", () => {
+  // The offline-accept lock-in: a top-level, per-party field (camelCase parsed,
+  // snake_case on disk). A non-empty list and the empty set are both valid -- the
+  // empty set is the strict "receive nothing" lock-in -- while the field stays
+  // optional (absent = lazy).
+  expect(
+    parseExchangeSpec({
+      ...minimalSpec,
+      expected_payload_columns: ["notes", "member_id"],
+    }).expectedPayloadColumns,
+  ).toEqual(["notes", "member_id"]);
+  expect(
+    parseExchangeSpec({ ...minimalSpec, expected_payload_columns: [] })
+      .expectedPayloadColumns,
+  ).toEqual([]);
+  expect(parseExchangeSpec(minimalSpec).expectedPayloadColumns).toBeUndefined();
+});
+
+test("expectedPayloadColumns: an empty column name is rejected", () => {
+  // Names are partner-controlled; the per-entry min(1) floor rejects an empty name,
+  // matching the payload/metadata name floors.
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    expected_payload_columns: [""],
+  });
+  expect(result.success).toBe(false);
+});
+
 test("parses an ExchangeSpec with an SFTP connection", () => {
   const result = parseExchangeSpec({
     linkageTerms: minimalLinkageTerms,

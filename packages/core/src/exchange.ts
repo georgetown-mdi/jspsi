@@ -22,7 +22,9 @@ import {
   exchangePayloads,
   toCommittedPayload,
   assertPayloadSendDisclosed,
+  reconcileReceivedPayload,
 } from "./payloadExchange.js";
+import type { PayloadWireMessage } from "./payloadExchange.js";
 import { buildExchangeRecord } from "./exchangeRecord.js";
 
 import type { Metadata } from "./config/metadata.js";
@@ -68,6 +70,27 @@ export interface PreparedExchange {
    * and never folded into the agreed-terms hash.
    */
   retentionDisposition?: string;
+  /**
+   * The payload column set this party has LOCKED IN as what it will receive, if
+   * any -- the inviter's `disclosedPayloadColumns` carried on an accepted
+   * invitation, or a party's persisted local lock-in (the exchange config's
+   * `expectedPayloadColumns`, falling back to the negotiated `payload.receive`).
+   * When set, {@link runExchange} verifies the partner's transmitted payload
+   * columns match it exactly and aborts otherwise (see
+   * {@link reconcileReceivedPayload}); the empty set is enforced strictly
+   * ("receive nothing"). When absent (undefined), this party reconciles lazily and
+   * accepts whatever the sender's own disclosure metadata transmits.
+   *
+   * Applies only to an output party. {@link runExchange} independently forces a
+   * party with `expectsOutput: false` to receive no payload at all, regardless of
+   * this field, so a non-receiving helper does not rely on the caller setting it.
+   *
+   * Populated by the caller (the accept/exchange front end that holds the token
+   * or the persisted config), NOT by {@link prepareForExchange}: it is a
+   * consent-fidelity expectation, not a property derived from this party's local
+   * data, and the party that is lazy on this direction leaves it undefined.
+   */
+  expectedPayloadColumns?: string[];
   dataset: StandardizedDataset;
   /**
    * The original parsed CSV rows, retained for payload extraction after
@@ -124,22 +147,23 @@ export function prepareForExchange(
   const linkageTerms =
     exchangeDataSpec.linkageTerms ?? getDefaultLinkageTerms(identity, metadata);
 
-  // Reject a payload data dictionary that over-declares what metadata transmits.
-  // `payload.send` is exchanged, consented to, and written into the exchange
-  // record, while metadata's isPayload/role is the single source of truth for
-  // what actually leaves the machine. This is the one step with both in scope, so
-  // the CLI and web paths inherit the same fail-closed check; it is a no-op on the
-  // default and guided paths, which author no payload block. See
-  // assertPayloadSendDisclosed.
+  // Reject a payload data dictionary that does not match what metadata transmits.
+  // `payload.send` is exchanged, consented to, written into the exchange record,
+  // and mirrored into a recurring partner's lock-in, while metadata's
+  // isPayload/role is the single source of truth for what actually leaves the
+  // machine. This is the one step with both in scope, so the CLI and web paths
+  // inherit the same fail-closed check; it is a no-op on the default and guided
+  // paths, which author no payload block. See assertPayloadSendDisclosed.
   assertPayloadSendDisclosed(linkageTerms.payload, metadata);
 
   let dateInputFormat: string | undefined;
   if (exchangeDataSpec.standardization === undefined) {
-    // Skip `role: ignored` columns: an ignored date_of_birth column does not
-    // participate in linkage, so it must not drive the inferred date format
-    // either (and resolveFieldColumns would not bind it as the dob field).
+    // Only a `role: linkage` date_of_birth column participates in linkage, so
+    // only one may drive the inferred date format -- a column roled identifier/
+    // payload/ignored does not match and resolveFieldColumns would not bind it as
+    // the dob field.
     const dobCol = metadata.find(
-      (c) => c.type === "date_of_birth" && c.role !== "ignored",
+      (c) => c.type === "date_of_birth" && c.role === "linkage",
     );
     if (dobCol !== undefined) {
       dateInputFormat = inferDateFormat(
@@ -184,6 +208,14 @@ export function prepareForExchange(
     // A self-facing operator note, passed through untouched from the local
     // config to the record builder; absent when the config omits it.
     retentionDisposition: exchangeDataSpec.retentionDisposition,
+    // NOTE: expectedPayloadColumns (the received-payload lock-in) is deliberately
+    // NOT threaded here, unlike retentionDisposition above. The caller sets it on
+    // the returned PreparedExchange after this returns, because the accept path's
+    // source is the invitation token (not this dataSpec) and the recurring path
+    // applies a fallback (config expectedPayloadColumns, else payload.receive). A
+    // caller that wants the lock-in must set it explicitly; see
+    // PreparedExchange.expectedPayloadColumns. (It rides ExchangeDataSpec only so
+    // the exchange command can read it off the parsed config.)
     dataset,
     rawRows,
     rowCount: rawRows.length,
@@ -470,16 +502,36 @@ export async function runExchange(
     onStage,
   );
 
-  const localPayload = preparePayload(
-    prepared.rawRows,
-    prepared.metadata,
-    associationTable,
-  );
+  // Send-gate: transmit payload only to a partner entitled to the result. A party
+  // with expectsOutput:false learns no matched records, so it has no use for
+  // payload values and must not receive them -- transmitting to it is a one-sided
+  // disclosure to a non-receiving helper (docs/notes/one-sided-disclosure.md). The
+  // disclosed columns are gathered (and the payload built) only when the partner
+  // will receive output; otherwise an empty message goes on the wire and is
+  // recorded as such. The disclosure is closed at the source here, not merely
+  // declared empty.
+  const localPayload: PayloadWireMessage = partnerTerms.output.expectsOutput
+    ? preparePayload(prepared.rawRows, prepared.metadata, associationTable)
+    : { hasData: false };
   const partnerPayload = await exchangePayloads(
     conn,
     handshakeRole,
     localPayload,
   );
+
+  // Received-payload enforcement, fail-closed before the result or audit record is
+  // built (so a mismatched payload is never written to disk or surfaced):
+  // - A no-output party (expectsOutput:false) must receive NO payload. The
+  //   send-gate above keeps a conforming partner from sending any; expecting the
+  //   empty set here closes it fail-closed against a non-conforming one.
+  // - An output party enforces the column set it consented to receive (a fresh
+  //   acceptor's carried disclosedPayloadColumns, or a persisted lock-in); a lazy
+  //   one (expectedPayloadColumns undefined) takes whatever the sender's own
+  //   disclosure metadata transmits.
+  const expectedReceive = linkageTerms.output.expectsOutput
+    ? prepared.expectedPayloadColumns
+    : [];
+  reconcileReceivedPayload(partnerPayload, expectedReceive);
 
   // Self-attested record: produced from data both sides already hold, with no
   // extra round-trip and no private key. Two disclosure figures, gated
@@ -513,11 +565,13 @@ export async function runExchange(
   // caller (the `associationTable` field of the result). A helper therefore neither
   // receives the result table from the exchange nor binds it in its record -- the
   // returned-result gate and the record gate are deliberately one rule (see
-  // ExchangeResult). It scopes the result TABLE only: `partnerPayload` rides a
-  // separate, output-direction-independent channel (exchangePayloads, governed by
-  // each party's own disclosure metadata, not by expectsOutput), so a non-receiving
-  // helper can still receive the receiver's disclosed payload values -- a known
-  // residual disclosure tracked separately, not closed by this gate.
+  // ExchangeResult). It scopes the result TABLE only; the payload channel is now
+  // gated consistently with it: the send-gate above transmits payload solely to a
+  // partner entitled to output, and the receive-side check fails closed if a
+  // non-receiving party is sent payload regardless. So a non-receiving helper no
+  // longer receives the partner's disclosed payload values -- the one-sided
+  // disclosure formerly carried on this channel is closed here, not left as a
+  // residual (docs/notes/one-sided-disclosure.md).
   const bothExpectOutput =
     linkageTerms.output.expectsOutput && partnerTerms.output.expectsOutput;
   const heldAssociationTable = linkageTerms.output.expectsOutput;

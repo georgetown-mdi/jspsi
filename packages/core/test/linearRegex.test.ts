@@ -39,6 +39,16 @@ describe("compileLinearRegex operations", () => {
     expect(compileLinearRegex("^\\d{9}$").test("12345678")).toBe(false);
   });
 
+  test("matches is a full (whole-input) match", () => {
+    expect(compileLinearRegex("[A-Z]").matches("A")).toBe(true);
+    expect(compileLinearRegex("[A-Z]").matches("aBc")).toBe(false);
+    // The decisive difference from test(): an alternation branch that matches a
+    // zero-width span at the start anchor satisfies the unanchored find but NOT a
+    // full match. `^[a]*|]$` is `(^[a]*) | (]$)`; `^[a]*` matches the empty string.
+    expect(compileLinearRegex("^[a]*|]$").test("zzz")).toBe(true);
+    expect(compileLinearRegex("^[a]*|]$").matches("zzz")).toBe(false);
+  });
+
   test("split returns the parts around matches (RE2 split semantics)", () => {
     expect(compileLinearRegex("[;,]").split("a;b,c")).toEqual(["a", "b", "c"]);
     // Unlike String.prototype.split, capture groups are NOT emitted as parts.
