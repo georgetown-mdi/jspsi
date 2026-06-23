@@ -4,6 +4,7 @@ import { APPLIED_SETTINGS } from "@psi/appliedSettings";
 
 import type {
   Algorithm,
+  DateFormatToken,
   InvitationToken,
   LinkageField,
   LinkageKey,
@@ -26,6 +27,25 @@ const FIELD_TYPE_LABELS: Record<LinkageField["type"], string> = {
   ssn4: "Last 4 of Social Security number",
   phone_number: "Phone number",
   email_address: "Email address",
+};
+
+/**
+ * Compact label per linkage-field semantic type, for the always-visible per-key
+ * field one-liner (see {@link InvitationKeySummary.headerFields}), where the
+ * verbose {@link FIELD_TYPE_LABELS} would not fit on one line. Like those, the
+ * `type` is a fixed enum the schema validates, so these are safe to render
+ * verbatim. `ssn4` keeps the "(last 4)" qualifier rather than a bare "SSN": the
+ * full-SSN and last-4 cases are a real disclosure difference the acceptor must
+ * see, and "SSN4" is internal jargon.
+ */
+const COMPACT_FIELD_TYPE_LABELS: Record<LinkageField["type"], string> = {
+  first_name: "first name",
+  last_name: "last name",
+  date_of_birth: "date of birth",
+  ssn: "SSN",
+  ssn4: "SSN (last 4)",
+  phone_number: "phone",
+  email_address: "email",
 };
 
 /**
@@ -82,13 +102,13 @@ export const TRANSFORM_FUNCTION_GLOSSARY: Record<string, string> = {
   remove_affixes:
     "Removes name titles and suffixes (Mr., Dr., Jr., III) before matching.",
   substring:
-    "Matches on only a fixed slice of the value (a character range), not the whole value.",
+    "Matches on only part of the value, not the whole value, so more values can match.",
   parse_date:
     "Reformats the date to a canonical form before matching, so dates written in different formats can match.",
   pad_left:
     "Left-pads the value to a fixed length before matching (e.g. zero-filling a short identifier).",
   phonetic:
-    "Matches on a sound-alike phonetic code rather than the literal spelling, so names that sound alike can match.",
+    "Matches names by a sound-alike code rather than the literal spelling, so different names that sound alike can match.",
   null_if: "Treats listed values as empty, dropping them from matching.",
   replace_regex:
     "Rewrites the parts of the value matching a pattern before matching.",
@@ -146,6 +166,16 @@ export interface InvitationTransformSummary {
    * Absent when the declared function name is one core does not recognize.
    */
   description?: string;
+  /**
+   * Literal, parameter-derived phrase for a recognized parameterized function
+   * (currently `substring` on a name field): "the first 3 characters". Leads the
+   * element's detail in place of the function name when present, and suppresses
+   * {@link description} so the slice is not stated twice. Computed only where the
+   * character position maps to the value the acceptor sees (a name field); absent
+   * for a date or other reformatted field, a negative/non-integer slice, or a
+   * function with no literal -- the renderer then leads with {@link description}.
+   */
+  effect?: string;
   /**
    * Parameters this function coerces before applying, each naming the parameter
    * and the value it actually runs as (e.g. `replacement` runs as the empty
@@ -222,11 +252,19 @@ export interface InvitationKeySummary {
    */
   swapTransformInterchange: boolean;
   /**
-   * True when the key carries any non-default matching rule -- a transform, a
-   * fuzzy comparison, or a swap. The visible flag that must never be silently
-   * consented to.
+   * The always-visible one-liner of the fields this key matches on: one entry per
+   * element, each a COMPACT semantic-type label carrying a terse breadth marker
+   * when its element loosens matching ("last name (partial)", "date of birth
+   * (fuzzy)"). Deduped by the full entry (label + marker) so a truncated and a
+   * whole-value element of the same field stay distinct. Each entry is a fixed
+   * compact label for the element's schema-validated type plus a fixed marker; an
+   * unresolved field would fall back to its sanitized identifier, but a dangling
+   * field reference is rejected at decode, so that fallback is unreachable for a
+   * decoded token (and cosmetic-only if ever reached -- the renderer joins these
+   * for display). The honest anchor a partner-controlled key {@link name} cannot
+   * misrepresent; the swap "either order" note is carried by {@link hasSwap}.
    */
-  hasNonDefaultRule: boolean;
+  headerFields: Array<string>;
 }
 
 /**
@@ -373,12 +411,58 @@ function describeExecutedValue(value: unknown): string {
 }
 
 /**
+ * The literal slice phrase for a `substring` step on a name field, or undefined
+ * when no faithful literal applies. `positionalSafe` gates both the field kind and
+ * the pipeline position -- the caller passes true only for a name field's FIRST
+ * step, so the slice runs on the unmodified field value. A date or other
+ * reformatted field is canonicalized by a standardization the token does not carry
+ * (so "the first 6 characters" there would be unverifiable), and a substring after
+ * an earlier step that already rewrote the value (e.g. phonetic then substring)
+ * takes the first N of that intermediate value, not the field -- both are left to
+ * the glossary description rather than a misstating literal. The params
+ * are partner-controlled and typed `unknown`, so they are narrowed to integers
+ * before use; only a positive integer start yields a literal. A non-positive start
+ * has no faithful "first N" -- a negative counts from the end, and 0 is a no-op
+ * (core's schema rejects it and the factory maps it to an always-null fn) -- and a
+ * non-integer is not a usable slice, so all fall back to undefined and the caller
+ * then leads with the glossary description. Core's `substring` is SQL SUBSTR:
+ * 1-indexed positive `start`.
+ */
+function substringEffect(
+  step: TransformStep,
+  positionalSafe: boolean,
+): string | undefined {
+  if (step.function !== "substring" || !positionalSafe) return undefined;
+  const start = step.params?.start;
+  const length = step.params?.length;
+  if (
+    typeof start !== "number" ||
+    !Number.isInteger(start) ||
+    typeof length !== "number" ||
+    !Number.isInteger(length) ||
+    length < 1
+  )
+    return undefined;
+  if (start === 1)
+    return length === 1
+      ? "the first character"
+      : `the first ${length} characters`;
+  if (start > 1) return `characters ${start} to ${start + length - 1}`;
+  return undefined;
+}
+
+/**
  * Reduce one transform step to its display summary: the sanitized function name
  * and a bounded, sanitized `key: value` view of its parameters. Each entry is
  * sanitized as a whole (so a parameter key or value cannot carry control, bidi,
  * or homoglyph characters, and is truncated), and the entry count is capped.
+ * `positionalSafe` lets a recognized `substring` lead with a literal slice phrase
+ * (see {@link substringEffect}) on a name field.
  */
-function summarizeTransform(step: TransformStep): InvitationTransformSummary {
+function summarizeTransform(
+  step: TransformStep,
+  positionalSafe: boolean,
+): InvitationTransformSummary {
   const entries = Object.entries(step.params ?? {});
   const shown = entries.slice(0, MAX_DISPLAYED_PARAMS);
   const params = shown.map((entry) =>
@@ -386,16 +470,20 @@ function summarizeTransform(step: TransformStep): InvitationTransformSummary {
   );
   if (entries.length > MAX_DISPLAYED_PARAMS)
     params.push(`... ${entries.length - MAX_DISPLAYED_PARAMS} more`);
-  // Look up the description by the RAW function name: the glossary is keyed by
-  // the name core dispatches on, so a match means this is that known function.
-  // The hasOwn guard (not a bare index) is what makes the absent case visible to
-  // the type system -- the function name is partner-controlled and may name no
-  // entry, which the Record index signature alone would silently type as string.
   const summary: InvitationTransformSummary = {
     function: sanitizeForDisplay(step.function),
     params,
   };
-  if (Object.hasOwn(TRANSFORM_FUNCTION_GLOSSARY, step.function))
+  // A literal slice phrase leads in place of the function name where it is
+  // faithful (substring on a name field) and makes the generic glossary line
+  // redundant, so the description is only the fallback when there is no literal.
+  // The glossary lookup uses the RAW function name and the hasOwn guard (not a
+  // bare index) so the absent case stays visible to the type system -- the
+  // partner-controlled name may match no entry, which the Record index signature
+  // alone would silently type as string.
+  const effect = substringEffect(step, positionalSafe);
+  if (effect !== undefined) summary.effect = effect;
+  else if (Object.hasOwn(TRANSFORM_FUNCTION_GLOSSARY, step.function))
     summary.description = TRANSFORM_FUNCTION_GLOSSARY[step.function];
   // Surface each runtime-coerced param as its own note rather than folded into
   // the param line, so it cannot be impersonated by partner text in a param
@@ -415,6 +503,107 @@ function summarizeTransform(step: TransformStep): InvitationTransformSummary {
 }
 
 /**
+ * The date-component vocabulary `parse_date` layouts are built from, pinned to
+ * core's {@link DateFormatToken} so adding a token there breaks this build rather
+ * than silently missing a dropped component below. Detection is set-membership
+ * only -- which components a format string carries -- and these tokens are
+ * pairwise non-substrings, so `String.includes` recovers core's greedy
+ * tokenization exactly for this vocabulary; a future overlapping token (a 2-digit
+ * year, say) would surface as a compile error to revisit the membership test.
+ */
+const DATE_FORMAT_COMPONENTS: Record<DateFormatToken, true> = {
+  YYYY: true,
+  MM: true,
+  DD: true,
+};
+
+// Core's parseDateFactory defaults (standardization.ts): an absent format is the
+// full MM/DD/YYYY -> YYYYMMDD layout, which carries every component, so an absent
+// outputFormat drops nothing.
+const DEFAULT_PARSE_DATE_INPUT = "MM/DD/YYYY";
+const DEFAULT_PARSE_DATE_OUTPUT = "YYYYMMDD";
+
+/** The date components a `parse_date` format layout carries. */
+function dateComponentsOf(format: string): Set<DateFormatToken> {
+  const present = new Set<DateFormatToken>();
+  for (const token of Object.keys(
+    DATE_FORMAT_COMPONENTS,
+  ) as Array<DateFormatToken>)
+    if (format.includes(token)) present.add(token);
+  return present;
+}
+
+/**
+ * Whether a `parse_date` step's output layout omits a date component its input
+ * carries -- the case that collapses distinct dates (an `outputFormat` of "YYYY"
+ * makes every date in a year match; a tokenless output collapses every date to a
+ * constant) rather than merely reformatting between equivalent layouts, which is
+ * routine canonicalization. The params are partner-controlled and typed
+ * `unknown`, so each format is narrowed to a string, falling back to core's
+ * default layout (which carries every component) when absent.
+ */
+function parseDateDropsComponent(step: TransformStep): boolean {
+  if (step.function !== "parse_date") return false;
+  const rawInput = step.params?.inputFormat;
+  const rawOutput = step.params?.outputFormat;
+  const input =
+    typeof rawInput === "string" ? rawInput : DEFAULT_PARSE_DATE_INPUT;
+  const output =
+    typeof rawOutput === "string" ? rawOutput : DEFAULT_PARSE_DATE_OUTPUT;
+  const outputComponents = dateComponentsOf(output);
+  return [...dateComponentsOf(input)].some(
+    (component) => !outputComponents.has(component),
+  );
+}
+
+/**
+ * The terse informative marker for a key element's collapsed-header entry, or
+ * undefined when the element matches exactly or only canonicalizes its value
+ * (case, whitespace, accents, affixes, padding, and a `parse_date` that merely
+ * reformats between equivalent layouts -- routine standardization, deliberately
+ * not flagged so the recommended setup stays clean). It names any rule that
+ * materially changes which records match: where the direction is determinable
+ * from the terms it names the EFFECT ("partial" for a truncation, or for a
+ * `parse_date` whose output layout drops a component its input carries and so
+ * matches on only part of the date; "fuzzy" / "sound-alike" / "multiple" /
+ * "fallback" for an expansion), and where an arbitrary partner-authored pattern
+ * or value list makes the direction indeterminate it names the RULE directly
+ * ("pattern replacement", "pattern extraction", "pattern filter", "excludes
+ * values"). Informative, not a broaden-only warning: `filter_regex` and `null_if`
+ * narrow matching but are still surfaced. "fuzzy" is reserved for the genuine
+ * fuzzy-comparison expansion, distinct from `substring`'s "partial". None of the
+ * regex/value rules appear on the default or guided path (only `substring` and
+ * `swap` do), so an expert-authored rule is what trips those markers.
+ *
+ * Returns a SINGLE, most-salient marker, not one per rule: the always-visible
+ * header is deliberately terse, so an element carrying more than one rule shows
+ * just the first -- effect-named rules take precedence over the directly-named
+ * ones -- while its complete rule set sits one expand down in
+ * {@link MatchKeyDetails}. The element stays flagged either way.
+ */
+function elementBreadthMarker(element: LinkageKeyElement): string | undefined {
+  const steps = element.transform ?? [];
+  const functions = new Set(steps.map((s) => s.function));
+  // Effect named where the direction is determinable from the terms.
+  if (functions.has("substring")) return "partial";
+  if (element.generateFuzzyComparisons !== undefined) return "fuzzy";
+  if (functions.has("phonetic")) return "sound-alike";
+  if (functions.has("split_on")) return "multiple";
+  if (functions.has("coalesce")) return "fallback";
+  // parse_date is routine date canonicalization UNLESS its output layout drops a
+  // component its input carries, which collapses distinct dates -- then it
+  // matches on only part of the date.
+  if (steps.some(parseDateDropsComponent)) return "partial";
+  // Rule named directly where a partner-authored pattern or value list makes the
+  // matching direction indeterminate from the terms alone.
+  if (functions.has("replace_regex")) return "pattern replacement";
+  if (functions.has("extract_regex")) return "pattern extraction";
+  if (functions.has("filter_regex")) return "pattern filter";
+  if (functions.has("null_if")) return "excludes values";
+  return undefined;
+}
+
+/**
  * Reduce one linkage key to its display summary, resolving each element's field
  * reference to a human-readable label and surfacing every non-default matching
  * rule. `fieldByName` maps a field `name` to its semantic type; an element or
@@ -431,17 +620,53 @@ function summarizeKey(
       : sanitizeForDisplay(fieldName);
   };
 
+  const compactLabelForField = (fieldName: string): string => {
+    const type = fieldByName.get(fieldName);
+    return type !== undefined
+      ? COMPACT_FIELD_TYPE_LABELS[type]
+      : sanitizeForDisplay(fieldName);
+  };
+
   const elements: Array<InvitationKeyElementSummary> = key.elements.map(
-    (element) => ({
-      fieldLabel: labelForField(element.field),
-      transforms: (element.transform ?? []).map(summarizeTransform),
-      fuzzyComparison:
-        element.generateFuzzyComparisons !== undefined
-          ? FUZZY_COMPARISON_LABELS[element.generateFuzzyComparisons]
-          : undefined,
-      fuzzyComparisonApplied: APPLIED_SETTINGS.fuzzyComparisons,
-    }),
+    (element) => {
+      const type = fieldByName.get(element.field);
+      // A character slice reads faithfully only where its position maps to the
+      // value the acceptor sees -- a free-text name. A date or other reformatted
+      // field is canonicalized by a standardization the token does not carry, so
+      // a positional phrase there would be unverifiable; summarizeTransform falls
+      // back to the glossary description for it.
+      const positionalSafe = type === "first_name" || type === "last_name";
+      return {
+        fieldLabel: labelForField(element.field),
+        // The substring literal is faithful only on a name field's FIRST step: a
+        // later step runs on a value an earlier one already rewrote (e.g.
+        // phonetic then substring takes the first N of the sound-alike code, not
+        // the name), so "the first N characters" of the original would be wrong.
+        transforms: (element.transform ?? []).map((step, stepIndex) =>
+          summarizeTransform(step, positionalSafe && stepIndex === 0),
+        ),
+        fuzzyComparison:
+          element.generateFuzzyComparisons !== undefined
+            ? FUZZY_COMPARISON_LABELS[element.generateFuzzyComparisons]
+            : undefined,
+        fuzzyComparisonApplied: APPLIED_SETTINGS.fuzzyComparisons,
+      };
+    },
   );
+
+  // The always-visible field one-liner: a compact label per element with a terse
+  // breadth marker, deduped by the full entry so a truncated element does not
+  // collapse onto a whole-value one of the same field.
+  const headerFields: Array<string> = [];
+  const seenHeaderFields = new Set<string>();
+  for (const element of key.elements) {
+    const label = compactLabelForField(element.field);
+    const marker = elementBreadthMarker(element);
+    const entry = marker !== undefined ? `${label} (${marker})` : label;
+    if (seenHeaderFields.has(entry)) continue;
+    seenHeaderFields.add(entry);
+    headerFields.push(entry);
+  }
 
   const hasSwap = key.swap !== undefined;
   let swap: [string, string] | undefined;
@@ -479,20 +704,13 @@ function summarizeKey(
     }
   }
 
-  const hasNonDefaultRule =
-    hasSwap ||
-    elements.some(
-      (element) =>
-        element.transforms.length > 0 || element.fuzzyComparison !== undefined,
-    );
-
   return {
     name: sanitizeForDisplay(key.name),
     elements,
+    headerFields,
     hasSwap,
     swap,
     swapTransformInterchange,
-    hasNonDefaultRule,
   };
 }
 

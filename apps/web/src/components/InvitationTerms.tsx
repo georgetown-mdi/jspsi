@@ -1,7 +1,6 @@
 import { useId, useState } from "react";
 
 import {
-  Badge,
   Collapse,
   Group,
   List,
@@ -39,57 +38,84 @@ function Term({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /**
- * The always-visible header for one linkage key: its name and -- when the key
- * carries any non-default matching rule -- the "Non-standard matching" badge.
- * This stays OUTSIDE the Details disclosure so a non-standard rule (which changes
- * which records match, and under `psi` which identifiers are disclosed) is never
- * hidden in collapsed content; the per-element transform/swap detail it summarizes
- * lives in {@link MatchKeyDetails} inside the disclosure.
+ * One linkage key as a collapsible disclosure: the always-visible header is the
+ * key's name and a short derived one-liner of the fields it matches on (each with
+ * a terse breadth marker when its element loosens matching), and the expanded body
+ * is the per-element transform/swap/fuzzy detail ({@link MatchKeyDetails}). The
+ * header is the honest, always-visible anchor -- the field one-liner is derived
+ * from the schema-validated semantic types (see
+ * {@link InvitationKeySummary.headerFields}), so a partner-controlled key name
+ * cannot misrepresent what the key matches on.
+ *
+ * The disclosure mirrors the master-detail pattern below: aria-expanded +
+ * aria-controls on the toggle, the id on the always-mounted wrapper (not the
+ * Collapse panel) so it survives Mantine's reduced-motion unmount, and the panel
+ * hidden from assistive tech + the tab order while closed. The toggle's accessible
+ * name is the key name alone; the field one-liner is associated as its description
+ * (aria-describedby) rather than folded into the name, so a screen reader hears
+ * "<key name>, button, collapsed" and then the fields as the description.
  */
-function MatchKeyName({ summary }: { summary: InvitationKeySummary }) {
+function MatchKeyDisclosure({ summary }: { summary: InvitationKeySummary }) {
+  const [open, setOpen] = useState(false);
+  // Stable ids across SSR/hydration; one component instance per key, so useId is
+  // called once per widget (never inside a map).
+  const panelId = useId();
+  const sublineId = useId();
   return (
-    <Group gap="xs">
-      <Text size="sm">{summary.name}</Text>
-      {summary.hasNonDefaultRule && (
-        // role="img" makes the aria-label the badge's accessible name: a Mantine
-        // Badge renders as a plain <div>, on which an aria-label alone is
-        // unreliably exposed to assistive tech and, where honored, would clash
-        // with the visible text.
-        <Badge
-          size="xs"
-          color="yellow"
-          variant="light"
-          role="img"
-          aria-label="Warning: this key uses non-standard matching rules"
-        >
-          Non-standard matching
-        </Badge>
-      )}
-    </Group>
+    <Stack gap={2} role="listitem">
+      <UnstyledButton
+        onClick={() => setOpen((isOpen) => !isOpen)}
+        aria-expanded={open}
+        aria-controls={panelId}
+        aria-describedby={sublineId}
+      >
+        <Group gap={4}>
+          <IconChevronRight
+            size={16}
+            aria-hidden
+            style={{
+              transform: open ? "rotate(90deg)" : "rotate(0deg)",
+              transition: "transform 150ms ease",
+            }}
+          />
+          <Text size="sm" fw={500}>
+            {summary.name}
+          </Text>
+        </Group>
+      </UnstyledButton>
+      {/* Always-visible, AT-associated breadth signal. The "Matches on " lead-in
+          and the markers are fixed copy, and each field entry is a fixed compact
+          label: the sanitized unknown-field fallback is unreachable for a decoded
+          token (a dangling field reference is rejected at decode) and cosmetic-only
+          if ever reached, so the joined line carries no unescaped partner text. */}
+      <Text id={sublineId} size="xs" c="dimmed">
+        Matches on {summary.headerFields.join(" - ")}
+        {summary.hasSwap && " (matched in either order)"}
+      </Text>
+      <div id={panelId}>
+        <Collapse expanded={open}>
+          <MatchKeyDetails summary={summary} />
+        </Collapse>
+      </div>
+    </Stack>
   );
 }
 
 /**
- * The per-element transform/swap detail for one linkage key: its ordered elements
- * (each annotated with the transform or fuzzy comparison that alters its match)
- * and a note for a swap. Rendered inside the Details disclosure beneath the key's
- * always-visible name (see {@link MatchKeyName}).
- *
- * The element/transform/swap rendering below is relocated verbatim from the
- * merged consent-screen MatchKey block (board item 200878066) and is treated as a
- * black box: its internal accessibility (programmatic grouping/provenance,
- * plain-language transform identity, leaf-line list semantics) is item 202228494's
- * territory -- do NOT restructure it here. Only the name+badge header was lifted
- * out, to the always-visible {@link MatchKeyName}.
+ * The per-element transform/swap detail for one linkage key, shown in the expanded
+ * body of its {@link MatchKeyDisclosure}: each ordered element with the transform
+ * or fuzzy comparison that alters its match, and a swap note. Each element's
+ * transforms lead with their plain matching consequence (the literal slice phrase
+ * or the glossary description), with the raw function name and parameters following
+ * as technical detail rather than leading.
  */
 function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
   // A block, not a <List.Item>: it carries flow content (a nested element list, a
   // swap note), which Mantine's List.Item would place inside an inline <span>,
-  // producing invalid markup. The key name repeats here (plain, no badge) so the
-  // detail reads in context once the disclosure is open.
+  // producing invalid markup. The key name is not repeated here -- the disclosure
+  // header carries it.
   return (
     <Stack gap={2}>
-      <Text size="sm">{summary.name}</Text>
       {/* Elements (and their transforms/parameters) render as a Stack of
           blocks, not a Mantine List: a transform with parameters needs nested
           structure, which a List.Item -- whose children sit in an inline span
@@ -103,7 +129,8 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
               {element.fuzzyComparison !== undefined && (
                 <Text span size="xs" c="dimmed">
                   {" "}
-                  - fuzzy match: {element.fuzzyComparison}
+                  - also matches approximate variants ({element.fuzzyComparison}
+                  )
                   {/* Flag a proposed expansion the run does not yet perform, so
                       the acceptor is not told a looser match occurs when it
                       does not. */}
@@ -118,16 +145,23 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
                 as spurious extra steps or parameters. */}
             {element.transforms.map((transform, ti) => (
               <Stack key={ti} gap={0} pl="md">
+                {/* Lead with the plain matching consequence: the literal slice
+                    phrase when faithful, else the glossary description, else --
+                    for a function core does not recognize -- the bare sanitized
+                    name. All are fixed/sanitized copy, not raw partner free text. */}
                 <Text size="xs" c="dimmed">
-                  transformed ({transform.function})
+                  {transform.effect !== undefined
+                    ? `Matches on ${transform.effect}`
+                    : transform.description !== undefined
+                      ? transform.description
+                      : `Applies ${transform.function}`}
                 </Text>
-                {/* Plain-language description of the function's matching effect.
-                    Fixed copy keyed by the recognized function name (not
-                    partner-controlled), so it renders verbatim; absent for a
-                    function name core does not recognize. */}
-                {transform.description !== undefined && (
+                {/* The raw function name as secondary detail when a plainer lead
+                    replaced it, so the technical identity stays available. */}
+                {(transform.effect !== undefined ||
+                  transform.description !== undefined) && (
                   <Text size="xs" c="dimmed" pl="md" fs="italic">
-                    {transform.description}
+                    {transform.function}
                   </Text>
                 )}
                 {transform.params.map((param, pi) => (
@@ -180,13 +214,15 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
 }
 
 /**
- * Renders the inviter's linkage terms decoded from an invitation for review. The
- * dense, matching-rule detail (per-element transforms and swaps, personal-data
- * constraints, payload columns, legal agreement, and dedup notes) sits behind a
- * single default-collapsed "Details" disclosure; the always-visible core is the
- * matching method, the names of the keys records are matched on, result sharing,
- * and -- crucially -- the "Non-standard matching" badge, so a rule that changes
- * which records match is never hidden in collapsed content.
+ * Renders the inviter's linkage terms decoded from an invitation for review. Each
+ * linkage key is its own default-collapsed disclosure under "Records are matched
+ * on": the always-visible header is the key name and a short derived one-liner of
+ * the fields it matches on (each carrying a terse breadth marker -- "(partial)",
+ * "(fuzzy)" -- when its element loosens matching), and the expanded body holds the
+ * per-element transform/swap/fuzzy detail. The remaining dense detail (personal-
+ * data constraints, payload columns, legal agreement, and dedup notes) sits behind
+ * a single default-collapsed "Other details" disclosure. The matching method and
+ * result sharing stay always-visible.
  *
  * `perspective` chooses only the heading and intro copy for the three contexts
  * this renders in: the acceptor `review`ing a partner's proposal (pre-consent),
@@ -229,6 +265,9 @@ export function InvitationTerms({
   // Stable id linking the disclosure toggle (aria-controls) to its panel; useId
   // keeps it consistent across SSR and hydration.
   const detailsId = useId();
+  // Associates the per-key disclosure list with its "Records are matched on"
+  // caption, so assistive tech announces the keys as a named group.
+  const matchedOnLabelId = useId();
   return (
     <Stack gap="sm">
       <Title order={headingOrder} size="h2" ref={headingRef} tabIndex={-1}>
@@ -263,17 +302,22 @@ export function InvitationTerms({
           )}
         </Term>
 
-        <Term label="Records are matched on">
-          {/* Always visible: just the key names and the non-standard-matching
-              badge. The per-element transform/swap detail moves into the Details
-              disclosure below (MatchKeyDetails). Keyed by index -- the list is
-              static and key names are not unique once sanitized. */}
-          <Stack gap="xs">
+        <Stack gap={2}>
+          <Text size="sm" fw={600} id={matchedOnLabelId}>
+            Records are matched on
+          </Text>
+          {/* A labelled list of per-key disclosures: each key's collapsed header
+              (name + derived field one-liner) is always visible, its rule detail
+              one expand down. role=list/listitem (not Mantine List.Item, whose
+              inline span body cannot hold the disclosure's flow content) so AT
+              announces the set; keyed by index -- the list is static and key names
+              are not unique once sanitized. */}
+          <Stack gap="xs" role="list" aria-labelledby={matchedOnLabelId}>
             {summary.linkageKeys.map((key, index) => (
-              <MatchKeyName key={index} summary={key} />
+              <MatchKeyDisclosure key={index} summary={key} />
             ))}
           </Stack>
-        </Term>
+        </Stack>
 
         {/* Viewer-centric, so each party reads its OWN outcome first-person rather
             than inferring it from the inviter's perspective: this is the consent-
@@ -331,12 +375,12 @@ export function InvitationTerms({
             size={16}
             aria-hidden
             style={{
-              transform: detailsOpen ? "rotate(90deg)" : undefined,
+              transform: detailsOpen ? "rotate(90deg)" : "rotate(0deg)",
               transition: "transform 150ms ease",
             }}
           />
           <Text size="sm" fw={500}>
-            Details
+            Other details
           </Text>
         </Group>
       </UnstyledButton>
@@ -344,18 +388,6 @@ export function InvitationTerms({
       <div id={detailsId}>
         <Collapse expanded={detailsOpen}>
           <Stack gap="sm">
-            <Term label="Matching rules">
-              {/* A Stack of key blocks, not a Mantine List: each key renders flow
-                content (see MatchKeyDetails), which a List.Item would nest
-                invalidly. Keyed by index -- the list is static and key names are
-                not unique once sanitized. */}
-              <Stack gap="sm">
-                {summary.linkageKeys.map((key, index) => (
-                  <MatchKeyDetails key={index} summary={key} />
-                ))}
-              </Stack>
-            </Term>
-
             <Term label="Personal data used">
               <Stack gap="xs">
                 {summary.linkageFields.map((field, index) =>

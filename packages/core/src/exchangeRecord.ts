@@ -14,6 +14,7 @@ import {
   toBase64Url,
 } from "./utils/crypto.js";
 import { AlgorithmSchema } from "./types.js";
+import { MAX_NAME_LENGTH } from "./config/linkageTerms.js";
 
 import type { CanonicalValue } from "./utils/canonical.js";
 import type { LinkageTerms } from "./config/linkageTerms.js";
@@ -458,7 +459,12 @@ const ExchangeRecordCommitmentsSchema: z.ZodType<ExchangeRecordCommitments> =
   });
 
 const RecordPayloadColumnSchema: z.ZodType<RecordPayloadColumn> = z.object({
-  name: z.string().min(1),
+  // Bound the name length: a payloadReceived column name originates from the
+  // partner's payload wire message, so this is the on-disk backstop for the wire
+  // bound in payloadExchange.ts -- an over-long name cannot reach the record by
+  // any path. MAX_NAME_LENGTH matches both the wire predicate and the operator's
+  // own `terms.payload.send`/`receive` names.
+  name: z.string().min(1).max(MAX_NAME_LENGTH),
   description: z.string().optional(),
 });
 
