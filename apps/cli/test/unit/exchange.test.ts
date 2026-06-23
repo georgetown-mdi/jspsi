@@ -41,11 +41,13 @@ vi.mock("@psilink/core", async (importActual) => {
     // real so it consumes the input stream (a mock would leave a dangling
     // createReadStream whose async open races the afterEach cleanup). Only the
     // handler tests exercise this path; loadConfig never calls it. The shape
-    // carries the empty fields the value-constraint sweep (warnOnValueConstraints)
-    // reads, so the sweep is a no-op here rather than tripping on a partial stub.
+    // carries the empty linkageFields and linkageKeys the value-constraint sweep
+    // (warnOnValueConstraints) reads -- it scopes to key-referenced fields, so it
+    // walks both -- so the sweep is a no-op here rather than tripping on a partial
+    // stub.
     prepareForExchange: vi.fn().mockReturnValue({
       warnings: [],
-      linkageTerms: { linkageFields: [] },
+      linkageTerms: { linkageFields: [], linkageKeys: [] },
       dataset: { getField: () => undefined },
       rowCount: 0,
     }),
