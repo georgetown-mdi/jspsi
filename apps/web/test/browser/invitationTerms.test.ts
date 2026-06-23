@@ -358,3 +358,103 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
     );
   });
 });
+
+describe("InvitationTerms: always-visible egress and legal-agreement presence hints", () => {
+  // Render a chosen terms object under the given perspective. The presence hints
+  // live in the always-visible core; the detail they point at stays in the "Other
+  // details" disclosure.
+  function render(
+    linkageTerms: LinkageTerms,
+    perspective?: "review" | "accepted" | "proposing",
+  ) {
+    root!.render(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(InvitationTerms, {
+          linkageTerms,
+          ...(perspective ? { perspective } : {}),
+        }),
+      ),
+    );
+  }
+
+  test("the egress hint surfaces a column count in the always-visible core, outside the 'Other details' disclosure", async () => {
+    // Two columns the inviter requests FROM the acceptor: the acceptor's egress.
+    render({
+      ...terms,
+      payload: { send: [], receive: [{ name: "ssn" }, { name: "zip_code" }] },
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+
+    // The presence/count hint is on screen ... (the trailing period pins the
+    // exact rendered copy: a presence assertion of the full sentence).
+    expect(container!.textContent).toContain(
+      "This invitation requests 2 additional data columns from you.",
+    );
+    // ... and OUTSIDE the disclosure (structure, not styling): the hint text is
+    // not inside the "Other details" panel, which carries the collapsed detail
+    // even while hidden.
+    expect(panelFor("Other details").textContent).not.toContain(
+      "This invitation requests 2 additional data columns from you",
+    );
+    // The column NAMES themselves stay one expand down in the disclosure -- the
+    // hint surfaces only the count, not the detail.
+    expect(panelFor("Other details").textContent).toContain("zip_code");
+  });
+
+  test("the egress hint reads singular for a single requested column", async () => {
+    render({
+      ...terms,
+      payload: { send: [], receive: [{ name: "ssn" }] },
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).toContain(
+      "This invitation requests 1 additional data column from you.",
+    );
+  });
+
+  test("the egress hint reads 'from your partner' in the inviter's own preview", async () => {
+    render(
+      {
+        ...terms,
+        payload: { send: [], receive: [{ name: "ssn" }, { name: "zip_code" }] },
+      },
+      "proposing",
+    );
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).toContain(
+      "This invitation requests 2 additional data columns from your partner.",
+    );
+  });
+
+  test("no egress hint when the inviter requests no columns from the acceptor", async () => {
+    // The module terms request nothing from the acceptor (receive: []).
+    render(terms);
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).not.toContain("additional data column");
+  });
+
+  test("the legal-agreement hint surfaces presence in the always-visible core, outside the 'Other details' disclosure", async () => {
+    // The module terms attach a legal agreement (receive stays empty, so only the
+    // legal hint shows).
+    render(terms);
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+
+    expect(container!.textContent).toContain(
+      "This invitation attaches a legal agreement.",
+    );
+    // Outside the disclosure, by structure ...
+    expect(panelFor("Other details").textContent).not.toContain(
+      "attaches a legal agreement",
+    );
+    // ... while the agreement detail (its reference) stays inside it.
+    expect(panelFor("Other details").textContent).toContain("MOU-2025-0042");
+  });
+
+  test("no legal-agreement hint when the invitation attaches none", async () => {
+    render({ ...terms, legalAgreement: undefined });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).not.toContain("attaches a legal agreement");
+  });
+});
