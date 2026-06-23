@@ -34,7 +34,7 @@ import type {
   OutputDirection,
 } from "../../src/psi/advancedInvite.js";
 
-import type { Metadata } from "@psilink/core";
+import type { LinkageTerms, Metadata } from "@psilink/core";
 
 /** The names of the draft keys that reference an `ssn` field. */
 function ssnKeyNames(draft: AdvancedInviteDraft): Array<string> {
@@ -1043,5 +1043,243 @@ describe("draftFromTerms reconstructs multi-field bindings on import", () => {
     expect(canonicalString(buildAdvancedTerms(imported))).toEqual(
       canonicalString(exported),
     );
+  });
+});
+
+describe("draftFromTerms degrades gracefully on an unsupplyable key", () => {
+  const NOW = new Date("2026-06-20T00:00:00.000Z");
+  const NAME_STEPS = [{ function: "to_upper_case" }];
+
+  /** A fresh editor seed over the given columns, the import target. */
+  function seedFor(forColumns: Array<string>, m: Metadata): AdvancedInviteSeed {
+    return {
+      terms: getDefaultLinkageTerms("Inviter", m),
+      metadata: m,
+      columns: forColumns,
+    };
+  }
+
+  /** A document declaring THREE same-typed (first_name) fields, each referenced by
+   * its own key, plus a date column the keys do not use. The export carries all
+   * three field declarations; the binding is local and does not travel. */
+  function threeNameDocument(): LinkageTerms {
+    const threeNameMetadata: Metadata = [
+      { name: "n1", type: "first_name", role: "linkage", isPayload: false },
+      { name: "n2", type: "first_name", role: "linkage", isPayload: false },
+      { name: "n3", type: "first_name", role: "linkage", isPayload: false },
+      {
+        name: "dob_col",
+        type: "date_of_birth",
+        role: "linkage",
+        isPayload: false,
+      },
+    ];
+    return buildAdvancedTerms({
+      identity: "Inviter",
+      lifetimeSeconds: 3600,
+      outputDirection: "both",
+      algorithm: "psi",
+      deduplicate: false,
+      metadata: threeNameMetadata,
+      standardization: [
+        { output: "first_name", input: "n1", steps: NAME_STEPS },
+        { output: "first_name_2", input: "n2", steps: NAME_STEPS },
+        { output: "first_name_3", input: "n3", steps: NAME_STEPS },
+      ],
+      keys: [
+        {
+          key: { name: "k1", elements: [{ field: "first_name" }] },
+          enabled: true,
+        },
+        {
+          key: { name: "k2", elements: [{ field: "first_name_2" }] },
+          enabled: true,
+        },
+        {
+          key: { name: "k3", elements: [{ field: "first_name_3" }] },
+          enabled: true,
+        },
+      ],
+    });
+  }
+
+  /** Two first_name columns and a date: the import target for the 3-field document
+   * supplies only two of its three same-typed fields. */
+  const twoNameMetadata: Metadata = [
+    {
+      name: "maiden_col",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+    {
+      name: "current_col",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+    {
+      name: "dob_col",
+      type: "date_of_birth",
+      role: "linkage",
+      isPayload: false,
+    },
+  ];
+  const twoNameColumns = ["maiden_col", "current_col", "dob_col"];
+
+  const enabledByName = (draft: AdvancedInviteDraft): Record<string, boolean> =>
+    Object.fromEntries(
+      draft.keys.map((entry) => [entry.key.name, entry.enabled]),
+    );
+
+  test("a partially-satisfiable import disables only the unsupplyable key and generates the rest", () => {
+    // Three same-typed fields into a two-column file: two bind, the third has no free
+    // column. Before this change satisfiableKeyCount was 2 yet canGenerate was false
+    // with the misleading "Enable at least one linkage key." -- the third key dangled
+    // the built terms and the referential-integrity failure masked the satisfiable
+    // subset. Now the import disables the third key so the two satisfiable keys
+    // generate, while the unsupplyable key stays visible (disabled) to re-enable later.
+    const exported = threeNameDocument();
+    const seed = seedFor(twoNameColumns, twoNameMetadata);
+    const imported = draftFromTerms(exported, seed, 3600, []);
+
+    // Two of the three same-typed fields were reconstructed; the third was not.
+    expect(
+      imported.standardization.some((t) => t.output === "first_name_2"),
+    ).toBe(true);
+    expect(
+      imported.standardization.some((t) => t.output === "first_name_3"),
+    ).toBe(false);
+
+    // The two supplyable keys stay enabled; only the unsupplyable one is disabled
+    // (kept, not dropped, so the operator sees what the document asked for).
+    expect(enabledByName(imported)).toEqual({ k1: true, k2: true, k3: false });
+
+    // The satisfiable subset generates cleanly -- no keys error.
+    const validation = validateAdvancedInvite(imported, seed, NOW);
+    expect(validation.errors.keys).toBeUndefined();
+    expect(validation.canGenerate).toBe(true);
+    expect(safeParseLinkageTerms(validation.terms).success).toBe(true);
+  });
+
+  test("re-enabling the unsupplyable key blocks with the field-cannot-be-supplied message, not the no-keys message", () => {
+    // The operator can turn the disabled key back on; generation then blocks (the key
+    // dangles the built terms), but with a message that names the real obstacle rather
+    // than the misleading "Enable at least one linkage key." This is the residual
+    // fully-blocked case the message fix handles regardless of the disable choice.
+    const exported = threeNameDocument();
+    const seed = seedFor(twoNameColumns, twoNameMetadata);
+    const imported = draftFromTerms(exported, seed, 3600, []);
+    const reEnabled: AdvancedInviteDraft = {
+      ...imported,
+      keys: imported.keys.map((entry) =>
+        entry.key.name === "k3" ? { ...entry, enabled: true } : entry,
+      ),
+    };
+
+    const validation = validateAdvancedInvite(reEnabled, seed, NOW);
+    expect(validation.canGenerate).toBe(false);
+    expect(validation.errors.keys).toMatch(/cannot supply/);
+    expect(validation.errors.keys).not.toContain("Enable at least one");
+  });
+
+  test("an import referencing a semantic type the inviter wholly lacks fails closed with an accurate message", () => {
+    // A document whose every key references first_name, imported into a file that has
+    // no first_name column at all: no key is supplyable, so all are disabled. The
+    // import still refuses to generate (fail-closed), but the message names the missing
+    // field rather than telling the operator to enable a key -- which would not help,
+    // since no key the columns can supply exists.
+    const document = buildAdvancedTerms({
+      identity: "Inviter",
+      lifetimeSeconds: 3600,
+      outputDirection: "both",
+      algorithm: "psi",
+      deduplicate: false,
+      metadata: [
+        { name: "n1", type: "first_name", role: "linkage", isPayload: false },
+        { name: "n2", type: "first_name", role: "linkage", isPayload: false },
+      ],
+      standardization: [
+        { output: "first_name", input: "n1", steps: NAME_STEPS },
+        { output: "first_name_2", input: "n2", steps: NAME_STEPS },
+      ],
+      keys: [
+        {
+          key: { name: "k1", elements: [{ field: "first_name" }] },
+          enabled: true,
+        },
+        {
+          key: { name: "k2", elements: [{ field: "first_name_2" }] },
+          enabled: true,
+        },
+      ],
+    });
+    const dobOnlyMetadata: Metadata = [
+      {
+        name: "dob_col",
+        type: "date_of_birth",
+        role: "linkage",
+        isPayload: false,
+      },
+    ];
+    const seed = seedFor(["dob_col"], dobOnlyMetadata);
+    const imported = draftFromTerms(document, seed, 3600, []);
+
+    // No key is supplyable, so every key is disabled on import.
+    expect(imported.keys.every((entry) => !entry.enabled)).toBe(true);
+
+    const validation = validateAdvancedInvite(imported, seed, NOW);
+    expect(validation.canGenerate).toBe(false);
+    expect(validation.terms).toBeUndefined();
+    expect(validation.errors.keys).toMatch(/cannot supply/);
+    expect(validation.errors.keys).not.toContain("Enable at least one");
+  });
+
+  test("a fully satisfiable import is unchanged: every key stays enabled and generates", () => {
+    // Both same-typed fields bind against the two columns, so no key is disabled --
+    // the import behaves exactly as before this change.
+    const document = buildAdvancedTerms({
+      identity: "Inviter",
+      lifetimeSeconds: 3600,
+      outputDirection: "both",
+      algorithm: "psi",
+      deduplicate: false,
+      metadata: twoNameMetadata,
+      standardization: [
+        { output: "first_name", input: "maiden_col", steps: NAME_STEPS },
+        { output: "first_name_2", input: "current_col", steps: NAME_STEPS },
+      ],
+      keys: [
+        {
+          key: { name: "k1", elements: [{ field: "first_name" }] },
+          enabled: true,
+        },
+        {
+          key: { name: "k2", elements: [{ field: "first_name_2" }] },
+          enabled: true,
+        },
+      ],
+    });
+    const seed = seedFor(twoNameColumns, twoNameMetadata);
+    const imported = draftFromTerms(document, seed, 3600, []);
+
+    expect(imported.keys.every((entry) => entry.enabled)).toBe(true);
+    const validation = validateAdvancedInvite(imported, seed, NOW);
+    expect(validation.errors.keys).toBeUndefined();
+    expect(validation.canGenerate).toBe(true);
+  });
+
+  test("turning off supplyable keys still reports the genuine no-keys-enabled message", () => {
+    // The new message must not regress the real "you turned all keys off" case: when
+    // every key IS supplyable, disabling them all keeps the original wording, which is
+    // the actionable advice (re-enable one).
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const allOff: AdvancedInviteDraft = {
+      ...draft,
+      keys: draft.keys.map((entry) => ({ ...entry, enabled: false })),
+    };
+    const validation = validateAdvancedInvite(allOff, seed, NOW);
+    expect(validation.canGenerate).toBe(false);
+    expect(validation.errors.keys).toBe("Enable at least one linkage key.");
   });
 });

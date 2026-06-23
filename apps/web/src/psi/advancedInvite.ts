@@ -489,6 +489,41 @@ function todayIso(now: Date): string {
   return now.toISOString().slice(0, 10);
 }
 
+/** The field names a metadata/standardization pair can declare -- the universe
+ * {@link buildAdvancedTerms} draws its `linkageFields` from
+ * ({@link authoredLinkageFields}). A key element whose `field` is absent from this
+ * set dangles: the built terms would reference an undeclared field, which
+ * {@link safeParseLinkageTerms}'s referential-integrity refine rejects. */
+function declarableFieldNames(
+  metadata: Metadata,
+  standardization: Standardization,
+): Set<string> {
+  return new Set(
+    authoredLinkageFields(metadata, standardization).map((field) => field.name),
+  );
+}
+
+/** Whether the inviter's columns can supply every field `key` references (each
+ * element's `field` is declarable -- see {@link declarableFieldNames}). A key that
+ * is not supplyable dangles the built terms, so the import disables it
+ * ({@link draftFromTerms}) and {@link validateAdvancedInvite} messages it distinctly
+ * from a draft whose keys were merely turned off. */
+function keyIsSupplyable(
+  key: LinkageKey,
+  declarable: ReadonlySet<string>,
+): boolean {
+  return key.elements.every((element) => declarable.has(element.field));
+}
+
+/** Shown when generation is blocked because an enabled linkage key references a
+ * field the inviter's columns cannot supply, or no key is supplyable at all --
+ * distinct from {@link messageForField}'s "Enable at least one linkage key." so an
+ * operator can tell "a key needs a field your columns cannot supply" apart from
+ * "you turned every key off." */
+const UNSUPPLYABLE_KEY_MESSAGE =
+  "A linkage key needs a field your columns cannot supply. Add a column of that " +
+  "type, or turn that key off.";
+
 /**
  * Validate a draft for the Generate gate. The core schema
  * ({@link safeParseLinkageTerms}) is the single source for everything it covers
@@ -524,11 +559,35 @@ export function validateAdvancedInvite(
       "Choose an invitation lifetime between 1 second and one year.";
   }
 
+  // A key is supplyable when the inviter's columns can declare every field it
+  // references; one that is not dangles the built terms (the referential-integrity
+  // refine rejects the undeclared field) and blocks generation. Detect it here so
+  // the accurate message wins over the generic schema-failure mapping below, which
+  // collapses every linkageKeys-path issue to "Enable at least one linkage key."
+  const declarable = declarableFieldNames(
+    draft.metadata,
+    draft.standardization,
+  );
+  const enabledKeys = draft.keys.filter((entry) => entry.enabled);
+  const enabledUnsupplyable = enabledKeys.some(
+    (entry) => !keyIsSupplyable(entry.key, declarable),
+  );
+  const anyKeySupplyable = draft.keys.some((entry) =>
+    keyIsSupplyable(entry.key, declarable),
+  );
   // At least one key must be active. The schema's linkageKeys .min(1) also
-  // catches this, but a dedicated message reads better against the key list.
-  const enabledCount = draft.keys.filter((entry) => entry.enabled).length;
-  if (enabledCount === 0) {
-    errors.keys = "Enable at least one linkage key.";
+  // catches the none-enabled case, but a dedicated message reads better against
+  // the key list.
+  if (enabledKeys.length === 0) {
+    // No key is active. Enabling one fixes it ONLY if some key is supplyable; when
+    // none is (e.g. a fully-unsupplyable import, every key referencing a field the
+    // columns cannot supply), the "turn one on" wording would mislead -- name the
+    // real obstacle instead, preserving the fail-closed refusal.
+    errors.keys = anyKeySupplyable
+      ? "Enable at least one linkage key."
+      : UNSUPPLYABLE_KEY_MESSAGE;
+  } else if (enabledUnsupplyable) {
+    errors.keys = UNSUPPLYABLE_KEY_MESSAGE;
   }
 
   // The "non-receiving-party-cannot-receive" rule, enforced live: sending payload
@@ -580,7 +639,7 @@ export function validateAdvancedInvite(
   // fields the columns can produce is satisfiable. Block when none can (the
   // exchange would emit no key strings and yield a silent empty result), the same
   // gate generateInvitation and the acceptor pre-flight apply.
-  if (enabledCount > 0 && errors.keys === undefined) {
+  if (enabledKeys.length > 0 && errors.keys === undefined) {
     // Assess against the draft's edited metadata AND its authored standardization,
     // the same binding the inviter's exchange uses (both are threaded into the
     // spec), so the verdict matches the run: a column remap that makes a key
@@ -1019,6 +1078,24 @@ export function draftFromTerms(
   lifetimeSeconds: number = INVITATION_LIFETIME_SECONDS,
   rawRows: ReadonlyArray<Record<string, string>> = [],
 ): AdvancedInviteDraft {
+  const standardization = standardizationForImportedTerms(
+    seed.metadata,
+    seed.terms,
+    terms,
+    rawRows,
+  );
+  // Disable -- but keep -- any imported key the reconstructed binding cannot
+  // supply: one referencing a field no column declares (more same-typed fields than
+  // columns of that type, or the type absent entirely). Such a key dangles the built
+  // terms and would otherwise block the WHOLE import behind a referential-integrity
+  // failure (the misleading "Enable at least one linkage key." on the keys control)
+  // even when other keys are satisfiable. Disabling it lets the satisfiable subset
+  // still generate, while the key stays visible -- its red "not satisfiable" badge is
+  // the reason the operator can read -- to re-enable once a matching column exists.
+  // Disable-and-show, not silent drop, so the import never hides what the document
+  // asked for. validateAdvancedInvite carries the matching message when an
+  // unsupplyable key is re-enabled or none is supplyable at all.
+  const declarable = declarableFieldNames(seed.metadata, standardization);
   return {
     identity: terms.identity,
     lifetimeSeconds,
@@ -1034,12 +1111,10 @@ export function draftFromTerms(
           }
         : undefined,
     metadata: seed.metadata,
-    standardization: standardizationForImportedTerms(
-      seed.metadata,
-      seed.terms,
-      terms,
-      rawRows,
-    ),
-    keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),
+    standardization,
+    keys: terms.linkageKeys.map((key) => ({
+      key,
+      enabled: keyIsSupplyable(key, declarable),
+    })),
   };
 }
