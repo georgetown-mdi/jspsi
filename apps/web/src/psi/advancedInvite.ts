@@ -14,8 +14,8 @@ import {
   safeParseLinkageTerms,
 } from "@psilink/core";
 
+import { normalizeForEditor, payloadSendForMetadata } from "./metadataEditing";
 import { APPLIED_SETTINGS } from "./appliedSettings";
-import { normalizeForEditor } from "./metadataEditing";
 
 import type {
   Algorithm,
@@ -448,23 +448,17 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   };
 
   // Author the payload data dictionary (terms.payload.send) from the columns the
-  // metadata DISCLOSES -- disclosedColumnNames over the draft metadata, the same
-  // isDisclosedToPartner predicate that gates transmission (preparePayload). Because
-  // the send list is DERIVED from the disclosed set, it is always a subset of (in
-  // fact equal to) what actually leaves the machine, so it can never trip core's
+  // draft metadata DISCLOSES, via the shared payloadSendForMetadata derivation (the
+  // quick path authors the same way over its inferred metadata, so the two cannot
+  // drift). The send equals the disclosed set, so it can never trip core's
   // assertPayloadSendDisclosed over-declaration reject -- the structural form of the
-  // task's footgun guard. `receive` is left unauthored: the inviter does not have
-  // the partner's schema, so it takes whatever the partner discloses
-  // (validateCompatibility is lazy on an absent receive; the acceptor mirrors this
-  // send into its own receive and validates it exactly). The send is emitted
-  // regardless of output direction so the preview states honestly what transmits;
-  // the incoherent "send while only I receive" case is blocked by
+  // task's footgun guard; `receive` is left unauthored for lazy reconciliation. The
+  // send is emitted regardless of output direction so the preview states honestly
+  // what transmits; the incoherent "send while only I receive" case is blocked by
   // validateAdvancedInvite rather than by silently dropping the (still-transmitted)
   // columns from the declaration.
-  const sentColumns = disclosedColumnNames(draft.metadata);
-  if (sentColumns.length > 0) {
-    terms.payload = { send: sentColumns.map((name) => ({ name })) };
-  }
+  const payload = payloadSendForMetadata(draft.metadata);
+  if (payload !== undefined) terms.payload = payload;
 
   if (draft.legalAgreement !== undefined) {
     terms.legalAgreement = {

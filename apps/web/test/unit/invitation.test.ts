@@ -5,7 +5,9 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
+  assertPayloadSendDisclosed,
   decodeInvitation,
+  disclosedColumnNames,
   getDefaultLinkageTerms,
   inferMetadata,
   validateCompatibility,
@@ -19,6 +21,7 @@ import {
   webrtcEndpointFromLocation,
 } from "../../src/psi/invitation.js";
 import { prepareAcceptedInvitation } from "../../src/psi/acceptInvitation.js";
+import { summarizeInvitation } from "../../src/psi/invitationSummary.js";
 
 import type { InvitationLocation } from "../../src/psi/invitation.js";
 
@@ -271,6 +274,126 @@ describe("generateInvitation", () => {
         metadata,
       }),
     ).rejects.toThrow(/does not transmit/);
+  });
+
+  // A linkable CSV (ssn + names + dob give satisfiable keys) that ALSO carries
+  // columns the quick path discloses: `notes` infers as an `other` column (role
+  // payload), and `member_id` infers as a single row-identifier left isPayload, so
+  // both are transmitted -- exactly the two inferred-disclosure shapes the quick
+  // path must now declare.
+  const DISCLOSING_COLUMNS = [
+    "ssn",
+    "first_name",
+    "last_name",
+    "dob",
+    "notes",
+    "member_id",
+  ];
+  const DISCLOSING_CSV =
+    "ssn,first_name,last_name,dob,notes,member_id\n" +
+    "123456789,Alice,Smith,1990-01-02,vip,M001\n";
+
+  test("quick path authors payload.send equal to the inferred metadata's disclosed columns", async () => {
+    const inviterName = "County Health Dept";
+    const disclosed = disclosedColumnNames(inferMetadata(DISCLOSING_COLUMNS));
+    // An inferred "other" column (notes) and an _id row-identifier (member_id),
+    // both still transmitted by the quick path.
+    expect(disclosed).toEqual(["notes", "member_id"]);
+
+    const { encoded, linkageTerms } = await generateInvitation({
+      inviterName,
+      file: csvStream(DISCLOSING_CSV),
+      location,
+    });
+    const token = await decodeInvitation(encoded);
+
+    // The token's payload.send enumerates exactly the disclosed columns, derived
+    // from the same predicate the wire transmits on -- so it cannot over- or
+    // under-state what leaves the machine. receive is never authored (lazy).
+    expect(token.linkageTerms.payload?.send?.map((c) => c.name)).toEqual(
+      disclosed,
+    );
+    expect(token.linkageTerms.payload?.receive).toBeUndefined();
+    // The returned terms (the inviter runs its own exchange on these) carry the
+    // same authored send.
+    expect(linkageTerms.payload?.send?.map((c) => c.name)).toEqual(disclosed);
+    // It cannot trip core's over-declaration reject: the send equals the disclosed
+    // set core gates transmission on, asserted against the same inferred metadata
+    // the inviter's exchange falls back to.
+    expect(() =>
+      assertPayloadSendDisclosed(
+        token.linkageTerms.payload,
+        inferMetadata(DISCLOSING_COLUMNS),
+      ),
+    ).not.toThrow();
+
+    // The partner's consent screen reads its payload entries from the token via
+    // summarizeInvitation (the same boundary the Advanced path's authored send
+    // flows through). Feed the quick-path token through it to pin that the disclosed
+    // columns surface as payload entries the partner sees before consenting -- the
+    // acceptance criterion that closes the quick-path declaration/consent gap. Plain
+    // ASCII names pass through sanitizeForDisplay unchanged.
+    const summary = summarizeInvitation(token);
+    expect(summary.payload?.send).toEqual(disclosed);
+    expect(summary.payload?.receive).toEqual([]);
+  });
+
+  test("quick path authors no payload when the file discloses no column", async () => {
+    // ALL_COLUMNS_CSV is all linkage-typed columns: the inferred metadata discloses
+    // nothing, so no (empty) payload block is authored.
+    expect(
+      disclosedColumnNames(
+        inferMetadata(["ssn", "ssn4", "first_name", "last_name", "dob"]),
+      ),
+    ).toEqual([]);
+    const { encoded, linkageTerms } = await generateInvitation({
+      inviterName: "Org",
+      file: csvStream(ALL_COLUMNS_CSV),
+      location,
+    });
+    const token = await decodeInvitation(encoded);
+    expect(token.linkageTerms.payload).toBeUndefined();
+    // No `payload: undefined` key either -- the returned terms equal the bare
+    // defaults, so the inviter's own exchange sees no payload to reconcile.
+    expect("payload" in linkageTerms).toBe(false);
+  });
+
+  test("the quick path's authored payload reconciles with a lazy acceptor", async () => {
+    const { linkageTerms } = await generateInvitation({
+      inviterName: "Inviter",
+      file: csvStream(DISCLOSING_CSV),
+      location,
+    });
+    expect(linkageTerms.payload?.send?.map((c) => c.name)).toEqual([
+      "notes",
+      "member_id",
+    ]);
+
+    // A lazy acceptor declares no payload.receive expectation (it does not know it
+    // will receive these columns), so the reconcile takes whatever the inviter
+    // sends -- both directions of validateCompatibility pass with no payload error.
+    const lazyAcceptor = { ...linkageTerms, identity: "Acceptor" };
+    delete (lazyAcceptor as { payload?: unknown }).payload;
+    expect(validateCompatibility(linkageTerms, lazyAcceptor).errors).toEqual(
+      [],
+    );
+    expect(validateCompatibility(lazyAcceptor, linkageTerms).errors).toEqual(
+      [],
+    );
+
+    // And the strict mirror -- an acceptor that adopts the inviter's send into its
+    // own receive (the deriveAcceptedLinkageTerms shape) -- agrees too.
+    const mirrorAcceptor = {
+      ...linkageTerms,
+      identity: "Acceptor",
+      payload: { receive: linkageTerms.payload?.send },
+    };
+    expect(validateCompatibility(linkageTerms, mirrorAcceptor).errors).toEqual(
+      [],
+    );
+    expect(validateCompatibility(mirrorAcceptor, linkageTerms).errors).toEqual(
+      [],
+    );
   });
 
   test("returns the embedded shared secret so the inviter can derive its id", async () => {

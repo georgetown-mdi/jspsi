@@ -10,6 +10,8 @@ import {
   loadCSVFile,
 } from "@psilink/core";
 
+import { payloadSendForMetadata } from "./metadataEditing";
+
 import type {
   InvitationToken,
   LinkageField,
@@ -228,7 +230,8 @@ export function deepLinkFor(origin: string, encoded: string): string {
  * This is the inviter's CSV-parse boundary: it parses `file` (via core's
  * {@link loadCSVFile}), infers column metadata, and derives the linkage terms
  * from it -- {@link getDefaultLinkageTerms} filtered to the keys the columns can
- * satisfy -- then embeds exactly those terms in the token AND returns them with
+ * satisfy, plus a `payload.send` declaring the columns the inferred metadata
+ * discloses -- then embeds exactly those terms in the token AND returns them with
  * the parsed rows. The inviter's own exchange must run on this same returned
  * `linkageTerms` object and `rawRows`/`columns`: a file is required at invite
  * time precisely so the embedded terms (which the acceptor adopts) and the terms
@@ -351,7 +354,8 @@ export async function generateInvitation(params: {
   // The terms to embed. The Advanced-options editor's authored terms are embedded
   // verbatim; the quick path derives them from the file's columns (inferred
   // metadata filters the default keys to those the columns can satisfy -- the same
-  // filter the inviter's own exchange would otherwise re-derive). standardization
+  // filter the inviter's own exchange would otherwise re-derive -- and authors a
+  // payload.send for the columns that metadata discloses, below). standardization
   // is left to CSV inference downstream in both cases.
   let linkageTerms: LinkageTerms;
   if (params.linkageTerms !== undefined) {
@@ -377,8 +381,8 @@ export async function generateInvitation(params: {
     // its send is structurally a subset and this is a defense-in-depth backstop
     // (against a regression or a non-editor caller) rather than a gate the editor
     // reaches; it runs here because the exchange-time check in prepareForExchange
-    // runs too late for the consent surface. The quick path (else) builds terms
-    // from columns and authors no payload, so needs no check.
+    // runs too late for the consent surface. The quick path (else) authors its own
+    // payload from the inferred metadata and runs the same backstop there.
     if (params.metadata !== undefined)
       assertPayloadSendDisclosed(linkageTerms.payload, params.metadata);
   } else {
@@ -402,6 +406,27 @@ export async function generateInvitation(params: {
     );
     if (satisfiableKeyCount === 0)
       throw new InvitationFileError({ kind: "unlinkable", unsatisfied });
+
+    // Author the payload data dictionary (terms.payload.send) for what the quick
+    // path already transmits -- the columns the inferred metadata discloses -- the
+    // quick-path analogue of the Advanced editor's authored send (item 202741998).
+    // payloadSendForMetadata derives the send from the SAME inferMetadata(columns)
+    // the inviter's own exchange falls back to (no authored metadata travels on the
+    // quick path), so the declaration equals disclosedColumnNames over that metadata
+    // and the partner's consent screen, the token, and the exchange record carry
+    // exactly what leaves the machine. This declares what already flows; it starts
+    // and stops sending nothing. `receive` stays unauthored (the inviter does not
+    // know the partner's schema; reconciliation is lazy). When nothing is disclosed
+    // the helper returns undefined and no empty payload block is minted (assigning
+    // it would leave a `payload: undefined` key, diverging from the default terms).
+    const payload = payloadSendForMetadata(metadata);
+    if (payload !== undefined) linkageTerms.payload = payload;
+    // Mint-boundary backstop, mirroring the authored path above: the send is a
+    // subset of (equal to) the disclosed set by construction, so this never throws
+    // on quick-path output, but it keeps the consent surface honest as an executable
+    // check rather than a comment, and runs before prepareForExchange (which checks
+    // the same invariant too late for the token's consent screen).
+    assertPayloadSendDisclosed(linkageTerms.payload, metadata);
   }
 
   // Bound the token's lifetime so an intercepted invitation cannot be accepted
