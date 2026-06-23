@@ -11,6 +11,10 @@ import { MantineProvider } from "@mantine/core";
 
 import { encodeInvitation, generateSharedSecret } from "@psilink/core";
 
+import {
+  clearAcceptHandoff,
+  stashAcceptHandoff,
+} from "@components/acceptHandoff";
 import { AcceptInvitation } from "@components/AcceptInvitation";
 
 import type { Root } from "react-dom/client";
@@ -183,6 +187,8 @@ afterEach(() => {
   harness.files = [];
   exchange.lastProps = undefined;
   window.location.hash = "";
+  // Drop any accept hand-off a test stashed, so it cannot leak into the next mount.
+  clearAcceptHandoff();
 });
 
 describe("accept review screen (consent + file before any connection)", () => {
@@ -212,6 +218,33 @@ describe("accept review screen (consent + file before any connection)", () => {
       .element(page.getByRole("heading", { name: "Prepare your data" }))
       .toBeInTheDocument();
     expect(exchangeMounted()).toBe(false);
+  });
+
+  test("a file chosen on the home page pre-fills the dropzone but still waits for consent", async () => {
+    window.location.hash = await encodeAcceptToken();
+    // The acceptor dropped their file on the home page before pressing "Review
+    // invitation"; it rides here as a hand-off (a File handle, never parsed yet).
+    stashAcceptHandoff(csvFile("first_name,last_name\nAlice,Smith\n"));
+    mountAcceptRoute();
+
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+
+    // The hand-off seeded the dropzone selection without a click here -- the user
+    // need not re-drop the same file.
+    await expect.element(page.getByTestId("file-count")).toHaveTextContent("1");
+
+    // But the file is only SELECTED, not parsed: with no consent yet the action
+    // stays disabled and nothing has transitioned, so the consent gate is intact.
+    await expect.element(page.getByTestId("accept")).toBeDisabled();
+    expect(exchangeMounted()).toBe(false);
+    expect(document.body.textContent).not.toContain("Prepare your data");
+
+    // Consent + name then enables it, exactly as a re-dropped file would.
+    await userEvent.click(page.getByRole("checkbox"));
+    await userEvent.fill(page.getByRole("textbox"), "Dana");
+    await expect.element(page.getByTestId("accept")).toBeEnabled();
   });
 
   test("does not enable accept (or mount anything) without consent", async () => {

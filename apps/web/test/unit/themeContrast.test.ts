@@ -83,7 +83,7 @@ const red1 = theme.colors.red[1];
 const dark7 = theme.colors.dark[7];
 const dark6 = theme.colors.dark[6];
 
-// Per-component Dropzone drag-state icon overrides (FileSelect.tsx), not theme
+// Per-component Dropzone drag-state icon overrides (FileDropzone.tsx), not theme
 // tokens, so these are read straight off the palette and checked against the
 // Dropzone's light-variant drag-over tints. The tint inverts with the scheme so
 // the icon shade does too (light shade 8, dark shade 6, via light-dark):
@@ -242,13 +242,13 @@ describe("theme colour contrast (WCAG 2.1 AA)", () => {
         bg: dark6,
         floor: 4.5,
       },
-      // Dropzone drag-state icons (FileSelect.tsx per-component overrides) on
+      // Dropzone drag-state icons (FileDropzone.tsx per-component overrides) on
       // their light-variant drag-over tints, both colour schemes -- non-text
       // graphics, so the 3:1 1.4.11 floor. Light shade 6 was a marginal accept
       // pass (3.04) and a reject failure (2.71); shade 8 clears both. The dark
       // tint inverts to a dark surface where shade 8 instead drops below the
       // floor (2.50 / 2.78), so dark keeps shade 6 (3.53 / 3.83) -- both branches
-      // of the FileSelect light-dark() pinned here so neither scheme regresses.
+      // of the FileDropzone light-dark() pinned here so neither scheme regresses.
       {
         name: "dropzone drag-accept icon (light): blue-8 on primary-1 tint",
         fg: dropzoneAcceptIconLight,
