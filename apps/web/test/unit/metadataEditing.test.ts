@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   SEMANTIC_TYPES,
+  assertPayloadSendDisclosed,
   inferMetadata,
   isDisclosedToPartner,
   preparePayload,
@@ -14,6 +15,7 @@ import {
   disclosureOf,
   hasMultipleIdentifiers,
   normalizeForEditor,
+  payloadSendForMetadata,
   quickInviteDisclosedColumns,
   setColumnDisclosure,
   setColumnType,
@@ -143,6 +145,33 @@ describe("quickInviteDisclosedColumns mirrors the quick path's wire", () => {
     expect(sent.hasData).toBe(true);
     if (sent.hasData)
       expect(sent.columns).toEqual(quickInviteDisclosedColumns(columns));
+  });
+});
+
+describe("payloadSendForMetadata authors the shared send declaration", () => {
+  test("send equals disclosedColumnNames; receive is never authored", () => {
+    const metadata = inferMetadata(["first_name", "record_id", "notes"]);
+    const payload = payloadSendForMetadata(metadata);
+    expect(payload?.send?.map((c) => c.name)).toEqual(
+      disclosedColumnNames(metadata),
+    );
+    // The inviter declares only its own send -- the lazy-reconcile contract both
+    // invite paths share -- so receive is left unset for the acceptor to mirror.
+    expect(payload?.receive).toBeUndefined();
+  });
+
+  test("returns undefined (no empty block) when nothing is disclosed", () => {
+    expect(payloadSendForMetadata(inferMetadata(["first_name", "ssn"]))).toBe(
+      undefined,
+    );
+  });
+
+  test("the authored send can never over-declare what metadata transmits", () => {
+    // Derived from the disclosed set, so it is a subset of (equal to) what
+    // preparePayload sends -- core's over-declaration reject accepts it.
+    const metadata = inferMetadata(["ssn", "first_name", "notes", "member_id"]);
+    const payload = payloadSendForMetadata(metadata);
+    expect(() => assertPayloadSendDisclosed(payload, metadata)).not.toThrow();
   });
 });
 

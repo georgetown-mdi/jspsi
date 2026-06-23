@@ -1,6 +1,11 @@
 import { disclosedColumnNames, inferMetadata } from "@psilink/core";
 
-import type { ColumnMetadata, Metadata, SemanticType } from "@psilink/core";
+import type {
+  ColumnMetadata,
+  Metadata,
+  Payload,
+  SemanticType,
+} from "@psilink/core";
 
 /**
  * The pure model behind the web metadata grid: the collapsed disclosure control,
@@ -258,6 +263,31 @@ export function quickInviteDisclosedColumns(
   columns: Array<string>,
 ): Array<string> {
   return disclosedColumnNames(inferMetadata(columns));
+}
+
+/**
+ * Author the `terms.payload.send` data dictionary from the columns `metadata`
+ * discloses, or `undefined` when it discloses none (so no empty payload block is
+ * minted). The send list is exactly {@link disclosedColumnNames} over `metadata`
+ * -- the same `isDisclosedToPartner` predicate {@link preparePayload} gathers the
+ * transmitted columns on -- so the declared dictionary equals what actually leaves
+ * the machine and can never over-declare (core's `assertPayloadSendDisclosed`
+ * accepts it by construction). It NEVER authors `receive`: an inviter does not know
+ * the partner's schema, so it declares only its own send and reconciles lazily (the
+ * acceptor mirrors this send into its own receive and validates that exactly).
+ *
+ * Shared by both invite paths so they cannot drift in how they declare what they
+ * send: the Advanced editor (`buildAdvancedTerms`) over its edited metadata and the
+ * quick path (`generateInvitation`) over the inferred metadata its own exchange
+ * falls back to. This declares what already transmits; it does not change which
+ * columns flow.
+ */
+export function payloadSendForMetadata(
+  metadata: Metadata,
+): Payload | undefined {
+  const sent = disclosedColumnNames(metadata);
+  if (sent.length === 0) return undefined;
+  return { send: sent.map((name) => ({ name })) };
 }
 
 export { disclosedColumnNames };
