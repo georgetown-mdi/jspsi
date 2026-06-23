@@ -672,6 +672,55 @@ test.each(positiveCases)(
   },
 );
 
+// --- Disclosed-columns subset ------------------------------------------------
+
+test("round-trips a token without a disclosed-columns subset", async () => {
+  const decoded = await decodeInvitation(await encodeInvitation(baseToken));
+  expect(decoded.disclosedPayloadColumns).toBeUndefined();
+});
+
+test("round-trips the inviter's disclosed-columns subset on the token", async () => {
+  const token: InvitationToken = {
+    ...baseToken,
+    disclosedPayloadColumns: ["county", "enrollment_id"],
+  };
+  const decoded = await decodeInvitation(await encodeInvitation(token));
+  expect(decoded.disclosedPayloadColumns).toEqual(["county", "enrollment_id"]);
+  // An optional TOP-LEVEL addition does not bump the token version.
+  expect(decoded.version).toBe("1");
+});
+
+test("a token minted without the disclosed-columns field still decodes (top-level back-compat)", async () => {
+  // The field is an optional top-level addition on the non-strict token schema,
+  // so a token shaped as one minted before it existed (no such key) decodes
+  // unchanged -- the backward-compatibility property that licenses the
+  // no-version-bump, exactly as connectionEndpoint took.
+  const decoded = await decodeInvitation(
+    await encodeRaw({
+      version: "1",
+      linkageTerms: baseTerms,
+      sharedSecret: VALID_SECRET,
+    }),
+  );
+  expect(decoded.disclosedPayloadColumns).toBeUndefined();
+});
+
+test("encodeInvitation rejects a disclosed-columns entry with an empty name", async () => {
+  const token = {
+    ...baseToken,
+    disclosedPayloadColumns: [""],
+  } as unknown as InvitationToken;
+  await expect(encodeInvitation(token)).rejects.toThrow(ZodError);
+});
+
+test("decodeInvitation rejects a disclosed-columns entry with an empty name", async () => {
+  const encoded = await encodeRaw({
+    ...baseToken,
+    disclosedPayloadColumns: [""],
+  });
+  await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
+});
+
 test.each(credentialCases)(
   "encodeInvitation rejects a $channel endpoint carrying $field",
   async ({ field, minimal }) => {

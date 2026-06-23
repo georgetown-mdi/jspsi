@@ -134,8 +134,20 @@ export interface InvitationLegalAgreementSummary {
 
 /** The optional data columns the inviter declares, with names sanitized. */
 export interface InvitationPayloadSummary {
-  /** Columns the inviter will send for matched records. */
+  /** Columns the inviter will send for matched records (what the acceptor
+   * receives), in the inviter's namespace. Empty when the declared set is empty;
+   * read {@link sendDeclared} to tell that apart from the lazy case. */
   send: Array<string>;
+  /**
+   * Whether the send set is a definite DECLARATION the acceptor is locked in to --
+   * the carried disclosed subset (possibly empty), or an authored `payload.send` --
+   * as opposed to the lazy case (the inviter sends whatever its own metadata
+   * discloses, nothing declared up front). When true and {@link send} is empty the
+   * acceptor is locked in to "receive nothing" (a later non-empty payload aborts),
+   * so the renderer states that explicitly ("(none)") rather than omitting the
+   * line; when false the send side is lazy and is not shown.
+   */
+  sendDeclared: boolean;
   /** Columns the inviter requests from the acceptor for matched records. */
   receive: Array<string>;
 }
@@ -716,15 +728,22 @@ function summarizeKey(
 
 /**
  * Build a display-ready {@link InvitationSummary} from an invitation's linkage
- * terms and optional expiry. The parameter is a structural subset of
- * {@link InvitationToken} (its `linkageTerms` and `expires`), so a full decoded
+ * terms, optional expiry, and optional carried disclosed-columns subset. The
+ * parameter is a structural subset of {@link InvitationToken} (its
+ * `linkageTerms`, `expires`, and `disclosedPayloadColumns`), so a full decoded
  * token is accepted as-is, but so is the terms/expiry pair the exchange screen
- * carries without a token. Pure and side-effect-free: it derives only what the
- * terms screen renders and sanitizes every partner-controlled string, so it is
- * the single tested boundary for that escaping.
+ * carries without a token. The "columns your partner will send" line derives from
+ * the carried `disclosedPayloadColumns` when present (the wire's own disclosure
+ * predicate), falling back to the authored `payload.send` otherwise. Pure and
+ * side-effect-free: it derives only what the terms screen renders and sanitizes
+ * every partner-controlled string, so it is the single tested boundary for that
+ * escaping.
  */
 export function summarizeInvitation(
-  source: Pick<InvitationToken, "linkageTerms" | "expires">,
+  source: Pick<
+    InvitationToken,
+    "linkageTerms" | "expires" | "disclosedPayloadColumns"
+  >,
 ): InvitationSummary {
   const terms = source.linkageTerms;
 
@@ -785,12 +804,36 @@ export function summarizeInvitation(
     };
   }
 
-  const send = terms.payload?.send ?? [];
-  const receive = terms.payload?.receive ?? [];
-  if (send.length > 0 || receive.length > 0) {
+  // The columns the acceptor will RECEIVE derive from the carried
+  // disclosedPayloadColumns -- the inviter's own isDisclosedToPartner predicate
+  // output, exactly the set preparePayload transmits -- so the displayed and
+  // consented set cannot drift from the bytes that flow. Fall back to the
+  // authored payload.send names for an invitation that carried no disclosed
+  // subset (an older or metadata-unknown mint) and for the inviter's own pre-mint
+  // "proposing" preview, which has authored its send but holds no token field
+  // yet. `receive` (what the inviter requests FROM the acceptor) is unaffected:
+  // it has no transmission predicate to derive from and stays the authored list.
+  //
+  // sendDeclared distinguishes a definite declaration (the carried subset --
+  // present even when empty -- or an authored send) from the lazy case (no carried
+  // subset and no authored send: the inviter sends whatever its metadata
+  // discloses). A declared-but-empty set is the strict "receive nothing" lock-in,
+  // which the renderer shows as "(none)" rather than suppressing -- so it is not
+  // confused with the lazy case, which has the opposite runtime behavior (a stray
+  // payload aborts under the lock-in, is accepted under lazy). The section renders
+  // whenever the send is declared OR a receive is listed.
+  const sendDeclared =
+    source.disclosedPayloadColumns !== undefined ||
+    (terms.payload?.send ?? []).length > 0;
+  const send =
+    source.disclosedPayloadColumns ??
+    (terms.payload?.send ?? []).map((column) => column.name);
+  const receive = (terms.payload?.receive ?? []).map((column) => column.name);
+  if (sendDeclared || receive.length > 0) {
     summary.payload = {
-      send: send.map((column) => sanitizeForDisplay(column.name)),
-      receive: receive.map((column) => sanitizeForDisplay(column.name)),
+      send: send.map((name) => sanitizeForDisplay(name)),
+      sendDeclared,
+      receive: receive.map((name) => sanitizeForDisplay(name)),
     };
   }
 

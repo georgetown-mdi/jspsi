@@ -1,11 +1,17 @@
 import { z } from "zod";
-import { LinkageTermsSchema, MAX_PARAMS_ENTRIES } from "./linkageTerms.js";
+import {
+  LinkageTermsSchema,
+  MAX_NAME_LENGTH,
+  MAX_PARAMS_ENTRIES,
+  MAX_PAYLOAD_ENTRIES,
+} from "./linkageTerms.js";
 import type { LinkageTerms } from "./linkageTerms.js";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { SHARED_SECRET_REGEX } from "./connection.js";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 import { pathsResolveToSameDir } from "../utils/pathCompare.js";
 import { parseBoundedJson } from "../utils/boundedJson.js";
+import { boundedArray } from "../utils/boundedArray.js";
 
 // --- Connection endpoint -----------------------------------------------------
 
@@ -343,7 +349,8 @@ export interface InvitationToken {
    * one an existing decoder could not read correctly. Adding an optional field
    * at THIS top level is backward compatible (an older decoder validates with a
    * non-strict `z.object` and simply ignores the field), so it does not bump the
-   * version; `connectionEndpoint` was added this way and the version stayed "1".
+   * version; `connectionEndpoint` and `disclosedPayloadColumns` were both added
+   * this way and the version stayed "1".
    *
    * The per-channel endpoint sub-schemas are `z.strictObject`, so an older
    * decoder REJECTS (it does not ignore) any field added to one of them: an
@@ -370,6 +377,35 @@ export interface InvitationToken {
    * {@link ConnectionEndpoint}). Never carries credentials.
    */
   connectionEndpoint?: ConnectionEndpoint;
+  /**
+   * The inviter's disclosed-columns subset: exactly the column names the
+   * acceptor will RECEIVE for matched records -- the set the inviter's
+   * `disclosedColumnNames(metadata)` / `isDisclosedToPartner` predicate gathers
+   * and `preparePayload` transmits. Carried so the acceptor's consent display
+   * and its runtime lock-in derive from the wire's own transmission predicate
+   * rather than from a separately-authored `terms.payload.send` dictionary each
+   * mint path must remember to write; the displayed/consented set then cannot
+   * diverge from the bytes that flow.
+   *
+   * The names are in the INVITER's column namespace and the acceptor reasons
+   * about them as "what I will receive" -- NOT as its own `payload.send` (the
+   * acceptor's `payload.send` is the inviter's `receive` mirrored into the
+   * acceptor's namespace; see `deriveAcceptedLinkageTerms`). Only the
+   * consent-relevant disclosed subset is carried -- linkage/identifier/ignored
+   * columns that are not transmitted are not included and do not leave the
+   * inviter's machine.
+   *
+   * Optional. Omitted ONLY on a mint path that does not know its metadata, and
+   * then the acceptor reconciles lazily from the first transmission. When the
+   * metadata IS known the subset is carried verbatim, INCLUDING the empty set when
+   * nothing is disclosed -- an empty set is NOT the lazy case: it LOCKS IN "receive
+   * nothing," so a later non-empty payload aborts. Whenever present (empty or not)
+   * it locks in the acceptor's expectation: a received payload whose column set
+   * differs aborts the exchange as a protocol error (the party promised one set and
+   * delivered another). Only an OMITTED (undefined) field is lazy. See
+   * {@link reconcileReceivedPayload}.
+   */
+  disclosedPayloadColumns?: string[];
 }
 
 // The params width bound the decode fold carries, mirrored from linkageTerms.ts's
@@ -446,6 +482,26 @@ const InvitationTokenSchema: z.ZodType<InvitationToken> = z.object({
     ),
   expires: z.iso.datetime().optional(),
   connectionEndpoint: ConnectionEndpointSchema.optional(),
+  // The inviter's disclosed-columns subset (see the interface field). Each name
+  // is bounded to the same MAX_NAME_LENGTH ceiling and the count to the same
+  // MAX_PAYLOAD_ENTRIES cap a `payload.send`/`receive` list carries, since this
+  // is the same disclosed set those would name; the whole token is already
+  // structurally bounded by parseBoundedJson at decode, so boundedArray here is
+  // defense-in-depth on the field. Names are partner-controlled (the inviter
+  // crafts the token) and are routed through sanitizeForDisplay wherever they
+  // reach a consent surface or a diagnostic. The `.min(1)` floor rejects an empty
+  // name, matching the metadata/payload name floors -- an honest inviter derives
+  // these from metadata whose names are already non-empty. There is deliberately
+  // no array-level minimum: an empty array is MEANINGFUL -- it is the strict
+  // "receive nothing" lock-in carried when an inviter that knows its metadata
+  // discloses no payload column, which reconcileReceivedPayload enforces (a later
+  // non-empty payload aborts) -- so it must not be rejected at decode. Only an
+  // OMITTED field reconciles lazily.
+  disclosedPayloadColumns: boundedArray(
+    z.string().min(1).max(MAX_NAME_LENGTH),
+    MAX_PAYLOAD_ENTRIES,
+    `disclosedPayloadColumns must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
+  ).optional(),
 });
 
 // --- Lifetime policy ---------------------------------------------------------

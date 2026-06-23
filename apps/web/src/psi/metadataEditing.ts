@@ -271,8 +271,9 @@ export function quickInviteDisclosedColumns(
  * minted). The send list is exactly {@link disclosedColumnNames} over `metadata`
  * -- the same `isDisclosedToPartner` predicate {@link preparePayload} gathers the
  * transmitted columns on -- so the declared dictionary equals what actually leaves
- * the machine and can never over-declare (core's `assertPayloadSendDisclosed`
- * accepts it by construction). It NEVER authors `receive`: an inviter does not know
+ * the machine and can neither over- nor under-declare (core's
+ * `assertPayloadSendDisclosed` accepts it by construction). It NEVER authors
+ * `receive`: an inviter does not know
  * the partner's schema, so it declares only its own send and reconciles lazily (the
  * acceptor mirrors this send into its own receive and validates that exactly).
  *

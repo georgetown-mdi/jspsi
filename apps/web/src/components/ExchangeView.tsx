@@ -112,6 +112,14 @@ export type ExchangeConfig =
       expires?: string;
       endpoint: WebRTCEndpoint;
       linkageTerms: LinkageTerms;
+      /** The columns the invitation declared the inviter will send (its
+       * `disclosedPayloadColumns`), in the inviter's namespace -- what this party
+       * consented to RECEIVE. Locked in as `prepared.expectedPayloadColumns` so a
+       * received payload whose column set differs aborts the exchange (see
+       * `reconcileReceivedPayload`). Absent on an invitation that carried no
+       * disclosed subset (an older or metadata-unknown mint), where this party
+       * reconciles lazily. */
+      disclosedPayloadColumns?: Array<string>;
       /** The CSV parsed on the accept review screen, fed straight into the exchange
        * on Start: no re-parse, and no file prompt here. Mirrors the inviter's
        * `acquired`. */
@@ -433,6 +441,11 @@ export function ExchangeView(config: ExchangeConfig) {
         rawRows,
         columns,
       );
+      // Acceptor lock-in: verify the inviter transmits exactly the columns the
+      // invitation declared (and the consent screen showed), aborting otherwise.
+      // The inviter is lazy on its own receive side, so it leaves this unset.
+      if (config.role === "acceptor")
+        prepared.expectedPayloadColumns = config.disclosedPayloadColumns;
       onStages(buildStageList(prepared));
 
       if (config.role === "acceptor") await psi;
@@ -593,6 +606,21 @@ export function ExchangeView(config: ExchangeConfig) {
         // withheld here to avoid showing the same deadline twice; the acceptor has
         // no share block, so its terms carry the expiry.
         expires={config.role === "inviter" ? undefined : config.expires}
+        // The acceptor shows what it will RECEIVE from the carried disclosed set
+        // (the same set the consent screen showed); the inviter previews its own
+        // proposal, which has no carried field and falls back to its authored
+        // payload.send. That fallback is faithful only because both web mint paths
+        // author payload.send to equal the disclosed predicate
+        // (disclosedColumnNames over the same metadata, asserted by
+        // assertPayloadSendDisclosed at the mint boundary); if a future path ever
+        // authored a payload.send narrower than what its metadata discloses, the
+        // inviter's own preview would understate its send, so pass the inviter's
+        // disclosed set here too rather than relying on the equality.
+        disclosedPayloadColumns={
+          config.role === "acceptor"
+            ? config.disclosedPayloadColumns
+            : undefined
+        }
         perspective={config.role === "inviter" ? "proposing" : "accepted"}
         headingOrder={headingOrder}
         headingRef={config.role === "acceptor" ? leadingHeadingRef : undefined}

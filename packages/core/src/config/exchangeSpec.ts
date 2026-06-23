@@ -1,11 +1,16 @@
 import { z } from "zod";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
-import { LinkageTermsSchema } from "./linkageTerms.js";
+import {
+  LinkageTermsSchema,
+  MAX_NAME_LENGTH,
+  MAX_PAYLOAD_ENTRIES,
+} from "./linkageTerms.js";
 import { AuthenticationSchema, ConnectionConfigSchema } from "./connection.js";
 import { StandardizationSchema } from "./standardization.js";
 import { MetadataSchema } from "./metadata.js";
 import { SigningConfigSchema } from "./signing.js";
+import { boundedArray } from "../utils/boundedArray.js";
 
 // --- Exchange spec -----------------------------------------------------------
 
@@ -47,6 +52,22 @@ export const ExchangeSpecSchema = z.object({
   // pointer is the omitted key, not an empty string). See EXCHANGE_REFERENCE.md and
   // EXCHANGE_RECORD.md.
   retentionDisposition: z.string().min(1).optional(),
+  // Optional local lock-in: the payload columns (in the PARTNER's namespace) this
+  // party will enforce it receives at runtime (reconcileReceivedPayload). Per-party
+  // and local like retentionDisposition -- NOT negotiated, swapped, cross-validated,
+  // or folded into the agreed-terms hash, and deliberately distinct from
+  // linkageTerms.payload.receive (which is the negotiated data dictionary and the
+  // validateCompatibility send/receive mirror; reusing it would abort against an
+  // inviter that advertised no payload.send). An OFFLINE acceptance writes the
+  // invitation's disclosedPayloadColumns here so a later `psilink exchange`
+  // enforces what the operator consented to at accept time. An empty array is a
+  // strict "receive nothing" (a non-empty payload then aborts); an absent field
+  // reconciles lazily. Bounded like a payload list; names are partner-controlled.
+  expectedPayloadColumns: boundedArray(
+    z.string().min(1).max(MAX_NAME_LENGTH),
+    MAX_PAYLOAD_ENTRIES,
+    `expectedPayloadColumns must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
+  ).optional(),
 });
 
 export type ExchangeSpec = z.infer<typeof ExchangeSpecSchema>;

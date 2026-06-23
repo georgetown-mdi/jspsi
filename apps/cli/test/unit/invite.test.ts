@@ -7,6 +7,7 @@ import type { Arguments } from "yargs";
 import logLibrary from "loglevel";
 import {
   decodeInvitation,
+  disclosedColumnNames,
   getDefaultLinkageTerms,
   getLogger,
   inferMetadata,
@@ -278,6 +279,56 @@ test("validateInvite: online sftp emits a credential-free endpoint the acceptor 
   expect(connection.server.path).toBe("/exchanges/drop");
   expect(connection.server.username).toMatch(/REPLACE_WITH/);
   expect(connection.server.password).toBeUndefined();
+});
+
+test("validateInvite: online carries the disclosed-columns subset from the inferred metadata", async () => {
+  // An input with non-linkage columns: `notes` infers as an `other` payload column
+  // and `member_id` as an `_id` row-identifier, both transmitted; the name/dob/ssn
+  // linkage columns are not. The token must carry exactly that disclosed subset so
+  // the acceptor's consent and lock-in derive from the wire's own predicate.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-disc-"));
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,dob,ssn,notes,member_id\n" +
+      "Alice,Smith,1990-01-02,123456789,vip,M001\n",
+  );
+  const ready = await validateInvite({
+    resolved: { mode: "online", url: new URL("sftp://host/drop"), input },
+    options: testOptions(),
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.disclosedPayloadColumns).toEqual(
+    disclosedColumnNames(
+      inferMetadata([
+        "first_name",
+        "last_name",
+        "dob",
+        "ssn",
+        "notes",
+        "member_id",
+      ]),
+    ),
+  );
+  expect(token.disclosedPayloadColumns).toEqual(["notes", "member_id"]);
+});
+
+test("validateInvite: an all-linkage input carries an empty disclosed subset", async () => {
+  // onlineFixture's CSV is first_name,last_name,dob,ssn -- all linkage columns, so
+  // nothing is disclosed. The metadata is known (inferred from the input), so the
+  // field is carried as the EMPTY set, locking the acceptor in to "receive nothing"
+  // (a later non-empty payload aborts) rather than reconciling lazily.
+  const { input, options } = onlineFixture();
+  const ready = await validateInvite({
+    resolved: { mode: "online", url: new URL("sftp://host/drop"), input },
+    options,
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.disclosedPayloadColumns).toEqual([]);
 });
 
 test("validateInvite: online filedrop emits the shared-path endpoint", async () => {
