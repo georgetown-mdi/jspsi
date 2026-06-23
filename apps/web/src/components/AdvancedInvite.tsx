@@ -20,6 +20,7 @@ import {
 } from "@psilink/core";
 
 import { InvitationFileError, generateInvitation } from "@psi/invitation";
+import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
 import { invitationLocation } from "@psi/invitationLocation";
 import { seedAdvancedInvite } from "@psi/advancedInvite";
 
@@ -127,6 +128,18 @@ export function AdvancedInvite() {
     // synchronously, so neither mount loses it.
     clearAdvancedHandoff();
 
+    // Refuse an unnamed-column header before seeding: seedAdvancedInvite and the
+    // satisfiability check below both infer metadata from these columns, which
+    // rejects an empty name by throwing. An empty header cannot be fixed in the
+    // editor, so reject it here with the shared clear error and drop back to the
+    // picker, mirroring the unlinkable block below.
+    const emptyPositions = emptyColumnPositions(columns);
+    if (emptyPositions.length > 0) {
+      setError(unnameableColumnsAlert(emptyPositions));
+      setPhase({ status: "acquire" });
+      return;
+    }
+
     // Assess against the FULL default terms (every default field declared) so the
     // block can name the field types the file lacks -- the same gate and wording
     // generateInvitation and the acceptor pre-flight use.
@@ -218,12 +231,20 @@ export function AdvancedInvite() {
         // (the editing phase has no picker).
         setFiles([]);
         setPhase({ status: "acquire" });
-        setError({
-          title: "Could not generate invitation",
-          message:
-            "Your file could not back this invitation. Choose another file and " +
-            "try again.",
-        });
+        // An unnamed-column file is caught by enterEditor before the editor opens,
+        // so reaching here with one means the file changed under us; still surface
+        // the specific column positions (matching the quick path) rather than the
+        // generic message used for the unreadable/unlinkable kinds.
+        setError(
+          e.failure.kind === "unnameable"
+            ? unnameableColumnsAlert(e.failure.positions)
+            : {
+                title: "Could not generate invitation",
+                message:
+                  "Your file could not back this invitation. Choose another " +
+                  "file and try again.",
+              },
+        );
       } else {
         // Internal fault (a schema/encoding error). Keep error internals out of
         // a secret-bearing flow; log only the type. Mirrors InvitePanel.

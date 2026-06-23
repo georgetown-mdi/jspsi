@@ -552,6 +552,29 @@ test("exchangePayloads: a pathological-count partner row fails cleanly, not with
   expect((err as ConnectionError).cause).not.toBeInstanceOf(RangeError);
 });
 
+test("exchangePayloads: an empty partner column name is rejected as a protocol error", async () => {
+  // The wire `columns` predicate floors each name at .min(1): a partner that
+  // hand-crafts a `""` column -- to drive this party's record build into the
+  // non-fatal guard that drops the audit record while the exchange still completes
+  // -- is rejected as a clean ConnectionError("protocol"). Honest senders never
+  // emit an empty name (inferMetadata rejects it at intake), so this floor cannot
+  // regress them.
+  const [connA, connB] = createMessagePipe();
+  const initiatorPromise = exchangePayloads(connA, "initiator", {
+    hasData: false,
+  });
+  await connB.receive();
+  await connB.send({
+    hasData: true,
+    columns: [""],
+    rowIndices: [0],
+    rows: [["v"]],
+  });
+  const err = await initiatorPromise.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+});
+
 test("exchangePayloads: a pathological-count columns array fails cleanly, not with a RangeError", async () => {
   // ~4M invalid (non-string) column names, past the ~3.5M `Invalid string
   // length` threshold the unbounded `z.array(z.string())` schema hit (a ~4.5s
@@ -678,29 +701,6 @@ test("exchangePayloads: a partner column name at the length bound is accepted", 
   });
   const received = await initiatorPromise;
   expect(received.columns).toEqual([name]);
-});
-
-test("exchangePayloads: an empty partner column name is accepted at the wire", async () => {
-  // The wire predicate bounds only the name LENGTH (the upper bound), not the
-  // `.min(1)` floor the operator's own terms carry. An empty partner name is
-  // deliberately left to the record schema, which rejects it at record build --
-  // non-fatally, so the record is skipped while the exchange and its result are
-  // unaffected (exchangeRecord.test.ts pins that record-layer rejection). Pinning
-  // acceptance here stops a future `.min(1)` on the wire from silently escalating
-  // an empty name to a full exchange failure.
-  const [connA, connB] = createMessagePipe();
-  const initiatorPromise = exchangePayloads(connA, "initiator", {
-    hasData: false,
-  });
-  await connB.receive();
-  await connB.send({
-    hasData: true,
-    columns: [""],
-    rowIndices: [0],
-    rows: [["v"]],
-  });
-  const received = await initiatorPromise;
-  expect(received.columns).toEqual([""]);
 });
 
 test("exchangePayloads: the column-name length bound counts UTF-16 code units", async () => {

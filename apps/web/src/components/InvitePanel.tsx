@@ -22,6 +22,7 @@ import {
 import { InvitationFileError, generateInvitation } from "@psi/invitation";
 import { invitationLocation } from "@psi/invitationLocation";
 import { quickInviteDisclosedColumns } from "@psi/metadataEditing";
+import { unnameableColumnsAlert } from "@psi/columnNames";
 
 import {
   clearAdvancedHandoff,
@@ -148,6 +149,12 @@ export function InvitePanel({ session, setSession }: InvitePanelProps) {
               title: "Could not read your file",
               message: sanitizeErrorForDisplay(e.failure.cause),
             });
+          } else if (e.failure.kind === "unnameable") {
+            // An unnamed-column header: name the offending positions and tell the
+            // operator to fix the header, the same shared wording the Advanced
+            // editor and the acceptor's file acquire use (positions are not
+            // operator content, so they are shown directly).
+            setError(unnameableColumnsAlert(e.failure.positions));
           } else {
             // Zero satisfiable keys: name the field types the file lacks, the
             // same wording the acceptor's zero-coverage block uses. The default

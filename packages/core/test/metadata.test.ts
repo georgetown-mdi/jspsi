@@ -5,6 +5,7 @@ import {
   ALIAS_TYPE_META_MAP,
   safeParseMetadata,
 } from "../src/config/metadata";
+import { UsageError } from "../src/errors";
 
 // ─── inferMetadata: linkage columns ──────────────────────────────────────────
 
@@ -363,6 +364,37 @@ test("inferMetadata never assigns role: ignored", () => {
     "program_start_date",
   ]);
   expect(result.every((c) => c.role !== "ignored")).toBe(true);
+});
+
+// ─── inferMetadata: empty column name ─────────────────────────────────────────
+
+test("inferMetadata rejects an empty column name at intake", () => {
+  // An empty (zero-length) name -- a trailing comma, a blank cell, or a leading
+  // delimiter in the CSV header -- cannot be used for linkage, identification, or
+  // payload (every downstream name floors at .min(1)). Reject it at this intake
+  // chokepoint as a clear UsageError rather than disclosing it and losing the audit
+  // record to the non-fatal record-build guard. A UsageError so the CLI exits 64.
+  expect(() => inferMetadata([""])).toThrow(UsageError);
+  expect(() => inferMetadata(["ssn", "", "first_name"])).toThrow(UsageError);
+});
+
+test("inferMetadata empty-name error names the positions, not input", () => {
+  // The message reports the 1-based positions (not operator-controlled content) so
+  // the operator can find the unnamed headers; both empty columns are named.
+  let message = "";
+  try {
+    inferMetadata(["ssn", "", "first_name", ""]);
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err);
+  }
+  expect(message).toContain("2");
+  expect(message).toContain("4");
+});
+
+test("inferMetadata accepts a fully-named header (no regression)", () => {
+  expect(() =>
+    inferMetadata(["ssn", "first_name", "last_name", "dob"]),
+  ).not.toThrow();
 });
 
 test("a rejected metadata type is not echoed in the parse error", () => {
