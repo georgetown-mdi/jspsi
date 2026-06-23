@@ -519,7 +519,12 @@ function keyIsSupplyable(
  * field the inviter's columns cannot supply, or no key is supplyable at all --
  * distinct from {@link messageForField}'s "Enable at least one linkage key." so an
  * operator can tell "a key needs a field your columns cannot supply" apart from
- * "you turned every key off." */
+ * "you turned every key off." Deliberately names no specific field: the offending
+ * element's `field` reference can be partner-controlled (it rides an imported
+ * document), so echoing it here would surface partner text into the UI -- the same
+ * reason {@link messageForField} and core's referential-integrity refine locate the
+ * offender by issue path rather than by value. The operator identifies the key from
+ * its red "not satisfiable" badge in the key list instead. */
 const UNSUPPLYABLE_KEY_MESSAGE =
   "A linkage key needs a field your columns cannot supply. Add a column of that " +
   "type, or turn that key off.";
@@ -561,32 +566,37 @@ export function validateAdvancedInvite(
 
   // A key is supplyable when the inviter's columns can declare every field it
   // references; one that is not dangles the built terms (the referential-integrity
-  // refine rejects the undeclared field) and blocks generation. Detect it here so
-  // the accurate message wins over the generic schema-failure mapping below, which
-  // collapses every linkageKeys-path issue to "Enable at least one linkage key."
+  // refine rejects the undeclared field) and blocks generation. The two checks below
+  // set the accurate keys message up front so it wins over the generic
+  // schema-failure mapping, which collapses every linkageKeys-path issue to
+  // "Enable at least one linkage key."
   const declarable = declarableFieldNames(
     draft.metadata,
     draft.standardization,
   );
   const enabledKeys = draft.keys.filter((entry) => entry.enabled);
-  const enabledUnsupplyable = enabledKeys.some(
-    (entry) => !keyIsSupplyable(entry.key, declarable),
-  );
-  const anyKeySupplyable = draft.keys.some((entry) =>
-    keyIsSupplyable(entry.key, declarable),
-  );
   // At least one key must be active. The schema's linkageKeys .min(1) also
   // catches the none-enabled case, but a dedicated message reads better against
   // the key list.
   if (enabledKeys.length === 0) {
-    // No key is active. Enabling one fixes it ONLY if some key is supplyable; when
-    // none is (e.g. a fully-unsupplyable import, every key referencing a field the
-    // columns cannot supply), the "turn one on" wording would mislead -- name the
-    // real obstacle instead, preserving the fail-closed refusal.
-    errors.keys = anyKeySupplyable
+    // No key is active. Enabling one fixes it ONLY if a supplyable key exists --
+    // checked across ALL keys, enabled or not, since the question is whether
+    // enabling one COULD help. When none is supplyable (a fully-unsupplyable
+    // import, every key referencing a field the columns cannot supply), "turn one
+    // on" would mislead, so name the real obstacle instead, preserving the
+    // fail-closed refusal.
+    const someKeyIsSupplyable = draft.keys.some((entry) =>
+      keyIsSupplyable(entry.key, declarable),
+    );
+    errors.keys = someKeyIsSupplyable
       ? "Enable at least one linkage key."
       : UNSUPPLYABLE_KEY_MESSAGE;
-  } else if (enabledUnsupplyable) {
+  } else if (
+    enabledKeys.some((entry) => !keyIsSupplyable(entry.key, declarable))
+  ) {
+    // An enabled key references a field the columns cannot supply: the built terms
+    // dangle, so block with the accurate message rather than the misleading no-keys
+    // one the schema-failure mapping would otherwise produce.
     errors.keys = UNSUPPLYABLE_KEY_MESSAGE;
   }
 
