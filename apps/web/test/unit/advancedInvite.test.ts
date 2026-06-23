@@ -1282,4 +1282,94 @@ describe("draftFromTerms degrades gracefully on an unsupplyable key", () => {
     expect(validation.canGenerate).toBe(false);
     expect(validation.errors.keys).toBe("Enable at least one linkage key.");
   });
+
+  test("a composite key is disabled when ANY one of its elements is unsupplyable", () => {
+    // keyIsSupplyable is all-or-nothing over a key's elements (.every): a multi-element
+    // key with one supplyable and one unsupplyable element must be disabled as a whole,
+    // since the unsupplyable element would still dangle the built terms. Reachable via
+    // expert key editing (a second element bound to a field the columns cannot supply).
+    // Three first_name fields are referenced so they compete for the importer's two
+    // first_name columns: first_name and first_name_2 bind, first_name_3 cannot, and the
+    // composite key references first_name (supplyable) AND first_name_3 (not).
+    const document = buildAdvancedTerms({
+      identity: "Inviter",
+      lifetimeSeconds: 3600,
+      outputDirection: "both",
+      algorithm: "psi",
+      deduplicate: false,
+      metadata: [
+        { name: "n1", type: "first_name", role: "linkage", isPayload: false },
+        { name: "n2", type: "first_name", role: "linkage", isPayload: false },
+        { name: "n3", type: "first_name", role: "linkage", isPayload: false },
+      ],
+      standardization: [
+        { output: "first_name", input: "n1", steps: NAME_STEPS },
+        { output: "first_name_2", input: "n2", steps: NAME_STEPS },
+        { output: "first_name_3", input: "n3", steps: NAME_STEPS },
+      ],
+      keys: [
+        {
+          key: { name: "solo", elements: [{ field: "first_name" }] },
+          enabled: true,
+        },
+        {
+          key: { name: "second", elements: [{ field: "first_name_2" }] },
+          enabled: true,
+        },
+        {
+          // One supplyable element, one not -- the key as a whole is unsupplyable.
+          key: {
+            name: "composite",
+            elements: [{ field: "first_name" }, { field: "first_name_3" }],
+          },
+          enabled: true,
+        },
+      ],
+    });
+    const seed = seedFor(twoNameColumns, twoNameMetadata);
+    const imported = draftFromTerms(document, seed, 3600, []);
+
+    expect(enabledByName(imported)).toEqual({
+      solo: true,
+      second: true,
+      composite: false,
+    });
+    // The supplyable keys still generate; re-enabling the composite key blocks with the
+    // accurate message, not the misleading no-keys one.
+    expect(validateAdvancedInvite(imported, seed, NOW).canGenerate).toBe(true);
+    const reEnabled: AdvancedInviteDraft = {
+      ...imported,
+      keys: imported.keys.map((entry) =>
+        entry.key.name === "composite" ? { ...entry, enabled: true } : entry,
+      ),
+    };
+    const blocked = validateAdvancedInvite(reEnabled, seed, NOW);
+    expect(blocked.canGenerate).toBe(false);
+    expect(blocked.errors.keys).toMatch(/cannot supply/);
+  });
+
+  test("import enables a key iff building it alone yields schema-valid terms (disable/build lockstep)", () => {
+    // The disable-on-import predicate (declarableFieldNames + keyIsSupplyable) and the
+    // field set buildAdvancedTerms declares both derive from the SAME
+    // (metadata, standardization) pair, so a key is imported enabled exactly when it
+    // does not dangle the built terms. Pin that lockstep executably: a refactor that let
+    // buildAdvancedTerms derive its linkageFields differently from declarableFieldNames
+    // would re-block a partial import (an enabled key dangling) or silently drop a usable
+    // one (a satisfiable key disabled), and this assertion would fail rather than the
+    // regression shipping silently.
+    const exported = threeNameDocument();
+    const seed = seedFor(twoNameColumns, twoNameMetadata);
+    const imported = draftFromTerms(exported, seed, 3600, []);
+    expect(imported.keys.length).toBeGreaterThan(0);
+    for (const entry of imported.keys) {
+      const builtAlone = buildAdvancedTerms({
+        ...imported,
+        keys: imported.keys.map((other) => ({
+          ...other,
+          enabled: other.key.name === entry.key.name,
+        })),
+      });
+      expect(safeParseLinkageTerms(builtAlone).success).toBe(entry.enabled);
+    }
+  });
 });
