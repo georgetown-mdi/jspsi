@@ -75,9 +75,10 @@ vi.mock("@components/ExchangeView", () => ({
   },
 }));
 
-// The CSV the harness's "select file" button seeds. A hoisted handle so a test can
-// pick the file's columns before clicking (InvitePanel reads the header to derive
-// the "What you will send" disclosure); defaults to a single `other` column.
+// The CSV the harness's "select file" button seeds into the lifted file selection,
+// standing in for the home page's shared drop. A hoisted handle so a test could vary
+// it; the contents do not matter here (InvitePanel gates on a file being present,
+// not on its columns -- the column disclosure now lives in DefaultExchangeColumns).
 const fileSeed = vi.hoisted(() => ({
   content: ["c\n1\n"] as Array<string>,
   name: "data.csv",
@@ -166,22 +167,19 @@ afterEach(() => {
 });
 
 describe("InvitePanel compose screen", () => {
-  test("Advanced Options appears only once a file is chosen and navigates to the editor", async () => {
+  test("Advanced Options is disabled until a file is chosen, then navigates to the editor", async () => {
     gen.impl = () => Promise.resolve(generated);
     mount();
 
-    // No file yet: the lone Advanced Options link (now inside the disclosure) is
-    // absent -- there is nothing to take into the editor.
-    expect(page.getByText("Advanced Options").query()).toBeNull();
+    // The button is always present beside Generate, but disabled until a file gives
+    // the editor something to seed from. (The disclosure of what a file would send
+    // moved out to the shared drop's "Default exchange columns"; this is the one
+    // remaining control over it.)
+    const advanced = page.getByRole("button", { name: "Advanced Options" });
+    await expect.element(advanced).toBeDisabled();
 
     await userEvent.click(page.getByTestId("select-file"));
-
-    const advanced = page.getByText("Advanced Options");
-    await expect.element(advanced).toBeInTheDocument();
-    const el = advanced.element() as HTMLElement;
-    // A real, enabled control -- a BUTTON, not aria-disabled.
-    expect(el.tagName).toBe("BUTTON");
-    expect(el.getAttribute("aria-disabled")).not.toBe("true");
+    await expect.element(advanced).toBeEnabled();
 
     await userEvent.click(advanced);
     expect(nav.calls).toContainEqual({ to: "/advanced" });
@@ -194,8 +192,8 @@ describe("InvitePanel compose screen", () => {
     await userEvent.fill(page.getByRole("textbox"), "  Dr. Jane  ");
     await userEvent.click(page.getByTestId("select-file"));
 
-    const advanced = page.getByText("Advanced Options");
-    await expect.element(advanced).toBeInTheDocument();
+    const advanced = page.getByRole("button", { name: "Advanced Options" });
+    await expect.element(advanced).toBeEnabled();
     await userEvent.click(advanced);
 
     // The editor route reads this in-memory hand-off on arrival: the chosen file
@@ -204,56 +202,6 @@ describe("InvitePanel compose screen", () => {
     expect(handoff?.file).toBeInstanceOf(File);
     expect(handoff?.name).toBe("Dr. Jane");
     expect(nav.calls).toContainEqual({ to: "/advanced" });
-  });
-
-  test("surfaces exactly the columns the quick path will send, as a chip list", async () => {
-    gen.impl = () => Promise.resolve(generated);
-    // first_name (linkage, not sent), record_id (inferred row identifier, still
-    // sent on the un-normalized quick path), notes (other, sent).
-    fileSeed.content = ["first_name,record_id,notes\n", "Alice,1,vip\n"];
-    mount();
-    await userEvent.click(page.getByTestId("select-file"));
-
-    await expect
-      .element(page.getByText("What you will send"))
-      .toBeInTheDocument();
-    // The disclosed set, derived from the same predicate the wire uses -- the
-    // identifier and other columns, never the linkage one -- shown as chips.
-    await expect.element(page.getByText("record_id")).toBeInTheDocument();
-    await expect.element(page.getByText("notes")).toBeInTheDocument();
-    expect(document.body.textContent).not.toContain("first_name");
-  });
-
-  test("shows the no-columns disclosure (still with Advanced Options) when the quick path sends nothing", async () => {
-    gen.impl = () => Promise.resolve(generated);
-    // Start with a disclosing file so the chip list is present...
-    fileSeed.content = ["first_name,notes\n", "Alice,vip\n"];
-    mount();
-    await userEvent.click(page.getByTestId("select-file"));
-    await expect
-      .element(page.getByText(/For each row in your file that matches/))
-      .toBeInTheDocument();
-
-    // ...then choose a file whose columns are all linkage types, so nothing is
-    // disclosed: the chip sentence is withdrawn, but the disclosure stays so the
-    // user still learns nothing is sent AND still has the one Advanced Options link.
-    fileSeed.content = ["first_name,ssn\n", "Alice,123-45-6789\n"];
-    await userEvent.click(page.getByTestId("select-file"));
-    await expect
-      .element(
-        page.getByText("No column values will be sent to your partner.", {
-          exact: false,
-        }),
-      )
-      .toBeInTheDocument();
-    // The chip sentence is gone -- awaited (not a synchronous query), so the async
-    // header re-read has settled before its absence is asserted.
-    await expect
-      .element(page.getByText(/For each row in your file that matches/))
-      .not.toBeInTheDocument();
-    await expect
-      .element(page.getByText("Advanced Options"))
-      .toBeInTheDocument();
   });
 
   test("on success, transitions to the exchange screen carrying share artifacts, terms, rows, secret", async () => {

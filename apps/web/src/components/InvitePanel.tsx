@@ -1,9 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   Alert,
-  Anchor,
-  Badge,
   Button,
   Group,
   Paper,
@@ -16,15 +14,10 @@ import { IconAlertCircle } from "@tabler/icons-react";
 import { useForm } from "@tanstack/react-form";
 import { useNavigate } from "@tanstack/react-router";
 
-import {
-  loadCSVColumns,
-  sanitizeErrorForDisplay,
-  sanitizeForDisplay,
-} from "@psilink/core";
+import { sanitizeErrorForDisplay, sanitizeForDisplay } from "@psilink/core";
 
 import { InvitationFileError, generateInvitation } from "@psi/invitation";
 import { invitationLocation } from "@psi/invitationLocation";
-import { quickInviteDisclosedColumns } from "@psi/metadataEditing";
 import { unnameableColumnsAlert } from "@psi/columnNames";
 
 import { ExchangeView } from "@components/ExchangeView";
@@ -74,38 +67,6 @@ export function InvitePanel({ session, setSession, files }: InvitePanelProps) {
   // defensive.)
   const filesRef = useRef<Array<File>>(files);
   filesRef.current = files;
-  // The columns the quick path will send to the partner, surfaced as an awareness
-  // statement before the operator generates. `undefined` while no file is chosen
-  // or its header read is still in flight; an empty array means the quick path
-  // would send nothing. Derived from the SAME predicate the wire uses (see
-  // quickInviteDisclosedColumns), so it cannot drift from what is actually
-  // transmitted.
-  const [disclosedColumns, setDisclosedColumns] = useState<Array<string>>();
-
-  // Read the chosen file's header (only the header -- see loadCSVColumns) and
-  // compute the quick-path disclosure each time the selection changes. Best-effort
-  // awareness: a read error is swallowed here (the statement just stays hidden);
-  // the authoritative full parse and its surfaced error happen at generate. The
-  // cleanup flag drops a stale or post-unmount result -- selecting a new file (or
-  // navigating to Advanced) supersedes an in-flight read of the previous one.
-  useEffect(() => {
-    if (files.length === 0) {
-      setDisclosedColumns(undefined);
-      return;
-    }
-    const file = files[0];
-    let cancelled = false;
-    setDisclosedColumns(undefined);
-    void loadCSVColumns(file)
-      .then((columns) => {
-        if (!cancelled)
-          setDisclosedColumns(quickInviteDisclosedColumns(columns));
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [files]);
 
   const form = useForm({
     defaultValues: { inviterName: "" },
@@ -203,9 +164,9 @@ export function InvitePanel({ session, setSession, files }: InvitePanelProps) {
 
   // Open the column-aware editor, handing off the already-chosen file and name in
   // memory (a File cannot ride the URL) so the editor opens seeded without a
-  // re-drop. The lone "Advanced Options" link lives inside the disclosure, which
-  // renders only after a file's header has been read, so a file is always present
-  // when this fires; guard defensively rather than hand off an undefined file.
+  // re-drop. The "Advanced Options" button is disabled until a file is chosen, so a
+  // file is present when this fires; guard defensively rather than hand off an
+  // undefined file.
   const openAdvanced = () => {
     if (filesRef.current.length === 0) return;
     stashAdvancedHandoff({
@@ -274,89 +235,23 @@ export function InvitePanel({ session, setSession, files }: InvitePanelProps) {
               />
             )}
           />
-          {/* Awareness surface, sitting directly above Generate so it is the last
-              thing read before the operator commits -- a consent receipt for what
-              leaves the machine, not a settings panel. Wrapped in a standing polite
-              live region so its asynchronous appearance after a file is chosen is
-              announced; aria-atomic so the heading, sentence, chips, and link read
-              as one unit. It appears once a file's header has been read (whether or
-              not the quick path sends anything), so the single "Advanced Options"
-              link is reachable exactly when a file is chosen -- replacing the old
-              standing link and its duplicate inside the statement. The disclosed set
-              derives from the same predicate the wire uses, so it cannot over- or
-              under-state what leaves the machine; column names are the operator's
-              own but sanitized for display. */}
-          <div role="status" aria-live="polite" aria-atomic="true">
-            {disclosedColumns !== undefined && (
-              <Paper withBorder p="md">
-                <Text size="sm" fw={600} mb={4}>
-                  What you will send
-                </Text>
-                {disclosedColumns.length > 0 ? (
-                  <>
-                    <Text size="sm">
-                      For each row in your file that matches, your partner
-                      receives{" "}
-                      {disclosedColumns.length === 1
-                        ? "this column"
-                        : `these ${disclosedColumns.length} columns`}
-                      :
-                    </Text>
-                    {/* Informational chips, not controls: a non-interactive Badge
-                        list (no onClick, no Chip/Pill toggle or remove affordance),
-                        marked up as a list so assistive tech reads "N columns" and
-                        each name as a list item. Changing what is sent happens in
-                        Advanced, never by editing a chip. tt="none" keeps the
-                        operator's column names verbatim rather than upper-casing
-                        them into system-looking tokens. */}
-                    <Group
-                      gap="xs"
-                      mt="xs"
-                      role="list"
-                      aria-label="Columns sent to your partner"
-                    >
-                      {disclosedColumns.map((name) => (
-                        <Badge
-                          key={name}
-                          role="listitem"
-                          variant="light"
-                          color="gray"
-                          tt="none"
-                          radius="sm"
-                          size="md"
-                          style={{ cursor: "default" }}
-                        >
-                          {sanitizeForDisplay(name)}
-                        </Badge>
-                      ))}
-                    </Group>
-                    <Text size="xs" c="dimmed" mt="xs">
-                      Your partner never receives the values in your
-                      non-matching rows.
-                    </Text>
-                  </>
-                ) : (
-                  <Text size="sm">
-                    No column values will be sent to your partner. Your
-                    file&apos;s columns are used only to find matches.
-                  </Text>
-                )}
-                <Anchor
-                  component="button"
-                  type="button"
-                  ta="left"
-                  mt="xs"
-                  style={{ width: "fit-content" }}
+          {/* Action row: the secondary "Advanced Options" sits to the left of the
+              primary "Generate invitation". Both need a chosen file -- Advanced
+              seeds the editor from it, Generate mints from it -- so both are disabled
+              until the shared drop below holds one. The file's default exchange
+              columns are surfaced under that drop (see DefaultExchangeColumns), not
+              here, so a partner reviewing the accept box does not see an invite-side
+              disclosure pop up. */}
+          <form.Subscribe selector={(s) => s.isSubmitting}>
+            {(isSubmitting) => (
+              <Group justify="flex-end" mt="sm">
+                <Button
+                  variant="default"
+                  disabled={files.length === 0}
                   onClick={openAdvanced}
                 >
                   Advanced Options
-                </Anchor>
-              </Paper>
-            )}
-          </div>
-          <form.Subscribe selector={(s) => s.isSubmitting}>
-            {(isSubmitting) => (
-              <Group justify="center" mt="sm">
+                </Button>
                 <Button
                   disabled={files.length === 0 || isSubmitting}
                   onClick={() => void form.handleSubmit()}

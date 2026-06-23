@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Box, Grid, Paper, Stack, Text, Title } from "@mantine/core";
 
 import AcceptForm from "@components/AcceptForm";
+import { DefaultExchangeColumns } from "@components/DefaultExchangeColumns";
 import { EXCHANGE_READING_WIDTH } from "@components/contentWidth";
 import FileDropzone from "@components/FileDropzone";
 import { InvitePanel } from "@components/InvitePanel";
@@ -94,6 +95,11 @@ export function HomePage() {
                 matching; it is never uploaded.
               </Text>
               <FileDropzone files={files} setFiles={setFiles} />
+              {/* The file's default exchange columns surface here, under the file
+                  they come from -- shared by both paths -- rather than inside the
+                  invite panel, so they do not pop up when the operator only means to
+                  accept. The invite panel's "Advanced Options" changes them. */}
+              <DefaultExchangeColumns files={files} />
             </Stack>
           </Paper>
         </Stack>
