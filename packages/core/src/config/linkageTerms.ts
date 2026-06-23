@@ -1115,20 +1115,34 @@ export function safeParseLinkageTerms(raw: unknown) {
  *   its mirror); for any one-sided configuration a copy makes both sides claim to
  *   receive, fails the mirror, and aborts the exchange before any data moves.
  *
- * `deduplicate` and `payload` are left as adopted from the inviter's terms. Both
- * are per-party in principle, but the web Advanced-options editor and the CLI
- * default acceptance never author either one-sided (`deduplicate` stays false, and
- * no `payload` block is authored), so for the configurations those front ends
- * produce a verbatim adoption is correct and the mirror is always coherent.
- * Mirroring per-party payload `send`/`receive` lists is deferred to the payload-
- * authoring work. Metadata and standardization stay per-party and local (they are
- * never embedded in the token); this function shapes only the agreed linkage terms.
+ * - `payload` is MIRRORED, for the same reason as `output`:
+ *   {@link validateCompatibility} compares payload as a `send` <-> `receive` mirror,
+ *   so the acceptor's `send` is the inviter's `receive` and its `receive` is the
+ *   inviter's `send`. A verbatim copy is only accidentally correct for symmetric
+ *   payload; the common invite/accept shape (the inviter authors a `send` and no
+ *   `receive`) fails the mirror under a copy. With the inviter's `receive` absent,
+ *   the acceptor's `send` comes out absent -- which is correct: the acceptor's own
+ *   transmission is governed by its metadata, and the inviter is lazy about what it
+ *   receives (an unauthored `receive` is not cross-checked; see
+ *   {@link validateCompatibility}). The acceptor's `receive` becomes the inviter's
+ *   `send`, so the acceptor validates exactly what it will get.
+ *
+ * `deduplicate` is left as adopted from the inviter's terms. It is per-party in
+ * principle, but the web Advanced-options editor and the CLI default acceptance
+ * never author it one-sided (`deduplicate` stays false), so for the configurations
+ * those front ends produce a verbatim adoption is correct and the mirror is always
+ * coherent. Metadata and standardization stay per-party and local (they are never
+ * embedded in the token); this function shapes only the agreed linkage terms.
  *
  * It fails closed. A config that is valid for the INVITER can mirror to one that is
- * incoherent for the acceptor: an inviter that is the sole receiver
- * (`expectsOutput: true`) may carry `deduplicate: true` or a non-empty
- * `payload.receive`, both of which require receiving output -- but the acceptor
- * mirrors to `expectsOutput: false`, which the schema's cross-field rules forbid.
+ * incoherent for the acceptor: an inviter that is the sole receiver (it shares no
+ * result with the partner) may carry `deduplicate: true` or a non-empty
+ * `payload.send`, both of which require the PARTNER to receive output --
+ * `deduplicate` is adopted onto the acceptor, and the inviter's `send` mirrors to
+ * the acceptor's `receive` -- but the acceptor mirrors to `expectsOutput: false`,
+ * which the schema's cross-field rules forbid. (The inviter's own `payload.receive`
+ * mirrors to the acceptor's `send`, which needs no output, so it is never the
+ * trigger.)
  * The front ends above never produce such an inviter config, but a hand-authored
  * CLI config or a crafted invitation token could, and the derived terms are not
  * otherwise re-validated before the run. So the derived terms are re-checked
@@ -1153,6 +1167,17 @@ export function deriveAcceptedLinkageTerms(
       shareWithPartner: inviterTerms.output.expectsOutput,
     },
   };
+  // Mirror the payload `send`/`receive` (see the doc comment). Built explicitly so
+  // an absent inviter `receive` yields an absent acceptor `send` (rather than an
+  // empty list), keeping the acceptor lazy on a direction the inviter left open.
+  if (inviterTerms.payload !== undefined) {
+    const mirrored: Payload = {};
+    if (inviterTerms.payload.receive !== undefined)
+      mirrored.send = inviterTerms.payload.receive;
+    if (inviterTerms.payload.send !== undefined)
+      mirrored.receive = inviterTerms.payload.send;
+    derived.payload = mirrored;
+  }
   // Fail closed on an inviter config that mirrors to an incoherent acceptor config
   // (see the doc comment). safeParse is a validity gate only; return the object we
   // built, not parsed.data, so the canonical/agreed-terms bytes are unchanged.
@@ -1160,8 +1185,11 @@ export function deriveAcceptedLinkageTerms(
     throw new Error(
       "the invitation's linkage terms cannot be accepted unchanged: mirroring " +
         "the output direction for the accepting party produced an incompatible " +
-        "configuration (a party that receives no output cannot deduplicate or " +
-        "receive payload columns)",
+        "configuration. The inviter is the sole receiver of the matched result, " +
+        "yet its terms also have the accepting party deduplicate or receive " +
+        "payload columns the inviter sends -- neither is possible for a party " +
+        "that receives no result. Ask the inviter to share the result, or to " +
+        "drop those settings.",
     );
   }
   return derived;
@@ -1373,43 +1401,74 @@ export function validateCompatibility(
     }
   }
 
-  // Compare the raw, comma-joined names; display each name sanitized. A column
-  // name is partner-controlled free text, so the displayed list is escaped
-  // per-name while the equality check stays byte-exact.
-  const localSendNames = (local.payload?.send ?? []).map((c) => c.name).sort();
-  const partnerReceiveNames = (partner.payload?.receive ?? [])
-    .map((c) => c.name)
-    .sort();
-  if (localSendNames.join(",") !== partnerReceiveNames.join(",")) {
-    const localShown = localSendNames
-      .map((n) => sanitizeForDisplay(n))
-      .join(",");
-    const partnerShown = partnerReceiveNames
-      .map((n) => sanitizeForDisplay(n))
-      .join(",");
-    errors.push(
-      `payload mismatch: local send columns [${localShown}] do not match ` +
-        `partner receive columns [${partnerShown}]`,
-    );
+  // Payload mirror, LAZY on the receive side. Each of the two directions is gated
+  // on whether the RECEIVING party declared a `payload.receive` expectation:
+  //
+  // - `receive` DECLARED (the field is present, even if empty) asserts "I expect
+  //   exactly these columns": the partner's `send` must match it byte-for-byte or
+  //   the exchange aborts -- the strict mirror, unchanged. This is the recurring /
+  //   loaded-config case, where both parties carry an agreed payload.
+  // - `receive` ABSENT means "take whatever I'm given": that direction is skipped.
+  //   This is what lets the invite/accept flow reconcile without the inviter
+  //   knowing the acceptor's schema. The inviter authors only its `send` and leaves
+  //   `receive` unset (lazy); the acceptor mirrors the inviter's `send` into its own
+  //   `receive` and so validates exactly what it will get; and the inviter accepts
+  //   whatever the acceptor discloses. A zero-setup exchange, which authors no
+  //   payload, is lazy on both sides.
+  //
+  // Laziness relaxes only this cross-party DECLARATION check; it never widens what a
+  // party sends. Transmission is governed by each party's own metadata
+  // (`isDisclosedToPartner`) and the forward-only `assertPayloadSendDisclosed`, both
+  // unchanged -- so a lazy receiver accepts only what the sender's own consented
+  // metadata discloses, and receiving is not disclosing. The gate is symmetric: each
+  // direction keys on the same receiver's declared `receive`, so the two parties
+  // (which call this with swapped arguments) compute identical verdicts. Names are
+  // displayed sanitized (partner-controlled free text) while the equality is
+  // byte-exact and element-wise -- compared per sorted column, NOT by a
+  // delimiter-joined string, so a partner-controlled name containing the separator
+  // cannot make two distinct sets join equal (`["a,b"]` vs `["a","b"]`) and slip a
+  // genuine mismatch past the check. Matching the messages elsewhere.
+  const sameColumnSet = (a: Array<string>, b: Array<string>): boolean =>
+    a.length === b.length && a.every((name, i) => name === b[i]);
+
+  if (partner.payload?.receive !== undefined) {
+    const partnerReceiveNames = partner.payload.receive
+      .map((c) => c.name)
+      .sort();
+    const localSendNames = (local.payload?.send ?? [])
+      .map((c) => c.name)
+      .sort();
+    if (!sameColumnSet(localSendNames, partnerReceiveNames)) {
+      const localShown = localSendNames
+        .map((n) => sanitizeForDisplay(n))
+        .join(",");
+      const partnerShown = partnerReceiveNames
+        .map((n) => sanitizeForDisplay(n))
+        .join(",");
+      errors.push(
+        `payload mismatch: local send columns [${localShown}] do not match ` +
+          `partner receive columns [${partnerShown}]`,
+      );
+    }
   }
 
-  const localReceiveNames = (local.payload?.receive ?? [])
-    .map((c) => c.name)
-    .sort();
-  const partnerSendNames = (partner.payload?.send ?? [])
-    .map((c) => c.name)
-    .sort();
-  if (localReceiveNames.join(",") !== partnerSendNames.join(",")) {
-    const localShown = localReceiveNames
-      .map((n) => sanitizeForDisplay(n))
-      .join(",");
-    const partnerShown = partnerSendNames
-      .map((n) => sanitizeForDisplay(n))
-      .join(",");
-    errors.push(
-      `payload mismatch: local receive columns [${localShown}] do not ` +
-        `match partner send columns [${partnerShown}]`,
-    );
+  if (local.payload?.receive !== undefined) {
+    const localReceiveNames = local.payload.receive.map((c) => c.name).sort();
+    const partnerSendNames = (partner.payload?.send ?? [])
+      .map((c) => c.name)
+      .sort();
+    if (!sameColumnSet(localReceiveNames, partnerSendNames)) {
+      const localShown = localReceiveNames
+        .map((n) => sanitizeForDisplay(n))
+        .join(",");
+      const partnerShown = partnerSendNames
+        .map((n) => sanitizeForDisplay(n))
+        .join(",");
+      errors.push(
+        `payload mismatch: local receive columns [${localShown}] do not ` +
+          `match partner send columns [${partnerShown}]`,
+      );
+    }
   }
 
   return { errors, warnings };

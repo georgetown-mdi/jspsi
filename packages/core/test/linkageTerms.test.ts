@@ -1506,6 +1506,84 @@ test("matching payload send/receive columns are compatible", () => {
   expect(errors.filter((e) => e.includes("payload"))).toHaveLength(0);
 });
 
+test("payload is lazy: an unauthored receive accepts any partner send", () => {
+  // The invite/accept shape: the inviter authors a send and leaves receive unset
+  // (lazy), the acceptor mirrors that send into its own receive. The inviter's lazy
+  // direction (its absent receive vs the acceptor's send) is skipped, so the
+  // acceptor may disclose columns the inviter never enumerated without aborting.
+  const inviter = {
+    ...termsA,
+    payload: { send: [{ name: "enrollment_date" }] },
+  };
+  const acceptor = {
+    ...termsB,
+    payload: {
+      send: [{ name: "case_id" }, { name: "extra_col" }],
+      receive: [{ name: "enrollment_date" }],
+    },
+  };
+  expect(
+    validateCompatibility(inviter, acceptor).errors.filter((e) =>
+      e.includes("payload"),
+    ),
+  ).toHaveLength(0);
+  expect(
+    validateCompatibility(acceptor, inviter).errors.filter((e) =>
+      e.includes("payload"),
+    ),
+  ).toHaveLength(0);
+});
+
+test("payload is lazy on both sides when neither authors a receive (zero-setup)", () => {
+  // Neither party declares a receive: each sends its own disclosed columns and
+  // takes whatever the other sends, so no payload mismatch can fire even though the
+  // two send lists differ.
+  const x = { ...termsA, payload: { send: [{ name: "a_col" }] } };
+  const y = { ...termsB, payload: { send: [{ name: "b_col" }] } };
+  expect(
+    validateCompatibility(x, y).errors.filter((e) => e.includes("payload")),
+  ).toHaveLength(0);
+  expect(
+    validateCompatibility(y, x).errors.filter((e) => e.includes("payload")),
+  ).toHaveLength(0);
+});
+
+test("a declared receive still aborts when the partner's send does not satisfy it", () => {
+  // Strict mode is preserved: a party that declares a receive (a loaded/recurring
+  // config) demands the partner send exactly that, even when the reverse direction
+  // is lazy.
+  const local = { ...termsA, payload: { receive: [{ name: "needed_col" }] } };
+  const partner = {
+    ...termsB,
+    payload: { send: [{ name: "something_else" }] },
+  };
+  expect(
+    validateCompatibility(local, partner).errors.some((e) =>
+      e.includes("payload mismatch"),
+    ),
+  ).toBe(true);
+});
+
+test("payload comparison is element-wise: a comma in a column name does not alias the set", () => {
+  // The column-name sets are compared per sorted element, not by a comma-joined
+  // string. A partner-controlled name containing the separator must not collapse
+  // two distinct sets into an equal join: send ["a,b"] against receive ["a","b"]
+  // is a genuine mismatch, not a match.
+  const local = {
+    ...termsA,
+    payload: { send: [{ name: "a,b" }], receive: [{ name: "z" }] },
+  };
+  const partner = {
+    ...termsB,
+    payload: { send: [{ name: "z" }], receive: [{ name: "a" }, { name: "b" }] },
+  };
+  expect(
+    validateCompatibility(local, partner).errors.some((e) =>
+      e.includes("payload mismatch"),
+    ),
+  ).toBe(true);
+});
+
 // ─── validateCompatibility: partner-string sanitization ──────────────────────
 // A mismatch echoes a partner-supplied value into operator-facing output; these
 // pin that every such value is routed through sanitizeForDisplay (control/ANSI
@@ -2425,18 +2503,63 @@ test("deriveAcceptedLinkageTerms fails closed when the mirror is incoherent (ded
   ).toThrow(/cannot be accepted unchanged/);
 });
 
-test("deriveAcceptedLinkageTerms fails closed when the mirror is incoherent (payload.receive)", () => {
-  // Same shape via payload: an inviter sole-receiver with a non-empty
-  // payload.receive mirrors to expectsOutput: false with a non-empty receive list,
-  // which the schema forbids (a non-receiving party gets no payload columns).
+test("deriveAcceptedLinkageTerms fails closed when the mirror is incoherent (payload.send to a non-receiving partner)", () => {
+  // Same shape via payload, but through the MIRROR: an inviter that is the sole
+  // receiver (shareWithPartner: false) yet declares a payload.send is asking the
+  // partner to send columns for matched records the partner never receives. The
+  // acceptor mirrors that send into its own receive while mirroring to
+  // expectsOutput: false, which the schema forbids -- so the derivation throws
+  // rather than produce an invalid, never-re-validated config. (This is the case
+  // the web editor blocks live: see the advanced-invite coherence rule.)
+  const inviterTerms: LinkageTerms = {
+    ...inviterBase,
+    output: { expectsOutput: true, shareWithPartner: false },
+    payload: { send: [{ name: "dose" }] },
+  };
+  expect(() =>
+    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
+  ).toThrow(/cannot be accepted unchanged/);
+});
+
+test("deriveAcceptedLinkageTerms mirrors payload send/receive (asymmetric invite/accept shape)", () => {
+  // The common invite/accept shape: the inviter authors a payload.send (columns it
+  // will give the partner) and leaves receive unauthored (lazy -- it takes whatever
+  // the partner discloses). The acceptor's payload is the MIRROR: receive becomes
+  // the inviter's send (so it validates exactly what it gets) and send comes out
+  // absent (the inviter's absent receive), keeping the acceptor lazy on that
+  // direction. Both sides pass validateCompatibility.
+  const inviterTerms: LinkageTerms = {
+    ...inviterBase,
+    output: { expectsOutput: true, shareWithPartner: true },
+    payload: {
+      send: [{ name: "enrollment_date", description: "Date enrolled" }],
+    },
+  };
+  const derived = deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org");
+  expect(derived.payload).toStrictEqual({
+    receive: [{ name: "enrollment_date", description: "Date enrolled" }],
+  });
+  expect(derived.payload?.send).toBeUndefined();
+  expect(validateCompatibility(inviterTerms, derived).errors).toEqual([]);
+  expect(validateCompatibility(derived, inviterTerms).errors).toEqual([]);
+});
+
+test("deriveAcceptedLinkageTerms accepts a sole-receiver inviter that REQUESTS payload (mirror is coherent)", () => {
+  // An inviter sole-receiver (shareWithPartner: false) may validly REQUEST payload
+  // (payload.receive): it receives output, so it can attach what it receives. The
+  // mirror turns that into the acceptor SENDING (payload.send) while it receives no
+  // output -- which is coherent (sending needs no output) -- so the derivation must
+  // NOT throw, and the acceptor's receive stays absent (lazy).
   const inviterTerms: LinkageTerms = {
     ...inviterBase,
     output: { expectsOutput: true, shareWithPartner: false },
     payload: { receive: [{ name: "dob" }] },
   };
-  expect(() =>
-    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
-  ).toThrow(/cannot be accepted unchanged/);
+  const derived = deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org");
+  expect(derived.payload).toStrictEqual({ send: [{ name: "dob" }] });
+  expect(derived.payload?.receive).toBeUndefined();
+  expect(validateCompatibility(inviterTerms, derived).errors).toEqual([]);
+  expect(validateCompatibility(derived, inviterTerms).errors).toEqual([]);
 });
 
 test("deriveAcceptedLinkageTerms accepts a coherent deduplicate config (no false positive)", () => {

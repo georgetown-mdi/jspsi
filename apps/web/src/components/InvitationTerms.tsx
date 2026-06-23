@@ -420,9 +420,17 @@ export function InvitationTerms({
 
             {summary.payload !== undefined && (
               <Term label="Additional data for matched records">
+                {/* Viewer-centric, like Result sharing: under "proposing" the
+                    inviter reads its OWN send/receive first-person ("You will
+                    send"), while the acceptor reads them as the partner's ("Your
+                    partner will send"). The columns are the same either way. */}
                 {summary.payload.send.length > 0 && (
                   <Stack gap={2}>
-                    <Text size="sm">Your partner will send:</Text>
+                    <Text size="sm">
+                      {perspective === "proposing"
+                        ? "You will send:"
+                        : "Your partner will send:"}
+                    </Text>
                     {/* One column per item rather than a joined string: a
                       partner-controlled column name may contain the separator,
                       which joined text would render as spurious extra columns.
@@ -437,7 +445,11 @@ export function InvitationTerms({
                 )}
                 {summary.payload.receive.length > 0 && (
                   <Stack gap={2}>
-                    <Text size="sm">Your partner requests from you:</Text>
+                    <Text size="sm">
+                      {perspective === "proposing"
+                        ? "You request from your partner:"
+                        : "Your partner requests from you:"}
+                    </Text>
                     <List size="sm" withPadding listStyleType="circle">
                       {summary.payload.receive.map((column, index) => (
                         <List.Item key={index}>{column}</List.Item>

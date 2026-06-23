@@ -5,6 +5,7 @@ import {
   assessLinkageSatisfiability,
   authoredLinkageFields,
   canonicalString,
+  disclosedColumnNames,
   getDefaultLinkageTerms,
   getDefaultStandardization,
   inferDateFormat,
@@ -182,6 +183,7 @@ export type AdvancedField =
   | "legalReference"
   | "legalPurpose"
   | "legalExpiration"
+  | "payload"
   | "keys";
 
 /** The result of validating a draft: whether Generate may proceed, the built
@@ -446,6 +448,25 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
     linkageKeys: enabledKeys,
   };
 
+  // Author the payload data dictionary (terms.payload.send) from the columns the
+  // metadata DISCLOSES -- disclosedColumnNames over the draft metadata, the same
+  // isDisclosedToPartner predicate that gates transmission (preparePayload). Because
+  // the send list is DERIVED from the disclosed set, it is always a subset of (in
+  // fact equal to) what actually leaves the machine, so it can never trip core's
+  // assertPayloadSendDisclosed over-declaration reject -- the structural form of the
+  // task's footgun guard. `receive` is left unauthored: the inviter does not have
+  // the partner's schema, so it takes whatever the partner discloses
+  // (validateCompatibility is lazy on an absent receive; the acceptor mirrors this
+  // send into its own receive and validates it exactly). The send is emitted
+  // regardless of output direction so the preview states honestly what transmits;
+  // the incoherent "send while only I receive" case is blocked by
+  // validateAdvancedInvite rather than by silently dropping the (still-transmitted)
+  // columns from the declaration.
+  const sentColumns = disclosedColumnNames(draft.metadata);
+  if (sentColumns.length > 0) {
+    terms.payload = { send: sentColumns.map((name) => ({ name })) };
+  }
+
   if (draft.legalAgreement !== undefined) {
     terms.legalAgreement = {
       reference: normalizeText(draft.legalAgreement.reference),
@@ -509,6 +530,25 @@ export function validateAdvancedInvite(
   const enabledCount = draft.keys.filter((entry) => entry.enabled).length;
   if (enabledCount === 0) {
     errors.keys = "Enable at least one linkage key.";
+  }
+
+  // The "non-receiving-party-cannot-receive" rule, enforced live: sending payload
+  // to a partner that receives no result is incoherent -- the partner has no matched
+  // records to attach it to, and the acceptor's mirror (receive = this send, with
+  // expectsOutput false) is exactly what the schema rejects at accept time
+  // (deriveAcceptedLinkageTerms throws). Block it here so the inviter never mints an
+  // invitation the partner cannot accept. The check reads the same disclosed set
+  // buildAdvancedTerms derives the send from, so it fires precisely when the built
+  // terms carry a payload.send the chosen direction makes unacceptable.
+  if (
+    !outputForDirection(draft.outputDirection).shareWithPartner &&
+    disclosedColumnNames(draft.metadata).length > 0
+  ) {
+    errors.payload =
+      "Some columns are set to be sent to your partner, but you chose that only " +
+      "you receive the matched results. Your partner cannot receive payload for a " +
+      "result it does not get. Either share the results with your partner, or set " +
+      "those columns so they are not sent.";
   }
 
   const parsed = safeParseLinkageTerms(terms);
@@ -599,6 +639,9 @@ function fieldForIssuePath(path: ReadonlyArray<PropertyKey>): AdvancedField {
     if (sub === "purpose") return "legalPurpose";
     if (sub === "expirationDate") return "legalExpiration";
   }
+  // A payload-column schema failure (e.g. a sent column whose name exceeds the
+  // length bound) surfaces against the payload control, not the key list.
+  if (head === "payload") return "payload";
   // linkageKeys, linkageFields, and anything else the editor can influence
   // surface against the key list (the only structural control it offers).
   return "keys";
@@ -619,6 +662,11 @@ function messageForField(field: AdvancedField): string {
       return "Enter a valid date (YYYY-MM-DD).";
     case "lifetime":
       return "Choose an invitation lifetime between 1 second and one year.";
+    case "payload":
+      // The common payload error (sending while only you receive) is set with its
+      // own message in validateAdvancedInvite; this covers a schema failure on a
+      // sent column (e.g. an over-long column name from the CSV).
+      return "One or more columns you are sending cannot be used; adjust which columns are sent.";
     case "keys":
       return "Enable at least one linkage key.";
   }

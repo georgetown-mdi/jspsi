@@ -42,8 +42,11 @@ import {
   setDraftMetadata,
   validateAdvancedInvite,
 } from "@psi/advancedInvite";
+import {
+  disclosedColumnNames,
+  hasMultipleIdentifiers,
+} from "@psi/metadataEditing";
 import { APPLIED_SETTINGS } from "@psi/appliedSettings";
-import { hasMultipleIdentifiers } from "@psi/metadataEditing";
 
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 import { InvitationTerms } from "@components/InvitationTerms";
@@ -109,15 +112,18 @@ const LIFETIME_OPTIONS: Array<{ value: string; label: string }> = [
  * supports -- identity, invitation lifetime, an optional legal agreement, and which
  * linkage keys are active and in what order.
  *
- * The matching algorithm, deduplication, fuzzy comparisons, and payload columns
- * are deliberately NOT settable here (see {@link buildAdvancedTerms}): each is a
- * capability not yet honored end-to-end or tracked as its own authoring task, so
- * surfacing it as a control would mint an invitation whose headline behavior
- * silently does not happen. They are visible read-only in the preview (it
- * annotates dedup/fuzzy as proposed-not-applied and states the matching method),
- * so nothing is hidden -- only the unselectable controls are absent. Output
- * sharing IS settable (the 3-way "who receives the matched results" control),
- * now that one-sided output is honored end-to-end.
+ * The matching algorithm, deduplication, and fuzzy comparisons are deliberately
+ * NOT settable here (see {@link buildAdvancedTerms}): each is a capability not yet
+ * honored end-to-end or tracked as its own authoring task, so surfacing it as a
+ * control would mint an invitation whose headline behavior silently does not
+ * happen. They are visible read-only in the preview (it annotates dedup/fuzzy as
+ * proposed-not-applied and states the matching method), so nothing is hidden --
+ * only the unselectable controls are absent. Output sharing IS settable (the 3-way
+ * "who receives the matched results" control), and the invitation's payload is now
+ * authored too: the send list is derived from each column's disclosure under "Your
+ * columns" (so it cannot over-state what transmits), and receive is reconciled from
+ * the partner rather than pre-declared -- both honored end-to-end now that output
+ * is one-sided-aware and payload reconciliation is lazy.
  *
  * Validation runs through {@link validateAdvancedInvite} (the core schema is the
  * single source); Generate is disabled until the draft parses and at least one key
@@ -399,6 +405,16 @@ export function LinkageTermsEditor({
 
   const { errors } = validation;
 
+  // The columns this party will send as payload, derived from the grid's disclosure
+  // choices (the same isDisclosedToPartner predicate buildAdvancedTerms authors
+  // terms.payload.send from), so this summary cannot drift from what the invitation
+  // declares or what actually transmits. `receive` is not authored here: the inviter
+  // takes whatever the partner discloses (see buildAdvancedTerms / the lazy
+  // validateCompatibility). The inviter receives payload only when it receives a
+  // result at all (output direction is not "only your partner").
+  const sentColumns = disclosedColumnNames(draft.metadata);
+  const inviterReceivesResult = draft.outputDirection !== "partner";
+
   return (
     <Stack>
       <Grid gap="xl" align="flex-start">
@@ -478,6 +494,55 @@ export function LinkageTermsEditor({
                 onChange={updateMetadata}
                 caption="Your columns, their types, and how each is used"
               />
+            </Stack>
+
+            {/* Payload control. Send is authored through the grid's per-column
+                disclosure above (this summarizes the result); receive is not
+                author-time: the inviter does not have the partner's schema, so it
+                takes whatever the partner discloses. The coherence rule (no sending
+                to a partner that receives no result) is enforced live via
+                errors.payload. */}
+            <Stack gap="xs">
+              <Text size="sm" fw={600}>
+                Extra data for matched records
+              </Text>
+              {sentColumns.length > 0 ? (
+                <Text size="xs">
+                  <Text span fw={600}>
+                    You will send:
+                  </Text>{" "}
+                  {sentColumns.join(", ")}. Choose which columns are sent by
+                  setting them to &ldquo;Sent to your partner&rdquo; under Your
+                  columns above.
+                </Text>
+              ) : (
+                <Text size="xs" c="dimmed">
+                  You are not sending any extra columns. Set a column to
+                  &ldquo;Sent to your partner&rdquo; under Your columns above to
+                  include it.
+                </Text>
+              )}
+              {inviterReceivesResult ? (
+                <Text size="xs">
+                  <Text span fw={600}>
+                    You will receive:
+                  </Text>{" "}
+                  whatever extra columns your partner chooses to send. You
+                  don&apos;t pick these in advance &mdash; your partner sets
+                  them from their own file, and you receive them for your
+                  matched records.
+                </Text>
+              ) : (
+                <Text size="xs" c="dimmed">
+                  You receive no result, so your partner sends you no extra
+                  columns.
+                </Text>
+              )}
+              {errors.payload && (
+                <Text size="xs" c="red" role="alert">
+                  {errors.payload}
+                </Text>
+              )}
             </Stack>
 
             {/* The per-party data-prep workbench, in expert mode only: the guided
