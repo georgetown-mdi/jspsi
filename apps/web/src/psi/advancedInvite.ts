@@ -206,12 +206,13 @@ export interface AdvancedValidation {
  * pipeline's input format inferred from the operator's own rows, rather than the
  * fixed `MM/DD/YYYY` {@link getDefaultStandardization} assumes. The quick path
  * auto-detects the layout because it supplies no explicit standardization (the
- * exchange infers when none is given); the advanced path always supplies one, so
- * it must infer here or it would silently parse a non-US date file with the wrong
- * format and under-match every date-of-birth key. Mirrors the exchange's own
- * inference: the first present `role: linkage` date_of_birth column's values drive
- * {@link inferDateFormat}, falling back to the `MM/DD/YYYY` default when there is no
- * such column or the format cannot be inferred (e.g. seeded with no rows).
+ * exchange infers when none is given); the advanced path and the acceptor's
+ * Prepare-data editor always supply one, so they must infer here or they would
+ * silently parse a non-US date file with the wrong format and under-match every
+ * date-of-birth key. Mirrors the exchange's own inference: the first present
+ * `role: linkage` date_of_birth column's values drive {@link inferDateFormat},
+ * falling back to the `MM/DD/YYYY` default when there is no such column or the
+ * format cannot be inferred (e.g. seeded with no rows).
  *
  * The inferred format lives only in the local cleaning steps; the cross-party terms
  * carry the field, not its cleaning ({@link authoredLinkageFields} ignores steps),

@@ -24,11 +24,7 @@ import {
 } from "@tabler/icons-react";
 import { useDisclosure } from "@mantine/hooks";
 
-import {
-  assessLinkageSatisfiability,
-  getDefaultStandardization,
-  inferMetadata,
-} from "@psilink/core";
+import { assessLinkageSatisfiability, inferMetadata } from "@psilink/core";
 
 import {
   SEMANTIC_TYPE_LABELS,
@@ -43,6 +39,8 @@ import {
   applyStepOverrides,
   isStepValid,
 } from "@psi/standardizationAuthoring";
+
+import { defaultStandardizationForRows } from "@psi/advancedInvite";
 
 import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
@@ -74,10 +72,11 @@ import type { FieldStepOverride } from "@psi/standardizationAuthoring";
  *
  * The verdict and the run consume the SAME `{ metadata, standardization }`: the
  * standardization is derived from the current metadata via
- * {@link getDefaultStandardization} (so the recommended per-type cleaning is
- * always applied to the current column bindings, matching the acceptor's prior
- * inferred behavior), and that exact pair is handed to {@link onLaunch}. So the
- * gate the operator sees and the exchange that runs cannot disagree.
+ * {@link defaultStandardizationForRows} (so the recommended per-type cleaning is
+ * always applied to the current column bindings, with the date-of-birth input
+ * format inferred from the operator's own rows), and that exact pair is handed to
+ * {@link onLaunch}. So the gate the operator sees and the exchange that runs
+ * cannot disagree.
  *
  * Metadata/standardization are LOCAL and per-party: they are never embedded in the
  * token or cross-checked, so editing them changes only this party's match rate and
@@ -155,10 +154,15 @@ export function PrepareData({
   );
 
   // The recommended per-type cleaning for the default type-fallback binding,
-  // re-derived from the current metadata so it tracks a remap.
+  // re-derived from the current metadata so it tracks a remap. The date-of-birth
+  // input format is inferred from the operator's own rows rather than assumed
+  // MM/DD/YYYY: this editor always supplies an explicit standardization to the
+  // exchange, which then skips its own inference, so an ISO-dated file would
+  // otherwise be parsed as US-format and under-match every dob key. Mirrors the
+  // inviter advanced path (see defaultStandardizationForRows).
   const baseStandardization = useMemo(
-    () => getDefaultStandardization(metadata, linkageTerms),
-    [metadata, linkageTerms],
+    () => defaultStandardizationForRows(metadata, linkageTerms, rawRows),
+    [metadata, linkageTerms, rawRows],
   );
 
   // Field name -> its declared linkage field, for the per-field card label, the
