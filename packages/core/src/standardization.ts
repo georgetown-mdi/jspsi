@@ -22,6 +22,7 @@ import type {
 import {
   MAX_DATE_FORMAT_LENGTH,
   MAX_TRANSFORM_PATTERN_LENGTH,
+  referencedLinkageFieldNames,
 } from "./config/linkageTerms.js";
 import { inferMetadata } from "./config/metadata.js";
 import type { ColumnMetadata } from "./config/metadata.js";
@@ -1885,29 +1886,41 @@ export interface ConstraintViolationSummary {
 }
 
 /**
- * Sweep a whole {@link StandardizedDataset} and aggregate the value-level
- * constraint violations its produced values trip, per (field, kind). Runs the same
- * per-value {@link checkValueConstraints} the web workbench renders badges from --
- * one implementation for both surfaces -- over every produced value of every
- * declared field, so the CLI warns on exactly the violations the web shows.
+ * Sweep a {@link StandardizedDataset} and aggregate the value-level constraint
+ * violations its produced values trip, per (field, kind), for the linkage fields a
+ * linkage key actually references. Runs the same per-value
+ * {@link checkValueConstraints} the web workbench renders badges from -- one
+ * implementation, so the two surfaces never disagree on whether a given value
+ * violates a constraint (they differ in WHICH fields they cover: the web badges
+ * the field being edited, this sweep scopes to key-referenced fields, below).
  * Warn-not-enforce: it only counts; it never throws or rejects a value, and the
  * caller decides how to surface the result (the CLI logs a warning per entry and
  * proceeds). An empty result means every produced value conforms.
  *
- * A field declared in `terms` but absent from the dataset (it resolved to no
- * column) contributes nothing. Each row's produced value set is checked
- * element-wise, so a fan-out value (e.g. from `split_on`) is judged per candidate.
- * The dataset caches each row's values, so this pre-pass warms the same cache the
- * key-building exchange reuses rather than computing them twice.
+ * The sweep is scoped to key-referenced fields because the exchange standardizes
+ * and consumes only those (via {@link StandardizedKeyIterable}): a constraint
+ * violation on a declared field that no linkage key references cannot affect
+ * matching, so warning about it would be noise and running its standardization
+ * pipeline would be wasted work. A constrained field that no linkage key
+ * references therefore contributes nothing and is never standardized by the sweep;
+ * so does a referenced field that resolved to no column and is absent from the
+ * dataset. Each row's produced value set is checked element-wise, so a fan-out
+ * value (e.g. from `split_on`) is judged per candidate. The dataset caches each
+ * row's values, so this pre-pass warms the same cache the key-building exchange
+ * reuses rather than computing them twice.
  */
 export function summarizeDatasetConstraintViolations(
   terms: LinkageTerms,
   dataset: StandardizedDataset,
   rowCount: number,
 ): ConstraintViolationSummary[] {
+  // Scope to the fields a linkage key references -- the only fields the exchange
+  // standardizes and consumes; see referencedLinkageFieldNames.
+  const referencedFields = referencedLinkageFieldNames(terms.linkageKeys);
   const summaries: ConstraintViolationSummary[] = [];
   for (const field of terms.linkageFields) {
     if (field.constraints === undefined) continue;
+    if (!referencedFields.has(field.name)) continue;
     const standardized = dataset.getField(field.name);
     if (standardized === undefined) continue;
     // Tally this field's violations keyed only by the closed `kind` enum, so no

@@ -1,9 +1,10 @@
 import { ZodError } from "zod";
-import { expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 
 import {
   deriveAcceptedLinkageTerms,
   parseLinkageTerms,
+  referencedLinkageFieldNames,
   safeParseLinkageTerms,
   validateCompatibility,
   MAX_NAME_LENGTH,
@@ -18,6 +19,7 @@ import {
   MAX_KEY_ELEMENTS,
   MAX_PAYLOAD_ENTRIES,
 } from "../src/config/linkageTerms";
+import type { LinkageKey } from "../src/config/linkageTerms";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import {
   DISPLAY_TRUNCATION_MARKER,
@@ -2573,4 +2575,32 @@ test("deriveAcceptedLinkageTerms accepts a coherent deduplicate config (no false
   expect(() =>
     deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
   ).not.toThrow();
+});
+
+describe("referencedLinkageFieldNames", () => {
+  test("returns the union of element fields across keys, deduplicated", () => {
+    const keys: LinkageKey[] = [
+      { name: "k1", elements: [{ field: "a" }, { field: "b" }] },
+      { name: "k2", elements: [{ field: "b" }, { field: "c" }] },
+    ];
+    expect(referencedLinkageFieldNames(keys)).toEqual(new Set(["a", "b", "c"]));
+  });
+
+  test("is unaffected by a key's swap directive", () => {
+    // swap only permutes which slot holds which field at receive time, so the
+    // union of referenced fields is identical with or without it -- the property
+    // that lets every caller pass keys as authored, without resolving swap.
+    const swapped: LinkageKey[] = [
+      {
+        name: "k",
+        elements: [{ field: "a" }, { field: "b" }],
+        swap: ["a", "b"],
+      },
+    ];
+    expect(referencedLinkageFieldNames(swapped)).toEqual(new Set(["a", "b"]));
+  });
+
+  test("returns an empty set for no keys", () => {
+    expect(referencedLinkageFieldNames([])).toEqual(new Set<string>());
+  });
 });

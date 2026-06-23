@@ -10,6 +10,7 @@ import {
   getDefaultStandardization,
   inferDateFormat,
   inferMetadata,
+  referencedLinkageFieldNames,
   safeParseLinkageTerms,
 } from "@psilink/core";
 
@@ -419,9 +420,7 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
     .map((entry) =>
       APPLIED_SETTINGS.fuzzyComparisons ? entry.key : stripFuzzy(entry.key),
     );
-  const referenced = new Set(
-    enabledKeys.flatMap((key) => key.elements.map((el) => el.field)),
-  );
+  const referenced = referencedLinkageFieldNames(enabledKeys);
   // Derive the linkage fields from the authored standardization, not the
   // one-field-per-type default: a transformation per type declares its own field
   // (named by its output, bound to its input column), so two transformations of one

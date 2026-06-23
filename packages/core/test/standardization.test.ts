@@ -2718,4 +2718,109 @@ describe("summarizeDatasetConstraintViolations", () => {
       },
     ]);
   });
+
+  test("skips a constrained field no linkage key references, still reports a referenced one", () => {
+    // Both fields are declared, constrained, resolve to a column, and carry a
+    // value that violates their constraints. Only `last_name` is referenced by a
+    // linkage key; `first_name` is declared-but-unreferenced, so the exchange
+    // never standardizes or consumes it and the sweep must not warn on it.
+    const terms: LinkageTerms = {
+      ...sweepTerms,
+      linkageFields: [
+        {
+          name: "last_name",
+          type: "last_name",
+          constraints: { allowedCharacters: "A-Z" },
+        },
+        {
+          name: "first_name",
+          type: "first_name",
+          constraints: { allowedCharacters: "A-Z" },
+        },
+      ],
+      linkageKeys: [{ name: "LN", elements: [{ field: "last_name" }] }],
+    };
+    const rows = [{ LN: "smith", FN: "jane" }]; // both lowercase -> both violate A-Z
+    const dataset = buildStandardizedDataset(
+      undefined,
+      rows,
+      [
+        { name: "LN", type: "last_name", role: "linkage", isPayload: false },
+        { name: "FN", type: "first_name", role: "linkage", isPayload: false },
+      ],
+      terms,
+    );
+    // The unreferenced first_name DOES resolve to a column (it is present in the
+    // dataset), so its exclusion is the referenced-scoping at work, not the
+    // resolved-to-no-column path the prior test covers.
+    expect(dataset.getField("first_name")).toBeDefined();
+    expect(
+      summarizeDatasetConstraintViolations(terms, dataset, rows.length),
+    ).toEqual([
+      {
+        field: "last_name",
+        kind: "disallowedCharacters",
+        label: "disallowed characters",
+        count: 1,
+      },
+    ]);
+  });
+
+  test("sweeps every field a swap key references, unaffected by the swap", () => {
+    // Encodes the referenced-set comment's swap-invariance claim as a check: the
+    // sweep reads the un-swapped `element.field`, and `swap` only permutes which
+    // slot holds which field, so the set of fields it sweeps is identical with or
+    // without the swap. Both swapped fields are constrained and violate, so both
+    // must be reported -- a field reachable only through the swap is not missed.
+    const terms: LinkageTerms = {
+      ...sweepTerms,
+      linkageFields: [
+        {
+          name: "first_name",
+          type: "first_name",
+          constraints: { allowedCharacters: "A-Z" },
+        },
+        {
+          name: "last_name",
+          type: "last_name",
+          constraints: { allowedCharacters: "A-Z" },
+        },
+      ],
+      linkageKeys: [
+        {
+          name: "swap(FN,LN)",
+          elements: [{ field: "first_name" }, { field: "last_name" }],
+          swap: ["first_name", "last_name"],
+        },
+      ],
+    };
+    const rows = [{ FN: "jane", LN: "smith" }]; // both lowercase -> both violate A-Z
+    const dataset = buildStandardizedDataset(
+      undefined,
+      rows,
+      [
+        { name: "FN", type: "first_name", role: "linkage", isPayload: false },
+        { name: "LN", type: "last_name", role: "linkage", isPayload: false },
+      ],
+      terms,
+    );
+    expect(
+      summarizeDatasetConstraintViolations(terms, dataset, rows.length),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          field: "first_name",
+          kind: "disallowedCharacters",
+          label: "disallowed characters",
+          count: 1,
+        },
+        {
+          field: "last_name",
+          kind: "disallowedCharacters",
+          label: "disallowed characters",
+          count: 1,
+        },
+      ]),
+    );
+  });
 });

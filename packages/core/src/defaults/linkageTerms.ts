@@ -1,3 +1,4 @@
+import { referencedLinkageFieldNames } from "../config/linkageTerms";
 import type {
   LinkageTerms,
   LinkageField,
@@ -226,9 +227,7 @@ export function getDefaultLinkageTerms(
     linkageKeys = [...DEFAULT_LINKAGE_KEYS];
   }
 
-  const referencedFields = new Set(
-    linkageKeys.flatMap((key) => key.elements.map((el) => el.field)),
-  );
+  const referencedFields = referencedLinkageFieldNames(linkageKeys);
   const linkageFields = DEFAULT_LINKAGE_FIELDS.filter((f) =>
     referencedFields.has(f.name),
   );
