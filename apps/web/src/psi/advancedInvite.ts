@@ -616,11 +616,31 @@ export function validateAdvancedInvite(
 
   const parsed = safeParseLinkageTerms(terms);
   if (!parsed.success) {
-    for (const issue of parsed.error.issues) {
-      const field = fieldForIssuePath(issue.path);
-      // Keep the first message per control; the schema reports the most specific
-      // issue first, and stacking several on one input is noise.
-      if (errors[field] === undefined) errors[field] = messageForField(field);
+    // Each control touched by a schema issue gets its control-specific message
+    // (the message is keyed on the control, not the individual issue, so the set of
+    // affected controls is all that matters). Keep the first message per control:
+    // the keys control deliberately sets its accurate message up front so it wins
+    // over the generic schema mapping, and stacking several messages on one input
+    // is noise. The payload control is the one exception -- a schema payload error
+    // (e.g. an over-long sent column name) is a second, distinct obstacle from the
+    // direction-conflict message that may already occupy it, so both are surfaced
+    // rather than letting the direction conflict mask the schema problem and leave
+    // the operator unaware of an obstacle that still blocks generation.
+    const schemaFields = new Set(
+      parsed.error.issues.map((issue) => fieldForIssuePath(issue.path)),
+    );
+    for (const field of schemaFields) {
+      const existing = errors[field];
+      if (existing === undefined) {
+        errors[field] = messageForField(field);
+      } else if (field === "payload") {
+        // Lead with the schema/column error and trail the direction conflict: the
+        // schema error is the obstacle that persists after the operator reverses
+        // the one-click direction choice, so it earns first position. Joined with a
+        // newline (not a space) so the editor renders the two problems as separate
+        // lines rather than one run-on paragraph.
+        errors.payload = `${messageForField("payload")}\n${existing}`;
+      }
     }
   }
 

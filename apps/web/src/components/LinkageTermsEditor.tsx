@@ -539,7 +539,16 @@ export function LinkageTermsEditor({
                 </Text>
               )}
               {errors.payload && (
-                <Text size="xs" c="red" role="alert">
+                // The payload control can carry two distinct problems at once (a
+                // schema/column error and the send-direction conflict), joined with
+                // a newline by validateAdvancedInvite; pre-line renders them as
+                // separate lines rather than one run-on paragraph.
+                <Text
+                  size="xs"
+                  c="red"
+                  role="alert"
+                  style={{ whiteSpace: "pre-line" }}
+                >
                   {errors.payload}
                 </Text>
               )}

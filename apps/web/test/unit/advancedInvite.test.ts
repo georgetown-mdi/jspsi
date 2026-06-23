@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   MAX_INVITATION_LIFETIME_SECONDS,
+  MAX_NAME_LENGTH,
   assertPayloadSendDisclosed,
   assessLinkageSatisfiability,
   canonicalString,
@@ -554,6 +555,59 @@ describe("payload authoring", () => {
       validateAdvancedInvite({ ...draft, outputDirection: "both" }, seed).errors
         .payload,
     ).toBeUndefined();
+  });
+
+  test("a schema payload error is surfaced even behind the direction conflict, not masked", () => {
+    // A disclosed (sent) column whose name exceeds the schema's MAX_NAME_LENGTH is a
+    // payload-path schema failure; choosing inviter-only output while disclosing
+    // columns is the direction conflict. Both attach to the payload control, where a
+    // first-message-wins guard would otherwise drop the schema error behind the (more
+    // common) direction conflict -- hiding a second obstacle that still blocks Generate.
+    const overLong = "x".repeat(MAX_NAME_LENGTH + 1);
+    // The over-long header infers as an `other` column, disclosed (sent) by default.
+    const { draft, seed } = seedAdvancedInvite("Org", [
+      ...ALL_COLUMNS,
+      overLong,
+    ]);
+    expect(disclosedColumnNames(draft.metadata)).toContain(overLong);
+
+    // Single-problem baselines, so the both-problems assertion compares against the
+    // actual messages rather than hard-coding the copy.
+    // (1) Schema-payload-error only: output shared, so no direction conflict.
+    const schemaOnly = validateAdvancedInvite(
+      { ...draft, outputDirection: "both" },
+      seed,
+    );
+    const schemaMessage = schemaOnly.errors.payload ?? "";
+    expect(schemaMessage.length).toBeGreaterThan(0);
+    expect(schemaOnly.canGenerate).toBe(false);
+
+    // (2) Direction-conflict only: a normally-named disclosed column, inviter-only.
+    const conflict = seedAdvancedInvite("Org", [...ALL_COLUMNS, "notes"]);
+    const conflictOnly = validateAdvancedInvite(
+      { ...conflict.draft, outputDirection: "inviter" },
+      conflict.seed,
+    );
+    const directionMessage = conflictOnly.errors.payload ?? "";
+    expect(directionMessage.length).toBeGreaterThan(0);
+    expect(conflictOnly.canGenerate).toBe(false);
+
+    // The single-problem cases stay clean: neither carries the other's message.
+    expect(schemaMessage).not.toContain(directionMessage);
+    expect(directionMessage).not.toContain(schemaMessage);
+
+    // (3) Both problems at once: the payload message surfaces BOTH, so the schema
+    // error is no longer masked by the direction conflict. They are newline-separated
+    // (the editor renders them as a stacked list) with the more-persistent schema
+    // error leading -- it is the obstacle that remains after the one-click direction
+    // choice is reversed.
+    const both = validateAdvancedInvite(
+      { ...draft, outputDirection: "inviter" },
+      seed,
+    );
+    const bothMessage = both.errors.payload ?? "";
+    expect(bothMessage.split("\n")).toEqual([schemaMessage, directionMessage]);
+    expect(both.canGenerate).toBe(false);
   });
 
   test("a disclosed-payload invitation round-trips through the acceptor mirror", () => {
