@@ -331,6 +331,34 @@ test("single-output (responder receives): the gate withholds from the initiator"
   expect(built(initiator).record.commitments.associationTable).toBeUndefined();
 });
 
+test("single-output: the no-output helper is sent no payload (one-sided disclosure closed)", async () => {
+  // Both parties' metadata discloses `note`. The receiver (initiator) gets the
+  // helper's disclosed payload, as it should. But the no-output helper (responder)
+  // is sent NONE of the receiver's disclosed payload, even though the receiver's
+  // own metadata discloses `note`: the send-gate transmits payload only to a
+  // partner entitled to the result, closing the one-sided disclosure (203012150 /
+  // docs/notes/one-sided-disclosure.md). The committed records reflect it.
+  const receiverOut: Output = { expectsOutput: true, shareWithPartner: false };
+  const senderOut: Output = { expectsOutput: false, shareWithPartner: true };
+  const [initiator, responder] = await runBoth(receiverOut, senderOut);
+
+  expect(initiator.resolvedRole).toBe("receiver");
+  expect(responder.resolvedRole).toBe("sender");
+
+  // The receiver receives the helper's payload; the helper receives nothing.
+  expect(initiator.partnerPayload.columns).toEqual(["note"]);
+  expect(responder.partnerPayload.columns).toEqual([]);
+
+  // Both records still commit a partnerPayloadReceived (the helper's is a
+  // commitment to the empty payload it correctly received).
+  expect(
+    built(initiator).record.commitments.partnerPayloadReceived,
+  ).toBeDefined();
+  expect(
+    built(responder).record.commitments.partnerPayloadReceived,
+  ).toBeDefined();
+});
+
 // --- Acceptor payload lock-in (live) -----------------------------------------
 
 // The responder's inferred metadata discloses `note` (role: other -> payload),

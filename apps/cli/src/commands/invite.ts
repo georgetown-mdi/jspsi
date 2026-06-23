@@ -147,18 +147,19 @@ export function resolveInvitePositionals(
  * the acceptor will RECEIVE for matched records, derived from this party's
  * metadata via the same `isDisclosedToPartner` predicate `preparePayload`
  * transmits on. Returns undefined -- so the field is omitted and the acceptor
- * reconciles lazily -- when the metadata is unknown at mint (a config-as-source
+ * reconciles lazily ONLY when the metadata is unknown at mint (a config-as-source
  * invite whose config carries no explicit metadata block, where the run infers
- * metadata from the exchange input the invite command never sees) or when nothing
- * is disclosed (the acceptor receives no payload either way, so a declared empty
- * set could never differ from what it gets). See the InvitationToken field.
+ * metadata from the exchange input the invite command never sees). When the
+ * metadata IS known, the disclosed set is carried verbatim -- INCLUDING the empty
+ * set when nothing is disclosed, which locks the acceptor in to "receive nothing"
+ * so a non-empty payload later aborts, rather than leaving it lazy. Empty is a
+ * constraint here, not the absence of one. See the InvitationToken field.
  */
 function disclosedColumnsFor(
   metadata: Metadata | undefined,
 ): string[] | undefined {
   if (metadata === undefined) return undefined;
-  const columns = disclosedColumnNames(metadata);
-  return columns.length > 0 ? columns : undefined;
+  return disclosedColumnNames(metadata);
 }
 
 // --- Validation (the no-commit phase) ----------------------------------------

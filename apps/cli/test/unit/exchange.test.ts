@@ -1001,3 +1001,34 @@ test("prepareDataset: a config without payload.receive locks in nothing (lazy)",
   );
   expect(prepared.expectedPayloadColumns).toBeUndefined();
 });
+
+test("prepareDataset: the top-level expectedPayloadColumns is the canonical lock-in source", async () => {
+  // The local expectedPayloadColumns field (written by an offline accept from the
+  // invitation's disclosedPayloadColumns) is the canonical lock-in and takes
+  // precedence over the negotiated payload.receive. Distinct from payload.receive
+  // so it does not trip the validateCompatibility mirror against an inviter that
+  // advertised no payload.send.
+  const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
+  const terms: LinkageTerms = {
+    ...ssnAndNameDobTerms,
+    payload: { receive: [{ name: "ignored_by_precedence" }] },
+  };
+  const prepared = await prepareDataset(
+    { linkageTerms: terms, expectedPayloadColumns: ["diagnosis", "notes"] },
+    "Test Party",
+    input,
+  );
+  expect(prepared.expectedPayloadColumns).toEqual(["diagnosis", "notes"]);
+});
+
+test("prepareDataset: an empty expectedPayloadColumns locks in the strict empty set", async () => {
+  // An offline accept of an invitation that disclosed nothing persists the empty
+  // set; it is a strict "receive nothing" lock-in, not the absent/lazy case.
+  const input = writeInput("last_name,dob\nLovelace,1815-12-10\n");
+  const prepared = await prepareDataset(
+    { linkageTerms: ssnAndNameDobTerms, expectedPayloadColumns: [] },
+    "Test Party",
+    input,
+  );
+  expect(prepared.expectedPayloadColumns).toEqual([]);
+});

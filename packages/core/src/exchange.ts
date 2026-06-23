@@ -24,6 +24,7 @@ import {
   assertPayloadSendDisclosed,
   reconcileReceivedPayload,
 } from "./payloadExchange.js";
+import type { PayloadWireMessage } from "./payloadExchange.js";
 import { buildExchangeRecord } from "./exchangeRecord.js";
 
 import type { Metadata } from "./config/metadata.js";
@@ -72,11 +73,17 @@ export interface PreparedExchange {
   /**
    * The payload column set this party has LOCKED IN as what it will receive, if
    * any -- the inviter's `disclosedPayloadColumns` carried on an accepted
-   * invitation, or a recurring party's persisted `payload.receive`. When set,
-   * {@link runExchange} verifies the partner's transmitted payload columns match
-   * it exactly and aborts the exchange otherwise (see
-   * {@link reconcileReceivedPayload}); when absent, this party reconciles lazily
-   * and accepts whatever the sender's own disclosure metadata transmits.
+   * invitation, or a party's persisted local lock-in (the exchange config's
+   * `expectedPayloadColumns`, falling back to the negotiated `payload.receive`).
+   * When set, {@link runExchange} verifies the partner's transmitted payload
+   * columns match it exactly and aborts otherwise (see
+   * {@link reconcileReceivedPayload}); the empty set is enforced strictly
+   * ("receive nothing"). When absent (undefined), this party reconciles lazily and
+   * accepts whatever the sender's own disclosure metadata transmits.
+   *
+   * Applies only to an output party. {@link runExchange} independently forces a
+   * party with `expectsOutput: false` to receive no payload at all, regardless of
+   * this field, so a non-receiving helper does not rely on the caller setting it.
    *
    * Populated by the caller (the accept/exchange front end that holds the token
    * or the persisted config), NOT by {@link prepareForExchange}: it is a
@@ -487,26 +494,36 @@ export async function runExchange(
     onStage,
   );
 
-  const localPayload = preparePayload(
-    prepared.rawRows,
-    prepared.metadata,
-    associationTable,
-  );
+  // Send-gate: transmit payload only to a partner entitled to the result. A party
+  // with expectsOutput:false learns no matched records, so it has no use for
+  // payload values and must not receive them -- transmitting to it is a one-sided
+  // disclosure to a non-receiving helper (docs/notes/one-sided-disclosure.md). The
+  // disclosed columns are gathered (and the payload built) only when the partner
+  // will receive output; otherwise an empty message goes on the wire and is
+  // recorded as such. The disclosure is closed at the source here, not merely
+  // declared empty.
+  const localPayload: PayloadWireMessage = partnerTerms.output.expectsOutput
+    ? preparePayload(prepared.rawRows, prepared.metadata, associationTable)
+    : { hasData: false };
   const partnerPayload = await exchangePayloads(
     conn,
     handshakeRole,
     localPayload,
   );
 
-  // Lock-in enforcement: when this party consented to a specific received-column
-  // set (a fresh acceptor carrying the invitation's disclosedPayloadColumns, or a
-  // recurring party with a persisted payload.receive), the partner must have
-  // transmitted exactly that set. A divergence aborts here -- after the payload
-  // is received but before the result or the audit record is built -- so a party
-  // that promised one disclosure and delivered another never has its mismatched
-  // payload written to disk or surfaced. A lazy party (expectedPayloadColumns
-  // undefined) takes whatever the sender's own disclosure metadata transmits.
-  reconcileReceivedPayload(partnerPayload, prepared.expectedPayloadColumns);
+  // Received-payload enforcement, fail-closed before the result or audit record is
+  // built (so a mismatched payload is never written to disk or surfaced):
+  // - A no-output party (expectsOutput:false) must receive NO payload. The
+  //   send-gate above keeps a conforming partner from sending any; expecting the
+  //   empty set here closes it fail-closed against a non-conforming one.
+  // - An output party enforces the column set it consented to receive (a fresh
+  //   acceptor's carried disclosedPayloadColumns, or a persisted lock-in); a lazy
+  //   one (expectedPayloadColumns undefined) takes whatever the sender's own
+  //   disclosure metadata transmits.
+  const expectedReceive = linkageTerms.output.expectsOutput
+    ? prepared.expectedPayloadColumns
+    : [];
+  reconcileReceivedPayload(partnerPayload, expectedReceive);
 
   // Self-attested record: produced from data both sides already hold, with no
   // extra round-trip and no private key. Two disclosure figures, gated
@@ -540,11 +557,13 @@ export async function runExchange(
   // caller (the `associationTable` field of the result). A helper therefore neither
   // receives the result table from the exchange nor binds it in its record -- the
   // returned-result gate and the record gate are deliberately one rule (see
-  // ExchangeResult). It scopes the result TABLE only: `partnerPayload` rides a
-  // separate, output-direction-independent channel (exchangePayloads, governed by
-  // each party's own disclosure metadata, not by expectsOutput), so a non-receiving
-  // helper can still receive the receiver's disclosed payload values -- a known
-  // residual disclosure tracked separately, not closed by this gate.
+  // ExchangeResult). It scopes the result TABLE only; the payload channel is now
+  // gated consistently with it: the send-gate above transmits payload solely to a
+  // partner entitled to output, and the receive-side check fails closed if a
+  // non-receiving party is sent payload regardless. So a non-receiving helper no
+  // longer receives the partner's disclosed payload values -- the one-sided
+  // disclosure formerly carried on this channel is closed here, not left as a
+  // residual (docs/notes/one-sided-disclosure.md).
   const bothExpectOutput =
     linkageTerms.output.expectsOutput && partnerTerms.output.expectsOutput;
   const heldAssociationTable = linkageTerms.output.expectsOutput;

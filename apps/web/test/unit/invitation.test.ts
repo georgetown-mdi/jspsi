@@ -370,14 +370,17 @@ describe("generateInvitation", () => {
     expect(token.disclosedPayloadColumns).toEqual(disclosed);
   });
 
-  test("quick path carries no disclosed subset when the file discloses nothing", async () => {
+  test("quick path carries an empty disclosed subset when the file discloses nothing", async () => {
+    // The web inviter always knows its metadata, so the field is always carried --
+    // here the EMPTY set, which locks the acceptor in to "receive nothing" (a later
+    // non-empty payload aborts) rather than reconciling lazily.
     const { encoded } = await generateInvitation({
       inviterName: "Org",
       file: csvStream(ALL_COLUMNS_CSV),
       location,
     });
     const token = await decodeInvitation(encoded);
-    expect(token.disclosedPayloadColumns).toBeUndefined();
+    expect(token.disclosedPayloadColumns).toEqual([]);
   });
 
   test("summarizeInvitation derives the received set from the carried subset with no payload.send authored", () => {
@@ -404,6 +407,23 @@ describe("generateInvitation", () => {
       inferMetadata(["ssn", "first_name", "last_name", "dob"]),
     );
     const summary = summarizeInvitation({ linkageTerms: terms });
+    expect(summary.payload).toBeUndefined();
+  });
+
+  test("summarizeInvitation suppresses the payload section for an empty carried subset", () => {
+    // The web inviter always carries the disclosed subset, possibly empty. An empty
+    // carried set means "you receive no payload columns"; the consent screen shows
+    // no payload-receive section, which faithfully reads as "no payload" -- and the
+    // acceptor's runtime lock-in still enforces it (a sent payload aborts), so a
+    // suppressed section is not a hidden constraint. Only a non-empty set renders.
+    const terms = getDefaultLinkageTerms(
+      "Inviter",
+      inferMetadata(["ssn", "first_name", "last_name", "dob"]),
+    );
+    const summary = summarizeInvitation({
+      linkageTerms: terms,
+      disclosedPayloadColumns: [],
+    });
     expect(summary.payload).toBeUndefined();
   });
 

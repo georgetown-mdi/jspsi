@@ -216,16 +216,18 @@ export function displayInvitation(
   // The columns the inviter declared it will transmit for matched records, in the
   // inviter's namespace -- what this party will RECEIVE. Derived from the wire's
   // own disclosure predicate (disclosedPayloadColumns), the same set the runtime
-  // lock-in enforces. Partner-controlled, so escaped. Shown only when the
-  // invitation carried the subset (an older or metadata-unknown mint omits it,
-  // and reconciles lazily).
-  if (
-    token.disclosedPayloadColumns !== undefined &&
-    token.disclosedPayloadColumns.length > 0
-  )
+  // lock-in enforces. Partner-controlled, so escaped. Shown whenever the invitation
+  // carried the subset; an empty set is a real "you will receive no payload
+  // columns" lock-in (a later non-empty payload aborts), shown as (none). Omitted
+  // entirely only for an older or metadata-unknown mint, which reconciles lazily.
+  if (token.disclosedPayloadColumns !== undefined)
     log.info(
       `  columns you will receive: ` +
-        `${token.disclosedPayloadColumns.map((c) => sanitizeForDisplay(c)).join(", ")}`,
+        (token.disclosedPayloadColumns.length > 0
+          ? token.disclosedPayloadColumns
+              .map((c) => sanitizeForDisplay(c))
+              .join(", ")
+          : "(none)"),
     );
   if (token.expires !== undefined) log.info(`  expires: ${token.expires}`);
 }
@@ -612,6 +614,15 @@ export async function handler(argv: Arguments): Promise<void> {
       const spec: ExchangeSpec = {
         connection: ready.connection,
         ...ready.dataSpec,
+        // Persist the consented received-column lock-in so the later `psilink
+        // exchange` enforces it (online accept holds it in memory for its single
+        // run; offline accept's enforcement happens at a separate invocation, so it
+        // must be written). Carried in the inviter's namespace, distinct from
+        // payload.receive. Omitted -- and reconciled lazily -- when the invitation
+        // carried no disclosed subset (an older or metadata-unknown mint).
+        ...(ready.token.disclosedPayloadColumns !== undefined
+          ? { expectedPayloadColumns: ready.token.disclosedPayloadColumns }
+          : {}),
       };
       // When reusing a pre-existing config, provisionConfigAndKey ignores `spec`
       // and writes only the key file, leaving the user's config untouched.

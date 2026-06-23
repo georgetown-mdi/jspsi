@@ -238,47 +238,51 @@ export function assertPayloadSendDisclosed(
  *
  * `declared` is the column set this party LOCKED IN as what it will receive --
  * the inviter's `disclosedPayloadColumns` carried on the invitation (the set the
- * acceptor consented to on its review screen), or a recurring party's persisted
- * `payload.receive`. `assertPayloadSendDisclosed` is the mint-boundary, forward
- * (send-side) counterpart of this guard: that one keeps a party from
+ * acceptor consented to on its review screen), a recurring party's persisted
+ * lock-in, or the EMPTY set for a party not entitled to the result (which must
+ * receive no payload at all). `assertPayloadSendDisclosed` is the mint-boundary,
+ * forward (send-side) counterpart of this guard: that one keeps a party from
  * over-DECLARING what it sends; this one keeps a party from over-DELIVERING past
- * what the other consented to receive. The party promised one set on the
- * invitation and must deliver exactly that, or the exchange aborts.
+ * what the other consented to receive. The party must deliver exactly the
+ * locked-in set, or the exchange aborts.
  *
  * The match is byte-exact and element-wise over the sorted column names (NOT a
  * delimiter-joined string, so a partner-controlled name containing the separator
  * cannot make two distinct sets compare equal), mirroring
  * {@link validateCompatibility}'s payload mirror.
  *
+ * A PRESENT `declared` -- INCLUDING the empty set -- is enforced strictly: an
+ * empty `declared` means "receive nothing," so a non-empty received set against it
+ * aborts. That is the fail-closed path for a party not entitled to the result (the
+ * caller passes `[]` when its own `expectsOutput` is false) and for an inviter that
+ * disclosed nothing (the mint carries `[]`, not an omitted field). Only an ABSENT
+ * (undefined) `declared` is lazy -- empty is NOT absent.
+ *
  * Two cases are deliberately NOT a mismatch:
- * - `declared` ABSENT (undefined) OR EMPTY is the LAZY reconciliation path: the
- *   party did not lock in a non-trivial expectation, so it takes whatever it is
- *   given (zero-setup, and the inviter's own receive side, which it leaves blank
- *   and fills lazily). Empty collapses to absent because an empty disclosed set
- *   carries no constraint to enforce -- an honest mint omits the field entirely
- *   when nothing is disclosed, and a no-output recurring helper's `payload.receive`
- *   is empty by schema, so both must read as "no expectation," never as "expect
- *   exactly zero columns, abort on any." This never widens disclosure --
- *   transmission is governed by the SENDER's own `isDisclosedToPartner` metadata
- *   and `assertPayloadSendDisclosed`, both unchanged; receiving is not disclosing.
+ * - `declared` ABSENT (undefined) is the LAZY reconciliation path: the party did
+ *   not lock in an expectation, so it takes whatever it is given (zero-setup, and
+ *   an output party's own receive side, left blank and filled lazily). This never
+ *   widens disclosure -- transmission is governed by the SENDER's own
+ *   `isDisclosedToPartner` metadata and `assertPayloadSendDisclosed`, both
+ *   unchanged; receiving is not disclosing. A present-but-empty array is NOT this
+ *   case: empty is a strict "receive nothing," not "no expectation."
  * - An EMPTY received column set (the partner sent no payload data -- no
- *   transmittable columns, or no matched rows) cannot exceed any consent, so it
- *   is accepted even against a non-empty `declared`. A partner with matched rows
- *   and disclosed columns sends them as a non-empty set; a partner that sends an
- *   empty set discloses nothing, which is always within what was consented.
+ *   transmittable columns, or no matched rows) cannot exceed any consent, so it is
+ *   accepted even against a non-empty `declared`. This is also what lets a
+ *   correctly-gated no-output party (declared empty, received empty) pass, and
+ *   avoids a false abort on a zero-match exchange.
  *
  * @throws {ConnectionError} of kind `"protocol"` when `declared` is present and
- *   the received non-empty column set is not exactly it. A protocol error
- *   because the peer violated the disclosure contract the invitation established;
- *   the receiving party's callers surface it as a failed exchange. The offending
- *   names are partner-controlled, so both sides of the message route through
- *   {@link sanitizeForDisplay}.
+ *   the received non-empty column set is not exactly it. A protocol error because
+ *   the peer violated the disclosure contract; the receiving party's callers
+ *   surface it as a failed exchange. The offending names are partner-controlled,
+ *   so both sides of the message route through {@link sanitizeForDisplay}.
  */
 export function reconcileReceivedPayload(
   received: PartnerPayload,
   declared: string[] | undefined,
 ): void {
-  if (declared === undefined || declared.length === 0) return;
+  if (declared === undefined) return;
   if (received.columns.length === 0) return;
   const got = [...received.columns].sort();
   const want = [...declared].sort();
@@ -287,10 +291,12 @@ export function reconcileReceivedPayload(
   if (matches) return;
   const gotShown = got.map((name) => sanitizeForDisplay(name)).join(", ");
   const wantShown = want.map((name) => sanitizeForDisplay(name)).join(", ");
+  const wantDescription =
+    want.length === 0 ? `no payload at all` : `only [${wantShown}]`;
   throw new ConnectionError(
     `payload disclosure mismatch: the partner transmitted columns ` +
-      `[${gotShown}] but the invitation declared it would send [${wantShown}]. ` +
-      `The exchange is aborted because the data received does not match what ` +
+      `[${gotShown}] but this party expected to receive ${wantDescription}. ` +
+      `The exchange is aborted because the payload received does not match what ` +
       `was consented to.`,
     "protocol",
   );

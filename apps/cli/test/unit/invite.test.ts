@@ -315,9 +315,11 @@ test("validateInvite: online carries the disclosed-columns subset from the infer
   expect(token.disclosedPayloadColumns).toEqual(["notes", "member_id"]);
 });
 
-test("validateInvite: an all-linkage input carries no disclosed subset", async () => {
+test("validateInvite: an all-linkage input carries an empty disclosed subset", async () => {
   // onlineFixture's CSV is first_name,last_name,dob,ssn -- all linkage columns, so
-  // nothing is disclosed and the field is omitted (the acceptor reconciles lazily).
+  // nothing is disclosed. The metadata is known (inferred from the input), so the
+  // field is carried as the EMPTY set, locking the acceptor in to "receive nothing"
+  // (a later non-empty payload aborts) rather than reconciling lazily.
   const { input, options } = onlineFixture();
   const ready = await validateInvite({
     resolved: { mode: "online", url: new URL("sftp://host/drop"), input },
@@ -326,7 +328,7 @@ test("validateInvite: an all-linkage input carries no disclosed subset", async (
     log: silentLog,
   });
   const token = await decodeInvitation(ready.invitation);
-  expect(token.disclosedPayloadColumns).toBeUndefined();
+  expect(token.disclosedPayloadColumns).toEqual([]);
 });
 
 test("validateInvite: online filedrop emits the shared-path endpoint", async () => {

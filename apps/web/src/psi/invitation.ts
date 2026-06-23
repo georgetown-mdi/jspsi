@@ -238,15 +238,15 @@ export function deepLinkFor(origin: string, encoded: string): string {
 /**
  * The disclosed-columns subset to carry on the token for this metadata: the
  * column names `disclosedColumnNames` selects (exactly what `preparePayload`
- * transmits), or undefined when nothing is disclosed -- the field is then omitted
- * and the acceptor receives no payload regardless, so a declared empty set could
- * never differ from what it gets. See the InvitationToken field.
+ * transmits). The web inviter always knows its metadata, so the field is always
+ * carried -- INCLUDING the empty set when nothing is disclosed, which locks the
+ * acceptor in to "receive nothing" so a non-empty payload later aborts. Empty is a
+ * constraint, not the absence of one (unlike a CLI config-as-source invite with no
+ * metadata block, which omits the field and reconciles lazily). See the
+ * InvitationToken field.
  */
-function disclosedColumnsForToken(
-  metadata: Metadata,
-): Array<string> | undefined {
-  const columns = disclosedColumnNames(metadata);
-  return columns.length > 0 ? columns : undefined;
+function disclosedColumnsForToken(metadata: Metadata): Array<string> {
+  return disclosedColumnNames(metadata);
 }
 
 /**
@@ -409,7 +409,11 @@ export async function generateInvitation(params: {
   // the inviter's own exchange uses -- the Advanced editor's edited metadata, or
   // (quick path, and the editor when it authored none) the metadata inferred from
   // the columns -- so the declared set equals what preparePayload transmits.
-  let disclosedPayloadColumns: Array<string> | undefined;
+  // Always carried -- the web inviter always knows its metadata. The disclosed set,
+  // possibly the EMPTY set when nothing is disclosed: an empty set locks the
+  // acceptor in to "receive nothing" (a non-empty payload later aborts), it is not
+  // the absent/lazy case.
+  let disclosedPayloadColumns: Array<string>;
   let linkageTerms: LinkageTerms;
   if (params.linkageTerms !== undefined) {
     linkageTerms = params.linkageTerms;

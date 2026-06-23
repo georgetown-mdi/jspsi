@@ -585,18 +585,21 @@ export async function prepareDataset(
   for (const warning of prepared.warnings)
     log.warn("cleaning configuration issue:", warning);
   warnOnValueConstraints(prepared, log);
-  // Recurring lock-in: a committed config that declares a non-empty
-  // payload.receive expectation has its received payload verified against exactly
-  // those columns at runtime (see reconcileReceivedPayload), so a partner that
-  // transmits a different set aborts the exchange. Both parties' persisted configs
-  // carry the agreed payload, so the check is symmetric. A config with no declared
-  // receive (the default-terms path) reconciles lazily; so does an empty declared
-  // receive (the no-output helper, whose receive is empty by schema), since an
-  // empty set carries no constraint -- reconcileReceivedPayload collapses it to
-  // the lazy path rather than "expect exactly zero columns."
-  const declaredReceive = exchangeDataSpec.linkageTerms?.payload?.receive;
-  if (declaredReceive !== undefined)
-    prepared.expectedPayloadColumns = declaredReceive.map((c) => c.name);
+  // Recurring / offline-accept lock-in: a committed config has its received payload
+  // verified against the locked-in column set at runtime (see
+  // reconcileReceivedPayload), so a partner that transmits a different set aborts
+  // the exchange. The canonical, local source is the top-level expectedPayloadColumns
+  // (written by an offline acceptance from the invitation's disclosedPayloadColumns);
+  // it falls back to the negotiated payload.receive names for an authored recurring
+  // config that carries only the data dictionary. An empty set is enforced strictly
+  // ("receive nothing"); an absent source reconciles lazily, as before. A no-output
+  // party's "receive nothing" is enforced independently by runExchange regardless of
+  // this field.
+  const expectedFromConfig =
+    exchangeDataSpec.expectedPayloadColumns ??
+    exchangeDataSpec.linkageTerms?.payload?.receive?.map((c) => c.name);
+  if (expectedFromConfig !== undefined)
+    prepared.expectedPayloadColumns = expectedFromConfig;
   return prepared;
 }
 

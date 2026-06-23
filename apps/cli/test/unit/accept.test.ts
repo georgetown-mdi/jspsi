@@ -1005,6 +1005,34 @@ test("displayInvitation escapes a hostile inviter identity and key names", () =>
   }
 });
 
+test("displayInvitation: the carried disclosed subset shows names, '(none)' when empty, and nothing when absent", () => {
+  // The acceptor's "columns you will receive" line. A present subset is shown
+  // (an empty one as "(none)", since the empty set is a real "receive nothing"
+  // lock-in); an absent subset (an older or metadata-unknown mint, reconciled
+  // lazily) shows no line at all.
+  const log = getLogger("accept-display-receive-test");
+  log.setLevel("silent");
+  const lines = (token: InvitationToken): string => {
+    const infoSpy = vi.spyOn(log, "info");
+    try {
+      displayInvitation(token, log);
+      return infoSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    } finally {
+      infoSpy.mockRestore();
+    }
+  };
+  const base = sampleToken(FUTURE());
+  expect(
+    lines({ ...base, disclosedPayloadColumns: ["diagnosis", "notes"] }),
+  ).toContain("columns you will receive: diagnosis, notes");
+  expect(lines({ ...base, disclosedPayloadColumns: [] })).toContain(
+    "columns you will receive: (none)",
+  );
+  expect(lines({ ...base, disclosedPayloadColumns: undefined })).not.toContain(
+    "columns you will receive",
+  );
+});
+
 // --- handler: repeated single-value flag -------------------------------------
 
 test("handler: a repeated single-value flag is rejected (exit 64) via runOrExit", async () => {
