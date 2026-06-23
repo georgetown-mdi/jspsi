@@ -70,8 +70,8 @@ Date these linkage terms were last modified. A mismatch produces a warning indic
 *Required:* yes  
 *Consistency:* mandatory
 
-- `psi` — reveals the intersection (matched records and their identifiers). Intended for operational data exchange.
-- `psi-c` — reveals only the cardinality of the intersection (how many records match). Intended for research and program planning.
+- `psi` -- reveals the intersection (matched records and their identifiers). Intended for operational data exchange.
+- `psi-c` -- reveals only the cardinality of the intersection (how many records match). Intended for research and program planning.
 
 > **Not yet implemented:** the `psi-c` algorithm is not yet fully implemented. It is targeted for a release after 1.0; see [ROADMAP.md](ROADMAP.md). Use `psi` for now.
 
@@ -119,7 +119,7 @@ In a many-to-one exchange where the "one" party has `expects_output: false`, the
 
 The linkage fields define the standardized form of each PII element that participates in linkage. Each field has a name, a semantic type, and optional constraints. The name is a unique identifier used by linkage key elements and data standardizing transformations.
 
-Constraints are not enforced by the application — they are standards that both parties independently commit to meeting when preparing their data. The application will warn if a constraint is violated, but it will not transform the data to satisfy it. In the future, it may be an option to upgrade these warnings to errors.
+Constraints are not enforced by the application -- they are standards that both parties independently commit to meeting when preparing their data. The application will warn if a constraint is violated, but it will not transform the data to satisfy it. In the future, it may be an option to upgrade these warnings to errors.
 
 Social Security Numbers must be formatted as `XXXXXXXXX` (nine-character numeric string, no dashes). Dates of birth must be formatted as `YYYYMMDD`. Converting raw input to these formats is the responsibility of each party's data standardization.
 
@@ -530,7 +530,7 @@ connection:
 *Required:* no  
 *Applies to:* `webrtc`
 
-A provisioning endpoint that returns a complete set of ICE servers — STUN and TURN combined — for the current exchange. Called at the start of each CLI run; both parties call the same endpoint independently and may receive different time-limited credentials pointing to the same infrastructure. This matches the API shape of commercial ICE credential services such as Twilio Network Traversal Service. Mutually exclusive with static `stun` and `turn`.
+A provisioning endpoint that returns a complete set of ICE servers -- STUN and TURN combined -- for the current exchange. Called at the start of each CLI run; both parties call the same endpoint independently and may receive different time-limited credentials pointing to the same infrastructure. This matches the API shape of commercial ICE credential services such as Twilio Network Traversal Service. Mutually exclusive with static `stun` and `turn`.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -925,7 +925,7 @@ The `split_on` function produces `set<string>` instead of a single `string`. Whe
 
 **Cross-product**: when a linkage key references multiple fan-out fields, the key strings are the cartesian product of those fields' value lists. A `split_on` on both `first_name` and `last_name` with two parts each produces four key strings per row. The total count can grow quickly; a warning is issued when a single row generates more than 20 key strings for one linkage key.
 
-**Match resolution for fan-out**: when more than one PSI entry derived from the same original row appears in the intersection for a given linkage key round, the correct behavior depends on the output mode. In a single-party-output exchange the receiver can carry the row forward without informing the sender; no inconsistency arises because the sender never learns the intersection result. In a dual-party-output exchange utilizing a deterministic cascade and the filtering of candidate records, the parties must communicate to determine whether the multiple matches are distinct or conflated — that is, whether a third piece of evidence resolves the apparent link. This additional communication violates the protocol's privacy guarantee that nothing is learned about records outside the intersection. Users who employ fan-out transformations in a dual-party-output exchange are warned about this consequence.
+**Match resolution for fan-out**: when more than one PSI entry derived from the same original row appears in the intersection for a given linkage key round, the correct behavior depends on the output mode. In a single-party-output exchange the receiver can carry the row forward without informing the sender; no inconsistency arises because the sender never learns the intersection result. In a dual-party-output exchange utilizing a deterministic cascade and the filtering of candidate records, the parties must communicate to determine whether the multiple matches are distinct or conflated -- that is, whether a third piece of evidence resolves the apparent link. This additional communication violates the protocol's privacy guarantee that nothing is learned about records outside the intersection. Users who employ fan-out transformations in a dual-party-output exchange are warned about this consequence.
 
 When exactly one fan-out entry matches, the original row is accepted and all its fan-out variants are removed from the candidate set for subsequent rounds.
 
