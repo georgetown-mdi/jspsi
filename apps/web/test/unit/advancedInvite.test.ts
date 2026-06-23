@@ -568,14 +568,16 @@ describe("payload authoring", () => {
     expect(directionMessage).not.toContain(schemaMessage);
 
     // (3) Both problems at once: the payload message surfaces BOTH, so the schema
-    // error is no longer masked by the direction conflict.
+    // error is no longer masked by the direction conflict. They are newline-separated
+    // (the editor renders them as a stacked list) with the more-persistent schema
+    // error leading -- it is the obstacle that remains after the one-click direction
+    // choice is reversed.
     const both = validateAdvancedInvite(
       { ...draft, outputDirection: "inviter" },
       seed,
     );
     const bothMessage = both.errors.payload ?? "";
-    expect(bothMessage).toContain(schemaMessage);
-    expect(bothMessage).toContain(directionMessage);
+    expect(bothMessage.split("\n")).toEqual([schemaMessage, directionMessage]);
     expect(both.canGenerate).toBe(false);
   });
 
