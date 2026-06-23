@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { UsageError } from "../errors.js";
 import { SEMANTIC_TYPES } from "../types";
 import { MAX_NAME_LENGTH } from "./linkageTerms.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
@@ -199,8 +200,36 @@ export const ALIAS_TYPE_META_MAP = DEFAULT_COLUMN_TYPES_AND_ALIASES.reduce(
  * there is more than one identifier column, the `identifier` role will be given
  * to the column `id` or `identifier` if it exists. If not, no identifier role
  * will be assigned.
+ *
+ * @throws {UsageError} when any column name is empty (zero-length). Every name
+ *   field downstream -- the metadata, payload, wire, and exchange-record schemas
+ *   -- floors at `.min(1)`, so an inferred empty name would otherwise surface only
+ *   later: disclosed and sent, then caught at record build by the non-fatal guard
+ *   that silently drops the audit record while the exchange still completes. This
+ *   is the intake chokepoint where raw CSV columns become metadata, so an unnamed
+ *   header (a trailing comma, a blank cell, or a leading delimiter in the header
+ *   row) is rejected here as a clear local error instead, mirroring
+ *   {@link ColumnMetadataSchema}'s `name` floor for authored metadata. A
+ *   {@link UsageError} so the CLI classifies it as a configuration error (exit
+ *   64), not a transport failure; the message names the offending column
+ *   positions only and never echoes input (the names are empty).
  */
 export function inferMetadata(columnNames: Array<string>): Metadata {
+  const emptyPositions = columnNames
+    .map((name, index) => (name.length === 0 ? index + 1 : 0))
+    .filter((position) => position > 0);
+  if (emptyPositions.length > 0) {
+    const plural = emptyPositions.length > 1;
+    throw new UsageError(
+      `input column${plural ? "s" : ""} ${emptyPositions.join(", ")} ` +
+        `${plural ? "have" : "has"} an empty name. A column used for linkage, ` +
+        `identification, or payload must be named; a trailing comma, a blank ` +
+        `cell, or a leading delimiter in the CSV header row produces an unnamed ` +
+        `column. Name the column${plural ? "s" : ""}, or remove the empty ` +
+        `header field${plural ? "s" : ""}.`,
+    );
+  }
+
   const result: Metadata = columnNames.map((name) => {
     const lookupName = name.toLowerCase();
     if (!(lookupName in ALIAS_TYPE_META_MAP)) {

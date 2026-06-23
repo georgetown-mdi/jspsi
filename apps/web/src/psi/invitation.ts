@@ -10,6 +10,7 @@ import {
   loadCSVFile,
 } from "@psilink/core";
 
+import { emptyColumnPositions } from "./columnNames";
 import { payloadSendForMetadata } from "./metadataEditing";
 
 import type {
@@ -164,6 +165,18 @@ export type InvitationFileFailure =
       /** The default linkage fields the file cannot produce, so the caller can
        * name the missing field types to the inviter. */
       unsatisfied: Array<LinkageField>;
+    }
+  | {
+      /** The CSV header carries one or more empty (zero-length) column names -- a
+       * trailing comma, a blank cell, or a leading delimiter produces an unnamed
+       * (`""`) column. Core's {@link inferMetadata} rejects it at intake, and the
+       * payload schema's `name` `.min(1)` would otherwise reject it only as a raw
+       * ZodError at encode (the generic retry dead-end); refused here EARLY so the
+       * caller can show a clear, actionable error. */
+      kind: "unnameable";
+      /** The 1-based positions of the empty-named columns, for the operator-facing
+       * message (see {@link unnameableColumnsAlert}). */
+      positions: Array<number>;
     };
 
 /**
@@ -178,7 +191,9 @@ export class InvitationFileError extends Error {
     super(
       failure.kind === "unreadable"
         ? "invitation file could not be read"
-        : "invitation file satisfies no linkage keys",
+        : failure.kind === "unlinkable"
+          ? "invitation file satisfies no linkage keys"
+          : "invitation file has an empty column name",
     );
     this.name = "InvitationFileError";
     this.failure = failure;
@@ -350,6 +365,21 @@ export async function generateInvitation(params: {
   } catch (cause) {
     throw new InvitationFileError({ kind: "unreadable", cause });
   }
+
+  // Refuse an unnamed-column header before any inference or minting. inferMetadata
+  // (the quick path) and assessLinkageSatisfiability below both reject an empty
+  // name by throwing a raw UsageError, and the authored path would carry a `""`
+  // column into payload.send and bottom out in PayloadColumnSchema's name `.min(1)`
+  // ZodError at encode -- both of which the UI flattens into its generic retry
+  // dead-end. Surface the typed, user-actionable failure here instead, the same
+  // "reject early with a clear error" intake philosophy the unreadable/unlinkable
+  // gates follow.
+  const emptyPositions = emptyColumnPositions(columns);
+  if (emptyPositions.length > 0)
+    throw new InvitationFileError({
+      kind: "unnameable",
+      positions: emptyPositions,
+    });
 
   // The terms to embed. The Advanced-options editor's authored terms are embedded
   // verbatim; the quick path derives them from the file's columns (inferred

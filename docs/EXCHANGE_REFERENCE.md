@@ -803,6 +803,8 @@ retention_disposition: "Filed in Agency A association DB (links.prod); retained 
 
 Optional field-level descriptions of the input dataset. If omitted, semantic types are inferred from column names. If no identifier columns are specified, output row indices reference positions in the input file.
 
+When metadata is inferred (no explicit `metadata` block), an empty (zero-length) column name in the input is rejected at intake with a clear error (exit 64), the same way an explicit `metadata` `name` is rejected at config parse (see the `name` field below). A trailing comma, a blank cell, or a leading delimiter in a CSV header row produces such an unnamed column; because an empty name cannot be used for linkage, identification, or payload, the file is refused up front rather than silently dropping the column's audit record during the exchange. Name the column or remove the empty header field. The web app surfaces the same rejection at its file-intake surfaces (the quick and Advanced invite paths and the acceptor's file step).
+
 ```yaml
 metadata:
   columns:

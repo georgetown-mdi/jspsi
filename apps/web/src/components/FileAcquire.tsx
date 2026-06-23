@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { loadCSVFile, sanitizeErrorForDisplay } from "@psilink/core";
 
+import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
+
 import FileSelect from "@components/FileSelect";
 
 /** A titled alert. The acquire phase emits its read-failure message through this
@@ -103,6 +105,22 @@ export default function FileAcquire(props: FileAcquireProps) {
 
       const rawRows = csvResult.data as Array<Record<string, string>>;
       const columns = csvResult.meta.fields ?? [];
+
+      // Refuse an unnamed-column header before handing off: the editor seeds its
+      // metadata from these columns via inferMetadata, which rejects an empty name
+      // by throwing -- during the editor's render, where it would crash rather than
+      // surface. An empty header cannot be fixed downstream (the editor offers no
+      // column rename), so reject it here with the shared clear error, mirroring
+      // the read-failure cleanup above (abort, release the controller, re-enable
+      // submit).
+      const emptyPositions = emptyColumnPositions(columns);
+      if (emptyPositions.length > 0) {
+        onError(unnameableColumnsAlert(emptyPositions));
+        controller.abort();
+        abortRef.current = undefined;
+        setSubmitted(false);
+        return;
+      }
 
       onAcquired({ rawRows, columns });
     })();

@@ -20,6 +20,7 @@ import {
 } from "@psilink/core";
 
 import { InvitationFileError, generateInvitation } from "@psi/invitation";
+import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
 import { invitationLocation } from "@psi/invitationLocation";
 import { seedAdvancedInvite } from "@psi/advancedInvite";
 
@@ -126,6 +127,18 @@ export function AdvancedInvite() {
     // the setup/cleanup/setup effect cycle have already read the hand-off
     // synchronously, so neither mount loses it.
     clearAdvancedHandoff();
+
+    // Refuse an unnamed-column header before seeding: seedAdvancedInvite and the
+    // satisfiability check below both infer metadata from these columns, which
+    // rejects an empty name by throwing. An empty header cannot be fixed in the
+    // editor, so reject it here with the shared clear error and drop back to the
+    // picker, mirroring the unlinkable block below.
+    const emptyPositions = emptyColumnPositions(columns);
+    if (emptyPositions.length > 0) {
+      setError(unnameableColumnsAlert(emptyPositions));
+      setPhase({ status: "acquire" });
+      return;
+    }
 
     // Assess against the FULL default terms (every default field declared) so the
     // block can name the field types the file lacks -- the same gate and wording

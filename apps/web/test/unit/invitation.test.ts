@@ -252,6 +252,26 @@ describe("generateInvitation", () => {
     ).rejects.toBeInstanceOf(InvitationFileError);
   });
 
+  test("rejects an unnamed column header early as an unnameable InvitationFileError", async () => {
+    // A trailing comma in the header yields an unnamed ("") column. The quick path
+    // must reject it early as a typed, user-actionable InvitationFileError (kind
+    // "unnameable", naming the 1-based position) rather than letting inferMetadata's
+    // raw UsageError -- or the payload schema's name .min(1) ZodError at encode --
+    // bottom out in the UI's generic "please try again" retry dead-end.
+    const EMPTY_HEADER_CSV =
+      "ssn,first_name,last_name,dob,\n123456789,Alice,Smith,1990-01-02,\n";
+    const error = await generateInvitation({
+      inviterName: "Org",
+      file: csvStream(EMPTY_HEADER_CSV),
+      location,
+    }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InvitationFileError);
+    expect((error as InvitationFileError).failure).toEqual({
+      kind: "unnameable",
+      positions: [5],
+    });
+  });
+
   test("fails closed when authored terms over-declare payload.send at the mint", async () => {
     // Defense-in-depth backstop: the Advanced editor authors no payload block
     // today, so this cannot fire from the UI until payload authoring lands (item
