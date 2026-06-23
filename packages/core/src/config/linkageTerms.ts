@@ -326,8 +326,13 @@ const NameConstraintsSchema: z.ZodType<NameConstraints> = z.object({
   // (re2js) -- the SAME engine that executes it: the core value-level constraint
   // check (`checkValueConstraints` in standardization.ts, shared by the web
   // workbench and the CLI) compiles `^[allowedCharacters]$` under that engine, one
-  // code point at a time, to flag values outside the class. Validating with the
-  // engine that runs it guarantees a class accepted here compiles at check time,
+  // code point at a time, to flag values outside the class -- escaping a leading
+  // `^` (and a `-` immediately after it) to a literal first so the class is read as
+  // an allow-list, not a negation. Validating with the engine that runs it
+  // guarantees a class accepted here compiles at check time (if escaping a leading
+  // caret yields a form re2js cannot compile, the check over-flags rather than
+  // failing open -- see withinAllowedCharacters -- so a refine-accepted class is
+  // never silently un-checked),
   // so the advisory cannot silently fail open on a class the native engine accepts
   // but re2js rejects (a backreference, a POSIX/Unicode class, or the degenerate
   // empty class). Note the brackets that get added. The `.max()` precedes the

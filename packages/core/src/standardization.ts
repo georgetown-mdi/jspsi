@@ -1685,38 +1685,100 @@ export interface ConstraintViolation {
  * body of a `[...]` class -- NOT that it cannot break out of one. A crafted value
  * can close the class and inject arbitrary regex structure (e.g. `x](a+)+b[y`).
  *
- * Two hazards follow, each guarded here. (1) ReDoS: matching against an attacker-
- * chosen pattern on the native `RegExp` engine could backtrack catastrophically
- * and hang the single, non-interruptible thread. The class is compiled under the
- * linear-time engine the transform-regex paths use ({@link compileLinearRegex},
- * re2js) instead, so the blow-up is impossible by construction -- no partner
- * pattern ever touches the backtracking engine -- and a pattern that engine cannot
- * compile is treated as "cannot check" (no violation, fail-open) rather than
- * throwing. {@link NameConstraintsSchema} validates the class under this SAME
- * engine, so for a decoded token that fail-open is a backstop, not a path: a class
- * that would not compile here is rejected at terms validation. (2) Warning
- * suppression: a breakout that relies on matching a MULTI-character span (e.g.
- * `a]|.*[b`, `(a+)+`) would silently pass disallowed values if the whole value were
- * matched at once. Testing one code point at a time against `^[allowed]$` defeats
- * that family -- a multi-character construct cannot match a single code point, so
- * such a value is still flagged. It does NOT, and need not, defeat a class that
- * genuinely ADMITS the code point -- including a character-class shorthand smuggled
- * in via the leading-`]`-is-literal trick (e.g. `]|\w|[`, which parses as one class
- * admitting every word character, so a "disallowed" letter is not flagged). That is
- * the class behaving as a class; because the check is warn-not-enforce the only
- * consequence is a suppressed advisory badge, never a data-filtering or
- * match-correctness effect -- so it is an accepted limit, not a hole. (Encoded by
- * the suppression tests in standardization.test.ts.) For a legitimate class the
- * per-code-point test is exactly `^[allowed]*$` (every character must be in the
- * class). The empty string trivially conforms. */
+ * Hazards follow, each guarded here.
+ *
+ * (1) ReDoS: matching against an attacker-chosen pattern on the native `RegExp`
+ * engine could backtrack catastrophically and hang the single, non-interruptible
+ * thread. The class is compiled under the linear-time engine the transform-regex
+ * paths use ({@link compileLinearRegex}, re2js) instead, so the blow-up is
+ * impossible by construction -- no partner pattern ever touches the backtracking
+ * engine -- and a pattern that engine cannot compile is treated as "cannot check"
+ * (no violation, fail-open) rather than throwing. {@link NameConstraintsSchema}
+ * validates the class under this SAME engine, so for a decoded token that fail-open
+ * is a backstop, not a path: a class that would not compile here is rejected at
+ * terms validation.
+ *
+ * (2) Warning suppression has three sub-cases, handled differently:
+ *
+ *   - A breakout closes the class and injects regex structure: a multi-character
+ *     span (`a]|.*[b`, `(a+)+`), or an alternation with an empty-matchable branch
+ *     (`a]*|` becomes `^[a]*|]$` = `(^[a]*) | (]$)`). Each value is tested one code
+ *     point at a time AND as a FULL match (re2js `matches()`, anchored both ends),
+ *     not an unanchored find: a multi-character span cannot match a single code
+ *     point, and a branch matching only a zero-width or leading span does not satisfy
+ *     a full match (an unanchored test would instead let `^[a]*`, which matches the
+ *     empty string at the start anchor, pass every value). A breakout branch that
+ *     genuinely matches a SINGLE code point is a different case -- see the accepted-
+ *     limit sub-case below.
+ *
+ *   - A leading `^` makes re2js read the class as a NEGATION (`^A-Z` compiles to
+ *     `[^A-Z]`), inverting the advisory: the class would admit every character
+ *     EXCEPT the listed ones and so suppress the warning on arbitrary disallowed
+ *     input, the opposite of a plain reading ("allow `^` and A-Z, flag the rest").
+ *     This is CLOSED: a leading `^` is escaped to a literal `\^` before compiling,
+ *     and a `-` immediately after it is escaped too (otherwise `\^-X` would read as
+ *     a range -- `^-Z` -> `\^-Z` is reversed -- rather than the literal caret the
+ *     operator meant). An exotic leading-`^` combination can still escape to a class
+ *     re2js cannot compile (e.g. `^]A[`, where the literal `\^` lets a following `]`
+ *     close the class): when the raw class compiled but the escaped one does not, the
+ *     value is OVER-flagged rather than failed open, so a leading `^` never suppresses
+ *     the advisory -- the worst case is the warn-not-enforce safe direction. A literal
+ *     caret is otherwise written non-first (`A-Z^`) or escaped (`\^`), so the escape
+ *     never narrows a legitimate class.
+ *
+ *   - A class -- or an injected alternation branch -- that genuinely ADMITS the single
+ *     code point is NOT defeated, and is an accepted limit. This covers a character-
+ *     class shorthand (`\w`, `\d`, `\s`) or Unicode/POSIX property class, whether or
+ *     not dressed up with the leading-`]`-is-literal trick (e.g. `]|\w|[`, one class
+ *     admitting every word character); it equally covers an alternation breakout whose
+ *     branch admits one code point (`a]|.|[b` compiles to `(^[a]) | (.) | ([b]$)`,
+ *     whose `.` branch full-matches any code point, so the class effectively admits
+ *     everything). There is no transform or parse-time rule that suppresses these
+ *     without rejecting or narrowing a legitimate class: `\p{L}` ("any letter") is the
+ *     natural constraint for international names and is indistinguishable at the engine
+ *     level from a smuggle, so neutralizing it would false-flag real non-Latin names;
+ *     and an effective allow-all reached via breakout is indistinguishable by matching
+ *     behavior from a legitimately permissive class such as `[\s\S]` -- only the syntax
+ *     (a top-level `|`, which a genuine character class never contains) differs, and
+ *     detecting that would take a full class parser, out of proportion to a warn-only
+ *     advisory. The class is behaving as a class; because the check is warn-not-enforce
+ *     the only consequence is a suppressed advisory badge, never a data-filtering or
+ *     match-correctness effect -- so it is an accepted limit, not a hole.
+ *
+ * Every sub-case is pinned by tests in standardization.test.ts so the boundary
+ * between what is closed and what is accepted cannot silently drift. For a
+ * legitimate class the per-code-point test is exactly `^[allowed]*$` (every
+ * character must be in the class). The empty string trivially conforms.
+ */
 function withinAllowedCharacters(value: string, allowed: string): boolean {
+  // A leading `^` is class NEGATION in re2js (`[^...]`), which would invert this
+  // check and suppress the advisory on every UNLISTED character. Escape it to a
+  // literal caret; escape a `-` immediately after it too, or `\^-X` would read as a
+  // range instead of a literal caret. If the escaped class still will not compile
+  // (an exotic leading-`^` combination), the catch over-flags rather than failing
+  // open. See the header (2) for the families this does and does not close.
+  let classBody = allowed;
+  if (allowed.startsWith("^-")) classBody = `\\^\\-${allowed.slice(2)}`;
+  else if (allowed.startsWith("^")) classBody = `\\^${allowed.slice(1)}`;
   let oneOf: CompiledLinearRegex;
   try {
-    oneOf = compileLinearRegex(`^[${allowed}]$`);
+    oneOf = compileLinearRegex(`^[${classBody}]$`);
   } catch {
-    return true;
+    // The escaped form did not compile. If the raw class does (an exotic leading-`^`
+    // combination such as `^]A[`, where the literal `\^` lets a following `]` close
+    // the class), our escape -- not the partner's class -- broke it: over-flag (the
+    // warn-not-enforce safe direction) instead of failing open and suppressing the
+    // advisory on every value, which a leading-`^` negation would otherwise achieve.
+    // A class that compiles neither way is genuinely uncheckable: fail open, as
+    // header (1) describes.
+    try {
+      compileLinearRegex(`^[${allowed}]$`);
+    } catch {
+      return true;
+    }
+    return false;
   }
-  for (const character of value) if (!oneOf.test(character)) return false;
+  for (const character of value) if (!oneOf.matches(character)) return false;
   return true;
 }
 
