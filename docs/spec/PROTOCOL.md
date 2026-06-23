@@ -203,6 +203,21 @@ The responder confirms first (in msg2); the initiator verifies `responder_confir
 
 **Test vectors and interoperability.** The key-schedule mix chain above is faithful Noise NNpsk0, but the overall handshake is pinned by psilink's own checked-in known-answer vector (`packages/core/test/vectors/kex-vectors.json`) rather than being wire-compatible with generic Noise. Two things diverge from a stock Noise NNpsk0 session: the protocol name differs (so the initial `h` differs), and instead of Noise `Split()` the session key uses a custom KDF over `ck || h` with an added explicit confirmation round. So no end-to-end Noise vector corresponds. What does correspond is the underlying machinery, cross-checked against its published references in `packages/core/test/kex.test.ts`: the X25519 Diffie-Hellman against [RFC 7748](https://www.rfc-editor.org/rfc/rfc7748) section 6.1, and the Noise chaining HKDF against [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869) test case 3. The vectors fix the pre-shared secret and both ephemeral private keys and record, for all four `(initiator, responder)` request-encryption flag combinations, the handshake hash, session key, and both confirmation tags (the chaining key and confirmation key are flag-independent and recorded once); they are reproduced by the independent generator at `packages/core/test/vectors/generate-kex-vectors.mjs`.
 
+## Shared-secret rotation
+
+The pre-shared secret that authenticates a recurring exchange is a 32-byte value encoded as unpadded base64url (43 characters). Two mechanisms mint one, differing only in how the 32 bytes are produced:
+
+- **Invitation tokens** are generated directly from a CSPRNG (`crypto.getRandomValues`), giving 256 bits of entropy.
+- **Rotation tokens** are derived from the 32-byte session key (above) with the application HKDF (`hkdfDerive`: HKDF-SHA-256, 32-byte zero salt), so a rotated secret carries the same 256-bit security level as the session key it derives from:
+
+```
+rotated_secret = HKDF(session_key, "psilink-shared-secret-rotation-v1", 32)
+```
+
+The rotation runs after every successful handshake and before the data exchange begins: both parties recompute it independently from the shared `session_key`, so it adds no message or round-trip, and each persists the result as the secret for the next exchange. The `psilink-shared-secret-rotation-v1` info string is a single fixed label (not a per-party or per-context family) and is disjoint from every other domain-separation label in the system (`psilink-kex-v1:*`, `psilink-aead-v1:*`, `psilink-abort-token-v1:*`, `psilink-webrtc-peerid-v1:*`, and the `psilink-signing-*` labels), so a rotated secret can never collide with a session, AEAD, abort-marker, peer-id, or signing derivation.
+
+The operator-facing rotation policy -- that the secret is never reused, that a rotated token carries no expiry by default, and the recovery path when the two parties' tokens desynchronize -- is in [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#recurring-exchange-authentication).
+
 ## WebRTC rendezvous peer-id derivation
 
 The WebRTC transport meets its peer with no coordination backend: both web parties derive their PeerJS rendezvous peer ids deterministically from the invitation's 32-byte shared secret, so each side computes the other's id locally and they rendezvous on the PeerJS signaling broker without exchanging an id out of band. This precedes and is independent of the X25519 handshake above -- it places the two parties on the same WebRTC connection, over which the handshake then runs.

@@ -67,7 +67,7 @@ In the exchange specification (`psilink.yaml`), this mechanism is configured in 
 
 ### Token format and entropy
 
-Tokens are base64url-encoded 32-byte values. Invitation tokens are generated using `crypto.getRandomValues`, giving 256 bits of entropy. Rotation tokens are derived from the 32-byte key-exchange session key via HKDF-SHA-256 (info string `"psilink-shared-secret-rotation-v1"`, output 32 bytes) and carry the same 256-bit security level as the underlying session key.
+The shared secret is a 32-byte value carrying 256 bits of entropy, whether it was minted for an invitation (generated directly from a CSPRNG) or produced by rotation (derived from the key-exchange session key, so it inherits the session key's 256-bit security level). Rotation derives the replacement deterministically from the session key both parties already hold, so it needs no extra round-trip, and the secret is never reused. The on-disk encoding and the rotation-derivation construction -- the HKDF instantiation, its domain-separation label, and the output length -- are specified in [PROTOCOL.md](spec/PROTOCOL.md#shared-secret-rotation).
 
 ### Invitation contents and confidentiality
 
