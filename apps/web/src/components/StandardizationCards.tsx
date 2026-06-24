@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Button, Group, Paper, Stack } from "@mantine/core";
 import { IconPlus } from "@tabler/icons-react";
@@ -94,36 +94,58 @@ export function StandardizationCards({
    * declares intent. */
   onMissingField: "skip" | "throw";
 }) {
-  const fieldByName = new Map(
-    declaredFields.map((field) => [field.name, field]),
+  const fieldByName = useMemo(
+    () => new Map(declaredFields.map((field) => [field.name, field])),
+    [declaredFields],
   );
 
-  // The operator's `role: linkage` columns of a semantic type, in metadata order --
+  // The operator's `role: linkage` columns per semantic type, in metadata order --
   // the columns a field of that type MAY bind to. Only a linkage column participates
   // in matching, so a column roled identifier/payload/ignored is never offered as a
-  // match input the core would refuse. More than one makes the input column a real
-  // choice (and lets two same-typed fields each take their own).
+  // match input the core would refuse. Built once per metadata so each card's input
+  // options and the add-affordance check are lookups, not a metadata scan per card per
+  // render.
+  const columnsByType = useMemo(() => {
+    // Keyed by the column's own (broader) semantic type; lookups by a field's
+    // narrower linkage type are a subset, so non-linkage-typed entries are never read.
+    const map = new Map<Metadata[number]["type"], Array<string>>();
+    for (const column of metadata) {
+      if (column.role !== "linkage") continue;
+      const list = map.get(column.type);
+      if (list === undefined) map.set(column.type, [column.name]);
+      else list.push(column.name);
+    }
+    return map;
+  }, [metadata]);
+  // More than one column of a type makes the input column a real choice (and lets two
+  // same-typed fields each take their own).
   const columnsForType = (type: LinkageField["type"]): Array<string> =>
-    metadata
-      .filter((column) => column.role === "linkage" && column.type === type)
-      .map((column) => column.name);
+    columnsByType.get(type) ?? [];
 
   // The rendered-card count per type, so the add control offers only a type with a
   // free column and the remove control appears only on a same-typed pair. Counted
   // over declared fields (one card each), so a transformation that declares no field
   // never inflates the tally past what is on screen.
-  const boundByType = new Map<LinkageField["type"], number>();
-  for (const transformation of standardization) {
-    const field = fieldByName.get(transformation.output);
-    if (field !== undefined)
-      boundByType.set(field.type, (boundByType.get(field.type) ?? 0) + 1);
-  }
-  const addableTypes =
-    onAddField === undefined
-      ? []
-      : [...boundByType.keys()].filter(
-          (type) => columnsForType(type).length > (boundByType.get(type) ?? 0),
-        );
+  const boundByType = useMemo(() => {
+    const counts = new Map<LinkageField["type"], number>();
+    for (const transformation of standardization) {
+      const field = fieldByName.get(transformation.output);
+      if (field !== undefined)
+        counts.set(field.type, (counts.get(field.type) ?? 0) + 1);
+    }
+    return counts;
+  }, [standardization, fieldByName]);
+  const addableTypes = useMemo(
+    () =>
+      onAddField === undefined
+        ? []
+        : [...boundByType.keys()].filter(
+            (type) =>
+              (columnsByType.get(type)?.length ?? 0) >
+              (boundByType.get(type) ?? 0),
+          ),
+    [onAddField, boundByType, columnsByType],
+  );
 
   return (
     <Stack gap="sm">

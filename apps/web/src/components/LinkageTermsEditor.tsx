@@ -342,6 +342,13 @@ export function LinkageTermsEditor({
       .filter((column) => column.role === "linkage" && column.type === type)
       .map((column) => column.name);
 
+  // A signature of each field's input binding for the cleaning error boundary's
+  // auto-recovery (see CleaningErrorBoundary); a reset or remap changes it.
+  const cleaningResetKey = useMemo(
+    () => draft.standardization.map((t) => `${t.output}=${t.input}`).join(","),
+    [draft.standardization],
+  );
+
   // Per-field standardization edits on the inviter's source-of-truth array (its
   // direct-mutation model, vs the acceptor's override layer). The shared
   // StandardizationCards emits granular intents; the inviter ignores the echoed
@@ -703,9 +710,7 @@ export function LinkageTermsEditor({
                 </Text>
                 <CleaningErrorBoundary
                   onReset={handleReset}
-                  resetKey={draft.standardization
-                    .map((t) => `${t.output}=${t.input}`)
-                    .join(",")}
+                  resetKey={cleaningResetKey}
                 >
                   <StandardizationCards
                     standardization={draft.standardization}

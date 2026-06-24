@@ -29,7 +29,7 @@ class Boundary extends Component<BoundaryProps, { errored: boolean }> {
     return { errored: true };
   }
 
-  componentDidCatch(error: Error, _info: ErrorInfo): void {
+  componentDidCatch(error: unknown, _info: ErrorInfo): void {
     this.props.onCatch(error);
   }
 
@@ -62,9 +62,9 @@ class Boundary extends Component<BoundaryProps, { errored: boolean }> {
  * the most likely fix, since it clears the per-field overrides back to the
  * recommended pipeline.
  *
- * {@link resetKey} is a signature of the rendered standardization, so the boundary
- * auto-clears when the prepared data changes (a remap recovers without the button
- * too); the button also resets the boundary directly, so a click always retries even
+ * {@link resetKey} signs each field's input binding -- the only input to the
+ * missing-field invariant -- so a remap auto-clears the boundary. The button
+ * also resets it directly, so a click always retries even
  * if the signature is unchanged. The acceptor's thrown message names no
  * partner-controlled value, but the dev-gated `onCatch` log mirrors
  * DefaultCatchBoundary so an unforeseen error carrying partner bytes never reaches a
@@ -78,8 +78,8 @@ export function CleaningErrorBoundary({
   children: ReactNode;
   /** Restore the cleaning to its recommended state (the host's reset). */
   onReset: () => void;
-  /** A value that changes whenever the rendered standardization changes, so the
-   * boundary auto-recovers once the offending state is edited away. */
+  /** A value that changes when a field's input binding changes (the input to the
+   * invariant the boundary guards), so it auto-recovers once a remap fixes it. */
   resetKey: string;
 }) {
   return (

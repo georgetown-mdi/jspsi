@@ -217,6 +217,13 @@ export function PrepareData({
     [baseStandardization, effectiveInputOverrides, stepOverrides],
   );
 
+  // A signature of each field's input binding -- the only input to the missing-field
+  // invariant the cleaning boundary guards -- so a remap or reset auto-recovers it.
+  const cleaningResetKey = useMemo(
+    () => standardization.map((t) => `${t.output}=${t.input}`).join(","),
+    [standardization],
+  );
+
   const setFieldSteps = (
     output: string,
     input: string,
@@ -506,9 +513,7 @@ export function PrepareData({
                 </div>
                 <CleaningErrorBoundary
                   onReset={handleReset}
-                  resetKey={standardization
-                    .map((t) => `${t.output}=${t.input}`)
-                    .join(",")}
+                  resetKey={cleaningResetKey}
                 >
                   <StandardizationCards
                     standardization={standardization}
