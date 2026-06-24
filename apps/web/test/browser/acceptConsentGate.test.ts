@@ -561,6 +561,13 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
     await expect
       .element(page.getByRole("button", { name: "Start exchange" }))
       .toBeEnabled();
+    // The disclosure consequence of the fix: both columns started as inferred
+    // payload (sent); remapping them to match makes them role: linkage / not sent,
+    // so nothing is now disclosed. The "what you will send" summary reflects that --
+    // proof the remap re-roled the columns rather than leaving them sent.
+    await expect
+      .element(page.getByText(/No columns\. Only the linkage result/))
+      .toBeInTheDocument();
   });
 
   test("clearing a required param on a recommended step disables Start exchange until it is fixed, so a malformed pipeline never reaches the exchange", async () => {

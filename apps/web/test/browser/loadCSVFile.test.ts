@@ -15,6 +15,10 @@ import { loadCSVFile } from "@psilink/core";
 // error, which in a record-linkage tool is a wrong intersection. This builds a CSV
 // deliberately larger than one chunk and asserts EVERY row survives.
 describe("loadCSVFile multi-chunk parsing", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   test("returns every row of a file that spans more than one PapaParse chunk", async () => {
     const header = "id,value";
     const pad = "v".repeat(200);
@@ -39,9 +43,35 @@ describe("loadCSVFile multi-chunk parsing", () => {
     // assertions if the input fit in one chunk, so fail loudly if it does not.
     expect(file.size).toBeGreaterThan(Papa.LocalChunkSize);
 
+    // Count how many times PapaParse actually fires the per-chunk callback, by
+    // wrapping the chunk handler the wrapped config carries. This makes the
+    // multi-chunk premise executable (it replaces the old `WORKERS_SUPPORTED`
+    // assertion): if a future PapaParse delivered this file inline in a single
+    // chunk, the accumulation would no longer be exercised and the row assertions
+    // below could pass vacuously -- so assert more than one chunk was seen.
+    let chunkCalls = 0;
+    const realParse = Papa.parse;
+    vi.spyOn(Papa, "parse").mockImplementation(((
+      input: unknown,
+      config: { chunk?: (r: unknown, p: unknown) => void } & Record<
+        string,
+        unknown
+      >,
+    ) => {
+      const userChunk = config.chunk;
+      return (realParse as unknown as (i: unknown, c: unknown) => void)(input, {
+        ...config,
+        chunk: (r: unknown, p: unknown) => {
+          chunkCalls += 1;
+          userChunk?.(r, p);
+        },
+      });
+    }) as unknown as typeof Papa.parse);
+
     const result = await loadCSVFile(file);
     const rows = result.data as Array<Record<string, string>>;
 
+    expect(chunkCalls).toBeGreaterThan(1);
     expect(rows.length).toBe(rowCount);
     expect(result.meta.fields).toEqual(["id", "value"]);
     // Spot-check both ends, including the row straddling the chunk boundary

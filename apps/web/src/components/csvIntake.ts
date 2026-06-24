@@ -15,7 +15,7 @@
  * `docs/spec/PROTOCOL.md`.
  *
  * No-silent-truncation is the invariant that actually matters here, and it is
- * pinned directly by a multi-chunk correctness test in worker mode
+ * pinned directly by a multi-chunk correctness test
  * (`test/browser/loadCSVFile.test.ts`), not by holding the cap below the chunk
  * size. The dropzone-wiring guard (`test/browser/fileSelect.test.ts`) separately
  * checks that {@link FileSelect} passes this constant through as `maxSize` rather

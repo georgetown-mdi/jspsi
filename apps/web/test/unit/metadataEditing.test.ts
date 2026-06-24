@@ -417,6 +417,7 @@ describe("setColumnTypeForMatching forces the match role", () => {
       col({ name: "z", type: "other", role: "ignored", isPayload: false }),
     ];
     const out = setColumnTypeForMatching(md, "z", "first_name");
+    expect(out[0].type).toBe("first_name");
     expect(out[0].role).toBe("linkage");
     expect(disclosureOf(out[0])).toBe("match");
   });
