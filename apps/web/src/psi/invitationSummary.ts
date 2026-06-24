@@ -27,6 +27,7 @@ const FIELD_TYPE_LABELS: Record<LinkageField["type"], string> = {
   ssn4: "Last 4 of Social Security number",
   phone_number: "Phone number",
   email_address: "Email address",
+  zip_code: "ZIP code",
 };
 
 /**
@@ -46,6 +47,7 @@ const COMPACT_FIELD_TYPE_LABELS: Record<LinkageField["type"], string> = {
   ssn4: "SSN (last 4)",
   phone_number: "phone",
   email_address: "email",
+  zip_code: "ZIP",
 };
 
 /**

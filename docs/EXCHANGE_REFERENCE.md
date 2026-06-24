@@ -170,8 +170,11 @@ linkage_terms:
 | `date_of_birth` | Date of birth |
 | `phone_number` | Phone number |
 | `email_address` | Email address |
+| `zip_code` | US ZIP code; canonical form is 5 digits, zero-padded |
 
 Additional types will be added as their use case arises.
+
+A column named `zip`, `zip5`, `zip_5`, `zipcode`, or `zip_code` is inferred as `zip_code`. Like `phone_number` and `email_address`, it is a matchable type with no default linkage key, so an inferred ZIP column is used for matching only when a key references it and is not sent as payload unless you mark it so.
 
 #### Constraints
 

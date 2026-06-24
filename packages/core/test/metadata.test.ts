@@ -4,6 +4,7 @@ import {
   inferMetadata,
   ALIAS_TYPE_META_MAP,
   safeParseMetadata,
+  disclosedColumnNames,
 } from "../src/config/metadata";
 import { UsageError } from "../src/errors";
 
@@ -23,6 +24,29 @@ test("phone and email: linkage role, not payload by default", () => {
   expect(phone.isPayload).toBe(false);
   expect(email.role).toBe("linkage");
   expect(email.isPayload).toBe(false);
+});
+
+test("zip_code: linkage role, not payload by default", () => {
+  // A recognized PII type defaults to linkage and is NOT disclosed: an inferred
+  // ZIP column participates in matching only if a key references it, and is never
+  // silently shipped as payload (unlike an unrecognized `other` column, which is).
+  const [zip] = inferMetadata(["zip"]);
+  expect(zip.type).toBe("zip_code");
+  expect(zip.role).toBe("linkage");
+  expect(zip.isPayload).toBe(false);
+});
+
+test("an inferred zip column is excluded from the disclosed set", () => {
+  // The observable disclosure consequence, pinned at the boundary preparePayload
+  // gathers on (disclosedColumnNames over isDisclosedToPartner): a `zip` column is
+  // NOT sent to the partner, while an unrecognized `notes` column still is. This is
+  // the behavior change a `zip` column previously inferred as `other` (and sent);
+  // pin it so a regression in the alias mapping cannot silently start disclosing it.
+  const disclosed = disclosedColumnNames(
+    inferMetadata(["first_name", "last_name", "zip", "notes"]),
+  );
+  expect(disclosed).not.toContain("zip");
+  expect(disclosed).toContain("notes");
 });
 
 // ─── inferMetadata: identifier column ────────────────────────────────────────
@@ -103,6 +127,11 @@ test.each([
   ["phone", "phone_number"],
   ["email_address", "email_address"],
   ["email", "email_address"],
+  ["zip_code", "zip_code"],
+  ["zip", "zip_code"],
+  ["zip5", "zip_code"],
+  ["zip_5", "zip_code"],
+  ["zipcode", "zip_code"],
   ["id", "identifier"],
   // No-separator spellings: a single-token column export still infers. Pinned
   // because the map builder keys on `type.toLowerCase()`, which equals the

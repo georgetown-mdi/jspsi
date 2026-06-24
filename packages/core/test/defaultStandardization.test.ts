@@ -33,6 +33,7 @@ const minimalTerms: LinkageTerms = {
     { name: "date_of_birth", type: "date_of_birth" },
     { name: "phone_number", type: "phone_number" },
     { name: "email_address", type: "email_address" },
+    { name: "zip_code", type: "zip_code" },
   ],
   linkageKeys: [
     {
@@ -50,6 +51,7 @@ const fullMetadata: ColumnMetadata[] = [
   { name: "DOB", type: "date_of_birth", role: "linkage", isPayload: false },
   { name: "PHONE", type: "phone_number", role: "linkage", isPayload: false },
   { name: "EMAIL", type: "email_address", role: "linkage", isPayload: false },
+  { name: "ZIP", type: "zip_code", role: "linkage", isPayload: false },
 ];
 
 // --- getDefaultStandardization -----------------------------------------------
@@ -57,7 +59,7 @@ const fullMetadata: ColumnMetadata[] = [
 describe("getDefaultStandardization — structure", () => {
   test("returns one transformation per matching linkage field", () => {
     const result = getDefaultStandardization(fullMetadata, minimalTerms);
-    expect(result).toHaveLength(7);
+    expect(result).toHaveLength(8);
   });
 
   test("output names match linkage field names", () => {
@@ -70,6 +72,7 @@ describe("getDefaultStandardization — structure", () => {
     expect(outputs).toContain("date_of_birth");
     expect(outputs).toContain("phone_number");
     expect(outputs).toContain("email_address");
+    expect(outputs).toContain("zip_code");
   });
 
   test("input names come from metadata column names", () => {
@@ -175,8 +178,8 @@ describe('default chains: a blank input yields null, never ""', () => {
   const transformations = getDefaultStandardization(fullMetadata, minimalTerms);
 
   // Guard: every default linkage field is exercised, so this is not a vacuous pass.
-  test("covers all seven default linkage fields", () => {
-    expect(transformations).toHaveLength(7);
+  test("covers all eight default linkage fields", () => {
+    expect(transformations).toHaveLength(8);
   });
 
   for (const t of transformations) {
@@ -614,6 +617,69 @@ describe("default email_address pipeline", () => {
     );
     expect(asciiIdx).toBeGreaterThanOrEqual(0);
     expect(emailFilterIdx).toBeGreaterThan(asciiIdx);
+  });
+});
+
+// --- ZIP code pipeline -------------------------------------------------------
+
+describe("default zip_code pipeline", () => {
+  function run(input: string) {
+    const [t] = getDefaultStandardization(
+      [{ name: "ZIP", type: "zip_code", role: "linkage", isPayload: false }],
+      {
+        ...minimalTerms,
+        linkageFields: [{ name: "zip_code", type: "zip_code" }],
+      },
+    );
+    return runPipeline(input, t.steps!);
+  }
+
+  test("passes a bare 5-digit ZIP through unchanged", () => {
+    expect(run("90210")).toBe("90210");
+  });
+
+  test("truncates a ZIP+4 to its 5-digit prefix", () => {
+    expect(run("90210-1234")).toBe("90210");
+  });
+
+  test("strips non-digit formatting before truncating", () => {
+    expect(run(" 90210 ")).toBe("90210");
+  });
+
+  test("zero-pads a 4-digit New England ZIP missing its leading zero", () => {
+    expect(run("2139")).toBe("02139");
+  });
+
+  test("keeps only the first 5 digits of a 9-digit ZIP+4 run together", () => {
+    expect(run("902101234")).toBe("90210");
+  });
+
+  test("returns null for empty input", () => {
+    expect(run("")).toBeNull();
+  });
+
+  test("returns null for an all-non-digit value", () => {
+    expect(run("abcde")).toBeNull();
+  });
+
+  test('explicit null_if "" precedes pad_left so a cleaned-empty value never pads to 00000', () => {
+    // Mirrors the SSN/SSN4 blank-drop guard: pad_left would otherwise mask a value
+    // that cleaned to empty as "00000". substring already nulls an empty slice, so
+    // this pins the belt-and-suspenders ordering, not new coverage.
+    const [t] = getDefaultStandardization(
+      [{ name: "ZIP", type: "zip_code", role: "linkage", isPayload: false }],
+      {
+        ...minimalTerms,
+        linkageFields: [{ name: "zip_code", type: "zip_code" }],
+      },
+    );
+    const steps = t.steps ?? [];
+    const emptyDropIdx = steps.findIndex(
+      (s) => s.function === "null_if" && s.params?.value === "",
+    );
+    const padIdx = steps.findIndex((s) => s.function === "pad_left");
+    expect(emptyDropIdx).toBeGreaterThanOrEqual(0);
+    expect(padIdx).toBeGreaterThan(emptyDropIdx);
   });
 });
 

@@ -107,6 +107,27 @@ test("parses a complete valid set of terms", () => {
   expect(result.payload?.send).toHaveLength(1);
 });
 
+test("accepts a zip_code linkage field referenced by a key", () => {
+  // zip_code is a matchable type with no default key (like phone_number /
+  // email_address): it must still be a valid LinkageField the schema accepts and a
+  // key may reference, even though getDefaultLinkageTerms never emits one.
+  const result = safeParseLinkageTerms({
+    ...base,
+    linkageFields: [
+      { name: "ssn", type: "ssn" },
+      { name: "zip", type: "zip_code", constraints: { exclude: ["00000"] } },
+    ],
+    linkageKeys: [
+      { name: "SSN + ZIP", elements: [{ field: "ssn" }, { field: "zip" }] },
+    ],
+  });
+  expect(result.success).toBe(true);
+  if (result.success) {
+    const zip = result.data.linkageFields.find((f) => f.name === "zip");
+    expect(zip?.type).toBe("zip_code");
+  }
+});
+
 // ─── Cross-field constraint: deduplicate → expectsOutput ─────────────────────
 
 test("deduplicate: true with expectsOutput: true is valid", () => {

@@ -50,6 +50,7 @@ export const SEMANTIC_TYPE_LABELS: Record<SemanticType, string> = {
   identifier: "Row identifier",
   phone_number: "Phone number",
   email_address: "Email address",
+  zip_code: "ZIP code",
   other: "Other (not used for matching)",
 };
 

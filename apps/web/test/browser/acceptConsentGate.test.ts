@@ -324,11 +324,12 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
       .element(page.getByText("Invitation from County Health Department"))
       .toBeInTheDocument();
 
-    // first_name + last_name satisfy both keys; the extra `zip` column is inferred
-    // as payload, so the disclosure summary names exactly it.
-    await reachEditor(csvFile("first_name,last_name,zip\nAlice,Smith,90210\n"));
+    // first_name + last_name satisfy both keys; the extra unrecognized `notes`
+    // column is inferred as payload, so the disclosure summary names exactly it. (A
+    // recognized type such as `zip_code` would infer as linkage and NOT be sent.)
+    await reachEditor(csvFile("first_name,last_name,notes\nAlice,Smith,vip\n"));
     await expect
-      .element(page.getByText("Columns sent to your partner: zip."))
+      .element(page.getByText("Columns sent to your partner: notes."))
       .toBeInTheDocument();
 
     // Continue opens the confirmation, which lists the disclosed column; only
@@ -353,13 +354,13 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
     expect(exchange.lastProps.acquired.columns).toEqual([
       "first_name",
       "last_name",
-      "zip",
+      "notes",
     ]);
     // The editor's edited metadata and standardization are threaded to the run.
     expect(exchange.lastProps.metadata.map((c) => c.name)).toEqual([
       "first_name",
       "last_name",
-      "zip",
+      "notes",
     ]);
     expect(exchange.lastProps.standardization.length).toBeGreaterThan(0);
     // A fully satisfiable file carries no partial-coverage advisory.
@@ -400,10 +401,13 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
       .element(page.getByText("Invitation from County Health Department"))
       .toBeInTheDocument();
 
-    // Reach the editor with a first file; `zip` is the inferred payload.
-    await reachEditor(csvFile("first_name,last_name,zip\nAlice,Smith,90210\n"));
+    // Reach the editor with a first file; the unrecognized `comment` column is the
+    // inferred payload.
+    await reachEditor(
+      csvFile("first_name,last_name,comment\nAlice,Smith,ok\n"),
+    );
     await expect
-      .element(page.getByText("Columns sent to your partner: zip."))
+      .element(page.getByText("Columns sent to your partner: comment."))
       .toBeInTheDocument();
 
     // Back returns to the review screen (the terms heading shows again) and the
@@ -418,7 +422,7 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
     expect(exchangeMounted()).toBe(false);
 
     // A different file (consent already given, so only re-select) re-enters the
-    // editor reseeded from the NEW columns: `notes` is the payload now, not `zip`.
+    // editor reseeded from the NEW columns: `notes` is the payload now, not `comment`.
     harness.files = [csvFile("first_name,last_name,notes\nBob,Jones,hi\n")];
     await userEvent.click(page.getByTestId("select"));
     await expect.element(page.getByTestId("file-count")).toHaveTextContent("1");

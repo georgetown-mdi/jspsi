@@ -1937,6 +1937,7 @@ export function checkValueConstraints(
       break;
     case "phone_number":
     case "email_address":
+    case "zip_code":
       // Only `exclude` (handled above) has a clean value-level test for these
       // types; nothing further to check.
       break;
