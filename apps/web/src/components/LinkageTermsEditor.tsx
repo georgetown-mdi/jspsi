@@ -50,6 +50,7 @@ import {
 import { APPLIED_SETTINGS } from "@psi/appliedSettings";
 import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
+import { CleaningErrorBoundary } from "@components/CleaningErrorBoundary";
 import { DisclosureSection } from "@components/DisclosureSection";
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 import { FieldCoverage } from "@components/FieldCoverage";
@@ -700,28 +701,35 @@ export function LinkageTermsEditor({
                   They change which of your rows match -- check the preview.
                   Patterns over 1000 characters are rejected.
                 </Text>
-                <StandardizationCards
-                  standardization={draft.standardization}
-                  declaredFields={declaredFields}
-                  metadata={draft.metadata}
-                  rawRows={rawRows}
-                  onStepsChange={setFieldSteps}
-                  onInputColumnChange={setFieldInput}
-                  // Add/remove same-typed fields is an expert affordance; an omitted
-                  // callback removes it. Cleaning steps stay available regardless.
-                  onAddField={expertMode ? addFieldForType : undefined}
-                  onRemoveField={expertMode ? removeField : undefined}
-                  renderCoverage={(output) => (
-                    <FieldCoverage
-                      rate={nonEmptyRates?.get(output)}
-                      // Suppress the first-paint "Checking..." placeholders (the
-                      // inviter never had coverage before): show nothing until the
-                      // first sweep settles, then the rate.
-                      pending={nonEmptyRates !== null && ratesPending}
-                    />
-                  )}
-                  onMissingField="skip"
-                />
+                <CleaningErrorBoundary
+                  onReset={handleReset}
+                  resetKey={draft.standardization
+                    .map((t) => `${t.output}=${t.input}`)
+                    .join(",")}
+                >
+                  <StandardizationCards
+                    standardization={draft.standardization}
+                    declaredFields={declaredFields}
+                    metadata={draft.metadata}
+                    rawRows={rawRows}
+                    onStepsChange={setFieldSteps}
+                    onInputColumnChange={setFieldInput}
+                    // Add/remove same-typed fields is an expert affordance; an omitted
+                    // callback removes it. Cleaning steps stay available regardless.
+                    onAddField={expertMode ? addFieldForType : undefined}
+                    onRemoveField={expertMode ? removeField : undefined}
+                    renderCoverage={(output) => (
+                      <FieldCoverage
+                        rate={nonEmptyRates?.get(output)}
+                        // Suppress the first-paint "Checking..." placeholders (the
+                        // inviter never had coverage before): show nothing until the
+                        // first sweep settles, then the rate.
+                        pending={nonEmptyRates !== null && ratesPending}
+                      />
+                    )}
+                    onMissingField="skip"
+                  />
+                </CleaningErrorBoundary>
                 {/* One polite, atomic editor-wide live region for a silent-empty
                     collapse (per-card FieldCoverage alarms are role="presentation"). */}
                 <VisuallyHidden

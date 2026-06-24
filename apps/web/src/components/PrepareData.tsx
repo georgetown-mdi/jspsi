@@ -44,6 +44,7 @@ import { defaultStandardizationForRows } from "@psi/advancedInvite";
 
 import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
+import { CleaningErrorBoundary } from "@components/CleaningErrorBoundary";
 import { FieldCoverage } from "@components/FieldCoverage";
 import { InvitationTerms } from "@components/InvitationTerms";
 import { MetadataGrid } from "@components/MetadataGrid";
@@ -503,21 +504,28 @@ export function PrepareData({
                     Patterns over 1000 characters are rejected.
                   </Text>
                 </div>
-                <StandardizationCards
-                  standardization={standardization}
-                  declaredFields={linkageTerms.linkageFields}
-                  metadata={metadata}
-                  rawRows={rawRows}
-                  onStepsChange={setFieldSteps}
-                  onInputColumnChange={setInputColumn}
-                  renderCoverage={(output) => (
-                    <FieldCoverage
-                      rate={nonEmptyRates?.get(output)}
-                      pending={ratesPending}
-                    />
-                  )}
-                  onMissingField="throw"
-                />
+                <CleaningErrorBoundary
+                  onReset={handleReset}
+                  resetKey={standardization
+                    .map((t) => `${t.output}=${t.input}`)
+                    .join(",")}
+                >
+                  <StandardizationCards
+                    standardization={standardization}
+                    declaredFields={linkageTerms.linkageFields}
+                    metadata={metadata}
+                    rawRows={rawRows}
+                    onStepsChange={setFieldSteps}
+                    onInputColumnChange={setInputColumn}
+                    renderCoverage={(output) => (
+                      <FieldCoverage
+                        rate={nonEmptyRates?.get(output)}
+                        pending={ratesPending}
+                      />
+                    )}
+                    onMissingField="throw"
+                  />
+                </CleaningErrorBoundary>
                 {/* One polite, atomic live region announces a silent-empty collapse
                     for the whole editor (debounced via the recompute), so a
                     screen-reader user hears the alarm without each card firing its
