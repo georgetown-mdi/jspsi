@@ -167,14 +167,14 @@ export function AcceptInvitation() {
 
   return (
     <Paper
-      // The review and exchange screens are a single reading column, so the panel
-      // self-constrains to EXCHANGE_READING_WIDTH (centered) rather than filling the
-      // route's wide container. The full route width is kept for exactly the state
-      // that renders the "Prepare your data" editor below -- the same
-      // ready+preparing predicate, so the panel width cannot diverge from the phase
-      // showing -- because that editor is a genuine two-column layout.
+      // Every decoded phase -- review, prepare, and exchange -- is now a two-column
+      // layout (the consent gate, the data editor, or the run's Status beside the
+      // agreed-terms summary), so the panel fills the route's wide container. Only
+      // the pre-decode states (the decode spinner and the bad/expired-invitation
+      // error) stay a single reading column, capped to EXCHANGE_READING_WIDTH and
+      // centered.
       style={
-        decode.status === "ready" && phase.status === "preparing"
+        decode.status === "ready"
           ? undefined
           : { width: EXCHANGE_READING_WIDTH, marginInline: "auto" }
       }

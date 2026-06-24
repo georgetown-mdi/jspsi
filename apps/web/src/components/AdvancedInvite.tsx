@@ -262,13 +262,15 @@ export function AdvancedInvite() {
 
   return (
     <Paper
-      // The acquire, loading, and exchange screens are single entry/reading columns,
-      // so the panel self-constrains to EXCHANGE_READING_WIDTH (centered) rather than
-      // filling the route's wide container -- matching the home and accept exchange
-      // screens. The terms editor (editing) is a genuine wide editor and keeps the
-      // full route width, mirroring the accept route's "Prepare your data" phase.
+      // The acquire and loading screens are single entry/reading columns, so the
+      // panel self-constrains to EXCHANGE_READING_WIDTH (centered) rather than
+      // filling the route's wide container. The terms editor (editing) and the
+      // exchange screen are both genuine two-column layouts -- the edit rail beside
+      // the live terms preview, then the agreed terms beside the run's Status -- so
+      // they keep the full route width, matching the home and accept exchange
+      // screens.
       style={
-        phase.status === "editing"
+        phase.status === "editing" || phase.status === "exchange"
           ? undefined
           : { width: EXCHANGE_READING_WIDTH, marginInline: "auto" }
       }

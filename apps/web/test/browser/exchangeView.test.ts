@@ -335,54 +335,59 @@ describe("ExchangeView focus throughline", () => {
     });
   });
 
-  test("moves focus to the share-block heading on mount for the inviter", async () => {
-    // The inviter leads with the share block, so its entry focus lands on that
+  test("moves focus to the exchange-summary heading on mount for the inviter", async () => {
+    // Both roles now lead with the exchange-summary heading (the left column); the
+    // inviter's share block moved below the columns. Entry focus lands on that
     // heading -- taking a keyboard/screen-reader user who pressed Generate to the
-    // new screen rather than leaving focus on the unmounted compose button.
+    // new screen rather than leaving focus on the unmounted compose button. The
+    // inviter's summary heading is "Exchange proposal" (the proposing perspective).
     setOutcome("none");
     render(inviterConfig("secret-a"));
 
     await vi.waitFor(() => {
       const active = document.activeElement;
       expect(active?.tagName).toBe("H3");
-      expect(active?.textContent).toBe("Share this invitation");
+      expect(active?.textContent).toBe("Exchange proposal");
     });
   });
 
-  test("recovers focus onto 'Partner connected' when the share block collapses", async () => {
+  test("recovers focus onto the Status heading when the share block unmounts on connect", async () => {
     setOutcome("none");
     render(inviterConfig("secret-a"));
 
-    // The inviter auto-starts; its expanded share block holds the entry focus.
+    // The inviter auto-starts; entry focus lands on the summary heading. Move it
+    // into the share block (the link/code the inviter shares while it waits), so
+    // the connect below orphans it.
     await vi.waitFor(() => {
-      expect(document.activeElement?.textContent).toBe("Share this invitation");
+      expect(document.activeElement?.textContent).toBe("Exchange proposal");
       expect(lifecycle.calls).toHaveLength(1);
     });
+    const shareHeading = page.getByRole("heading", {
+      name: "Share this invitation",
+    });
+    await expect.element(shareHeading).toBeInTheDocument();
+    (shareHeading.element() as HTMLElement).focus();
+    expect(document.activeElement?.textContent).toBe("Share this invitation");
 
     // Simulate the partner connecting: drive the captured onStage to a protocol
-    // stage, collapsing the share block and unmounting the focused heading. The
-    // resulting state update flushes asynchronously; the waitFor below polls for
-    // it (mirroring how the stub fires onResult/onError directly).
+    // stage. The share block unmounts entirely (nothing left to share), dropping
+    // the focused heading; the browser moves focus to <body>, and the peer-connect
+    // effect recovers it onto the Status heading rather than leaving it stranded.
+    // The state update flushes asynchronously; the waitFor below polls for it.
     lifecycle.calls[0].onStage("confirming protocol");
 
-    // Focus is recovered onto the "Partner connected" indicator rather than left
-    // to fall to <body>. The indicator's icon is aria-hidden with no text, so its
-    // textContent is exactly "Partner connected" -- an exact match (not toContain),
-    // so a focus left on <body> (whose textContent also includes that string)
-    // would fail rather than pass vacuously.
     await vi.waitFor(() => {
-      expect(document.activeElement?.textContent).toBe("Partner connected");
+      expect(document.activeElement?.textContent).toBe("Status");
     });
   });
 
-  test("does not move focus on peer-connect when focus is already elsewhere", async () => {
+  test("does not move focus on peer-connect when focus is already on a live element", async () => {
     setOutcome("none");
     render(inviterConfig("secret-a"));
     await vi.waitFor(() => expect(lifecycle.calls).toHaveLength(1));
 
-    // The user navigates to the terms heading (outside the share block, and it
-    // stays mounted through the collapse), so focus is NOT orphaned by the
-    // collapse.
+    // Focus rests on the summary heading (the left column, which stays mounted
+    // through the connect), so it is NOT orphaned when the share block unmounts.
     const terms = page.getByRole("heading", {
       name: "Exchange proposal",
     });
@@ -390,12 +395,26 @@ describe("ExchangeView focus throughline", () => {
     (terms.element() as HTMLElement).focus();
     expect(document.activeElement?.textContent).toBe("Exchange proposal");
 
-    // Partner connects and the share block collapses; since focus was not on
+    // Partner connects and the share block unmounts; since focus was not on
     // <body>, the recovery must leave it where the user put it.
     lifecycle.calls[0].onStage("confirming protocol");
-    await expect
-      .element(page.getByText("Partner connected"))
-      .toBeInTheDocument();
+    await vi.waitFor(() =>
+      expect(page.getByText("Share this invitation").query()).toBeNull(),
+    );
     expect(document.activeElement?.textContent).toBe("Exchange proposal");
+  });
+
+  test("the acceptor exchange screen surfaces its own outbound disclosure", async () => {
+    // The exchange screen now shows the acceptor's send set beside the agreed terms
+    // (mirroring the inviter, whose declared send shows inside its proposing terms).
+    // This config prepared empty metadata, so the acceptor discloses nothing and the
+    // send block states that explicitly -- the empty-set confirmation the chips fall
+    // back to.
+    setOutcome("none");
+    render(acceptorConfig("secret-a"));
+
+    await expect
+      .element(page.getByText(/No columns are sent to your partner/))
+      .toBeInTheDocument();
   });
 });

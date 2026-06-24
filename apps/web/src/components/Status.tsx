@@ -35,21 +35,19 @@ export interface StatusProps extends PaperProps {
   /** True when this party's agreed terms give it no output (a one-sided exchange
    * where it is the PSI sender / helper): no results file is offered, and the card
    * states that it contributed to the match but receives no result table -- rather
-   * than presenting an empty or missing download as a failure. The audit-record
-   * downloads, when present, are still offered. The "no result table" message is
+   * than presenting an empty or missing download as a failure. The exchange-record
+   * download, when present, is still offered. The "no result table" message is
    * shown only once the exchange completes (the component gates it on the `done`
    * stage internally), so a caller may pass this as soon as it is known -- a
    * pre-completion value does not surface a premature message. */
   resultWithheld?: boolean | undefined;
-  /** Self-attested audit record (JSON); safe to retain or share. */
+  /** The combined exchange record (JSON: a `public` record part and a `private`
+   * opening part). Because it embeds the private opening it is as sensitive as the
+   * matched data, so it is offered with a "keep private" label. */
   recordFileURL?: string | undefined;
-  /** Download filename for the audit record (timestamped per exchange by the
+  /** Download filename for the exchange record (timestamped per exchange by the
    * caller); falls back to a static name when not supplied. */
   recordFileName?: string | undefined;
-  /** Private opening data (JSON); as sensitive as the matched data. */
-  openingFileURL?: string | undefined;
-  /** Download filename for the opening data; falls back to a static name. */
-  openingFileName?: string | undefined;
 }
 
 type ProtocolStageInfo = [
@@ -68,8 +66,6 @@ export function Status(props: StatusProps) {
     resultWithheld,
     recordFileURL,
     recordFileName,
-    openingFileURL,
-    openingFileName,
     ...paperProps
   } = props;
 
@@ -196,28 +192,10 @@ export function Status(props: StatusProps) {
 
           {recordFileURL !== undefined && (
             <Group justify="center" gap="xs" component="span">
-              <Text>Download audit record:</Text>
+              <Text>Download exchange record (keep private):</Text>
               <a
                 href={recordFileURL}
                 download={recordFileName ?? "psilink-record.json"}
-              >
-                <ActionIcon
-                  variant="light"
-                  color="blue"
-                  disabled={!isCompleted}
-                >
-                  <IconDownload size={18} />
-                </ActionIcon>
-              </a>
-            </Group>
-          )}
-
-          {openingFileURL !== undefined && (
-            <Group justify="center" gap="xs" component="span">
-              <Text>Download opening data (keep private):</Text>
-              <a
-                href={openingFileURL}
-                download={openingFileName ?? "psilink-record.opening.json"}
               >
                 <ActionIcon
                   variant="light"

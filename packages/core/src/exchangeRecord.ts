@@ -397,6 +397,21 @@ export interface OpeningData {
   commitments: OpeningDataCommitments;
 }
 
+/**
+ * The combined exchange-record file: the shareable {@link ExchangeRecord} under
+ * `public` and the private {@link OpeningData} under `private`, in one JSON file.
+ * The web app offers this as a single download rather than two separate files --
+ * auditing is rare, so two artifacts to track is excessive. Because it embeds the
+ * private opening, the whole file is as sensitive as the matched data and must be
+ * kept private (it is not the "safe to share" record alone). The CLI still writes
+ * the two parts as separate files for now; unifying the two surfaces (and the
+ * separate question of stripping the opening's redundant data) is deferred.
+ */
+export interface ExchangeRecordFile {
+  public: ExchangeRecord;
+  private: OpeningData;
+}
+
 // --- Schemas -----------------------------------------------------------------
 
 // Base64url without padding (the binary encoding used throughout receipts; see
@@ -830,7 +845,9 @@ export async function buildExchangeRecord(
 // ordinary, human-readable JSON file, NOT the canonical encoding (which is only
 // for the bytes that are hashed, committed, or -- in a later phase -- signed).
 // Shared by the CLI and the web app so both write byte-identical files.
-function serialize(value: ExchangeRecord | OpeningData): string {
+function serialize(
+  value: ExchangeRecord | OpeningData | ExchangeRecordFile,
+): string {
   return JSON.stringify(value, null, 2) + "\n";
 }
 
@@ -842,6 +859,12 @@ export function serializeExchangeRecord(record: ExchangeRecord): string {
 /** Serialize {@link OpeningData} to its on-disk/download string form. */
 export function serializeOpeningData(opening: OpeningData): string {
   return serialize(opening);
+}
+
+/** Serialize an {@link ExchangeRecordFile} -- the combined public record plus
+ * private opening -- to its on-disk/download string form. */
+export function serializeExchangeRecordFile(file: ExchangeRecordFile): string {
+  return serialize(file);
 }
 
 /**

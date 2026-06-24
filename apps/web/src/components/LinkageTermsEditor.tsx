@@ -45,8 +45,8 @@ import {
 import { APPLIED_SETTINGS } from "@psi/appliedSettings";
 import { hasMultipleIdentifiers } from "@psi/metadataEditing";
 
+import { ExchangeSummary } from "@components/ExchangeSummary";
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
-import { InvitationTerms } from "@components/InvitationTerms";
 import { MetadataGrid } from "@components/MetadataGrid";
 import { StandardizationWorkbench } from "@components/StandardizationWorkbench";
 import { TermsImportExport } from "@components/TermsImportExport";
@@ -103,8 +103,8 @@ const LIFETIME_OPTIONS: Array<{ value: string; label: string }> = [
 
 /**
  * The column-aware Advanced-options editor: an edit rail, a live preview rendered
- * by the same {@link InvitationTerms} component the acceptor consent screen uses,
- * and a sticky validation footer. It is seeded from the auto-derived terms for the
+ * by the same {@link ExchangeSummary} panel the acceptor consent and exchange
+ * screens use, and a sticky validation footer. It is seeded from the auto-derived terms for the
  * inviter's columns (never a blank form) and authors only what this iteration
  * supports -- identity, invitation lifetime, an optional legal agreement, and which
  * linkage keys are active and in what order.
@@ -776,13 +776,11 @@ export function LinkageTermsEditor({
             aria-label="Live preview of your invitation"
             gap="sm"
           >
-            <Paper withBorder p="md">
-              <InvitationTerms
-                linkageTerms={previewTerms}
-                perspective="proposing"
-                headingOrder={3}
-              />
-            </Paper>
+            <ExchangeSummary
+              linkageTerms={previewTerms}
+              perspective="proposing"
+              headingOrder={3}
+            />
           </Stack>
         </Grid.Col>
       </Grid>

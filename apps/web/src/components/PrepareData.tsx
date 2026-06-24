@@ -6,8 +6,6 @@ import {
   Divider,
   Grid,
   Group,
-  List,
-  Modal,
   Paper,
   Select,
   Stack,
@@ -22,7 +20,6 @@ import {
   IconArrowLeft,
   IconCircleCheck,
 } from "@tabler/icons-react";
-import { useDisclosure } from "@mantine/hooks";
 
 import { assessLinkageSatisfiability, inferMetadata } from "@psilink/core";
 
@@ -44,9 +41,8 @@ import { defaultStandardizationForRows } from "@psi/advancedInvite";
 
 import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
-import { ColumnChips } from "@components/ColumnChips";
+import { ExchangeSummary } from "@components/ExchangeSummary";
 import { FieldCoverage } from "@components/FieldCoverage";
-import { InvitationTerms } from "@components/InvitationTerms";
 import { MetadataGrid } from "@components/MetadataGrid";
 import { StandardizationPreview } from "@components/StandardizationPreview";
 import { StandardizationStepEditor } from "@components/StandardizationStepEditor";
@@ -82,7 +78,7 @@ import type { FieldStepOverride } from "@psi/standardizationAuthoring";
  * Metadata/standardization are LOCAL and per-party: they are never embedded in the
  * token or cross-checked, so editing them changes only this party's match rate and
  * disclosure, never the agreement the consent screen already accepted. The
- * `satisfiableKeyCount === 0` hard block remains -- "Continue" is disabled so a
+ * `satisfiableKeyCount === 0` hard block remains -- "Start exchange" is disabled so a
  * silent-empty exchange is never run -- but the operator fixes the file in place
  * rather than being bounced back to the picker.
  */
@@ -319,9 +315,6 @@ export function PrepareData({
     return [...seen.entries()].map(([type, label]) => ({ type, label }));
   }, [verdict.unsatisfied]);
 
-  const [confirmOpen, { open: openConfirm, close: closeConfirm }] =
-    useDisclosure(false);
-
   // The gated expert tier (board item 202533670): off by default, so the standard
   // guided authoring is unchanged unless the operator opts in. When on, the
   // per-field step editors let an operator author and edit raw-pattern (regex)
@@ -342,7 +335,6 @@ export function PrepareData({
   };
 
   const launch = () => {
-    closeConfirm();
     const warning: AlertContent | undefined = partial
       ? {
           title: "Partial coverage",
@@ -593,90 +585,36 @@ export function PrepareData({
                 Reset to recommended
               </Button>
               <Button
-                onClick={openConfirm}
+                onClick={launch}
                 disabled={
                   blocked || multipleIdentifiers || !standardizationValid
                 }
               >
-                Continue to exchange
+                Start exchange
               </Button>
             </Group>
           </Stack>
         </Grid.Col>
 
         {/* Side column: the agreed terms (the exchange proposal) the operator
-            consented to, plus the columns this party will send for matched rows --
-            the same two pieces the inviter's Advanced-options preview pairs. */}
+            consented to, plus the columns this party will send for matched rows.
+            ExchangeSummary is the same panel the review screen, the inviter's
+            Advanced-options preview, and the exchange screen all render, so the
+            agreed terms read identically across the flow. The send chips derive from
+            the live metadata disclosure -- the same disclosedColumnNames predicate
+            the run transmits on, so they cannot drift from what leaves the machine
+            -- and they are the standing last-look that replaces the removed "confirm
+            what you will send" modal. */}
         <Grid.Col span={{ base: 12, md: 5 }}>
-          <Paper withBorder p="md">
-            <Text size="sm" fw={600} mb="xs">
-              Exchange proposal
-            </Text>
-            <InvitationTerms
-              linkageTerms={linkageTerms}
-              disclosedPayloadColumns={disclosedPayloadColumns}
-              perspective="accepted"
-              headingOrder={3}
-            />
-            {/* The columns this party will send to the partner for matched rows,
-                surfaced as chips beside the agreed terms (the inviter sees the same
-                disclosure in its own proposal preview). Derived from the metadata
-                disclosure -- the same disclosedColumnNames predicate the confirm
-                step and the run transmit on -- so it cannot drift from what leaves
-                the machine. */}
-            <Stack gap={4} mt="md">
-              <Text size="sm" fw={600}>
-                Columns you will send to your partner
-              </Text>
-              {disclosed.length > 0 ? (
-                <ColumnChips
-                  columns={disclosed}
-                  label="Columns you will send to your partner"
-                />
-              ) : (
-                <Text size="sm" c="dimmed">
-                  No columns are sent to your partner; only the linkage result
-                  (which of your rows matched) is produced.
-                </Text>
-              )}
-            </Stack>
-          </Paper>
+          <ExchangeSummary
+            linkageTerms={linkageTerms}
+            disclosedPayloadColumns={disclosedPayloadColumns}
+            perspective="accepted"
+            headingOrder={3}
+            sendColumns={disclosed}
+          />
         </Grid.Col>
       </Grid>
-
-      <Modal
-        opened={confirmOpen}
-        onClose={closeConfirm}
-        title="Confirm what you will send"
-        centered
-      >
-        <Stack>
-          {disclosed.length === 0 ? (
-            <Text size="sm">
-              You will <strong>not</strong> send any columns to your partner.
-              Only the linkage result (which of your rows matched) is produced.
-            </Text>
-          ) : (
-            <>
-              <Text size="sm">
-                For each matched row, you will send these columns to your
-                partner:
-              </Text>
-              <List size="sm">
-                {disclosed.map((name) => (
-                  <List.Item key={name}>{name}</List.Item>
-                ))}
-              </List>
-            </>
-          )}
-          <Group justify="flex-end">
-            <Button variant="default" onClick={closeConfirm}>
-              Go back
-            </Button>
-            <Button onClick={launch}>Confirm and continue</Button>
-          </Group>
-        </Stack>
-      </Modal>
     </Stack>
   );
 }

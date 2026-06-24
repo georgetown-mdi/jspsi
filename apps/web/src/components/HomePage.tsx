@@ -30,16 +30,16 @@ import type { InviterSession } from "@components/InvitePanel";
  * the two), with the shared drop below; on a narrow viewport they stack (the
  * `base: 12` span). Once {@link InvitePanel} generates an invitation it stores the
  * session here, and the page drops the grid, the accept form, and the shared drop
- * to render the panel -- now showing the {@link ExchangeView} -- as a single
- * centered reading column (see {@link EXCHANGE_READING_WIDTH}), so the exchange
- * screen takes over the view the way the accept route does rather than sitting in
- * one half of the grid.
+ * to render the panel -- now showing the {@link ExchangeView} -- across the full
+ * route width, so the exchange screen takes over the view the way the accept route
+ * does (in its own two columns: the agreed terms beside the run's Status) rather
+ * than sitting in one half of the grid.
  *
  * The page `<h1>` frames the compose panels only: while composing it spans the full
  * route width above the grid and shared drop; once a session exists the takeover
- * drops it along with the grid, accept form, and drop, so the centered constraint
- * wraps just the panel (whose own `<h2>` leads the exchange screen, matching the
- * accept route's in-Paper heading).
+ * drops it along with the grid, accept form, and drop, so the panel (whose own
+ * `<h2>` leads the exchange screen, matching the accept route's in-Paper heading)
+ * stands alone.
  *
  * The content width (wide) is declared by the route and supplied by the shell's
  * container, so this page renders only its content -- no `Container` of its own.
@@ -51,13 +51,7 @@ export function HomePage() {
   const [files, setFiles] = useState<Array<File>>([]);
 
   return (
-    <Box
-      style={
-        session === undefined
-          ? undefined
-          : { width: EXCHANGE_READING_WIDTH, marginInline: "auto" }
-      }
-    >
+    <Box>
       {/* The page heading frames the two compose panels; once an invitation is
           generated the exchange takes over the view and the heading is dropped
           (the panel's own h2 leads from there), so it renders only while
@@ -112,10 +106,10 @@ export function HomePage() {
         </Stack>
       ) : (
         // Takeover: the same panel, now rendering the exchange screen, with the
-        // page heading, the accept form, and the shared drop dropped. The wrapping
-        // Box (above) centers it in the reading column; `mt="md"` keeps the same top
-        // gap the grid had, so the panel does not jump up against the shell's top
-        // edge across the transition.
+        // page heading, the accept form, and the shared drop dropped. It fills the
+        // route width (no reading-column cap) so the exchange screen can lay out its
+        // two columns; `mt="md"` keeps the same top gap the grid had, so the panel
+        // does not jump up against the shell's top edge across the transition.
         <Box mt="md">
           <InvitePanel
             session={session}
