@@ -149,6 +149,26 @@ describe("commitAcceptance (the consent gate)", () => {
 });
 
 describe("summarizeInvitation", () => {
+  test("matchedFields lists each matched field once, in first-appearance order across keys", () => {
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageKeys: [
+          { name: "SSN + DOB", elements: [{ field: "ssn" }, { field: "dob" }] },
+          {
+            name: "SSN + LN",
+            elements: [{ field: "ssn" }, { field: "last_name" }],
+          },
+        ],
+      }),
+    );
+    // ssn and dob first (key 1), then last_name (new in key 2); ssn not repeated.
+    expect(summary.matchedFields).toEqual([
+      "SSN",
+      "date of birth",
+      "last name",
+    ]);
+  });
+
   test("derives the inviter's terms for display", () => {
     const summary = summarizeInvitation(makeToken());
     expect(summary.invitingParty).toBe("County Health Department");
@@ -162,6 +182,12 @@ describe("summarizeInvitation", () => {
       "Social Security number",
       "Last name",
       "Date of birth",
+    ]);
+    // The always-visible consent line: the unique fields matched on, compact form.
+    expect(summary.matchedFields).toEqual([
+      "SSN",
+      "last name",
+      "date of birth",
     ]);
     expect(summary.legalAgreement).toMatchObject({
       reference: "MOU-2025-0042",

@@ -178,13 +178,21 @@ export function Status(props: StatusProps) {
           ) : (
             <Group justify="center" gap="xs" component="span">
               <Text>Download result:</Text>
-              <a href={resultsFileURL} download="results.csv">
+              {/* The accessible name lives on the anchor (the interactive
+                  element): the visible "Download result:" is a sibling Text, not
+                  the link's content, and the icon is decorative, so without this
+                  the link has no name for assistive tech. */}
+              <a
+                href={resultsFileURL}
+                download="results.csv"
+                aria-label="Download result"
+              >
                 <ActionIcon
                   variant="light"
                   color="blue"
                   disabled={!isCompleted}
                 >
-                  <IconDownload size={18} />
+                  <IconDownload size={18} aria-hidden />
                 </ActionIcon>
               </a>
             </Group>
@@ -196,13 +204,14 @@ export function Status(props: StatusProps) {
               <a
                 href={recordFileURL}
                 download={recordFileName ?? "psilink-record.json"}
+                aria-label="Download exchange record (keep private)"
               >
                 <ActionIcon
                   variant="light"
                   color="blue"
                   disabled={!isCompleted}
                 >
-                  <IconDownload size={18} />
+                  <IconDownload size={18} aria-hidden />
                 </ActionIcon>
               </a>
             </Group>

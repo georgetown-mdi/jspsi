@@ -165,6 +165,26 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     expect(panelFor("SSN + FN1").textContent).not.toContain("(partial)");
   });
 
+  test("the fields matched on are summarized always-visible, outside the collapsed matching list", async () => {
+    renderTerms();
+    await expect.element(toggle("Matching strategies")).toBeInTheDocument();
+    // The matching list is collapsed by default ...
+    expect(
+      toggle("Matching strategies").element().getAttribute("aria-expanded"),
+    ).toBe("false");
+    // ... yet the unique fields the keys match on are stated in the always-visible
+    // core, so an acceptor sees WHICH data is matched on without expanding (deduped
+    // in first-appearance order: ssn, last_name, dob from key 1, then first_name).
+    expect(container!.textContent).toContain(
+      "Matching on SSN, last name, date of birth, first name.",
+    );
+    // Structurally outside the disclosure: the summary is not inside the matching
+    // panel, which carries the collapsed per-key detail even while hidden.
+    expect(panelFor("Matching strategies").textContent).not.toContain(
+      "Matching on SSN, last name, date of birth, first name.",
+    );
+  });
+
   test("opening one key disclosure exposes its detail to AT and leaves the others collapsed", async () => {
     renderTerms();
 

@@ -323,9 +323,12 @@ export function InvitationTerms({
   // keeps it consistent across SSR and hydration.
   const detailsId = useId();
   // The whole matching list is itself a default-collapsed "Matching strategies"
-  // disclosure; this is its toggle state and the id its aria-controls points at.
+  // disclosure; this is its toggle state, the id its aria-controls points at, and
+  // the id of the always-visible field summary associated as the toggle's
+  // description (the same aria-describedby pattern each per-key disclosure uses).
   const [matchingOpen, setMatchingOpen] = useState(false);
   const matchingPanelId = useId();
+  const matchingSublineId = useId();
   // Associates the per-key disclosure list with its "Matching strategies" caption,
   // so assistive tech announces the keys as a named group.
   const matchedOnLabelId = useId();
@@ -380,6 +383,9 @@ export function InvitationTerms({
             onClick={() => setMatchingOpen((open) => !open)}
             aria-expanded={matchingOpen}
             aria-controls={matchingPanelId}
+            aria-describedby={
+              summary.matchedFields.length > 0 ? matchingSublineId : undefined
+            }
           >
             <Group gap={4}>
               <IconChevronRight
@@ -395,6 +401,16 @@ export function InvitationTerms({
               </Text>
             </Group>
           </UnstyledButton>
+          {/* The always-visible field summary: WHICH fields the keys match on,
+              kept outside the collapse so the single fact consent most depends on
+              is legible without expanding the detail. The compact field labels and
+              the deduped order are derived (and sanitized) by summarizeInvitation;
+              the per-key grouping and breadth markers stay one expand down. */}
+          {summary.matchedFields.length > 0 && (
+            <Text id={matchingSublineId} size="sm">
+              Matching on {summary.matchedFields.join(", ")}.
+            </Text>
+          )}
           {/* A labelled list of per-key disclosures: each key's collapsed header
               (name + derived field one-liner), its rule detail one further expand
               down. role=list/listitem (not Mantine List.Item, whose inline span body
