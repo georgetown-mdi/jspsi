@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   Alert,
-  Anchor,
+  Button,
+  Group,
   Paper,
   Stack,
   Text,
@@ -13,23 +14,14 @@ import { IconAlertCircle } from "@tabler/icons-react";
 import { useForm } from "@tanstack/react-form";
 import { useNavigate } from "@tanstack/react-router";
 
-import {
-  loadCSVColumns,
-  sanitizeErrorForDisplay,
-  sanitizeForDisplay,
-} from "@psilink/core";
+import { sanitizeErrorForDisplay, sanitizeForDisplay } from "@psilink/core";
 
 import { InvitationFileError, generateInvitation } from "@psi/invitation";
 import { invitationLocation } from "@psi/invitationLocation";
-import { quickInviteDisclosedColumns } from "@psi/metadataEditing";
 import { unnameableColumnsAlert } from "@psi/columnNames";
 
-import {
-  clearAdvancedHandoff,
-  stashAdvancedHandoff,
-} from "@components/advancedHandoff";
 import { ExchangeView } from "@components/ExchangeView";
-import FileSelect from "@components/FileSelect";
+import { stashAdvancedHandoff } from "@components/advancedHandoff";
 
 import type { AlertContent } from "@components/FileAcquire";
 import type { GeneratedInvitation } from "@psi/invitation";
@@ -58,53 +50,23 @@ interface InvitePanelProps {
    * owner. The owner re-renders this panel with the new value, which is what
    * drives the compose-form -> exchange-view transition below. */
   setSession: (session: InviterSession | undefined) => void;
+  /** The file chosen in the home page's shared drop, which now sits below both
+   * compose panels rather than inside this one. Read-only here: the panel gates
+   * Generate on it, derives the disclosure from it, and reads it back at submit;
+   * the owner ({@link HomePage}) holds the selection and the drop target. */
+  files: Array<File>;
 }
 
-export function InvitePanel({ session, setSession }: InvitePanelProps) {
+export function InvitePanel({ session, setSession, files }: InvitePanelProps) {
   const navigate = useNavigate();
   const [error, setError] = useState<AlertContent>();
-  const [files, setFiles] = useState<Array<File>>([]);
-  // The selected file is read back inside the form's onSubmit, which runs in a
-  // callback that may close over a stale `files` value; a ref always reflects the
-  // latest selection. (The submit button is gated on a file being present, so the
-  // read below normally finds one; the guard is defensive.)
-  const filesRef = useRef<Array<File>>([]);
-  const selectFiles = (next: Array<File>) => {
-    filesRef.current = next;
-    setFiles(next);
-  };
-  // The columns the quick path will send to the partner, surfaced as an awareness
-  // statement before the operator generates. `undefined` while no file is chosen
-  // or its header read is still in flight; an empty array means the quick path
-  // would send nothing (so no statement is shown). Derived from the SAME predicate
-  // the wire uses (see quickInviteDisclosedColumns), so it cannot drift from what
-  // is actually transmitted.
-  const [disclosedColumns, setDisclosedColumns] = useState<Array<string>>();
-
-  // Read the chosen file's header (only the header -- see loadCSVColumns) and
-  // compute the quick-path disclosure each time the selection changes. Best-effort
-  // awareness: a read error is swallowed here (the statement just stays hidden);
-  // the authoritative full parse and its surfaced error happen at generate. The
-  // cleanup flag drops a stale or post-unmount result -- selecting a new file (or
-  // navigating to Advanced) supersedes an in-flight read of the previous one.
-  useEffect(() => {
-    if (files.length === 0) {
-      setDisclosedColumns(undefined);
-      return;
-    }
-    const file = files[0];
-    let cancelled = false;
-    setDisclosedColumns(undefined);
-    void loadCSVColumns(file)
-      .then((columns) => {
-        if (!cancelled)
-          setDisclosedColumns(quickInviteDisclosedColumns(columns));
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [files]);
+  // The selected file is read back inside the form's onSubmit -- a callback created
+  // once that would otherwise close over a stale `files` value. A ref synced to the
+  // latest prop on every render keeps that read current. (Generate is gated on a
+  // file being present, so the read below normally finds one; the guard is
+  // defensive.)
+  const filesRef = useRef<Array<File>>(files);
+  filesRef.current = files;
 
   const form = useForm({
     defaultValues: { inviterName: "" },
@@ -118,8 +80,8 @@ export function InvitePanel({ session, setSession }: InvitePanelProps) {
         setError({
           title: "Choose a data file",
           message:
-            "Select your CSV file before generating the invitation -- its " +
-            "columns set the invitation's matching rules.",
+            "Choose your CSV file in the drop below before generating the " +
+            "invitation -- its columns set the invitation's matching rules.",
         });
         return;
       }
@@ -202,17 +164,15 @@ export function InvitePanel({ session, setSession }: InvitePanelProps) {
 
   // Open the column-aware editor, handing off the already-chosen file and name in
   // memory (a File cannot ride the URL) so the editor opens seeded without a
-  // re-drop; if no file is chosen yet, clear any stale hand-off so the editor falls
-  // back to its own file picker. Shared by the standing "Advanced options" link and
-  // the disclosure statement's "change what is sent" link, so the quick-invite
-  // operator has a one-click path into Advanced to alter what is disclosed.
+  // re-drop. The "Advanced Options" button is disabled until a file is chosen, so a
+  // file is present when this fires; guard defensively rather than hand off an
+  // undefined file.
   const openAdvanced = () => {
-    if (filesRef.current.length > 0)
-      stashAdvancedHandoff({
-        file: filesRef.current[0],
-        name: form.state.values.inviterName.trim(),
-      });
-    else clearAdvancedHandoff();
+    if (filesRef.current.length === 0) return;
+    stashAdvancedHandoff({
+      file: filesRef.current[0],
+      name: form.state.values.inviterName.trim(),
+    });
     void navigate({ to: "/advanced" });
   };
 
@@ -222,9 +182,9 @@ export function InvitePanel({ session, setSession }: InvitePanelProps) {
       {session === undefined ? (
         <Stack mt="md">
           <Text size="sm" c="dimmed">
-            Choose your data file and add your name. We read the file in your
-            browser to set the invitation&apos;s matching rules; it is never
-            uploaded.
+            Add your name, then choose your data file below. We read the file in
+            your browser to set the invitation&apos;s matching rules; it is
+            never uploaded.
           </Text>
           <form.Field
             name="inviterName"
@@ -238,12 +198,12 @@ export function InvitePanel({ session, setSession }: InvitePanelProps) {
                 onChange={(e) => handleChange(e.target.value)}
                 onBlur={handleBlur}
                 onKeyDown={(e) => {
-                  // The compose screen has no <form> element (so FileSelect's
-                  // submit button, which defaults to type=submit, cannot double-
-                  // fire), so restore Enter-to-submit on the name field by hand.
-                  // Skip Enter mid-IME-composition, which only commits the
-                  // candidate text. The submit no-ops without a file (the handler
-                  // guards on one), matching the disabled Generate button.
+                  // The compose screen has no <form> element, so restore
+                  // Enter-to-submit on the name field by hand. Skip Enter
+                  // mid-IME-composition, which only commits the candidate text. The
+                  // submit no-ops without a file (the handler guards on one, and
+                  // surfaces the "choose a file" message), matching the disabled
+                  // Generate button.
                   if (e.key === "Enter" && !e.nativeEvent.isComposing) {
                     e.preventDefault();
                     void form.handleSubmit();
@@ -275,64 +235,32 @@ export function InvitePanel({ session, setSession }: InvitePanelProps) {
               />
             )}
           />
-          <Anchor
-            component="button"
-            type="button"
-            ta="left"
-            style={{ width: "fit-content" }}
-            onClick={openAdvanced}
-          >
-            Advanced options
-          </Anchor>
+          {/* Action row: the secondary "Advanced Options" sits to the left of the
+              primary "Generate invitation". Both need a chosen file -- Advanced
+              seeds the editor from it, Generate mints from it -- so both are disabled
+              until the shared drop below holds one. The file's default exchange
+              columns are surfaced under that drop (see DefaultExchangeColumns), not
+              here, so a partner reviewing the accept box does not see an invite-side
+              disclosure pop up. */}
           <form.Subscribe selector={(s) => s.isSubmitting}>
             {(isSubmitting) => (
-              <FileSelect
-                submitLabel="Generate invitation"
-                handleSubmit={() => void form.handleSubmit()}
-                submitted={isSubmitting}
-                files={files}
-                setFiles={selectFiles}
-              />
-            )}
-          </form.Subscribe>
-          {/* Awareness surface: the columns the quick path will send to the
-              partner, shown before the operator generates. Wrapped in a standing
-              polite live region so its asynchronous appearance after a file is
-              chosen is announced; aria-atomic so the heading, sentence, and
-              change-link read as one unit rather than a fragment when they insert
-              in a single tick (matching the verdict/summary regions in PrepareData
-              and MetadataGrid). Nothing is shown when the quick path would send
-              nothing (no disclosure to surface). The column set derives from the
-              same predicate the wire uses, so it cannot over- or under-state what
-              leaves the machine; column names are the operator's own but sanitized
-              for display, matching the other file-derived text on this screen. */}
-          <div role="status" aria-live="polite" aria-atomic="true">
-            {disclosedColumns && disclosedColumns.length > 0 && (
-              <Paper withBorder p="md">
-                <Text size="sm" fw={600} mb={4}>
-                  What the quick path will send
-                </Text>
-                <Text size="sm">
-                  For each matched row, these columns will be sent to your
-                  partner:{" "}
-                  {disclosedColumns
-                    .map((name) => sanitizeForDisplay(name))
-                    .join(", ")}
-                  .
-                </Text>
-                <Anchor
-                  component="button"
-                  type="button"
-                  ta="left"
-                  mt="xs"
-                  style={{ width: "fit-content" }}
+              <Group justify="flex-end" mt="sm">
+                <Button
+                  variant="default"
+                  disabled={files.length === 0}
                   onClick={openAdvanced}
                 >
-                  Change what is sent in Advanced options
-                </Anchor>
-              </Paper>
+                  Advanced Options
+                </Button>
+                <Button
+                  disabled={files.length === 0 || isSubmitting}
+                  onClick={() => void form.handleSubmit()}
+                >
+                  Generate invitation
+                </Button>
+              </Group>
             )}
-          </div>
+          </form.Subscribe>
           {error && (
             <Alert
               color="red"

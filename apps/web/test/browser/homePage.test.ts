@@ -16,10 +16,12 @@ import type { Root } from "react-dom/client";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { LinkageTerms } from "@psilink/core";
 
-// HomePage owns the inviter session and swaps its whole layout on generate: the
-// two-column compose grid (InvitePanel + AcceptForm) gives way to a single centered
-// exchange panel with the accept form dropped. This suite drives a generate through
-// InvitePanel's (mocked) form and asserts that takeover -- the layout choice
+// HomePage owns the inviter session AND the shared data-file selection, and swaps
+// its whole layout on generate: the two-column compose grid (InvitePanel +
+// AcceptForm) plus the shared file drop below them give way to a single centered
+// exchange panel with the accept form and the drop dropped. This suite drives a
+// generate through InvitePanel's form -- seeding the lifted file via the (mocked)
+// shared drop -- and asserts that takeover, the layout choice that
 // invitePanel.test.ts, which mounts InvitePanel alone, cannot see.
 
 // The only router seam the rendered graph touches: InvitePanel's Advanced link and
@@ -58,36 +60,21 @@ vi.mock("@components/ExchangeView", () => ({
     createElement("div", { "data-testid": "exchange-view" }, "exchange"),
 }));
 
-// Stand in for the dropzone: a button to seed a file and a Generate button gated on
-// a file being present, exactly as the real FileSelect gates it.
-vi.mock("@components/FileSelect", () => ({
+// Stand in for the shared drop (the real Mantine Dropzone is awkward to drive
+// headlessly): a button that seeds the lifted file selection, which HomePage feeds
+// to both panels. InvitePanel renders its own Generate button, gated on this file.
+vi.mock("@components/FileDropzone", () => ({
   default: (props: {
-    submitLabel: string;
-    submitted: boolean;
     files: Array<File>;
-    handleSubmit: () => void;
     setFiles: (files: Array<File>) => void;
   }) =>
     createElement(
-      "div",
-      null,
-      createElement(
-        "button",
-        {
-          "data-testid": "select-file",
-          onClick: () => props.setFiles([new File(["c\n1\n"], "data.csv")]),
-        },
-        "select",
-      ),
-      createElement(
-        "button",
-        {
-          "data-testid": "generate",
-          disabled: props.files.length === 0 || props.submitted,
-          onClick: props.handleSubmit,
-        },
-        props.submitLabel,
-      ),
+      "button",
+      {
+        "data-testid": "select-file",
+        onClick: () => props.setFiles([new File(["c\n1\n"], "data.csv")]),
+      },
+      "select",
     ),
 }));
 
@@ -131,7 +118,7 @@ afterEach(() => {
 });
 
 describe("HomePage layout", () => {
-  test("resting state shows both the invite and accept panels, no exchange", async () => {
+  test("resting state shows both compose panels and the shared file drop, no exchange", async () => {
     gen.impl = () => Promise.resolve(generated);
     mount();
 
@@ -141,11 +128,16 @@ describe("HomePage layout", () => {
     await expect
       .element(page.getByText("Accept an invitation you were sent"))
       .toBeInTheDocument();
+    // The single shared drop sits below both panels (its heading -- not the
+    // invite panel's "...choose your data file below" intro prose).
+    await expect
+      .element(page.getByRole("heading", { name: "Your data file" }))
+      .toBeInTheDocument();
     // No exchange screen until an invitation exists.
     expect(page.getByTestId("exchange-view").query()).toBeNull();
   });
 
-  test("generating an invitation takes over the view: accept form dropped, exchange shown", async () => {
+  test("generating an invitation takes over the view: accept form and shared drop dropped, exchange shown", async () => {
     gen.impl = () => Promise.resolve(generated);
     mount();
 
@@ -156,13 +148,19 @@ describe("HomePage layout", () => {
       "County Health Dept",
     );
     await userEvent.click(page.getByTestId("select-file"));
-    await userEvent.click(page.getByTestId("generate"));
+    await userEvent.click(
+      page.getByRole("button", { name: "Generate invitation" }),
+    );
 
     // The exchange screen takes over the whole view...
     await expect.element(page.getByTestId("exchange-view")).toBeInTheDocument();
-    // ...and the accept form (the other grid column) is dropped.
+    // ...and the accept form and the shared drop (the rest of the compose layout)
+    // are dropped.
     expect(
       page.getByText("Accept an invitation you were sent").query(),
+    ).toBeNull();
+    expect(
+      page.getByRole("heading", { name: "Your data file" }).query(),
     ).toBeNull();
   });
 });

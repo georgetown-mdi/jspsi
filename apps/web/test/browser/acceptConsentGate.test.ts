@@ -11,6 +11,11 @@ import { MantineProvider } from "@mantine/core";
 
 import { encodeInvitation, generateSharedSecret } from "@psilink/core";
 
+import {
+  clearAcceptHandoff,
+  peekAcceptHandoff,
+  stashAcceptHandoff,
+} from "@components/acceptHandoff";
 import { AcceptInvitation } from "@components/AcceptInvitation";
 
 import type { Root } from "react-dom/client";
@@ -183,6 +188,8 @@ afterEach(() => {
   harness.files = [];
   exchange.lastProps = undefined;
   window.location.hash = "";
+  // Drop any accept hand-off a test stashed, so it cannot leak into the next mount.
+  clearAcceptHandoff();
 });
 
 describe("accept review screen (consent + file before any connection)", () => {
@@ -212,6 +219,71 @@ describe("accept review screen (consent + file before any connection)", () => {
       .element(page.getByRole("heading", { name: "Prepare your data" }))
       .toBeInTheDocument();
     expect(exchangeMounted()).toBe(false);
+  });
+
+  test("a file chosen on the home page pre-fills the dropzone but still waits for consent", async () => {
+    window.location.hash = await encodeAcceptToken();
+    // The acceptor dropped their file on the home page before pressing "Review
+    // invitation"; it rides here as a hand-off (a File handle, never parsed yet).
+    stashAcceptHandoff(csvFile("first_name,last_name\nAlice,Smith\n"));
+    mountAcceptRoute();
+
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+
+    // The hand-off seeded the dropzone selection without a click here -- the user
+    // need not re-drop the same file.
+    await expect.element(page.getByTestId("file-count")).toHaveTextContent("1");
+
+    // The module stash is consumed exactly once on mount: a later back/forward
+    // navigation to /accept finds nothing and falls back to the picker rather than
+    // re-seeding from this now-captured file. (afterEach also clears it, so this
+    // asserts the component did the consume, not the cleanup.)
+    expect(peekAcceptHandoff()).toBeUndefined();
+
+    // But the file is only SELECTED, not parsed: with no consent yet the action
+    // stays disabled and nothing has transitioned, so the consent gate is intact.
+    await expect.element(page.getByTestId("accept")).toBeDisabled();
+    expect(exchangeMounted()).toBe(false);
+    expect(document.body.textContent).not.toContain("Prepare your data");
+
+    // Consent + name then enables it, exactly as a re-dropped file would.
+    await userEvent.click(page.getByRole("checkbox"));
+    await userEvent.fill(page.getByRole("textbox"), "Dana");
+    await expect.element(page.getByTestId("accept")).toBeEnabled();
+  });
+
+  test("after acquiring, a back edge does not re-seed the stale home-page file", async () => {
+    window.location.hash = await encodeAcceptToken();
+    stashAcceptHandoff(csvFile("first_name,last_name\nAlice,Smith\n"));
+    mountAcceptRoute();
+
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+    // Seeded from the hand-off on the first mount.
+    await expect.element(page.getByTestId("file-count")).toHaveTextContent("1");
+
+    // Consent, name, accept -> reaches the prepare editor (the seed is now consumed).
+    await userEvent.click(page.getByRole("checkbox"));
+    await userEvent.fill(page.getByRole("textbox"), "Dana");
+    await expect.element(page.getByTestId("accept")).toBeEnabled();
+    await userEvent.click(page.getByTestId("accept"));
+    await expect
+      .element(page.getByRole("heading", { name: "Prepare your data" }))
+      .toBeInTheDocument();
+
+    // Back to the review screen: the dropzone must start EMPTY, not resurrect the
+    // home-page file over whatever the operator would now choose. Re-seeding here
+    // would silently revert an in-route file change to the original hand-off.
+    await userEvent.click(
+      page.getByRole("button", { name: "Choose a different file" }),
+    );
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+    await expect.element(page.getByTestId("file-count")).toHaveTextContent("0");
   });
 
   test("does not enable accept (or mount anything) without consent", async () => {

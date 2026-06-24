@@ -25,6 +25,11 @@ export interface AcquiredBundle {
 export interface FileAcquireProps {
   /** Label for the submit button (FileSelect no longer hardcodes "Start"). */
   submitLabel: string;
+  /** Seed the dropzone selection, e.g. with the file the acceptor already chose on
+   * the home page (carried via the accept hand-off) so they need not re-drop it.
+   * Only seeds the SELECTION -- the parse still runs on the gated submit, so this
+   * never short-circuits the consent gate. Omitted, the dropzone starts empty. */
+  initialFiles?: Array<File>;
   /** Hold the submit button disabled until an external precondition is met,
    * forwarded to {@link FileSelect}. The accept review screen -- the sole caller
    * -- passes its consent gate here, so the file cannot be parsed before the user
@@ -55,9 +60,13 @@ export interface FileAcquireProps {
  * not dead-ended here.
  */
 export default function FileAcquire(props: FileAcquireProps) {
-  const { submitLabel, submitDisabled, onError, onAcquired } = props;
+  const { submitLabel, submitDisabled, initialFiles, onError, onAcquired } =
+    props;
 
-  const [files, setFiles] = useState<Array<File>>([]);
+  // Seed from the hand-off once: a fresh acquire is a fresh mount, and the file is
+  // a lazy handle, so holding it costs only a reference. The user can still re-drop
+  // to replace it.
+  const [files, setFiles] = useState<Array<File>>(() => initialFiles ?? []);
   const [submitted, setSubmitted] = useState(false);
 
   // Drives this phase's AbortSignal. A useEffect cleanup aborts it on unmount, so
