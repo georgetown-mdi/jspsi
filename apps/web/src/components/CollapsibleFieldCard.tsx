@@ -61,6 +61,9 @@ export function CollapsibleFieldCard({
             onClick={() => setOpen((isOpen) => !isOpen)}
             aria-expanded={open}
             aria-controls={panelId}
+            // A stable, label-independent seam so a test can expand every field
+            // card generically, without naming each semantic-type label.
+            data-testid="field-card-toggle"
           >
             <Group gap={4} wrap="nowrap">
               <IconChevronRight

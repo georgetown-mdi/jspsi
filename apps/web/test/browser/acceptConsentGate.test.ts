@@ -18,6 +18,8 @@ import {
 } from "@components/acceptHandoff";
 import { AcceptInvitation } from "@components/AcceptInvitation";
 
+import { expandFieldCards } from "./fieldCards";
+
 import type { Root } from "react-dom/client";
 
 import type { InvitationToken, LinkageTerms } from "@psilink/core";
@@ -551,9 +553,7 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
 
     // The field's cleaning card starts collapsed; expand it to reach the step's
     // inline "Input format" param.
-    await userEvent.click(
-      page.getByRole("button", { name: "Date of birth", exact: true }),
-    );
+    await expandFieldCards();
 
     // Clear the recommended parse_date step's required "Input format": the step is
     // now mid-edit. A malformed step would run as a silent full-field exclusion or

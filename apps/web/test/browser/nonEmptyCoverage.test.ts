@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { page, userEvent } from "vitest/browser";
+import { page } from "vitest/browser";
 
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -11,6 +11,8 @@ import { MantineProvider } from "@mantine/core";
 
 import { FieldCoverage } from "@components/FieldCoverage";
 import { PrepareData } from "@components/PrepareData";
+
+import { expandFieldCards } from "./fieldCards";
 
 import type { Root } from "react-dom/client";
 
@@ -217,9 +219,7 @@ describe("PrepareData surfaces a silent-empty collapse before launch", () => {
       .toBeInTheDocument();
 
     // Expanding the field reveals the full value-level alarm in the card body.
-    await userEvent.click(
-      page.getByRole("button", { name: "Date of birth", exact: true }),
-    );
+    await expandFieldCards();
     await expect
       .element(page.getByTestId("coverage-silent-empty"))
       .toBeInTheDocument();
@@ -257,9 +257,7 @@ describe("PrepareData surfaces a silent-empty collapse before launch", () => {
     );
 
     // The card starts collapsed; expand it to read the per-field coverage rate.
-    await userEvent.click(
-      page.getByRole("button", { name: "Date of birth", exact: true }),
-    );
+    await expandFieldCards();
     await expect
       .element(page.getByTestId("coverage-rate"))
       .toHaveTextContent("2 of 2 rows produce a value (100%)");
