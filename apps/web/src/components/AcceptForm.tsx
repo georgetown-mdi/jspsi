@@ -3,6 +3,11 @@ import { useNavigate } from "@tanstack/react-router";
 
 import { Button, Center, Paper, Stack, Textarea, Title } from "@mantine/core";
 
+import {
+  clearAcceptHandoff,
+  stashAcceptHandoff,
+} from "@components/acceptHandoff";
+
 /**
  * Peel the encoded invitation token out of what the user pasted. A deep-link URL
  * carries the token in its fragment (`<origin>/accept#<token>`), so everything
@@ -16,13 +21,26 @@ function tokenFromInput(input: string): string {
   return hash === -1 ? trimmed : trimmed.slice(hash + 1);
 }
 
+interface AcceptFormProps {
+  /** The file chosen in the home page's shared drop. The accept path does not
+   * require it -- "Review invitation" works without one -- but if it is present we
+   * carry it to the consent screen (via {@link stashAcceptHandoff}) so the user
+   * need not re-drop the same file. The handle is only stashed, never parsed: the
+   * accept screen still parses behind its consent gate. */
+  files: Array<File>;
+}
+
 /**
  * Homepage accept form: takes either a bare encoded invitation or a pasted
  * deep-link URL and routes to the `/accept` consent page with the token in the
  * URL fragment -- the same destination the inviter's deep-link points at. The
  * decode, terms review, expiry enforcement, and rendezvous all live on `/accept`.
+ *
+ * "Review invitation" is disabled until the field holds a usable token, so the
+ * action is offered only once there is something to review; the file drop below
+ * does NOT gate it (a file is optional for accepting).
  */
-export default function AcceptForm() {
+export default function AcceptForm({ files }: AcceptFormProps) {
   const navigate = useNavigate();
 
   const form = useForm({
@@ -30,6 +48,11 @@ export default function AcceptForm() {
     onSubmit: ({ value }) => {
       const token = tokenFromInput(value.invitation);
       if (!token) return;
+      // Carry the home-page file selection (if any) to the consent screen, or
+      // clear any stale stash so the accept screen falls back to its own picker.
+      // Only a File handle moves; the parse stays gated behind consent there.
+      if (files.length > 0) stashAcceptHandoff(files[0]);
+      else clearAcceptHandoff();
       // The token rides in the fragment, never a search param, so this
       // confidential value is not sent to the server (matching the inviter's
       // deep-link). `/accept` reads it from `window.location.hash`.
@@ -83,7 +106,19 @@ export default function AcceptForm() {
             )}
           />
           <Center>
-            <Button type="submit">Review invitation</Button>
+            {/* Disabled until the field holds a usable token, so the action is
+                offered only when there is an invitation to review. Subscribes to
+                the field rather than gating on the validator's error string so an
+                untouched (never-blurred) field still disables the button. */}
+            <form.Subscribe
+              selector={(s) => tokenFromInput(s.values.invitation)}
+            >
+              {(token) => (
+                <Button type="submit" disabled={!token}>
+                  Review invitation
+                </Button>
+              )}
+            </form.Subscribe>
           </Center>
         </Stack>
       </form>

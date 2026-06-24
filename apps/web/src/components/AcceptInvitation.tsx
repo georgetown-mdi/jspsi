@@ -7,6 +7,10 @@ import { describeDecodeError } from "@psilink/core";
 import { commitAcceptance } from "@psi/acceptConsent";
 import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
+import {
+  clearAcceptHandoff,
+  peekAcceptHandoff,
+} from "@components/acceptHandoff";
 import { AcceptInvitationPanel } from "@components/AcceptInvitationPanel";
 import { EXCHANGE_READING_WIDTH } from "@components/contentWidth";
 import { ExchangeView } from "@components/ExchangeView";
@@ -66,6 +70,34 @@ export function AcceptInvitation() {
   // The review-screen error (a CSV read failure): nothing is handed off, so the
   // user stays on the review screen to choose another file.
   const [acquireError, setAcquireError] = useState<AlertContent>();
+  // The file the acceptor chose on the home page, if any, carried in memory across
+  // the navigation (a File cannot ride the URL fragment the token occupies). Read
+  // once with a pure peek (StrictMode-safe), and used only to pre-fill the acquire
+  // dropzone -- the parse still runs behind the consent gate below.
+  const [handoffFiles] = useState<Array<File> | undefined>(() => {
+    const file = peekAcceptHandoff();
+    return file ? [file] : undefined;
+  });
+  // Consume the hand-off once: clear the module stash so a later back/forward
+  // navigation to /accept -- which does not pass through the home page's "Review
+  // invitation" submit -- finds nothing and falls back to the dropzone's own
+  // picker rather than re-seeding from this now-captured file. Latched so it runs
+  // once across React StrictMode's double effect invoke; the file is already held
+  // in `handoffFiles` (captured synchronously in the render initializer above), so
+  // clearing the stash does not lose it.
+  const handoffClearedRef = useRef(false);
+  useEffect(() => {
+    if (handoffClearedRef.current) return;
+    handoffClearedRef.current = true;
+    clearAcceptHandoff();
+  }, []);
+  // The hand-off seeds the acquire dropzone only on its FIRST mount. Once the
+  // operator has acquired a file (handleAcquired), a later back edge
+  // preparing -> reviewing re-mounts the acquire phase, and without this latch it
+  // would re-seed the stale home-page file -- silently discarding whatever file the
+  // operator chose in-route. After the first acquire we pass no seed, so the
+  // re-mounted dropzone starts empty for a deliberate re-pick.
+  const handoffConsumedRef = useRef(false);
 
   useEffect(() => {
     // The token is the URL fragment minus the leading "#".
@@ -126,6 +158,9 @@ export function AcceptInvitation() {
     // not rest on the disabled state alone.
     const name = commitAcceptance({ consented, name: acceptorName });
     if (name === undefined) return;
+    // The seed has now done its job; a back edge to reviewing must not resurrect it
+    // over the file just acquired (see handoffConsumedRef).
+    handoffConsumedRef.current = true;
     setPhase({ status: "preparing", name, bundle });
   };
 
@@ -200,6 +235,7 @@ export function AcceptInvitation() {
           onConsentedChange={setConsented}
           acceptorName={acceptorName}
           onAcceptorNameChange={setAcceptorName}
+          initialFiles={handoffConsumedRef.current ? undefined : handoffFiles}
           error={acquireError}
           onAcquireError={setAcquireError}
           onAcquired={handleAcquired}

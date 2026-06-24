@@ -14,7 +14,6 @@ import { InvitationFileError } from "@psi/invitation";
 import {
   clearAdvancedHandoff,
   peekAdvancedHandoff,
-  stashAdvancedHandoff,
 } from "@components/advancedHandoff";
 import { InvitePanel } from "@components/InvitePanel";
 
@@ -28,7 +27,7 @@ import type { LinkageTerms } from "@psilink/core";
 // Drive generateInvitation from the test: each case sets `gen.impl`. The real
 // module (and its InvitationFileError class, so `instanceof` in InvitePanel and
 // here refer to the same class) is preserved; only the entry point is swapped.
-// Capture navigation: InvitePanel's "Advanced options" link navigates to the
+// Capture navigation: InvitePanel's "Advanced Options" link navigates to the
 // editor route via useNavigate. Mock the router so the panel can mount without a
 // RouterProvider (the render-test pattern) and record where it navigates.
 const nav = vi.hoisted(() => ({ calls: [] as Array<unknown> }));
@@ -76,47 +75,13 @@ vi.mock("@components/ExchangeView", () => ({
   },
 }));
 
-// The CSV the "select file" mock button seeds. A hoisted handle so a test can
-// pick the file's columns before clicking (InvitePanel reads the header to derive
-// the quick-path disclosure statement); defaults to a single `other` column.
+// The CSV the harness's "select file" button seeds into the lifted file selection,
+// standing in for the home page's shared drop. A hoisted handle so a test could vary
+// it; the contents do not matter here (InvitePanel gates on a file being present,
+// not on its columns -- the column disclosure now lives in DefaultExchangeColumns).
 const fileSeed = vi.hoisted(() => ({
   content: ["c\n1\n"] as Array<string>,
   name: "data.csv",
-}));
-
-// Stand in for the Mantine dropzone: a button to seed a file and a Generate
-// button wired to InvitePanel's submit, gated on a file being present exactly as
-// the real FileSelect gates it.
-vi.mock("@components/FileSelect", () => ({
-  default: (props: {
-    submitLabel: string;
-    submitted: boolean;
-    files: Array<File>;
-    handleSubmit: () => void;
-    setFiles: (files: Array<File>) => void;
-  }) =>
-    createElement(
-      "div",
-      null,
-      createElement(
-        "button",
-        {
-          "data-testid": "select-file",
-          onClick: () =>
-            props.setFiles([new File(fileSeed.content, fileSeed.name)]),
-        },
-        "select",
-      ),
-      createElement(
-        "button",
-        {
-          "data-testid": "generate",
-          disabled: props.files.length === 0 || props.submitted,
-          onClick: props.handleSubmit,
-        },
-        props.submitLabel,
-      ),
-    ),
 }));
 
 const terms: LinkageTerms = {
@@ -144,14 +109,28 @@ let container: HTMLElement | undefined;
 let root: Root | undefined;
 let consoleErrorSpy: ReturnType<typeof vi.spyOn> | undefined;
 
-// InvitePanel is now controlled: HomePage owns the inviter session and feeds it
-// back so the panel can swap the compose form for the exchange view. Stand in for
-// that owner with a minimal stateful harness, so generating still drives the
-// transition (the panel calls setSession; the harness re-renders it with the
-// stored value) exactly as it does under HomePage.
+// InvitePanel is now controlled on two axes: HomePage owns the inviter session
+// (fed back so the panel can swap the compose form for the exchange view) AND the
+// shared data-file selection (the drop now lives below both compose panels, not in
+// this one). Stand in for that owner with a minimal stateful harness: a "select
+// file" button seeds the lifted `files`, and generating drives the session
+// transition exactly as it does under HomePage.
 function Harness() {
   const [session, setSession] = useState<InviterSession>();
-  return createElement(InvitePanel, { session, setSession });
+  const [files, setFiles] = useState<Array<File>>([]);
+  return createElement(
+    "div",
+    null,
+    createElement(
+      "button",
+      {
+        "data-testid": "select-file",
+        onClick: () => setFiles([new File(fileSeed.content, fileSeed.name)]),
+      },
+      "select",
+    ),
+    createElement(InvitePanel, { session, setSession, files }),
+  );
 }
 
 function mount() {
@@ -162,10 +141,14 @@ function mount() {
 }
 
 // Enter a name, select a file, then click Generate -- the full compose action.
+// Generate is InvitePanel's own button now (the drop and its button no longer live
+// here), gated on the lifted file being present.
 async function compose(name = "County Health Dept") {
   await userEvent.fill(page.getByRole("textbox"), name);
   await userEvent.click(page.getByTestId("select-file"));
-  await userEvent.click(page.getByTestId("generate"));
+  await userEvent.click(
+    page.getByRole("button", { name: "Generate invitation" }),
+  );
 }
 
 afterEach(() => {
@@ -184,115 +167,37 @@ afterEach(() => {
 });
 
 describe("InvitePanel compose screen", () => {
-  test("Advanced options is an active control that navigates to the editor route", async () => {
+  test("Advanced Options is disabled until a file is chosen, then navigates to the editor", async () => {
     gen.impl = () => Promise.resolve(generated);
     mount();
 
-    const advanced = page.getByText("Advanced options");
-    await expect.element(advanced).toBeInTheDocument();
-    const el = advanced.element() as HTMLElement;
-    // A real, enabled control now that the editor exists (no longer aria-disabled).
-    expect(el.tagName).toBe("BUTTON");
-    expect(el.getAttribute("aria-disabled")).not.toBe("true");
+    // The button is always present beside Generate, but disabled until a file gives
+    // the editor something to seed from. (The disclosure of what a file would send
+    // moved out to the shared drop's "Default exchange columns"; this is the one
+    // remaining control over it.)
+    const advanced = page.getByRole("button", { name: "Advanced Options" });
+    await expect.element(advanced).toBeDisabled();
+
+    await userEvent.click(page.getByTestId("select-file"));
+    await expect.element(advanced).toBeEnabled();
 
     await userEvent.click(advanced);
-    // It navigates to the editor route.
     expect(nav.calls).toContainEqual({ to: "/advanced" });
   });
 
-  test("Advanced options hands off the chosen file and name in memory", async () => {
+  test("Advanced Options hands off the chosen file and name in memory", async () => {
     gen.impl = () => Promise.resolve(generated);
     mount();
 
     await userEvent.fill(page.getByRole("textbox"), "  Dr. Jane  ");
     await userEvent.click(page.getByTestId("select-file"));
-    // Exact match: once a file is chosen the disclosure statement adds a "Change
-    // what is sent in Advanced options" link, so a substring match would be
-    // ambiguous. This asserts the standing top-level link.
-    await userEvent.click(
-      page.getByRole("button", { name: "Advanced options", exact: true }),
-    );
+
+    const advanced = page.getByRole("button", { name: "Advanced Options" });
+    await expect.element(advanced).toBeEnabled();
+    await userEvent.click(advanced);
 
     // The editor route reads this in-memory hand-off on arrival: the chosen file
     // and the trimmed name, so it opens seeded without a re-drop.
-    const handoff = peekAdvancedHandoff();
-    expect(handoff?.file).toBeInstanceOf(File);
-    expect(handoff?.name).toBe("Dr. Jane");
-    expect(nav.calls).toContainEqual({ to: "/advanced" });
-  });
-
-  test("Advanced options with no file clears any stale hand-off", async () => {
-    gen.impl = () => Promise.resolve(generated);
-    // Seed a stale hand-off from an earlier Advanced click, so clearing it is
-    // observable (without this, the assertion would pass vacuously: afterEach
-    // already leaves the stash empty).
-    stashAdvancedHandoff({
-      file: new File(["c\n1\n"], "stale.csv"),
-      name: "Prior",
-    });
-    expect(peekAdvancedHandoff()).toBeDefined();
-    mount();
-
-    await userEvent.fill(page.getByRole("textbox"), "County Health Dept");
-    await userEvent.click(page.getByText("Advanced options"));
-
-    // No file chosen now: the panel clears the stale stash so the route falls back
-    // to its own picker rather than resurrecting the earlier file.
-    expect(peekAdvancedHandoff()).toBeUndefined();
-    expect(nav.calls).toContainEqual({ to: "/advanced" });
-  });
-
-  test("surfaces exactly the columns the quick path will send for the chosen file", async () => {
-    gen.impl = () => Promise.resolve(generated);
-    // first_name (linkage, not sent), record_id (inferred row identifier, still
-    // sent on the un-normalized quick path), notes (other, sent).
-    fileSeed.content = ["first_name,record_id,notes\n", "Alice,1,vip\n"];
-    mount();
-    await userEvent.click(page.getByTestId("select-file"));
-
-    await expect
-      .element(page.getByText("What the quick path will send"))
-      .toBeInTheDocument();
-    // The disclosed set, in column order, derived from the same predicate the wire
-    // uses -- the identifier and other columns, never the linkage one.
-    expect(document.body.textContent).toContain("record_id, notes.");
-    expect(document.body.textContent).not.toContain("first_name");
-  });
-
-  test("shows no statement when the quick path would send nothing", async () => {
-    gen.impl = () => Promise.resolve(generated);
-    // Start with a disclosing file so the statement is present...
-    fileSeed.content = ["first_name,notes\n", "Alice,vip\n"];
-    mount();
-    await userEvent.click(page.getByTestId("select-file"));
-    await expect
-      .element(page.getByText("What the quick path will send"))
-      .toBeInTheDocument();
-
-    // ...then choose a file whose columns are all linkage types, so nothing is
-    // disclosed: the statement is withdrawn (no awareness surface is required when
-    // the quick path sends nothing).
-    fileSeed.content = ["first_name,ssn\n", "Alice,123-45-6789\n"];
-    await userEvent.click(page.getByTestId("select-file"));
-    await expect
-      .element(page.getByText("What the quick path will send"))
-      .not.toBeInTheDocument();
-  });
-
-  test("the disclosure statement offers a one-click path into Advanced options", async () => {
-    gen.impl = () => Promise.resolve(generated);
-    fileSeed.content = ["first_name,notes\n", "Alice,vip\n"];
-    mount();
-    await userEvent.fill(page.getByRole("textbox"), "  Dr. Jane  ");
-    await userEvent.click(page.getByTestId("select-file"));
-
-    const change = page.getByText("Change what is sent in Advanced options");
-    await expect.element(change).toBeInTheDocument();
-    await userEvent.click(change);
-
-    // Same hand-off and navigation as the standing Advanced link: the chosen file
-    // and trimmed name, so the editor opens seeded and the operator changes what is
-    // disclosed without restarting the flow.
     const handoff = peekAdvancedHandoff();
     expect(handoff?.file).toBeInstanceOf(File);
     expect(handoff?.name).toBe("Dr. Jane");

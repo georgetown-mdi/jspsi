@@ -50,6 +50,7 @@ export function AcceptInvitationPanel({
   onConsentedChange,
   acceptorName,
   onAcceptorNameChange,
+  initialFiles,
   error,
   onAcquireError,
   onAcquired,
@@ -61,6 +62,10 @@ export function AcceptInvitationPanel({
   onConsentedChange: (value: boolean) => void;
   acceptorName: string;
   onAcceptorNameChange: (value: string) => void;
+  /** Seed the file-acquire dropzone, e.g. with the file the acceptor chose on the
+   * home page (carried via the accept hand-off). Selection only -- the parse stays
+   * behind the consent gate. */
+  initialFiles?: Array<File>;
   /** The review-screen error to display beneath the consent gate: a CSV read
    * failure. Cleared at the start of each attempt. */
   error?: AlertContent;
@@ -144,6 +149,7 @@ export function AcceptInvitationPanel({
             submitDisabled={
               commitAcceptance({ consented, name: acceptorName }) === undefined
             }
+            initialFiles={initialFiles}
             onError={onAcquireError}
             onAcquired={onAcquired}
           />
