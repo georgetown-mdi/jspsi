@@ -186,6 +186,12 @@ const DEFAULT_COLUMN_TYPES_AND_ALIASES: Array<TypeMeta> = [
     role: "linkage",
     isPayload: false,
   },
+  {
+    type: "zip_code",
+    aliases: ["zip_code", "zipcode", "zip", "zip5", "zip_5"],
+    role: "linkage",
+    isPayload: false,
+  },
 ];
 
 export const ALIAS_TYPE_META_MAP = DEFAULT_COLUMN_TYPES_AND_ALIASES.reduce(

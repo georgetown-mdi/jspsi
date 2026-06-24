@@ -106,6 +106,22 @@ const EMAIL_ADDRESS_STEPS: StandardizationStep[] = [
   },
 ];
 
+// US 5-digit ZIP. Strip every non-digit (which subsumes a leading trim and
+// non-ASCII removal), keep the first 5 digits so a ZIP+4 collapses to its
+// 5-digit prefix, then zero-pad a short value to 5 (a New England ZIP stored
+// without its leading zero). The explicit null_if drops a value that cleaned to
+// empty (a blank or all-non-digit cell) before pad_left can mask it as "00000";
+// substring already nulls an empty slice, so this mirrors the SSN pipeline's
+// belt-and-suspenders null-before-pad rather than adding new coverage. Unlike
+// SSN there is no placeholder null_if: "00000" is a real ZIP (USPS bulk/dummy
+// and the floor of zero-padding), not a sentinel to drop, so none is excluded.
+const ZIP_CODE_STEPS: StandardizationStep[] = [
+  { function: "replace_regex", params: { pattern: "[^0-9]", replacement: "" } },
+  { function: "substring", params: { start: 1, length: 5 } },
+  { function: "null_if", params: { value: "" } },
+  { function: "pad_left", params: { length: 5 } },
+];
+
 // --- Default standardization -------------------------------------------------
 
 export interface DefaultStandardizationOptions {
@@ -136,6 +152,8 @@ function stepsForType(
       return PHONE_NUMBER_STEPS;
     case "email_address":
       return EMAIL_ADDRESS_STEPS;
+    case "zip_code":
+      return ZIP_CODE_STEPS;
     default:
       return undefined;
   }

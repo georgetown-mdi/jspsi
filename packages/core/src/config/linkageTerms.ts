@@ -435,6 +435,11 @@ interface EmailAddressField {
   type: "email_address";
   constraints?: AnyConstraints;
 }
+interface ZipCodeField {
+  name: string;
+  type: "zip_code";
+  constraints?: AnyConstraints;
+}
 
 /**
  * A standardized PII field that participates in linkage. Linkage key elements
@@ -449,7 +454,8 @@ export type LinkageField =
   | SsnField
   | Ssn4Field
   | PhoneNumberField
-  | EmailAddressField;
+  | EmailAddressField
+  | ZipCodeField;
 
 const LinkageFieldSchema: z.ZodType<LinkageField> = z.discriminatedUnion(
   "type",
@@ -480,6 +486,10 @@ const LinkageFieldSchema: z.ZodType<LinkageField> = z.discriminatedUnion(
     }),
     z.object({
       type: z.literal("email_address"),
+      ...linkageFieldBase(AnyConstraintsSchema),
+    }),
+    z.object({
+      type: z.literal("zip_code"),
       ...linkageFieldBase(AnyConstraintsSchema),
     }),
   ],
