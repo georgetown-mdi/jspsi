@@ -317,6 +317,26 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
       .toBeInTheDocument();
   }
 
+  test("the editor's side terms section is the Exchange proposal and lists the sent columns as chips", async () => {
+    window.location.hash = await encodeAcceptToken();
+    mountAcceptRoute();
+    // `notes` is the unrecognized column inferred as payload, so it is the one this
+    // party will send.
+    await reachEditor(csvFile("first_name,last_name,notes\nAlice,Smith,vip\n"));
+    // The agreed terms sit under an "Exchange proposal" heading (the side column,
+    // mirroring the inviter's Advanced-options layout).
+    await expect
+      .element(page.getByText("Exchange proposal"))
+      .toBeInTheDocument();
+    // The columns this party will send are surfaced there as a chip list (named for
+    // assistive tech), with `notes` among the chips.
+    const sendChips = page.getByRole("list", {
+      name: "Columns you will send to your partner",
+    });
+    await expect.element(sendChips).toBeInTheDocument();
+    await expect.element(sendChips.getByText("notes")).toBeInTheDocument();
+  });
+
   test("a satisfiable file reaches the exchange after Continue and Confirm, threading the edited spec", async () => {
     window.location.hash = await encodeAcceptToken();
     mountAcceptRoute();
@@ -325,11 +345,15 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
       .toBeInTheDocument();
 
     // first_name + last_name satisfy both keys; the extra unrecognized `notes`
-    // column is inferred as payload, so the disclosure summary names exactly it. (A
+    // column is inferred as payload, so the send-column chips name exactly it. (A
     // recognized type such as `zip_code` would infer as linkage and NOT be sent.)
     await reachEditor(csvFile("first_name,last_name,notes\nAlice,Smith,vip\n"));
     await expect
-      .element(page.getByText("Columns sent to your partner: notes."))
+      .element(
+        page
+          .getByRole("list", { name: "Columns you will send to your partner" })
+          .getByText("notes"),
+      )
       .toBeInTheDocument();
 
     // Continue opens the confirmation, which lists the disclosed column; only
@@ -402,12 +426,16 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
       .toBeInTheDocument();
 
     // Reach the editor with a first file; the unrecognized `comment` column is the
-    // inferred payload.
+    // inferred payload, so it is the lone send-column chip.
     await reachEditor(
       csvFile("first_name,last_name,comment\nAlice,Smith,ok\n"),
     );
     await expect
-      .element(page.getByText("Columns sent to your partner: comment."))
+      .element(
+        page
+          .getByRole("list", { name: "Columns you will send to your partner" })
+          .getByText("comment"),
+      )
       .toBeInTheDocument();
 
     // Back returns to the review screen (the terms heading shows again) and the
@@ -431,7 +459,11 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
       .element(page.getByRole("heading", { name: "Prepare your data" }))
       .toBeInTheDocument();
     await expect
-      .element(page.getByText("Columns sent to your partner: notes."))
+      .element(
+        page
+          .getByRole("list", { name: "Columns you will send to your partner" })
+          .getByText("notes"),
+      )
       .toBeInTheDocument();
   });
 

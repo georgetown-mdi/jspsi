@@ -277,6 +277,27 @@ describe("LinkageTermsEditor", () => {
       .toBeInTheDocument();
   });
 
+  test("expert keys start collapsed and reveal their element editor on toggle", async () => {
+    mount();
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    // The key header (its name toggle) is visible, but the element editor is
+    // collapsed: no "Add an element" control until the key is expanded.
+    const firstKey = page
+      .getByRole("button", { name: "SSN + LN + DOB" })
+      .first();
+    await expect.element(firstKey).toBeInTheDocument();
+    expect(
+      page.getByRole("button", { name: "Add an element" }).query(),
+    ).toBeNull();
+    // Expanding the key reveals its element editor.
+    await userEvent.click(firstKey);
+    await expect
+      .element(page.getByRole("button", { name: "Add an element" }).first())
+      .toBeInTheDocument();
+  });
+
   test("an expert-authored key survives a metadata edit after expert mode is toggled off", async () => {
     // Regression: authoring a key, turning expert mode OFF, then editing a column
     // must not silently re-derive the key list from the template and drop the
@@ -391,6 +412,12 @@ describe("LinkageTermsEditor", () => {
     mount();
     await userEvent.click(
       page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    // Keys start collapsed; expand the first to reach its elements. Its name toggle
+    // is the first match -- the edit rail precedes the live preview, which lists the
+    // same key.
+    await userEvent.click(
+      page.getByRole("button", { name: "SSN + LN + DOB" }).first(),
     );
     const firstAddElement = page
       .getByRole("button", { name: "Add an element" })

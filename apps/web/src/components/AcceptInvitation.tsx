@@ -50,8 +50,9 @@ type AcceptPhase =
  * The flow is gated on consent: the review screen's "Accept and continue" is
  * disabled until consent and a name are given, and on a successful parse the
  * acquire handler re-checks {@link commitAcceptance} before advancing -- so no
- * rendezvous, key exchange, or PSI frame can be set up before consent, and the
- * dialing exchange waits for the user's explicit Start there.
+ * rendezvous, key exchange, or PSI frame can be set up before consent. Past that
+ * gate (and the prepare step) the exchange screen dials on arrival with no separate
+ * Start press, since the user has already accepted and confirmed.
  *
  * The content width (the wider reading width the dense terms want) is declared by
  * the route and supplied by the shell's container, so this page renders only its
@@ -184,9 +185,10 @@ export function AcceptInvitation() {
       <Title order={1}>Accept an invitation</Title>
       {decode.status === "ready" && phase.status === "exchange" ? (
         // The exchange screen: the acceptor arrives pre-acquired (the parsed CSV)
-        // and pre-prepared (the editor's metadata/standardization), and dials only
-        // on the explicit Start ExchangeView renders. Keyed by the secret so it
-        // never persists across a different invitation. Reload to start over.
+        // and pre-prepared (the editor's metadata/standardization), and dials on
+        // arrival (it consented and confirmed already, so no separate Start press).
+        // Keyed by the secret so it never persists across a different invitation.
+        // Reload to start over.
         <ExchangeView
           key={decode.invitation.token.sharedSecret}
           role="acceptor"

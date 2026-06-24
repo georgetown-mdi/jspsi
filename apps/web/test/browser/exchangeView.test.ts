@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { page, userEvent } from "vitest/browser";
+import { page } from "vitest/browser";
 
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -90,11 +90,11 @@ vi.mock("@psi/exchangeLifecycle", () => ({
   },
 }));
 
-// The acceptor now arrives pre-acquired (its CSV was parsed and pre-flighted on
-// the review screen) and dials only on its explicit Start, so ExchangeView renders
-// no FileAcquire of its own -- there is no acquire seam to stub here. A
-// partial-coverage advisory rides in as the `initialWarning` config field instead
-// of being raised by a stubbed acquire phase.
+// The acceptor arrives pre-acquired (its CSV was parsed and pre-flighted on the
+// review screen) and auto-dials on mount, so ExchangeView renders no FileAcquire of
+// its own -- there is no acquire seam to stub here. A partial-coverage advisory
+// rides in as the `initialWarning` config field instead of being raised by a
+// stubbed acquire phase.
 
 const acceptorTerms: LinkageTerms = {
   version: "1.0.0",
@@ -207,36 +207,20 @@ describe("ExchangeView Start->run wiring", () => {
     expect(container.querySelector('input[type="file"]')).toBeNull();
   });
 
-  test("acceptor arrives pre-acquired and dials nothing before Start", async () => {
+  test("acceptor auto-dials as the initiator on mount from its pre-acquired bundle", async () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
     render(acceptorConfig("secret-a"));
 
-    // It shows the pre-start status and a Start button, holds no file input of its
-    // own (the file was chosen on the review screen), and -- crucially -- has NOT
-    // dialed: no run begins until the user presses Start.
-    await expect.element(page.getByText("Before start")).toBeInTheDocument();
-    await expect
-      .element(page.getByRole("button", { name: "Start" }))
-      .toBeInTheDocument();
-    expect(container.querySelector('input[type="file"]')).toBeNull();
-    expect(lifecycle.calls).toHaveLength(0);
-  });
-
-  test("acceptor dials once as the initiator when Start is pressed", async () => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
-    render(acceptorConfig("secret-a"));
-
-    await userEvent.click(page.getByRole("button", { name: "Start" }));
-    expect(lifecycle.calls).toHaveLength(1);
+    // The acceptor reaches this screen pre-acquired (its file was chosen and
+    // pre-flighted on the review screen) and already consented and prepared, so the
+    // run begins on mount with no Start press: it dials as the PSI initiator and
+    // holds no file input of its own. There is no Start gate any more.
+    await vi.waitFor(() => expect(lifecycle.calls).toHaveLength(1));
     expect(lifecycle.calls[0].exchangeRole).toBe("initiator");
     expect(lifecycle.calls[0].sharedSecret).toBe("secret-a");
-
-    // The Start button hides once the run is underway, so it cannot start a
-    // second racing run on the same mount (a fresh run comes from a fresh mount).
+    expect(container.querySelector('input[type="file"]')).toBeNull();
     expect(page.getByRole("button", { name: "Start" }).query()).toBeNull();
   });
 
@@ -276,9 +260,8 @@ describe("ExchangeView Start->run wiring", () => {
       .element(page.getByText("Partial CSV coverage"))
       .toBeInTheDocument();
 
-    // The run succeeds: the advisory must stay, explaining why the match count
-    // may be lower, and no failure alert appears.
-    await userEvent.click(page.getByRole("button", { name: "Start" }));
+    // The run succeeds (it auto-started on mount): the advisory must stay,
+    // explaining why the match count may be lower, and no failure alert appears.
     await expect.element(page.getByText("Done")).toBeInTheDocument();
     expect(document.body.textContent).toContain("Partial CSV coverage");
     expect(document.body.textContent).not.toContain("Exchange failed");
@@ -290,13 +273,11 @@ describe("ExchangeView Start->run wiring", () => {
     consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     setOutcome("failure");
     render(acceptorConfig("secret-a", warning));
-    await expect
-      .element(page.getByText("Partial CSV coverage"))
-      .toBeInTheDocument();
 
-    // The run fails: the advisory is cleared so it cannot read as the cause
-    // beside the failure alert.
-    await userEvent.click(page.getByRole("button", { name: "Start" }));
+    // The run auto-starts on mount and fails (the lifecycle stub fires onError
+    // synchronously), so the failure alert shows and the advisory is cleared --
+    // it cannot read as the cause beside the failure. The warning's brief on-mount
+    // presence is not asserted: the synchronous failure clears it in the same tick.
     await expect.element(page.getByText("Exchange failed")).toBeInTheDocument();
     expect(document.body.textContent).not.toContain("Partial CSV coverage");
   });
@@ -309,7 +290,6 @@ describe("ExchangeView Start->run wiring", () => {
     setOutcome("withheld");
     render(acceptorConfig("secret-a"));
 
-    await userEvent.click(page.getByRole("button", { name: "Start" }));
     await expect.element(page.getByText("Done")).toBeInTheDocument();
 
     // The completion message states the contribution and the absence of a result...
@@ -330,8 +310,7 @@ describe("ExchangeView focus throughline", () => {
 
     // On done, focus lands on the Status ("results") heading so the outcome is
     // announced -- not on the mid-protocol stage label, which the live region
-    // handles without stealing focus.
-    await userEvent.click(page.getByRole("button", { name: "Start" }));
+    // handles without stealing focus. The run auto-starts on mount.
     await expect.element(page.getByText("Done")).toBeInTheDocument();
     await vi.waitFor(() => {
       const active = document.activeElement;
@@ -346,7 +325,6 @@ describe("ExchangeView focus throughline", () => {
     setOutcome("failure");
     render(acceptorConfig("secret-a"));
 
-    await userEvent.click(page.getByRole("button", { name: "Start" }));
     await expect.element(page.getByText("Exchange failed")).toBeInTheDocument();
     await vi.waitFor(() => {
       // The focused element is the alert itself, carrying its title text -- not

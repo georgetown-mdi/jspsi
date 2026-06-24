@@ -2,7 +2,7 @@ import log from "loglevel";
 
 import { useEffect, useRef, useState } from "react";
 
-import { Alert, Button, Group, Stack } from "@mantine/core";
+import { Alert, Group, Stack } from "@mantine/core";
 
 import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
 
@@ -213,11 +213,6 @@ export function ExchangeView(config: ExchangeConfig) {
   const [warningAlert, setWarningAlert] = useState<AlertContent | undefined>(
     config.role === "acceptor" ? config.initialWarning : undefined,
   );
-  // Whether the run has been started. Drives only the acceptor's Start button
-  // visibility (it hides once pressed; the inviter auto-starts and shows none);
-  // the authoritative one-run-per-mount guard is handleStart's abortRef check.
-  const [started, setStarted] = useState(false);
-
   // Drives the lifecycle's AbortSignal. A useEffect cleanup aborts it on unmount,
   // so the owner tears down any in-flight wait or exchange and every owner-driven
   // seam stops firing (no setState after unmount). The cleanup also clears the
@@ -312,12 +307,11 @@ export function ExchangeView(config: ExchangeConfig) {
 
   // Start the connection lifecycle from an already-loaded, already-checked CSV:
   // both roles arrive with one in config.acquired -- the acceptor's parsed and
-  // pre-flighted on the review screen (and dialed only on the user's Start), the
-  // inviter's parsed at compose time (auto-started by the mount effect below).
-  // Both sources guarantee at least one satisfiable linkage key -- the acceptor
-  // via its pre-flight, the inviter via generateInvitation's fail-closed block --
-  // so an unsatisfiable file never reaches here: nothing is dialed and the
-  // connecting UI does not mount.
+  // pre-flighted on the review screen, the inviter's parsed at compose time -- and
+  // both auto-start from the mount effect below. Both sources guarantee at least one
+  // satisfiable linkage key -- the acceptor via its pre-flight, the inviter via
+  // generateInvitation's fail-closed block -- so an unsatisfiable file never reaches
+  // here: nothing is dialed and the connecting UI does not mount.
   const handleStart = (bundle: AcquiredBundle) => {
     // Guard against re-entry: once an exchange is in flight its AbortController is
     // stored here, and starting a second would orphan the first's signal and race
@@ -325,9 +319,6 @@ export function ExchangeView(config: ExchangeConfig) {
     // this makes the one-exchange-per-mount invariant explicit -- a fresh exchange
     // comes from a fresh mount (ExchangeView is keyed by the secret).
     if (abortRef.current) return;
-    // Hide the acceptor's Start button now that the run is underway (the inviter
-    // shows none); the abortRef guard above remains the authoritative gate.
-    setStarted(true);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -554,15 +545,16 @@ export function ExchangeView(config: ExchangeConfig) {
     });
   };
 
-  // The inviter is the responder (it listens), so it starts immediately from its
-  // pre-acquired bundle with no Start press. The acceptor is the initiator: it
-  // dials only when the user presses Start (the button below), so it does NOT
-  // auto-start here. Runs once per mount -- ExchangeView is keyed by the secret,
-  // so a fresh exchange is a fresh mount, and handleStart's re-entry guard plus
-  // the StrictMode-safe abort cleanup above keep a double-invoked effect from
-  // racing two runs.
+  // Both roles auto-start from their already-acquired, already-checked bundle: the
+  // inviter as the responder that listens, the acceptor as the initiator that dials.
+  // The acceptor reaches this screen only after it consented and prepared its data,
+  // so dialing on arrival discloses nothing new -- it just removes a redundant Start
+  // press after the user already accepted and confirmed. Runs once per mount --
+  // ExchangeView is keyed by the secret, so a fresh exchange is a fresh mount, and
+  // handleStart's re-entry guard plus the StrictMode-safe abort cleanup above keep a
+  // double-invoked effect from racing two runs.
   useEffect(() => {
-    if (config.role === "inviter") handleStart(config.acquired);
+    handleStart(config.acquired);
   }, []);
 
   return (
@@ -651,16 +643,6 @@ export function ExchangeView(config: ExchangeConfig) {
           openingFileName={outputs?.record?.openingFileName}
         />
       </Group>
-      {config.role === "acceptor" && !started && (
-        // Acceptor only: it arrives pre-acquired (config.acquired, parsed and
-        // pre-flighted on the review screen) and dials only on this explicit
-        // Start, so nothing connects before the user presses it. The button hides
-        // once the run begins; the inviter is the responder and auto-starts, so it
-        // shows none.
-        <Group justify="center">
-          <Button onClick={() => handleStart(config.acquired)}>Start</Button>
-        </Group>
-      )}
     </Stack>
   );
 }

@@ -42,11 +42,8 @@ import {
   setDraftMetadata,
   validateAdvancedInvite,
 } from "@psi/advancedInvite";
-import {
-  disclosedColumnNames,
-  hasMultipleIdentifiers,
-} from "@psi/metadataEditing";
 import { APPLIED_SETTINGS } from "@psi/appliedSettings";
+import { hasMultipleIdentifiers } from "@psi/metadataEditing";
 
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 import { InvitationTerms } from "@components/InvitationTerms";
@@ -405,14 +402,10 @@ export function LinkageTermsEditor({
 
   const { errors } = validation;
 
-  // The columns this party will send as payload, derived from the grid's disclosure
-  // choices (the same isDisclosedToPartner predicate buildAdvancedTerms authors
-  // terms.payload.send from), so this summary cannot drift from what the invitation
-  // declares or what actually transmits. `receive` is not authored here: the inviter
-  // takes whatever the partner discloses (see buildAdvancedTerms / the lazy
-  // validateCompatibility). The inviter receives payload only when it receives a
-  // result at all (output direction is not "only your partner").
-  const sentColumns = disclosedColumnNames(draft.metadata);
+  // The inviter receives payload only when it receives a result at all (output
+  // direction is not "only your partner"); `receive` is otherwise not authored here
+  // -- the inviter takes whatever the partner discloses (see buildAdvancedTerms /
+  // the lazy validateCompatibility).
   const inviterReceivesResult = draft.outputDirection !== "partner";
 
   return (
@@ -496,32 +489,17 @@ export function LinkageTermsEditor({
               />
             </Stack>
 
-            {/* Payload control. Send is authored through the grid's per-column
-                disclosure above (this summarizes the result); receive is not
-                author-time: the inviter does not have the partner's schema, so it
-                takes whatever the partner discloses. The coherence rule (no sending
-                to a partner that receives no result) is enforced live via
-                errors.payload. */}
+            {/* Payload control. The columns this party SENDS are authored through
+                the grid's per-column disclosure above and shown as chips beside the
+                terms preview, so they are not restated here -- only the receive note
+                and the live coherence error remain. Receive is not author-time: the
+                inviter does not have the partner's schema, so it takes whatever the
+                partner discloses; the coherence rule (no sending to a partner that
+                receives no result) is enforced live via errors.payload. */}
             <Stack gap="xs">
               <Text size="sm" fw={600}>
                 Extra data for matched records
               </Text>
-              {sentColumns.length > 0 ? (
-                <Text size="xs">
-                  <Text span fw={600}>
-                    You will send:
-                  </Text>{" "}
-                  {sentColumns.join(", ")}. Choose which columns are sent by
-                  setting them to &ldquo;Sent to your partner&rdquo; under Your
-                  columns above.
-                </Text>
-              ) : (
-                <Text size="xs" c="dimmed">
-                  You are not sending any extra columns. Set a column to
-                  &ldquo;Sent to your partner&rdquo; under Your columns above to
-                  include it.
-                </Text>
-              )}
               {inviterReceivesResult ? (
                 <Text size="xs">
                   <Text span fw={600}>

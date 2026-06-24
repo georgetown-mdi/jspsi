@@ -44,6 +44,7 @@ import { defaultStandardizationForRows } from "@psi/advancedInvite";
 
 import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
+import { ColumnChips } from "@components/ColumnChips";
 import { FieldCoverage } from "@components/FieldCoverage";
 import { InvitationTerms } from "@components/InvitationTerms";
 import { MetadataGrid } from "@components/MetadataGrid";
@@ -365,29 +366,23 @@ export function PrepareData({
           Choose a different file
         </Button>
       </Group>
-      <Title order={2} ref={headingRef} tabIndex={-1}>
-        Prepare your data
-      </Title>
-      <Text size="sm" c="dimmed">
-        Tell us what each column in your file is and what should be done with
-        it, then check that your data can match the agreed terms. Nothing here
-        is sent to your partner except the columns you mark as shared; these
-        settings stay on your device.
-      </Text>
+      <Grid gap="xl" align="flex-start">
+        {/* Main editing column: name each column, resolve the satisfiability
+            verdict, and clean the data. The agreed terms sit in the side column,
+            mirroring the inviter's Advanced-options layout. */}
+        <Grid.Col span={{ base: 12, md: 7 }}>
+          <Stack>
+            <Title order={2} ref={headingRef} tabIndex={-1}>
+              Prepare your data
+            </Title>
+            <Text size="sm" c="dimmed">
+              Tell us what each column in your file is and what should be done
+              with it, then check that your data can match the agreed terms.
+              Nothing here is sent to your partner except the columns you mark
+              as shared; these settings stay on your device.
+            </Text>
 
-      <Paper withBorder p="md">
-        <Text size="sm" fw={600} mb="xs">
-          The terms you are matching against
-        </Text>
-        <InvitationTerms
-          linkageTerms={linkageTerms}
-          disclosedPayloadColumns={disclosedPayloadColumns}
-          perspective="accepted"
-          headingOrder={3}
-        />
-      </Paper>
-
-      {/* The verdict lives in ONE stable, polite, atomic live region whose inner
+            {/* The verdict lives in ONE stable, polite, atomic live region whose inner
           Alert swaps as the verdict changes. Because the wrapper node persists
           across the swap, a remap that flips blocked->all-clear is announced
           (three separately-mounted Alerts would not reliably announce a
@@ -400,204 +395,254 @@ export function PrepareData({
           tabIndex=-1 makes it the programmatic focus target after a remap without
           adding a tab stop; landing focus here re-reads the verdict, a benign
           reinforcement of the polite announcement rather than a separate one. */}
-      <div
-        ref={verdictRef}
-        tabIndex={-1}
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-        data-testid="verdict"
-      >
-        {blocked ? (
-          <Alert
-            role="presentation"
-            color="red"
-            icon={<IconAlertCircle aria-hidden />}
-            title="This file cannot match yet"
-          >
-            None of the agreed linkage keys can be satisfied by your columns, so
-            no matches are possible. Set the columns below to the missing field
-            types, then this will clear.
-          </Alert>
-        ) : partial ? (
-          <Alert
-            role="presentation"
-            color="yellow"
-            icon={<IconAlertTriangle aria-hidden />}
-            title={`${satisfiable} of ${totalKeys} keys can match`}
-          >
-            Some linkage keys cannot be satisfied by your columns and will be
-            inactive for this exchange. The other keys will proceed normally.
-            You can map more columns below to enable additional keys.
-          </Alert>
-        ) : (
-          <Alert
-            role="presentation"
-            color="green"
-            icon={<IconCircleCheck aria-hidden />}
-            title={`All ${totalKeys} keys can match`}
-          >
-            Your columns can satisfy every agreed linkage key.
-          </Alert>
-        )}
-      </div>
+            <div
+              ref={verdictRef}
+              tabIndex={-1}
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              data-testid="verdict"
+            >
+              {blocked ? (
+                <Alert
+                  role="presentation"
+                  color="red"
+                  icon={<IconAlertCircle aria-hidden />}
+                  title="This file cannot match yet"
+                >
+                  None of the agreed linkage keys can be satisfied by your
+                  columns, so no matches are possible. Set the columns below to
+                  the missing field types, then this will clear.
+                </Alert>
+              ) : partial ? (
+                <Alert
+                  role="presentation"
+                  color="yellow"
+                  icon={<IconAlertTriangle aria-hidden />}
+                  title={`${satisfiable} of ${totalKeys} keys can match`}
+                >
+                  Some linkage keys cannot be satisfied by your columns and will
+                  be inactive for this exchange. The other keys will proceed
+                  normally. You can map more columns below to enable additional
+                  keys.
+                </Alert>
+              ) : (
+                <Alert
+                  role="presentation"
+                  color="green"
+                  icon={<IconCircleCheck aria-hidden />}
+                  title={`All ${totalKeys} keys can match`}
+                >
+                  Your columns can satisfy every agreed linkage key.
+                </Alert>
+              )}
+            </div>
 
-      {unsatisfiedTypes.length > 0 && (
-        <Paper withBorder p="md">
-          <Text size="sm" fw={600} mb="xs">
-            Map a column to each missing field
-          </Text>
-          <Stack gap="sm">
-            {unsatisfiedTypes.map(({ type, label }) => (
-              <Select
-                key={type}
-                label={label}
-                description={`No column is set to ${label.toLowerCase()} yet`}
-                placeholder="Choose a column"
-                data={columns}
-                value={null}
-                allowDeselect={false}
-                onChange={(columnName) =>
-                  columnName !== null && remap(type, columnName)
-                }
-              />
-            ))}
-          </Stack>
-        </Paper>
-      )}
+            {unsatisfiedTypes.length > 0 && (
+              <Paper withBorder p="md">
+                <Text size="sm" fw={600} mb="xs">
+                  Map a column to each missing field
+                </Text>
+                <Stack gap="sm">
+                  {unsatisfiedTypes.map(({ type, label }) => (
+                    <Select
+                      key={type}
+                      label={label}
+                      description={`No column is set to ${label.toLowerCase()} yet`}
+                      placeholder="Choose a column"
+                      data={columns}
+                      value={null}
+                      allowDeselect={false}
+                      onChange={(columnName) =>
+                        columnName !== null && remap(type, columnName)
+                      }
+                    />
+                  ))}
+                </Stack>
+              </Paper>
+            )}
 
-      <MetadataGrid
-        metadata={metadata}
-        onChange={setMetadata}
-        caption="Your columns, their types, and how each is used"
-      />
+            <MetadataGrid
+              metadata={metadata}
+              onChange={setMetadata}
+              caption="Your columns, their types, and how each is used"
+            />
 
-      {standardization.length > 0 && (
-        <Stack
-          gap="sm"
-          component="section"
-          aria-label="Clean your data to match"
-        >
-          <Divider />
-          <div>
-            <Text size="sm" fw={600}>
-              Clean your data to match
-            </Text>
-            <Text size="xs" c="dimmed">
-              Each field is cleaned by an ordered list of steps before matching.
-              Edit the steps and watch the before-and-after on a sample of your
-              rows. Cleaning runs on your device and changes only your own match
-              rate; it is never sent to your partner.
-            </Text>
-          </div>
-          {/* The gated expert affordance. Raw patterns run under a linear-time
+            {standardization.length > 0 && (
+              <Stack
+                gap="sm"
+                component="section"
+                aria-label="Clean your data to match"
+              >
+                <Divider />
+                <div>
+                  <Text size="sm" fw={600}>
+                    Clean your data to match
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    Each field is cleaned by an ordered list of steps before
+                    matching. Edit the steps and watch the before-and-after on a
+                    sample of your rows. Cleaning runs on your device and
+                    changes only your own match rate; it is never sent to your
+                    partner.
+                  </Text>
+                </div>
+                {/* The gated expert affordance. Raw patterns run under a linear-time
               engine (they cannot freeze the tab), but a wrong pattern silently
               changes which of your rows match, so the capability is opt-in and
               never offered as a recommended fix. */}
-          <Switch
-            checked={expert}
-            onChange={(event) => setExpert(event.currentTarget.checked)}
-            label="Advanced: author raw patterns"
-            description="Add or edit regular-expression cleaning steps. A wrong pattern changes which of your rows match."
-            size="sm"
-            style={{ alignSelf: "flex-start" }}
-          />
-          {standardization.map((transformation) => {
-            const field = fieldByName.get(transformation.output);
-            // Every standardization output is a declared linkage field (both
-            // `standardization` and `fieldByName` derive from the same
-            // `linkageTerms.linkageFields`), so this never resolves to undefined;
-            // assert it as a check rather than silently dropping a field's card if
-            // that ever stops holding. The message names no partner-controlled
-            // value (the output is a partner-supplied field name).
-            if (field === undefined)
-              throw new Error(
-                "standardization output does not resolve to a declared linkage field",
-              );
-            const steps = transformation.steps ?? [];
-            return (
-              <Paper withBorder p="md" key={transformation.output}>
-                <Stack gap="sm">
-                  <Grid gap="lg" align="flex-start">
-                    <Grid.Col span={{ base: 12, md: 7 }}>
-                      <StandardizationStepEditor
-                        fieldLabel={SEMANTIC_TYPE_LABELS[field.type]}
-                        inputColumn={transformation.input}
-                        steps={steps}
-                        expert={expert}
-                        inputColumnOptions={columnsForType(field.type)}
-                        onInputColumnChange={(column) =>
-                          setInputColumn(transformation.output, column)
-                        }
-                        onStepsChange={(next) =>
-                          setFieldSteps(
-                            transformation.output,
-                            transformation.input,
-                            next,
-                          )
-                        }
-                      />
-                    </Grid.Col>
-                    <Grid.Col span={{ base: 12, md: 5 }}>
-                      <Text size="xs" fw={600} mb="xs">
-                        Preview
-                      </Text>
-                      <StandardizationPreview
-                        field={field}
-                        inputColumn={transformation.input}
-                        steps={steps}
-                        rawRows={rawRows}
-                      />
-                    </Grid.Col>
-                  </Grid>
-                  {/* Full-CSV coverage for this field: the visible silent-empty
+                <Switch
+                  checked={expert}
+                  onChange={(event) => setExpert(event.currentTarget.checked)}
+                  label="Advanced: author raw patterns"
+                  description="Add or edit regular-expression cleaning steps. A wrong pattern changes which of your rows match."
+                  size="sm"
+                  style={{ alignSelf: "flex-start" }}
+                />
+                {standardization.map((transformation) => {
+                  const field = fieldByName.get(transformation.output);
+                  // Every standardization output is a declared linkage field (both
+                  // `standardization` and `fieldByName` derive from the same
+                  // `linkageTerms.linkageFields`), so this never resolves to undefined;
+                  // assert it as a check rather than silently dropping a field's card if
+                  // that ever stops holding. The message names no partner-controlled
+                  // value (the output is a partner-supplied field name).
+                  if (field === undefined)
+                    throw new Error(
+                      "standardization output does not resolve to a declared linkage field",
+                    );
+                  const steps = transformation.steps ?? [];
+                  return (
+                    <Paper withBorder p="md" key={transformation.output}>
+                      <Stack gap="sm">
+                        <Grid gap="lg" align="flex-start">
+                          <Grid.Col span={{ base: 12, md: 7 }}>
+                            <StandardizationStepEditor
+                              fieldLabel={SEMANTIC_TYPE_LABELS[field.type]}
+                              inputColumn={transformation.input}
+                              steps={steps}
+                              expert={expert}
+                              inputColumnOptions={columnsForType(field.type)}
+                              onInputColumnChange={(column) =>
+                                setInputColumn(transformation.output, column)
+                              }
+                              onStepsChange={(next) =>
+                                setFieldSteps(
+                                  transformation.output,
+                                  transformation.input,
+                                  next,
+                                )
+                              }
+                            />
+                          </Grid.Col>
+                          <Grid.Col span={{ base: 12, md: 5 }}>
+                            <Text size="xs" fw={600} mb="xs">
+                              Preview
+                            </Text>
+                            <StandardizationPreview
+                              field={field}
+                              inputColumn={transformation.input}
+                              steps={steps}
+                              rawRows={rawRows}
+                            />
+                          </Grid.Col>
+                        </Grid>
+                        {/* Full-CSV coverage for this field: the visible silent-empty
                       defense, distinct from the sample preview above. */}
-                  <FieldCoverage
-                    rate={nonEmptyRates?.get(transformation.output)}
-                    pending={ratesPending}
-                  />
-                </Stack>
-              </Paper>
-            );
-          })}
-          {/* One polite, atomic live region announces a silent-empty collapse for
+                        <FieldCoverage
+                          rate={nonEmptyRates?.get(transformation.output)}
+                          pending={ratesPending}
+                        />
+                      </Stack>
+                    </Paper>
+                  );
+                })}
+                {/* One polite, atomic live region announces a silent-empty collapse for
               the whole editor (debounced via the recompute), so a screen-reader user
               hears the alarm without each card firing its own region. The visible
               per-card alarms are role="presentation". */}
-          <VisuallyHidden role="status" aria-live="polite" aria-atomic="true">
-            {coverageAnnouncement}
-          </VisuallyHidden>
-        </Stack>
-      )}
+                <VisuallyHidden
+                  role="status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                >
+                  {coverageAnnouncement}
+                </VisuallyHidden>
+              </Stack>
+            )}
 
-      {!standardizationValid && (
-        <Text size="sm" c="red" role="alert">
-          Finish or fix the highlighted cleaning steps before continuing.
-        </Text>
-      )}
+            {!standardizationValid && (
+              <Text size="sm" c="red" role="alert">
+                Finish or fix the highlighted cleaning steps before continuing.
+              </Text>
+            )}
 
-      <Group justify="space-between">
-        <Button
-          variant="default"
-          onClick={() => {
-            setMetadata(initialMetadata);
-            setStepOverrides(new Map());
-            setInputOverrides(new Map());
-            // Reset returns the editor to its seeded state (see initialMetadata),
-            // which has the expert tier off, so close the raw-pattern affordance
-            // too rather than leaving it on over reset-to-default state.
-            setExpert(false);
-          }}
-        >
-          Reset to recommended
-        </Button>
-        <Button
-          onClick={openConfirm}
-          disabled={blocked || multipleIdentifiers || !standardizationValid}
-        >
-          Continue to exchange
-        </Button>
-      </Group>
+            <Group justify="space-between">
+              <Button
+                variant="default"
+                onClick={() => {
+                  setMetadata(initialMetadata);
+                  setStepOverrides(new Map());
+                  setInputOverrides(new Map());
+                  // Reset returns the editor to its seeded state (see initialMetadata),
+                  // which has the expert tier off, so close the raw-pattern affordance
+                  // too rather than leaving it on over reset-to-default state.
+                  setExpert(false);
+                }}
+              >
+                Reset to recommended
+              </Button>
+              <Button
+                onClick={openConfirm}
+                disabled={
+                  blocked || multipleIdentifiers || !standardizationValid
+                }
+              >
+                Continue to exchange
+              </Button>
+            </Group>
+          </Stack>
+        </Grid.Col>
+
+        {/* Side column: the agreed terms (the exchange proposal) the operator
+            consented to, plus the columns this party will send for matched rows --
+            the same two pieces the inviter's Advanced-options preview pairs. */}
+        <Grid.Col span={{ base: 12, md: 5 }}>
+          <Paper withBorder p="md">
+            <Text size="sm" fw={600} mb="xs">
+              Exchange proposal
+            </Text>
+            <InvitationTerms
+              linkageTerms={linkageTerms}
+              disclosedPayloadColumns={disclosedPayloadColumns}
+              perspective="accepted"
+              headingOrder={3}
+            />
+            {/* The columns this party will send to the partner for matched rows,
+                surfaced as chips beside the agreed terms (the inviter sees the same
+                disclosure in its own proposal preview). Derived from the metadata
+                disclosure -- the same disclosedColumnNames predicate the confirm
+                step and the run transmit on -- so it cannot drift from what leaves
+                the machine. */}
+            <Stack gap={4} mt="md">
+              <Text size="sm" fw={600}>
+                Columns you will send to your partner
+              </Text>
+              {disclosed.length > 0 ? (
+                <ColumnChips
+                  columns={disclosed}
+                  label="Columns you will send to your partner"
+                />
+              ) : (
+                <Text size="sm" c="dimmed">
+                  No columns are sent to your partner; only the linkage result
+                  (which of your rows matched) is produced.
+                </Text>
+              )}
+            </Stack>
+          </Paper>
+        </Grid.Col>
+      </Grid>
 
       <Modal
         opened={confirmOpen}

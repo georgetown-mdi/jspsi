@@ -322,7 +322,7 @@ export function InvitationTerms({
         {perspective === "proposing"
           ? "Your partner must review and consent to these details before any data is exchanged."
           : perspective === "accepted"
-            ? "These are the terms you consented to."
+            ? "These are the exchange details."
             : "These are the details your partner proposes for linking your records."}
       </Text>
 
