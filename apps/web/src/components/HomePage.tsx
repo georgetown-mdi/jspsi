@@ -35,10 +35,11 @@ import type { InviterSession } from "@components/InvitePanel";
  * screen takes over the view the way the accept route does rather than sitting in
  * one half of the grid.
  *
- * The constraint wraps the heading too, so once it engages the `<h1>` shares the
- * panel's edge (matching the accept route's in-Paper h1) instead of spanning full
- * width above a narrower panel; while composing it is absent and the heading, grid,
- * and shared drop keep the full route width.
+ * The page `<h1>` frames the compose panels only: while composing it spans the full
+ * route width above the grid and shared drop; once a session exists the takeover
+ * drops it along with the grid, accept form, and drop, so the centered constraint
+ * wraps just the panel (whose own `<h2>` leads the exchange screen, matching the
+ * accept route's in-Paper heading).
  *
  * The content width (wide) is declared by the route and supplied by the shell's
  * container, so this page renders only its content -- no `Container` of its own.
@@ -57,7 +58,13 @@ export function HomePage() {
           : { width: EXCHANGE_READING_WIDTH, marginInline: "auto" }
       }
     >
-      <Title order={1}>Start a private data exchange</Title>
+      {/* The page heading frames the two compose panels; once an invitation is
+          generated the exchange takes over the view and the heading is dropped
+          (the panel's own h2 leads from there), so it renders only while
+          composing. */}
+      {session === undefined && (
+        <Title order={1}>Start a private data exchange</Title>
+      )}
       {session === undefined ? (
         <Stack mt="md">
           <Grid align="flex-start">
@@ -89,25 +96,26 @@ export function HomePage() {
             <Title order={2}>Your data file</Title>
             <Stack mt="md">
               <Text size="sm" c="dimmed">
-                Choose the CSV for this exchange. It is required to send an
-                invitation and optional when accepting one (you can also choose
-                it on the next screen). We read it in your browser to set up
-                matching; it is never uploaded.
+                Choose the CSV for this exchange. You can review an invitation
+                without specifying a file using the form above. Your file is
+                processed entirely in your browser and it is never uploaded to
+                our server.
               </Text>
               <FileDropzone files={files} setFiles={setFiles} />
               {/* The file's default exchange columns surface here, under the file
                   they come from -- shared by both paths -- rather than inside the
                   invite panel, so they do not pop up when the operator only means to
-                  accept. The invite panel's "Advanced Options" changes them. */}
+                  accept. The invite panel's "Advanced options" changes them. */}
               <DefaultExchangeColumns files={files} />
             </Stack>
           </Paper>
         </Stack>
       ) : (
         // Takeover: the same panel, now rendering the exchange screen, with the
-        // accept form and the shared drop dropped. The wrapping Box (above) centers
-        // it and the heading in the reading column; `mt="md"` matches the grid's
-        // top gap so the spacing under the h1 is unchanged across the transition.
+        // page heading, the accept form, and the shared drop dropped. The wrapping
+        // Box (above) centers it in the reading column; `mt="md"` keeps the same top
+        // gap the grid had, so the panel does not jump up against the shell's top
+        // edge across the transition.
         <Box mt="md">
           <InvitePanel
             session={session}

@@ -223,10 +223,21 @@ export function ExpertKeyEditor({
           // inviter edits and owns).
           const keyLabel = sanitizeForDisplay(key.name);
           const satisfiable = keyIsSatisfiable(keyIndex);
-          const swapData = key.elements.map((el) => ({
-            value: elementIdentifier(el),
-            label: sanitizeForDisplay(elementIdentifier(el)),
-          }));
+          // One swap option per element, keyed by its identifier. Deduplicated by
+          // value: two elements can transiently share an identifier while being
+          // edited (e.g. the operator clears an alias so it falls back to a field
+          // name another element already uses) -- an invalid state validation flags
+          // and blocks Generate on, but one Mantine's MultiSelect would otherwise
+          // throw on (duplicate option values), crashing the whole editor instead of
+          // surfacing the inline error. addElement avoids creating the collision in
+          // the first place; this keeps a hand-edited collision from being fatal.
+          const seenSwapIds = new Set<string>();
+          const swapData = key.elements.flatMap((el) => {
+            const value = elementIdentifier(el);
+            if (seenSwapIds.has(value)) return [];
+            seenSwapIds.add(value);
+            return [{ value, label: sanitizeForDisplay(value) }];
+          });
           return (
             <Paper
               key={idFor(keyIds.current, key)}

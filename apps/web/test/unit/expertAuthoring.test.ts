@@ -190,3 +190,72 @@ describe("expert authoring round-trips", () => {
     expect(safeParseLinkageTerms(buildAdvancedTerms(d)).success).toBe(true);
   });
 });
+
+describe("addElement keeps element identifiers unique within a key", () => {
+  test("a second element of the same field gets a distinct alias, not a colliding identifier", () => {
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    // The repro that tore down the editor: a fresh key carries one element of the
+    // first declared field, and the picker defaults the next element to that same
+    // field -- so both took the bare "first_name" identifier. addElement now aliases
+    // the second so the two are told apart.
+    let d: AdvancedInviteDraft = { ...draft, keys: [] };
+    d = addKey(d, "first_name");
+    d = addElement(d, 0, "first_name");
+
+    const elements = d.keys[0].key.elements;
+    expect(elements).toHaveLength(2);
+    expect(elements[0]).toEqual({ field: "first_name" });
+    expect(elements[1].field).toBe("first_name");
+    expect(elements[1].name).toBe("first_name_2");
+
+    // The identifiers (`name ?? field`) the schema requires unique -- and the values
+    // the swap control offers -- carry no duplicate, so no Select is ever fed a
+    // colliding option set.
+    const ids = elements.map((el) => el.name ?? el.field);
+    expect(new Set(ids).size).toBe(ids.length);
+    // The built terms are schema-valid: the duplicate-identifier refine passes.
+    expect(safeParseLinkageTerms(buildAdvancedTerms(d)).success).toBe(true);
+  });
+
+  test("a second element of a different field needs no alias", () => {
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    let d: AdvancedInviteDraft = { ...draft, keys: [] };
+    d = addKey(d, "first_name");
+    d = addElement(d, 0, "last_name");
+    // No identifier collision, so the element stays a bare field reference with no
+    // spurious alias (the round-trip and swap tests above rely on this shape).
+    expect(d.keys[0].key.elements[1]).toEqual({ field: "last_name" });
+  });
+
+  test("the alias steps past an existing alias that already holds the next name", () => {
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    let d: AdvancedInviteDraft = { ...draft, keys: [] };
+    d = addKey(d, "first_name");
+    // Two existing elements: the bare field ("first_name") and one already aliased
+    // "first_name_2". The next first_name element collides with the bare field AND
+    // its first candidate alias is taken, so it must step to "first_name_3".
+    d = updateKeyAt(d, 0, (key) => ({
+      ...key,
+      elements: [
+        { field: "first_name" },
+        { field: "first_name", name: "first_name_2" },
+      ],
+    }));
+    d = addElement(d, 0, "first_name");
+    expect(d.keys[0].key.elements[2].name).toBe("first_name_3");
+    const ids = d.keys[0].key.elements.map((el) => el.name ?? el.field);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  test("two elements sharing an identifier are schema-invalid, so the alias is load-bearing", () => {
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    let d: AdvancedInviteDraft = { ...draft, keys: [] };
+    d = addKey(d, "first_name");
+    // Force the collision addElement now avoids: a second bare first_name element.
+    d = updateKeyAt(d, 0, (key) => ({
+      ...key,
+      elements: [...key.elements, { field: "first_name" }],
+    }));
+    expect(safeParseLinkageTerms(buildAdvancedTerms(d)).success).toBe(false);
+  });
+});

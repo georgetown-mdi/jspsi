@@ -15,6 +15,8 @@ import { IconChevronRight } from "@tabler/icons-react";
 
 import { summarizeInvitation } from "@psi/invitationSummary";
 
+import { ColumnChips } from "@components/ColumnChips";
+
 import type { ReactNode, Ref } from "react";
 
 import type { LinkageTerms } from "@psilink/core";
@@ -231,14 +233,19 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
  * fixed-copy flag). Only the presence is surfaced -- the column list and the
  * agreement text stay in Details, not duplicated into the core.
  *
- * `perspective` chooses only the heading and intro copy for the three contexts
- * this renders in: the acceptor `review`ing a partner's proposal (pre-consent),
- * the acceptor viewing the terms it has `accepted` (during the run, so the copy is
+ * `perspective` selects the heading and intro copy for the three contexts this
+ * renders in -- the acceptor `review`ing a partner's proposal (pre-consent), the
+ * acceptor viewing the terms it has `accepted` (during the run, so the copy is
  * past-tense rather than "proposes"), and the inviter looking at the terms it is
- * `proposing` (its own identity, so it is not labelled "Invitation from <self>").
- * The terms body is identical for all three. `headingOrder` sets only the
- * heading's semantic level (its visual size is fixed), so the outline nests
- * correctly under the page's `h1` (acceptor) or section `h2` (inviter).
+ * `proposing` (its own identity, so it is not labelled "Invitation from <self>")
+ * -- plus the few viewer-centric blocks whose framing depends on who is reading:
+ * Result sharing and the payload send/receive copy read first-person for each
+ * party, and the inviter's `proposing` preview surfaces its sent columns as chips
+ * above "Other details" (so they are not also repeated inside it). The matching
+ * keys and the rest of the body are identical across all three. `headingOrder`
+ * sets only the heading's semantic level (its visual size is fixed), so the
+ * outline nests correctly under the page's `h1` (acceptor) or section `h2`
+ * (inviter).
  *
  * All partner-controlled free text is sanitized for display by
  * {@link summarizeInvitation}, mirroring the CLI's `displayInvitation`: the
@@ -263,8 +270,10 @@ export function InvitationTerms({
    * authored `payload.send`; absent for the inviter's pre-mint "proposing"
    * preview and older tokens, which fall back to `payload.send`. */
   disclosedPayloadColumns?: Array<string>;
-  /** Which context this renders in. Changes only the heading and intro copy; the
-   * body is identical. */
+  /** Which context this renders in. Drives the heading and intro copy and the
+   * viewer-centric blocks (Result sharing, the payload send/receive framing, and
+   * the inviter-only sent-columns chips above "Other details"); the matching keys
+   * and the rest of the body are identical. */
   perspective?: "review" | "accepted" | "proposing";
   /** Semantic heading level (its visual size is fixed at the h2 scale), so the
    * heading nests correctly under its container -- h2 below the acceptor page's
@@ -306,23 +315,29 @@ export function InvitationTerms({
     <Stack gap="sm">
       <Title order={headingOrder} size="h2" ref={headingRef} tabIndex={-1}>
         {perspective === "proposing"
-          ? "Terms you are proposing"
+          ? "Exchange proposal"
           : `Invitation from ${summary.invitingParty}`}
       </Title>
       <Text size="sm" c="dimmed">
         {perspective === "proposing"
-          ? "Your partner must review and consent to these terms before any data is exchanged."
+          ? "Your partner must review and consent to these details before any data is exchanged."
           : perspective === "accepted"
             ? "These are the terms you consented to."
-            : "These are the terms your partner proposes for linking your records."}
+            : "These are the details your partner proposes for linking your records."}
       </Text>
 
       <Stack gap="xs">
         <Term label="Matching method">
           <Text size="sm">
-            {summary.algorithm === "psi-c"
-              ? "Only the number of records you have in common is revealed, not which records match."
-              : "The shared identifiers of records you have in common are revealed to whoever receives the result."}
+            {summary.algorithm === "psi-c" ? (
+              "Only the number of records you have in common is revealed, not which records match."
+            ) : (
+              <>
+                The shared identifiers of records you have in common are
+                revealed to whoever receives the result.{" "}
+                <strong>PII is not directly revealed.</strong>
+              </>
+            )}
           </Text>
           {/* psi-c is a disclosure guarantee: flag a proposed count-only setting
               the run does not yet honor, so the line above cannot read as in
@@ -411,6 +426,35 @@ export function InvitationTerms({
             )}
           </Stack>
         )}
+
+        {/* The columns this party sends to its partner for matched records,
+            surfaced as chips in the always-visible core -- right above the "Other
+            details" disclosure -- rather than only inside it, reusing the same chip
+            visual ({@link ColumnChips}) the home page's default-exchange-columns
+            surface uses. Only the inviter's own "proposing" preview shows it here;
+            the acceptor's review/accepted views keep the send list inline under
+            "Other details". Driven by summary.payload.send (already sanitized by
+            summarizeInvitation), so it cannot drift from what the invitation
+            declares. The send is an eager, definite declaration under "proposing"
+            (the editor preview derives it from the disclosure grid, and both web
+            mint paths author it to the disclosed set), so an empty set reads as a
+            positive "no columns" confirmation rather than an unknown. */}
+        {perspective === "proposing" && (
+          <Term label="Columns sent to your partner">
+            {summary.payload !== undefined &&
+            summary.payload.send.length > 0 ? (
+              <ColumnChips
+                columns={summary.payload.send}
+                label="Columns sent to your partner"
+              />
+            ) : (
+              <Text size="sm" c="dimmed">
+                No columns are sent to your partner; your file is used only to
+                find matches.
+              </Text>
+            )}
+          </Term>
+        )}
       </Stack>
 
       {/* A real disclosure: the toggle carries aria-expanded and aria-controls,
@@ -478,58 +522,63 @@ export function InvitationTerms({
               </Stack>
             </Term>
 
-            {summary.payload !== undefined && (
-              <Term label="Additional data for matched records">
-                {/* Viewer-centric, like Result sharing: under "proposing" the
-                    inviter reads its OWN send/receive first-person ("You will
-                    send"), while the acceptor reads them as the partner's ("Your
-                    partner will send"). The columns are the same either way. */}
-                {/* Shown whenever the send set is a definite declaration --
+            {/* Renders only when it has content: the acceptor's send list (hidden
+                in the inviter's "proposing" preview, which shows its send as chips
+                above) or a non-empty receive list. The guard mirrors the two inner
+                conditions below so the Term never renders an empty label -- which it
+                would in the inviter's preview, where the send block is suppressed
+                and receive is usually empty. */}
+            {summary.payload !== undefined &&
+              ((summary.payload.sendDeclared && perspective !== "proposing") ||
+                summary.payload.receive.length > 0) && (
+                <Term label="Additional data for matched records">
+                  {/* Viewer-centric, like Result sharing: the acceptor reads the
+                    inviter's send as the partner's ("Your partner will send"). The
+                    inviter's own send is surfaced as chips above "Other details"
+                    instead, so it is suppressed here under "proposing". */}
+                  {/* Shown whenever the send set is a definite declaration --
                     including the empty set, rendered "(none)" so the strict
                     "receive nothing" lock-in is visible rather than inferred from a
                     missing line (the CLI's displayInvitation shows the same). A
                     lazy send (not declared) is omitted instead. */}
-                {summary.payload.sendDeclared && (
-                  <Stack gap={2}>
-                    <Text size="sm">
-                      {perspective === "proposing"
-                        ? "You will send:"
-                        : "Your partner will send:"}
-                    </Text>
-                    {summary.payload.send.length > 0 ? (
-                      // One column per item rather than a joined string: a
-                      // partner-controlled column name may contain the separator,
-                      // which joined text would render as spurious extra columns.
-                      // Keyed by index -- column order is fixed and a sanitized
-                      // name is not unique.
+                  {summary.payload.sendDeclared &&
+                    perspective !== "proposing" && (
+                      <Stack gap={2}>
+                        <Text size="sm">Your partner will send:</Text>
+                        {summary.payload.send.length > 0 ? (
+                          // One column per item rather than a joined string: a
+                          // partner-controlled column name may contain the separator,
+                          // which joined text would render as spurious extra columns.
+                          // Keyed by index -- column order is fixed and a sanitized
+                          // name is not unique.
+                          <List size="sm" withPadding listStyleType="circle">
+                            {summary.payload.send.map((column, index) => (
+                              <List.Item key={index}>{column}</List.Item>
+                            ))}
+                          </List>
+                        ) : (
+                          <Text size="sm" c="dimmed">
+                            (none)
+                          </Text>
+                        )}
+                      </Stack>
+                    )}
+                  {summary.payload.receive.length > 0 && (
+                    <Stack gap={2}>
+                      <Text size="sm">
+                        {perspective === "proposing"
+                          ? "You request from your partner:"
+                          : "Your partner requests from you:"}
+                      </Text>
                       <List size="sm" withPadding listStyleType="circle">
-                        {summary.payload.send.map((column, index) => (
+                        {summary.payload.receive.map((column, index) => (
                           <List.Item key={index}>{column}</List.Item>
                         ))}
                       </List>
-                    ) : (
-                      <Text size="sm" c="dimmed">
-                        (none)
-                      </Text>
-                    )}
-                  </Stack>
-                )}
-                {summary.payload.receive.length > 0 && (
-                  <Stack gap={2}>
-                    <Text size="sm">
-                      {perspective === "proposing"
-                        ? "You request from your partner:"
-                        : "Your partner requests from you:"}
-                    </Text>
-                    <List size="sm" withPadding listStyleType="circle">
-                      {summary.payload.receive.map((column, index) => (
-                        <List.Item key={index}>{column}</List.Item>
-                      ))}
-                    </List>
-                  </Stack>
-                )}
-              </Term>
-            )}
+                    </Stack>
+                  )}
+                </Term>
+              )}
 
             {summary.legalAgreement !== undefined && (
               <Term label="Legal agreement">

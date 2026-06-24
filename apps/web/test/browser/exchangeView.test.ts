@@ -406,11 +406,11 @@ describe("ExchangeView focus throughline", () => {
     // stays mounted through the collapse), so focus is NOT orphaned by the
     // collapse.
     const terms = page.getByRole("heading", {
-      name: "Terms you are proposing",
+      name: "Exchange proposal",
     });
     await expect.element(terms).toBeInTheDocument();
     (terms.element() as HTMLElement).focus();
-    expect(document.activeElement?.textContent).toBe("Terms you are proposing");
+    expect(document.activeElement?.textContent).toBe("Exchange proposal");
 
     // Partner connects and the share block collapses; since focus was not on
     // <body>, the recovery must leave it where the user put it.
@@ -418,6 +418,6 @@ describe("ExchangeView focus throughline", () => {
     await expect
       .element(page.getByText("Partner connected"))
       .toBeInTheDocument();
-    expect(document.activeElement?.textContent).toBe("Terms you are proposing");
+    expect(document.activeElement?.textContent).toBe("Exchange proposal");
   });
 });

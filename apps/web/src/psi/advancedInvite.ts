@@ -858,16 +858,37 @@ export function removeKey(
   return { ...draft, keys: draft.keys.filter((_, i) => i !== index) };
 }
 
-/** Append an element referencing `fieldName` to the key at `keyIndex`. */
+/** Append an element referencing `fieldName` to the key at `keyIndex`. When that
+ * field already identifies an element in the key, the new element is given a
+ * distinct alias so the key keeps the unique element identifiers the schema
+ * requires. */
 export function addElement(
   draft: AdvancedInviteDraft,
   keyIndex: number,
   fieldName: string,
 ): AdvancedInviteDraft {
-  return updateKeyAt(draft, keyIndex, (key) => ({
-    ...key,
-    elements: [...key.elements, { field: fieldName }],
-  }));
+  return updateKeyAt(draft, keyIndex, (key) => {
+    // An element's identifier is its alias if set, else its field name (the same
+    // `name ?? field` the schema requires unique within a key, and the value the
+    // swap control lists as an option). A new element starts as a bare field
+    // reference, so when that field already identifies an element here -- the common
+    // case, since the field picker defaults to the first declared field -- give the
+    // new one a distinct alias. Otherwise two same-field elements would share an
+    // identifier: a state the schema rejects (blocking Generate) AND one that feeds
+    // the swap control duplicate option values, which Mantine throws on -- crashing
+    // the editor before the validation message can surface. The operator can rename
+    // or clear the alias afterward. Mirrors addKey/addFieldForType, which likewise
+    // construct unique names rather than emitting a collision.
+    const ids = new Set(key.elements.map((el) => el.name ?? el.field));
+    const element: LinkageKeyElement = { field: fieldName };
+    if (ids.has(fieldName)) {
+      let n = 2;
+      let alias = `${fieldName}_${n}`;
+      while (ids.has(alias)) alias = `${fieldName}_${++n}`;
+      element.name = alias;
+    }
+    return { ...key, elements: [...key.elements, element] };
+  });
 }
 
 /** Remove the element at `elementIndex` from the key at `keyIndex`. A key must
