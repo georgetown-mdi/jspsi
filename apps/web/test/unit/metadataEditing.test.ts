@@ -19,6 +19,7 @@ import {
   quickInviteDisclosedColumns,
   setColumnDisclosure,
   setColumnType,
+  setColumnTypeForMatching,
 } from "../../src/psi/metadataEditing.js";
 
 import type { ColumnMetadata, Metadata } from "@psilink/core";
@@ -344,9 +345,11 @@ describe("setColumnType keeps disclosure intent", () => {
   });
 
   test("retyping a not-yet-usable column to a linkage type promotes it to match", () => {
-    // The remap fix: an `ignored` column retyped to satisfy a field must actually
-    // become usable (resolveFieldColumns skips `role: ignored`), not silently stay
-    // ignored -- and `match` is not sent, so disclosure does not increase.
+    // The grid's type dropdown: an `ignored` column retyped to satisfy a field must
+    // actually become usable (resolveFieldColumns skips `role: ignored`), not silently
+    // stay ignored -- and `match` is not sent, so disclosure does not increase. (The
+    // "Map a column to each missing field" quick-fix forces match outright instead --
+    // see setColumnTypeForMatching below.)
     const md: Metadata = [
       col({ name: "x", type: "other", role: "ignored", isPayload: false }),
     ];
@@ -389,6 +392,43 @@ describe("setColumnType keeps disclosure intent", () => {
     expect(metadata.find((c) => c.name === "old")?.role).toBe("ignored");
     expect(demotedIdentifiers).toEqual(["old"]);
     expect(hasMultipleIdentifiers(metadata)).toBe(false);
+  });
+});
+
+describe("setColumnTypeForMatching forces the match role", () => {
+  test("a sent column picked for the quick-fix becomes a match column", () => {
+    // The reported bug: a column inferred as role: payload (every unrecognized
+    // header starts there) picked in "Map a column to each missing field" must
+    // actually satisfy the field. setColumnType would keep it sent (see the
+    // keep-branch tests above) and leave it unusable for linkage; this forces match.
+    const md: Metadata = [
+      col({ name: "postal", type: "other", role: "payload", isPayload: true }),
+    ];
+    const out = setColumnTypeForMatching(md, "postal", "zip_code");
+    expect(out[0].type).toBe("zip_code");
+    expect(out[0].role).toBe("linkage");
+    expect(disclosureOf(out[0])).toBe("match");
+    // `match` is not sent, so binding a column for matching never discloses it.
+    expect(isDisclosedToPartner(out[0])).toBe(false);
+  });
+
+  test("an ignored column is promoted to match too", () => {
+    const md: Metadata = [
+      col({ name: "z", type: "other", role: "ignored", isPayload: false }),
+    ];
+    const out = setColumnTypeForMatching(md, "z", "first_name");
+    expect(out[0].type).toBe("first_name");
+    expect(out[0].role).toBe("linkage");
+    expect(disclosureOf(out[0])).toBe("match");
+  });
+
+  test("only the named column changes", () => {
+    const md: Metadata = [
+      col({ name: "a", type: "other", role: "payload", isPayload: true }),
+      col({ name: "b", type: "other", role: "payload", isPayload: true }),
+    ];
+    const out = setColumnTypeForMatching(md, "a", "last_name");
+    expect(out.find((c) => c.name === "b")).toEqual(md[1]);
   });
 });
 

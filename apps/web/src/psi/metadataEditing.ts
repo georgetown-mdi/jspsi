@@ -139,8 +139,10 @@ export function normalizeForEditor(metadata: Metadata): Metadata {
  * deliberately-sent `payload` column stays sent and a type change never alters
  * disclosure on its own -- EXCEPT a column sitting at `ignored` that is retyped to
  * a matchable type (any linkage type or `identifier`), which is promoted to the
- * type's natural usable choice so the quick-fix remap cannot silently leave a
- * field unsatisfiable (`resolveFieldColumns` binds only `role: linkage`). Otherwise the
+ * type's natural usable choice so the grid's type dropdown does not leave a
+ * freshly-matchable column inert (`resolveFieldColumns` binds only `role: linkage`).
+ * The "Map a column to each missing field" quick-fix takes a different path that
+ * forces the `match` role outright -- see {@link setColumnTypeForMatching}. Otherwise the
  * column falls back to that natural choice: `match` for a linkage type,
  * `identifier` for the identifier type, `ignored` for `other`. The fallback is
  * never `payload`, so a type change can never START disclosing a column.
@@ -233,6 +235,35 @@ export function setColumnType(
       : column,
   );
   return enforceSingleIdentifier(applied, columnName);
+}
+
+/**
+ * Bind a column to a missing linkage field for the "Map a column to each missing
+ * field" quick-fix: set its semantic `type` AND force the `match` disclosure
+ * (`role: linkage`, not sent), so the chosen column actually participates in
+ * matching. This is deliberately NOT {@link setColumnType}: that helper carries a
+ * still-valid disclosure across a type change -- a property the grid's type dropdown
+ * needs (a deliberately-sent `payload` column must stay sent) but the wrong one
+ * here, where the operator's intent IS to use the column for matching. The column
+ * they pick is whatever they have, and every column an unrecognized header infers
+ * to starts at `payload` (core `inferMetadata`), so routing the remap through
+ * {@link setColumnType} would retype it yet leave it `role: payload` -- the field
+ * stays unsatisfiable and the quick-fix appears to do nothing.
+ *
+ * No single-identifier enforcement is needed: `match` is never the identifier role,
+ * and the quick-fix only ever targets a matchable linkage field type (an identifier
+ * field is not matched on, so it never appears as an unsatisfied linkage field).
+ */
+export function setColumnTypeForMatching(
+  metadata: Metadata,
+  columnName: string,
+  type: SemanticType,
+): Metadata {
+  return metadata.map((column) =>
+    column.name === columnName
+      ? applyDisclosure({ ...column, type }, "match")
+      : column,
+  );
 }
 
 /** Whether a metadata set declares more than one `identifier` column, which the

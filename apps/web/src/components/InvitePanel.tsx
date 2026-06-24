@@ -20,6 +20,8 @@ import { InvitationFileError, generateInvitation } from "@psi/invitation";
 import { invitationLocation } from "@psi/invitationLocation";
 import { unnameableColumnsAlert } from "@psi/columnNames";
 
+import { whenDiagnostic } from "@utils/diagnostics";
+
 import { ExchangeView } from "@components/ExchangeView";
 import { stashAdvancedHandoff } from "@components/advancedHandoff";
 
@@ -148,10 +150,19 @@ export function InvitePanel({ session, setSession, files }: InvitePanelProps) {
           // misuse). Show a fixed message rather than the raw error: a raw
           // ZodError dump is unhelpful, and not echoing error internals into a
           // secret-bearing flow keeps a future Zod version that embeds a failing
-          // field's value out of the UI. Log only the error type.
+          // field's value out of the UI. The default log carries only the error
+          // type; the full error (message + stack) goes to the console only under
+          // diagnostic mode (a dev build, or an operator who set the diagnostics
+          // flag), the seam for putting raw internals into the console on purpose.
+          // Without this the type alone was too little to tell apart, e.g., a schema
+          // failure from the bundled-worker CSV-parse crash that made every invite
+          // fail with a bare "TypeError".
           console.error(
             "invitation generation failed:",
             e instanceof Error ? e.name : typeof e,
+          );
+          whenDiagnostic(() =>
+            console.error("invitation generation failed (detail):", e),
           );
           setError({
             title: "Could not generate invitation",

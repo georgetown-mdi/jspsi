@@ -38,22 +38,25 @@ export function loadCSVFile(
     const errors: Array<Papa.ParseError> = [];
     let meta: Papa.ParseMeta | undefined;
     Papa.parse(file, {
-      // Parse in a Web Worker so a multi-MB browser File does not block the main
-      // thread (no input, no paint) for the duration of the parse. PapaParse only
-      // honors this where it can spawn one -- internally gated on
-      // `WORKERS_SUPPORTED` (`!!global.Worker`), which is false under Node -- so
-      // the CLI's readable-stream inputs and the Node-environment tests keep
-      // parsing inline exactly as before. The complete/error callback contract is
-      // identical in both modes: a read/parse failure (including a FileReader
-      // error inside the worker) posts back through `error` and rejects, and a
-      // worker that fails to spawn throws synchronously inside this executor,
-      // which also rejects. The one unhandled path is an uncaught exception in the
-      // worker thread -- PapaParse attaches no `Worker.onerror` -- which would
-      // leave the promise pending; an exceptional case not expected here. Worker
-      // mode also keeps only ~one chunk of parsed rows alive at a time (the full
-      // accumulated set lives only on this thread), so the worker's footprint does
-      // not grow with the file.
-      worker: true,
+      // Parse INLINE, never in a Web Worker. PapaParse's `worker: true` spawns its
+      // worker from its own bundled source by reading the running script's URL -- a
+      // self-location trick that survives a dev server (the module is a real,
+      // URL-addressable file) but breaks once Vite bundles and minifies PapaParse
+      // into a chunk: the spawned worker runs a broken bootstrap that mis-applies
+      // `header: true`, so the header row AND the first data row both land in
+      // `meta.fields` while `data` comes back empty. The malformed header then
+      // crashes the first consumer that treats a field as a string (inferMetadata's
+      // `name.toLowerCase()`), so the production web inviter could not generate an
+      // invitation of any kind. Dev and the real-Chromium browser tests pass because
+      // the worker resolves there -- the failure is specific to the bundled build, so
+      // no unit/browser test catches it; the header guard in `complete` below is the
+      // executable backstop. Inline parsing blocks the main thread for the parse,
+      // acceptable for the once-per-exchange invite/accept file; an off-main-thread
+      // parse, if ever wanted for very large files, must go through a Vite-native
+      // worker in the web app, not PapaParse's self-hosted one. Under Node (the CLI)
+      // PapaParse never honored the worker anyway (`WORKERS_SUPPORTED` is
+      // `!!global.Worker`, false there), so this changes only the web build.
+      worker: false,
       header: true,
       skipEmptyLines: true,
       chunk: (results) => {
@@ -75,6 +78,21 @@ export function loadCSVFile(
         // future PapaParse callback-ordering change.
         if (meta === undefined) {
           reject(new Error("CSV parse completed without producing a chunk"));
+          return;
+        }
+        // The header must be a flat list of string column names. A correct
+        // `header: true` parse always produces that; a non-string field means the
+        // parse itself malfunctioned (the bundled-worker corruption the `worker:
+        // false` note above describes leaks a data row -- an array -- into
+        // `meta.fields`). Reject loudly here rather than letting the malformed header
+        // flow into inferMetadata and surface as a deep, opaque `toLowerCase` crash.
+        if (meta.fields?.some((field) => typeof field !== "string")) {
+          reject(
+            new Error(
+              "CSV header parsed to a non-string column; the file could not be " +
+                "read correctly",
+            ),
+          );
           return;
         }
         resolve({ data, errors, meta });
