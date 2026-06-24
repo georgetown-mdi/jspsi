@@ -216,14 +216,15 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
 }
 
 /**
- * Renders the inviter's linkage terms decoded from an invitation for review. Each
- * linkage key is its own default-collapsed disclosure under "Records are matched
- * on": the always-visible header is the key name and a short derived one-liner of
- * the fields it matches on (each carrying a terse breadth marker -- "(partial)",
- * "(fuzzy)" -- when its element loosens matching), and the expanded body holds the
- * per-element transform/swap/fuzzy detail. The remaining dense detail (personal-
- * data constraints, payload columns, legal agreement, and dedup notes) sits behind
- * a single default-collapsed "Other details" disclosure. The matching method and
+ * Renders the inviter's linkage terms decoded from an invitation for review. The
+ * matching list sits behind a default-collapsed "Matching strategies" disclosure;
+ * inside it each linkage key is its own further default-collapsed disclosure, whose
+ * header is the key name and a short derived one-liner of the fields it matches on
+ * (each carrying a terse breadth marker -- "(partial)", "(fuzzy)" -- when its
+ * element loosens matching), and whose expanded body holds the per-element
+ * transform/swap/fuzzy detail. The remaining dense detail (personal-data
+ * constraints, payload columns, legal agreement, and dedup notes) sits behind a
+ * single default-collapsed "Other details" disclosure. The matching method and
  * result sharing stay always-visible.
  *
  * Two facts whose detail lives in that disclosure also carry an always-visible
@@ -319,8 +320,12 @@ export function InvitationTerms({
   // Stable id linking the disclosure toggle (aria-controls) to its panel; useId
   // keeps it consistent across SSR and hydration.
   const detailsId = useId();
-  // Associates the per-key disclosure list with its "Records are matched on"
-  // caption, so assistive tech announces the keys as a named group.
+  // The whole matching list is itself a default-collapsed "Matching strategies"
+  // disclosure; this is its toggle state and the id its aria-controls points at.
+  const [matchingOpen, setMatchingOpen] = useState(false);
+  const matchingPanelId = useId();
+  // Associates the per-key disclosure list with its "Matching strategies" caption,
+  // so assistive tech announces the keys as a named group.
   const matchedOnLabelId = useId();
   return (
     <Stack gap="sm">
@@ -362,21 +367,47 @@ export function InvitationTerms({
           )}
         </Term>
 
+        {/* The matching list as a default-collapsed disclosure, mirroring the
+            per-key and "Other details" disclosures below: aria-expanded +
+            aria-controls on the toggle, the id on the always-mounted wrapper (not
+            the Collapse panel) so it survives Mantine's reduced-motion unmount, and
+            the per-key list hidden from assistive tech + the tab order while closed.
+            The toggle text doubles as the list's group label (matchedOnLabelId). */}
         <Stack gap={2}>
-          <Text size="sm" fw={600} id={matchedOnLabelId}>
-            Records are matched on
-          </Text>
+          <UnstyledButton
+            onClick={() => setMatchingOpen((open) => !open)}
+            aria-expanded={matchingOpen}
+            aria-controls={matchingPanelId}
+          >
+            <Group gap={4}>
+              <IconChevronRight
+                size={16}
+                aria-hidden
+                style={{
+                  transform: matchingOpen ? "rotate(90deg)" : "rotate(0deg)",
+                  transition: "transform 150ms ease",
+                }}
+              />
+              <Text size="sm" fw={600} id={matchedOnLabelId}>
+                Matching strategies
+              </Text>
+            </Group>
+          </UnstyledButton>
           {/* A labelled list of per-key disclosures: each key's collapsed header
-              (name + derived field one-liner) is always visible, its rule detail
-              one expand down. role=list/listitem (not Mantine List.Item, whose
-              inline span body cannot hold the disclosure's flow content) so AT
-              announces the set; keyed by index -- the list is static and key names
-              are not unique once sanitized. */}
-          <Stack gap="xs" role="list" aria-labelledby={matchedOnLabelId}>
-            {summary.linkageKeys.map((key, index) => (
-              <MatchKeyDisclosure key={index} summary={key} />
-            ))}
-          </Stack>
+              (name + derived field one-liner), its rule detail one further expand
+              down. role=list/listitem (not Mantine List.Item, whose inline span body
+              cannot hold the disclosure's flow content) so AT announces the set;
+              keyed by index -- the list is static and key names are not unique once
+              sanitized. */}
+          <div id={matchingPanelId}>
+            <Collapse expanded={matchingOpen}>
+              <Stack gap="xs" role="list" aria-labelledby={matchedOnLabelId}>
+                {summary.linkageKeys.map((key, index) => (
+                  <MatchKeyDisclosure key={index} summary={key} />
+                ))}
+              </Stack>
+            </Collapse>
+          </div>
         </Stack>
 
         {/* Viewer-centric, so each party reads its OWN outcome first-person rather

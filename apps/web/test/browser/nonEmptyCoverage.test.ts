@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -209,7 +209,17 @@ describe("PrepareData surfaces a silent-empty collapse before launch", () => {
       .element(page.getByText("All 1 keys can match"))
       .toBeInTheDocument();
 
-    // The value-level alarm appears after the debounced sweep settles.
+    // The field card starts collapsed, so the silent-empty collapse surfaces in the
+    // always-visible card header (its body alarm is one expand down). The header
+    // marker appears after the debounced sweep settles.
+    await expect
+      .element(page.getByTestId("field-card-coverage-warning"))
+      .toBeInTheDocument();
+
+    // Expanding the field reveals the full value-level alarm in the card body.
+    await userEvent.click(
+      page.getByRole("button", { name: "Date of birth", exact: true }),
+    );
     await expect
       .element(page.getByTestId("coverage-silent-empty"))
       .toBeInTheDocument();
@@ -246,11 +256,20 @@ describe("PrepareData surfaces a silent-empty collapse before launch", () => {
       }),
     );
 
+    // The card starts collapsed; expand it to read the per-field coverage rate.
+    await userEvent.click(
+      page.getByRole("button", { name: "Date of birth", exact: true }),
+    );
     await expect
       .element(page.getByTestId("coverage-rate"))
       .toHaveTextContent("2 of 2 rows produce a value (100%)");
+    // Full coverage raises neither the body alarm nor the always-visible header
+    // warning.
     expect(page.getByTestId("coverage-silent-empty").elements()).toHaveLength(
       0,
     );
+    expect(
+      page.getByTestId("field-card-coverage-warning").elements(),
+    ).toHaveLength(0);
   });
 });

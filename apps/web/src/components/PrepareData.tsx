@@ -40,6 +40,7 @@ import { defaultStandardizationForRows } from "@psi/advancedInvite";
 
 import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
+import { CollapsibleFieldCard } from "@components/CollapsibleFieldCard";
 import { ExchangeSummary } from "@components/ExchangeSummary";
 import { FieldCoverage } from "@components/FieldCoverage";
 import { MetadataGrid } from "@components/MetadataGrid";
@@ -484,13 +485,42 @@ export function PrepareData({
                       "standardization output does not resolve to a declared linkage field",
                     );
                   const steps = transformation.steps ?? [];
+                  const rate = nonEmptyRates?.get(transformation.output);
+                  // The card body collapses by default, so surface a silent-empty
+                  // collapse in the always-visible header too -- otherwise the
+                  // visible coverage alarm would be hidden until the field is
+                  // expanded (assistive tech still hears it through the editor's one
+                  // live region below, which is unaffected by the collapse). The
+                  // marker is aria-hidden so it does not announce a third time on top
+                  // of that region and the body alarm.
+                  const silentEmpty = rate !== undefined && isSilentEmpty(rate);
                   return (
-                    <Paper withBorder p="md" key={transformation.output}>
+                    <CollapsibleFieldCard
+                      key={transformation.output}
+                      title={SEMANTIC_TYPE_LABELS[field.type]}
+                      headerExtra={
+                        silentEmpty ? (
+                          <Group
+                            gap={4}
+                            wrap="nowrap"
+                            c="red"
+                            aria-hidden
+                            data-testid="field-card-coverage-warning"
+                          >
+                            <IconAlertCircle size={16} />
+                            <Text size="xs" c="red" fw={500}>
+                              No rows produce a value
+                            </Text>
+                          </Group>
+                        ) : undefined
+                      }
+                    >
                       <Stack gap="sm">
                         <Grid gap="lg" align="flex-start">
                           <Grid.Col span={{ base: 12, md: 7 }}>
                             <StandardizationStepEditor
                               fieldLabel={SEMANTIC_TYPE_LABELS[field.type]}
+                              hideFieldLabel
                               inputColumn={transformation.input}
                               steps={steps}
                               expert
@@ -521,12 +551,9 @@ export function PrepareData({
                         </Grid>
                         {/* Full-CSV coverage for this field: the visible silent-empty
                       defense, distinct from the sample preview above. */}
-                        <FieldCoverage
-                          rate={nonEmptyRates?.get(transformation.output)}
-                          pending={ratesPending}
-                        />
+                        <FieldCoverage rate={rate} pending={ratesPending} />
                       </Stack>
-                    </Paper>
+                    </CollapsibleFieldCard>
                   );
                 })}
                 {/* One polite, atomic live region announces a silent-empty collapse for

@@ -1,8 +1,9 @@
-import { Button, Grid, Group, Paper, Stack, Text } from "@mantine/core";
+import { Button, Grid, Group, Stack, Text } from "@mantine/core";
 import { IconPlus } from "@tabler/icons-react";
 
 import { SEMANTIC_TYPE_LABELS } from "@psi/metadataEditing";
 
+import { CollapsibleFieldCard } from "@components/CollapsibleFieldCard";
 import { StandardizationPreview } from "@components/StandardizationPreview";
 import { StandardizationStepEditor } from "@components/StandardizationStepEditor";
 
@@ -19,7 +20,9 @@ import type {
  * {@link StandardizationStepEditor} (cleaning steps + input-column binding) with a
  * live {@link StandardizationPreview} over a sample of the operator's rows. Shared
  * by the acceptor's "Prepare your data" editor's intent and hosted here by the
- * inviter's Advanced-options editor.
+ * inviter's Advanced-options editor. Each card is a default-collapsed
+ * {@link CollapsibleFieldCard} headed by its semantic-type label, so a long field
+ * list reads as a scannable index with the step/preview detail one expand away.
  *
  * It edits the effective {@link Standardization} directly (the host owns the model
  * and re-derives the declared fields from it via `authoredLinkageFields`). The
@@ -138,12 +141,16 @@ export function StandardizationWorkbench({
         const steps = transformation.steps ?? [];
         const siblingsOfType = boundByType.get(field.type) ?? 0;
         return (
-          <Paper withBorder p="md" key={transformation.output}>
+          <CollapsibleFieldCard
+            key={transformation.output}
+            title={SEMANTIC_TYPE_LABELS[field.type]}
+          >
             <Stack gap="sm">
               <Grid gap="lg" align="flex-start">
                 <Grid.Col span={{ base: 12, md: 7 }}>
                   <StandardizationStepEditor
                     fieldLabel={SEMANTIC_TYPE_LABELS[field.type]}
+                    hideFieldLabel
                     inputColumn={transformation.input}
                     steps={steps}
                     inputColumnOptions={columnsForType(field.type)}
@@ -183,7 +190,7 @@ export function StandardizationWorkbench({
                 </Group>
               )}
             </Stack>
-          </Paper>
+          </CollapsibleFieldCard>
         );
       })}
 

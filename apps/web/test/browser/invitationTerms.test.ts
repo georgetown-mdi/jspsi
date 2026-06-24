@@ -121,6 +121,10 @@ describe("InvitationTerms: per-key matching disclosures", () => {
   test("each key is its own disclosure, the rule detail collapsed and hidden from AT while the header stays visible", async () => {
     renderTerms();
 
+    // The matching list is itself a default-collapsed "Matching strategies"
+    // disclosure; open it to reach the per-key disclosures nested inside.
+    await userEvent.click(toggle("Matching strategies"));
+
     // Each key is a disclosure button, collapsed to start.
     const exact = toggle("SSN + LN + DOB");
     const truncated = toggle("SSN + FN1");
@@ -141,10 +145,9 @@ describe("InvitationTerms: per-key matching disclosures", () => {
       "Matches on the first character",
     );
 
-    // The always-visible header one-liner is the honest anchor: the truncated
-    // element carries the "(partial)" breadth marker, the exact key carries none.
-    // The marker is always-visible (a top-level signal), not buried in the
-    // collapsed body.
+    // Each key's header one-liner is the honest anchor: shown beside the key name
+    // (not buried in the key's own collapsed rule body). The truncated element
+    // carries the "(partial)" breadth marker, the exact key carries none.
     expect(container!.textContent).toContain(
       "Matches on SSN - first name (partial)",
     );
@@ -157,6 +160,8 @@ describe("InvitationTerms: per-key matching disclosures", () => {
   test("opening one key disclosure exposes its detail to AT and leaves the others collapsed", async () => {
     renderTerms();
 
+    // Open the matching list, then one key inside it.
+    await userEvent.click(toggle("Matching strategies"));
     await userEvent.click(toggle("SSN + FN1"));
 
     expect(toggle("SSN + FN1").element().getAttribute("aria-expanded")).toBe(
@@ -177,6 +182,8 @@ describe("InvitationTerms: per-key matching disclosures", () => {
 
   test("the toggle's accessible name is the key name; the field one-liner is its description", async () => {
     renderTerms();
+    // Open the matching list so the per-key disclosure is reachable.
+    await userEvent.click(toggle("Matching strategies"));
     await expect.element(toggle("SSN + FN1")).toBeInTheDocument();
 
     // getByRole resolving on the exact key name already proves the name is the
@@ -196,13 +203,17 @@ describe("InvitationTerms: per-key matching disclosures", () => {
   test("every disclosure on the screen has a distinct aria-controls id", async () => {
     renderTerms();
     await expect.element(toggle("Other details")).toBeInTheDocument();
+    // Open the matching list so its nested per-key disclosures are mounted and
+    // counted alongside the top-level disclosures.
+    await userEvent.click(toggle("Matching strategies"));
 
     const ids = Array.from(container!.querySelectorAll("[aria-controls]")).map(
       (el) => el.getAttribute("aria-controls"),
     );
-    // Two per-key disclosures plus the master "Other details" disclosure.
-    expect(ids.length).toBe(3);
-    expect(new Set(ids).size).toBe(3);
+    // The "Matching strategies" disclosure, its two nested per-key disclosures, and
+    // the master "Other details" disclosure.
+    expect(ids.length).toBe(4);
+    expect(new Set(ids).size).toBe(4);
   });
 
   test("the master 'Other details' disclosure holds the non-key blocks, not the per-key matching detail", async () => {
@@ -265,36 +276,41 @@ describe("InvitationTerms: a key disclosure's aria-controls survives a reduced-m
       ),
     );
 
-    // Every disclosure on the screen -- both per-key widgets AND the master "Other
-    // details" -- relies on the always-mounted-wrapper design, so assert the
-    // unmount for all of them, not just one key.
-    const names = ["SSN + LN + DOB", "SSN + FN1", "Other details"];
-    for (const name of names) {
+    // Assert the always-mounted-wrapper design for every disclosure. The top-level
+    // ones are the matching list ("Matching strategies") and the master "Other
+    // details"; the per-key widgets live nested inside "Matching strategies" and are
+    // exercised after it is opened (a collapsed parent unmounts them entirely under
+    // reduced motion). The reduced-motion media effect resolves after mount and
+    // unmounts each closed Collapse panel, emptying its wrapper -- the state in which
+    // an id held on the panel itself would dangle.
+    async function expectEmptyWrapper(name: string) {
       await expect.element(toggle(name)).toBeInTheDocument();
       expect(toggle(name).element().getAttribute("aria-expanded")).toBe(
         "false",
       );
-    }
-    const ids = names.map((name) =>
-      toggle(name).element().getAttribute("aria-controls"),
-    );
-    ids.forEach((id) => expect(id).toBeTruthy());
-
-    // The reduced-motion media effect resolves after mount and unmounts each closed
-    // Collapse panel, emptying its wrapper -- the state in which an id held on the
-    // panel itself would dangle. Wait for that unmount so the assertion exercises
-    // it rather than the pre-effect mounted-but-hidden panel.
-    for (const id of ids) {
+      const id = toggle(name).element().getAttribute("aria-controls");
+      expect(id).toBeTruthy();
+      // Wait for the unmount so the assertion exercises it rather than the
+      // pre-effect mounted-but-hidden panel.
       await expect
         .poll(() => document.getElementById(id!)?.children.length)
         .toBe(0);
       // The stable wrapper holding aria-controls stays mounted, so the reference
-      // still resolves to a present element; the unmounted panel keeps the
-      // collapsed detail out of the accessibility tree.
+      // still resolves to a present element; the unmounted panel keeps the collapsed
+      // detail out of the accessibility tree.
       const panel = document.getElementById(id!);
       expect(panel).not.toBeNull();
       expect(panel!.textContent).toBe("");
     }
+
+    for (const name of ["Matching strategies", "Other details"])
+      await expectEmptyWrapper(name);
+
+    // Open the matching list so its per-key disclosures mount, then assert each
+    // closed per-key panel is likewise unmounted to an empty but present wrapper.
+    await userEvent.click(toggle("Matching strategies"));
+    for (const name of ["SSN + LN + DOB", "SSN + FN1"])
+      await expectEmptyWrapper(name);
   });
 });
 

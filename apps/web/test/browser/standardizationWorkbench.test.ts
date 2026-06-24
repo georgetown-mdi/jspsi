@@ -72,6 +72,12 @@ describe("StandardizationWorkbench: per-field binding and multi-field controls",
 
   test("the input-column binding is a labelled combobox when the type has more than one column", async () => {
     render(oneNameField);
+    // Each field card starts collapsed; expand the first_name card (its header is the
+    // semantic-type label) to reveal the editor. exact: true so the header is not
+    // confused with the "Add another first name field" control.
+    await userEvent.click(
+      page.getByRole("button", { name: "First name", exact: true }),
+    );
     // StandardizationStepEditor renders the binding as a Mantine Select named by its
     // label; reachable by role + accessible name (a11y parity with the acceptor).
     await expect
@@ -109,6 +115,15 @@ describe("StandardizationWorkbench: per-field binding and multi-field controls",
       { output: "date_of_birth", input: "dob_col", steps: [] },
     ];
     render(twoNameFields);
+    // Both first_name cards start collapsed and share the "First name" header label;
+    // expand each to reveal its remove control (collapsed cards keep the control out
+    // of the accessibility tree).
+    const firstNameCards = page.getByRole("button", {
+      name: "First name",
+      exact: true,
+    });
+    await userEvent.click(firstNameCards.nth(0));
+    await userEvent.click(firstNameCards.nth(1));
     // One remove control per same-typed field (two), and none for the lone date.
     // Poll so the count is read after React commits, not before.
     await expect

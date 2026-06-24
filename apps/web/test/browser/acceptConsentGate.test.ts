@@ -549,6 +549,12 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
     });
     await expect.element(startButton).toBeEnabled();
 
+    // The field's cleaning card starts collapsed; expand it to reach the step's
+    // inline "Input format" param.
+    await userEvent.click(
+      page.getByRole("button", { name: "Date of birth", exact: true }),
+    );
+
     // Clear the recommended parse_date step's required "Input format": the step is
     // now mid-edit. A malformed step would run as a silent full-field exclusion or
     // throw at compile, so the gate must close until it is valid again.
