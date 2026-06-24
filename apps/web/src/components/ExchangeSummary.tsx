@@ -1,6 +1,5 @@
-import { Paper, Stack, Text } from "@mantine/core";
+import { Paper } from "@mantine/core";
 
-import { ColumnChips } from "@components/ColumnChips";
 import { InvitationTerms } from "@components/InvitationTerms";
 
 import type { Ref } from "react";
@@ -9,23 +8,21 @@ import type { LinkageTerms } from "@psilink/core";
 
 /**
  * The standardized "exchange proposal" panel: the agreed linkage terms
- * ({@link InvitationTerms}) in a bordered card, optionally followed by this
- * party's own outbound disclosure as chips. One component for every place the
+ * ({@link InvitationTerms}) in a bordered card. One component for every place the
  * agreed terms sit beside an editor or a run -- the inviter's Advanced-options
- * preview, the acceptor's review and "Prepare your data" screens, and both
- * roles' exchange-executing screen -- so the wrapper, the heading nesting, and
- * the "columns you will send" chips render the same way everywhere; only the
- * per-viewer copy differs, and that is owned by `perspective` inside
+ * preview, the acceptor's review and "Prepare your data" screens, and both roles'
+ * exchange-executing screen -- so the wrapper and heading nesting are identical
+ * everywhere; only the per-viewer copy differs, owned by `perspective` inside
  * {@link InvitationTerms}.
  *
- * The send-columns block renders only when {@link sendColumns} is provided. It
- * is THIS party's own disclosure -- what leaves this machine for matched rows --
- * distinct from the terms' own send/receive framing. The acceptor supplies it
- * from its live metadata once a file is chosen, so it is omitted on the review
- * screen (no file yet) and on the inviter, whose declared send already renders
- * inside {@link InvitationTerms} under the "proposing" perspective. An empty
- * array is meaningful: it renders the explicit "no columns are sent"
- * confirmation rather than nothing.
+ * {@link sendColumns} is THIS party's own outbound disclosure -- what leaves this
+ * machine for matched rows. It is forwarded to {@link InvitationTerms} as
+ * `outboundColumns`, which renders it as chips in the always-visible core just
+ * above "Other details", so the disclosure sits with the agreed terms rather than
+ * after the panel. The acceptor supplies it from its live metadata once a file is
+ * chosen; it is omitted on the review screen (no file yet) and on the inviter,
+ * whose declared send already renders under the "proposing" perspective. An empty
+ * array renders the explicit "no columns are sent" confirmation.
  */
 export function ExchangeSummary({
   linkageTerms,
@@ -49,7 +46,8 @@ export function ExchangeSummary({
   disclosedPayloadColumns?: Array<string>;
   headingRef?: Ref<HTMLHeadingElement>;
   /** This party's own disclosed columns ("Columns you will send to your
-   * partner"), rendered as chips below the terms. Omit where the set is not yet
+   * partner"), forwarded to {@link InvitationTerms} as `outboundColumns` and
+   * rendered as chips just above "Other details". Omit where the set is not yet
    * known (the acceptor review screen) or already shown inside the terms (the
    * inviter's "proposing" preview). An empty array renders the explicit
    * "no columns are sent" confirmation. */
@@ -64,25 +62,8 @@ export function ExchangeSummary({
         expires={expires}
         disclosedPayloadColumns={disclosedPayloadColumns}
         headingRef={headingRef}
+        outboundColumns={sendColumns}
       />
-      {sendColumns !== undefined && (
-        <Stack gap={4} mt="md">
-          <Text size="sm" fw={600}>
-            Columns you will send to your partner
-          </Text>
-          {sendColumns.length > 0 ? (
-            <ColumnChips
-              columns={sendColumns}
-              label="Columns you will send to your partner"
-            />
-          ) : (
-            <Text size="sm" c="dimmed">
-              No columns are sent to your partner; only the linkage result
-              (which of your rows matched) is produced.
-            </Text>
-          )}
-        </Stack>
-      )}
     </Paper>
   );
 }

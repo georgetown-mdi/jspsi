@@ -604,7 +604,7 @@ export function ExchangeView(config: ExchangeConfig) {
           is visible without scrolling. Columns stack on a narrow viewport
           (base: 12). */}
       <Grid gap="xl" align="flex-start">
-        <Grid.Col span={{ base: 12, md: 7 }}>
+        <Grid.Col span={{ base: 12, md: 5 }}>
           <Status
             stages={stages}
             stageId={stageId}
@@ -616,7 +616,7 @@ export function ExchangeView(config: ExchangeConfig) {
             recordFileName={outputs?.record?.recordFileName}
           />
         </Grid.Col>
-        <Grid.Col span={{ base: 12, md: 5 }}>
+        <Grid.Col span={{ base: 12, md: 7 }}>
           <ExchangeSummary
             linkageTerms={config.linkageTerms}
             perspective={config.role === "inviter" ? "proposing" : "accepted"}

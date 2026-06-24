@@ -257,6 +257,7 @@ export function InvitationTerms({
   linkageTerms,
   expires,
   disclosedPayloadColumns,
+  outboundColumns,
   perspective = "review",
   headingOrder = 2,
   headingRef,
@@ -270,6 +271,16 @@ export function InvitationTerms({
    * authored `payload.send`; absent for the inviter's pre-mint "proposing"
    * preview and older tokens, which fall back to `payload.send`. */
   disclosedPayloadColumns?: Array<string>;
+  /** This viewer's OWN outbound disclosure: the columns it will send to its
+   * partner for matched records. Distinct from {@link disclosedPayloadColumns}
+   * (what the INVITER sends). Rendered as chips in the always-visible core, just
+   * above "Other details" -- the same slot the inviter's "proposing" send block
+   * uses -- so the disclosure sits with the agreed terms rather than after the
+   * whole panel. The acceptor passes its live metadata disclosure here; the inviter
+   * does not (its own send already renders from `payload.send` under "proposing").
+   * `[]` renders the explicit "no columns are sent" line; undefined renders nothing
+   * (the set is not yet known -- e.g. the review screen before a file is chosen). */
+  outboundColumns?: Array<string>;
   /** Which context this renders in. Drives the heading and intro copy and the
    * viewer-centric blocks (Result sharing, the payload send/receive framing, and
    * the inviter-only sent-columns chips above "Other details"); the matching keys
@@ -451,6 +462,27 @@ export function InvitationTerms({
               <Text size="sm" c="dimmed">
                 No columns are sent to your partner; your file is used only to
                 find matches.
+              </Text>
+            )}
+          </Term>
+        )}
+
+        {/* The acceptor's OWN outbound disclosure, in the same always-visible slot
+            as the inviter's proposing block above, so "Columns you will send" sits
+            with the agreed terms and ABOVE "Other details" rather than after the
+            whole panel. Only the acceptor passes outboundColumns; the inviter's own
+            send already renders from its proposing block. */}
+        {perspective !== "proposing" && outboundColumns !== undefined && (
+          <Term label="Columns you will send to your partner">
+            {outboundColumns.length > 0 ? (
+              <ColumnChips
+                columns={outboundColumns}
+                label="Columns you will send to your partner"
+              />
+            ) : (
+              <Text size="sm" c="dimmed">
+                No columns are sent to your partner; only the linkage result
+                (which of your rows matched) is produced.
               </Text>
             )}
           </Term>
