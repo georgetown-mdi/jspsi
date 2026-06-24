@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { page, userEvent } from "vitest/browser";
+import { page } from "vitest/browser";
 
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -252,34 +252,5 @@ describe("PrepareData surfaces a silent-empty collapse before launch", () => {
     expect(page.getByTestId("coverage-silent-empty").elements()).toHaveLength(
       0,
     );
-  });
-
-  test('"Reset to recommended" turns the expert tier back off', async () => {
-    // The expert switch is editor-wide state, and Reset returns the editor to its
-    // seeded defaults (which have it off); leaving the raw-pattern affordance open
-    // over reset-to-default state would contradict that. Two rows keep the sweep
-    // inline so no worker is spawned.
-    render(
-      createElement(PrepareData, {
-        linkageTerms: dobTerms,
-        columns: ["dob"],
-        rawRows: [{ dob: "1990-01-01" }, { dob: "1985-12-31" }],
-        onLaunch: vi.fn(),
-        onBack: vi.fn(),
-      }),
-    );
-
-    const expertSwitch = page.getByRole("switch", {
-      name: "Advanced: author raw patterns",
-    });
-    await expect.element(expertSwitch).not.toBeChecked();
-
-    await userEvent.click(expertSwitch);
-    await expect.element(expertSwitch).toBeChecked();
-
-    await userEvent.click(
-      page.getByRole("button", { name: "Reset to recommended" }),
-    );
-    await expect.element(expertSwitch).not.toBeChecked();
   });
 });

@@ -24,11 +24,11 @@ import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
 import { invitationLocation } from "@psi/invitationLocation";
 import { seedAdvancedInvite } from "@psi/advancedInvite";
 
+import { EDITOR_WIDTH, EXCHANGE_READING_WIDTH } from "@components/contentWidth";
 import {
   clearAdvancedHandoff,
   peekAdvancedHandoff,
 } from "@components/advancedHandoff";
-import { EXCHANGE_READING_WIDTH } from "@components/contentWidth";
 import { ExchangeView } from "@components/ExchangeView";
 import FileSelect from "@components/FileSelect";
 import { LinkageTermsEditor } from "@components/LinkageTermsEditor";
@@ -265,11 +265,13 @@ export function AdvancedInvite() {
       // The acquire, loading, and exchange screens are single entry/reading columns,
       // so the panel self-constrains to EXCHANGE_READING_WIDTH (centered) rather than
       // filling the route's wide container -- matching the home and accept exchange
-      // screens. The terms editor (editing) is a genuine wide editor and keeps the
-      // full route width, mirroring the accept route's "Prepare your data" phase.
+      // screens. The terms editor (editing) is a genuine two-column editor and
+      // self-constrains to the narrower EDITOR_WIDTH (not the route's wide xxl, which
+      // leaves a sparse rail under the 7/5 split), mirroring the accept route's
+      // "Prepare your data" phase.
       style={
         phase.status === "editing"
-          ? undefined
+          ? { width: EDITOR_WIDTH, marginInline: "auto" }
           : { width: EXCHANGE_READING_WIDTH, marginInline: "auto" }
       }
     >

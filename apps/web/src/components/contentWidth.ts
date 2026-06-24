@@ -50,11 +50,31 @@ export const DEFAULT_CONTENT_WIDTH: ContainerWidth = "xl";
  * the route's wider content container (see {@link resolveContentWidth}) rather than
  * filling it -- an intentional centered reading area, the way the shell already
  * centers a capped container in a wider viewport. On the home route it sits below
- * the full-width page heading, which keeps the route width. The acceptor's "Prepare
- * your data" editor likewise keeps the full route width -- it is a genuine two-column
- * editor, not a reading column -- so the constraint is phase-scoped, not route-wide.
+ * the full-width page heading, which keeps the route width. The two-column data-prep
+ * editors are NOT reading columns; they self-constrain to {@link EDITOR_WIDTH}
+ * instead -- so both constraints are phase-scoped, not route-wide.
  */
 export const EXCHANGE_READING_WIDTH = "clamp(min(40rem, 100%), 80vw, 60rem)";
+
+/**
+ * The width the two-column data-prep editors (the inviter's advanced-options editor
+ * and the acceptor's "Prepare your data" screen) self-constrain to, narrower than
+ * their route's `xxl` container (which was sized for a flat single column and leaves
+ * a sparse rail under a 7/5 split).
+ *
+ * The LOWER bound is load-bearing: the columns split at Mantine's `md` breakpoint
+ * (62em = 992px; the theme overrides no `breakpoints` -- its `md: 500px` is the
+ * separate CONTAINER_SIZES width scale, not this axis), so the floor is set at
+ * `62rem` -- below the split point the columns stack (`base: 12`) and the editor uses
+ * full width, a clean single column; above it the constraint never leaves the content
+ * column both narrow AND pre-split (the dead zone a smaller floor would open between
+ * the clamp width and the 992px split). It grows with the viewport and caps at a
+ * `78rem` (~1248px) reading measure, where the 7/5 split yields a ~685px primary and a
+ * ~470px rail. `min(62rem, 100%)` guards a viewport narrower than 62rem so the column
+ * falls back to full width rather than overflowing. Applied as a CSS `width` with
+ * `marginInline: auto`, like {@link EXCHANGE_READING_WIDTH}.
+ */
+export const EDITOR_WIDTH = "clamp(min(62rem, 100%), 92vw, 78rem)";
 
 /**
  * Resolve the content width for the active route from its match chain: the

@@ -38,7 +38,6 @@ export function StandardizationStepEditor({
   inputColumn,
   steps,
   onStepsChange,
-  expert = false,
   inputColumnOptions,
   onInputColumnChange,
 }: {
@@ -51,9 +50,6 @@ export function StandardizationStepEditor({
   steps: Array<StandardizationStep>;
   /** Emit the next step array on any add, remove, reorder, or param edit. */
   onStepsChange: (steps: Array<StandardizationStep>) => void;
-  /** Forwarded to {@link StepListEditor}: when set, the gated expert tier (raw
-   * regular-expression steps) is authorable here. Defaults to off. */
-  expert?: boolean;
   /** The columns this field MAY bind to -- the operator's `role: linkage` columns
    * of the field's semantic type. When more than one is offered and
    * {@link onInputColumnChange} is set, the input column becomes a selectable
@@ -123,7 +119,12 @@ export function StandardizationStepEditor({
       <StepListEditor
         steps={steps}
         onStepsChange={onStepsChange}
-        expert={expert}
+        // The per-party cleaning surface: raw patterns are authorable here, local to
+        // this party and changing only its own match rate. The cross-party
+        // element-transform editor does NOT use this component -- it drives
+        // StepListEditor directly and omits allowRawPatterns, so a token-embedded
+        // (partner-authored) regex stays read-only.
+        allowRawPatterns
       />
 
       {/* One polite, atomic live region for this field's step list: announces the

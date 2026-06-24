@@ -376,6 +376,46 @@ describe("validateAdvancedInvite", () => {
       ).errors.lifetime,
     ).toBeDefined();
   });
+
+  test("(c) blocks Generate on a malformed cleaning step, against the standardization control", () => {
+    // The launch gate that backstops ungated raw-pattern authoring: a step left
+    // mid-edit (here a filter_regex with no pattern) must block Generate via
+    // errors.standardization, so a malformed pattern never reaches the exchange,
+    // where core would run it as a silent full-field exclusion or throw at compile.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const withBadStep: AdvancedInviteDraft = {
+      ...draft,
+      standardization: draft.standardization.map((transformation, i) =>
+        i === 0
+          ? { ...transformation, steps: [{ function: "filter_regex" }] }
+          : transformation,
+      ),
+    };
+    const blocked = validateAdvancedInvite(withBadStep, seed, NOW);
+    expect(blocked.canGenerate).toBe(false);
+    expect(blocked.errors.standardization).toBeDefined();
+    expect(blocked.terms).toBeUndefined();
+
+    // The gate keys on step validity, not on the presence of a raw pattern: a
+    // well-formed, in-dialect pattern is accepted on the same ungated path, so
+    // completing the step clears errors.standardization and unblocks Generate.
+    const withValidStep: AdvancedInviteDraft = {
+      ...draft,
+      standardization: draft.standardization.map((transformation, i) =>
+        i === 0
+          ? {
+              ...transformation,
+              steps: [
+                { function: "filter_regex", params: { pattern: "[A-Z]" } },
+              ],
+            }
+          : transformation,
+      ),
+    };
+    const ok = validateAdvancedInvite(withValidStep, seed, NOW);
+    expect(ok.errors.standardization).toBeUndefined();
+    expect(ok.canGenerate).toBe(true);
+  });
 });
 
 describe("controls the editor does not expose stay at their safe defaults", () => {
