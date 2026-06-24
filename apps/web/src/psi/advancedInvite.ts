@@ -17,6 +17,7 @@ import {
 
 import { normalizeForEditor, payloadSendForMetadata } from "./metadataEditing";
 import { APPLIED_SETTINGS } from "./appliedSettings";
+import { isStepValid } from "./standardizationAuthoring";
 
 import type {
   Algorithm,
@@ -186,7 +187,8 @@ export type AdvancedField =
   | "legalPurpose"
   | "legalExpiration"
   | "payload"
-  | "keys";
+  | "keys"
+  | "standardization";
 
 /** The result of validating a draft: whether Generate may proceed, the built
  * terms when they parse cleanly, and per-control error messages. */
@@ -704,6 +706,22 @@ export function validateAdvancedInvite(
     }
   }
 
+  // Every authored cleaning step must be well-formed before Generate -- the same
+  // launch gate the acceptor applies (PrepareData's standardizationValid). A step left
+  // mid-edit (a cleared substring.start) or a malformed/over-length raw pattern would
+  // otherwise reach the exchange, where core runs it as a silent full-field exclusion
+  // or throws at compile. Now that raw patterns are ungated for per-party cleaning,
+  // this gate is load-bearing rather than defensive. Gated in this tested boundary (not
+  // only the component wrapper) so it cannot be bypassed.
+  if (
+    !draft.standardization.every((transformation) =>
+      (transformation.steps ?? []).every(isStepValid),
+    )
+  ) {
+    errors.standardization =
+      "Finish or fix the highlighted cleaning steps before generating.";
+  }
+
   const canGenerate =
     parsed.success && encodable && Object.keys(errors).length === 0;
   return {
@@ -755,6 +773,10 @@ function messageForField(field: AdvancedField): string {
       return "One or more columns you are sending cannot be used; adjust which columns are sent.";
     case "keys":
       return "Enable at least one linkage key.";
+    case "standardization":
+      // Set directly in validateAdvancedInvite (not via a schema-path mapping); this
+      // keeps the switch exhaustive over AdvancedField.
+      return "Finish or fix the highlighted cleaning steps before generating.";
   }
 }
 

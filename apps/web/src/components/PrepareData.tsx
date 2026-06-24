@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Alert,
+  Box,
   Button,
   Divider,
   Grid,
@@ -40,12 +41,11 @@ import { defaultStandardizationForRows } from "@psi/advancedInvite";
 
 import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
-import { CollapsibleFieldCard } from "@components/CollapsibleFieldCard";
+import { CleaningErrorBoundary } from "@components/CleaningErrorBoundary";
 import { ExchangeSummary } from "@components/ExchangeSummary";
 import { FieldCoverage } from "@components/FieldCoverage";
 import { MetadataGrid } from "@components/MetadataGrid";
-import { StandardizationPreview } from "@components/StandardizationPreview";
-import { StandardizationStepEditor } from "@components/StandardizationStepEditor";
+import { StandardizationCards } from "@components/StandardizationCards";
 import { useNonEmptyRates } from "@components/useNonEmptyRates";
 
 import type {
@@ -78,9 +78,15 @@ import type { FieldStepOverride } from "@psi/standardizationAuthoring";
  * Metadata/standardization are LOCAL and per-party: they are never embedded in the
  * token or cross-checked, so editing them changes only this party's match rate and
  * disclosure, never the agreement the consent screen already accepted. The
- * `satisfiableKeyCount === 0` hard block remains -- "Start exchange" is disabled so a
+ * `satisfiableKeyCount === 0` hard block remains -- "Continue" is disabled so a
  * silent-empty exchange is never run -- but the operator fixes the file in place
  * rather than being bounced back to the picker.
+ *
+ * Laid out as a two-column editor (the shared data-prep layout): a primary column
+ * carrying the verdict, the disclosure/quick-fix block, the metadata grid, and the
+ * shared {@link StandardizationCards}; a summary column carrying the read-once agreed
+ * terms; and a sticky footer for the commit. The cleaning surface and its
+ * `FieldCoverage`/preview are the same component the inviter uses.
  */
 export function PrepareData({
   linkageTerms,
@@ -91,10 +97,10 @@ export function PrepareData({
   onBack,
 }: {
   /** The adopted (agreed) linkage terms the operator is matching against, shown
-   * read-only via {@link InvitationTerms}. */
+   * read-only via {@link ExchangeSummary}. */
   linkageTerms: LinkageTerms;
   /** The columns the invitation declared the inviter will send (its
-   * `disclosedPayloadColumns`), passed through to {@link InvitationTerms} so the
+   * `disclosedPayloadColumns`), passed through to {@link ExchangeSummary} so the
    * "what you will receive" line matches the review screen. */
   disclosedPayloadColumns?: Array<string>;
   /** The acceptor's own CSV column names, from the parsed file. */
@@ -171,17 +177,6 @@ export function PrepareData({
     [linkageTerms],
   );
 
-  // The operator's `role: linkage` columns of a semantic type, in metadata order
-  // -- the columns a field of that type MAY bind to. Only a linkage column
-  // participates in matching (core's resolveFieldColumns binds only `role:
-  // linkage`), so a column roled identifier/payload/ignored is never offered as a
-  // match input the core would refuse. More than one makes the input column a real
-  // choice (and lets two same-typed fields each take their own).
-  const columnsForType = (type: LinkageField["type"]): Array<string> =>
-    metadata
-      .filter((column) => column.role === "linkage" && column.type === type)
-      .map((column) => column.name);
-
   // The input-column overrides that still apply: an override is dropped when its
   // chosen column is no longer a `role: linkage` column of the field's type (a
   // metadata remap or re-role can invalidate one), so a stale binding never drives
@@ -217,6 +212,13 @@ export function PrepareData({
         stepOverrides,
       ),
     [baseStandardization, effectiveInputOverrides, stepOverrides],
+  );
+
+  // A signature of each field's input binding -- the only input to the missing-field
+  // invariant the cleaning boundary guards -- so a remap or reset auto-recovers it.
+  const cleaningResetKey = useMemo(
+    () => standardization.map((t) => `${t.output}=${t.input}`).join(","),
+    [standardization],
   );
 
   const setFieldSteps = (
@@ -327,6 +329,12 @@ export function PrepareData({
     verdictRef.current?.focus();
   };
 
+  const handleReset = () => {
+    setMetadata(initialMetadata);
+    setStepOverrides(new Map());
+    setInputOverrides(new Map());
+  };
+
   const launch = () => {
     const warning: AlertContent | undefined = partial
       ? {
@@ -351,35 +359,28 @@ export function PrepareData({
           Choose a different file
         </Button>
       </Group>
+      <Title order={2} ref={headingRef} tabIndex={-1}>
+        Prepare your data
+      </Title>
+      <Text size="sm" c="dimmed">
+        Tell us what each column in your file is and what should be done with
+        it, then check that your data can match the agreed terms. Nothing here
+        is sent to your partner except the columns you mark as shared; these
+        settings stay on your device.
+      </Text>
+
       <Grid gap="xl" align="flex-start">
-        {/* Main editing column: name each column, resolve the satisfiability
-            verdict, and clean the data. The agreed terms sit in the side column,
-            mirroring the inviter's Advanced-options layout. */}
+        {/* Primary column: verdict, disclosure/quick-fix, columns, cleaning. */}
         <Grid.Col span={{ base: 12, md: 7 }}>
           <Stack>
-            <Title order={2} ref={headingRef} tabIndex={-1}>
-              Prepare your data
-            </Title>
-            <Text size="sm" c="dimmed">
-              Tell us what each column in your file is and what should be done
-              with it, then check that your data can match the agreed terms.
-              Nothing here is sent to your partner except the columns you mark
-              as shared; these settings stay on your device.
-            </Text>
-
-            {/* The verdict lives in ONE stable, polite, atomic live region whose inner
-          Alert swaps as the verdict changes. Because the wrapper node persists
-          across the swap, a remap that flips blocked->all-clear is announced
-          (three separately-mounted Alerts would not reliably announce a
-          transition). Kept polite, not assertive: the verdict is a standing
-          condition the operator is here to resolve, and an assertive node would
-          fire on mount and fight the heading focus. The wrapper owns the
-          live-region semantics, so each inner Alert is role="presentation" --
-          Mantine's Alert defaults role to "alert" (assertive) when none is set,
-          which would otherwise nest an assertive region inside this polite one.
-          tabIndex=-1 makes it the programmatic focus target after a remap without
-          adding a tab stop; landing focus here re-reads the verdict, a benign
-          reinforcement of the polite announcement rather than a separate one. */}
+            {/* The verdict lives in ONE stable, polite, atomic live region whose
+                inner Alert swaps as the verdict changes. Because the wrapper node
+                persists across the swap, a remap that flips blocked->all-clear is
+                announced. Kept polite, not assertive: the verdict is a standing
+                condition the operator is here to resolve. Each inner Alert is
+                role="presentation" -- Mantine's Alert defaults to "alert" (assertive)
+                when none is set, which would nest an assertive region inside this
+                polite one. tabIndex=-1 makes it the focus target after a remap. */}
             <div
               ref={verdictRef}
               tabIndex={-1}
@@ -423,7 +424,11 @@ export function PrepareData({
               )}
             </div>
 
-            {unsatisfiedTypes.length > 0 && (
+            {/* Directly under the verdict, co-located with it because it is what the
+                operator acts on next: while a field type is still missing, the
+                quick-fix remap (nothing to send yet); once every type is mappable,
+                the static "what you'll send" summary. */}
+            {unsatisfiedTypes.length > 0 ? (
               <Paper withBorder p="md">
                 <Text size="sm" fw={600} mb="xs">
                   Map a column to each missing field
@@ -444,6 +449,25 @@ export function PrepareData({
                     />
                   ))}
                 </Stack>
+              </Paper>
+            ) : (
+              // A STATIC summary derived synchronously from disclosedColumnNames --
+              // NOT a live region; the MetadataGrid's own announcer covers disclosure
+              // changes for assistive tech (a second region would double-announce).
+              <Paper withBorder p="md">
+                <Text size="sm" fw={600} mb={4}>
+                  What you will send to your partner
+                </Text>
+                {disclosed.length === 0 ? (
+                  <Text size="xs" c="dimmed">
+                    No columns. Only the linkage result (which of your rows
+                    matched) is produced.
+                  </Text>
+                ) : (
+                  <Text size="xs">
+                    For each matched row: {disclosed.join(", ")}.
+                  </Text>
+                )}
               </Paper>
             )}
 
@@ -471,95 +495,43 @@ export function PrepareData({
                     changes only your own match rate; it is never sent to your
                     partner.
                   </Text>
+                  {/* Raw-pattern (regex) steps are available without a gate. This
+                      non-blocking note states the consequence; each regex step
+                      carries an "advanced" badge and the preview shows its effect. */}
+                  <Text size="xs" c="dimmed" mt={4}>
+                    Some steps use raw patterns (marked &ldquo;advanced&rdquo;).
+                    They change which of your rows match -- check the preview.
+                    Patterns over 1000 characters are rejected.
+                  </Text>
                 </div>
-                {standardization.map((transformation) => {
-                  const field = fieldByName.get(transformation.output);
-                  // Every standardization output is a declared linkage field (both
-                  // `standardization` and `fieldByName` derive from the same
-                  // `linkageTerms.linkageFields`), so this never resolves to undefined;
-                  // assert it as a check rather than silently dropping a field's card if
-                  // that ever stops holding. The message names no partner-controlled
-                  // value (the output is a partner-supplied field name).
-                  if (field === undefined)
-                    throw new Error(
-                      "standardization output does not resolve to a declared linkage field",
-                    );
-                  const steps = transformation.steps ?? [];
-                  const rate = nonEmptyRates?.get(transformation.output);
-                  // The card body collapses by default, so surface a silent-empty
-                  // collapse in the always-visible header too -- otherwise the
-                  // visible coverage alarm would be hidden until the field is
-                  // expanded (assistive tech still hears it through the editor's one
-                  // live region below, which is unaffected by the collapse). The
-                  // marker is aria-hidden so it does not announce a third time on top
-                  // of that region and the body alarm.
-                  const silentEmpty = rate !== undefined && isSilentEmpty(rate);
-                  return (
-                    <CollapsibleFieldCard
-                      key={transformation.output}
-                      title={SEMANTIC_TYPE_LABELS[field.type]}
-                      headerExtra={
-                        silentEmpty ? (
-                          <Group
-                            gap={4}
-                            wrap="nowrap"
-                            c="red"
-                            aria-hidden
-                            data-testid="field-card-coverage-warning"
-                          >
-                            <IconAlertCircle size={16} />
-                            <Text size="xs" c="red" fw={500}>
-                              No rows produce a value
-                            </Text>
-                          </Group>
-                        ) : undefined
-                      }
-                    >
-                      <Stack gap="sm">
-                        <Grid gap="lg" align="flex-start">
-                          <Grid.Col span={{ base: 12, md: 7 }}>
-                            <StandardizationStepEditor
-                              fieldLabel={SEMANTIC_TYPE_LABELS[field.type]}
-                              hideFieldLabel
-                              inputColumn={transformation.input}
-                              steps={steps}
-                              expert
-                              inputColumnOptions={columnsForType(field.type)}
-                              onInputColumnChange={(column) =>
-                                setInputColumn(transformation.output, column)
-                              }
-                              onStepsChange={(next) =>
-                                setFieldSteps(
-                                  transformation.output,
-                                  transformation.input,
-                                  next,
-                                )
-                              }
-                            />
-                          </Grid.Col>
-                          <Grid.Col span={{ base: 12, md: 5 }}>
-                            <Text size="xs" fw={600} mb="xs">
-                              Preview
-                            </Text>
-                            <StandardizationPreview
-                              field={field}
-                              inputColumn={transformation.input}
-                              steps={steps}
-                              rawRows={rawRows}
-                            />
-                          </Grid.Col>
-                        </Grid>
-                        {/* Full-CSV coverage for this field: the visible silent-empty
-                      defense, distinct from the sample preview above. */}
-                        <FieldCoverage rate={rate} pending={ratesPending} />
-                      </Stack>
-                    </CollapsibleFieldCard>
-                  );
-                })}
-                {/* One polite, atomic live region announces a silent-empty collapse for
-              the whole editor (debounced via the recompute), so a screen-reader user
-              hears the alarm without each card firing its own region. The visible
-              per-card alarms are role="presentation". */}
+                <CleaningErrorBoundary
+                  onReset={handleReset}
+                  resetKey={cleaningResetKey}
+                >
+                  <StandardizationCards
+                    standardization={standardization}
+                    declaredFields={linkageTerms.linkageFields}
+                    metadata={metadata}
+                    rawRows={rawRows}
+                    onStepsChange={setFieldSteps}
+                    onInputColumnChange={setInputColumn}
+                    renderCoverage={(output) => (
+                      <FieldCoverage
+                        rate={nonEmptyRates?.get(output)}
+                        pending={ratesPending}
+                      />
+                    )}
+                    isFieldSilentEmpty={(output) => {
+                      const rate = nonEmptyRates?.get(output);
+                      return rate !== undefined && isSilentEmpty(rate);
+                    }}
+                    onMissingField="throw"
+                  />
+                </CleaningErrorBoundary>
+                {/* One polite, atomic live region announces a silent-empty collapse
+                    for the whole editor (debounced via the recompute), so a
+                    screen-reader user hears the alarm without each card firing its
+                    own region. The visible per-card alarms are role="presentation". */}
                 <VisuallyHidden
                   role="status"
                   aria-live="polite"
@@ -571,43 +543,19 @@ export function PrepareData({
             )}
 
             {!standardizationValid && (
-              <Text size="sm" c="red" role="alert">
+              <Text size="xs" c="red" role="alert">
                 Finish or fix the highlighted cleaning steps before continuing.
               </Text>
             )}
-
-            <Group justify="space-between">
-              <Button
-                variant="default"
-                onClick={() => {
-                  setMetadata(initialMetadata);
-                  setStepOverrides(new Map());
-                  setInputOverrides(new Map());
-                }}
-              >
-                Reset to recommended
-              </Button>
-              <Button
-                onClick={launch}
-                disabled={
-                  blocked || multipleIdentifiers || !standardizationValid
-                }
-              >
-                Start exchange
-              </Button>
-            </Group>
           </Stack>
         </Grid.Col>
 
-        {/* Side column: the agreed terms (the exchange proposal) the operator
-            consented to, plus the columns this party will send for matched rows.
-            ExchangeSummary is the same panel the review screen, the inviter's
-            Advanced-options preview, and the exchange screen all render, so the
-            agreed terms read identically across the flow. The send chips derive from
-            the live metadata disclosure -- the same disclosedColumnNames predicate
-            the run transmits on, so they cannot drift from what leaves the machine
-            -- and they are the standing last-look that replaces the removed "confirm
-            what you will send" modal. */}
+        {/* Summary column: the read-once agreed terms, in the shared ExchangeSummary
+            panel used on every screen. Not sticky -- reference material the operator
+            reads once, and terms-only is too short to justify pinning. Two columns
+            still shorten the primary scroll (terms beside, not atop). The summary
+            also surfaces this party's own outbound disclosure (sendColumns) as chips,
+            the standing last-look that replaces the removed confirm modal. */}
         <Grid.Col span={{ base: 12, md: 5 }}>
           <ExchangeSummary
             linkageTerms={linkageTerms}
@@ -618,6 +566,34 @@ export function PrepareData({
           />
         </Grid.Col>
       </Grid>
+
+      {/* Sticky footer for the commit, mirroring the inviter's. Bottom padding on
+          the page keeps it from occluding the last card. There is no confirm modal:
+          consent is already given on the review screen, and the live "Columns you
+          will send" chips in the summary column are the standing last-look. */}
+      <Box
+        style={{
+          position: "sticky",
+          bottom: 0,
+          background: "var(--mantine-color-body)",
+          borderTop: "1px solid var(--mantine-color-default-border)",
+          paddingTop: "var(--mantine-spacing-sm)",
+          paddingBottom: "var(--mantine-spacing-sm)",
+          zIndex: 1,
+        }}
+      >
+        <Group justify="flex-end">
+          <Button variant="default" onClick={handleReset}>
+            Reset to recommended
+          </Button>
+          <Button
+            onClick={launch}
+            disabled={blocked || multipleIdentifiers || !standardizationValid}
+          >
+            Start exchange
+          </Button>
+        </Group>
+      </Box>
     </Stack>
   );
 }

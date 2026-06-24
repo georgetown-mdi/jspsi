@@ -167,7 +167,7 @@ export function AcceptInvitation() {
 
   return (
     <Paper
-      // Every decoded phase -- review, prepare, and exchange -- is now a two-column
+      // Every decoded phase -- review, prepare, and exchange -- is a two-column
       // layout (the consent gate, the data editor, or the run's Status beside the
       // agreed-terms summary), so the panel fills the route's wide container. Only
       // the pre-decode states (the decode spinner and the bad/expired-invitation

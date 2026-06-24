@@ -561,13 +561,14 @@ const noParams = z.object({});
  * only the dialect to conform to. See docs/spec/PROTOCOL.md.
  *
  * The length cap matches {@link MAX_TRANSFORM_PATTERN_LENGTH} (the same bound the
- * linkage-terms validation gate applies to wire patterns) and is checked BEFORE the
- * dialect compile, so an oversized source is rejected without paying the compile
- * cost -- an in-dialect pattern compiles in time super-linear in its length, which a
- * live editor preview must never incur on the main thread for a pathological-length
- * paste. Deliberately stricter than the factory (which compiles any length), like
- * substring's footgun rejections; the descriptor drift test pins only short patterns,
- * so this divergence does not break it.
+ * linkage-terms validation gate applies to wire patterns). The dialect refine below
+ * re-checks the length and skips the compile when it is exceeded: Zod's string checks
+ * do not abort, so a bare `.max` would still let `.refine` compile an oversized
+ * source, and an in-dialect pattern compiles in time super-linear in its length --
+ * which a live editor preview must never incur on the main thread for a
+ * pathological-length paste. Deliberately stricter than the factory (which compiles
+ * any length), like substring's footgun rejections; the descriptor drift test pins
+ * only short patterns, so this divergence does not break it.
  */
 const regexPatternSchema = z
   .string()
@@ -575,11 +576,21 @@ const regexPatternSchema = z
   .max(MAX_TRANSFORM_PATTERN_LENGTH, {
     message: `must not exceed ${MAX_TRANSFORM_PATTERN_LENGTH} characters`,
   })
-  .refine(patternConformsToDialect, {
-    message:
-      "must be a valid regular expression in the linear-time dialect " +
-      "(RE2 syntax; backreferences and lookaround are not supported)",
-  });
+  .refine(
+    // Skip the compile for an over-length source: the `.max` above does not abort
+    // (Zod string checks are non-aborting), so without this length re-check `.refine`
+    // would compile an oversized pattern -- and RE2 compile is super-linear in length,
+    // which a live editor preview must never pay on the main thread. The `.max` already
+    // reports the length error; this guard only spares the compile.
+    (pattern) =>
+      pattern.length <= MAX_TRANSFORM_PATTERN_LENGTH &&
+      patternConformsToDialect(pattern),
+    {
+      message:
+        "must be a valid regular expression in the linear-time dialect " +
+        "(RE2 syntax; backreferences and lookaround are not supported)",
+    },
+  );
 
 /**
  * Editor-facing descriptor for every standardization function the library

@@ -37,6 +37,11 @@ import {
 } from "@psilink/core";
 
 import {
+  SEMANTIC_TYPE_LABELS,
+  disclosedColumnNames,
+  hasMultipleIdentifiers,
+} from "@psi/metadataEditing";
+import {
   buildAdvancedTerms,
   defaultStandardizationForRows,
   draftFromTerms,
@@ -44,19 +49,25 @@ import {
   validateAdvancedInvite,
 } from "@psi/advancedInvite";
 import { APPLIED_SETTINGS } from "@psi/appliedSettings";
-import { hasMultipleIdentifiers } from "@psi/metadataEditing";
+import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
+import { CleaningErrorBoundary } from "@components/CleaningErrorBoundary";
+import { DisclosureSection } from "@components/DisclosureSection";
 import { ExchangeSummary } from "@components/ExchangeSummary";
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
+import { FieldCoverage } from "@components/FieldCoverage";
 import { MetadataGrid } from "@components/MetadataGrid";
-import { StandardizationWorkbench } from "@components/StandardizationWorkbench";
+import { StandardizationCards } from "@components/StandardizationCards";
 import { TermsImportExport } from "@components/TermsImportExport";
+import { useNonEmptyRates } from "@components/useNonEmptyRates";
 
 import type {
   Algorithm,
+  LinkageField,
   LinkageTerms,
   Metadata,
   Standardization,
+  StandardizationStep,
 } from "@psilink/core";
 
 import type {
@@ -69,7 +80,7 @@ import type {
  * {@link APPLIED_SETTINGS}.psiC -- the control is disabled until the run honors
  * it, since a count-only claim the exchange does not apply is a privacy footgun. */
 const ALGORITHM_OPTIONS: Array<{ value: Algorithm; label: string }> = [
-  { value: "psi", label: "Reveal which records match (standard)" },
+  { value: "psi", label: "Reveal the matched identifiers (standard)" },
   { value: "psi-c", label: "Reveal only the count (psi-c)" },
 ];
 
@@ -104,8 +115,8 @@ const LIFETIME_OPTIONS: Array<{ value: string; label: string }> = [
 
 /**
  * The column-aware Advanced-options editor: an edit rail, a live preview rendered
- * by the same {@link ExchangeSummary} panel the acceptor consent and exchange
- * screens use, and a sticky validation footer. It is seeded from the auto-derived terms for the
+ * by the same {@link InvitationTerms} component the acceptor consent screen uses,
+ * and a sticky validation footer. It is seeded from the auto-derived terms for the
  * inviter's columns (never a blank form) and authors only what this iteration
  * supports -- identity, invitation lifetime, an optional legal agreement, and which
  * linkage keys are active and in what order.
@@ -204,6 +215,10 @@ export function LinkageTermsEditor({
   // interaction so it does not linger.
   const [announcement, setAnnouncement] = useState("");
 
+  // The cleaning section is now always shown (no longer gated behind expert mode) and
+  // open by default since it is first-class, but collapsible so the rail can be tamed.
+  const [cleaningOpen, setCleaningOpen] = useState(true);
+
   // Focus the editor heading once on mount so a keyboard/screen-reader user who
   // arrived from the compose screen lands on the editor, not the unmounted link.
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -282,6 +297,121 @@ export function LinkageTermsEditor({
     () => authoredLinkageFields(draft.metadata, draft.standardization),
     [draft.metadata, draft.standardization],
   );
+
+  // Per-party full-CSV coverage for the inviter's OWN cleaning -- parity with the
+  // acceptor, which the inviter previously lacked: an inviter could silently collapse
+  // a field (under-matching its own rows) with no warning. The visible per-field
+  // FieldCoverage is rendered inside StandardizationCards; this hook feeds it and the
+  // editor-wide announcer below.
+  const { rates: nonEmptyRates, pending: ratesPending } = useNonEmptyRates(
+    rawRows,
+    draft.standardization,
+  );
+  const fieldByName = useMemo(
+    () => new Map(declaredFields.map((field) => [field.name, field])),
+    [declaredFields],
+  );
+  // The safe semantic-type labels of fields whose transform drops every row, for the
+  // single editor-wide announcement (the partner-controlled `output` is never
+  // announced raw). Empty until the first sweep settles, so nothing announces on mount.
+  const silentEmptyLabels = useMemo(() => {
+    if (nonEmptyRates === null) return [];
+    const labels = new Set<string>();
+    for (const transformation of draft.standardization) {
+      const rate = nonEmptyRates.get(transformation.output);
+      const field = fieldByName.get(transformation.output);
+      if (rate !== undefined && field !== undefined && isSilentEmpty(rate))
+        labels.add(SEMANTIC_TYPE_LABELS[field.type]);
+    }
+    return [...labels];
+  }, [nonEmptyRates, draft.standardization, fieldByName]);
+  const coverageAnnouncement =
+    silentEmptyLabels.length === 0
+      ? ""
+      : `Coverage warning: ${silentEmptyLabels.join(", ")} ${
+          silentEmptyLabels.length === 1 ? "produces" : "produce"
+        } no value for any row and cannot match. Check the cleaning steps.`;
+
+  // The inviter's `role: linkage` columns of a semantic type, in metadata order --
+  // the columns a same-typed field MAY bind to. Drives the add-field free-column
+  // search below (StandardizationCards computes its own copy for the affordance).
+  const columnsForType = (
+    metadata: Metadata,
+    type: LinkageField["type"],
+  ): Array<string> =>
+    metadata
+      .filter((column) => column.role === "linkage" && column.type === type)
+      .map((column) => column.name);
+
+  // A signature of each field's input binding for the cleaning error boundary's
+  // auto-recovery (see CleaningErrorBoundary); a reset or remap changes it.
+  const cleaningResetKey = useMemo(
+    () => draft.standardization.map((t) => `${t.output}=${t.input}`).join(","),
+    [draft.standardization],
+  );
+
+  // Per-field standardization edits on the inviter's source-of-truth array (its
+  // direct-mutation model, vs the acceptor's override layer). The shared
+  // StandardizationCards emits granular intents; the inviter ignores the echoed
+  // `input` (it matches on `output`).
+  const setFieldSteps = (
+    output: string,
+    _input: string,
+    steps: Array<StandardizationStep>,
+  ) =>
+    setDraft((prev) => ({
+      ...prev,
+      standardization: prev.standardization.map((t) =>
+        t.output === output ? { ...t, steps } : t,
+      ),
+    }));
+  const setFieldInput = (output: string, column: string) =>
+    setDraft((prev) => ({
+      ...prev,
+      standardization: prev.standardization.map((t) =>
+        t.output === output ? { ...t, input: column } : t,
+      ),
+    }));
+  const removeField = (output: string) =>
+    setDraft((prev) => ({
+      ...prev,
+      standardization: prev.standardization.filter((t) => t.output !== output),
+    }));
+  // Append a same-typed field bound to its first free column, named uniquely off the
+  // type's first field and seeded with its steps (so the second field starts from the
+  // same recommended pipeline). Migrated from the deleted StandardizationWorkbench;
+  // it reads the host's authoritative array via the functional updater, so the
+  // affordance the component gates on `addableTypes` and this free-column search stay
+  // consistent (the early return never fires while the component shows the button).
+  const addFieldForType = (type: LinkageField["type"]) =>
+    setDraft((prev) => {
+      const bound = new Set(prev.standardization.map((t) => t.input));
+      const freeColumn = columnsForType(prev.metadata, type).find(
+        (c) => !bound.has(c),
+      );
+      if (freeColumn === undefined) return prev;
+      const typeByOutput = new Map(
+        authoredLinkageFields(prev.metadata, prev.standardization).map((f) => [
+          f.name,
+          f.type,
+        ]),
+      );
+      const sibling = prev.standardization.find(
+        (t) => typeByOutput.get(t.output) === type,
+      );
+      const base = sibling?.output ?? type;
+      const taken = new Set(prev.standardization.map((t) => t.output));
+      let n = 2;
+      let output = `${base}_${n}`;
+      while (taken.has(output)) output = `${base}_${++n}`;
+      return {
+        ...prev,
+        standardization: [
+          ...prev.standardization,
+          { output, input: freeColumn, steps: sibling?.steps ?? [] },
+        ],
+      };
+    });
 
   const updateDraft = (next: Partial<AdvancedInviteDraft>) => {
     setAnnouncement("");
@@ -403,10 +533,14 @@ export function LinkageTermsEditor({
 
   const { errors } = validation;
 
-  // The inviter receives payload only when it receives a result at all (output
-  // direction is not "only your partner"); `receive` is otherwise not authored here
-  // -- the inviter takes whatever the partner discloses (see buildAdvancedTerms /
-  // the lazy validateCompatibility).
+  // The columns this party will send as payload, derived from the grid's disclosure
+  // choices (the same isDisclosedToPartner predicate buildAdvancedTerms authors
+  // terms.payload.send from), so this summary cannot drift from what the invitation
+  // declares or what actually transmits. `receive` is not authored here: the inviter
+  // takes whatever the partner discloses (see buildAdvancedTerms / the lazy
+  // validateCompatibility). The inviter receives payload only when it receives a
+  // result at all (output direction is not "only your partner").
+  const sentColumns = disclosedColumnNames(draft.metadata);
   const inviterReceivesResult = draft.outputDirection !== "partner";
 
   return (
@@ -490,17 +624,32 @@ export function LinkageTermsEditor({
               />
             </Stack>
 
-            {/* Payload control. The columns this party SENDS are authored through
-                the grid's per-column disclosure above and shown as chips beside the
-                terms preview, so they are not restated here -- only the receive note
-                and the live coherence error remain. Receive is not author-time: the
-                inviter does not have the partner's schema, so it takes whatever the
-                partner discloses; the coherence rule (no sending to a partner that
-                receives no result) is enforced live via errors.payload. */}
+            {/* Payload control. Send is authored through the grid's per-column
+                disclosure above (this summarizes the result); receive is not
+                author-time: the inviter does not have the partner's schema, so it
+                takes whatever the partner discloses. The coherence rule (no sending
+                to a partner that receives no result) is enforced live via
+                errors.payload. */}
             <Stack gap="xs">
               <Text size="sm" fw={600}>
                 Extra data for matched records
               </Text>
+              {sentColumns.length > 0 ? (
+                <Text size="xs">
+                  <Text span fw={600}>
+                    You will send:
+                  </Text>{" "}
+                  {sentColumns.join(", ")}. Choose which columns are sent by
+                  setting them to &ldquo;Sent to your partner&rdquo; under Your
+                  columns above.
+                </Text>
+              ) : (
+                <Text size="xs" c="dimmed">
+                  You are not sending any extra columns. Set a column to
+                  &ldquo;Sent to your partner&rdquo; under Your columns above to
+                  include it.
+                </Text>
+              )}
               {inviterReceivesResult ? (
                 <Text size="xs">
                   <Text span fw={600}>
@@ -533,34 +682,84 @@ export function LinkageTermsEditor({
               )}
             </Stack>
 
-            {/* The per-party data-prep workbench, in expert mode only: the guided
-                path keeps the recommended one-field-per-type cleaning untouched.
-                Binding two columns of one type to separate fields here is what makes
-                the expert key editor below offer both (authoredLinkageFields derives
-                the declared fields from this standardization). Per-party and local --
-                never embedded in the token. */}
-            {expertMode && (
-              <Stack gap="xs">
-                <Text size="sm" fw={600}>
-                  Clean and bind your fields
-                </Text>
+            {/* The per-party data-prep cleaning: now ALWAYS shown (no longer gated
+                behind expert mode), open by default since it is first-class, in a
+                collapsible section so the rail stays tame. Per-party and local --
+                never embedded in the token. Adding/removing same-typed fields stays
+                an expert affordance (it is a key-authoring decision); the cleaning
+                STEPS, including raw patterns, are available to everyone. */}
+            <DisclosureSection
+              label="Clean and bind your fields"
+              open={cleaningOpen}
+              onToggle={setCleaningOpen}
+              headingOrder={3}
+            >
+              <Stack gap="xs" mt="xs">
                 <Text size="xs" c="dimmed">
                   Each field is read from one of your columns and cleaned by an
-                  ordered list of steps. Bind two columns of the same type to
-                  separate fields -- a maiden and a current name, say -- to
-                  match on both. Cleaning runs on your device and is never sent
+                  ordered list of steps before matching. Cleaning runs on your
+                  device and changes only your own match rate; it is never sent
                   to your partner.
                 </Text>
-                <StandardizationWorkbench
-                  standardization={draft.standardization}
-                  declaredFields={declaredFields}
-                  metadata={draft.metadata}
-                  rawRows={rawRows}
-                  onChange={(next) =>
-                    setDraft((prev) => ({ ...prev, standardization: next }))
-                  }
-                />
+                {/* Raw-pattern (regex) steps are available without a gate. This
+                    non-blocking note states the consequence; each regex step carries
+                    an "advanced" badge and the preview shows its effect. */}
+                <Text size="xs" c="dimmed">
+                  Some steps use raw patterns (marked &ldquo;advanced&rdquo;).
+                  They change which of your rows match -- check the preview.
+                  Patterns over 1000 characters are rejected.
+                </Text>
+                <CleaningErrorBoundary
+                  onReset={handleReset}
+                  resetKey={cleaningResetKey}
+                >
+                  <StandardizationCards
+                    standardization={draft.standardization}
+                    declaredFields={declaredFields}
+                    metadata={draft.metadata}
+                    rawRows={rawRows}
+                    onStepsChange={setFieldSteps}
+                    onInputColumnChange={setFieldInput}
+                    // Add/remove same-typed fields is an expert affordance; an omitted
+                    // callback removes it. Cleaning steps stay available regardless.
+                    onAddField={expertMode ? addFieldForType : undefined}
+                    onRemoveField={expertMode ? removeField : undefined}
+                    renderCoverage={(output) => (
+                      <FieldCoverage
+                        rate={nonEmptyRates?.get(output)}
+                        // Suppress the first-paint "Checking..." placeholders (the
+                        // inviter never had coverage before): show nothing until the
+                        // first sweep settles, then the rate.
+                        pending={nonEmptyRates !== null && ratesPending}
+                      />
+                    )}
+                    isFieldSilentEmpty={(output) => {
+                      const rate = nonEmptyRates?.get(output);
+                      return rate !== undefined && isSilentEmpty(rate);
+                    }}
+                    onMissingField="skip"
+                  />
+                </CleaningErrorBoundary>
+                {/* One polite, atomic editor-wide live region for a silent-empty
+                    collapse (per-card FieldCoverage alarms are role="presentation"). */}
+                <VisuallyHidden
+                  role="status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                >
+                  {coverageAnnouncement}
+                </VisuallyHidden>
               </Stack>
+            </DisclosureSection>
+
+            {/* The cleaning launch gate (errors.standardization), shown OUTSIDE the
+                collapsible section so a blocking malformed step surfaces even when
+                cleaning is collapsed. Parallel to the acceptor's standardizationValid
+                message. */}
+            {errors.standardization && (
+              <Text size="xs" c="red" role="alert">
+                {errors.standardization}
+              </Text>
             )}
 
             <Stack gap="xs">
@@ -601,8 +800,8 @@ export function LinkageTermsEditor({
                 >
                   {draft.keys.map((entry, index) => {
                     const satisfiable = keyIsSatisfiable(index);
-                    // The key name is operator-authored but can be self-imported
-                    // from a JSON/YAML document, so sanitize it for display and in
+                    // The key name is operator-authored but can be self-imported from
+                    // a JSON/YAML document, so sanitize it for display and in
                     // accessible names -- the same discipline ExpertKeyEditor applies
                     // -- rather than rendering partner-influenceable text raw.
                     const keyLabel = sanitizeForDisplay(entry.key.name);
@@ -722,7 +921,7 @@ export function LinkageTermsEditor({
               )}
             </Stack>
 
-            {expertMode && (
+            {expertMode ? (
               <>
                 <Divider />
                 <Stack gap="xs">
@@ -742,8 +941,8 @@ export function LinkageTermsEditor({
                     disabled={!APPLIED_SETTINGS.psiC}
                     description={
                       APPLIED_SETTINGS.psiC
-                        ? "Reveal which records match, or only the count."
-                        : "Count-only (psi-c) is not available yet: this version of the exchange reveals which records match regardless."
+                        ? "Reveal the matched identifiers, or only the count."
+                        : "Count-only (psi-c) is not available yet: this version of the exchange reveals the matched identifiers regardless."
                     }
                     onChange={(value) =>
                       // Mantine infers the value type from the typed data, so it is
@@ -771,6 +970,20 @@ export function LinkageTermsEditor({
                   onImport={handleImport}
                 />
               </>
+            ) : (
+              <Alert
+                variant="light"
+                color="gray"
+                icon={<IconInfoCircle aria-hidden />}
+                title="Fixed in this version"
+              >
+                Matched identifiers are revealed (not just a count), and each
+                record matches at most one of your partner&apos;s. These are not
+                adjustable yet. Who receives the matched results is set above;
+                which of your columns are sent to your partner is set per column
+                under Your columns above. Turn on Expert authoring to build keys
+                directly or import and export the terms.
+              </Alert>
             )}
           </Stack>
         </Grid.Col>
@@ -781,6 +994,10 @@ export function LinkageTermsEditor({
             component="section"
             aria-label="Live preview of your invitation"
             gap="sm"
+            // Sticky: the inviter's preview genuinely updates as the rail is edited,
+            // so keeping it in view is worth the pinned column (the acceptor's
+            // read-once terms are not sticky). No header to clear, so a spacing offset.
+            style={{ position: "sticky", top: "var(--mantine-spacing-md)" }}
           >
             <ExchangeSummary
               linkageTerms={previewTerms}

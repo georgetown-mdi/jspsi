@@ -168,7 +168,7 @@ function StepRow({
   step,
   index,
   count,
-  expert,
+  allowRawPatterns,
   onParam,
   onMove,
   onRemove,
@@ -176,9 +176,9 @@ function StepRow({
   step: EditableStep;
   index: number;
   count: number;
-  /** When set, the raw-pattern (`tier: "regex"`) family is editable here (the
-   * gated expert tier); otherwise those steps render read-only. */
-  expert: boolean;
+  /** When set, the raw-pattern (`tier: "regex"`) family is editable here; otherwise
+   * those steps render read-only. */
+  allowRawPatterns: boolean;
   onParam: (key: string, value: unknown) => void;
   onMove: (direction: -1 | 1) => void;
   onRemove: () => void;
@@ -186,17 +186,18 @@ function StepRow({
   const descriptor = descriptorFor(step.function);
   const { label } = functionDisplay(step.function);
   const isRegexTier = descriptor?.tier === "regex";
-  // The raw-pattern family (`tier: "regex"`) is editable ONLY behind the expert
-  // opt-in (board item 202533670); without it -- and for any unrecognized function
-  // -- the step is shown read-only. An existing pipeline's regex steps (a default
-  // standardization pipeline's, or an imported set of linkage terms') always render
-  // here and stay reorderable and removable; only editing their pattern needs the
-  // opt-in. `editableDescriptor` narrows to the descriptor whose params this row
-  // authors (standard tier always, regex tier under `expert`), so the typed param
-  // branch passes a non-optional one.
+  // The raw-pattern family (`tier: "regex"`) is editable only when the host enables it
+  // via `allowRawPatterns`; without it -- and for any unrecognized function -- the step
+  // renders read-only. The per-party cleaning editors enable it (a raw pattern changes
+  // only THIS party's own match rate); the cross-party element-transform editor does
+  // NOT (a token-embedded regex runs on the partner's data, a distinct trust surface).
+  // An existing pipeline's regex steps always render and stay reorderable/removable;
+  // only editing their pattern needs the opt-in. `editableDescriptor` narrows to the
+  // descriptor whose params this row authors (standard tier always, regex tier under
+  // `allowRawPatterns`), so the typed param branch passes a non-optional one.
   const editableDescriptor =
     descriptor !== undefined &&
-    (descriptor.tier === "standard" || (expert && isRegexTier))
+    (descriptor.tier === "standard" || (allowRawPatterns && isRegexTier))
       ? descriptor
       : undefined;
 
@@ -299,7 +300,7 @@ export function StepListEditor({
   onStepsChange,
   addStepLabel = "Add a step",
   emptyHint = "No steps: the value is used as-is. Add a step to clean it.",
-  expert = false,
+  allowRawPatterns = false,
 }: {
   /** The ordered pipeline steps. */
   steps: Array<EditableStep>;
@@ -309,12 +310,13 @@ export function StepListEditor({
   addStepLabel?: string;
   /** Hint shown when the list is empty. */
   emptyHint?: ReactNode;
-  /** When set, the gated expert tier is unlocked: the raw-pattern
-   * ({@link STANDARDIZATION_EXPERT_FUNCTION_GROUPS}) functions appear in the add
-   * menu and existing regex steps' patterns become editable. Defaults to off, so a
-   * host that does not opt in (e.g. the cross-party element-transform editor today)
-   * keeps the standard surface, with regex steps read-only. */
-  expert?: boolean;
+  /** When set, the raw-pattern ({@link STANDARDIZATION_EXPERT_FUNCTION_GROUPS})
+   * functions appear in the add menu and existing regex steps' patterns become
+   * editable. Defaults to OFF so the cross-party element-transform editor (a
+   * token-embedded transform that runs on the partner's data) keeps regex steps
+   * read-only; the per-party cleaning editors pass `true`, since a raw pattern there
+   * changes only this party's own match rate. */
+  allowRawPatterns?: boolean;
 }) {
   // A stable React key per step, tracked by object identity so a reorder follows
   // the logical step (rather than its array position) and a param edit keeps the
@@ -486,7 +488,7 @@ export function StepListEditor({
               step={step}
               index={index}
               count={steps.length}
-              expert={expert}
+              allowRawPatterns={allowRawPatterns}
               onParam={(key, value) => setParam(index, key, value)}
               onMove={(direction) => moveStep(index, direction)}
               onRemove={() => removeStep(index)}
@@ -509,11 +511,12 @@ export function StepListEditor({
         </Menu.Target>
         <Menu.Dropdown>
           {STANDARDIZATION_FUNCTION_GROUPS.map(renderMenuGroup)}
-          {/* The raw-pattern (regex) family appears only behind the expert opt-in,
-              after a divider, so it is never mixed into the standard menu or offered
-              as a recommended step. */}
-          {expert && <Menu.Divider />}
-          {expert &&
+          {/* The raw-pattern (regex) family appears after a divider, only where the
+              host enables it, so it is never mixed into the standard menu or offered
+              as a recommended step (and never offered at all in the cross-party
+              element-transform editor). */}
+          {allowRawPatterns && <Menu.Divider />}
+          {allowRawPatterns &&
             STANDARDIZATION_EXPERT_FUNCTION_GROUPS.map(renderMenuGroup)}
         </Menu.Dropdown>
       </Menu>
