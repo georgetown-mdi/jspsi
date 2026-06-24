@@ -71,7 +71,7 @@ import type {
  * {@link APPLIED_SETTINGS}.psiC -- the control is disabled until the run honors
  * it, since a count-only claim the exchange does not apply is a privacy footgun. */
 const ALGORITHM_OPTIONS: Array<{ value: Algorithm; label: string }> = [
-  { value: "psi", label: "Reveal the matched identifiers (standard)" },
+  { value: "psi", label: "Reveal which records match (standard)" },
   { value: "psi-c", label: "Reveal only the count (psi-c)" },
 ];
 
@@ -738,7 +738,7 @@ export function LinkageTermsEditor({
               )}
             </Stack>
 
-            {expertMode ? (
+            {expertMode && (
               <>
                 <Divider />
                 <Stack gap="xs">
@@ -758,8 +758,8 @@ export function LinkageTermsEditor({
                     disabled={!APPLIED_SETTINGS.psiC}
                     description={
                       APPLIED_SETTINGS.psiC
-                        ? "Reveal the matched identifiers, or only the count."
-                        : "Count-only (psi-c) is not available yet: this version of the exchange reveals the matched identifiers regardless."
+                        ? "Reveal which records match, or only the count."
+                        : "Count-only (psi-c) is not available yet: this version of the exchange reveals which records match regardless."
                     }
                     onChange={(value) =>
                       // Mantine infers the value type from the typed data, so it is
@@ -787,20 +787,6 @@ export function LinkageTermsEditor({
                   onImport={handleImport}
                 />
               </>
-            ) : (
-              <Alert
-                variant="light"
-                color="gray"
-                icon={<IconInfoCircle aria-hidden />}
-                title="Fixed in this version"
-              >
-                Matched identifiers are revealed (not just a count), and each
-                record matches at most one of your partner&apos;s. These are not
-                adjustable yet. Who receives the matched results is set above;
-                which of your columns are sent to your partner is set per column
-                under Your columns above. Turn on Expert authoring to build keys
-                directly or import and export the terms.
-              </Alert>
             )}
           </Stack>
         </Grid.Col>

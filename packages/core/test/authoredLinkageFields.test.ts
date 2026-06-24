@@ -143,4 +143,55 @@ describe("authoredLinkageFields", () => {
       constraints: NAME_CONSTRAINTS,
     });
   });
+
+  test("a present matchable type with no default field and no binding declares a synthetic field", () => {
+    // zip_code is matchable but absent from DEFAULT_LINKAGE_FIELDS, so with no
+    // authored cleaning it would previously declare nothing and be unpickable in the
+    // key editor. It now declares one synthetic, constraint-free field named for the
+    // type, which resolveFieldColumns binds to the column by type.
+    const metadata: Metadata = [col("zip", "zip_code")];
+    expect(authoredLinkageFields(metadata)).toEqual([
+      { name: "zip_code", type: "zip_code" },
+    ]);
+  });
+
+  test("synthetic non-default fields follow the default fields, in metadata order", () => {
+    const metadata: Metadata = [
+      col("zip", "zip_code"),
+      col("f", "first_name"),
+      col("email", "email_address"),
+    ];
+    // Default types first (first_name), then the present non-default matchable types
+    // in metadata order (zip_code before email_address).
+    expect(authoredLinkageFields(metadata).map((f) => f.name)).toEqual([
+      "first_name",
+      "zip_code",
+      "email_address",
+    ]);
+  });
+
+  test("an explicit binding supersedes the synthetic field for a non-default type", () => {
+    const metadata: Metadata = [col("zip", "zip_code")];
+    const standardization: Standardization = [
+      { output: "zip5", input: "zip", steps: [] },
+    ];
+    // The authored output is the only zip_code field -- no synthetic "zip_code"
+    // field is also emitted alongside it.
+    expect(authoredLinkageFields(metadata, standardization)).toEqual([
+      { name: "zip5", type: "zip_code" },
+    ]);
+  });
+
+  test("a matchable column not roled linkage, and a non-matchable type, declare no field", () => {
+    const metadata: Metadata = [
+      col("zip", "zip_code", "payload"), // matchable type, but not roled linkage
+      col("rowid", "identifier"), // roled linkage, but a non-matchable type
+      col("misc", "other"), // roled linkage, but a non-matchable type
+      col("f", "first_name"),
+    ];
+    // Only the linkage-roled, matchable-typed column declares a field.
+    expect(authoredLinkageFields(metadata).map((f) => f.name)).toEqual([
+      "first_name",
+    ]);
+  });
 });

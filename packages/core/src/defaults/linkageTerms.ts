@@ -279,9 +279,15 @@ function isLinkageFieldType(type: SemanticType): type is LinkageField["type"] {
  *   duplicate `output` -- are what let two same-typed fields coexist, and the
  *   explicit `input` each transformation carries is what binds them to different
  *   columns at exchange time (see {@link resolveFieldColumns}).
- * - Otherwise the type's single default field ({@link DEFAULT_LINKAGE_FIELDS}) is
- *   emitted, so a metadata-only pair (no `standardization`) yields exactly the
- *   default per-type field set and the guided path is unchanged.
+ * - Otherwise a single field is emitted for the type: the type's default field
+ *   ({@link DEFAULT_LINKAGE_FIELDS}) when it has one, else a synthetic default named
+ *   for the type (`name` and `type` both the semantic type, no constraints). The
+ *   synthetic case is what lets a column of a matchable type the default keys do not
+ *   use (`zip_code`, `phone_number`, `email_address`) be referenced as a linkage
+ *   field with no authored cleaning -- it resolves to that column by type at exchange
+ *   time. A metadata-only pair (no `standardization`) thus yields exactly one field
+ *   per present matchable type, and for the default types alone is byte-identical to
+ *   the default per-type field set, so the guided path is unchanged.
  *
  * A transformation whose `input` is a non-`linkage` (identifier/payload/ignored)
  * or absent column declares no field: matching participation requires
@@ -289,12 +295,13 @@ function isLinkageFieldType(type: SemanticType): type is LinkageField["type"] {
  * {@link resolveFieldColumns}, so the field would resolve to no column anyway.
  *
  * Field order follows {@link DEFAULT_LINKAGE_FIELDS}, with a default type's explicit
- * fields emitted in `standardization` order at that type's position, and any
- * explicit-only type (one with no default field, e.g. `phone_number`) appended
- * after in `standardization` order. The returned set is the CANDIDATE fields keys
+ * fields emitted in `standardization` order at that type's position; any
+ * explicit-only type (one with no default field, e.g. `phone_number`) follows in
+ * `standardization` order, then any present matchable type with no field yet (the
+ * synthetic case) in metadata order. The returned set is the CANDIDATE fields keys
  * may reference; a caller that emits final terms filters it to the fields its
  * enabled keys reference (as `buildAdvancedTerms` does), which leaves the
- * no-`standardization` emission byte-identical to today. Pure.
+ * no-`standardization` emission byte-identical to today for the default types. Pure.
  */
 export function authoredLinkageFields(
   metadata: Metadata,
@@ -344,11 +351,28 @@ export function authoredLinkageFields(
       });
   }
   // Explicit fields for a present type with no default field (e.g. phone_number,
-  // email_address): there are no default constraints to inherit.
+  // email_address, zip_code): there are no default constraints to inherit.
   for (const [type, transformations] of explicitByType) {
     if (emittedTypes.has(type)) continue;
+    emittedTypes.add(type);
     for (const transformation of transformations)
       fields.push({ name: transformation.output, type });
+  }
+  // A present matchable type with neither a default field nor any authored
+  // transformation still declares one field: a synthetic default named for the
+  // type, in metadata order. DEFAULT_LINKAGE_FIELDS covers only the types the
+  // default keys use, so without this a column of another matchable type
+  // (`zip_code`, `phone_number`, `email_address`) roled `linkage` would be invisible
+  // to the key editor and unmatchable -- even though resolveFieldColumns binds such
+  // a field to that column (identity transform) at exchange time. One field per type
+  // (deduped via emittedTypes); a second column of the type is matched by authoring a
+  // distinct transformation, the same way two same-typed default fields are split.
+  for (const column of metadata) {
+    if (column.role !== "linkage") continue;
+    if (!isLinkageFieldType(column.type)) continue;
+    if (emittedTypes.has(column.type)) continue;
+    emittedTypes.add(column.type);
+    fields.push({ name: column.type, type: column.type });
   }
   return fields;
 }
