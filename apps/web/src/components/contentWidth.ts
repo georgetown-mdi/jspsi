@@ -63,7 +63,8 @@ export const EXCHANGE_READING_WIDTH = "clamp(min(40rem, 100%), 80vw, 60rem)";
  * a sparse rail under a 7/5 split).
  *
  * The LOWER bound is load-bearing: the columns split at Mantine's `md` breakpoint
- * (62em = 992px; no breakpoint override exists in the theme), so the floor is set at
+ * (62em = 992px; the theme overrides no `breakpoints` -- its `md: 500px` is the
+ * separate CONTAINER_SIZES width scale, not this axis), so the floor is set at
  * `62rem` -- below the split point the columns stack (`base: 12`) and the editor uses
  * full width, a clean single column; above it the constraint never leaves the content
  * column both narrow AND pre-split (the dead zone a smaller floor would open between

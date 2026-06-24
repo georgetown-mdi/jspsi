@@ -533,7 +533,7 @@ export function PrepareData({
             )}
 
             {!standardizationValid && (
-              <Text size="sm" c="red" role="alert">
+              <Text size="xs" c="red" role="alert">
                 Finish or fix the highlighted cleaning steps before continuing.
               </Text>
             )}

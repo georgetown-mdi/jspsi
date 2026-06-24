@@ -99,12 +99,17 @@ export function descriptorFor(
  * editor never re-encodes a function's parameter shape, label, or risk tier. The
  * standard add menu ({@link STANDARDIZATION_FUNCTION_GROUPS}) offers exactly the
  * functions whose descriptor `tier` is `"standard"` (`coalesce` among them). The
- * `tier: "regex"` family (raw-pattern authoring) is the gated expert tier (board
- * item 202533670): it is excluded from the standard menu and offered only behind
- * the editor's explicit expert opt-in, through
- * {@link STANDARDIZATION_EXPERT_FUNCTION_GROUPS} -- never as a recommended fix. A
- * default pipeline's existing regex steps are always rendered and reorderable; only
- * editing their pattern (or adding one from scratch) requires that opt-in.
+ * `tier: "regex"` family (raw-pattern authoring) is excluded from the standard
+ * menu, grouped instead under {@link STANDARDIZATION_EXPERT_FUNCTION_GROUPS},
+ * never surfaced as a recommended fix. Whether those functions can be added, and
+ * whether an existing regex step's pattern is editable, is governed by the shared
+ * step editor's `allowRawPatterns` prop (default false): the per-party cleaning
+ * editors (the inviter's advanced options and the acceptor's "Prepare your data"
+ * screen) pass it true, so raw patterns are authorable there directly with no
+ * opt-in switch, while the cross-party, token-embedded element-transform editor
+ * leaves it false so a partner-authored regex stays read-only. A default
+ * pipeline's existing regex steps are always rendered and reorderable regardless
+ * of that prop.
  */
 
 // --- Function intent grouping ------------------------------------------------
@@ -171,14 +176,16 @@ export const authorableFunctionNames: ReadonlySet<string> = new Set(
 );
 
 /**
- * The expert-tier raw-pattern functions (`tier: "regex"`), grouped for the gated
- * "advanced" section of the add-step menu. Each authors an operator-supplied
- * regular expression: it runs under the linear-time engine (so a pattern cannot
- * backtrack catastrophically) and the descriptor's schema bounds the pattern's
- * length and rejects out-of-dialect syntax, but a wrong pattern still shapes which
- * records match. So they are offered ONLY behind the editor's explicit expert
- * opt-in -- never in {@link STANDARDIZATION_FUNCTION_GROUPS} (the standard menu) and
- * never surfaced as a recommended fix.
+ * The raw-pattern functions (`tier: "regex"`), grouped under the "advanced"
+ * section of the add-step menu. Each authors an operator-supplied regular
+ * expression: it runs under the linear-time engine (so a pattern cannot backtrack
+ * catastrophically) and the descriptor's schema bounds the pattern's length and
+ * rejects out-of-dialect syntax, but a wrong pattern still shapes which records
+ * match. So they sit apart from {@link STANDARDIZATION_FUNCTION_GROUPS} (the
+ * standard menu) and are never surfaced as a recommended fix. The per-party
+ * cleaning editors offer these directly; only the cross-party, token-embedded
+ * element-transform editor holds them back (read-only), via the same
+ * `allowRawPatterns` gate.
  *
  * A parity test ({@link expertFunctionNames}) pins this set to the descriptor
  * table's `tier: "regex"` names in both directions, so a regex-tier function added
@@ -199,7 +206,7 @@ export const STANDARDIZATION_EXPERT_FUNCTION_GROUPS: Array<StandardizationFuncti
   ];
 
 /**
- * Every function name the gated expert tier lets an operator add, flattened from
+ * Every function name the advanced group lets an operator add, flattened from
  * {@link STANDARDIZATION_EXPERT_FUNCTION_GROUPS}. Exported so the parity test can
  * assert this set equals the descriptor table's `tier: "regex"` names in both
  * directions, and that it is disjoint from {@link authorableFunctionNames}.
