@@ -122,7 +122,15 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     renderTerms();
 
     // The matching list is itself a default-collapsed "Matching strategies"
-    // disclosure; open it to reach the per-key disclosures nested inside.
+    // disclosure: it starts collapsed and its per-key disclosures are unreachable
+    // until it is opened.
+    await expect.element(toggle("Matching strategies")).toBeInTheDocument();
+    expect(
+      toggle("Matching strategies").element().getAttribute("aria-expanded"),
+    ).toBe("false");
+    expect(toggle("SSN + FN1").query()).toBeNull();
+
+    // Open it to reach the per-key disclosures nested inside.
     await userEvent.click(toggle("Matching strategies"));
 
     // Each key is a disclosure button, collapsed to start.

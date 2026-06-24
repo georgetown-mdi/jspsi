@@ -218,6 +218,12 @@ describe("PrepareData surfaces a silent-empty collapse before launch", () => {
       .element(page.getByTestId("field-card-coverage-warning"))
       .toBeInTheDocument();
 
+    // The full body alarm stays hidden inside the collapsed card -- the header marker
+    // is the always-visible signal until the field is expanded.
+    await expect
+      .element(page.getByTestId("coverage-silent-empty"))
+      .not.toBeVisible();
+
     // Expanding the field reveals the full value-level alarm in the card body.
     await expandFieldCards();
     await expect

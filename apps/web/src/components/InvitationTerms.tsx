@@ -13,6 +13,8 @@ import {
 
 import { IconChevronRight } from "@tabler/icons-react";
 
+import { sanitizeForDisplay } from "@psilink/core";
+
 import { summarizeInvitation } from "@psi/invitationSummary";
 
 import { ColumnChips } from "@components/ColumnChips";
@@ -506,8 +508,15 @@ export function InvitationTerms({
         {perspective !== "proposing" && outboundColumns !== undefined && (
           <Term label="Columns you will send to your partner">
             {outboundColumns.length > 0 ? (
+              // These are the operator's OWN CSV headers (from the live metadata
+              // disclosure), not a sanitized summary value, so sanitize them for
+              // display like every other column-name surface (ColumnChips renders
+              // verbatim) -- a header carrying bidi/zero-width/homoglyph characters
+              // must not misrepresent to the operator what leaves their machine.
               <ColumnChips
-                columns={outboundColumns}
+                columns={outboundColumns.map((name) =>
+                  sanitizeForDisplay(name),
+                )}
                 label="Columns you will send to your partner"
               />
             ) : (
