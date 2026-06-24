@@ -48,7 +48,7 @@ jobs:
     # the core build add only a couple of minutes.
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # Pins Node, installs from the lockfile, and builds @psilink/core so the
       # stress tests run against the compiled fork in dist/.
       - uses: ./.github/actions/setup
