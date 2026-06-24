@@ -1,28 +1,21 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import Papa from "papaparse";
 
 import { loadCSVFile } from "@psilink/core";
 
-// Pin the no-silent-truncation invariant directly, in the mode where it can
-// actually break. loadCSVFile parses with `worker: true`, and PapaParse worker
-// mode posts each LocalChunkSize chunk back separately while handing `complete`
-// only the FINAL chunk -- so before the chunk-accumulation fix, any file spanning
-// more than one chunk parsed to a silently truncated subset (the last chunk's
-// rows) with no error, which in a record-linkage tool is a wrong intersection.
-// This builds a CSV deliberately larger than one chunk, runs it through the real
-// browser worker path, and asserts EVERY row survives -- it fails against the old
-// final-chunk-only behavior rather than the cap-vs-chunk-size arithmetic the old
-// fileSelect cap test stood in for.
+// Pin the no-silent-truncation invariant directly. loadCSVFile parses inline (NOT
+// `worker: true` -- the bundled-worker corruption that fix avoids; see file.ts),
+// and PapaParse streams a local File in LocalChunkSize chunks even inline, handing
+// `complete` `undefined` once a `chunk` callback is present -- so the rows live
+// only in what our `chunk` handler accumulates. Before that accumulation a file
+// spanning more than one chunk parsed to a silently truncated subset with no
+// error, which in a record-linkage tool is a wrong intersection. This builds a CSV
+// deliberately larger than one chunk and asserts EVERY row survives.
 describe("loadCSVFile multi-chunk parsing", () => {
   test("returns every row of a file that spans more than one PapaParse chunk", async () => {
-    // The bug is worker-specific; if the browser could not spawn a worker the
-    // parse would fall back to the inline path that never truncated, so this test
-    // would not exercise the regression. Assert worker mode is actually available.
-    expect(Papa.WORKERS_SUPPORTED).toBe(true);
-
     const header = "id,value";
     const pad = "v".repeat(200);
     // One full chunk plus a 1 MiB margin, so the input lands in (at least) two
@@ -59,5 +52,46 @@ describe("loadCSVFile multi-chunk parsing", () => {
       id: String(rowCount - 1),
       value: pad,
     });
+  });
+});
+
+describe("loadCSVFile rejects a malformed header", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("rejects when a parsed field is not a string, rather than letting it crash a downstream consumer", async () => {
+    // The shape the bundled PapaParse worker produced: the header row and the first
+    // data row both land in meta.fields, so a field is an array, not a string. The
+    // guard rejects loudly here; without it the non-string field flowed into
+    // inferMetadata and surfaced as an opaque `e.toLowerCase is not a function`,
+    // which the inviter saw only as "invitation generation failed: TypeError". Drive
+    // it directly by having Papa.parse hand back that malformed meta.
+    // Hand loadCSVFile the malformed result through its own callbacks. Typed against
+    // a minimal local shape and cast to Papa.parse, so the test does not have to
+    // satisfy PapaParse's overloaded parse signature.
+    type MinimalConfig = {
+      chunk?: (results: {
+        data: Array<unknown>;
+        errors: Array<unknown>;
+        meta: { fields: Array<unknown> };
+      }) => void;
+      complete?: () => void;
+    };
+    vi.spyOn(Papa, "parse").mockImplementation(((
+      _file: unknown,
+      config: MinimalConfig,
+    ) => {
+      config.chunk?.({
+        data: [],
+        errors: [],
+        meta: { fields: ["first_name", ["Alice", "Smith"]] },
+      });
+      config.complete?.();
+    }) as unknown as typeof Papa.parse);
+
+    await expect(
+      loadCSVFile(new File(["x"], "data.csv", { type: "text/csv" })),
+    ).rejects.toThrow(/non-string column/);
   });
 });
