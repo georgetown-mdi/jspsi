@@ -1,10 +1,11 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 
 import {
   ActionIcon,
   Badge,
   Box,
   Button,
+  Collapse,
   Divider,
   Group,
   MultiSelect,
@@ -13,10 +14,12 @@ import {
   Stack,
   Text,
   TextInput,
+  UnstyledButton,
 } from "@mantine/core";
 import {
   IconArrowDown,
   IconArrowUp,
+  IconChevronRight,
   IconPlus,
   IconTrash,
 } from "@tabler/icons-react";
@@ -45,8 +48,9 @@ import type {
 import type { AdvancedInviteDraft, FuzzyComparison } from "@psi/advancedInvite";
 
 /** The fuzzy-comparison expansions an element can declare, with plain-language
- * labels. Disabled wholesale until the run applies fuzzy comparisons (see
- * APPLIED_SETTINGS); shown so the capability is discoverable. */
+ * labels. The control is rendered only when the run applies fuzzy comparisons (see
+ * APPLIED_SETTINGS.fuzzyComparisons); while it does not, the control is hidden
+ * rather than shown disabled with a "not available" note. */
 const FUZZY_OPTIONS: Array<{ value: FuzzyComparison; label: string }> = [
   { value: "transpositions", label: "Two-digit transpositions" },
   { value: "edit_distances", label: "Single-character edits" },
@@ -88,7 +92,8 @@ export function ExpertKeyEditor({
   declaredFields: Array<LinkageField>;
   /** Whether the inviter's columns can satisfy the key at this index. */
   keyIsSatisfiable: (keyIndex: number) => boolean;
-  /** Whether the per-element fuzzy control is enabled (the run applies fuzzy). */
+  /** Whether the run applies fuzzy comparisons; when false the per-element fuzzy
+   * control is hidden rather than shown disabled. */
   fuzzyApplied: boolean;
   onChange: (next: AdvancedInviteDraft) => void;
   /** Emit a message to the host's polite live region. */
@@ -129,6 +134,21 @@ export function ExpertKeyEditor({
   // action lives. Per-key add-element buttons are tracked by the key's stable id.
   const addKeyRef = useRef<HTMLButtonElement>(null);
   const addElementRefs = useRef(new Map<string, HTMLButtonElement>());
+
+  // Which key cards are expanded, by the key's stable id (the same id its React
+  // key and focus tracking use). Keys start collapsed -- showing only their name,
+  // satisfiability badge, and reorder/remove controls -- so a long key list reads
+  // as an overview; the element editor, alias, transform, and swap live one expand
+  // down. A newly added key is expanded on creation (see the Add a key handler), so
+  // the operator is dropped straight into editing it.
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
+  const toggleKeyExpanded = (id: string): void =>
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const fieldOptions = declaredFields.map((field) => ({
     value: field.name,
@@ -222,29 +242,58 @@ export function ExpertKeyEditor({
           // editable Key name input below shows the raw value (it is what the
           // inviter edits and owns).
           const keyLabel = sanitizeForDisplay(key.name);
+          // The collapsed header's visible name: the sanitized key name, or a
+          // placeholder when it is blank so the toggle is never an empty target.
+          const keyDisplayName =
+            keyLabel.trim() === "" ? "Unnamed key" : keyLabel;
           const satisfiable = keyIsSatisfiable(keyIndex);
-          const swapData = key.elements.map((el) => ({
-            value: elementIdentifier(el),
-            label: sanitizeForDisplay(elementIdentifier(el)),
-          }));
+          const keyId = idFor(keyIds.current, key);
+          const keyOpen = expandedKeys.has(keyId);
+          const keyBodyId = `key-body-${keyId}`;
+          // One swap option per element, keyed by its identifier. Deduplicated by
+          // value: two elements can transiently share an identifier while being
+          // edited (e.g. the operator clears an alias so it falls back to a field
+          // name another element already uses) -- an invalid state validation flags
+          // and blocks Generate on, but one Mantine's MultiSelect would otherwise
+          // throw on (duplicate option values), crashing the whole editor instead of
+          // surfacing the inline error. addElement avoids creating the collision in
+          // the first place; this keeps a hand-edited collision from being fatal.
+          const seenSwapIds = new Set<string>();
+          const swapData = key.elements.flatMap((el) => {
+            const value = elementIdentifier(el);
+            if (seenSwapIds.has(value)) return [];
+            seenSwapIds.add(value);
+            return [{ value, label: sanitizeForDisplay(value) }];
+          });
           return (
-            <Paper
-              key={idFor(keyIds.current, key)}
-              withBorder
-              p="sm"
-              component="li"
-            >
+            <Paper key={keyId} withBorder p="sm" component="li">
               <Stack gap="xs">
-                <Group justify="space-between" wrap="nowrap" align="flex-start">
-                  <TextInput
-                    label="Key name"
-                    value={key.name}
-                    onChange={(e) =>
-                      editKey(keyIndex, (k) => ({ ...k, name: e.target.value }))
-                    }
-                    style={{ flex: 1 }}
-                  />
-                  <Group gap={2} wrap="nowrap" mt={24}>
+                <Group justify="space-between" wrap="nowrap" align="center">
+                  {/* Collapse toggle: the chevron plus the key name, which is the
+                      button's accessible label. Keys start collapsed, so the list
+                      reads as an overview; the editor body is one expand down. */}
+                  <UnstyledButton
+                    onClick={() => toggleKeyExpanded(keyId)}
+                    aria-expanded={keyOpen}
+                    aria-controls={keyBodyId}
+                    style={{ flex: 1, minWidth: 0 }}
+                  >
+                    <Group gap={4} wrap="nowrap">
+                      <IconChevronRight
+                        size={16}
+                        aria-hidden
+                        style={{
+                          flexShrink: 0,
+                          transform: keyOpen ? "rotate(90deg)" : "rotate(0deg)",
+                          transition: "transform 150ms ease",
+                        }}
+                      />
+                      <Text size="sm" fw={500} truncate>
+                        {keyDisplayName}
+                      </Text>
+                    </Group>
+                  </UnstyledButton>
+                  <Group gap={2} wrap="nowrap">
                     <Badge
                       size="xs"
                       variant="light"
@@ -290,224 +339,272 @@ export function ExpertKeyEditor({
                   </Group>
                 </Group>
 
-                <Stack
-                  gap="xs"
-                  component="ol"
-                  aria-label={`Elements of ${keyLabel}`}
-                  style={{ listStyle: "none", padding: 0, margin: 0 }}
-                >
-                  {key.elements.map((element, elementIndex) => {
-                    // The element's own identifier (alias or field), named in its
-                    // controls and announcements -- matching the key/step controls,
-                    // which name their item rather than its bare ordinal.
-                    const elementLabel = sanitizeForDisplay(
-                      elementIdentifier(element),
-                    );
-                    return (
-                      <Paper
-                        key={idFor(elementIds.current, element)}
-                        withBorder
-                        p="xs"
-                        component="li"
-                        bg="var(--mantine-color-default-hover)"
+                <div id={keyBodyId}>
+                  <Collapse expanded={keyOpen}>
+                    <Stack gap="xs" pt="xs">
+                      <TextInput
+                        label="Key name"
+                        value={key.name}
+                        onChange={(e) =>
+                          editKey(keyIndex, (k) => ({
+                            ...k,
+                            name: e.target.value,
+                          }))
+                        }
+                      />
+                      <Stack
+                        gap="xs"
+                        component="ol"
+                        aria-label={`Elements of ${keyLabel}`}
+                        style={{
+                          listStyle: "none",
+                          padding: 0,
+                          margin: 0,
+                        }}
                       >
-                        <Stack gap="xs">
-                          <Group
-                            justify="space-between"
-                            wrap="nowrap"
-                            align="flex-end"
-                          >
-                            <Select
-                              label="Field"
-                              data={fieldOptions}
-                              value={element.field}
-                              allowDeselect={false}
-                              onChange={(value) =>
-                                value !== null &&
-                                editElement(keyIndex, elementIndex, (el) => ({
-                                  ...el,
-                                  field: value,
-                                }))
-                              }
-                              style={{ flex: 1 }}
-                            />
-                            <Group gap={2} wrap="nowrap">
-                              <ActionIcon
-                                variant="subtle"
-                                disabled={elementIndex === 0}
-                                onClick={() => {
-                                  applyKeyStructureEdit(
-                                    keyIndex,
-                                    moveElement(
-                                      draft,
+                        {key.elements.map((element, elementIndex) => {
+                          // The element's own identifier (alias or field), named in its
+                          // controls and announcements -- matching the key/step controls,
+                          // which name their item rather than its bare ordinal.
+                          const elementLabel = sanitizeForDisplay(
+                            elementIdentifier(element),
+                          );
+                          return (
+                            <Paper
+                              key={idFor(elementIds.current, element)}
+                              withBorder
+                              p="xs"
+                              component="li"
+                              bg="var(--mantine-color-default-hover)"
+                            >
+                              <Stack gap="xs">
+                                <Group
+                                  justify="space-between"
+                                  wrap="nowrap"
+                                  align="flex-end"
+                                >
+                                  <Select
+                                    label="Field"
+                                    data={fieldOptions}
+                                    value={element.field}
+                                    allowDeselect={false}
+                                    onChange={(value) =>
+                                      value !== null &&
+                                      editElement(
+                                        keyIndex,
+                                        elementIndex,
+                                        (el) => ({
+                                          ...el,
+                                          field: value,
+                                        }),
+                                      )
+                                    }
+                                    style={{ flex: 1 }}
+                                  />
+                                  <Group gap={2} wrap="nowrap">
+                                    <ActionIcon
+                                      variant="subtle"
+                                      disabled={elementIndex === 0}
+                                      onClick={() => {
+                                        applyKeyStructureEdit(
+                                          keyIndex,
+                                          moveElement(
+                                            draft,
+                                            keyIndex,
+                                            elementIndex,
+                                            -1,
+                                          ),
+                                        );
+                                        // Name + new position so each announcement differs
+                                        // (a repeated identical string is not re-announced).
+                                        announce(
+                                          `Moved ${elementLabel} to position ${elementIndex} of ${key.elements.length}.`,
+                                        );
+                                      }}
+                                      aria-label={`Move element ${elementIndex + 1} (${elementLabel}) earlier`}
+                                    >
+                                      <IconArrowUp size={16} />
+                                    </ActionIcon>
+                                    <ActionIcon
+                                      variant="subtle"
+                                      disabled={
+                                        elementIndex === key.elements.length - 1
+                                      }
+                                      onClick={() => {
+                                        applyKeyStructureEdit(
+                                          keyIndex,
+                                          moveElement(
+                                            draft,
+                                            keyIndex,
+                                            elementIndex,
+                                            1,
+                                          ),
+                                        );
+                                        announce(
+                                          `Moved ${elementLabel} to position ${elementIndex + 2} of ${key.elements.length}.`,
+                                        );
+                                      }}
+                                      aria-label={`Move element ${elementIndex + 1} (${elementLabel}) later`}
+                                    >
+                                      <IconArrowDown size={16} />
+                                    </ActionIcon>
+                                    <ActionIcon
+                                      variant="subtle"
+                                      color="red"
+                                      disabled={key.elements.length === 1}
+                                      onClick={() => {
+                                        applyKeyStructureEdit(
+                                          keyIndex,
+                                          removeElement(
+                                            draft,
+                                            keyIndex,
+                                            elementIndex,
+                                          ),
+                                        );
+                                        announce(`Removed ${elementLabel}.`);
+                                        // Keep focus in the key (the removed row held it).
+                                        addElementRefs.current
+                                          .get(idFor(keyIds.current, key))
+                                          ?.focus();
+                                      }}
+                                      aria-label={`Remove element ${elementIndex + 1} (${elementLabel})`}
+                                    >
+                                      <IconTrash size={16} />
+                                    </ActionIcon>
+                                  </Group>
+                                </Group>
+
+                                <TextInput
+                                  label="Alias (optional)"
+                                  description="A name for this element, needed only to tell two elements of the same field apart or to target a swap"
+                                  value={element.name ?? ""}
+                                  onChange={(e) =>
+                                    editElement(
                                       keyIndex,
                                       elementIndex,
-                                      -1,
-                                    ),
-                                  );
-                                  // Name + new position so each announcement differs
-                                  // (a repeated identical string is not re-announced).
-                                  announce(
-                                    `Moved ${elementLabel} to position ${elementIndex} of ${key.elements.length}.`,
-                                  );
-                                }}
-                                aria-label={`Move element ${elementIndex + 1} (${elementLabel}) earlier`}
-                              >
-                                <IconArrowUp size={16} />
-                              </ActionIcon>
-                              <ActionIcon
-                                variant="subtle"
-                                disabled={
-                                  elementIndex === key.elements.length - 1
-                                }
-                                onClick={() => {
-                                  applyKeyStructureEdit(
-                                    keyIndex,
-                                    moveElement(
-                                      draft,
-                                      keyIndex,
-                                      elementIndex,
-                                      1,
-                                    ),
-                                  );
-                                  announce(
-                                    `Moved ${elementLabel} to position ${elementIndex + 2} of ${key.elements.length}.`,
-                                  );
-                                }}
-                                aria-label={`Move element ${elementIndex + 1} (${elementLabel}) later`}
-                              >
-                                <IconArrowDown size={16} />
-                              </ActionIcon>
-                              <ActionIcon
-                                variant="subtle"
-                                color="red"
-                                disabled={key.elements.length === 1}
-                                onClick={() => {
-                                  applyKeyStructureEdit(
-                                    keyIndex,
-                                    removeElement(
-                                      draft,
-                                      keyIndex,
-                                      elementIndex,
-                                    ),
-                                  );
-                                  announce(`Removed ${elementLabel}.`);
-                                  // Keep focus in the key (the removed row held it).
-                                  addElementRefs.current
-                                    .get(idFor(keyIds.current, key))
-                                    ?.focus();
-                                }}
-                                aria-label={`Remove element ${elementIndex + 1} (${elementLabel})`}
-                              >
-                                <IconTrash size={16} />
-                              </ActionIcon>
-                            </Group>
-                          </Group>
+                                      (el) => {
+                                        const name = e.target.value;
+                                        const next = { ...el };
+                                        if (name === "") delete next.name;
+                                        else next.name = name;
+                                        return next;
+                                      },
+                                    )
+                                  }
+                                />
 
-                          <TextInput
-                            label="Alias (optional)"
-                            description="A name for this element, needed only to tell two elements of the same field apart or to target a swap"
-                            value={element.name ?? ""}
-                            onChange={(e) =>
-                              editElement(keyIndex, elementIndex, (el) => {
-                                const name = e.target.value;
-                                const next = { ...el };
-                                if (name === "") delete next.name;
-                                else next.name = name;
-                                return next;
-                              })
-                            }
-                          />
+                                <div>
+                                  <Text size="xs" fw={600} mb={4}>
+                                    Transform before matching
+                                  </Text>
+                                  <StepListEditor
+                                    steps={element.transform ?? []}
+                                    addStepLabel="Add a transform"
+                                    emptyHint="No transforms: the field value is matched as-is."
+                                    onStepsChange={(steps) =>
+                                      editElement(
+                                        keyIndex,
+                                        elementIndex,
+                                        (el) => {
+                                          const next = { ...el };
+                                          if (steps.length === 0)
+                                            delete next.transform;
+                                          else next.transform = steps;
+                                          return next;
+                                        },
+                                      )
+                                    }
+                                  />
+                                </div>
 
-                          <div>
-                            <Text size="xs" fw={600} mb={4}>
-                              Transform before matching
-                            </Text>
-                            <StepListEditor
-                              steps={element.transform ?? []}
-                              addStepLabel="Add a transform"
-                              emptyHint="No transforms: the field value is matched as-is."
-                              onStepsChange={(steps) =>
-                                editElement(keyIndex, elementIndex, (el) => {
-                                  const next = { ...el };
-                                  if (steps.length === 0) delete next.transform;
-                                  else next.transform = steps;
-                                  return next;
-                                })
-                              }
-                            />
-                          </div>
+                                {/* The fuzzy-comparison control is shown only when the
+                              exchange actually applies fuzzy expansions. While it
+                              does not (APPLIED_SETTINGS.fuzzyComparisons is false),
+                              the whole control is hidden rather than shown disabled
+                              with a "not available" note, so the element editor is
+                              not cluttered with a dead capability. */}
+                                {fuzzyApplied && (
+                                  <Select
+                                    label="Fuzzy comparison"
+                                    data={FUZZY_OPTIONS}
+                                    value={
+                                      element.generateFuzzyComparisons ?? null
+                                    }
+                                    clearable
+                                    description="Expand this value into near-matches before hashing"
+                                    onChange={(value) =>
+                                      editElement(
+                                        keyIndex,
+                                        elementIndex,
+                                        (el) => {
+                                          const next = { ...el };
+                                          // Mantine infers the value type from the typed
+                                          // FUZZY_OPTIONS data, so it is a FuzzyComparison
+                                          // (or null) without an assertion.
+                                          if (value === null)
+                                            delete next.generateFuzzyComparisons;
+                                          else
+                                            next.generateFuzzyComparisons =
+                                              value;
+                                          return next;
+                                        },
+                                      )
+                                    }
+                                  />
+                                )}
+                              </Stack>
+                            </Paper>
+                          );
+                        })}
+                      </Stack>
 
-                          <Select
-                            label="Fuzzy comparison"
-                            data={FUZZY_OPTIONS}
-                            value={element.generateFuzzyComparisons ?? null}
-                            clearable
-                            disabled={!fuzzyApplied}
-                            description={
-                              fuzzyApplied
-                                ? "Expand this value into near-matches before hashing"
-                                : "Not available: this version of the exchange does not yet apply fuzzy comparisons"
-                            }
-                            onChange={(value) =>
-                              editElement(keyIndex, elementIndex, (el) => {
-                                const next = { ...el };
-                                // Mantine infers the value type from the typed
-                                // FUZZY_OPTIONS data, so it is a FuzzyComparison
-                                // (or null) without an assertion.
-                                if (value === null)
-                                  delete next.generateFuzzyComparisons;
-                                else next.generateFuzzyComparisons = value;
-                                return next;
-                              })
-                            }
-                          />
-                        </Stack>
-                      </Paper>
-                    );
-                  })}
-                </Stack>
-
-                <Group justify="space-between" wrap="nowrap" align="flex-end">
-                  <Button
-                    variant="light"
-                    size="xs"
-                    leftSection={<IconPlus size={14} aria-hidden />}
-                    ref={(el) => {
-                      const id = idFor(keyIds.current, key);
-                      if (el) addElementRefs.current.set(id, el);
-                      else addElementRefs.current.delete(id);
-                    }}
-                    onClick={() => {
-                      applyKeyStructureEdit(
-                        keyIndex,
-                        addElement(draft, keyIndex, firstField),
-                      );
-                      announce("Added an element.");
-                    }}
-                  >
-                    Add an element
-                  </Button>
-                  <MultiSelect
-                    label="Swap (match in either order)"
-                    description="Choose exactly two elements that may be matched in either order"
-                    data={swapData}
-                    value={key.swap ?? []}
-                    maxValues={2}
-                    clearable
-                    size="xs"
-                    style={{ flex: 1, maxWidth: 360 }}
-                    onChange={(value) =>
-                      editKey(keyIndex, (k) => {
-                        const next = { ...k };
-                        if (value.length === 2)
-                          next.swap = [value[0], value[1]];
-                        else delete next.swap;
-                        return next;
-                      })
-                    }
-                  />
-                </Group>
+                      <Group
+                        justify="space-between"
+                        wrap="nowrap"
+                        align="flex-end"
+                      >
+                        <Button
+                          variant="light"
+                          size="xs"
+                          leftSection={<IconPlus size={14} aria-hidden />}
+                          ref={(el) => {
+                            const id = idFor(keyIds.current, key);
+                            if (el) addElementRefs.current.set(id, el);
+                            else addElementRefs.current.delete(id);
+                          }}
+                          onClick={() => {
+                            applyKeyStructureEdit(
+                              keyIndex,
+                              addElement(draft, keyIndex, firstField),
+                            );
+                            announce("Added an element.");
+                          }}
+                        >
+                          Add an element
+                        </Button>
+                        <MultiSelect
+                          label="Swap (match in either order)"
+                          description="Choose exactly two elements that may be matched in either order"
+                          data={swapData}
+                          value={key.swap ?? []}
+                          maxValues={2}
+                          clearable
+                          size="xs"
+                          style={{ flex: 1, maxWidth: 360 }}
+                          onChange={(value) =>
+                            editKey(keyIndex, (k) => {
+                              const next = { ...k };
+                              if (value.length === 2)
+                                next.swap = [value[0], value[1]];
+                              else delete next.swap;
+                              return next;
+                            })
+                          }
+                        />
+                      </Group>
+                    </Stack>
+                  </Collapse>
+                </div>
               </Stack>
             </Paper>
           );
@@ -521,7 +618,16 @@ export function ExpertKeyEditor({
           variant="light"
           leftSection={<IconPlus size={16} aria-hidden />}
           onClick={() => {
-            onChange(addKey(draft, firstField));
+            const next = addKey(draft, firstField);
+            // Expand the freshly added key (appended last) so the operator lands in
+            // its editor rather than a collapsed header. idFor mints its stable id
+            // here; the same key object carries that id into the next render, so it
+            // reads as expanded.
+            const newKey = next.keys[next.keys.length - 1].key;
+            setExpandedKeys((prev) =>
+              new Set(prev).add(idFor(keyIds.current, newKey)),
+            );
+            onChange(next);
             announce("Added a key.");
           }}
         >

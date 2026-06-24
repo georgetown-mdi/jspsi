@@ -2,7 +2,7 @@ import log from "loglevel";
 
 import { useEffect, useRef, useState } from "react";
 
-import { Alert, Button, Group, Stack } from "@mantine/core";
+import { Alert, Grid, Stack } from "@mantine/core";
 
 import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
 
@@ -17,18 +17,18 @@ import {
   errorMessage,
   prepareForExchange,
   sanitizeForDisplay,
-  serializeExchangeRecord,
-  serializeOpeningData,
+  serializeExchangeRecordFile,
 } from "@psilink/core";
 
 import { dialAsAcceptor, listenAsInviter } from "@psi/rendezvous";
 import { acceptorExchangeDataSpec } from "@psi/acceptInvitation";
+import { disclosedColumnNames } from "@psi/metadataEditing";
 import { runExchangeLifecycle } from "@psi/exchangeLifecycle";
 import { waitForIncomingConnection } from "@psi/waitForConnection";
 
 import { whenDiagnostic } from "@utils/diagnostics";
 
-import { InvitationTerms } from "@components/InvitationTerms";
+import { ExchangeSummary } from "@components/ExchangeSummary";
 import { ShareBlock } from "@components/ShareBlock";
 import { Status } from "@components/Status";
 
@@ -64,13 +64,12 @@ import type {
  * (`acquired`), but acquire each differently. The acceptor adopts the inviter's
  * terms from the decoded invitation (the same terms the review screen displayed),
  * substituting its own identity, and arrives with the CSV the review screen parsed
- * and pre-flighted -- so it renders no file prompt and dials only when the user
- * presses Start. The inviter is the SOURCE of the terms: it derived them from its
- * file at invite time and embedded exactly them in the token, so it carries that
- * same `linkageTerms` object (no re-derivation) along with the CSV parsed at
- * compose time, and -- being the responder that listens -- auto-starts with no
- * Start press. Either way the exchange runs straight from `acquired` with no
- * re-parse.
+ * and pre-flighted -- so it renders no file prompt and auto-dials on arrival. The
+ * inviter is the SOURCE of the terms: it derived them from its file at invite time
+ * and embedded exactly them in the token, so it carries that same `linkageTerms`
+ * object (no re-derivation) along with the CSV parsed at compose time, and -- being
+ * the responder that listens -- likewise auto-dials on arrival with no Start press.
+ * Either way the exchange runs straight from `acquired` with no re-parse.
  */
 export type ExchangeConfig =
   | {
@@ -121,7 +120,7 @@ export type ExchangeConfig =
        * reconciles lazily. */
       disclosedPayloadColumns?: Array<string>;
       /** The CSV parsed on the accept review screen, fed straight into the exchange
-       * on Start: no re-parse, and no file prompt here. Mirrors the inviter's
+       * on arrival: no re-parse, and no file prompt here. Mirrors the inviter's
        * `acquired`. */
       acquired: AcquiredBundle;
       /** The per-party metadata and standardization the acceptor authored in the
@@ -183,7 +182,7 @@ function buildStageList(prepared: PreparedExchange): Array<StageDefinition> {
 }
 
 /**
- * The Start->run half of a web exchange, shared by both roles: it takes an
+ * The run half of a web exchange, shared by both roles: it takes an
  * already-acquired CSV bundle from the file-acquire phase, draws in the peer (the
  * role's only difference), runs the exchange, and surfaces the result and audit
  * downloads. It owns the single {@link AbortController} and the unmount-abort
@@ -213,11 +212,6 @@ export function ExchangeView(config: ExchangeConfig) {
   const [warningAlert, setWarningAlert] = useState<AlertContent | undefined>(
     config.role === "acceptor" ? config.initialWarning : undefined,
   );
-  // Whether the run has been started. Drives only the acceptor's Start button
-  // visibility (it hides once pressed; the inviter auto-starts and shows none);
-  // the authoritative one-run-per-mount guard is handleStart's abortRef check.
-  const [started, setStarted] = useState(false);
-
   // Drives the lifecycle's AbortSignal. A useEffect cleanup aborts it on unmount,
   // so the owner tears down any in-flight wait or exchange and every owner-driven
   // seam stops firing (no setState after unmount). The cleanup also clears the
@@ -236,13 +230,16 @@ export function ExchangeView(config: ExchangeConfig) {
 
   // The screen-level accessibility throughline. Three focus targets, each its own
   // ref so the effects below stay independent:
-  //  - leadingHeadingRef: the heading the screen leads with (the inviter's share
-  //    block, the acceptor's terms). Focused once on mount so a keyboard/screen-
-  //    reader user who pressed Generate/Accept lands on the new screen rather than
-  //    on the unmounted button. This is the entry move, not a mid-protocol one.
+  //  - leadingHeadingRef: the exchange-summary heading both roles now lead with --
+  //    the summary sits in the left column, and the inviter's share block moved
+  //    below the two columns. Focused once on mount so a keyboard/screen-reader
+  //    user who pressed Generate/Accept lands on the new screen rather than on the
+  //    unmounted button. This is the entry move, not a mid-protocol one.
   //  - resultsHeadingRef: the Status heading, focused on `done` so the results are
-  //    announced; mid-protocol stages deliberately do NOT move focus (the Status
-  //    live region announces them instead).
+  //    announced, and also when the partner connects -- the inviter's share block
+  //    unmounts then, so this recovers the focus that unmount would otherwise
+  //    orphan (see the peer-connect effect). Other mid-protocol stages do NOT move
+  //    focus (the Status live region announces them instead).
   //  - errorAlertRef: a blocking error alert, focused so it is announced and
   //    actionable. `done` and a blocking error are mutually exclusive (a successful
   //    run reaches `done` and sets no alert; every error path leaves the stage
@@ -250,9 +247,6 @@ export function ExchangeView(config: ExchangeConfig) {
   const leadingHeadingRef = useRef<HTMLHeadingElement>(null);
   const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
   const errorAlertRef = useRef<HTMLDivElement>(null);
-  // The collapsed "Partner connected" indicator, focused to recover focus the
-  // share block's collapse would otherwise orphan (see the peer-connect effect).
-  const partnerConnectedRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     leadingHeadingRef.current?.focus();
   }, []);
@@ -265,26 +259,27 @@ export function ExchangeView(config: ExchangeConfig) {
 
   // The partner is connected once the run has advanced past the pre-stages
   // ("before start"/"waiting for peer") into a protocol stage. Drives the inviter
-  // share block's collapse to its one-line "Partner connected" state.
+  // share block's removal: once connected there is nothing left to share, so the
+  // link/code block (rendered below the columns) drops out entirely.
   const peerConnected = !preStages.some((stage) => stage.id === stageId);
 
-  // Recover focus orphaned by the inviter share block collapsing on peer-connect:
-  // when the expanded block (which may hold focus -- its heading or a copy button)
-  // becomes the one-line "Partner connected" indicator, the focused node unmounts
-  // and the browser drops focus to <body>. Move it onto the indicator so a
-  // keyboard/screen-reader user is not stranded -- but ONLY when focus is on
-  // <body>, so focus the user moved to a live element (the terms, the Status card)
-  // is not stolen. The <body> check cannot distinguish "orphaned by the collapse"
-  // from a screen reader in browse mode (which parks real focus on <body> while
-  // its virtual cursor reads elsewhere); in that case this pulls the cursor to the
-  // indicator -- an acceptable one-shot, since "Partner connected" is the timely,
-  // relevant event and the Status live region announces the stage regardless. A
-  // no-op for the acceptor, which renders no share block (the ref stays null).
+  // Recover focus orphaned by the inviter share block UNMOUNTING on peer-connect:
+  // once the partner connects the share block (which may hold focus -- its heading
+  // or a copy button) is removed, so the focused node disappears and the browser
+  // drops focus to <body>. Move it onto the Status heading so a keyboard/screen-
+  // reader user is taken to the run's progress rather than stranded -- but ONLY
+  // when focus is on <body>, so focus the user moved to a live element (the
+  // summary, the Status downloads) is not stolen. The <body> check cannot
+  // distinguish "orphaned by the unmount" from a screen reader in browse mode
+  // (which parks real focus on <body> while its virtual cursor reads elsewhere); in
+  // that case this pulls the cursor to the Status heading -- an acceptable one-shot,
+  // since the connection is the timely, relevant event and the Status live region
+  // announces the stage regardless. A no-op for the acceptor, which renders no
+  // share block, so peer-connect leaves its focus untouched.
   useEffect(() => {
     if (!peerConnected) return;
     const active = document.activeElement;
-    if (!active || active === document.body)
-      partnerConnectedRef.current?.focus();
+    if (!active || active === document.body) resultsHeadingRef.current?.focus();
   }, [peerConnected]);
 
   // Heading level for the terms and Status headings, so the outline nests under
@@ -294,8 +289,8 @@ export function ExchangeView(config: ExchangeConfig) {
 
   // Revoke this exchange's object URLs when the component unmounts (or before a
   // replacement set is stored): createObjectURL keeps each Blob alive until it is
-  // revoked, and the record and opening blobs hold the matched data, so they
-  // should not outlive the page that backs them.
+  // revoked, and the combined record blob holds the matched data, so it should not
+  // outlive the page that backs it.
   useEffect(() => {
     if (outputs === undefined) return;
     return () => {
@@ -303,21 +298,18 @@ export function ExchangeView(config: ExchangeConfig) {
       // non-receiving helper); only revoke a URL that was actually created.
       if (outputs.resultsUrl !== undefined)
         window.URL.revokeObjectURL(outputs.resultsUrl);
-      if (outputs.record !== undefined) {
+      if (outputs.record !== undefined)
         window.URL.revokeObjectURL(outputs.record.recordUrl);
-        window.URL.revokeObjectURL(outputs.record.openingUrl);
-      }
     };
   }, [outputs]);
 
   // Start the connection lifecycle from an already-loaded, already-checked CSV:
   // both roles arrive with one in config.acquired -- the acceptor's parsed and
-  // pre-flighted on the review screen (and dialed only on the user's Start), the
-  // inviter's parsed at compose time (auto-started by the mount effect below).
-  // Both sources guarantee at least one satisfiable linkage key -- the acceptor
-  // via its pre-flight, the inviter via generateInvitation's fail-closed block --
-  // so an unsatisfiable file never reaches here: nothing is dialed and the
-  // connecting UI does not mount.
+  // pre-flighted on the review screen, the inviter's parsed at compose time -- and
+  // both auto-start from the mount effect below. Both sources guarantee at least one
+  // satisfiable linkage key -- the acceptor via its pre-flight, the inviter via
+  // generateInvitation's fail-closed block -- so an unsatisfiable file never reaches
+  // here: nothing is dialed and the connecting UI does not mount.
   const handleStart = (bundle: AcquiredBundle) => {
     // Guard against re-entry: once an exchange is in flight its AbortController is
     // stored here, and starting a second would orphan the first's signal and race
@@ -325,9 +317,6 @@ export function ExchangeView(config: ExchangeConfig) {
     // this makes the one-exchange-per-mount invariant explicit -- a fresh exchange
     // comes from a fresh mount (ExchangeView is keyed by the secret).
     if (abortRef.current) return;
-    // Hide the acceptor's Start button now that the run is underway (the inviter
-    // shows none); the abortRef guard above remains the authoritative gate.
-    setStarted(true);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -373,19 +362,26 @@ export function ExchangeView(config: ExchangeConfig) {
                 ),
               };
             })();
-      // The audit record and its opening are produced as a pair, so one guard
-      // offers both or neither. They are absent only if building the record
-      // failed after a successful exchange; in that case the downloads are
-      // intentionally omitted without a blocking alert. Filenames are timestamped
-      // per exchange (the record's own createdAt, made filesystem-safe) so
-      // repeated downloads in one session accumulate rather than collide.
+      // The combined record is produced only when the audit pair exists; it is
+      // absent if building the record failed after a successful exchange, in which
+      // case the download is intentionally omitted without a blocking alert. The
+      // filename is timestamped per exchange (the record's own createdAt, made
+      // filesystem-safe) so repeated downloads in one session accumulate rather
+      // than collide.
       if (result.audit !== undefined) {
         const stamp = result.audit.record.createdAt.replace(/[:.]/g, "-");
+        // One download: the public record and the private opening packaged in a
+        // single { public, private } JSON file. Because it embeds the private
+        // opening it is as sensitive as the matched data (Status labels it "keep
+        // private").
         generated.record = {
-          recordUrl: jsonUrl(serializeExchangeRecord(result.audit.record)),
+          recordUrl: jsonUrl(
+            serializeExchangeRecordFile({
+              public: result.audit.record,
+              private: result.audit.opening,
+            }),
+          ),
           recordFileName: `psilink-record-${stamp}.json`,
-          openingUrl: jsonUrl(serializeOpeningData(result.audit.opening)),
-          openingFileName: `psilink-record-${stamp}.opening.json`,
         };
       }
       return generated;
@@ -554,26 +550,28 @@ export function ExchangeView(config: ExchangeConfig) {
     });
   };
 
-  // The inviter is the responder (it listens), so it starts immediately from its
-  // pre-acquired bundle with no Start press. The acceptor is the initiator: it
-  // dials only when the user presses Start (the button below), so it does NOT
-  // auto-start here. Runs once per mount -- ExchangeView is keyed by the secret,
-  // so a fresh exchange is a fresh mount, and handleStart's re-entry guard plus
-  // the StrictMode-safe abort cleanup above keep a double-invoked effect from
-  // racing two runs.
+  // Both roles auto-start from their already-acquired, already-checked bundle: the
+  // inviter as the responder that listens, the acceptor as the initiator that dials.
+  // The acceptor reaches this screen only after it consented and prepared its data,
+  // so dialing on arrival discloses nothing new -- it just removes a redundant Start
+  // press after the user already accepted and confirmed. Runs once per mount --
+  // ExchangeView is keyed by the secret, so a fresh exchange is a fresh mount, and
+  // handleStart's re-entry guard plus the StrictMode-safe abort cleanup above keep a
+  // double-invoked effect from racing two runs.
   useEffect(() => {
-    if (config.role === "inviter") handleStart(config.acquired);
+    handleStart(config.acquired);
   }, []);
 
   return (
     <Stack>
       {errorAlert && (
-        // This slot now carries only the run lifecycle's error messages: the
-        // acceptor's file read and pre-flight errors surface on the review screen,
-        // not here. Those run-error messages are fixed strings or a single
+        // This slot carries only the run lifecycle's error messages: the acceptor's
+        // file read and pre-flight errors surface on the review screen, not here.
+        // Those run-error messages are fixed strings or a single
         // sanitizeForDisplay'd message with no embedded newlines; pre-line is kept
         // defensively so any future multi-line message renders one line per line
         // rather than run together. tabIndex + ref so a blocking error takes focus.
+        // Full-width above the columns so it is not boxed into one of them.
         <Alert
           color="red"
           // A severity icon so error is not signalled by color alone (WCAG
@@ -587,44 +585,6 @@ export function ExchangeView(config: ExchangeConfig) {
           {errorAlert.message}
         </Alert>
       )}
-      {/* The inviter leads with the share block, weighted above the terms; the
-          acceptor leads with the terms (no share block). Both see the terms
-          summary on the exchange screen as the agreed reference for the run. */}
-      {config.role === "inviter" && (
-        <ShareBlock
-          headingRef={leadingHeadingRef}
-          connectedRef={partnerConnectedRef}
-          deepLink={config.share.deepLink}
-          encoded={config.share.encoded}
-          expires={config.expires}
-          connected={peerConnected}
-        />
-      )}
-      <InvitationTerms
-        linkageTerms={config.linkageTerms}
-        // The inviter's expiry is already shown in the share block above, so it is
-        // withheld here to avoid showing the same deadline twice; the acceptor has
-        // no share block, so its terms carry the expiry.
-        expires={config.role === "inviter" ? undefined : config.expires}
-        // The acceptor shows what it will RECEIVE from the carried disclosed set
-        // (the same set the consent screen showed); the inviter previews its own
-        // proposal, which has no carried field and falls back to its authored
-        // payload.send. That fallback is faithful only because both web mint paths
-        // author payload.send to equal the disclosed predicate
-        // (disclosedColumnNames over the same metadata, asserted by
-        // assertPayloadSendDisclosed at the mint boundary); if a future path ever
-        // authored a payload.send narrower than what its metadata discloses, the
-        // inviter's own preview would understate its send, so pass the inviter's
-        // disclosed set here too rather than relying on the equality.
-        disclosedPayloadColumns={
-          config.role === "acceptor"
-            ? config.disclosedPayloadColumns
-            : undefined
-        }
-        perspective={config.role === "inviter" ? "proposing" : "accepted"}
-        headingOrder={headingOrder}
-        headingRef={config.role === "acceptor" ? leadingHeadingRef : undefined}
-      />
       {warningAlert && (
         <Alert
           color="yellow"
@@ -637,29 +597,71 @@ export function ExchangeView(config: ExchangeConfig) {
           {warningAlert.message}
         </Alert>
       )}
-      <Group justify="center" align="stretch" grow>
-        <Status
-          stages={stages}
-          stageId={stageId}
-          headingRef={resultsHeadingRef}
-          headingOrder={headingOrder}
-          resultsFileURL={outputs?.resultsUrl}
-          resultWithheld={outputs?.resultWithheld}
-          recordFileURL={outputs?.record?.recordUrl}
-          recordFileName={outputs?.record?.recordFileName}
-          openingFileURL={outputs?.record?.openingUrl}
-          openingFileName={outputs?.record?.openingFileName}
+      {/* The summary stays on the RIGHT -- the same side it sits on while setting
+          up -- so the agreed reference keeps a consistent place across the flow.
+          Status (the run's progress and downloads) takes the LEFT, upper area, so it
+          is visible without scrolling. Columns stack on a narrow viewport
+          (base: 12). */}
+      <Grid gap="xl" align="flex-start">
+        <Grid.Col span={{ base: 12, md: 5 }}>
+          <Status
+            stages={stages}
+            stageId={stageId}
+            headingRef={resultsHeadingRef}
+            headingOrder={headingOrder}
+            resultsFileURL={outputs?.resultsUrl}
+            resultWithheld={outputs?.resultWithheld}
+            recordFileURL={outputs?.record?.recordUrl}
+            recordFileName={outputs?.record?.recordFileName}
+          />
+        </Grid.Col>
+        <Grid.Col span={{ base: 12, md: 7 }}>
+          <ExchangeSummary
+            linkageTerms={config.linkageTerms}
+            perspective={config.role === "inviter" ? "proposing" : "accepted"}
+            headingOrder={headingOrder}
+            // Both roles lead with the summary heading (the inviter's share block
+            // moved below the columns).
+            headingRef={leadingHeadingRef}
+            // The inviter's expiry is shown in the share block below, so it is
+            // withheld here to avoid showing the same deadline twice; the acceptor
+            // has no share block, so its summary carries the expiry.
+            expires={config.role === "inviter" ? undefined : config.expires}
+            // The acceptor shows what it will RECEIVE from the carried disclosed set
+            // (the same set the consent screen showed); the inviter previews its own
+            // proposal, which has no carried field and falls back to its authored
+            // payload.send -- faithful because both web mint paths author
+            // payload.send to the disclosed predicate (asserted by
+            // assertPayloadSendDisclosed at the mint boundary).
+            disclosedPayloadColumns={
+              config.role === "acceptor"
+                ? config.disclosedPayloadColumns
+                : undefined
+            }
+            // The acceptor surfaces the columns IT will send, derived from the
+            // metadata it prepared -- the same disclosedColumnNames predicate the
+            // run transmits on, so the chips cannot drift from what leaves the
+            // machine. The inviter's own send already renders inside the terms under
+            // "proposing", so it passes none here.
+            sendColumns={
+              config.role === "acceptor"
+                ? disclosedColumnNames(config.metadata)
+                : undefined
+            }
+          />
+        </Grid.Col>
+      </Grid>
+      {/* The inviter's link/code to share out-of-band, below the columns so the
+          summary and Status lead. It drops out entirely once the partner connects:
+          there is nothing left to share, and Status then shows the run is underway,
+          so the block (and any "Partner connected" restatement) would only add
+          noise. The acceptor renders no share block. */}
+      {config.role === "inviter" && !peerConnected && (
+        <ShareBlock
+          deepLink={config.share.deepLink}
+          encoded={config.share.encoded}
+          expires={config.expires}
         />
-      </Group>
-      {config.role === "acceptor" && !started && (
-        // Acceptor only: it arrives pre-acquired (config.acquired, parsed and
-        // pre-flighted on the review screen) and dials only on this explicit
-        // Start, so nothing connects before the user presses it. The button hides
-        // once the run begins; the inviter is the responder and auto-starts, so it
-        // shows none.
-        <Group justify="center">
-          <Button onClick={() => handleStart(config.acquired)}>Start</Button>
-        </Group>
       )}
     </Stack>
   );

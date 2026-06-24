@@ -27,7 +27,7 @@ import type { LinkageTerms } from "@psilink/core";
 // Drive generateInvitation from the test: each case sets `gen.impl`. The real
 // module (and its InvitationFileError class, so `instanceof` in InvitePanel and
 // here refer to the same class) is preserved; only the entry point is swapped.
-// Capture navigation: InvitePanel's "Advanced Options" link navigates to the
+// Capture navigation: InvitePanel's "Advanced options" link navigates to the
 // editor route via useNavigate. Mock the router so the panel can mount without a
 // RouterProvider (the render-test pattern) and record where it navigates.
 const nav = vi.hoisted(() => ({ calls: [] as Array<unknown> }));
@@ -167,32 +167,37 @@ afterEach(() => {
 });
 
 describe("InvitePanel compose screen", () => {
-  test("Advanced Options is disabled until a file is chosen, then navigates to the editor", async () => {
+  test("Advanced options is disabled until a name and file are provided, then navigates to the editor", async () => {
     gen.impl = () => Promise.resolve(generated);
     mount();
 
-    // The button is always present beside Generate, but disabled until a file gives
-    // the editor something to seed from. (The disclosure of what a file would send
-    // moved out to the shared drop's "Default exchange columns"; this is the one
-    // remaining control over it.)
-    const advanced = page.getByRole("button", { name: "Advanced Options" });
+    // The button is always present beside Generate, but disabled until both a name
+    // and a file are provided -- Advanced seeds the editor from them. (The disclosure
+    // of what a file would send moved out to the shared drop's "Default exchange
+    // columns"; this is the one remaining control over it.)
+    const advanced = page.getByRole("button", { name: "Advanced options" });
     await expect.element(advanced).toBeDisabled();
 
+    // A file alone does not enable it -- the name is still missing.
     await userEvent.click(page.getByTestId("select-file"));
+    await expect.element(advanced).toBeDisabled();
+
+    // With the name filled too it enables and navigates to the editor route.
+    await userEvent.fill(page.getByRole("textbox"), "County Health Dept");
     await expect.element(advanced).toBeEnabled();
 
     await userEvent.click(advanced);
     expect(nav.calls).toContainEqual({ to: "/advanced" });
   });
 
-  test("Advanced Options hands off the chosen file and name in memory", async () => {
+  test("Advanced options hands off the chosen file and name in memory", async () => {
     gen.impl = () => Promise.resolve(generated);
     mount();
 
     await userEvent.fill(page.getByRole("textbox"), "  Dr. Jane  ");
     await userEvent.click(page.getByTestId("select-file"));
 
-    const advanced = page.getByRole("button", { name: "Advanced Options" });
+    const advanced = page.getByRole("button", { name: "Advanced options" });
     await expect.element(advanced).toBeEnabled();
     await userEvent.click(advanced);
 

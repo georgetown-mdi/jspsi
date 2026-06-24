@@ -2,7 +2,7 @@ import {
   Alert,
   Center,
   Checkbox,
-  Divider,
+  Grid,
   Loader,
   Stack,
   Text,
@@ -13,8 +13,8 @@ import { IconAlertCircle } from "@tabler/icons-react";
 
 import { commitAcceptance } from "@psi/acceptConsent";
 
+import { ExchangeSummary } from "@components/ExchangeSummary";
 import FileAcquire from "@components/FileAcquire";
-import { InvitationTerms } from "@components/InvitationTerms";
 
 import type { Ref } from "react";
 
@@ -107,65 +107,82 @@ export function AcceptInvitationPanel({
         </Alert>
       )}
       {decode.status === "ready" && (
-        <Stack mt="md">
-          <InvitationTerms
-            linkageTerms={decode.invitation.token.linkageTerms}
-            expires={decode.invitation.token.expires}
-            disclosedPayloadColumns={
-              decode.invitation.token.disclosedPayloadColumns
-            }
-            headingRef={headingRef}
-          />
-          <Divider my="sm" label="Accept and exchange" labelPosition="center" />
-          <Text size="sm" c="dimmed">
-            To accept your partner's proposed terms, confirm your consent, enter
-            your name, and choose your data file. Your browser connects directly
-            to your partner.
-          </Text>
-          <Checkbox
-            checked={consented}
-            onChange={(event) => onConsentedChange(event.currentTarget.checked)}
-            label="I have reviewed my partner's proposed terms and consent to this exchange"
-          />
-          <TextInput
-            value={acceptorName}
-            onChange={(event) => onAcceptorNameChange(event.target.value)}
-            withAsterisk
-            required
-            label="Your name"
-            description="Recorded in your exchange record so your partner can identify you"
-            placeholder="Your name"
-          />
-          {/* The file-acquire phase parses the chosen CSV on the single "Accept
-              and continue" action. commitAcceptance is the authoritative gate,
-              used here for the submit's disabled state and again in the route's
-              onAcquired handler, so nothing is parsed -- let alone handed off and
-              dialed -- before both consent and a name. On a successful parse it
-              hands the parsed bundle to onAcquired, which moves to the "Prepare
-              your data" editor where the linkage-satisfiability verdict is shown
-              and an unsatisfiable file can be fixed rather than dead-ended. */}
-          <FileAcquire
-            submitLabel="Accept and continue"
-            submitDisabled={
-              commitAcceptance({ consented, name: acceptorName }) === undefined
-            }
-            initialFiles={initialFiles}
-            onError={onAcquireError}
-            onAcquired={onAcquired}
-          />
-          {error && (
-            // pre-line so a read-failure message's per-cause newlines (from
-            // sanitizeErrorForDisplay) render one cause per line.
-            <Alert
-              color="red"
-              icon={<IconAlertCircle aria-hidden />}
-              title={error.title}
-              style={{ whiteSpace: "pre-line" }}
-            >
-              {error.message}
-            </Alert>
-          )}
-        </Stack>
+        // Two columns mirroring the setup pages: the consent gate (the action) on
+        // the left, the agreed terms (the reference being reviewed) on the right.
+        // Focus still leads to the terms heading on mount (headingRef), so a
+        // screen-reader user starts at what they are consenting to regardless of
+        // column order. Stacks to one column on a narrow viewport (base: 12), where
+        // `order` puts the terms FIRST so a phone reads what is being consented to
+        // before the consent gate -- the reverse of the desktop left-to-right order.
+        <Grid gap="xl" align="flex-start" mt="md">
+          <Grid.Col span={{ base: 12, md: 7 }} order={{ base: 2, md: 1 }}>
+            <Stack>
+              <Text size="sm" c="dimmed">
+                To accept your partner's proposed terms, confirm your consent,
+                enter your name, and choose your data file. Your browser
+                connects directly to your partner.
+              </Text>
+              <Checkbox
+                checked={consented}
+                onChange={(event) =>
+                  onConsentedChange(event.currentTarget.checked)
+                }
+                label="I have reviewed my partner's proposed terms and consent to this exchange"
+              />
+              <TextInput
+                value={acceptorName}
+                onChange={(event) => onAcceptorNameChange(event.target.value)}
+                withAsterisk
+                required
+                label="Your name"
+                description="Recorded in your exchange record so your partner can identify you"
+                placeholder="Your name"
+              />
+              {/* The file-acquire phase parses the chosen CSV on the single "Accept
+                  and continue" action. commitAcceptance is the authoritative gate,
+                  used here for the submit's disabled state and again in the route's
+                  onAcquired handler, so nothing is parsed -- let alone handed off
+                  and dialed -- before both consent and a name. On a successful
+                  parse it hands the parsed bundle to onAcquired, which moves to the
+                  "Prepare your data" editor where the linkage-satisfiability verdict
+                  is shown and an unsatisfiable file can be fixed rather than
+                  dead-ended. */}
+              <FileAcquire
+                submitLabel="Accept and continue"
+                submitDisabled={
+                  commitAcceptance({ consented, name: acceptorName }) ===
+                  undefined
+                }
+                initialFiles={initialFiles}
+                onError={onAcquireError}
+                onAcquired={onAcquired}
+              />
+              {error && (
+                // pre-line so a read-failure message's per-cause newlines (from
+                // sanitizeErrorForDisplay) render one cause per line.
+                <Alert
+                  color="red"
+                  icon={<IconAlertCircle aria-hidden />}
+                  title={error.title}
+                  style={{ whiteSpace: "pre-line" }}
+                >
+                  {error.message}
+                </Alert>
+              )}
+            </Stack>
+          </Grid.Col>
+          <Grid.Col span={{ base: 12, md: 5 }} order={{ base: 1, md: 2 }}>
+            <ExchangeSummary
+              linkageTerms={decode.invitation.token.linkageTerms}
+              expires={decode.invitation.token.expires}
+              disclosedPayloadColumns={
+                decode.invitation.token.disclosedPayloadColumns
+              }
+              perspective="review"
+              headingRef={headingRef}
+            />
+          </Grid.Col>
+        </Grid>
       )}
     </>
   );

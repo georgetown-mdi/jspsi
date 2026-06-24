@@ -164,9 +164,9 @@ export function InvitePanel({ session, setSession, files }: InvitePanelProps) {
 
   // Open the column-aware editor, handing off the already-chosen file and name in
   // memory (a File cannot ride the URL) so the editor opens seeded without a
-  // re-drop. The "Advanced Options" button is disabled until a file is chosen, so a
-  // file is present when this fires; guard defensively rather than hand off an
-  // undefined file.
+  // re-drop. The "Advanced options" button is disabled until a name is filled and a
+  // file is chosen, so a file is present when this fires; guard defensively rather
+  // than hand off an undefined file.
   const openAdvanced = () => {
     if (filesRef.current.length === 0) return;
     stashAdvancedHandoff({
@@ -182,9 +182,7 @@ export function InvitePanel({ session, setSession, files }: InvitePanelProps) {
       {session === undefined ? (
         <Stack mt="md">
           <Text size="sm" c="dimmed">
-            Add your name, then choose your data file below. We read the file in
-            your browser to set the invitation&apos;s matching rules; it is
-            never uploaded.
+            Add your name, then choose your data file below.
           </Text>
           <form.Field
             name="inviterName"
@@ -235,31 +233,43 @@ export function InvitePanel({ session, setSession, files }: InvitePanelProps) {
               />
             )}
           />
-          {/* Action row: the secondary "Advanced Options" sits to the left of the
-              primary "Generate invitation". Both need a chosen file -- Advanced
-              seeds the editor from it, Generate mints from it -- so both are disabled
-              until the shared drop below holds one. The file's default exchange
-              columns are surfaced under that drop (see DefaultExchangeColumns), not
-              here, so a partner reviewing the accept box does not see an invite-side
-              disclosure pop up. */}
-          <form.Subscribe selector={(s) => s.isSubmitting}>
-            {(isSubmitting) => (
-              <Group justify="flex-end" mt="sm">
-                <Button
-                  variant="default"
-                  disabled={files.length === 0}
-                  onClick={openAdvanced}
-                >
-                  Advanced Options
-                </Button>
-                <Button
-                  disabled={files.length === 0 || isSubmitting}
-                  onClick={() => void form.handleSubmit()}
-                >
-                  Generate invitation
-                </Button>
-              </Group>
-            )}
+          {/* Action row: the secondary "Advanced options" sits to the left of the
+              primary "Generate invitation". Both need a name and a chosen file --
+              Advanced seeds the editor from them, Generate mints from them -- so both
+              are disabled until the name field is filled and the shared drop below
+              holds a file; a hint to the left of the buttons spells out that gate.
+              The file's default exchange columns are surfaced under that drop (see
+              DefaultExchangeColumns), not here, so a partner reviewing the accept box
+              does not see an invite-side disclosure pop up. */}
+          <form.Subscribe
+            selector={(s) => ({
+              isSubmitting: s.isSubmitting,
+              nameMissing: !s.values.inviterName.trim(),
+            })}
+          >
+            {({ isSubmitting, nameMissing }) => {
+              const incomplete = files.length === 0 || nameMissing;
+              return (
+                <Group justify="flex-end" mt="sm">
+                  <Text size="sm" c="dimmed" me="auto">
+                    A name and a file are needed to proceed.
+                  </Text>
+                  <Button
+                    variant="default"
+                    disabled={incomplete}
+                    onClick={openAdvanced}
+                  >
+                    Advanced options
+                  </Button>
+                  <Button
+                    disabled={incomplete || isSubmitting}
+                    onClick={() => void form.handleSubmit()}
+                  >
+                    Generate invitation
+                  </Button>
+                </Group>
+              );
+            }}
           </form.Subscribe>
           {error && (
             <Alert

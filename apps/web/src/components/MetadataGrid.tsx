@@ -33,16 +33,20 @@ const ANNOUNCE_DEBOUNCE_MS = 600;
 
 /**
  * The shared metadata grid: a real table mapping each input column to a semantic
- * type and a single consequence-labeled disclosure choice, with a running summary
- * of the columns disclosed to the partner. Presentational -- it holds no metadata
- * state of its own; it renders `metadata` and emits the next array through
- * {@link onChange}, so each host (the acceptor "Prepare your data" screen and the
- * inviter Advanced-options editor) owns the model and decides what the edit means.
+ * type and a single consequence-labeled disclosure choice. Presentational -- it
+ * holds no metadata state of its own; it renders `metadata` and emits the next
+ * array through {@link onChange}, so each host (the acceptor "Prepare your data"
+ * screen and the inviter Advanced-options editor) owns the model and decides what
+ * the edit means.
  *
- * The disclosure summary is computed synchronously from {@link disclosedColumnNames}
- * -- the same predicate `preparePayload` transmits on -- so it cannot over- or
- * under-state what leaves the machine. The single aria-live region announces that
- * summary, debounced; the visible summary and the grid update immediately.
+ * The grid does not paint the disclosed-columns list itself: each host already
+ * shows it visibly as the "Columns you will send to your partner" chips beside the
+ * agreed terms, so a second text copy here would be a same-screen duplicate. What
+ * the grid keeps is the aria-live ANNOUNCEMENT of that list -- computed
+ * synchronously from {@link disclosedColumnNames}, the same predicate
+ * `preparePayload` transmits on, so it cannot over- or under-state what leaves the
+ * machine -- debounced and voiced right at the disclosure control the static chips
+ * cannot speak for.
  */
 export function MetadataGrid({
   metadata,
@@ -166,12 +170,14 @@ export function MetadataGrid({
         </Text>
       )}
 
-      {/* The running disclosure summary, the security-relevant readout of what
-          leaves the machine. Synchronous so it tracks the grid exactly; the
-          aria-live region below announces it on a debounce. */}
-      <Text size="sm" fw={disclosed.length > 0 ? 600 : 400}>
-        {summary}
-      </Text>
+      {/* The disclosure readout is shown VISIBLY by the host's column chips
+          (the "Columns you will send to your partner" list beside the agreed
+          terms), so the grid no longer repeats it as text -- that was a
+          duplicate on the same screen. What stays here is the announcement: a
+          screen-reader user toggling a disclosure Select above gets no spoken
+          feedback from the static chips, so this single debounced live region --
+          computed from the same disclosedColumnNames predicate the run transmits
+          on -- voices the new set as it changes, right at the control. */}
       <VisuallyHidden role="status" aria-live="polite" aria-atomic="true">
         {announcement}
       </VisuallyHidden>

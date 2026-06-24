@@ -35,6 +35,7 @@ const STEP_ANNOUNCE_DEBOUNCE_MS = 600;
  */
 export function StandardizationStepEditor({
   fieldLabel,
+  hideFieldLabel = false,
   inputColumn,
   steps,
   onStepsChange,
@@ -44,6 +45,11 @@ export function StandardizationStepEditor({
   /** Human-readable label for the field this pipeline produces (a safe
    * semantic-type label, never the partner-controlled field name). */
   fieldLabel: string;
+  /** Suppress the in-card field-label line. Set when the host wraps this editor in a
+   * collapsible card whose header already carries the label (see the per-field card
+   * in {@link StandardizationCards}), so it is not shown twice. Defaults to showing
+   * it (the standalone layout). */
+  hideFieldLabel?: boolean;
   /** The operator's own input column the pipeline reads. */
   inputColumn: string;
   /** The ordered pipeline steps. */
@@ -87,9 +93,11 @@ export function StandardizationStepEditor({
   return (
     <Stack gap="xs">
       <div>
-        <Text size="sm" fw={600}>
-          {fieldLabel}
-        </Text>
+        {!hideFieldLabel && (
+          <Text size="sm" fw={600}>
+            {fieldLabel}
+          </Text>
+        )}
         {onInputColumnChange !== undefined &&
         (inputColumnOptions?.length ?? 0) > 1 ? (
           // More than one of the operator's columns has this field's type, so the

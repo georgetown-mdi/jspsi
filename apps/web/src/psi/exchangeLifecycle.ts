@@ -84,30 +84,27 @@ export interface AcquireContext {
  */
 export type Acquire = (context: AcquireContext) => Promise<AcquiredExchange>;
 
-/** The self-attested record and its private opening data as paired downloads.
- * A single object so the two can never be present apart (mirrors
- * {@link ExchangeResult.audit}, where the record and opening are one field). */
+/** The combined exchange-record download: the public record and its private
+ * opening packaged in one JSON file (see core's `ExchangeRecordFile`). One object
+ * and one download -- auditing is rare, so two files to track is excessive. */
 export interface RecordDownloads {
-  /** The self-attested exchange record (JSON); safe to retain or share. */
+  /** The combined exchange record (JSON: a `public` record part and a `private`
+   * opening part). Because it embeds the private opening, the whole file is as
+   * sensitive as the matched data and must be kept private. */
   recordUrl: string;
   /** Download filename for {@link recordUrl}, timestamped per exchange so
    * repeated downloads in one session accumulate an audit trail rather than
    * collide (mirrors the CLI's timestamped default path). */
   recordFileName: string;
-  /** The private opening data (JSON); as sensitive as the matched data. */
-  openingUrl: string;
-  /** Download filename for {@link openingUrl}, timestamped to match
-   * {@link recordFileName}. */
-  openingFileName: string;
 }
 
 /** Fields common to both shapes of {@link ExchangeOutputs}. */
 interface ExchangeOutputsBase {
-  /** The record and opening downloads as a single optional group, present or
-   * absent together. Absent only when building the record failed (the exchange
-   * still succeeded and the result, if any, remains available; see
-   * {@link ExchangeResult.audit}). Offered to a receiver and a helper alike -- the
-   * helper's record is produced even though it does not bind the result table. */
+  /** The combined exchange-record download, present or absent as a whole. Absent
+   * only when building the record failed (the exchange still succeeded and the
+   * result, if any, remains available; see {@link ExchangeResult.audit}). Offered
+   * to a receiver and a helper alike -- the helper's record is produced even though
+   * it does not bind the result table. */
   record?: RecordDownloads;
 }
 
@@ -137,8 +134,8 @@ interface WithheldExchangeOutputs extends ExchangeOutputsBase {
  * withheld", "neither") are unrepresentable. */
 export type ExchangeOutputs = ReceivedExchangeOutputs | WithheldExchangeOutputs;
 
-/** Pure output-generation step: build the local results file plus the record
- * and opening artifacts from the exchange result and return their URLs. May
+/** Pure output-generation step: build the local results file plus the combined
+ * exchange-record artifact from the exchange result and return their URLs. May
  * throw (classified as `"output"`); runs inside the owner after the exchange and
  * before teardown. */
 export type GenerateOutput = (

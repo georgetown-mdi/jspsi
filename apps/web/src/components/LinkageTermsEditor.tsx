@@ -33,6 +33,7 @@ import {
   assessLinkageSatisfiability,
   authoredLinkageFields,
   getDefaultLinkageTerms,
+  sanitizeForDisplay,
 } from "@psilink/core";
 
 import {
@@ -52,9 +53,9 @@ import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
 import { CleaningErrorBoundary } from "@components/CleaningErrorBoundary";
 import { DisclosureSection } from "@components/DisclosureSection";
+import { ExchangeSummary } from "@components/ExchangeSummary";
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 import { FieldCoverage } from "@components/FieldCoverage";
-import { InvitationTerms } from "@components/InvitationTerms";
 import { MetadataGrid } from "@components/MetadataGrid";
 import { StandardizationCards } from "@components/StandardizationCards";
 import { TermsImportExport } from "@components/TermsImportExport";
@@ -456,7 +457,7 @@ export function LinkageTermsEditor({
     [keys[index], keys[target]] = [keys[target], keys[index]];
     setDraft((prev) => ({ ...prev, keys }));
     setAnnouncement(
-      `Moved ${keys[target].key.name} to position ${target + 1} of ${keys.length}. ` +
+      `Moved ${sanitizeForDisplay(keys[target].key.name)} to position ${target + 1} of ${keys.length}. ` +
         "Keys earlier in the list match first.",
     );
   };
@@ -732,6 +733,10 @@ export function LinkageTermsEditor({
                         pending={nonEmptyRates !== null && ratesPending}
                       />
                     )}
+                    isFieldSilentEmpty={(output) => {
+                      const rate = nonEmptyRates?.get(output);
+                      return rate !== undefined && isSilentEmpty(rate);
+                    }}
                     onMissingField="skip"
                   />
                 </CleaningErrorBoundary>
@@ -795,6 +800,11 @@ export function LinkageTermsEditor({
                 >
                   {draft.keys.map((entry, index) => {
                     const satisfiable = keyIsSatisfiable(index);
+                    // The key name is operator-authored but can be self-imported from
+                    // a JSON/YAML document, so sanitize it for display and in
+                    // accessible names -- the same discipline ExpertKeyEditor applies
+                    // -- rather than rendering partner-influenceable text raw.
+                    const keyLabel = sanitizeForDisplay(entry.key.name);
                     return (
                       <Paper
                         key={entry.key.name}
@@ -810,7 +820,7 @@ export function LinkageTermsEditor({
                             }
                             label={
                               <Group gap="xs" wrap="nowrap">
-                                <Text size="sm">{entry.key.name}</Text>
+                                <Text size="sm">{keyLabel}</Text>
                                 <Badge
                                   size="xs"
                                   variant="light"
@@ -834,7 +844,7 @@ export function LinkageTermsEditor({
                               variant="subtle"
                               disabled={index === 0}
                               onClick={() => moveKey(index, -1)}
-                              aria-label={`Move ${entry.key.name} earlier`}
+                              aria-label={`Move ${keyLabel} earlier`}
                             >
                               <IconArrowUp size={16} />
                             </ActionIcon>
@@ -842,7 +852,7 @@ export function LinkageTermsEditor({
                               variant="subtle"
                               disabled={index === draft.keys.length - 1}
                               onClick={() => moveKey(index, 1)}
-                              aria-label={`Move ${entry.key.name} later`}
+                              aria-label={`Move ${keyLabel} later`}
                             >
                               <IconArrowDown size={16} />
                             </ActionIcon>
@@ -989,13 +999,11 @@ export function LinkageTermsEditor({
             // read-once terms are not sticky). No header to clear, so a spacing offset.
             style={{ position: "sticky", top: "var(--mantine-spacing-md)" }}
           >
-            <Paper withBorder p="md">
-              <InvitationTerms
-                linkageTerms={previewTerms}
-                perspective="proposing"
-                headingOrder={3}
-              />
-            </Paper>
+            <ExchangeSummary
+              linkageTerms={previewTerms}
+              perspective="proposing"
+              headingOrder={3}
+            />
           </Stack>
         </Grid.Col>
       </Grid>

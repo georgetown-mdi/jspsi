@@ -12,6 +12,8 @@ import { MantineProvider } from "@mantine/core";
 import { FieldCoverage } from "@components/FieldCoverage";
 import { PrepareData } from "@components/PrepareData";
 
+import { expandFieldCards } from "./fieldCards";
+
 import type { Root } from "react-dom/client";
 
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
@@ -209,7 +211,21 @@ describe("PrepareData surfaces a silent-empty collapse before launch", () => {
       .element(page.getByText("All 1 keys can match"))
       .toBeInTheDocument();
 
-    // The value-level alarm appears after the debounced sweep settles.
+    // The field card starts collapsed, so the silent-empty collapse surfaces in the
+    // always-visible card header (its body alarm is one expand down). The header
+    // marker appears after the debounced sweep settles.
+    await expect
+      .element(page.getByTestId("field-card-coverage-warning"))
+      .toBeInTheDocument();
+
+    // The full body alarm stays hidden inside the collapsed card -- the header marker
+    // is the always-visible signal until the field is expanded.
+    await expect
+      .element(page.getByTestId("coverage-silent-empty"))
+      .not.toBeVisible();
+
+    // Expanding the field reveals the full value-level alarm in the card body.
+    await expandFieldCards();
     await expect
       .element(page.getByTestId("coverage-silent-empty"))
       .toBeInTheDocument();
@@ -246,11 +262,18 @@ describe("PrepareData surfaces a silent-empty collapse before launch", () => {
       }),
     );
 
+    // The card starts collapsed; expand it to read the per-field coverage rate.
+    await expandFieldCards();
     await expect
       .element(page.getByTestId("coverage-rate"))
       .toHaveTextContent("2 of 2 rows produce a value (100%)");
+    // Full coverage raises neither the body alarm nor the always-visible header
+    // warning.
     expect(page.getByTestId("coverage-silent-empty").elements()).toHaveLength(
       0,
     );
+    expect(
+      page.getByTestId("field-card-coverage-warning").elements(),
+    ).toHaveLength(0);
   });
 });

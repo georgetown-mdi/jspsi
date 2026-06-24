@@ -7,8 +7,6 @@ import {
   Divider,
   Grid,
   Group,
-  List,
-  Modal,
   Paper,
   Select,
   Stack,
@@ -22,7 +20,6 @@ import {
   IconArrowLeft,
   IconCircleCheck,
 } from "@tabler/icons-react";
-import { useDisclosure } from "@mantine/hooks";
 
 import { assessLinkageSatisfiability, inferMetadata } from "@psilink/core";
 
@@ -45,8 +42,8 @@ import { defaultStandardizationForRows } from "@psi/advancedInvite";
 import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
 import { CleaningErrorBoundary } from "@components/CleaningErrorBoundary";
+import { ExchangeSummary } from "@components/ExchangeSummary";
 import { FieldCoverage } from "@components/FieldCoverage";
-import { InvitationTerms } from "@components/InvitationTerms";
 import { MetadataGrid } from "@components/MetadataGrid";
 import { StandardizationCards } from "@components/StandardizationCards";
 import { useNonEmptyRates } from "@components/useNonEmptyRates";
@@ -100,10 +97,10 @@ export function PrepareData({
   onBack,
 }: {
   /** The adopted (agreed) linkage terms the operator is matching against, shown
-   * read-only via {@link InvitationTerms}. */
+   * read-only via {@link ExchangeSummary}. */
   linkageTerms: LinkageTerms;
   /** The columns the invitation declared the inviter will send (its
-   * `disclosedPayloadColumns`), passed through to {@link InvitationTerms} so the
+   * `disclosedPayloadColumns`), passed through to {@link ExchangeSummary} so the
    * "what you will receive" line matches the review screen. */
   disclosedPayloadColumns?: Array<string>;
   /** The acceptor's own CSV column names, from the parsed file. */
@@ -320,9 +317,6 @@ export function PrepareData({
     return [...seen.entries()].map(([type, label]) => ({ type, label }));
   }, [verdict.unsatisfied]);
 
-  const [confirmOpen, { open: openConfirm, close: closeConfirm }] =
-    useDisclosure(false);
-
   // Remap: bind a field type to a chosen column by setting that column's semantic
   // type. The derived standardization regenerates the recommended cleaning for the
   // new binding, so a remap both makes the field satisfiable and cleans it.
@@ -342,7 +336,6 @@ export function PrepareData({
   };
 
   const launch = () => {
-    closeConfirm();
     const warning: AlertContent | undefined = partial
       ? {
           title: "Partial coverage",
@@ -528,6 +521,10 @@ export function PrepareData({
                         pending={ratesPending}
                       />
                     )}
+                    isFieldSilentEmpty={(output) => {
+                      const rate = nonEmptyRates?.get(output);
+                      return rate !== undefined && isSilentEmpty(rate);
+                    }}
                     onMissingField="throw"
                   />
                 </CleaningErrorBoundary>
@@ -553,28 +550,27 @@ export function PrepareData({
           </Stack>
         </Grid.Col>
 
-        {/* Summary column: the read-once agreed terms. Not sticky -- reference
-            material the operator reads once, and terms-only is too short to justify
-            pinning. Two columns still shorten the primary scroll (terms beside, not
-            atop). InvitationTerms supplies the column's heading via headingOrder. */}
+        {/* Summary column: the read-once agreed terms, in the shared ExchangeSummary
+            panel used on every screen. Not sticky -- reference material the operator
+            reads once, and terms-only is too short to justify pinning. Two columns
+            still shorten the primary scroll (terms beside, not atop). The summary
+            also surfaces this party's own outbound disclosure (sendColumns) as chips,
+            the standing last-look that replaces the removed confirm modal. */}
         <Grid.Col span={{ base: 12, md: 5 }}>
-          <Paper withBorder p="md">
-            <Text size="sm" fw={600} mb="xs">
-              The terms you are matching against
-            </Text>
-            <InvitationTerms
-              linkageTerms={linkageTerms}
-              disclosedPayloadColumns={disclosedPayloadColumns}
-              perspective="accepted"
-              headingOrder={3}
-            />
-          </Paper>
+          <ExchangeSummary
+            linkageTerms={linkageTerms}
+            disclosedPayloadColumns={disclosedPayloadColumns}
+            perspective="accepted"
+            headingOrder={3}
+            sendColumns={disclosed}
+          />
         </Grid.Col>
       </Grid>
 
-      {/* Sticky footer for the commit, mirroring the inviter's. Never inside a
-          collapsible section, so the modal's focus-return to "Continue" stays
-          intact. Bottom padding on the page keeps it from occluding the last card. */}
+      {/* Sticky footer for the commit, mirroring the inviter's. Bottom padding on
+          the page keeps it from occluding the last card. There is no confirm modal:
+          consent is already given on the review screen, and the live "Columns you
+          will send" chips in the summary column are the standing last-look. */}
       <Box
         style={{
           position: "sticky",
@@ -591,47 +587,13 @@ export function PrepareData({
             Reset to recommended
           </Button>
           <Button
-            onClick={openConfirm}
+            onClick={launch}
             disabled={blocked || multipleIdentifiers || !standardizationValid}
           >
-            Continue to exchange
+            Start exchange
           </Button>
         </Group>
       </Box>
-
-      <Modal
-        opened={confirmOpen}
-        onClose={closeConfirm}
-        title="Confirm what you will send"
-        centered
-      >
-        <Stack>
-          {disclosed.length === 0 ? (
-            <Text size="sm">
-              You will <strong>not</strong> send any columns to your partner.
-              Only the linkage result (which of your rows matched) is produced.
-            </Text>
-          ) : (
-            <>
-              <Text size="sm">
-                For each matched row, you will send these columns to your
-                partner:
-              </Text>
-              <List size="sm">
-                {disclosed.map((name) => (
-                  <List.Item key={name}>{name}</List.Item>
-                ))}
-              </List>
-            </>
-          )}
-          <Group justify="flex-end">
-            <Button variant="default" onClick={closeConfirm}>
-              Go back
-            </Button>
-            <Button onClick={launch}>Confirm and continue</Button>
-          </Group>
-        </Stack>
-      </Modal>
     </Stack>
   );
 }

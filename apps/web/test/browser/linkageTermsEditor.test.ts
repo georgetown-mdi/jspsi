@@ -71,7 +71,7 @@ describe("LinkageTermsEditor", () => {
     await expect.element(nameField()).toHaveValue("County Health Dept");
     // The live preview is the acceptor consent renderer in the proposing view.
     await expect
-      .element(page.getByText("Terms you are proposing"))
+      .element(page.getByText("Exchange proposal"))
       .toBeInTheDocument();
     await expect.element(generateButton()).toBeEnabled();
   });
@@ -277,6 +277,27 @@ describe("LinkageTermsEditor", () => {
       .toBeInTheDocument();
   });
 
+  test("expert keys start collapsed and reveal their element editor on toggle", async () => {
+    mount();
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    // The key header (its name toggle) is visible, but the element editor is
+    // collapsed: no "Add an element" control until the key is expanded.
+    const firstKey = page
+      .getByRole("button", { name: "SSN + LN + DOB" })
+      .first();
+    await expect.element(firstKey).toBeInTheDocument();
+    expect(
+      page.getByRole("button", { name: "Add an element" }).query(),
+    ).toBeNull();
+    // Expanding the key reveals its element editor.
+    await userEvent.click(firstKey);
+    await expect
+      .element(page.getByRole("button", { name: "Add an element" }).first())
+      .toBeInTheDocument();
+  });
+
   test("an expert-authored key survives a metadata edit after expert mode is toggled off", async () => {
     // Regression: authoring a key, turning expert mode OFF, then editing a column
     // must not silently re-derive the key list from the template and drop the
@@ -331,6 +352,58 @@ describe("LinkageTermsEditor", () => {
     await expect.element(generateButton()).toBeEnabled();
   });
 
+  test("adding a second element of the same field aliases it rather than crashing the editor", async () => {
+    // Regression: the field picker defaults a new element to the first declared
+    // field, so a fresh key's only element and the next added element both took the
+    // bare "ssn" identifier -- two elements sharing it. That fed the swap control
+    // duplicate option values, which Mantine throws on, tearing the whole editor
+    // down to the route error boundary. addElement now aliases the colliding element.
+    mount();
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    // A new key starts with a single element of the first declared field (ssn).
+    await userEvent.click(page.getByRole("button", { name: "Add a key" }));
+    // Add a second element to that new key (the last key's Add control). Without the
+    // fix this re-render throws on the duplicate swap option and never settles.
+    await userEvent.click(
+      page.getByRole("button", { name: "Add an element" }).last(),
+    );
+    // The second element is aliased (ssn_2): the key keeps unique identifiers and the
+    // editor is still standing (its presence is proof the render did not throw).
+    await expect
+      .element(page.getByRole("button", { name: "Remove element 2 (ssn_2)" }))
+      .toBeInTheDocument();
+  });
+
+  test("clearing an alias into a duplicate identifier blocks Generate instead of crashing", async () => {
+    // The swap control's options are the element identifiers; two elements sharing
+    // one would feed it duplicate option values, which Mantine throws on. addElement
+    // avoids creating that, but a hand edit can still reach it -- clearing an alias
+    // so it falls back to a field name a sibling already uses. The control must drop
+    // the duplicate option, leaving validation to block Generate, not tear the
+    // editor down.
+    mount();
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    await userEvent.click(page.getByRole("button", { name: "Add a key" }));
+    await userEvent.click(
+      page.getByRole("button", { name: "Add an element" }).last(),
+    );
+    // The new element's alias (ssn_2) is the last alias field on the page; clearing
+    // it collides its identifier with the sibling ssn element.
+    await userEvent.clear(
+      page.getByRole("textbox", { name: "Alias (optional)" }).last(),
+    );
+    // Still standing (the Add control survives), and Generate is blocked on the now
+    // schema-invalid key rather than the page being replaced by the error boundary.
+    await expect
+      .element(page.getByRole("button", { name: "Add a key" }))
+      .toBeInTheDocument();
+    await expect.element(generateButton()).toBeDisabled();
+  });
+
   test("removing an element keeps focus on that key's Add control", async () => {
     // The removed element row held focus on its trash button; without a deliberate
     // move, focus would fall to document.body. It must land on the owning key's
@@ -339,6 +412,12 @@ describe("LinkageTermsEditor", () => {
     mount();
     await userEvent.click(
       page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    // Keys start collapsed; expand the first to reach its elements. Its name toggle
+    // is the first match -- the edit rail precedes the live preview, which lists the
+    // same key.
+    await userEvent.click(
+      page.getByRole("button", { name: "SSN + LN + DOB" }).first(),
     );
     const firstAddElement = page
       .getByRole("button", { name: "Add an element" })

@@ -7,12 +7,12 @@ import { describeDecodeError } from "@psilink/core";
 import { commitAcceptance } from "@psi/acceptConsent";
 import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
-import { EDITOR_WIDTH, EXCHANGE_READING_WIDTH } from "@components/contentWidth";
 import {
   clearAcceptHandoff,
   peekAcceptHandoff,
 } from "@components/acceptHandoff";
 import { AcceptInvitationPanel } from "@components/AcceptInvitationPanel";
+import { EXCHANGE_READING_WIDTH } from "@components/contentWidth";
 import { ExchangeView } from "@components/ExchangeView";
 import { PrepareData } from "@components/PrepareData";
 
@@ -50,8 +50,9 @@ type AcceptPhase =
  * The flow is gated on consent: the review screen's "Accept and continue" is
  * disabled until consent and a name are given, and on a successful parse the
  * acquire handler re-checks {@link commitAcceptance} before advancing -- so no
- * rendezvous, key exchange, or PSI frame can be set up before consent, and the
- * dialing exchange waits for the user's explicit Start there.
+ * rendezvous, key exchange, or PSI frame can be set up before consent. Past that
+ * gate (and the prepare step) the exchange screen dials on arrival with no separate
+ * Start press, since the user has already accepted and confirmed.
  *
  * The content width (the wider reading width the dense terms want) is declared by
  * the route and supplied by the shell's container, so this page renders only its
@@ -166,15 +167,15 @@ export function AcceptInvitation() {
 
   return (
     <Paper
-      // The review and exchange screens are a single reading column, so the panel
-      // self-constrains to EXCHANGE_READING_WIDTH (centered) rather than filling the
-      // route's wide container. The "Prepare your data" editor (the same
-      // ready+preparing predicate, so the panel width cannot diverge from the phase
-      // showing) is a genuine two-column layout and self-constrains to the narrower
-      // EDITOR_WIDTH rather than the route's wide xxl container.
+      // Every decoded phase -- review, prepare, and exchange -- is a two-column
+      // layout (the consent gate, the data editor, or the run's Status beside the
+      // agreed-terms summary), so the panel fills the route's wide container. Only
+      // the pre-decode states (the decode spinner and the bad/expired-invitation
+      // error) stay a single reading column, capped to EXCHANGE_READING_WIDTH and
+      // centered.
       style={
-        decode.status === "ready" && phase.status === "preparing"
-          ? { width: EDITOR_WIDTH, marginInline: "auto" }
+        decode.status === "ready"
+          ? undefined
           : { width: EXCHANGE_READING_WIDTH, marginInline: "auto" }
       }
     >
@@ -184,9 +185,10 @@ export function AcceptInvitation() {
       <Title order={1}>Accept an invitation</Title>
       {decode.status === "ready" && phase.status === "exchange" ? (
         // The exchange screen: the acceptor arrives pre-acquired (the parsed CSV)
-        // and pre-prepared (the editor's metadata/standardization), and dials only
-        // on the explicit Start ExchangeView renders. Keyed by the secret so it
-        // never persists across a different invitation. Reload to start over.
+        // and pre-prepared (the editor's metadata/standardization), and dials on
+        // arrival (it consented and confirmed already, so no separate Start press).
+        // Keyed by the secret so it never persists across a different invitation.
+        // Reload to start over.
         <ExchangeView
           key={decode.invitation.token.sharedSecret}
           role="acceptor"

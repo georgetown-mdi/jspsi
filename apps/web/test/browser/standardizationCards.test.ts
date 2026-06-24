@@ -13,6 +13,8 @@ import { authoredLinkageFields } from "@psilink/core";
 
 import { StandardizationCards } from "@components/StandardizationCards";
 
+import { expandFieldCards } from "./fieldCards";
+
 import type { Root } from "react-dom/client";
 
 import type { Metadata, Standardization } from "@psilink/core";
@@ -79,6 +81,8 @@ describe("StandardizationCards: per-field binding and multi-field affordances", 
 
   test("the input-column binding is a labelled combobox when the type has more than one column", async () => {
     render(oneNameField);
+    // Cards start collapsed to their label; expand to reach the binding control.
+    await expandFieldCards();
     // The shared StandardizationStepEditor renders the binding as a Mantine Select
     // named by its label; reachable by role + accessible name on both pages.
     await expect
@@ -101,6 +105,7 @@ describe("StandardizationCards: per-field binding and multi-field affordances", 
 
   test("no add affordance when onAddField is omitted (the acceptor case)", async () => {
     render(oneNameField);
+    await expandFieldCards();
     // Wait for the cards to commit before asserting the affordance's absence.
     await expect
       .element(page.getByRole("combobox", { name: "Column to clean" }))
@@ -122,6 +127,8 @@ describe("StandardizationCards: per-field binding and multi-field affordances", 
     ];
     const onRemoveField = vi.fn<(output: string) => void>();
     render(twoNameFields, { onAddField: () => {}, onRemoveField });
+    // Cards start collapsed; expand them to reach the per-field remove controls.
+    await expandFieldCards();
     // One remove control per same-typed field (two), none for the lone date.
     await expect
       .poll(
@@ -149,6 +156,7 @@ describe("StandardizationCards: per-field binding and multi-field affordances", 
     ];
     // A same-typed pair, but no onRemoveField supplied: the affordance never renders.
     render(twoNameFields);
+    await expandFieldCards();
     // Wait for the cards to commit before asserting the affordance's absence.
     await expect
       .element(page.getByRole("combobox", { name: "Column to clean" }).first())

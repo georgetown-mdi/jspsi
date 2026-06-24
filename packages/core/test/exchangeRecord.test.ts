@@ -12,6 +12,7 @@ import {
   parseExchangeRecord,
   parseOpeningData,
   serializeExchangeRecord,
+  serializeExchangeRecordFile,
   serializeOpeningData,
   verifyCommitmentOpening,
   verifyRecordCommitments,
@@ -825,6 +826,20 @@ describe("serialize / parse", () => {
     const parsed = parseOpeningData(JSON.parse(serializeOpeningData(opening)));
     expect(parsed).toEqual(opening);
     expect(parsed.version).toBe(EXCHANGE_OPENING_VERSION);
+  });
+
+  test("the combined record file packages the record and opening under public/private", async () => {
+    const { record, opening } = await buildExchangeRecord(
+      baseInputs,
+      fixedRandomness,
+    );
+    const parsed = JSON.parse(
+      serializeExchangeRecordFile({ public: record, private: opening }),
+    ) as { public: unknown; private: unknown };
+    // The `public` part is the shareable record and the `private` part the
+    // opening; each validates through its own parser and round-trips intact.
+    expect(parseExchangeRecord(parsed.public)).toEqual(record);
+    expect(parseOpeningData(parsed.private)).toEqual(opening);
   });
 
   test("parseExchangeRecord rejects an unrecognized version", async () => {

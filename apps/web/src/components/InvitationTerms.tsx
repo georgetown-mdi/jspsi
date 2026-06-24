@@ -13,7 +13,11 @@ import {
 
 import { IconChevronRight } from "@tabler/icons-react";
 
+import { sanitizeForDisplay } from "@psilink/core";
+
 import { summarizeInvitation } from "@psi/invitationSummary";
+
+import { ColumnChips } from "@components/ColumnChips";
 
 import type { ReactNode, Ref } from "react";
 
@@ -214,14 +218,15 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
 }
 
 /**
- * Renders the inviter's linkage terms decoded from an invitation for review. Each
- * linkage key is its own default-collapsed disclosure under "Records are matched
- * on": the always-visible header is the key name and a short derived one-liner of
- * the fields it matches on (each carrying a terse breadth marker -- "(partial)",
- * "(fuzzy)" -- when its element loosens matching), and the expanded body holds the
- * per-element transform/swap/fuzzy detail. The remaining dense detail (personal-
- * data constraints, payload columns, legal agreement, and dedup notes) sits behind
- * a single default-collapsed "Other details" disclosure. The matching method and
+ * Renders the inviter's linkage terms decoded from an invitation for review. The
+ * matching list sits behind a default-collapsed "Matching strategies" disclosure;
+ * inside it each linkage key is its own further default-collapsed disclosure, whose
+ * header is the key name and a short derived one-liner of the fields it matches on
+ * (each carrying a terse breadth marker -- "(partial)", "(fuzzy)" -- when its
+ * element loosens matching), and whose expanded body holds the per-element
+ * transform/swap/fuzzy detail. The remaining dense detail (personal-data
+ * constraints, payload columns, legal agreement, and dedup notes) sits behind a
+ * single default-collapsed "Other details" disclosure. The matching method and
  * result sharing stay always-visible.
  *
  * Two facts whose detail lives in that disclosure also carry an always-visible
@@ -231,14 +236,19 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
  * fixed-copy flag). Only the presence is surfaced -- the column list and the
  * agreement text stay in Details, not duplicated into the core.
  *
- * `perspective` chooses only the heading and intro copy for the three contexts
- * this renders in: the acceptor `review`ing a partner's proposal (pre-consent),
- * the acceptor viewing the terms it has `accepted` (during the run, so the copy is
+ * `perspective` selects the heading and intro copy for the three contexts this
+ * renders in -- the acceptor `review`ing a partner's proposal (pre-consent), the
+ * acceptor viewing the terms it has `accepted` (during the run, so the copy is
  * past-tense rather than "proposes"), and the inviter looking at the terms it is
- * `proposing` (its own identity, so it is not labelled "Invitation from <self>").
- * The terms body is identical for all three. `headingOrder` sets only the
- * heading's semantic level (its visual size is fixed), so the outline nests
- * correctly under the page's `h1` (acceptor) or section `h2` (inviter).
+ * `proposing` (its own identity, so it is not labelled "Invitation from <self>")
+ * -- plus the few viewer-centric blocks whose framing depends on who is reading:
+ * Result sharing and the payload send/receive copy read first-person for each
+ * party, and the inviter's `proposing` preview surfaces its sent columns as chips
+ * above "Other details" (so they are not also repeated inside it). The matching
+ * keys and the rest of the body are identical across all three. `headingOrder`
+ * sets only the heading's semantic level (its visual size is fixed), so the
+ * outline nests correctly under the page's `h1` (acceptor) or section `h2`
+ * (inviter).
  *
  * All partner-controlled free text is sanitized for display by
  * {@link summarizeInvitation}, mirroring the CLI's `displayInvitation`: the
@@ -250,6 +260,7 @@ export function InvitationTerms({
   linkageTerms,
   expires,
   disclosedPayloadColumns,
+  outboundColumns,
   perspective = "review",
   headingOrder = 2,
   headingRef,
@@ -263,8 +274,20 @@ export function InvitationTerms({
    * authored `payload.send`; absent for the inviter's pre-mint "proposing"
    * preview and older tokens, which fall back to `payload.send`. */
   disclosedPayloadColumns?: Array<string>;
-  /** Which context this renders in. Changes only the heading and intro copy; the
-   * body is identical. */
+  /** This viewer's OWN outbound disclosure: the columns it will send to its
+   * partner for matched records. Distinct from {@link disclosedPayloadColumns}
+   * (what the INVITER sends). Rendered as chips in the always-visible core, just
+   * above "Other details" -- the same slot the inviter's "proposing" send block
+   * uses -- so the disclosure sits with the agreed terms rather than after the
+   * whole panel. The acceptor passes its live metadata disclosure here; the inviter
+   * does not (its own send already renders from `payload.send` under "proposing").
+   * `[]` renders the explicit "no columns are sent" line; undefined renders nothing
+   * (the set is not yet known -- e.g. the review screen before a file is chosen). */
+  outboundColumns?: Array<string>;
+  /** Which context this renders in. Drives the heading and intro copy and the
+   * viewer-centric blocks (Result sharing, the payload send/receive framing, and
+   * the inviter-only sent-columns chips above "Other details"); the matching keys
+   * and the rest of the body are identical. */
   perspective?: "review" | "accepted" | "proposing";
   /** Semantic heading level (its visual size is fixed at the h2 scale), so the
    * heading nests correctly under its container -- h2 below the acceptor page's
@@ -299,30 +322,43 @@ export function InvitationTerms({
   // Stable id linking the disclosure toggle (aria-controls) to its panel; useId
   // keeps it consistent across SSR and hydration.
   const detailsId = useId();
-  // Associates the per-key disclosure list with its "Records are matched on"
-  // caption, so assistive tech announces the keys as a named group.
+  // The whole matching list is itself a default-collapsed "Matching strategies"
+  // disclosure; this is its toggle state, the id its aria-controls points at, and
+  // the id of the always-visible field summary associated as the toggle's
+  // description (the same aria-describedby pattern each per-key disclosure uses).
+  const [matchingOpen, setMatchingOpen] = useState(false);
+  const matchingPanelId = useId();
+  const matchingSublineId = useId();
+  // Associates the per-key disclosure list with its "Matching strategies" caption,
+  // so assistive tech announces the keys as a named group.
   const matchedOnLabelId = useId();
   return (
     <Stack gap="sm">
       <Title order={headingOrder} size="h2" ref={headingRef} tabIndex={-1}>
         {perspective === "proposing"
-          ? "Terms you are proposing"
+          ? "Exchange proposal"
           : `Invitation from ${summary.invitingParty}`}
       </Title>
       <Text size="sm" c="dimmed">
         {perspective === "proposing"
-          ? "Your partner must review and consent to these terms before any data is exchanged."
+          ? "Your partner must review and consent to these details before any data is exchanged."
           : perspective === "accepted"
-            ? "These are the terms you consented to."
-            : "These are the terms your partner proposes for linking your records."}
+            ? "These are the exchange details."
+            : "These are the details your partner proposes for linking your records."}
       </Text>
 
       <Stack gap="xs">
         <Term label="Matching method">
           <Text size="sm">
-            {summary.algorithm === "psi-c"
-              ? "Only the number of records you have in common is revealed, not which records match."
-              : "The shared identifiers of records you have in common are revealed to whoever receives the result."}
+            {summary.algorithm === "psi-c" ? (
+              "Only the number of records you have in common is revealed, not which records match."
+            ) : (
+              <>
+                The shared identifiers of records you have in common are
+                revealed to whoever receives the result.{" "}
+                <strong>PII is not directly revealed.</strong>
+              </>
+            )}
           </Text>
           {/* psi-c is a disclosure guarantee: flag a proposed count-only setting
               the run does not yet honor, so the line above cannot read as in
@@ -336,21 +372,60 @@ export function InvitationTerms({
           )}
         </Term>
 
+        {/* The matching list as a default-collapsed disclosure, mirroring the
+            per-key and "Other details" disclosures below: aria-expanded +
+            aria-controls on the toggle, the id on the always-mounted wrapper (not
+            the Collapse panel) so it survives Mantine's reduced-motion unmount, and
+            the per-key list hidden from assistive tech + the tab order while closed.
+            The toggle text doubles as the list's group label (matchedOnLabelId). */}
         <Stack gap={2}>
-          <Text size="sm" fw={600} id={matchedOnLabelId}>
-            Records are matched on
-          </Text>
+          <UnstyledButton
+            onClick={() => setMatchingOpen((open) => !open)}
+            aria-expanded={matchingOpen}
+            aria-controls={matchingPanelId}
+            aria-describedby={
+              summary.matchedFields.length > 0 ? matchingSublineId : undefined
+            }
+          >
+            <Group gap={4}>
+              <IconChevronRight
+                size={16}
+                aria-hidden
+                style={{
+                  transform: matchingOpen ? "rotate(90deg)" : "rotate(0deg)",
+                  transition: "transform 150ms ease",
+                }}
+              />
+              <Text size="sm" fw={600} id={matchedOnLabelId}>
+                Matching strategies
+              </Text>
+            </Group>
+          </UnstyledButton>
+          {/* The always-visible field summary: WHICH fields the keys match on,
+              kept outside the collapse so the single fact consent most depends on
+              is legible without expanding the detail. The compact field labels and
+              the deduped order are derived (and sanitized) by summarizeInvitation;
+              the per-key grouping and breadth markers stay one expand down. */}
+          {summary.matchedFields.length > 0 && (
+            <Text id={matchingSublineId} size="sm">
+              Matching on {summary.matchedFields.join(", ")}.
+            </Text>
+          )}
           {/* A labelled list of per-key disclosures: each key's collapsed header
-              (name + derived field one-liner) is always visible, its rule detail
-              one expand down. role=list/listitem (not Mantine List.Item, whose
-              inline span body cannot hold the disclosure's flow content) so AT
-              announces the set; keyed by index -- the list is static and key names
-              are not unique once sanitized. */}
-          <Stack gap="xs" role="list" aria-labelledby={matchedOnLabelId}>
-            {summary.linkageKeys.map((key, index) => (
-              <MatchKeyDisclosure key={index} summary={key} />
-            ))}
-          </Stack>
+              (name + derived field one-liner), its rule detail one further expand
+              down. role=list/listitem (not Mantine List.Item, whose inline span body
+              cannot hold the disclosure's flow content) so AT announces the set;
+              keyed by index -- the list is static and key names are not unique once
+              sanitized. */}
+          <div id={matchingPanelId}>
+            <Collapse expanded={matchingOpen}>
+              <Stack gap="xs" role="list" aria-labelledby={matchedOnLabelId}>
+                {summary.linkageKeys.map((key, index) => (
+                  <MatchKeyDisclosure key={index} summary={key} />
+                ))}
+              </Stack>
+            </Collapse>
+          </div>
         </Stack>
 
         {/* Viewer-centric, so each party reads its OWN outcome first-person rather
@@ -410,6 +485,63 @@ export function InvitationTerms({
               </Text>
             )}
           </Stack>
+        )}
+
+        {/* The columns this party sends to its partner for matched records,
+            surfaced as chips in the always-visible core -- right above the "Other
+            details" disclosure -- rather than only inside it, reusing the same chip
+            visual ({@link ColumnChips}) the home page's default-exchange-columns
+            surface uses. Only the inviter's own "proposing" preview shows it here;
+            the acceptor's review/accepted views keep the send list inline under
+            "Other details". Driven by summary.payload.send (already sanitized by
+            summarizeInvitation), so it cannot drift from what the invitation
+            declares. The send is an eager, definite declaration under "proposing"
+            (the editor preview derives it from the disclosure grid, and both web
+            mint paths author it to the disclosed set), so an empty set reads as a
+            positive "no columns" confirmation rather than an unknown. */}
+        {perspective === "proposing" && (
+          <Term label="Columns sent to your partner">
+            {summary.payload !== undefined &&
+            summary.payload.send.length > 0 ? (
+              <ColumnChips
+                columns={summary.payload.send}
+                label="Columns sent to your partner"
+              />
+            ) : (
+              <Text size="sm" c="dimmed">
+                No columns are sent to your partner; your file is used only to
+                find matches.
+              </Text>
+            )}
+          </Term>
+        )}
+
+        {/* The acceptor's OWN outbound disclosure, in the same always-visible slot
+            as the inviter's proposing block above, so "Columns you will send" sits
+            with the agreed terms and ABOVE "Other details" rather than after the
+            whole panel. Only the acceptor passes outboundColumns; the inviter's own
+            send already renders from its proposing block. */}
+        {perspective !== "proposing" && outboundColumns !== undefined && (
+          <Term label="Columns you will send to your partner">
+            {outboundColumns.length > 0 ? (
+              // These are the operator's OWN CSV headers (from the live metadata
+              // disclosure), not a sanitized summary value, so sanitize them for
+              // display like every other column-name surface (ColumnChips renders
+              // verbatim) -- a header carrying bidi/zero-width/homoglyph characters
+              // must not misrepresent to the operator what leaves their machine.
+              <ColumnChips
+                columns={outboundColumns.map((name) =>
+                  sanitizeForDisplay(name),
+                )}
+                label="Columns you will send to your partner"
+              />
+            ) : (
+              <Text size="sm" c="dimmed">
+                No columns are sent to your partner; only the linkage result
+                (which of your rows matched) is produced.
+              </Text>
+            )}
+          </Term>
         )}
       </Stack>
 
@@ -478,58 +610,63 @@ export function InvitationTerms({
               </Stack>
             </Term>
 
-            {summary.payload !== undefined && (
-              <Term label="Additional data for matched records">
-                {/* Viewer-centric, like Result sharing: under "proposing" the
-                    inviter reads its OWN send/receive first-person ("You will
-                    send"), while the acceptor reads them as the partner's ("Your
-                    partner will send"). The columns are the same either way. */}
-                {/* Shown whenever the send set is a definite declaration --
+            {/* Renders only when it has content: the acceptor's send list (hidden
+                in the inviter's "proposing" preview, which shows its send as chips
+                above) or a non-empty receive list. The guard mirrors the two inner
+                conditions below so the Term never renders an empty label -- which it
+                would in the inviter's preview, where the send block is suppressed
+                and receive is usually empty. */}
+            {summary.payload !== undefined &&
+              ((summary.payload.sendDeclared && perspective !== "proposing") ||
+                summary.payload.receive.length > 0) && (
+                <Term label="Additional data for matched records">
+                  {/* Viewer-centric, like Result sharing: the acceptor reads the
+                    inviter's send as the partner's ("Your partner will send"). The
+                    inviter's own send is surfaced as chips above "Other details"
+                    instead, so it is suppressed here under "proposing". */}
+                  {/* Shown whenever the send set is a definite declaration --
                     including the empty set, rendered "(none)" so the strict
                     "receive nothing" lock-in is visible rather than inferred from a
                     missing line (the CLI's displayInvitation shows the same). A
                     lazy send (not declared) is omitted instead. */}
-                {summary.payload.sendDeclared && (
-                  <Stack gap={2}>
-                    <Text size="sm">
-                      {perspective === "proposing"
-                        ? "You will send:"
-                        : "Your partner will send:"}
-                    </Text>
-                    {summary.payload.send.length > 0 ? (
-                      // One column per item rather than a joined string: a
-                      // partner-controlled column name may contain the separator,
-                      // which joined text would render as spurious extra columns.
-                      // Keyed by index -- column order is fixed and a sanitized
-                      // name is not unique.
+                  {summary.payload.sendDeclared &&
+                    perspective !== "proposing" && (
+                      <Stack gap={2}>
+                        <Text size="sm">Your partner will send:</Text>
+                        {summary.payload.send.length > 0 ? (
+                          // One column per item rather than a joined string: a
+                          // partner-controlled column name may contain the separator,
+                          // which joined text would render as spurious extra columns.
+                          // Keyed by index -- column order is fixed and a sanitized
+                          // name is not unique.
+                          <List size="sm" withPadding listStyleType="circle">
+                            {summary.payload.send.map((column, index) => (
+                              <List.Item key={index}>{column}</List.Item>
+                            ))}
+                          </List>
+                        ) : (
+                          <Text size="sm" c="dimmed">
+                            (none)
+                          </Text>
+                        )}
+                      </Stack>
+                    )}
+                  {summary.payload.receive.length > 0 && (
+                    <Stack gap={2}>
+                      <Text size="sm">
+                        {perspective === "proposing"
+                          ? "You request from your partner:"
+                          : "Your partner requests from you:"}
+                      </Text>
                       <List size="sm" withPadding listStyleType="circle">
-                        {summary.payload.send.map((column, index) => (
+                        {summary.payload.receive.map((column, index) => (
                           <List.Item key={index}>{column}</List.Item>
                         ))}
                       </List>
-                    ) : (
-                      <Text size="sm" c="dimmed">
-                        (none)
-                      </Text>
-                    )}
-                  </Stack>
-                )}
-                {summary.payload.receive.length > 0 && (
-                  <Stack gap={2}>
-                    <Text size="sm">
-                      {perspective === "proposing"
-                        ? "You request from your partner:"
-                        : "Your partner requests from you:"}
-                    </Text>
-                    <List size="sm" withPadding listStyleType="circle">
-                      {summary.payload.receive.map((column, index) => (
-                        <List.Item key={index}>{column}</List.Item>
-                      ))}
-                    </List>
-                  </Stack>
-                )}
-              </Term>
-            )}
+                    </Stack>
+                  )}
+                </Term>
+              )}
 
             {summary.legalAgreement !== undefined && (
               <Term label="Legal agreement">

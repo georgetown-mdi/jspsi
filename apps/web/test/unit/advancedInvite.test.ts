@@ -5,6 +5,7 @@ import {
   MAX_NAME_LENGTH,
   assertPayloadSendDisclosed,
   assessLinkageSatisfiability,
+  authoredLinkageFields,
   canonicalString,
   deriveAcceptedLinkageTerms,
   getDefaultLinkageTerms,
@@ -1494,5 +1495,66 @@ describe("draftFromTerms degrades gracefully on an unsupplyable key", () => {
       });
       expect(safeParseLinkageTerms(builtAlone).success).toBe(entry.enabled);
     }
+  });
+});
+
+describe("matchable columns the default keys omit are pickable as linkage fields", () => {
+  const COLUMNS = [
+    "ssn",
+    "first_name",
+    "last_name",
+    "date_of_birth",
+    "zipcode",
+  ];
+
+  test("a zip_code column roled used-to-match becomes a declared field for the picker", () => {
+    // The reported gap: a column inferred as zip_code (role linkage) was absent from
+    // the expert key editor's field picker, because zip_code is not one of the
+    // default-key field types. The picker's options are authoredLinkageFields over
+    // the draft's metadata + standardization, so assert that source now declares it.
+    const { draft } = seedAdvancedInvite("Org", COLUMNS);
+    expect(draft.metadata.find((c) => c.name === "zipcode")).toMatchObject({
+      type: "zip_code",
+      role: "linkage",
+    });
+    const declared = authoredLinkageFields(
+      draft.metadata,
+      draft.standardization,
+    );
+    expect(declared.some((f) => f.type === "zip_code")).toBe(true);
+  });
+
+  test("a key matching on the zip_code field builds, validates, and is satisfiable", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", COLUMNS);
+    const zipField = authoredLinkageFields(
+      draft.metadata,
+      draft.standardization,
+    ).find((f) => f.type === "zip_code");
+    expect(zipField).toBeDefined();
+    // Author a key that matches solely on the zip_code field, the way an operator
+    // would in expert mode once the field is offered.
+    const withZipKey: AdvancedInviteDraft = {
+      ...draft,
+      keys: [
+        {
+          key: { name: "ZIP", elements: [{ field: zipField!.name }] },
+          enabled: true,
+        },
+      ],
+    };
+    const terms = buildAdvancedTerms(withZipKey);
+    // The zip_code field rides into the built terms (referenced by the enabled key),
+    // the terms are schema-valid, and the key resolves to the present zip_code
+    // column -- so the editor clears it for generation.
+    expect(terms.linkageFields.some((f) => f.type === "zip_code")).toBe(true);
+    expect(safeParseLinkageTerms(terms).success).toBe(true);
+    const { satisfiableKeyCount } = assessLinkageSatisfiability(
+      seed.columns,
+      terms,
+      withZipKey.standardization,
+      withZipKey.metadata,
+    );
+    expect(satisfiableKeyCount).toBe(1);
+    expect(validateAdvancedInvite(withZipKey, seed).canGenerate).toBe(true);
   });
 });

@@ -344,6 +344,14 @@ export interface InvitationSummary {
    * carrying its ordered elements and matching rules.
    */
   linkageKeys: Array<InvitationKeySummary>;
+  /**
+   * The unique fields the linkage keys match on, in compact-label form and order
+   * of first appearance -- no breadth markers, no per-key grouping. Surfaced
+   * always-visible (above the default-collapsed matching detail) so an acceptor
+   * sees WHICH data is matched on without expanding it. A field reference that
+   * does not resolve to a declared type falls back to its sanitized raw name.
+   */
+  matchedFields: Array<string>;
   /** PII fields involved, each with its label and declared constraints. */
   linkageFields: Array<InvitationFieldSummary>;
   /** Present only when the inviter attached a legal agreement. */
@@ -786,6 +794,26 @@ export function summarizeInvitation(
   // them (matching is currently hard-wired to one-to-one, and fuzzy expansion is
   // unimplemented). Wiring both into the run is tracked on the product board; the
   // displayed terms are what the acceptor agrees to.
+  // The unique fields the keys match on, compact and deduped in order of first
+  // appearance, for the always-visible consent line above the collapsed matching
+  // detail. Derived from the keys' elements (the fields actually matched on), not
+  // the declared field list, through the same compact-label/sanitize path the
+  // per-key sublines use; markers and per-key grouping stay in the disclosure.
+  const matchedFields: Array<string> = [];
+  const seenMatchedFields = new Set<string>();
+  for (const key of terms.linkageKeys) {
+    for (const element of key.elements) {
+      const type = fieldByName.get(element.field);
+      const label =
+        type !== undefined
+          ? COMPACT_FIELD_TYPE_LABELS[type]
+          : sanitizeForDisplay(element.field);
+      if (seenMatchedFields.has(label)) continue;
+      seenMatchedFields.add(label);
+      matchedFields.push(label);
+    }
+  }
+
   const summary: InvitationSummary = {
     invitingParty: sanitizeForDisplay(terms.identity),
     algorithm: terms.algorithm,
@@ -795,6 +823,7 @@ export function summarizeInvitation(
     deduplicate: terms.deduplicate,
     deduplicateApplied: APPLIED_SETTINGS.deduplicate,
     linkageKeys: terms.linkageKeys.map((key) => summarizeKey(key, fieldByName)),
+    matchedFields,
     linkageFields,
   };
 

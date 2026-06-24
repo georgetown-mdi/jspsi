@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 
-import { Button, Group, Paper, Stack } from "@mantine/core";
-import { IconPlus } from "@tabler/icons-react";
+import { Button, Group, Paper, Stack, Text } from "@mantine/core";
+import { IconAlertCircle, IconPlus } from "@tabler/icons-react";
 
 import { SEMANTIC_TYPE_LABELS } from "@psi/metadataEditing";
 
@@ -33,11 +33,13 @@ import type { ReactNode } from "react";
  * stored override's input against the current binding; passing any other notion of
  * input would silently drop the operator's edit on the next render.
  *
- * Each card stacks the step editor over an always-visible coverage readout (the
- * host's {@link renderCoverage}, the silent-empty safety signal) and a collapsible
- * sample before/after preview (a design-time aid, collapsed by default so a section
- * of many cards is not a wall). Add/remove-field affordances render only when the
- * matching callback is supplied (the inviter, in expert mode); the acceptor omits
+ * Each card is collapsed by default to its semantic-type label, so a section of many
+ * fields reads as a scannable index; expanding reveals the step editor, the coverage
+ * readout (the host's {@link renderCoverage}, the silent-empty safety signal), and a
+ * further-collapsible before/after sample preview. A silent-empty collapse
+ * ({@link isFieldSilentEmpty}) is flagged in the collapsed header too, so the safety
+ * signal is not hidden with the body. Add/remove-field affordances render only when
+ * the matching callback is supplied (the inviter, in expert mode); the acceptor omits
  * them. The field LABEL is always the safe semantic-type label, never the
  * partner-controlled field name.
  */
@@ -51,6 +53,7 @@ export function StandardizationCards({
   onAddField,
   onRemoveField,
   renderCoverage,
+  isFieldSilentEmpty,
   onMissingField,
 }: {
   /** The effective standardization: one transformation per declared field. */
@@ -87,6 +90,11 @@ export function StandardizationCards({
    * not a boolean, so the worker-backed hook stays out of this presentational
    * component. */
   renderCoverage?: (output: string) => ReactNode;
+  /** Whether a field's whole-file coverage is a silent-empty collapse, so the card
+   * shows a compact warning in its collapsed header (the body alarm renders through
+   * {@link renderCoverage}). A predicate, not a node, for the same reason: the
+   * worker-backed rates stay in the host. */
+  isFieldSilentEmpty?: (output: string) => boolean;
   /** What to do when a transformation's output does not resolve to a declared field:
    * `"skip"` (the inviter -- a transformation bound to an ignored/non-matchable column
    * declares none) or `"throw"` (the acceptor -- every output is a declared field, so
@@ -179,6 +187,7 @@ export function StandardizationCards({
               onStepsChange(transformation.output, transformation.input, next)
             }
             coverage={renderCoverage?.(transformation.output)}
+            silentEmpty={isFieldSilentEmpty?.(transformation.output) ?? false}
             // Removing is offered only for an added same-typed field, so the
             // recommended single field per type cannot be removed by accident.
             onRemove={
@@ -209,10 +218,14 @@ export function StandardizationCards({
   );
 }
 
-/** One field's card: the step editor, the always-visible coverage readout, and a
- * collapsible sample preview. The preview holds no focusable controls, so its
- * collapse cannot strand focus; the always-visible coverage above it is the
- * silent-empty safety signal regardless of the preview's state. */
+/** One field's card: collapsed by default to its semantic-type label, so a long
+ * list of fields reads as a scannable index. Expanding reveals the step editor, the
+ * coverage readout, and a further-collapsible sample preview. When the field's
+ * whole-file coverage is a silent-empty collapse, a compact warning is shown in the
+ * collapsed header (the card's `summary`), so the safety signal is not buried while
+ * the body is closed -- the full coverage alarm sits inside, and the editor-wide
+ * live region announces it for assistive tech. The card header carries the type
+ * label, so the step editor's own label is suppressed (`hideFieldLabel`). */
 function StandardizationCard({
   field,
   inputColumn,
@@ -222,6 +235,7 @@ function StandardizationCard({
   onInputColumnChange,
   onStepsChange,
   coverage,
+  silentEmpty,
   onRemove,
 }: {
   field: LinkageField;
@@ -232,44 +246,80 @@ function StandardizationCard({
   onInputColumnChange: (column: string) => void;
   onStepsChange: (steps: Array<StandardizationStep>) => void;
   coverage: ReactNode;
+  /** Whether this field's whole-file coverage is a silent-empty collapse; shown as a
+   * compact warning in the collapsed card header so it is not hidden with the body. */
+  silentEmpty: boolean;
   onRemove?: () => void;
 }) {
+  const [cardOpen, setCardOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   return (
     <Paper withBorder p="md">
-      <Stack gap="sm">
-        <StandardizationStepEditor
-          fieldLabel={SEMANTIC_TYPE_LABELS[field.type]}
-          inputColumn={inputColumn}
-          steps={steps}
-          inputColumnOptions={inputColumnOptions}
-          onInputColumnChange={onInputColumnChange}
-          onStepsChange={onStepsChange}
-        />
-        {/* Always-visible full-CSV coverage: the silent-empty safety net. */}
-        {coverage}
-        {/* The before/after sample preview: a design-time aid, collapsed by default
-            so a section of many cards stays compact. */}
-        <DisclosureSection
-          label="Preview a sample of your rows"
-          open={previewOpen}
-          onToggle={setPreviewOpen}
-        >
-          <StandardizationPreview
-            field={field}
+      <DisclosureSection
+        label={SEMANTIC_TYPE_LABELS[field.type]}
+        open={cardOpen}
+        onToggle={setCardOpen}
+        toggleTestId="field-card-toggle"
+        // Shown beside the label only while collapsed (DisclosureSection's summary
+        // slot), so a silent-empty field is flagged without expanding the card. The
+        // marker is inline (a span, not a block) so it nests validly in the summary's
+        // text wrapper; it is aria-hidden because the editor-wide live region already
+        // announces the collapse.
+        summary={
+          silentEmpty ? (
+            <Text
+              span
+              c="red"
+              fw={500}
+              aria-hidden
+              data-testid="field-card-coverage-warning"
+            >
+              <IconAlertCircle
+                size={14}
+                style={{ verticalAlign: "text-bottom" }}
+                aria-hidden
+              />{" "}
+              No rows produce a value
+            </Text>
+          ) : undefined
+        }
+      >
+        <Stack gap="sm" pt="sm">
+          <StandardizationStepEditor
+            fieldLabel={SEMANTIC_TYPE_LABELS[field.type]}
+            hideFieldLabel
             inputColumn={inputColumn}
             steps={steps}
-            rawRows={rawRows}
+            inputColumnOptions={inputColumnOptions}
+            onInputColumnChange={onInputColumnChange}
+            onStepsChange={onStepsChange}
           />
-        </DisclosureSection>
-        {onRemove !== undefined && (
-          <Group justify="flex-end">
-            <Button variant="subtle" color="red" size="xs" onClick={onRemove}>
-              Remove this field
-            </Button>
-          </Group>
-        )}
-      </Stack>
+          {/* Full-CSV coverage, visible once the card is open: the silent-empty
+              safety net (also flagged in the collapsed card header). */}
+          {coverage}
+          {/* The before/after sample preview: a design-time aid, collapsed by default
+              so an opened card stays compact. */}
+          <DisclosureSection
+            label="Preview a sample of your rows"
+            open={previewOpen}
+            onToggle={setPreviewOpen}
+          >
+            <StandardizationPreview
+              field={field}
+              inputColumn={inputColumn}
+              steps={steps}
+              rawRows={rawRows}
+            />
+          </DisclosureSection>
+          {onRemove !== undefined && (
+            <Group justify="flex-end">
+              <Button variant="subtle" color="red" size="xs" onClick={onRemove}>
+                Remove this field
+              </Button>
+            </Group>
+          )}
+        </Stack>
+      </DisclosureSection>
     </Paper>
   );
 }

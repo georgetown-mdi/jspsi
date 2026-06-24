@@ -18,6 +18,8 @@ import {
 } from "@components/acceptHandoff";
 import { AcceptInvitation } from "@components/AcceptInvitation";
 
+import { expandFieldCards } from "./fieldCards";
+
 import type { Root } from "react-dom/client";
 
 import type { InvitationToken, LinkageTerms } from "@psilink/core";
@@ -317,7 +319,28 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
       .toBeInTheDocument();
   }
 
-  test("a satisfiable file reaches the exchange after Continue and Confirm, threading the edited spec", async () => {
+  test("the editor's side panel is the shared exchange summary and lists the sent columns as chips", async () => {
+    window.location.hash = await encodeAcceptToken();
+    mountAcceptRoute();
+    // `notes` is the unrecognized column inferred as payload, so it is the one this
+    // party will send.
+    await reachEditor(csvFile("first_name,last_name,notes\nAlice,Smith,vip\n"));
+    // The agreed terms sit in the shared ExchangeSummary panel (the side column,
+    // mirroring the inviter's Advanced-options layout); for the acceptor the panel's
+    // terms heading names the inviter.
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+    // The columns this party will send are surfaced there as a chip list (named for
+    // assistive tech), with `notes` among the chips.
+    const sendChips = page.getByRole("list", {
+      name: "Columns you will send to your partner",
+    });
+    await expect.element(sendChips).toBeInTheDocument();
+    await expect.element(sendChips.getByText("notes")).toBeInTheDocument();
+  });
+
+  test("a satisfiable file reaches the exchange on Start exchange, threading the edited spec", async () => {
     window.location.hash = await encodeAcceptToken();
     mountAcceptRoute();
     await expect
@@ -325,25 +348,23 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
       .toBeInTheDocument();
 
     // first_name + last_name satisfy both keys; the extra unrecognized `notes`
-    // column is inferred as payload, so the disclosure summary names exactly it. (A
+    // column is inferred as payload, so the send-column chips name exactly it. (A
     // recognized type such as `zip_code` would infer as linkage and NOT be sent.)
     await reachEditor(csvFile("first_name,last_name,notes\nAlice,Smith,vip\n"));
     await expect
-      .element(page.getByText("Columns sent to your partner: notes."))
+      .element(
+        page
+          .getByRole("list", { name: "Columns you will send to your partner" })
+          .getByText("notes"),
+      )
       .toBeInTheDocument();
 
-    // Continue opens the confirmation, which lists the disclosed column; only
-    // confirming mounts the exchange.
-    await userEvent.click(
-      page.getByRole("button", { name: "Continue to exchange" }),
-    );
-    await expect
-      .element(page.getByText("Confirm what you will send"))
-      .toBeInTheDocument();
+    // "Start exchange" launches directly: the old "confirm what you will send"
+    // modal is gone (consent was given on the review screen, and the live send
+    // chips above are the standing last-look), so the click is the only step before
+    // the exchange mounts.
     expect(exchangeMounted()).toBe(false);
-    await userEvent.click(
-      page.getByRole("button", { name: "Confirm and continue" }),
-    );
+    await userEvent.click(page.getByRole("button", { name: "Start exchange" }));
 
     await expect
       .element(page.getByTestId("exchange-mounted"))
@@ -402,12 +423,16 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
       .toBeInTheDocument();
 
     // Reach the editor with a first file; the unrecognized `comment` column is the
-    // inferred payload.
+    // inferred payload, so it is the lone send-column chip.
     await reachEditor(
       csvFile("first_name,last_name,comment\nAlice,Smith,ok\n"),
     );
     await expect
-      .element(page.getByText("Columns sent to your partner: comment."))
+      .element(
+        page
+          .getByRole("list", { name: "Columns you will send to your partner" })
+          .getByText("comment"),
+      )
       .toBeInTheDocument();
 
     // Back returns to the review screen (the terms heading shows again) and the
@@ -431,11 +456,15 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
       .element(page.getByRole("heading", { name: "Prepare your data" }))
       .toBeInTheDocument();
     await expect
-      .element(page.getByText("Columns sent to your partner: notes."))
+      .element(
+        page
+          .getByRole("list", { name: "Columns you will send to your partner" })
+          .getByText("notes"),
+      )
       .toBeInTheDocument();
   });
 
-  test("a file with two identifier columns gates Continue even when keys are satisfiable", async () => {
+  test("a file with two identifier columns gates Start exchange even when keys are satisfiable", async () => {
     window.location.hash = await encodeAcceptToken();
     mountAcceptRoute();
     await expect
@@ -444,7 +473,8 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
 
     // `id` and `identifier` both infer to role:identifier, so the seed carries two
     // identifiers. The name columns satisfy both keys (not blocked), but the grid
-    // flags the ambiguous identifier and Continue stays disabled until it is fixed.
+    // flags the ambiguous identifier and "Start exchange" stays disabled until it is
+    // fixed.
     await reachEditor(
       csvFile("id,identifier,first_name,last_name\n1,2,Alice,Smith\n"),
     );
@@ -456,12 +486,12 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
       )
       .toBeInTheDocument();
     await expect
-      .element(page.getByRole("button", { name: "Continue to exchange" }))
+      .element(page.getByRole("button", { name: "Start exchange" }))
       .toBeDisabled();
     expect(exchangeMounted()).toBe(false);
   });
 
-  test("a zero-coverage file shows the block and disables Continue, so nothing dials", async () => {
+  test("a zero-coverage file shows the block and disables Start exchange, so nothing dials", async () => {
     window.location.hash = await encodeAcceptToken();
     mountAcceptRoute();
     await expect
@@ -469,19 +499,20 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
       .toBeInTheDocument();
 
     // No name columns at all: no linkage key can match. The dead-end is now an
-    // editor entry -- the block message shows, Continue is disabled, and nothing
-    // dials -- but the operator can fix it in place rather than being bounced out.
+    // editor entry -- the block message shows, "Start exchange" is disabled, and
+    // nothing dials -- but the operator can fix it in place rather than being
+    // bounced out.
     await reachEditor(csvFile("notes\nhello\n"));
     await expect
       .element(page.getByText("This file cannot match yet"))
       .toBeInTheDocument();
     await expect
-      .element(page.getByRole("button", { name: "Continue to exchange" }))
+      .element(page.getByRole("button", { name: "Start exchange" }))
       .toBeDisabled();
     expect(exchangeMounted()).toBe(false);
   });
 
-  test("clearing a required param on a recommended step disables Continue until it is fixed, so a malformed pipeline never reaches the exchange", async () => {
+  test("clearing a required param on a recommended step disables Start exchange until it is fixed, so a malformed pipeline never reaches the exchange", async () => {
     // A date_of_birth field, whose recommended pipeline includes parse_date -- a
     // standard-tier step that renders its "Input format" param inline. Editing it
     // exercises the same launch gate the add-menu path would, through the override
@@ -515,10 +546,14 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
 
     // A satisfiable file: the launch gate is open before any step edit.
     await reachEditor(csvFile("date_of_birth\n01/02/1990\n"));
-    const continueButton = page.getByRole("button", {
-      name: "Continue to exchange",
+    const startButton = page.getByRole("button", {
+      name: "Start exchange",
     });
-    await expect.element(continueButton).toBeEnabled();
+    await expect.element(startButton).toBeEnabled();
+
+    // The field's cleaning card starts collapsed; expand it to reach the step's
+    // inline "Input format" param.
+    await expandFieldCards();
 
     // Clear the recommended parse_date step's required "Input format": the step is
     // now mid-edit. A malformed step would run as a silent full-field exclusion or
@@ -532,11 +567,11 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
         ),
       )
       .toBeInTheDocument();
-    await expect.element(continueButton).toBeDisabled();
+    await expect.element(startButton).toBeDisabled();
 
     // Restoring a valid value re-opens the gate and clears the alert.
     await userEvent.fill(inputFormat, "MM/DD/YYYY");
-    await expect.element(continueButton).toBeEnabled();
+    await expect.element(startButton).toBeEnabled();
     expect(
       page
         .getByText(

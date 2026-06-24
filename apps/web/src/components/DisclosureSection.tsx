@@ -31,6 +31,7 @@ export function DisclosureSection({
   children,
   summary,
   headingOrder,
+  toggleTestId,
 }: {
   /** The section label; becomes the toggle button's accessible name. Keep it
    * operator- or app-authored: it is rendered as-is, so it must never carry a
@@ -48,6 +49,9 @@ export function DisclosureSection({
   /** Render the toggle inside a heading element of this level for landmark
    * navigation. Omit for a sub-control disclosure (e.g. a per-card preview). */
   headingOrder?: 2 | 3 | 4 | 5 | 6;
+  /** Optional stable test id on the toggle button, so a test can drive a class of
+   * disclosures (e.g. the per-field cleaning cards) without naming each label. */
+  toggleTestId?: string;
 }) {
   const panelId = useId();
   const toggleRef = useRef<HTMLButtonElement>(null);
@@ -73,6 +77,7 @@ export function DisclosureSection({
       onClick={handleClick}
       aria-expanded={open}
       aria-controls={panelId}
+      data-testid={toggleTestId}
       style={{ width: "100%" }}
     >
       <Group gap="xs" wrap="nowrap">

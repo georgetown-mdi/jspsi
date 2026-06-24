@@ -88,9 +88,9 @@ describe("DefaultExchangeColumns", () => {
     await expect.element(page.getByText("notes")).toBeInTheDocument();
     expect(document.body.textContent).not.toContain("first_name");
     // The changeability cue accompanies a non-empty chip list, pointing at the
-    // invite panel's Advanced Options without adding a control here.
+    // advanced options without adding a control here.
     await expect
-      .element(page.getByText(/change what you send in Advanced Options/))
+      .element(page.getByText(/you can change these by using advanced options/))
       .toBeInTheDocument();
   });
 
@@ -118,7 +118,7 @@ describe("DefaultExchangeColumns", () => {
       .element(page.getByText(/you will send your partner these elements/))
       .not.toBeInTheDocument();
     await expect
-      .element(page.getByText(/change what you send in Advanced Options/))
+      .element(page.getByText(/you can change these by using advanced options/))
       .not.toBeInTheDocument();
   });
 });

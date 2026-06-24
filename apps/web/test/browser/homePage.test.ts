@@ -154,8 +154,9 @@ describe("HomePage layout", () => {
 
     // The exchange screen takes over the whole view...
     await expect.element(page.getByTestId("exchange-view")).toBeInTheDocument();
-    // ...and the accept form and the shared drop (the rest of the compose layout)
-    // are dropped.
+    // ...and the page heading, the accept form, and the shared drop (the rest of
+    // the compose layout) are dropped.
+    expect(page.getByText("Start a private data exchange").query()).toBeNull();
     expect(
       page.getByText("Accept an invitation you were sent").query(),
     ).toBeNull();
