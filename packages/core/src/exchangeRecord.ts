@@ -406,6 +406,12 @@ export interface OpeningData {
  * kept private (it is not the "safe to share" record alone). The CLI still writes
  * the two parts as separate files for now; unifying the two surfaces (and the
  * separate question of stripping the opening's redundant data) is deferred.
+ *
+ * Write-only for now: there is no `parseExchangeRecordFile`, because nothing reads
+ * a combined file back. A reader that ever needs to validate one should parse the
+ * untrusted body through `parseBoundedJson` and then validate each part with
+ * {@link parseExchangeRecord} (on `public`) and {@link parseOpeningData} (on
+ * `private`), rather than feeding the whole file to a single parser.
  */
 export interface ExchangeRecordFile {
   public: ExchangeRecord;

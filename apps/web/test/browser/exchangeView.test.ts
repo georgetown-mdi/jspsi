@@ -356,18 +356,20 @@ describe("ExchangeView focus throughline", () => {
     render(inviterConfig("secret-a"));
 
     // The inviter auto-starts; entry focus lands on the summary heading. Move it
-    // into the share block (the link/code the inviter shares while it waits), so
-    // the connect below orphans it.
+    // into the share block (onto the copy-link button the inviter would use while
+    // it waits), so the connect below orphans it.
     await vi.waitFor(() => {
       expect(document.activeElement?.textContent).toBe("Exchange proposal");
       expect(lifecycle.calls).toHaveLength(1);
     });
-    const shareHeading = page.getByRole("heading", {
-      name: "Share this invitation",
+    const copyLink = page.getByRole("button", {
+      name: "Copy invitation link",
     });
-    await expect.element(shareHeading).toBeInTheDocument();
-    (shareHeading.element() as HTMLElement).focus();
-    expect(document.activeElement?.textContent).toBe("Share this invitation");
+    await expect.element(copyLink).toBeInTheDocument();
+    (copyLink.element() as HTMLElement).focus();
+    expect(document.activeElement?.getAttribute("aria-label")).toBe(
+      "Copy invitation link",
+    );
 
     // Simulate the partner connecting: drive the captured onStage to a protocol
     // stage. The share block unmounts entirely (nothing left to share), dropping

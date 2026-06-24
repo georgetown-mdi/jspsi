@@ -64,13 +64,12 @@ import type {
  * (`acquired`), but acquire each differently. The acceptor adopts the inviter's
  * terms from the decoded invitation (the same terms the review screen displayed),
  * substituting its own identity, and arrives with the CSV the review screen parsed
- * and pre-flighted -- so it renders no file prompt and dials only when the user
- * presses Start. The inviter is the SOURCE of the terms: it derived them from its
- * file at invite time and embedded exactly them in the token, so it carries that
- * same `linkageTerms` object (no re-derivation) along with the CSV parsed at
- * compose time, and -- being the responder that listens -- auto-starts with no
- * Start press. Either way the exchange runs straight from `acquired` with no
- * re-parse.
+ * and pre-flighted -- so it renders no file prompt and auto-dials on arrival. The
+ * inviter is the SOURCE of the terms: it derived them from its file at invite time
+ * and embedded exactly them in the token, so it carries that same `linkageTerms`
+ * object (no re-derivation) along with the CSV parsed at compose time, and -- being
+ * the responder that listens -- likewise auto-dials on arrival with no Start press.
+ * Either way the exchange runs straight from `acquired` with no re-parse.
  */
 export type ExchangeConfig =
   | {
@@ -121,7 +120,7 @@ export type ExchangeConfig =
        * reconciles lazily. */
       disclosedPayloadColumns?: Array<string>;
       /** The CSV parsed on the accept review screen, fed straight into the exchange
-       * on Start: no re-parse, and no file prompt here. Mirrors the inviter's
+       * on arrival: no re-parse, and no file prompt here. Mirrors the inviter's
        * `acquired`. */
       acquired: AcquiredBundle;
       /** The per-party metadata and standardization the acceptor authored in the
@@ -183,7 +182,7 @@ function buildStageList(prepared: PreparedExchange): Array<StageDefinition> {
 }
 
 /**
- * The Start->run half of a web exchange, shared by both roles: it takes an
+ * The run half of a web exchange, shared by both roles: it takes an
  * already-acquired CSV bundle from the file-acquire phase, draws in the peer (the
  * role's only difference), runs the exchange, and surfaces the result and audit
  * downloads. It owns the single {@link AbortController} and the unmount-abort
@@ -662,7 +661,6 @@ export function ExchangeView(config: ExchangeConfig) {
           deepLink={config.share.deepLink}
           encoded={config.share.encoded}
           expires={config.expires}
-          connected={false}
         />
       )}
     </Stack>

@@ -10,8 +10,6 @@ import {
 } from "@mantine/core";
 import { IconCheck, IconCopy } from "@tabler/icons-react";
 
-import type { Ref } from "react";
-
 /** A labelled, copy-to-clipboard view of one shareable artifact. It is only ever
  * rendered on the client -- behind the inviter exchange screen, which the compose
  * screen swaps in only from an event handler, so it is absent from the server
@@ -76,47 +74,25 @@ function CopyRow({
 /**
  * The inviter's share block on the exchange screen: the copy-link/code artifacts
  * and the invitation's expiry, weighted above the terms so sharing is the first
- * thing the inviter does while waiting. Once the partner connects (`connected`),
- * it collapses to a one-line "Partner connected" indicator rather than vanishing,
- * so the screen does not reflow out from under the inviter mid-glance and the
- * connection is positively confirmed.
+ * thing the inviter does while waiting. The exchange screen renders it only while
+ * the partner has not connected (`!peerConnected`) and drops it entirely once they
+ * do: there is nothing left to share, and Status then shows the run is underway, so
+ * a "Partner connected" restatement would only add noise. Focus recovery on connect
+ * is handled by the exchange screen (it moves focus to the Status heading), not here.
  */
 export function ShareBlock({
   deepLink,
   encoded,
   expires,
-  connected,
-  headingRef,
-  connectedRef,
 }: {
   deepLink: string;
   encoded: string;
   /** The invitation's expiry instant (ISO 8601), if it carries one. */
   expires?: string;
-  /** Whether the partner has connected; collapses the block to a one-liner. */
-  connected: boolean;
-  // tabIndex + ref so the exchange screen can move focus to the share heading on
-  // mount, taking a keyboard/screen-reader user who pressed Generate to the new
-  // screen rather than leaving focus on the unmounted compose button.
-  headingRef?: Ref<HTMLHeadingElement>;
-  // tabIndex + ref on the collapsed "Partner connected" indicator so the exchange
-  // screen can recover focus onto it when the block collapses out from under a
-  // keyboard/screen-reader user (see ExchangeView's peer-connect focus effect).
-  connectedRef?: Ref<HTMLDivElement>;
 }) {
-  if (connected) {
-    return (
-      <Group gap="xs" ref={connectedRef} tabIndex={-1}>
-        <IconCheck size={18} aria-hidden />
-        <Text fw={500}>Partner connected</Text>
-      </Group>
-    );
-  }
   return (
     <Stack gap="sm">
-      <Title order={3} ref={headingRef} tabIndex={-1}>
-        Share this invitation
-      </Title>
+      <Title order={3}>Share this invitation</Title>
       <Text size="sm" c="dimmed">
         Send one of these to your partner over a trusted channel (for example,
         secure email). It carries a one-time secret, so treat it as confidential

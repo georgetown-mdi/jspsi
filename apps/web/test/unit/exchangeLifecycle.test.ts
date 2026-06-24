@@ -11,6 +11,7 @@ import { runExchangeLifecycle } from "../../src/psi/exchangeLifecycle.js";
 import type {
   Acquire,
   AcquiredExchange,
+  ExchangeOutputs,
 } from "../../src/psi/exchangeLifecycle.js";
 
 import type { DataConnection } from "peerjs";
@@ -154,10 +155,8 @@ const OUTPUTS = {
   record: {
     recordUrl: "blob:record",
     recordFileName: "psilink-record.json",
-    openingUrl: "blob:opening",
-    openingFileName: "psilink-record.opening.json",
   },
-};
+} satisfies ExchangeOutputs;
 
 afterEach(() => {
   vi.clearAllMocks();

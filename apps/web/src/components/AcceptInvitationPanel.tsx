@@ -111,9 +111,11 @@ export function AcceptInvitationPanel({
         // the left, the agreed terms (the reference being reviewed) on the right.
         // Focus still leads to the terms heading on mount (headingRef), so a
         // screen-reader user starts at what they are consenting to regardless of
-        // column order. Stacks to one column on a narrow viewport (base: 12).
+        // column order. Stacks to one column on a narrow viewport (base: 12), where
+        // `order` puts the terms FIRST so a phone reads what is being consented to
+        // before the consent gate -- the reverse of the desktop left-to-right order.
         <Grid gap="xl" align="flex-start" mt="md">
-          <Grid.Col span={{ base: 12, md: 7 }}>
+          <Grid.Col span={{ base: 12, md: 7 }} order={{ base: 2, md: 1 }}>
             <Stack>
               <Text size="sm" c="dimmed">
                 To accept your partner's proposed terms, confirm your consent,
@@ -169,7 +171,7 @@ export function AcceptInvitationPanel({
               )}
             </Stack>
           </Grid.Col>
-          <Grid.Col span={{ base: 12, md: 5 }}>
+          <Grid.Col span={{ base: 12, md: 5 }} order={{ base: 1, md: 2 }}>
             <ExchangeSummary
               linkageTerms={decode.invitation.token.linkageTerms}
               expires={decode.invitation.token.expires}
