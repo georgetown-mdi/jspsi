@@ -119,6 +119,11 @@ export function StandardizationStepEditor({
       <StepListEditor
         steps={steps}
         onStepsChange={onStepsChange}
+        // The per-party cleaning surface: raw patterns are authorable here, local to
+        // this party and changing only its own match rate. The cross-party
+        // element-transform editor does NOT use this component -- it drives
+        // StepListEditor directly and omits allowRawPatterns, so a token-embedded
+        // (partner-authored) regex stays read-only.
         allowRawPatterns
       />
 

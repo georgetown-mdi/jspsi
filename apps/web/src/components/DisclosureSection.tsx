@@ -32,7 +32,9 @@ export function DisclosureSection({
   summary,
   headingOrder,
 }: {
-  /** The section label; becomes the toggle button's accessible name. */
+  /** The section label; becomes the toggle button's accessible name. Keep it
+   * operator- or app-authored: it is rendered as-is, so it must never carry a
+   * partner-controlled value. */
   label: ReactNode;
   /** Whether the panel is expanded (controlled by the host). */
   open: boolean;
