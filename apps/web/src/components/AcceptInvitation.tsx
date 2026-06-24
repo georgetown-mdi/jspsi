@@ -7,8 +7,8 @@ import { describeDecodeError } from "@psilink/core";
 import { commitAcceptance } from "@psi/acceptConsent";
 import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
+import { EDITOR_WIDTH, EXCHANGE_READING_WIDTH } from "@components/contentWidth";
 import { AcceptInvitationPanel } from "@components/AcceptInvitationPanel";
-import { EXCHANGE_READING_WIDTH } from "@components/contentWidth";
 import { ExchangeView } from "@components/ExchangeView";
 import { PrepareData } from "@components/PrepareData";
 
@@ -133,13 +133,13 @@ export function AcceptInvitation() {
     <Paper
       // The review and exchange screens are a single reading column, so the panel
       // self-constrains to EXCHANGE_READING_WIDTH (centered) rather than filling the
-      // route's wide container. The full route width is kept for exactly the state
-      // that renders the "Prepare your data" editor below -- the same
+      // route's wide container. The "Prepare your data" editor (the same
       // ready+preparing predicate, so the panel width cannot diverge from the phase
-      // showing -- because that editor is a genuine two-column layout.
+      // showing) is a genuine two-column layout and self-constrains to the narrower
+      // EDITOR_WIDTH rather than the route's wide xxl container.
       style={
         decode.status === "ready" && phase.status === "preparing"
-          ? undefined
+          ? { width: EDITOR_WIDTH, marginInline: "auto" }
           : { width: EXCHANGE_READING_WIDTH, marginInline: "auto" }
       }
     >
