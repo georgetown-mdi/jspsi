@@ -28,7 +28,7 @@ import {
   disclosedColumnNames,
   hasMultipleIdentifiers,
   normalizeForEditor,
-  setColumnType,
+  setColumnTypeForMatching,
 } from "@psi/metadataEditing";
 
 import {
@@ -317,11 +317,16 @@ export function PrepareData({
     return [...seen.entries()].map(([type, label]) => ({ type, label }));
   }, [verdict.unsatisfied]);
 
-  // Remap: bind a field type to a chosen column by setting that column's semantic
-  // type. The derived standardization regenerates the recommended cleaning for the
-  // new binding, so a remap both makes the field satisfiable and cleans it.
+  // Remap: bind a missing field type to a chosen column by setting that column's
+  // semantic type AND making it a match column (role: linkage). Forcing the match
+  // role is the point of the quick-fix -- the column the operator picks is whatever
+  // they have, and an unrecognized column infers to role: payload, so merely setting
+  // the type would retype it yet leave it unusable for linkage (see
+  // setColumnTypeForMatching). The derived standardization then regenerates the
+  // recommended cleaning for the new binding, so a remap both makes the field
+  // satisfiable and cleans it.
   const remap = (type: LinkageField["type"], columnName: string) => {
-    setMetadata((prev) => setColumnType(prev, columnName, type).metadata);
+    setMetadata((prev) => setColumnTypeForMatching(prev, columnName, type));
     // Move focus to the verdict before the chosen Select unmounts (it does as
     // soon as the field is satisfied), so a keyboard/screen-reader user lands on
     // the result instead of being dropped to <body>. The verdict node is stable,

@@ -512,6 +512,57 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
     expect(exchangeMounted()).toBe(false);
   });
 
+  test('"Map a column to each missing field" actually satisfies the field -- the chosen column is made a match column, not just retyped', async () => {
+    window.location.hash = await encodeAcceptToken();
+    mountAcceptRoute();
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+
+    // Both columns are unrecognized, so each infers to role: payload (core
+    // inferMetadata's fallback) -- neither matches a first_name/last_name field, so
+    // the file is blocked. This is the reported bug's exact shape: the columns the
+    // quick-fix offers start at `payload`, and merely retyping one (setColumnType's
+    // keep-branch preserves a sent column's disclosure) would leave it role: payload
+    // and unusable for linkage, so the verdict would never clear.
+    await reachEditor(csvFile("alpha,beta\nAlice,Smith\n"));
+    await expect
+      .element(page.getByText("This file cannot match yet"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Map a column to each missing field"))
+      .toBeInTheDocument();
+
+    // Map `alpha` to First name: the field becomes satisfiable (its remap select
+    // unmounts), so the verdict advances to partial rather than staying blocked --
+    // proof the column was re-roled to linkage, not just retyped.
+    const firstNameSelect = page.getByRole("combobox", {
+      name: "First name",
+      exact: true,
+    });
+    await userEvent.click(firstNameSelect);
+    await userEvent.click(page.getByRole("option", { name: "alpha" }));
+    await expect
+      .element(page.getByText("1 of 2 keys can match"))
+      .toBeInTheDocument();
+
+    // Map `beta` to Last name: now every key is satisfiable, the block is gone, and
+    // "Start exchange" is enabled. Before the fix this remained "This file cannot
+    // match yet" no matter how many columns were chosen.
+    const lastNameSelect = page.getByRole("combobox", {
+      name: "Last name",
+      exact: true,
+    });
+    await userEvent.click(lastNameSelect);
+    await userEvent.click(page.getByRole("option", { name: "beta" }));
+    await expect
+      .element(page.getByText("All 2 keys can match"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Start exchange" }))
+      .toBeEnabled();
+  });
+
   test("clearing a required param on a recommended step disables Start exchange until it is fixed, so a malformed pipeline never reaches the exchange", async () => {
     // A date_of_birth field, whose recommended pipeline includes parse_date -- a
     // standard-tier step that renders its "Input format" param inline. Editing it
