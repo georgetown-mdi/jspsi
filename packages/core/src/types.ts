@@ -104,6 +104,7 @@ export const SEMANTIC_TYPES = [
   "identifier",
   "phone_number",
   "email_address",
+  "zip_code",
   "other",
 ] as const;
 
