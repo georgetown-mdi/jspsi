@@ -54,12 +54,17 @@ export default function FileDropzone({
   };
 
   const handleReject = (rejectedFiles: Array<FileRejection>) => {
-    log.warn("rejected file(s):", rejectedFiles);
     const codes = new Set(
       rejectedFiles.flatMap((rejection) =>
         rejection.errors.map((error) => error.code),
       ),
     );
+    // Log the distinct rejection reason codes only, never the rejected File
+    // objects. A rejected file is never read (it does not reach the parser), so no
+    // contents could leak -- but its NAME can itself be sensitive in a PPRL context
+    // (a cohort or identifier-bearing filename), and the codes are all the
+    // diagnostic needs. The count is non-sensitive, so it stays.
+    log.warn(`rejected ${rejectedFiles.length} file(s):`, [...codes]);
     // Report each distinct reason: a batch can mix a too-large file with a
     // wrong-type one, so checking the size code alone would hide the type
     // rejection. Any non-size rejection is a type/format problem against the
