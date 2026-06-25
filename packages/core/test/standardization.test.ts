@@ -17,7 +17,11 @@ import {
 import * as linearRegex from "../src/utils/linearRegex";
 import { inferMetadata } from "../src/config/metadata";
 import { getDefaultLinkageTerms } from "../src/defaults/linkageTerms";
-import type { LinkageField, LinkageTerms } from "../src/config/linkageTerms";
+import type {
+  LinkageField,
+  LinkageKeyElement,
+  LinkageTerms,
+} from "../src/config/linkageTerms";
 import type { ColumnMetadata } from "../src/config/metadata";
 import {
   StandardizationSchema,
@@ -2169,6 +2173,128 @@ describe("assessLinkageSatisfiability", () => {
     );
     expect(unsatisfied).toEqual([]);
     expect(satisfiableKeyCount).toBe(0);
+  });
+});
+
+// --- assessLinkageSatisfiability: dead keys (self-defeating standardization) --
+
+describe("assessLinkageSatisfiability dead keys", () => {
+  // A single date_of_birth field bound to a present "dob" column, so the key is
+  // always SHAPE-satisfiable; the element transform decides whether it is dead.
+  const dobTerms = (
+    transform?: LinkageKeyElement["transform"],
+  ): LinkageTerms => ({
+    version: "1.0.0",
+    identity: "Party",
+    date: "2025-01-01",
+    algorithm: "psi",
+    output: { expectsOutput: true, shareWithPartner: false },
+    deduplicate: false,
+    linkageFields: [{ name: "dob", type: "date_of_birth" }],
+    linkageKeys: [
+      {
+        name: "DOB",
+        elements: [{ field: "dob", ...(transform && { transform }) }],
+      },
+    ],
+  });
+  const columns = ["dob"];
+
+  test("a parse_date element transform whose input omits a component is a dead key", () => {
+    // input_format "MM/DD" (no year): core's parseDateFactory requires all of
+    // YYYY/MM/DD, so it drops every record -- the key can never match.
+    const { unsatisfied, satisfiableKeyCount, deadKeys } =
+      assessLinkageSatisfiability(
+        columns,
+        dobTerms([
+          { function: "parse_date", params: { inputFormat: "MM/DD" } },
+        ]),
+      );
+    // The column is present, so the field is satisfiable and the key passes the
+    // column-SHAPE verdict -- the silent gap this fills: the count alone reads
+    // all-clear.
+    expect(unsatisfied).toEqual([]);
+    expect(satisfiableKeyCount).toBe(1);
+    // ...yet the key is reported dead.
+    expect(deadKeys.map((k) => k.name)).toEqual(["DOB"]);
+  });
+
+  test("the real builder also produces no key string for that element (differential)", () => {
+    // Pin the detector's "dead" verdict against an actual builder run, so a future
+    // parse_date change that the predicate fails to mirror turns red here rather
+    // than silently letting a silent-empty config through.
+    const terms = dobTerms([
+      { function: "parse_date", params: { inputFormat: "MM/DD" } },
+    ]);
+    const dataset = buildStandardizedDataset(
+      undefined,
+      [{ dob: "01/15/1990" }],
+      inferMetadata(columns),
+      terms,
+    );
+    expect(buildKeyStrings(terms.linkageKeys[0], dataset, 0)).toBeNull();
+  });
+
+  test("a complete parse_date input format is not a dead key", () => {
+    const { deadKeys } = assessLinkageSatisfiability(
+      columns,
+      dobTerms([
+        { function: "parse_date", params: { inputFormat: "MM/DD/YYYY" } },
+      ]),
+    );
+    expect(deadKeys).toEqual([]);
+  });
+
+  test("a bare parse_date (defaulted complete input) is not a dead key", () => {
+    const { deadKeys } = assessLinkageSatisfiability(
+      columns,
+      dobTerms([{ function: "parse_date" }]),
+    );
+    expect(deadKeys).toEqual([]);
+  });
+
+  test("a later coalesce default rescues a dead parse_date to a constant (not dead)", () => {
+    // The element yields the constant "X" for every row -- a producible, if
+    // low-cardinality, key the linkage layer treats as benign, so it is not dead.
+    const { deadKeys } = assessLinkageSatisfiability(
+      columns,
+      dobTerms([
+        { function: "parse_date", params: { inputFormat: "MM/DD" } },
+        { function: "coalesce", params: { default: "X" } },
+      ]),
+    );
+    expect(deadKeys).toEqual([]);
+  });
+
+  test("a coalesce with no string default does not rescue a dead parse_date", () => {
+    const { deadKeys } = assessLinkageSatisfiability(
+      columns,
+      dobTerms([
+        { function: "parse_date", params: { inputFormat: "MM/DD" } },
+        { function: "coalesce" },
+      ]),
+    );
+    expect(deadKeys.map((k) => k.name)).toEqual(["DOB"]);
+  });
+
+  test("a shape-unsatisfiable key is not double-reported as dead", () => {
+    // The column is absent, so the key fails the SHAPE verdict (satisfiableKeyCount
+    // 0); even with a dead element transform it is surfaced by the count, not also
+    // listed in deadKeys, which is scoped to shape-satisfiable keys.
+    const { satisfiableKeyCount, deadKeys } = assessLinkageSatisfiability(
+      ["other_column"],
+      dobTerms([{ function: "parse_date", params: { inputFormat: "MM/DD" } }]),
+    );
+    expect(satisfiableKeyCount).toBe(0);
+    expect(deadKeys).toEqual([]);
+  });
+
+  test("the recommended default setup reports no dead keys", () => {
+    // The default date_of_birth parse_date lives in the field standardization with
+    // a complete input, and the default keys carry no element transforms, so no key
+    // is dead -- the no-signal-on-the-default-setup guarantee.
+    const { deadKeys } = assessLinkageSatisfiability(FULL_COLUMNS, fullTerms);
+    expect(deadKeys).toEqual([]);
   });
 });
 

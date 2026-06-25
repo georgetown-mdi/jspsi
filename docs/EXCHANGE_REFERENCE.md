@@ -961,6 +961,8 @@ Parameter names below are written in snake_case in YAML (e.g. `input_format`, `i
 | `replace_regex` | Replace all regex matches | `pattern` (required), `replacement` (default `""`) |
 | `extract_regex` | Keep the first capture group, or the whole match if the pattern has none; produce `null` if there is no match or the result is empty | `pattern` (required) |
 
+`parse_date` produces a value only when its `input_format` names all three of `YYYY`, `MM`, and `DD`; an `input_format` that omits one (for example `MM/DD`, with no year) drops every record, so a linkage key whose element transform relies on it can never match. This is value-independent -- it holds for any data -- so it is reported before the exchange runs (the CLI pre-flight warns; the web "Prepare your data" editor flags the key) rather than surfacing only as an empty result afterward.
+
 #### Null-producing (filter) functions
 
 | Function | Description | Parameters |
