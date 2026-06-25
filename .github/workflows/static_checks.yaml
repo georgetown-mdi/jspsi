@@ -30,7 +30,7 @@ jobs:
     name: Typecheck, Lint, Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # Pins Node, installs from the lockfile, and builds @psilink/core (built
       # first so the CLI and web typechecks resolve its declarations from dist,
       # the same way the apps consume it).

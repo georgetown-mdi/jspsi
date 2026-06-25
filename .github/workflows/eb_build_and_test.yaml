@@ -72,7 +72,7 @@ jobs:
       artifactName: ${{steps.artifact-name.outputs.artifactName}}
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       # Pins Node, installs from the lockfile, and builds @psilink/core.
       - name: Set up and build core
         uses: ./.github/actions/setup

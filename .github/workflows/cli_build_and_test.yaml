@@ -37,7 +37,7 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # Pins Node, installs from the lockfile, and builds @psilink/core.
       - uses: ./.github/actions/setup
       - name: Build CLI
@@ -79,7 +79,7 @@ jobs:
       matrix:
         profile: [restricted-crypto, rate-limited, allowlist]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
       - name: Integration tests (CLI, native sshd, ${{ matrix.profile }} profile)
         run: |
@@ -108,7 +108,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
       - name: Integration tests (CLI, native sshd, chroot profile)
         run: |
