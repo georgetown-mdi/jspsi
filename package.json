@@ -26,10 +26,10 @@
     "node": ">=26"
   },
   "devDependencies": {
-    "eslint": "^10.3.0",
-    "prettier": "^3.6.2",
+    "eslint": "^10.5.0",
+    "prettier": "^3.8.4",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8",
-    "yaml": "^2.8.1"
+    "vitest": "^4.1.9",
+    "yaml": "^2.9.0"
   }
 }
