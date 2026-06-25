@@ -3,10 +3,21 @@ updates:
   # Workspace root and all npm packages
   - package-ecosystem: npm
     directory: "/"
+    target-branch: "staging"
     schedule:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
+    # Supply-chain hardening: never adopt a freshly published release. The
+    # cooldown holds a new version until the ecosystem has had time to surface a
+    # compromised release (hijacked maintainer token, malicious postinstall)
+    # before we ingest it, trading a few days of patch latency for not being the
+    # first to pull. It delays routine version bumps only.
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 5
     groups:
       # Cryptographic dependencies are grouped separately so they are reviewed
       # together and subject to the security review requirement in CONTRIBUTING.md.
@@ -53,17 +64,29 @@ updates:
   # CLI Dockerfile base image
   - package-ecosystem: docker
     directory: "/"
+    target-branch: "staging"
     schedule:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 5
 
   # GitHub Actions used by the workflows in .github/workflows. Every action is
   # tag-pinned (e.g. actions/checkout@v6), so this tracks those tags for new
   # releases and security advisories.
   - package-ecosystem: github-actions
     directory: "/"
+    target-branch: "staging"
     schedule:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 5
