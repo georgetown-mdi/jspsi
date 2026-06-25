@@ -270,11 +270,15 @@ describe("InvitationTerms: per-key matching disclosures", () => {
   });
 });
 
-describe("InvitationTerms: a key disclosure's aria-controls survives a reduced-motion preference", () => {
-  // With respectReducedMotion on, Mantine's Collapse unmounts each closed panel
-  // for a reduced-motion user -- the configuration that would dangle an
-  // aria-controls pointing at the panel itself. Force both halves of it: the OS
-  // reduced-motion signal (matchMedia) and the theme switch that honors it.
+describe("InvitationTerms: a key disclosure stays mounted but hidden under a reduced-motion preference", () => {
+  // Since Mantine 9.4 a closed Collapse no longer unmounts its panel for a
+  // reduced-motion user: it keeps the panel mounted inside a hidden React Activity
+  // boundary and hides it with display:none (rather than the height animation plus
+  // aria-hidden + inert it uses with motion). display:none keeps the collapsed
+  // detail out of sight, the accessibility tree, and the tab order all the same.
+  // Force the reduced-motion configuration -- the OS signal (matchMedia) and the
+  // theme switch that honors it -- and assert each disclosure's panel is present,
+  // hidden, and its aria-controls still resolves to its wrapper.
   let originalMatchMedia: typeof window.matchMedia;
 
   beforeEach(() => {
@@ -295,7 +299,7 @@ describe("InvitationTerms: a key disclosure's aria-controls survives a reduced-m
     window.matchMedia = originalMatchMedia;
   });
 
-  test("every disclosure's aria-controls resolves to a present wrapper while collapsed under reduced motion", async () => {
+  test("every disclosure's aria-controls resolves to a present, hidden panel while collapsed under reduced motion", async () => {
     root!.render(
       createElement(
         MantineProvider,
@@ -304,41 +308,38 @@ describe("InvitationTerms: a key disclosure's aria-controls survives a reduced-m
       ),
     );
 
-    // Assert the always-mounted-wrapper design for every disclosure. The top-level
-    // ones are the matching list ("Matching strategies") and the master "Other
-    // details"; the per-key widgets live nested inside "Matching strategies" and are
-    // exercised after it is opened (a collapsed parent unmounts them entirely under
-    // reduced motion). The reduced-motion media effect resolves after mount and
-    // unmounts each closed Collapse panel, emptying its wrapper -- the state in which
-    // an id held on the panel itself would dangle.
-    async function expectEmptyWrapper(name: string) {
+    // The always-mounted-wrapper design for every disclosure. The top-level ones
+    // are the matching list ("Matching strategies") and the master "Other details";
+    // the per-key widgets live nested inside "Matching strategies" and are exercised
+    // after it is opened. The closed Collapse panel stays mounted (React Activity)
+    // but is hidden with display:none, which keeps its collapsed detail out of the
+    // accessibility tree and the tab order while its wrapper -- the aria-controls
+    // target -- stays present.
+    async function expectHiddenPanel(name: string) {
       await expect.element(toggle(name)).toBeInTheDocument();
       expect(toggle(name).element().getAttribute("aria-expanded")).toBe(
         "false",
       );
       const id = toggle(name).element().getAttribute("aria-controls");
       expect(id).toBeTruthy();
-      // Wait for the unmount so the assertion exercises it rather than the
-      // pre-effect mounted-but-hidden panel.
-      await expect
-        .poll(() => document.getElementById(id!)?.children.length)
-        .toBe(0);
-      // The stable wrapper holding aria-controls stays mounted, so the reference
-      // still resolves to a present element; the unmounted panel keeps the collapsed
-      // detail out of the accessibility tree.
-      const panel = document.getElementById(id!);
+      const wrapper = document.getElementById(id!);
+      expect(wrapper).not.toBeNull();
+      // The closed panel is present (not unmounted) but display:none. Poll: the
+      // reduced-motion media effect resolves after mount, switching the panel from
+      // the pre-effect animated state to the display:none hidden state.
+      const panel = wrapper!.firstElementChild as HTMLElement | null;
       expect(panel).not.toBeNull();
-      expect(panel!.textContent).toBe("");
+      await expect.poll(() => getComputedStyle(panel!).display).toBe("none");
     }
 
     for (const name of ["Matching strategies", "Other details"])
-      await expectEmptyWrapper(name);
+      await expectHiddenPanel(name);
 
     // Open the matching list so its per-key disclosures mount, then assert each
-    // closed per-key panel is likewise unmounted to an empty but present wrapper.
+    // closed per-key panel is likewise present but hidden.
     await userEvent.click(toggle("Matching strategies"));
     for (const name of ["SSN + LN + DOB", "SSN + FN1"])
-      await expectEmptyWrapper(name);
+      await expectHiddenPanel(name);
   });
 });
 

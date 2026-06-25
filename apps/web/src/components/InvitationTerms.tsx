@@ -53,7 +53,8 @@ function Term({ label, children }: { label: string; children: ReactNode }) {
  *
  * The disclosure mirrors the master-detail pattern below: aria-expanded +
  * aria-controls on the toggle, the id on the always-mounted wrapper (not the
- * Collapse panel) so it survives Mantine's reduced-motion unmount, and the panel
+ * Collapse panel) so it stays a stable target however Mantine mounts the panel,
+ * and the panel
  * hidden from assistive tech + the tab order while closed. The toggle's accessible
  * name is the key name alone; the field one-liner is associated as its description
  * (aria-describedby) rather than folded into the name, so a screen reader hears
@@ -375,7 +376,8 @@ export function InvitationTerms({
         {/* The matching list as a default-collapsed disclosure, mirroring the
             per-key and "Other details" disclosures below: aria-expanded +
             aria-controls on the toggle, the id on the always-mounted wrapper (not
-            the Collapse panel) so it survives Mantine's reduced-motion unmount, and
+            the Collapse panel) so it stays a stable target however Mantine mounts
+            the panel, and
             the per-key list hidden from assistive tech + the tab order while closed.
             The toggle text doubles as the list's group label (matchedOnLabelId). */}
         <Stack gap={2}>
@@ -546,17 +548,14 @@ export function InvitationTerms({
       </Stack>
 
       {/* A real disclosure: the toggle carries aria-expanded and aria-controls,
-          and Mantine's Collapse sets aria-hidden + inert (and display:none) on the
-          panel while closed, so the dense detail is hidden from assistive tech and
-          the tab order until opened. aria-controls points at the stable wrapper
-          below, not the Collapse panel: with respectReducedMotion on, Collapse
-          unmounts the closed panel for a reduced-motion user, which would dangle an
-          id held on the panel itself; the always-mounted wrapper keeps the
-          reference resolvable in every state and under either motion preference
-          (collapsed content is hidden from AT when the panel is mounted-but-hidden,
-          and absent when it is unmounted). A render test pins this against the
-          accessibility tree, so the wrapper is not safe to inline back onto the
-          panel. */}
+          and while closed Mantine's Collapse hides the panel from assistive tech
+          and the tab order until opened -- with motion via aria-hidden + inert (and
+          display:none), and under a reduced-motion preference via display:none on a
+          panel React Activity keeps mounted. aria-controls points at the stable
+          wrapper below, not the Collapse panel, so the reference resolves to a
+          present element however Mantine mounts or hides the panel across motion
+          preferences. A render test pins this against the accessibility tree, so
+          the wrapper is not safe to inline back onto the panel. */}
       <UnstyledButton
         onClick={() => setDetailsOpen((open) => !open)}
         aria-expanded={detailsOpen}
