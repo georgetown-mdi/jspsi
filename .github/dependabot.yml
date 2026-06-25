@@ -70,10 +70,9 @@ updates:
       day: monday
     open-pull-requests-limit: 5
     cooldown:
+      # Only default-days is valid for the docker and github-actions
+      # ecosystems; the semver-*-days keys are supported for npm only.
       default-days: 7
-      semver-major-days: 14
-      semver-minor-days: 7
-      semver-patch-days: 5
 
   # GitHub Actions used by the workflows in .github/workflows. Every action is
   # tag-pinned (e.g. actions/checkout@v6), so this tracks those tags for new
@@ -86,7 +85,6 @@ updates:
       day: monday
     open-pull-requests-limit: 5
     cooldown:
+      # Only default-days is valid for the docker and github-actions
+      # ecosystems; the semver-*-days keys are supported for npm only.
       default-days: 7
-      semver-major-days: 14
-      semver-minor-days: 7
-      semver-patch-days: 5
