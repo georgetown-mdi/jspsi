@@ -1268,6 +1268,59 @@ describe("summarizeInvitation", () => {
     ).toBe("last name (excludes values)");
   });
 
+  test("does not mark a phonetic-then-substring element as a literal truncation", () => {
+    const headerFor = (transform: LinkageKeyElement["transform"]) =>
+      summarizeInvitation(
+        makeToken({
+          linkageFields: [{ name: "ln", type: "last_name" }],
+          linkageKeys: [
+            {
+              name: "K",
+              elements: [{ field: "ln", ...(transform && { transform }) }],
+            },
+          ],
+        }),
+      ).linkageKeys[0].headerFields[0];
+
+    // The bug: a substring after a value-recoding phonetic step slices the
+    // sound-alike code, not the literal name, so "partial" (a literal truncation)
+    // would misdescribe the match -- "sound-alike" is the dominant honest effect.
+    expect(
+      headerFor([
+        { function: "phonetic" },
+        { function: "substring", params: { start: 1, length: 3 } },
+      ]),
+    ).toBe("last name (sound-alike)");
+    // Order matters, mirroring the detail row's position-aware literal: a
+    // substring FIRST does truncate the literal name (phonetic then codes that
+    // truncation), so "partial" is faithful and stays.
+    expect(
+      headerFor([
+        { function: "substring", params: { start: 1, length: 3 } },
+        { function: "phonetic" },
+      ]),
+    ).toBe("last name (partial)");
+    // A routine normalizer before the substring does not recode the value out of
+    // literal correspondence, so "partial" still fires.
+    expect(
+      headerFor([
+        { function: "to_lower_case" },
+        { function: "substring", params: { start: 1, length: 3 } },
+      ]),
+    ).toBe("last name (partial)");
+    // The single-transform baselines stay unchanged by the re-ordering.
+    expect(
+      headerFor([{ function: "substring", params: { start: 1, length: 3 } }]),
+    ).toBe("last name (partial)");
+    expect(headerFor([{ function: "phonetic" }])).toBe(
+      "last name (sound-alike)",
+    );
+    // remove_affixes earns no marker: it is a broadening canonicalizer (like
+    // accent/case folding), not a record-dropping narrower, so it is deliberately
+    // routine despite stripping characters (see elementBreadthMarker's doc).
+    expect(headerFor([{ function: "remove_affixes" }])).toBe("last name");
+  });
+
   test("classifies every core standardization function as marked or routine", () => {
     // The header marker is a hand-maintained classification; pin it against core's
     // full function set in both directions, so a new core function cannot ship

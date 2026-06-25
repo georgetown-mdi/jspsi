@@ -583,19 +583,36 @@ function parseDateDropsComponent(step: TransformStep): boolean {
  * undefined when the element matches exactly or only canonicalizes its value
  * (case, whitespace, accents, affixes, padding, and a `parse_date` that merely
  * reformats between equivalent layouts -- routine standardization, deliberately
- * not flagged so the recommended setup stays clean). It names any rule that
- * materially changes which records match: where the direction is determinable
- * from the terms it names the EFFECT ("partial" for a truncation, or for a
- * `parse_date` whose output layout drops a component its input carries and so
- * matches on only part of the date; "fuzzy" / "sound-alike" / "multiple" /
- * "fallback" for an expansion), and where an arbitrary partner-authored pattern
- * or value list makes the direction indeterminate it names the RULE directly
- * ("pattern replacement", "pattern extraction", "pattern filter", "excludes
- * values"). Informative, not a broaden-only warning: `filter_regex` and `null_if`
- * narrow matching but are still surfaced. "fuzzy" is reserved for the genuine
- * fuzzy-comparison expansion, distinct from `substring`'s "partial". None of the
- * regex/value rules appear on the default or guided path (only `substring` and
- * `swap` do), so an expert-authored rule is what trips those markers.
+ * not flagged so the recommended setup stays clean). `remove_affixes` is in that
+ * routine set by deliberate decision: stripping titles and suffixes (Dr., Jr.)
+ * is a BROADENING canonicalizer in the same family as accent and case folding --
+ * it makes superficially-different spellings match -- not a record-DROPPING
+ * narrower like the flagged `filter_regex` / `null_if`, so it earns no marker
+ * despite removing characters. It names any rule that materially changes which
+ * records match: where the direction is determinable from the terms it names the
+ * EFFECT ("partial" for a truncation, or for a `parse_date` whose output layout
+ * drops a component its input carries and so matches on only part of the date;
+ * "fuzzy" / "sound-alike" / "multiple" / "fallback" for an expansion), and where
+ * an arbitrary partner-authored pattern or value list makes the direction
+ * indeterminate it names the RULE directly ("pattern replacement", "pattern
+ * extraction", "pattern filter", "excludes values"). Informative, not a
+ * broaden-only warning: `filter_regex` and `null_if` narrow matching but are
+ * still surfaced. "fuzzy" is reserved for the genuine fuzzy-comparison expansion,
+ * distinct from `substring`'s "partial". None of the regex/value rules appear on
+ * the default or guided path (only `substring` and `swap` do), so an
+ * expert-authored rule is what trips those markers.
+ *
+ * "partial" marks a LITERAL character-truncation, so it fires for a `substring`
+ * only where the slice runs on the literal value. A `substring` after a
+ * value-recoding `phonetic` step (which replaces the name with a sound-alike
+ * code) slices that code, not the name, so it is not flagged "partial" -- the
+ * recoding's "sound-alike" is then the dominant, honest effect. This mirrors the
+ * detail row's position-aware literal ({@link substringEffect} /
+ * {@link summarizeKey}, which render "the first N characters" only for a
+ * substring on the unmodified value). A routine normalizer before the substring
+ * (case/accents/...) does not recode the value out of literal correspondence, so
+ * it keeps "partial"; a `phonetic` AFTER the substring does too, since the
+ * literal is truncated first.
  *
  * Returns a SINGLE, most-salient marker, not one per rule: the always-visible
  * header is deliberately terse, so an element carrying more than one rule shows
@@ -606,8 +623,16 @@ function parseDateDropsComponent(step: TransformStep): boolean {
 function elementBreadthMarker(element: LinkageKeyElement): string | undefined {
   const steps = element.transform ?? [];
   const functions = new Set(steps.map((s) => s.function));
-  // Effect named where the direction is determinable from the terms.
-  if (functions.has("substring")) return "partial";
+  // Effect named where the direction is determinable from the terms. "partial"
+  // is a literal truncation, so a substring counts only where it slices the
+  // literal value -- not after a value-recoding `phonetic` step, where it slices
+  // the sound-alike code and "sound-alike" (below) is the honest dominant effect.
+  const truncatesLiteral = steps.some(
+    (step, index) =>
+      step.function === "substring" &&
+      !steps.slice(0, index).some((prior) => prior.function === "phonetic"),
+  );
+  if (truncatesLiteral) return "partial";
   if (element.generateFuzzyComparisons !== undefined) return "fuzzy";
   if (functions.has("phonetic")) return "sound-alike";
   if (functions.has("split_on")) return "multiple";
