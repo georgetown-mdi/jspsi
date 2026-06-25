@@ -14,8 +14,9 @@ import type { ReactNode } from "react";
  *
  * Three a11y properties are load-bearing:
  *  - The `aria-controls` target is the ALWAYS-MOUNTED `<div id>` wrapper, not the
- *    `Collapse` panel (which Mantine unmounts under `prefers-reduced-motion`), so the
- *    reference never dangles.
+ *    `Collapse` panel, so the reference never dangles however Mantine mounts or hides
+ *    the closed panel (it may keep the panel mounted in a hidden React Activity
+ *    boundary or unmount it, depending on motion preference and environment).
  *  - The chevron's rotate transition is suppressed under reduced motion.
  *  - On COLLAPSE, if focus is inside the panel it is moved to the toggle BEFORE the
  *    panel hides -- otherwise the browser drops focus to `<body>` (the common trap when
@@ -107,8 +108,8 @@ export function DisclosureSection({
       {headingOrder !== undefined
         ? createElement(`h${headingOrder}`, { style: { margin: 0 } }, toggle)
         : toggle}
-      {/* The always-mounted wrapper carries the aria-controls id; Collapse may unmount
-          its inner panel under reduced motion, but this node persists. */}
+      {/* The always-mounted wrapper carries the aria-controls id; this node persists
+          however Mantine mounts or hides the closed Collapse panel. */}
       <div id={panelId} ref={panelRef}>
         <Collapse expanded={open}>{children}</Collapse>
       </div>
