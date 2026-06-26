@@ -1727,6 +1727,17 @@ export function assessLinkageSatisfiability(
   // key passes the column check yet would run to a silent empty result. Scoped to
   // shape-satisfiable keys -- a key already excluded from satisfiableKeyCount for a
   // missing field is surfaced by that count, not double-reported as dead here.
+  //
+  // The scan walks each such key's element transform steps (each parse_date step a
+  // parseDateFormat tokenization over a MAX_DATE_FORMAT_LENGTH-bounded format), so
+  // its cost is O(total transform steps in `terms`) and needs no separate budget:
+  // on the partner-controlled accept path `terms` comes from a decoded invitation
+  // already bounded to MAX_ENCODED_INVITATION_LENGTH, so the step total stays small
+  // (a packed-to-the-cap hostile token measures single-digit milliseconds); on the
+  // operator's own committed-config path the terms are self-authored and drive
+  // strictly heavier per-row compile + RE2 work at exchange time, so this pre-flight
+  // scan is never the dominant cost. parseDateInputDropsEveryRecord never calls
+  // parseDateFormat on a non-string, so a hostile param shape cannot make it throw.
   const deadKeys = shapeSatisfiableKeys.filter((k) =>
     k.elements.some((e) => pipelineAlwaysDrops(e.transform)),
   );
