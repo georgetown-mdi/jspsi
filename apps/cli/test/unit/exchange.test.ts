@@ -825,6 +825,7 @@ const ssnOnlyTerms: LinkageTerms = {
   identity: "Test Party",
   date: "2025-01-01",
   algorithm: "psi",
+  linkageStrategy: "cascade",
   output: { expectsOutput: true, shareWithPartner: false },
   deduplicate: false,
   linkageFields: [{ name: "ssn", type: "ssn" }],

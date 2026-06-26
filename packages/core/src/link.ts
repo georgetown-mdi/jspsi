@@ -1,4 +1,5 @@
 import type { PSIParticipant } from "./participant";
+import type { AssociationTable } from "./types";
 import {
   receiveParsed,
   parseOrProtocolError,
@@ -270,6 +271,44 @@ export async function linkViaPSI(
       `psi for cardinality '${protocol.cardinality}' not yet implemented`,
     );
   }
+}
+
+/**
+ * Single-pass linkage strategy entry point (linkage terms `linkageStrategy:
+ * "single-pass"`; selected by the dispatch in exchange.ts). Same signature and
+ * return shape as {@link linkViaPSI}, so the two are interchangeable at the call
+ * site, and it must produce the byte-identical {@link AssociationTable}
+ * {@link linkViaPSI} would for the same inputs.
+ *
+ * Where {@link linkViaPSI} runs one dependent PSI exchange per key in sequence,
+ * single-pass batches every key's PSI data into one exchange and has the
+ * receiver reconstruct the cascade locally. Reproducing the cascade exactly
+ * means recomputing survivor-relative uniqueness as key precedence is replayed
+ * -- a value ambiguous over the full dataset can become unique once its twin is
+ * claimed by an earlier key -- so the exchange has to carry enough per-key
+ * structure to recompute that, not merely a union of per-key unique matches
+ * (see the issue and, once written, docs/spec/PROTOCOL.md). Only the
+ * cascade-equivalent table is emitted; the weaker-key matches visible in the
+ * reconstruction are not surfaced.
+ *
+ * Scaffold stub: the algorithm is implemented by the owner against this entry
+ * point. Until then it fails closed -- selecting `single-pass` aborts with a
+ * clear error rather than silently running the cascade under a strategy the
+ * parties did not agree to.
+ */
+export async function linkViaSinglePassPSI(
+  _protocol: {
+    cardinality: "one-to-one" | "one-to-many" | "many-to-one" | "many-to-many";
+  },
+  _participant: PSIParticipant,
+  _conn: MessageConnection,
+  _data: Array<IndexableIterable<string | undefined>>,
+  _verbosity: number = 0,
+  _setStage?: (id: string) => void,
+): Promise<AssociationTable> {
+  // Parameters mirror linkViaPSI (the `_` prefix marks them unused only until the
+  // algorithm is wired in); the owner implements the body against this signature.
+  throw new Error("single-pass linkage strategy is not yet implemented");
 }
 
 async function exchangeMappedElements(

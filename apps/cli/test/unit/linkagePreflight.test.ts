@@ -31,6 +31,7 @@ function dobTerms(
     identity: "Party",
     date: "2025-01-01",
     algorithm: "psi",
+    linkageStrategy: "cascade",
     output: { expectsOutput: true, shareWithPartner: false },
     deduplicate: false,
     linkageFields: [{ name: "dob", type: "date_of_birth" }],

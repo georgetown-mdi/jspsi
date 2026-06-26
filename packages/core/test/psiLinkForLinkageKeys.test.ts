@@ -35,6 +35,7 @@ const terms: LinkageTerms = {
   identity: "test",
   date: "2026-01-01",
   algorithm: "psi",
+  linkageStrategy: "cascade",
   output: { expectsOutput: true, shareWithPartner: true },
   deduplicate: false,
   linkageFields: [

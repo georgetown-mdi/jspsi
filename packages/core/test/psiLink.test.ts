@@ -5,7 +5,11 @@ import log from "loglevel";
 import PSI from "@openmined/psi.js";
 
 import { PSIParticipant } from "../src/participant";
-import { linkViaPSI, associationAndIterationArray } from "../src/link";
+import {
+  linkViaPSI,
+  linkViaSinglePassPSI,
+  associationAndIterationArray,
+} from "../src/link";
 
 import {
   createMessagePipe,
@@ -71,6 +75,22 @@ test("server and client yield identical results", () => {
 test("results are correct", () => {
   expect(serverResult[0]).toStrictEqual([1, 2, 4]);
   expect(serverResult[1]).toStrictEqual([2, 0, 1]);
+});
+
+// ─── linkViaSinglePassPSI: scaffold stub fails closed ─────────────────────────
+// The single-pass strategy's algorithm is implemented by the owner against this
+// entry point; until then, selecting it must abort rather than silently fall
+// back to the cascade. Pins that interim fail-closed contract.
+test("single-pass linkage entry point is not yet implemented and fails closed", async () => {
+  await expect(
+    linkViaSinglePassPSI(
+      { cardinality: "one-to-one" },
+      server,
+      serverConn,
+      serverData,
+      -1,
+    ),
+  ).rejects.toThrow(/not yet implemented/);
 });
 
 // ─── associationAndIterationArray: pathological-count bound ───────────────────

@@ -852,6 +852,36 @@ const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
   expirationDate: z.iso.date(),
 });
 
+// --- Linkage strategy --------------------------------------------------------
+
+/**
+ * How the agreed linkage keys are run against the partner's data. Both
+ * strategies produce the SAME association table; they differ only in how the
+ * per-key PSI exchanges are sequenced on the wire.
+ *
+ * - `cascade` -- the default (materialized when terms are authored without a
+ *   strategy): the keys are matched in a dependent sequence of rounds, each
+ *   round excluding the records already matched by an earlier key. One PSI
+ *   exchange per key.
+ * - `single-pass` -- the per-key PSI data is batched into one exchange and the
+ *   receiver reconstructs the cascade locally, sharing the result. Equivalent
+ *   output with far fewer round-trips, which makes linkage practical over
+ *   high-latency channels (file-sync) where a chain of dependent rounds is
+ *   prohibitively slow.
+ *
+ * Consistency: mandatory -- both parties must agree, like `algorithm`; a
+ * mismatch aborts the exchange. The schema default makes the field always
+ * present in parsed terms (and so in the agreed-terms hash), on equal footing
+ * with the other mandatory-consistency fields. See docs/spec/PROTOCOL.md for
+ * the wire shape of each strategy.
+ */
+export type LinkageStrategy = "cascade" | "single-pass";
+
+export const LinkageStrategySchema: z.ZodType<LinkageStrategy> = z.enum([
+  "cascade",
+  "single-pass",
+]);
+
 // --- Linkage Terms -----------------------------------------------------------
 
 /**
@@ -869,6 +899,9 @@ const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
  * - `date` — soft. A mismatch warns that one party may have a stale copy.
  * - `algorithm` — mandatory. `psi` reveals matched identifiers; `psi-c` reveals
  *   only the count.
+ * - `linkageStrategy` — mandatory. `cascade` (the default, materialized when
+ *   terms are authored without a strategy) runs dependent per-key rounds;
+ *   `single-pass` batches them into one exchange. Both produce the same output.
  * - `output` — mandatory.
  * - `deduplicate` — mandatory. Per-party; determines if multiple inputs can be
  *   matched to the same output.
@@ -918,6 +951,17 @@ export interface LinkageTerms {
   date: string;
   /** `psi` reveals matched identifiers; `psi-c` reveals only the count. */
   algorithm: Algorithm;
+  /**
+   * How the agreed linkage keys are exchanged: `cascade` (the default,
+   * materialized when terms are authored without a strategy) runs a dependent
+   * sequence of per-key PSI rounds, `single-pass` batches them into one exchange
+   * and reconstructs the identical association table. Both produce the same
+   * output.
+   * Consistency: mandatory -- both parties must agree; a mismatch aborts the
+   * exchange. Always present in parsed terms (via the schema default), on equal
+   * footing with the other mandatory-consistency fields.
+   */
+  linkageStrategy: LinkageStrategy;
   output: Output;
   /**
    * Whether this party's records may match more than one of the partners'.
@@ -948,6 +992,7 @@ const LinkageTermsBaseSchema = z.object({
   identity: z.string().min(1).max(MAX_TEXT_LENGTH),
   date: z.iso.date(),
   algorithm: AlgorithmSchema,
+  linkageStrategy: LinkageStrategySchema.default("cascade"),
   output: OutputSchema,
   deduplicate: z.boolean(),
   // Element COUNT bounded at MAX_LINKAGE_ENTRIES before per-element validation,
@@ -1296,6 +1341,20 @@ export function validateCompatibility(
     errors.push(
       `algorithm mismatch: local is ${sanitizeForDisplay(local.algorithm)}, ` +
         `partner is ${sanitizeForDisplay(partner.algorithm)}`,
+    );
+  }
+
+  // linkageStrategy is mandatory-consistency like algorithm: both parties must
+  // run the keys the same way or the reconstructed result could differ. The
+  // schema default materializes "cascade" when terms are authored without a
+  // strategy, so the field is always present here -- in both local terms and
+  // parsed partner terms -- and is compared directly, like algorithm. The values
+  // are validated enum members, not partner free text, but take the same
+  // sanitizeForDisplay path as algorithm for uniformity.
+  if (local.linkageStrategy !== partner.linkageStrategy) {
+    errors.push(
+      `linkage strategy mismatch: local is ${sanitizeForDisplay(local.linkageStrategy)}, ` +
+        `partner is ${sanitizeForDisplay(partner.linkageStrategy)}`,
     );
   }
 

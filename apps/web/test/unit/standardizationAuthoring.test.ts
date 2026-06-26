@@ -254,6 +254,7 @@ describe("every reachable pipeline function is descriptor-backed", () => {
       identity: "x",
       date: "2026-01-01",
       algorithm: "psi",
+      linkageStrategy: "cascade",
       output: { expectsOutput: true, shareWithPartner: true },
       deduplicate: false,
       linkageFields: fieldTypes.map((type, i) => ({ name: `f${i}`, type })),
@@ -489,6 +490,7 @@ describe("acceptor per-field column binding (multiple fields of one type)", () =
     identity: "acceptor",
     date: "2026-01-01",
     algorithm: "psi",
+    linkageStrategy: "cascade",
     output: { expectsOutput: true, shareWithPartner: true },
     deduplicate: false,
     linkageFields: [

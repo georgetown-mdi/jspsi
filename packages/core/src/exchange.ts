@@ -16,7 +16,7 @@ import {
   resolveRole,
 } from "./protocolSetup.js";
 import { reconcileHostKeyFingerprints } from "./hostKeyReconciliation.js";
-import { linkViaPSI } from "./link.js";
+import { linkViaPSI, linkViaSinglePassPSI } from "./link.js";
 import {
   preparePayload,
   exchangePayloads,
@@ -491,7 +491,18 @@ export async function runExchange(
     },
   );
 
-  const associationTable = await linkViaPSI(
+  // Dispatch on the agreed linkage strategy (mandatory-consistency, always
+  // present via the schema default; validateCompatibility has already aborted a
+  // mismatch upstream). "cascade" runs the dependent per-key rounds in sequence;
+  // "single-pass" batches them into one exchange and reconstructs the identical
+  // association table. Both conform to the same call shape, so they are selected
+  // by function -- an allowlist on the single-pass value, with cascade the
+  // established default.
+  const runLinkage =
+    linkageTerms.linkageStrategy === "single-pass"
+      ? linkViaSinglePassPSI
+      : linkViaPSI;
+  const associationTable = await runLinkage(
     { cardinality: "one-to-one" },
     participant,
     conn,
