@@ -2326,6 +2326,65 @@ describe("assessLinkageSatisfiability dead keys", () => {
     const { deadKeys } = assessLinkageSatisfiability(FULL_COLUMNS, fullTerms);
     expect(deadKeys).toEqual([]);
   });
+
+  test("a predicate-dead parse_date yields no key across a generated input-format corpus (differential)", () => {
+    // The detector is a hand-maintained mirror of core's parse_date runtime and has
+    // already drifted once (a non-string input format). The point tests above pin
+    // individual cases; this sweeps a generated space of input formats and pins the
+    // dangerous direction -- predicate says dead => the builder yields NOTHING for
+    // any value -- so a future tokenizer/guard change that the predicate fails to
+    // mirror turns red here rather than silently shipping a self-defeating key.
+    // Deterministic: every format is enumerated, no Math.random.
+    const permute = (a: string[]): string[][] =>
+      a.length <= 1
+        ? [a]
+        : a.flatMap((x, i) =>
+            permute([...a.slice(0, i), ...a.slice(i + 1)]).map((p) => [
+              x,
+              ...p,
+            ]),
+          );
+    const subsets: string[][] = [
+      [],
+      ["YYYY"],
+      ["MM"],
+      ["DD"],
+      ["YYYY", "MM"],
+      ["YYYY", "DD"],
+      ["MM", "DD"],
+      ["YYYY", "MM", "DD"],
+    ];
+    const formats = new Set<string>(["", "x", "---", "12"]);
+    for (const subset of subsets)
+      for (const ordering of permute(subset))
+        for (const sep of ["", "-", "/", ".", " "])
+          formats.add(ordering.join(sep));
+
+    for (const inputFormat of formats) {
+      const terms = dobTerms([
+        { function: "parse_date", params: { inputFormat } },
+      ]);
+      const { deadKeys } = assessLinkageSatisfiability(columns, terms);
+      // A format the detector does NOT call dead may legitimately produce a value
+      // (data-dependent), which the detector deliberately ignores -- skip it.
+      if (deadKeys.length === 0) continue;
+      // A value shaped to the declared format, plus other shapes: a dead format
+      // must yield no key for ANY of them.
+      const shaped = inputFormat
+        .replaceAll("YYYY", "2025")
+        .replaceAll("MM", "01")
+        .replaceAll("DD", "15");
+      for (const value of [shaped, "2025", "01", "15", "20250115", "", "x"]) {
+        const dataset = buildStandardizedDataset(
+          undefined,
+          [{ dob: value }],
+          inferMetadata(columns),
+          terms,
+        );
+        expect(buildKeyStrings(terms.linkageKeys[0], dataset, 0)).toBeNull();
+      }
+    }
+  });
 });
 
 // --- assessLinkageSatisfiability vs the real builder (differential) ----------
