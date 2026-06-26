@@ -1559,17 +1559,26 @@ const PARSE_DATE_REQUIRED_COMPONENTS: readonly DateFormatToken[] = [
  * requires, making {@link parseDateFactory} return null for EVERY value -- the
  * record is dropped regardless of its data. The motivating example is
  * `input_format: "MM/DD"` (no year): with no `YYYY` token, `parts.YYYY` is never
- * set and the factory's all-three-components guard drops every value. The present
- * component set is recovered from core's OWN tokenizer ({@link parseDateFormat}),
- * not a re-implemented scan, so it cannot drift from what the factory actually
- * parses -- the encode-the-runtime-invariant-as-a-check rule, here over a "this
- * never produces a value" claim. An absent input format defaults to the factory's
- * complete `"MM/DD/YYYY"`, which drops nothing.
+ * set and the factory's all-three-components guard drops every value.
+ *
+ * This mirrors {@link parseDateFactory}'s coercion exactly so the verdict cannot
+ * drift from the runtime. A nullish input format falls back to the factory's
+ * complete `"MM/DD/YYYY"`, which drops nothing. A non-nullish NON-string (wire
+ * params are `z.unknown()`, so a partner can supply one) never yields a value at
+ * runtime -- the factory either tokenizes it to an all-dropping pattern (a number,
+ * whose `.length` is undefined, yields an empty token order) or throws building
+ * the pattern (an array) -- so it is dead either way, and is reported so WITHOUT
+ * calling {@link parseDateFormat} on it, which would itself throw on an array and
+ * crash this pre-flight. For a string input format the present component set is
+ * recovered from core's OWN tokenizer ({@link parseDateFormat}), not a
+ * re-implemented scan -- the encode-the-runtime-invariant-as-a-check rule, here
+ * over a "this never produces a value" claim.
  */
 function parseDateInputDropsEveryRecord(params: Params | undefined): boolean {
-  const inputFormat =
-    typeof params?.inputFormat === "string" ? params.inputFormat : "MM/DD/YYYY";
-  const present = new Set(parseDateFormat(inputFormat).order);
+  const raw = params?.inputFormat;
+  if (raw === null || raw === undefined) return false;
+  if (typeof raw !== "string") return true;
+  const present = new Set(parseDateFormat(raw).order);
   return PARSE_DATE_REQUIRED_COMPONENTS.some((token) => !present.has(token));
 }
 

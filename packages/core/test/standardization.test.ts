@@ -2235,6 +2235,36 @@ describe("assessLinkageSatisfiability dead keys", () => {
     expect(buildKeyStrings(terms.linkageKeys[0], dataset, 0)).toBeNull();
   });
 
+  test("a non-string parse_date input format is a dead key, without crashing the check", () => {
+    // Wire params are z.unknown(), so a partner can supply a non-string input
+    // format. None yields a value at runtime (a number/boolean/object tokenizes to
+    // an all-dropping pattern; an array makes the factory throw), so each is dead --
+    // and assessLinkageSatisfiability must report it rather than throw on the array
+    // case (a regression would surface as this test throwing).
+    for (const inputFormat of [5, true, ["MM"], { x: 1 }]) {
+      const { deadKeys } = assessLinkageSatisfiability(
+        columns,
+        dobTerms([{ function: "parse_date", params: { inputFormat } }]),
+      );
+      expect(deadKeys.map((k) => k.name)).toEqual(["DOB"]);
+    }
+  });
+
+  test("the builder also drops every record for a numeric input format (differential)", () => {
+    // The non-string case that drops (rather than throwing): the detector's "dead"
+    // verdict must match the builder, the same differential the string case pins.
+    const terms = dobTerms([
+      { function: "parse_date", params: { inputFormat: 5 } },
+    ]);
+    const dataset = buildStandardizedDataset(
+      undefined,
+      [{ dob: "01/15/1990" }],
+      inferMetadata(columns),
+      terms,
+    );
+    expect(buildKeyStrings(terms.linkageKeys[0], dataset, 0)).toBeNull();
+  });
+
   test("a complete parse_date input format is not a dead key", () => {
     const { deadKeys } = assessLinkageSatisfiability(
       columns,

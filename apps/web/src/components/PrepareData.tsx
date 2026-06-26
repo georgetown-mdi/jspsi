@@ -444,15 +444,26 @@ export function PrepareData({
                 file, this is about the agreed terms, and the remedy differs (the
                 acceptor cannot fix it by remapping columns; the inviter must
                 correct the rule). Static, not a live region: it reads the terms'
-                element transforms, which this panel does not edit. */}
+                element transforms, which this panel does not edit.
+
+                role="note" (not Mantine's default role="alert") deliberately: the
+                condition is fixed at mount and never changes as the operator edits,
+                so an assertive on-mount announcement would be jarring for a standing
+                advisory -- the same polite-over-assertive reasoning the verdict
+                region applies. The title leads with the RULE ("drops every record"),
+                not "can(not) match", so it does not read as a contradiction of the
+                column verdict's "All N keys can match" heading directly above (that
+                verdict is about columns; this is about a terms-level rule -- a
+                separate axis, which the off-palette colour also signals). */}
             {deadKeyCount > 0 && (
               <Alert
+                role="note"
                 color="orange"
                 icon={<IconAlertTriangle aria-hidden />}
                 title={
                   deadKeyCount === 1
-                    ? "A linkage key can never match"
-                    : `${deadKeyCount} linkage keys can never match`
+                    ? "A linkage key's rule drops every record"
+                    : `${deadKeyCount} linkage keys have a rule that drops every record`
                 }
               >
                 {deadKeyCount === 1 ? "A key has" : "Some keys have"} a cleaning
