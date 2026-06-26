@@ -1541,20 +1541,123 @@ export function unsatisfiedLinkageFields(
   });
 }
 
+/**
+ * The date components {@link parseDateFactory} requires to emit any value. The
+ * factory populates a component only for a token its INPUT format declares, then
+ * returns null unless all three are present (its unconditional
+ * `!parts.YYYY || !parts.MM || !parts.DD` guard), so an input format omitting any
+ * of these produces null for every value.
+ */
+const PARSE_DATE_REQUIRED_COMPONENTS: readonly DateFormatToken[] = [
+  "YYYY",
+  "MM",
+  "DD",
+];
+
+/**
+ * Whether a `parse_date` step's INPUT format omits a date component the factory
+ * requires, making {@link parseDateFactory} return null for EVERY value -- the
+ * record is dropped regardless of its data. The motivating example is
+ * `input_format: "MM/DD"` (no year): with no `YYYY` token, `parts.YYYY` is never
+ * set and the factory's all-three-components guard drops every value.
+ *
+ * This mirrors {@link parseDateFactory}'s coercion exactly so the verdict cannot
+ * drift from the runtime. A nullish input format falls back to the factory's
+ * complete `"MM/DD/YYYY"`, which drops nothing. A non-nullish NON-string (wire
+ * params are `z.unknown()`, so a partner can supply one) never yields a value at
+ * runtime -- the factory either tokenizes it to an all-dropping pattern (a number,
+ * whose `.length` is undefined, yields an empty token order) or throws building
+ * the pattern (an array) -- so it is dead either way, and is reported so WITHOUT
+ * calling {@link parseDateFormat} on it, which would itself throw on an array and
+ * crash this pre-flight. For a string input format the present component set is
+ * recovered from core's OWN tokenizer ({@link parseDateFormat}), not a
+ * re-implemented scan -- the encode-the-runtime-invariant-as-a-check rule, here
+ * over a "this never produces a value" claim.
+ */
+function parseDateInputDropsEveryRecord(params: Params | undefined): boolean {
+  const raw = params?.inputFormat;
+  if (raw === null || raw === undefined) return false;
+  if (typeof raw !== "string") return true;
+  const present = new Set(parseDateFormat(raw).order);
+  return PARSE_DATE_REQUIRED_COMPONENTS.some((token) => !present.has(token));
+}
+
+/**
+ * Whether a transform/standardization pipeline produces NO value for every
+ * possible input -- a self-defeating "dead" pipeline, determinable from the terms
+ * alone without any data. Today the only value-INDEPENDENT drop core recognizes is
+ * a `parse_date` whose input format omits a required component
+ * ({@link parseDateInputDropsEveryRecord}); a later `coalesce` with a string
+ * default RESCUES a dropped value to that constant (see {@link applyStep}'s
+ * coalesce branch), so a pipeline ending in such a coalesce is NOT dead -- it
+ * yields a constant key, which the linkage layer treats as benign (a duplicated
+ * key contributes no match but is no silent-empty hazard, the same reason the
+ * coverage sweep does not flag a constant field). A coalesce BEFORE the drop, or
+ * one with no string default, does not rescue.
+ *
+ * Steps whose drop behavior depends on the VALUE -- a `substring` past the end of
+ * a short value, a `filter_regex` no value matches -- are deliberately NOT treated
+ * as always-dropping: that is the data-dependent residual the satisfiability layer
+ * leaves to the runtime coverage sweep, and assuming it here could wrongly flag a
+ * legitimate pipeline. Only a value-independent certainty is reported, so this can
+ * never claim a producible pipeline is dead.
+ */
+function pipelineAlwaysDrops(
+  steps: ReadonlyArray<{ function: string; params?: Params }> | undefined,
+): boolean {
+  if (steps === undefined) return false;
+  let dropped = false;
+  for (const step of steps) {
+    if (step.function === "coalesce") {
+      // A string default substitutes a constant for a dropped value, rescuing it;
+      // an undefined or non-string default leaves a dropped value dropped.
+      if (dropped && typeof step.params?.default === "string") dropped = false;
+      continue;
+    }
+    // A non-coalesce step null-propagates a dropped value, so once dropped the
+    // pipeline stays dropped until a rescuing coalesce.
+    if (dropped) continue;
+    if (
+      step.function === "parse_date" &&
+      parseDateInputDropsEveryRecord(step.params)
+    )
+      dropped = true;
+  }
+  return dropped;
+}
+
 /** How an input's columns fare against a set of linkage terms: which fields it
- * cannot produce, and how many of the terms' linkage keys remain usable as a
- * result. {@link satisfiableKeyCount} of 0 is the block signal -- every key
- * references at least one unproducible field, so an exchange would emit no key
- * strings and yield a result byte-indistinguishable from a legitimately empty
- * intersection. */
+ * cannot produce, how many of the terms' linkage keys remain usable as a result,
+ * and which otherwise-usable keys are self-defeating. {@link satisfiableKeyCount}
+ * of 0 is the block signal -- every key references at least one unproducible
+ * field, so an exchange would emit no key strings and yield a result
+ * byte-indistinguishable from a legitimately empty intersection. */
 export interface LinkageSatisfiability {
   /** The linkage fields the columns cannot produce (see
    * {@link unsatisfiedLinkageFields}); empty when the input satisfies every field. */
   unsatisfied: LinkageField[];
   /** The number of linkage keys all of whose element fields are satisfiable.
    * Zero means no key can match and the exchange should be blocked rather than
-   * run to a silent empty result. */
+   * run to a silent empty result. This is the column-SHAPE verdict only -- it does
+   * not subtract {@link deadKeys}, so it stays the count the differential test
+   * pins against the builder's column resolution. */
   satisfiableKeyCount: number;
+  /**
+   * Keys the column-shape verdict PASSES (every element field resolves to a
+   * present column) yet that still cannot match, because an element's declared
+   * standardization can never produce a value regardless of the data -- a
+   * self-defeating rule such as a `parse_date` whose input format omits a required
+   * component (`input_format: "MM/DD"`, no year). Distinct from {@link unsatisfied},
+   * which is about MISSING columns: here the columns are present but the rule is
+   * dead, so the key would run to a silent empty result. Empty when no
+   * shape-satisfiable key is self-defeating. Reported separately rather than
+   * folded into {@link satisfiableKeyCount} so the count stays the column-shape
+   * verdict and a caller can warn with the right remedy (fix the terms, not the
+   * CSV); the caller sanitizes the partner-controlled key names itself, as it does
+   * for {@link unsatisfied}. Detection is value-independent only (see
+   * {@link pipelineAlwaysDrops}): a data-dependent all-null collapse is left to
+   * the runtime coverage sweep, not reported here. */
+  deadKeys: LinkageKey[];
 }
 
 /**
@@ -1578,7 +1681,13 @@ export interface LinkageSatisfiability {
  * same-typed column exists but whose every row standardizes to empty (e.g. an
  * all-invalid date column) is reported satisfiable yet yields no key strings at
  * runtime. That residual is data-dependent and unavoidable from columns alone;
- * it can only over-claim "satisfiable", never wrongly block.
+ * it can only over-claim "satisfiable", never wrongly block. The one exception is
+ * value-INDEPENDENT: a key element whose declared standardization can never
+ * produce a value (a self-defeating `parse_date` input format) is reported in
+ * {@link LinkageSatisfiability.deadKeys}, derivable from the terms without data.
+ * That is reported separately, not subtracted from {@link satisfiableKeyCount}:
+ * the count stays the column-shape verdict, and the caller warns on `deadKeys`
+ * with a terms-fix remedy distinct from the missing-column one.
  */
 export function assessLinkageSatisfiability(
   columns: string[],
@@ -1610,10 +1719,33 @@ export function assessLinkageSatisfiability(
       .map((f) => f.name)
       .filter((name) => !unsatisfiedNames.has(name)),
   );
-  const satisfiableKeyCount = terms.linkageKeys.filter((k) =>
+  const shapeSatisfiableKeys = terms.linkageKeys.filter((k) =>
     k.elements.every((e) => producibleNames.has(e.field)),
-  ).length;
-  return { unsatisfied, satisfiableKeyCount };
+  );
+  // Among the shape-satisfiable keys, the self-defeating ones: an element whose
+  // transform can never produce a value (a dead `parse_date` input format), so the
+  // key passes the column check yet would run to a silent empty result. Scoped to
+  // shape-satisfiable keys -- a key already excluded from satisfiableKeyCount for a
+  // missing field is surfaced by that count, not double-reported as dead here.
+  //
+  // The scan walks each such key's element transform steps (each parse_date step a
+  // parseDateFormat tokenization over a MAX_DATE_FORMAT_LENGTH-bounded format), so
+  // its cost is O(total transform steps in `terms`) and needs no separate budget:
+  // on the partner-controlled accept path `terms` comes from a decoded invitation
+  // already bounded to MAX_ENCODED_INVITATION_LENGTH, so the step total stays small
+  // (a packed-to-the-cap hostile token measures single-digit milliseconds); on the
+  // operator's own committed-config path the terms are self-authored and drive
+  // strictly heavier per-row compile + RE2 work at exchange time, so this pre-flight
+  // scan is never the dominant cost. parseDateInputDropsEveryRecord never calls
+  // parseDateFormat on a non-string, so a hostile param shape cannot make it throw.
+  const deadKeys = shapeSatisfiableKeys.filter((k) =>
+    k.elements.some((e) => pipelineAlwaysDrops(e.transform)),
+  );
+  return {
+    unsatisfied,
+    satisfiableKeyCount: shapeSatisfiableKeys.length,
+    deadKeys,
+  };
 }
 
 // --- Value-level constraints -------------------------------------------------

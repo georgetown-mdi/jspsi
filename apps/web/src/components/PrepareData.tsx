@@ -245,6 +245,14 @@ export function PrepareData({
   const satisfiable = verdict.satisfiableKeyCount;
   const blocked = satisfiable === 0;
   const partial = satisfiable > 0 && satisfiable < totalKeys;
+  // Keys whose columns are all present (so the column verdict passes them) yet whose
+  // declared cleaning can never produce a value -- a self-defeating parse_date in
+  // the partner's adopted terms. Value-independent, so it does not change as the
+  // operator edits their columns/standardization (it reads the terms' element
+  // transforms, which the acceptor does not edit here); a fixed advisory, not the
+  // live verdict. A count, not the partner-controlled key names, matches this
+  // panel's convention of never rendering partner field/key text.
+  const deadKeyCount = verdict.deadKeys.length;
   const disclosed = disclosedColumnNames(metadata);
   // Every authored step must be well-formed before launch: a step the operator
   // left mid-edit (e.g. a cleared `substring.start`) carries a param the inline
@@ -428,6 +436,44 @@ export function PrepareData({
                 </Alert>
               )}
             </div>
+
+            {/* A dead key the column verdict cannot see: the columns are present
+                (so the verdict above may read all-clear), but a cleaning rule in
+                the partner's terms drops every record, so the key can never match.
+                Surfaced as its own advisory -- the column verdict is about the
+                file, this is about the agreed terms, and the remedy differs (the
+                acceptor cannot fix it by remapping columns; the inviter must
+                correct the rule). Static, not a live region: it reads the terms'
+                element transforms, which this panel does not edit.
+
+                role="note" (not Mantine's default role="alert") deliberately: the
+                condition is fixed at mount and never changes as the operator edits,
+                so an assertive on-mount announcement would be jarring for a standing
+                advisory -- the same polite-over-assertive reasoning the verdict
+                region applies. The title leads with the RULE ("drops every record"),
+                not "can(not) match", so it does not read as a contradiction of the
+                column verdict's "All N keys can match" heading directly above (that
+                verdict is about columns; this is about a terms-level rule -- a
+                separate axis, which the off-palette colour also signals). */}
+            {deadKeyCount > 0 && (
+              <Alert
+                role="note"
+                color="orange"
+                icon={<IconAlertTriangle aria-hidden />}
+                title={
+                  deadKeyCount === 1
+                    ? "A linkage key's rule drops every record"
+                    : `${deadKeyCount} linkage keys have a rule that drops every record`
+                }
+              >
+                {deadKeyCount === 1 ? "A key has" : "Some keys have"} a cleaning
+                rule in the agreed terms that drops every record (for example a
+                date format missing a component), so{" "}
+                {deadKeyCount === 1 ? "it" : "they"} would contribute no matches
+                no matter what your file contains. Your columns are not the
+                problem -- ask your partner for a corrected invitation.
+              </Alert>
+            )}
 
             {/* Directly under the verdict, co-located with it because it is what the
                 operator acts on next: while a field type is still missing, the

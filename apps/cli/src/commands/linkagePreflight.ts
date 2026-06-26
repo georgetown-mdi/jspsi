@@ -53,12 +53,25 @@ export function checkLinkageSatisfiability(
   standardization?: Standardization,
   metadata?: Metadata,
 ): void {
-  const { unsatisfied, satisfiableKeyCount } = assessLinkageSatisfiability(
-    columns,
-    terms,
-    standardization,
-    metadata,
-  );
+  const { unsatisfied, satisfiableKeyCount, deadKeys } =
+    assessLinkageSatisfiability(columns, terms, standardization, metadata);
+
+  // Warn about keys whose columns are all present but whose declared cleaning can
+  // never produce a value (a self-defeating parse_date input format): they pass
+  // the column check below yet would contribute nothing, running to a silent empty
+  // result. Surfaced separately from the column block/warn -- the remedy is to fix
+  // the terms, not the CSV -- and before the all-satisfiable early return, since a
+  // dead key still counts as shape-satisfiable. Key names are partner-sourced on
+  // the accept path, so sanitize each like the unsatisfied-field names below.
+  if (deadKeys.length > 0) {
+    const names = deadKeys.map((k) => sanitizeForDisplay(k.name)).join(", ");
+    log.warn(
+      `${deadKeys.length} of the ${messaging.source}'s linkage keys can never ` +
+        `match -- a cleaning step drops every record (${names}); those keys ` +
+        "will contribute nothing to this exchange.",
+    );
+  }
+
   // Gate on the key count, not on `unsatisfied.length`: a key can be unsatisfiable
   // because it references a field the terms never declare (not just a declared
   // field the CSV lacks), in which case `unsatisfied` is empty yet keys still
