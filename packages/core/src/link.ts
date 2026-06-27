@@ -522,7 +522,18 @@ function buildDistinctAndTokens(
   let recordCount = 0;
   for (let j = 0; j < data.length; ++j) {
     const column = Array.from(data[j]);
-    if (j === 0) recordCount = column.length;
+    if (j === 0) {
+      recordCount = column.length;
+    } else if (column.length !== recordCount) {
+      // Every key iterates the same records, so all columns share recordCount
+      // (StandardizedKeyIterable is built once per row count). A ragged column
+      // would make the shape frame's length disagree with the receiver's
+      // keyCount * recordCount tie; encode the invariant rather than trust it.
+      throw new Error(
+        `single-pass: linkage key ${j} has ${column.length} records, expected ` +
+          `${recordCount}; all keys must iterate the same records`,
+      );
+    }
     const row: Array<number> = new Array(column.length);
     for (let i = 0; i < column.length; ++i) {
       const value = column[i];
@@ -579,7 +590,8 @@ function uniqueSurvivors(
 // Pack a flat token array as a little-endian Int32 frame (the shape table).
 // Endianness is fixed explicitly so the frame is byte-identical across
 // architectures; Int32 covers the -1 sentinel and every value index.
-function encodeInt32LE(values: ReadonlyArray<number>): Uint8Array {
+/** @internal exported for the wire-message test. */
+export function encodeInt32LE(values: ReadonlyArray<number>): Uint8Array {
   const bytes = new Uint8Array(values.length * 4);
   const view = new DataView(bytes.buffer);
   for (let i = 0; i < values.length; ++i) view.setInt32(i * 4, values[i], true);
@@ -589,7 +601,8 @@ function encodeInt32LE(values: ReadonlyArray<number>): Uint8Array {
 // Decode a little-endian Int32 frame (see encodeInt32LE). A length that is not a
 // whole number of int32s is a protocol error, not a silent truncation; reads
 // through a DataView so a non-aligned buffer cannot fault.
-function decodeInt32LE(bytes: Uint8Array): Int32Array {
+/** @internal exported for the wire-message test. */
+export function decodeInt32LE(bytes: Uint8Array): Int32Array {
   if (bytes.byteLength % 4 !== 0)
     throw new Error(
       "protocol error: single-pass shape frame is not a whole number of int32s",

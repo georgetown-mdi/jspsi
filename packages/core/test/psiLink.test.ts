@@ -10,6 +10,8 @@ import {
   linkViaSinglePassPSI,
   associationAndIterationArray,
   singlePassHeaderMessage,
+  encodeInt32LE,
+  decodeInt32LE,
 } from "../src/link";
 
 import {
@@ -263,4 +265,42 @@ test("singlePassHeaderMessage parses a valid header and rejects a malformed one"
   }
   expect(err).toBeInstanceOf(ConnectionError);
   expect((err as ConnectionError).kind).toBe("protocol");
+});
+
+// ─── single-pass shape-frame codec and the receiver's frame-length tie ────────
+// The shape table is a partner-controlled binary frame; these pin the two
+// fail-closed gates that guard it (the channel-hardening controls).
+test("encodeInt32LE / decodeInt32LE round-trip, and a non-aligned frame is rejected", () => {
+  const values = [-1, 0, 1, 7, 2_000_000_000];
+  expect(Array.from(decodeInt32LE(encodeInt32LE(values)))).toEqual(values);
+  // A length that is not a whole number of int32s is a clean error, not a silent
+  // truncation -- the decode guard for the partner-supplied shape frame.
+  expect(() => decodeInt32LE(new Uint8Array(3))).toThrow(/int32/);
+});
+
+test("single-pass receiver rejects a shape frame inconsistent with the header", async () => {
+  // The receiver ties the shape frame to the header's record count:
+  // tokenBytes.byteLength must equal keyCount * senderRecordCount * 4. A
+  // contradicting frame is a clean protocol abort, not a wrong reconstruction.
+  // Drive the receiver (joiner) against a hostile sender that contradicts its own
+  // header. setup/response are consumed only after the length check, so dummies
+  // suffice; the check fires on the fourth frame.
+  const [conn, peer] = createMessagePipe();
+  const receiver = new PSIParticipant("client", psiLibrary, {
+    role: "joiner",
+    verbose: -1,
+  });
+  const run = linkViaSinglePassPSI(
+    { cardinality: "one-to-one" },
+    receiver,
+    conn,
+    [["a", "b"]], // one key
+    -1,
+  );
+  await peer.receive(); // consume the receiver's encrypted request
+  await peer.send(new Uint8Array([1, 2, 3, 4])); // setup (unused before the check)
+  await peer.send(new Uint8Array([5, 6, 7, 8])); // response
+  await peer.send({ recordCount: 5 }); // expects 1 * 5 * 4 = 20 bytes
+  await peer.send(new Uint8Array(8)); // 8 != 20
+  await expect(run).rejects.toThrow(/shape frame length/);
 });
