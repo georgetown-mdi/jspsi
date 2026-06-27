@@ -1,4 +1,6 @@
-import type { PSIParticipant } from "./participant";
+import * as z from "zod";
+
+import { associationTableMessage, type PSIParticipant } from "./participant";
 import type { AssociationTable } from "./types";
 import {
   receiveParsed,
@@ -62,34 +64,54 @@ function getUnidentifiedIndices(
   }, [] as Array<number>);
 }
 
+// The cascade's per-side, within-round reduction, shared by both strategies so
+// the "byte-identical table" contract cannot drift. Returns each value occurring
+// exactly once (the within-side uniqueness rule) mapped to its sole position, in
+// first-occurrence order; `valueAt` returns undefined to skip a position, folding
+// the "no key" sentinel and (in the single-pass replay) an already-matched
+// survivor into one skip.
+function reduceToSingletons<T>(
+  count: number,
+  valueAt: (index: number) => T | undefined,
+): Map<T, number> {
+  const occurrences = new Map<T, number>();
+  const firstIndex = new Map<T, number>();
+  for (let i = 0; i < count; ++i) {
+    const value = valueAt(i);
+    if (value === undefined) continue;
+    const seen = occurrences.get(value);
+    if (seen === undefined) {
+      occurrences.set(value, 1);
+      firstIndex.set(value, i);
+    } else {
+      occurrences.set(value, seen + 1);
+    }
+  }
+  const singletons = new Map<T, number>();
+  for (const [value, n] of occurrences) {
+    if (n === 1) singletons.set(value, firstIndex.get(value)!);
+  }
+  return singletons;
+}
+
+// Cascade adapter over reduceToSingletons: drops the undefined "no key" sentinel
+// ("" is a real value, kept) and returns each within-input-unique value with its
+// original index, remapped through `permutation` when the input is a carried-
+// forward subset of a later round. See docs/spec/PROTOCOL.md (Key input data).
 function removeDuplicatesAndUndefineds(
   dataWithDuplicatesAndUndefineds: Array<string | undefined>,
   permutation?: Array<number>,
 ): [Array<string>, Array<number>] {
-  const elementToIndexMap: Map<string, Array<number>> = new Map();
-  dataWithDuplicatesAndUndefineds.forEach((value, i) => {
-    // Drop only the "no key" sentinel. "" is a real, matchable key value
-    // distinct from undefined (testing `!value` here would conflate them), and
-    // participates in matching subject to the within-dataset uniqueness rule
-    // applied below. See docs/spec/PROTOCOL.md (Key input data).
-    if (value === undefined) return;
-    const arr = elementToIndexMap.get(value);
-    if (arr) {
-      arr.push(i);
-    } else {
-      elementToIndexMap.set(value, [i]);
-    }
-  });
-  const originalIndices: Array<number> = [];
+  const singletons = reduceToSingletons<string>(
+    dataWithDuplicatesAndUndefineds.length,
+    (i) => dataWithDuplicatesAndUndefineds[i],
+  );
   const data: Array<string> = [];
-  elementToIndexMap.forEach((arr, value) => {
-    if (arr.length === 1) {
-      originalIndices.push(arr[0]);
-      data.push(value);
-    }
-  });
-
-  if (permutation) return [data, originalIndices.map((i) => permutation[i])];
+  const originalIndices: Array<number> = [];
+  for (const [value, i] of singletons) {
+    data.push(value);
+    originalIndices.push(permutation ? permutation[i] : i);
+  }
   return [data, originalIndices];
 }
 
@@ -274,41 +296,293 @@ export async function linkViaPSI(
 }
 
 /**
- * Single-pass linkage strategy entry point (linkage terms `linkageStrategy:
- * "single-pass"`; selected by the dispatch in exchange.ts). Same signature and
- * return shape as {@link linkViaPSI}, so the two are interchangeable at the call
- * site, and it must produce the byte-identical {@link AssociationTable}
- * {@link linkViaPSI} would for the same inputs.
+ * Single-pass linkage strategy: same signature, inputs, and
+ * {@link AssociationTable} result as {@link linkViaPSI}, and byte-identical
+ * output, but one batched PSI exchange in place of {@link linkViaPSI}'s dependent
+ * round per key (selected by the exchange.ts dispatch on `linkageStrategy`).
  *
- * Where {@link linkViaPSI} runs one dependent PSI exchange per key in sequence,
- * single-pass batches every key's PSI data into one exchange and has the
- * receiver reconstruct the cascade locally. Reproducing the cascade exactly
- * means recomputing survivor-relative uniqueness as key precedence is replayed
- * -- a value ambiguous over the full dataset can become unique once its twin is
- * claimed by an earlier key -- so the exchange has to carry enough per-key
- * structure to recompute that, not merely a union of per-key unique matches
- * (see the issue and, once written, docs/spec/PROTOCOL.md). Only the
- * cascade-equivalent table is emitted; the weaker-key matches visible in the
- * reconstruction are not surfaced.
- *
- * Scaffold stub: the algorithm is implemented by the owner against this entry
- * point. Until then it fails closed -- selecting `single-pass` aborts with a
- * clear error rather than silently running the cascade under a strategy the
- * parties did not agree to.
+ * The sender encrypts its full per-key value structure once and ships it; the
+ * receiver recovers the cross-party value equality and replays the cascade
+ * locally. The full structure is needed -- not a union of per-key unique matches
+ * -- because uniqueness is survivor-relative: a value ambiguous over the whole
+ * dataset can become unique once an earlier key claims its twin. Only the
+ * cascade-equivalent table is returned; the weaker-key matches the receiver
+ * necessarily sees are never surfaced. The wire shape and its disclosure tradeoff
+ * are specified in docs/spec/PROTOCOL.md; the PSI primitives it composes are on
+ * {@link PSIParticipant}.
  */
 export async function linkViaSinglePassPSI(
-  _protocol: {
+  protocol: {
     cardinality: "one-to-one" | "one-to-many" | "many-to-one" | "many-to-many";
   },
-  _participant: PSIParticipant,
-  _conn: MessageConnection,
-  _data: Array<IndexableIterable<string | undefined>>,
-  _verbosity: number = 0,
-  _setStage?: (id: string) => void,
+  participant: PSIParticipant,
+  conn: MessageConnection,
+  data: Array<IndexableIterable<string | undefined>>,
+  verbosity: number = 0,
+  setStage?: (id: string) => void,
 ): Promise<AssociationTable> {
-  // Parameters mirror linkViaPSI (the `_` prefix marks them unused only until the
-  // algorithm is wired in); the owner implements the body against this signature.
-  throw new Error("single-pass linkage strategy is not yet implemented");
+  if (participant.config.role === "either")
+    throw new Error("participants role is unresolved");
+  if (!["one-to-one", "many-to-one"].includes(protocol.cardinality)) {
+    throw new Error(
+      `psi for cardinality '${protocol.cardinality}' not yet implemented`,
+    );
+  }
+
+  const log = getLoggerForVerbosity("psiLink", verbosity);
+  const stage = setStage ?? (() => {});
+  const keyCount = data.length;
+  // Guaranteed by the schema (linkageKeys is .min(1)); checked so a direct caller
+  // with empty data cannot make the receiver's frame-length guard below vacuous.
+  if (keyCount < 1)
+    throw new Error(
+      `${participant.id}: single-pass requires at least one linkage key`,
+    );
+
+  log.debug(
+    `${participant.id}: linking using ${keyCount} key(s) via single-pass PSI`,
+  );
+
+  // Each party's distinct values, deduplicated across all keys, with every cell
+  // tokenized to its value's index. The replay only ever compares within a key,
+  // so a value reused across keys shares one token and one ciphertext.
+  const { distinct, tokens, recordCount } = buildDistinctAndTokens(data);
+
+  if (participant.config.role === "starter") {
+    // Sender: ship the once-encrypted set, the doubly-encrypted request, and the
+    // shape table. The shape table is remapped into the setup's sorted order
+    // (tokensInSortedOrder) so the sorting permutation never leaves this side and
+    // the receiver's match indices address it directly.
+    stage("encrypting my data");
+    const { setup, permutation } = participant.createServerSetup(distinct);
+
+    const request = (await conn.receive()) as Uint8Array;
+    stage("doubly-encrypting partner's data");
+    const response = participant.processClientRequest(request);
+    const sortedTokens = tokensInSortedOrder(tokens, permutation);
+
+    // Four same-direction frames (the transport carries one binary blob or one
+    // JSON object per frame, never mixed): setup, response, a record-count header,
+    // and the shape table packed as little-endian Int32 -- 4 bytes/token, far
+    // cheaper than JSON for its keyCount x recordCount bulk.
+    log.debug(
+      `${participant.id}: sending setup, response, header, shape table`,
+    );
+    await conn.send(setup);
+    await conn.send(response);
+    await conn.send({ recordCount });
+    await conn.send(encodeInt32LE(sortedTokens));
+
+    const table = await receiveParsed(conn, associationTableMessage);
+    stage("done");
+    return [table[0], table[1]];
+  }
+
+  // Receiver (joiner): reconstruct the cascade locally, then return the sender
+  // its view.
+  stage("encrypting my data");
+  await conn.send(participant.createClientRequest(distinct));
+
+  const setupBytes = (await conn.receive()) as Uint8Array;
+  const responseBytes = (await conn.receive()) as Uint8Array;
+  const header = await receiveParsed(conn, singlePassHeaderMessage);
+  const tokenBytes = (await conn.receive()) as Uint8Array;
+
+  const senderRecordCount = header.recordCount;
+  if (
+    !Number.isInteger(senderRecordCount) ||
+    senderRecordCount < 0 ||
+    tokenBytes.byteLength !== keyCount * senderRecordCount * 4
+  ) {
+    throw new Error(
+      `${participant.id} protocol error: single-pass shape frame length does ` +
+        "not match the agreed key count",
+    );
+  }
+  const flatTokens = decodeInt32LE(tokenBytes);
+
+  // computeMatchTable returns the sender side in setup-message sorted order -- the
+  // order the sender remapped its shape table into -- so the ids align with no
+  // wire permutation. crossMatch is the value equality: receiver index -> sender
+  // index for shared values.
+  stage("identifying shared elements");
+  const [receiverIds, senderSortedIds] = participant.computeMatchTable(
+    setupBytes,
+    responseBytes,
+  );
+  const crossMatch = new Map<number, number>();
+  for (let k = 0; k < receiverIds.length; ++k) {
+    crossMatch.set(receiverIds[k], senderSortedIds[k]);
+  }
+
+  // The key-major shape table as per-key rows; subarray is a zero-copy view.
+  const senderTokens: Array<Int32Array> = [];
+  for (let j = 0; j < keyCount; ++j) {
+    senderTokens.push(
+      flatTokens.subarray(j * senderRecordCount, (j + 1) * senderRecordCount),
+    );
+  }
+
+  // Replay the cascade. uniqueSurvivors (here) and the cascade's
+  // removeDuplicatesAndUndefineds both reduce through reduceToSingletons, so the
+  // per-round survivor-relative uniqueness -- and thus the table -- is identical
+  // to linkViaPSI's by construction. The receiver alone resolves matches, so the
+  // two sides cannot disagree the way lockstep rounds can.
+  const matched: IndexIterationMap = new Array(recordCount).fill(undefined);
+  const senderMatched: Array<boolean> = new Array(senderRecordCount).fill(
+    false,
+  );
+  for (let j = 0; j < keyCount; ++j) {
+    stage(`stage ${j + 1} / ${keyCount}`);
+    const receiverUnique = uniqueSurvivors(
+      tokens[j],
+      (row) => matched[row] !== undefined,
+    );
+    const senderUnique = uniqueSurvivors(
+      senderTokens[j],
+      (row) => senderMatched[row],
+    );
+    for (const [receiverId, receiverRow] of receiverUnique) {
+      const senderId = crossMatch.get(receiverId);
+      if (senderId === undefined) continue;
+      const senderRow = senderUnique.get(senderId);
+      if (senderRow === undefined) continue;
+      matched[receiverRow] = { theirIndex: senderRow, iteration: j };
+      senderMatched[senderRow] = true;
+    }
+  }
+
+  // The receiver returns its own table (ascending receiver index); the sender's
+  // view (ascending sender index) rides the final frame. Both are the
+  // [localAscending, partner] shape linkViaPSI returns.
+  const mine: AssociationTable = [[], []];
+  for (let i = 0; i < recordCount; ++i) {
+    const m = matched[i];
+    if (m) {
+      mine[0].push(i);
+      mine[1].push(m.theirIndex);
+    }
+  }
+  const pairs = mine[0].map((i, k): [number, number] => [mine[1][k], i]);
+  pairs.sort((a, b) => a[0] - b[0]);
+  const theirs: AssociationTable = [
+    pairs.map((p) => p[0]),
+    pairs.map((p) => p[1]),
+  ];
+
+  log.debug(
+    `${participant.id}: ${mine[0].length} match(es); returning sender's view`,
+  );
+  await conn.send(theirs);
+  stage("done");
+  return mine;
+}
+
+// The single-pass header frame: just the sender's record count (the shape table
+// rides its own binary frame, and the sorting permutation never travels). A
+// scalar object, so it carries none of the single-issue-array count surface the
+// other frames do.
+/** @internal exported for the wire-message test. */
+export const singlePassHeaderMessage = z.object({
+  recordCount: z.number(),
+});
+
+// This party's distinct values (deduplicated across all keys) and the per-key
+// token rows indexing them: tokens[j][i] is record i's value index for key j, or
+// -1 for an absent cell. Equal tokens mean equal values, so the receiver recovers
+// both parties' per-round duplicate structure from integers alone. "" is a real
+// value with its own index, distinct from -1 (see docs/spec/PROTOCOL.md, Key
+// input data).
+function buildDistinctAndTokens(
+  data: Array<IndexableIterable<string | undefined>>,
+): {
+  distinct: Array<string>;
+  tokens: Array<Array<number>>;
+  recordCount: number;
+} {
+  const valueId = new Map<string, number>();
+  const distinct: Array<string> = [];
+  const tokens: Array<Array<number>> = [];
+  let recordCount = 0;
+  for (let j = 0; j < data.length; ++j) {
+    const column = Array.from(data[j]);
+    if (j === 0) recordCount = column.length;
+    const row: Array<number> = new Array(column.length);
+    for (let i = 0; i < column.length; ++i) {
+      const value = column[i];
+      if (value === undefined) {
+        row[i] = -1;
+        continue;
+      }
+      let id = valueId.get(value);
+      if (id === undefined) {
+        id = distinct.length;
+        valueId.set(value, id);
+        distinct.push(value);
+      }
+      row[i] = id;
+    }
+    tokens.push(row);
+  }
+  return { distinct, tokens, recordCount };
+}
+
+// Remap the flat shape table from build order into the setup's sorted order, so
+// it shares computeMatchTable's index space and the sorting permutation stays off
+// the wire. createServerSetup yields permutation[sortedPos] = buildId; invert it.
+// The -1 sentinel is preserved; runs over a fresh copy, leaving the caller's
+// `tokens` untouched.
+function tokensInSortedOrder(
+  tokens: Array<Array<number>>,
+  permutation: Array<number>,
+): Array<number> {
+  const sortedPosOf = new Array<number>(permutation.length);
+  for (let sortedPos = 0; sortedPos < permutation.length; ++sortedPos) {
+    sortedPosOf[permutation[sortedPos]] = sortedPos;
+  }
+  const flat = tokens.flat();
+  for (let i = 0; i < flat.length; ++i) {
+    if (flat[i] >= 0) flat[i] = sortedPosOf[flat[i]];
+  }
+  return flat;
+}
+
+// Single-pass replay adapter over reduceToSingletons, in token space: skips
+// already-matched rows and the -1 sentinel (a token of 0 is a real value index,
+// kept). ArrayLike so it serves both the receiver's number[] and the sender's
+// decoded Int32Array.
+function uniqueSurvivors(
+  tokens: ArrayLike<number>,
+  isMatched: (row: number) => boolean,
+): Map<number, number> {
+  return reduceToSingletons<number>(tokens.length, (row) =>
+    isMatched(row) || tokens[row] < 0 ? undefined : tokens[row],
+  );
+}
+
+// Pack a flat token array as a little-endian Int32 frame (the shape table).
+// Endianness is fixed explicitly so the frame is byte-identical across
+// architectures; Int32 covers the -1 sentinel and every value index.
+function encodeInt32LE(values: ReadonlyArray<number>): Uint8Array {
+  const bytes = new Uint8Array(values.length * 4);
+  const view = new DataView(bytes.buffer);
+  for (let i = 0; i < values.length; ++i) view.setInt32(i * 4, values[i], true);
+  return bytes;
+}
+
+// Decode a little-endian Int32 frame (see encodeInt32LE). A length that is not a
+// whole number of int32s is a protocol error, not a silent truncation; reads
+// through a DataView so a non-aligned buffer cannot fault.
+function decodeInt32LE(bytes: Uint8Array): Int32Array {
+  if (bytes.byteLength % 4 !== 0)
+    throw new Error(
+      "protocol error: single-pass shape frame is not a whole number of int32s",
+    );
+  const count = bytes.byteLength / 4;
+  const values = new Int32Array(count);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let i = 0; i < count; ++i) values[i] = view.getInt32(i * 4, true);
+  return values;
 }
 
 async function exchangeMappedElements(

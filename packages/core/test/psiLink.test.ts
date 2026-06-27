@@ -9,6 +9,7 @@ import {
   linkViaPSI,
   linkViaSinglePassPSI,
   associationAndIterationArray,
+  singlePassHeaderMessage,
 } from "../src/link";
 
 import {
@@ -77,20 +78,105 @@ test("results are correct", () => {
   expect(serverResult[1]).toStrictEqual([2, 0, 1]);
 });
 
-// ─── linkViaSinglePassPSI: scaffold stub fails closed ─────────────────────────
-// The single-pass strategy's algorithm is implemented by the owner against this
-// entry point; until then, selecting it must abort rather than silently fall
-// back to the cascade. Pins that interim fail-closed contract.
-test("single-pass linkage entry point is not yet implemented and fails closed", async () => {
-  await expect(
+// ─── linkViaSinglePassPSI: parity with the cascade ────────────────────────────
+// Single-pass batches every key into one exchange and has the receiver
+// reconstruct the cascade locally; it must produce the byte-identical association
+// table linkViaPSI would for the same inputs. Run both roles over a fresh pipe and
+// compare against the cascade results computed above.
+test("single-pass yields the byte-identical association table as the cascade", async () => {
+  const [spServerConn, spClientConn] = createMessagePipe();
+  const spServer = new PSIParticipant("server", psiLibrary, {
+    role: "starter",
+    verbose: -1,
+  });
+  const spClient = new PSIParticipant("client", psiLibrary, {
+    role: "joiner",
+    verbose: -1,
+  });
+
+  let [spServerResult, spClientResult] = await Promise.all([
     linkViaSinglePassPSI(
       { cardinality: "one-to-one" },
-      server,
-      serverConn,
+      spServer,
+      spServerConn,
       serverData,
       -1,
     ),
-  ).rejects.toThrow(/not yet implemented/);
+    linkViaSinglePassPSI(
+      { cardinality: "one-to-one" },
+      spClient,
+      spClientConn,
+      clientData,
+      -1,
+    ),
+  ]);
+
+  spServerResult = sortAssociationTable(spServerResult);
+  spClientResult = sortAssociationTable(spClientResult, true);
+
+  // Identical to the cascade, on both sides.
+  expect(spServerResult).toStrictEqual(serverResult);
+  expect(spClientResult).toStrictEqual(clientResult);
+
+  // Internally consistent: each party's locals are the other's partners.
+  expect(spServerResult[0]).toStrictEqual(spClientResult[1]);
+  expect(spServerResult[1]).toStrictEqual(spClientResult[0]);
+});
+
+// ─── linkViaSinglePassPSI: survivor-relative (contention) uniqueness ──────────
+// Uniqueness is evaluated over the records still unmatched at each round, not the
+// full dataset, so a value duplicated across the whole data becomes matchable once
+// an earlier key claims its twin. Here the sender's "Z" is duplicated (rows 0, 1),
+// but row 0 matches on key 1, leaving "Z" unique among key 2's survivors so row 1
+// matches too. A reconstruction that used full-dataset uniqueness would drop "Z"
+// and miss row 1; the expected table pins the survivor-relative behavior.
+test("single-pass reproduces the cascade's survivor-relative uniqueness", async () => {
+  const senderData = [
+    ["A", "B"],
+    ["Z", "Z"],
+  ];
+  const receiverData = [
+    ["A", undefined],
+    [undefined, "Z"],
+  ];
+
+  const run = async (link: typeof linkViaPSI) => {
+    const [senderConn, receiverConn] = createMessagePipe();
+    const sender = new PSIParticipant("server", psiLibrary, {
+      role: "starter",
+      verbose: -1,
+    });
+    const receiver = new PSIParticipant("client", psiLibrary, {
+      role: "joiner",
+      verbose: -1,
+    });
+    const [senderResult, receiverResult] = await Promise.all([
+      link({ cardinality: "one-to-one" }, sender, senderConn, senderData, -1),
+      link(
+        { cardinality: "one-to-one" },
+        receiver,
+        receiverConn,
+        receiverData,
+        -1,
+      ),
+    ]);
+    return [
+      sortAssociationTable(senderResult),
+      sortAssociationTable(receiverResult, true),
+    ];
+  };
+
+  const [cascadeSender, cascadeReceiver] = await run(linkViaPSI);
+  // Both sender rows match -- reachable only under survivor-relative uniqueness.
+  expect(cascadeSender).toStrictEqual([
+    [0, 1],
+    [0, 1],
+  ]);
+
+  const [singlePassSender, singlePassReceiver] =
+    await run(linkViaSinglePassPSI);
+  expect(singlePassSender).toStrictEqual(cascadeSender);
+  expect(singlePassReceiver).toStrictEqual(cascadeReceiver);
 });
 
 // ─── associationAndIterationArray: pathological-count bound ───────────────────
@@ -153,6 +239,25 @@ test("a mapped-elements element that is an array (not a plain object) is rejecte
   let err: unknown;
   try {
     parseOrProtocolError(associationAndIterationArray, [arrayElement]);
+  } catch (e) {
+    err = e;
+  }
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+});
+
+// ─── singlePassHeaderMessage: scalar header ───────────────────────────────────
+// Now that the sender remaps its shape table into the setup's sorted order, the
+// permutation no longer travels and the header is just the record count -- a
+// scalar object with none of the single-issue-array pathological surface the other
+// frames carry. A valid header parses; a non-number record count is a clean
+// protocol error.
+test("singlePassHeaderMessage parses a valid header and rejects a malformed one", () => {
+  expect(singlePassHeaderMessage.parse({ recordCount: 3 }).recordCount).toBe(3);
+
+  let err: unknown;
+  try {
+    parseOrProtocolError(singlePassHeaderMessage, { recordCount: "x" });
   } catch (e) {
     err = e;
   }

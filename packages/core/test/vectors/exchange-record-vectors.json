@@ -9,6 +9,7 @@
           "identity": "Party A",
           "date": "2025-01-01",
           "algorithm": "psi",
+          "linkageStrategy": "cascade",
           "output": {
             "expectsOutput": true,
             "shareWithPartner": true
@@ -55,6 +56,7 @@
           "identity": "Party B",
           "date": "2025-01-01",
           "algorithm": "psi",
+          "linkageStrategy": "cascade",
           "output": {
             "expectsOutput": true,
             "shareWithPartner": true
@@ -125,7 +127,7 @@
       "record": {
         "version": "psilink-exchange-record/v1",
         "createdAt": "2026-01-02T03:04:05.000Z",
-        "termsHash": "Mr4_C8Ph6lEic9fzLvBPbCDbDr8FZo2-9BtAA5my_DE",
+        "termsHash": "NndSxh_H2dH9QDOK3GNhZz574iSYpmWXZBAcqzbbJ7o",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
         "governance": {
@@ -201,6 +203,7 @@
           "identity": "Party A",
           "date": "2025-01-01",
           "algorithm": "psi",
+          "linkageStrategy": "cascade",
           "output": {
             "expectsOutput": true,
             "shareWithPartner": true
@@ -228,6 +231,7 @@
           "identity": "Party B",
           "date": "2025-01-01",
           "algorithm": "psi",
+          "linkageStrategy": "cascade",
           "output": {
             "expectsOutput": true,
             "shareWithPartner": true
@@ -276,7 +280,7 @@
       "record": {
         "version": "psilink-exchange-record/v1",
         "createdAt": "2026-01-02T03:04:05.000Z",
-        "termsHash": "hQi6gjL9Z0RFtfz2TZVqXmUF1Cu8PaBFbClOJ9R8l_Q",
+        "termsHash": "1pgvorgQseW486XCURs3KAcOP_YN3bnIhVndGsrHHwc",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
         "governance": {
@@ -334,6 +338,7 @@
           "identity": "Party A",
           "date": "2025-01-01",
           "algorithm": "psi",
+          "linkageStrategy": "cascade",
           "output": {
             "expectsOutput": false,
             "shareWithPartner": true
@@ -369,6 +374,7 @@
           "identity": "Party B",
           "date": "2025-01-01",
           "algorithm": "psi",
+          "linkageStrategy": "cascade",
           "output": {
             "expectsOutput": true,
             "shareWithPartner": false
@@ -422,7 +428,7 @@
       "record": {
         "version": "psilink-exchange-record/v1",
         "createdAt": "2026-01-02T03:04:05.000Z",
-        "termsHash": "JdCWXPlkOD1iKt2tRgC5IHHKIxM8_i3EZapYiuZQs8w",
+        "termsHash": "0mw2vkRK9EL4_K_3ZPpnmToLl2eyDBS3zGfoxqOlOTc",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
         "governance": {
@@ -479,6 +485,7 @@
           "identity": "Party B",
           "date": "2025-01-01",
           "algorithm": "psi",
+          "linkageStrategy": "cascade",
           "output": {
             "expectsOutput": true,
             "shareWithPartner": false
@@ -514,6 +521,7 @@
           "identity": "Party A",
           "date": "2025-01-01",
           "algorithm": "psi",
+          "linkageStrategy": "cascade",
           "output": {
             "expectsOutput": false,
             "shareWithPartner": true
@@ -572,7 +580,7 @@
       "record": {
         "version": "psilink-exchange-record/v1",
         "createdAt": "2026-01-02T03:04:05.000Z",
-        "termsHash": "JdCWXPlkOD1iKt2tRgC5IHHKIxM8_i3EZapYiuZQs8w",
+        "termsHash": "0mw2vkRK9EL4_K_3ZPpnmToLl2eyDBS3zGfoxqOlOTc",
         "localIdentity": "Party B",
         "partnerIdentity": "Party A",
         "governance": {
@@ -637,6 +645,7 @@
           "identity": "Party A",
           "date": "2025-01-01",
           "algorithm": "psi-c",
+          "linkageStrategy": "cascade",
           "output": {
             "expectsOutput": true,
             "shareWithPartner": true
@@ -687,6 +696,7 @@
           "identity": "Party B",
           "date": "2025-01-01",
           "algorithm": "psi-c",
+          "linkageStrategy": "cascade",
           "output": {
             "expectsOutput": true,
             "shareWithPartner": true
@@ -756,7 +766,7 @@
       "record": {
         "version": "psilink-exchange-record/v1",
         "createdAt": "2026-01-02T03:04:05.000Z",
-        "termsHash": "LIHMQ_NIHEB4G9rn6h_acyvRlHVipV-lm20PLREENW8",
+        "termsHash": "eZBA72rLn0xaADBj7BGC0mWHe_7s0pwED7tzDaUVjWk",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
         "governance": {
@@ -822,6 +832,7 @@
           "identity": "Party A",
           "date": "2025-01-01",
           "algorithm": "psi-c",
+          "linkageStrategy": "cascade",
           "output": {
             "expectsOutput": true,
             "shareWithPartner": true
@@ -872,6 +883,7 @@
           "identity": "Party B",
           "date": "2025-01-01",
           "algorithm": "psi-c",
+          "linkageStrategy": "cascade",
           "output": {
             "expectsOutput": true,
             "shareWithPartner": true
@@ -941,7 +953,7 @@
       "record": {
         "version": "psilink-exchange-record/v1",
         "createdAt": "2026-01-02T03:04:05.000Z",
-        "termsHash": "9flvqQVHa-jz3rqlB7LOt9Amu3_K7DXX_Gfl04_yhnY",
+        "termsHash": "AzJi5GLcAEIuLecddIrltTqEXxzN35jvu9OPcLpZ910",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
         "governance": {
@@ -1007,6 +1019,7 @@
           "identity": "Party A",
           "date": "2025-01-01",
           "algorithm": "psi",
+          "linkageStrategy": "cascade",
           "output": {
             "expectsOutput": true,
             "shareWithPartner": true
@@ -1053,6 +1066,7 @@
           "identity": "Party B",
           "date": "2025-01-01",
           "algorithm": "psi",
+          "linkageStrategy": "cascade",
           "output": {
             "expectsOutput": true,
             "shareWithPartner": true
@@ -1124,7 +1138,7 @@
       "record": {
         "version": "psilink-exchange-record/v1",
         "createdAt": "2026-01-02T03:04:05.000Z",
-        "termsHash": "Mr4_C8Ph6lEic9fzLvBPbCDbDr8FZo2-9BtAA5my_DE",
+        "termsHash": "NndSxh_H2dH9QDOK3GNhZz574iSYpmWXZBAcqzbbJ7o",
         "localIdentity": "Party A",
         "partnerIdentity": "Party B",
         "governance": {

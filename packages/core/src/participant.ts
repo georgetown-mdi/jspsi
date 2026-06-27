@@ -207,6 +207,86 @@ export class PSIParticipant {
     return this.stages;
   }
 
+  // Per-step PSI primitives for the single-pass strategy (link.ts
+  // linkViaSinglePassPSI), which consumes the four operations directly rather than
+  // through identifyIntersection's orchestrated per-round exchange below. They wrap
+  // the same library calls, so the WASM key and the psi server/client stay private
+  // to this class -- callers get only bytes and indices. identifyIntersection could
+  // one day compose from these so each step has a single implementation.
+
+  /**
+   * Encrypts this party's set once under the server key, returning the serialized
+   * setup message and the sorting permutation the library applied (sorted
+   * position -> original input index, used to map a match back to the input
+   * order). Requires the `"starter"` role.
+   */
+  public createServerSetup(values: ReadonlyArray<string>): {
+    setup: Uint8Array;
+    permutation: Array<number>;
+  } {
+    const server = this.psi.server;
+    if (!server)
+      throw new Error(`${this.id}: createServerSetup requires the server role`);
+    const permutation: Array<number> = [];
+    const setup = server.createSetupMessage(
+      0.0,
+      -1,
+      values,
+      this.library.dataStructure.Raw,
+      permutation,
+    );
+    return { setup: setup.serializeBinary(), permutation };
+  }
+
+  /**
+   * Doubly-encrypts the partner's request under the server key, returning the
+   * serialized response. Requires the `"starter"` role.
+   */
+  public processClientRequest(requestBytes: Uint8Array): Uint8Array {
+    const server = this.psi.server;
+    if (!server)
+      throw new Error(
+        `${this.id}: processClientRequest requires the server role`,
+      );
+    const request = this.library.request.deserializeBinary(requestBytes);
+    return server.processRequest(request).serializeBinary();
+  }
+
+  /**
+   * Encrypts this party's set once under the client key, returning the serialized
+   * request. Requires the `"joiner"` role.
+   */
+  public createClientRequest(values: ReadonlyArray<string>): Uint8Array {
+    const client = this.psi.client;
+    if (!client)
+      throw new Error(
+        `${this.id}: createClientRequest requires the client role`,
+      );
+    return client.createRequest(values).serializeBinary();
+  }
+
+  /**
+   * Strips this party's client-key layer off the doubly-encrypted response and
+   * matches it against the partner's setup, returning the value-level equality
+   * relation as `[receiverDistinctIndex, senderSortedIndex]` pairs. The sender
+   * side is in setup-message SORTED order; the caller maps it back to the
+   * sender's original distinct order with the permutation from
+   * {@link createServerSetup}. NOT record indices -- the cascade replay turns
+   * this into record pairs. Requires the `"joiner"` role.
+   */
+  public computeMatchTable(
+    setupBytes: Uint8Array,
+    responseBytes: Uint8Array,
+  ): [Array<number>, Array<number>] {
+    const client = this.psi.client;
+    if (!client)
+      throw new Error(`${this.id}: computeMatchTable requires the client role`);
+    const setup = this.library.serverSetup.deserializeBinary(setupBytes);
+    const response = this.library.response.deserializeBinary(responseBytes);
+    const table = client.getAssociationTable(setup, response);
+    return [table[0], table[1]];
+  }
+
   /**
    * Returns an association table with elements [localIndices, partnerIndices]
    */
