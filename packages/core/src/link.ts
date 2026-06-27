@@ -7,6 +7,7 @@ import {
   parseOrProtocolError,
   type MessageConnection,
 } from "./connection/messageConnection";
+import { MAX_FRAME_SIZE_BYTES } from "./connection/frameSize";
 import { singleIssueArray } from "./utils/singleIssueArray";
 
 import { getLoggerForVerbosity } from "./utils/logger";
@@ -361,6 +362,21 @@ export async function linkViaSinglePassPSI(
     const response = participant.processClientRequest(request);
     const sortedTokens = tokensInSortedOrder(tokens, permutation);
 
+    // Single-pass cannot stream: the whole shape table is one frame, so it has a
+    // tighter row ceiling than the cascade (see docs/spec/PROTOCOL.md). Refuse a
+    // frame over the cap here -- with an actionable error pointing at cascade --
+    // rather than letting the receiver reject it or the transport's serialization
+    // throw an opaque length error on the way out (no transport bounds an OUTBOUND
+    // frame; the cap is enforced inbound).
+    const shapeFrameBytes = sortedTokens.length * 4;
+    if (shapeFrameBytes > MAX_FRAME_SIZE_BYTES) {
+      throw new Error(
+        `${participant.id}: single-pass shape frame is ${shapeFrameBytes} bytes, ` +
+          `over the ${MAX_FRAME_SIZE_BYTES}-byte frame cap; this dataset is too ` +
+          "large for single-pass -- use the cascade linkage strategy",
+      );
+    }
+
     // Four same-direction frames (the transport carries one binary blob or one
     // JSON object per frame, never mixed): setup, response, a record-count header,
     // and the shape table packed as little-endian Int32 -- 4 bytes/token, far
@@ -484,7 +500,7 @@ export async function linkViaSinglePassPSI(
 // other frames do.
 /** @internal exported for the wire-message test. */
 export const singlePassHeaderMessage = z.object({
-  recordCount: z.number(),
+  recordCount: z.number().int().nonnegative(),
 });
 
 // This party's distinct values (deduplicated across all keys) and the per-key
