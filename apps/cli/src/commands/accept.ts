@@ -52,6 +52,7 @@ import {
   prepareForOnlineExchange,
   runOnlineBootstrap,
   runOrExit,
+  singlePassDisclosureNotice,
   warnOptionsOverridesIgnoredOffline,
   warnServerOverridesIgnoredOffline,
   type CommonBootstrapOptions,
@@ -197,6 +198,15 @@ export function displayInvitation(
   // since this summary is shown before the operator confirms acceptance.
   log.info(`  inviting party: ${sanitizeForDisplay(t.identity)}`);
   log.info(`  PSI algorithm: ${t.algorithm}`);
+  // The linkage strategy is a mandatory-consistency term (like the algorithm),
+  // and single-pass is disclosure-affecting -- it is the load-bearing thing the
+  // acceptor consents to here -- so show it plainly and, for single-pass, the
+  // disclosure-tradeoff note. The value is a schema enum, not partner free text,
+  // so it needs no sanitizing; the note is shared with the inviter's selection
+  // surface so both parties read identical framing.
+  log.info(`  linkage strategy: ${t.linkageStrategy}`);
+  if (t.linkageStrategy === "single-pass")
+    log.info(`  note: ${singlePassDisclosureNotice()}`);
   // Stated from the accepting party's perspective (this summary is shown only to
   // the acceptor, before it confirms): YOU receive iff the inviter shares, and the
   // inviter receives iff its terms expect output. For a one-sided invitation this

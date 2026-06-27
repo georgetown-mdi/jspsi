@@ -107,12 +107,14 @@ Invitation strings beginning with `-` may be misinterpreted as option flags by a
 When both parties are not simultaneously available or prefer not to use a coordination server, invite and accept can be performed without any server connection.
 
 ```sh
-psilink invite [--expires-in DURATION] [INPUT_FILE]
+psilink invite [--expires-in DURATION] [--linkage-strategy STRATEGY] [INPUT_FILE]
 ```
 
 This generates a shared secret, saves the `sharedSecret` and an `expires` field to a key file, prints an invitation string (see [Invitation strings](#invitation-strings)) and instructions for its use, and then exits immediately. The invitation should be forwarded to the user's partner using a trusted out-of-band channel (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md)).
 
 By default the invitation expires one hour after the shared secret is generated. Pass `--expires-in DURATION` to override that lifetime - for example when the out-of-band coordination window is longer or shorter than an hour. Prefer the shortest window your coordination allows: a longer lifetime proportionally widens the period in which a leaked-but-unaccepted invitation could be used by a third party. `DURATION` is a positive integer followed by a required unit suffix: `s` (seconds), `m` (minutes), `h` (hours), or `d` (days), for example `30m`, `2h`, or `1d`. A zero, negative, or otherwise malformed value is rejected with an error before any invitation is generated, as is a value beyond the one-year maximum (`365d`): the setup secret is short-lived by design, so its lifetime is bounded even when overridden (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md)).
+
+Pass `--linkage-strategy STRATEGY` to choose how the agreed linkage keys are run on the wire; `STRATEGY` is `cascade` (the default) or `single-pass`, and any other value is rejected as a usage error before any invitation is generated. `cascade` runs one dependent PSI round per key, so the round-trip count grows with the number of keys; `single-pass` batches every key into one exchange so the round-trip count stays constant, which is what makes a multi-key linkage practical over a high-latency channel (`filedrop` or `sftp`). Both produce the same matched result. `single-pass` is not a free optimization: to reconstruct the cascade in one pass the sender discloses its full per-key value structure to the receiver, so the receiver observes matches on less precise keys that `cascade` would have filtered out before exchanging them. Selecting it prints a note to that effect, and the partner sees the same note on their consent prompt -- the strategy is a mandatory-consistency term, so both parties must end up agreeing on it or the exchange aborts. Choose `single-pass` only when the round-trip saving is worth that additional disclosure; see [`linkage_terms.linkage_strategy`](EXCHANGE_REFERENCE.md#linkage_termslinkage_strategy) for the full tradeoff. The flag selects the strategy for terms inferred from `INPUT_FILE`; when the linkage terms instead come from a pre-existing configuration file, that file is authoritative and the flag is reported as having no effect (set `linkage_strategy` in the configuration to change it).
 
 Generating an invitation requires either a pre-existing configuration file or an `INPUT_FILE` from which linkage terms are inferred. If both types of files are present the content of the configuration file is checked against the input. A conflict occurs if the columns in the input cannot be transformed through available data standardizations to produce the linkage fields defined in the configuration file, meaning the file cannot satisfy the linkage keys the partner will expect. In this case, an error is raised and the reason why an invite cannot be generated is given.
 
@@ -143,12 +145,14 @@ After acceptance, both parties run `psilink exchange` at their convenience.
 ## Online invitation
 
 ```sh
-psilink invite [--accept-timeout=DURATION] [--expires-in DURATION] URL INPUT_FILE [OUTPUT_FILE]
+psilink invite [--accept-timeout=DURATION] [--expires-in DURATION] [--linkage-strategy STRATEGY] URL INPUT_FILE [OUTPUT_FILE]
 ```
 
 Similar to [offline invitation](#offline-invitation), this generates a shareable invitation string (see [Invitation strings](#invitation-strings)) then prints it and instructions for the user to forward to their partner by a secure, out-of-band channel. Those instructions include copy/pasteable templates for the invocation of `psilink accept` that reference the shared server. The invitation it prints also embeds a [credential-free connection endpoint](#invitation-strings) derived from the connection this invite is using -- the public locator only (host/port/path, or the split `inbound_path`/`outbound_path` pair), never credentials -- so an acceptor seeds its `connection` block from it and need only supply its own credentials. After printing the invitation information, the program connects to the server and waits for the partner to respond.
 
 `--expires-in DURATION` overrides the one-hour invitation lifetime exactly as in the [offline invitation](#offline-invitation). When the resulting lifetime is shorter than `--accept-timeout`, the command warns that the token will expire before the wait ends and a later acceptance will be rejected.
+
+`--linkage-strategy STRATEGY` selects the linkage strategy (`cascade` or `single-pass`) exactly as in the [offline invitation](#offline-invitation), and the same disclosure tradeoff applies to `single-pass`.
 
 The application exits when the token expires, when the connection times out, when the user cancels, or when the `--accept-timeout` (default 15 minutes) is reached; in all four cases the invitation can no longer be accepted, because the inviter has left the rendezvous and the handshake cannot be completed (and the secret in any case lapses at its expiry). This prevents the partner from completing the setup against an inviter who has given up; it does not destroy the secret, so a leaked invitation must still be treated as a compromise (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md)). Accept-timeout is the maximum time the inviter will wait for the entire acceptance handshake to complete - from the moment the invitation is printed to the moment an acceptance message is received.
 

@@ -1033,6 +1033,34 @@ test("displayInvitation: the carried disclosed subset shows names, '(none)' when
   );
 });
 
+test("displayInvitation: shows the linkage strategy and, for single-pass, the disclosure note", () => {
+  const log = getLogger("accept-display-strategy-test");
+  log.setLevel("silent");
+  const lines = (token: InvitationToken): string => {
+    const infoSpy = vi.spyOn(log, "info");
+    try {
+      displayInvitation(token, log);
+      return infoSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    } finally {
+      infoSpy.mockRestore();
+    }
+  };
+  const base = sampleToken(FUTURE());
+  // The default (cascade) is shown plainly, with no disclosure note.
+  const cascade = lines(base);
+  expect(cascade).toContain("linkage strategy: cascade");
+  expect(cascade).not.toContain("consented disclosure tradeoff");
+  // single-pass is the disclosure-affecting choice the acceptor consents to, so
+  // it carries the shared tradeoff note (with the operator-facing doc pointer).
+  const singlePass = lines({
+    ...base,
+    linkageTerms: { ...base.linkageTerms, linkageStrategy: "single-pass" },
+  });
+  expect(singlePass).toContain("linkage strategy: single-pass");
+  expect(singlePass).toContain("consented disclosure tradeoff");
+  expect(singlePass).toContain("docs/EXCHANGE_REFERENCE.md");
+});
+
 // --- handler: repeated single-value flag -------------------------------------
 
 test("handler: a repeated single-value flag is rejected (exit 64) via runOrExit", async () => {

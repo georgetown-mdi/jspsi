@@ -15,6 +15,7 @@ import {
 import type {
   ConnectionConfig,
   ExchangeSpec,
+  LinkageStrategy,
   LinkageTerms,
   Metadata,
   PreparedExchange,
@@ -46,9 +47,11 @@ import {
   logOnlineBootstrapOutcome,
   looksLikeUrl,
   parseCommonBootstrapArgs,
+  parseLinkageStrategyFlag,
   prepareForOnlineExchange,
   runOnlineBootstrap,
   runOrExit,
+  singlePassDisclosureNotice,
   unsatisfiedLinkageFields,
   warnOptionsOverridesIgnoredOffline,
   warnServerOverridesIgnoredOffline,
@@ -106,6 +109,17 @@ export function builder(cmd: Argv): Argv {
       describe:
         "override the invitation lifetime (default: 1 hour, maximum: 365d). " +
         DURATION_VALUE_HELP,
+    })
+    .option("linkage-strategy", {
+      type: "string",
+      describe:
+        "how the agreed linkage keys are run on the wire (default: cascade). " +
+        "cascade runs one dependent PSI round per key; single-pass batches " +
+        "every key into one exchange for a constant round-trip count, at the " +
+        "cost of disclosing your full per-key value structure to the receiver " +
+        "-- a consented disclosure tradeoff, not a free speed-up (see " +
+        "docs/EXCHANGE_REFERENCE.md). Has no effect when linkage terms come " +
+        "from an existing configuration file (set linkage_strategy there).",
     });
 }
 
@@ -218,6 +232,13 @@ type InviteReady =
  * conflict gate, input read, or token mint -- so a bad value never produces a
  * token or touches disk.
  *
+ * `linkageStrategy`, when given, is the operator's `--linkage-strategy`
+ * selection. It is applied to the terms this command authors from the input
+ * (the online and infer-from-input paths); when the terms instead come from a
+ * pre-existing configuration file the config is authoritative and the selection
+ * is warned-ignored rather than silently overriding it. Selecting `single-pass`
+ * surfaces the disclosure-tradeoff note at this point of selection.
+ *
  * @internal exported for testing
  */
 export async function validateInvite(params: {
@@ -225,9 +246,11 @@ export async function validateInvite(params: {
   options: CommonBootstrapOptions;
   acceptTimeout: number;
   expiresIn?: string;
+  linkageStrategy?: LinkageStrategy;
   log: ReturnType<typeof getLogger>;
 }): Promise<InviteReady> {
-  const { resolved, options, acceptTimeout, expiresIn, log } = params;
+  const { resolved, options, acceptTimeout, expiresIn, linkageStrategy, log } =
+    params;
   const identity = options.identity ?? userInfo().username;
   // parseDuration yields whole milliseconds at second granularity (its smallest
   // unit), so dividing by 1000 is exact: the lifetime is always a whole number
@@ -301,8 +324,13 @@ export async function validateInvite(params: {
       );
 
     const rows = await loadInputRows(input, { allowStdin: true });
-    const { dataSpec, warnings } = buildDataSpec({ identity, rows });
+    const { dataSpec, warnings } = buildDataSpec({
+      identity,
+      rows,
+      linkageStrategy,
+    });
     for (const w of warnings) log.warn(w);
+    noteSinglePassSelection(linkageStrategy, log);
 
     const expires = expiresFromNow(lifetimeSeconds);
     const sharedSecret = generateSharedSecret();
@@ -359,6 +387,18 @@ export async function validateInvite(params: {
 
   if (configSource !== undefined) {
     const configTerms = configSource.linkageTerms;
+    // The config is the authoritative terms source here, so --linkage-strategy
+    // cannot silently override its linkage_strategy; name it as ignored (like the
+    // offline server/options override warnings above) and point at the config
+    // field as the way to change it. The config's strategy is always materialized
+    // (the schema default), so it can be stated plainly.
+    if (linkageStrategy !== undefined)
+      log.warn(
+        "--linkage-strategy has no effect when the linkage terms come from an " +
+          `existing configuration file; its linkage_strategy ` +
+          `(${configTerms.linkageStrategy}) is used. Set linkage_strategy in ` +
+          `${options.configFile} to change it.`,
+      );
     // Config-as-source: the config supplies the linkage terms and persists
     // unchanged. The config read above is the mode discriminator -- it must run
     // first to know a config exists -- but it is a pure read; the only conflict
@@ -468,8 +508,13 @@ export async function validateInvite(params: {
   });
 
   const rows = await loadInputRows(resolved.input, { allowStdin: true });
-  const { dataSpec, warnings } = buildDataSpec({ identity, rows });
+  const { dataSpec, warnings } = buildDataSpec({
+    identity,
+    rows,
+    linkageStrategy,
+  });
   for (const w of warnings) log.warn(w);
+  noteSinglePassSelection(linkageStrategy, log);
 
   const expires = expiresFromNow(lifetimeSeconds);
   const sharedSecret = generateSharedSecret();
@@ -519,6 +564,11 @@ export async function handler(argv: Arguments): Promise<void> {
         durationFlagSeconds(argv, "accept-timeout", MAX_TIMEOUT_SECONDS) ??
         DEFAULT_ACCEPT_TIMEOUT_SECONDS;
       const expiresIn = singleValue(argv, "expires-in") as string | undefined;
+      // Validate the linkage-strategy enum here (not in validateInvite) so an
+      // unknown value is a clean usage error (exit 64) before any side effect,
+      // mirroring how accept-timeout is parsed above; singleValue rejects a
+      // repeat first.
+      const linkageStrategy = parseLinkageStrategyFlag(argv);
       const positionals = (argv["args"] as Array<string> | undefined) ?? [];
       const resolved = resolveInvitePositionals(positionals);
       const ready = await validateInvite({
@@ -526,6 +576,7 @@ export async function handler(argv: Arguments): Promise<void> {
         options,
         acceptTimeout,
         expiresIn,
+        linkageStrategy,
         log,
       });
 
@@ -627,6 +678,21 @@ function specWithPlaceholderConnection(
   const connection: ConnectionConfig =
     connectionFromEndpoint(undefined).connection;
   return { connection, ...dataSpec };
+}
+
+/**
+ * Surface the single-pass disclosure-tradeoff note at the point of selection,
+ * when the operator's `--linkage-strategy single-pass` was applied to the
+ * authored terms. A no-op for `cascade` or an absent selection. Called only from
+ * the two paths where the flag is actually applied (online and infer-from-input)
+ * -- not the config-as-source path, where the flag is warned-ignored and the
+ * note would misrepresent what was used.
+ */
+function noteSinglePassSelection(
+  strategy: LinkageStrategy | undefined,
+  log: ReturnType<typeof getLogger>,
+): void {
+  if (strategy === "single-pass") log.info(singlePassDisclosureNotice());
 }
 
 /**

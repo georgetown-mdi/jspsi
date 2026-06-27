@@ -12,6 +12,7 @@ import {
   getDefaultStandardization,
   columnValues,
   inferDateFormat,
+  LinkageStrategySchema,
   MAX_ENDPOINT_HOST_LENGTH,
   MAX_ENDPOINT_PATH_LENGTH,
   normalizeFiledropPath,
@@ -27,6 +28,7 @@ import type {
   ExchangeDataSpec,
   FileDropConnectionConfig,
   FileSyncOptions,
+  LinkageStrategy,
   LinkageTerms,
   PreparedExchange,
   SFTPConnectionConfig,
@@ -811,6 +813,72 @@ export async function loadInputRows(
   };
 }
 
+// --- Linkage strategy selection ----------------------------------------------
+
+/**
+ * Apply the operator-selected linkage strategy onto CLI-authored default terms.
+ * A no-op when `strategy` is undefined (the operator did not pass
+ * `--linkage-strategy`, so the schema default the factory already set --
+ * `cascade` -- stands) or when it equals the strategy already present; only an
+ * explicit `single-pass` selection changes anything. Returns a fresh object so
+ * the caller's input is not mutated.
+ */
+function withLinkageStrategy(
+  terms: LinkageTerms,
+  strategy: LinkageStrategy | undefined,
+): LinkageTerms {
+  if (strategy === undefined || strategy === terms.linkageStrategy)
+    return terms;
+  return { ...terms, linkageStrategy: strategy };
+}
+
+/**
+ * Parse the optional `--linkage-strategy` flag to a validated
+ * {@link LinkageStrategy}, or `undefined` when the operator did not select one
+ * (the caller then leaves the authored terms at their `cascade` default). A
+ * repeated flag is rejected by {@link singleValue} before its array value could
+ * reach the enum check, and an unrecognized value is a clean {@link UsageError}
+ * (exit 64), the same shape the CLI rejects other bad enum flags with (e.g.
+ * `--log-level`). The rejected value is echoed verbatim like that path -- it is
+ * the operator's own argument, not partner-controlled.
+ */
+export function parseLinkageStrategyFlag(
+  argv: Arguments,
+): LinkageStrategy | undefined {
+  const raw = singleValue(argv, "linkage-strategy") as string | undefined;
+  if (raw === undefined) return undefined;
+  const parsed = LinkageStrategySchema.safeParse(raw);
+  if (!parsed.success)
+    throw new UsageError(
+      `unrecognized linkage-strategy: ${raw}; expected cascade or single-pass`,
+    );
+  return parsed.data;
+}
+
+/**
+ * The note surfaced when `single-pass` is selected (on the authoring side) or
+ * carried by an invitation (on the accepting consent prompt): single-pass is a
+ * consented disclosure tradeoff, not a free speed-up. It discloses the sender's
+ * full per-key value structure to the receiver -- the receiver observes matches
+ * on less precise keys the cascade would have filtered out -- in exchange for a
+ * round-trip count constant in the number of keys. The matched result is
+ * identical either way. Shared by `invite` (selection time) and `accept`
+ * (consent prompt) so the operator and the partner read the same framing, and
+ * points at the operator-facing reference, not the internal design note.
+ *
+ * @internal exported for testing
+ */
+export function singlePassDisclosureNotice(): string {
+  return (
+    "single-pass linkage discloses the sender's full per-key value structure " +
+    "to the receiver: the receiver observes matches on less precise keys that " +
+    "cascade would have filtered out before exchanging them. The matched " +
+    "result is unchanged -- this is a consented disclosure tradeoff for a " +
+    "round-trip count that stays constant as keys are added, not a free " +
+    "speed-up. See docs/EXCHANGE_REFERENCE.md (linkage_terms.linkage_strategy)."
+  );
+}
+
 /**
  * Resolve the exchange-data portion of a config.
  *
@@ -822,13 +890,22 @@ export async function loadInputRows(
  *   written.
  * - Without input rows (accept with no input file): `terms` is required and the
  *   spec is just those terms.
+ *
+ * `linkageStrategy`, when given, is applied ONLY to terms this function authors
+ * from the defaults (the invite infer-from-input and online paths, where `terms`
+ * is absent); it is the operator's `--linkage-strategy` selection. When `terms`
+ * is supplied (accept derives them from the invitation, which already carries the
+ * agreed strategy), the selection is not applied -- the partner's choice stands.
+ * Absent (or `cascade`) leaves the default strategy untouched, so omitting the
+ * selection is byte-identical to before the flag existed.
  */
 export function buildDataSpec(args: {
   terms?: LinkageTerms;
   identity: string;
   rows?: { rawRows: Array<Record<string, string>>; columns: string[] };
+  linkageStrategy?: LinkageStrategy;
 }): { dataSpec: ResolvedDataSpec; warnings: string[] } {
-  const { terms, identity, rows } = args;
+  const { terms, identity, rows, linkageStrategy } = args;
   const warnings: string[] = [];
 
   if (rows === undefined) {
@@ -840,7 +917,12 @@ export function buildDataSpec(args: {
   }
 
   const metadata = inferMetadata(rows.columns);
-  const linkageTerms = terms ?? getDefaultLinkageTerms(identity, metadata);
+  const linkageTerms =
+    terms ??
+    withLinkageStrategy(
+      getDefaultLinkageTerms(identity, metadata),
+      linkageStrategy,
+    );
 
   const dobCol = metadata.find((c) => c.type === "date_of_birth");
   const dateInputFormat =

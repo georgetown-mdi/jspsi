@@ -331,6 +331,104 @@ test("validateInvite: an all-linkage input carries an empty disclosed subset", a
   expect(token.disclosedPayloadColumns).toEqual([]);
 });
 
+// --- linkage strategy selection ----------------------------------------------
+
+test("validateInvite: --linkage-strategy single-pass authors single-pass terms and notes the disclosure", async () => {
+  const { input, options } = onlineFixture();
+  const log = getLogger("invite-strategy-test");
+  log.setLevel("silent");
+  const infoSpy = vi.spyOn(log, "info");
+  try {
+    const ready = await validateInvite({
+      resolved: { mode: "online", url: new URL("sftp://host/drop"), input },
+      options,
+      acceptTimeout: 900,
+      linkageStrategy: "single-pass",
+      log,
+    });
+    // The selection flows into the authored terms the invitation carries, so the
+    // mandatory-consistency check sees single-pass on both sides.
+    const token = await decodeInvitation(ready.invitation);
+    expect(token.linkageTerms.linkageStrategy).toBe("single-pass");
+    // The disclosure tradeoff is surfaced at the point of selection.
+    const info = infoSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(info).toContain("consented disclosure tradeoff");
+    expect(info).toContain("docs/EXCHANGE_REFERENCE.md");
+  } finally {
+    infoSpy.mockRestore();
+  }
+});
+
+test("validateInvite: omitting --linkage-strategy authors cascade with no disclosure note", async () => {
+  // The default is unchanged from before the flag existed: cascade, and no note.
+  const { input, options } = onlineFixture();
+  const log = getLogger("invite-strategy-default-test");
+  log.setLevel("silent");
+  const infoSpy = vi.spyOn(log, "info");
+  try {
+    const ready = await validateInvite({
+      resolved: { mode: "online", url: new URL("sftp://host/drop"), input },
+      options,
+      acceptTimeout: 900,
+      log,
+    });
+    const token = await decodeInvitation(ready.invitation);
+    expect(token.linkageTerms.linkageStrategy).toBe("cascade");
+    const info = infoSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(info).not.toContain("consented disclosure tradeoff");
+  } finally {
+    infoSpy.mockRestore();
+  }
+});
+
+test("validateInvite: offline infer-from-input also carries the selected single-pass strategy", async () => {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-sp-offline-"));
+  tmpDirs.push(dir);
+  const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+  const ready = await validateInvite({
+    resolved: { mode: "offline", input },
+    options: testOptions({
+      configFile: path.join(dir, "psilink.yaml"),
+      keyFile: path.join(dir, ".psilink.key"),
+    }),
+    acceptTimeout: 900,
+    linkageStrategy: "single-pass",
+    log: silentLog,
+  });
+  expect(ready.mode).toBe("offline");
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.linkageTerms.linkageStrategy).toBe("single-pass");
+});
+
+test("validateInvite: --linkage-strategy is warned-ignored when terms come from a config", async () => {
+  // Config-as-source: the config is authoritative, so the flag must not silently
+  // override its linkage_strategy. The flag is named as ignored and the minted
+  // terms keep the config's strategy.
+  const terms = defaultTerms();
+  const { dir, configPath, keyPath } = withConfig(terms);
+  const log = getLogger("invite-strategy-config-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    const ready = await validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      linkageStrategy: "single-pass",
+      log,
+    });
+    expect(ready.mode).toBe("offlineFromConfig");
+    const token = await decodeInvitation(ready.invitation);
+    // cascade: the config's strategy, not the ignored flag's single-pass.
+    expect(token.linkageTerms.linkageStrategy).toBe("cascade");
+    const warn = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(warn).toContain("--linkage-strategy has no effect");
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("validateInvite: online filedrop emits the shared-path endpoint", async () => {
   const { input, options } = onlineFixture();
   const ready = await validateInvite({
