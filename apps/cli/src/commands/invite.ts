@@ -118,8 +118,9 @@ export function builder(cmd: Argv): Argv {
         "every key into one exchange for a constant round-trip count, at the " +
         "cost of disclosing your full per-key value structure to the receiver " +
         "-- a consented disclosure tradeoff, not a free speed-up (see " +
-        "docs/EXCHANGE_REFERENCE.md). Has no effect when linkage terms come " +
-        "from an existing configuration file (set linkage_strategy there).",
+        "docs/EXCHANGE_REFERENCE.md, linkage_terms.linkage_strategy). Has no " +
+        "effect when linkage terms come from an existing configuration file " +
+        "(set linkage_strategy there).",
     });
 }
 
@@ -394,10 +395,10 @@ export async function validateInvite(params: {
     // (the schema default), so it can be stated plainly.
     if (linkageStrategy !== undefined)
       log.warn(
-        "--linkage-strategy has no effect when the linkage terms come from an " +
-          `existing configuration file; its linkage_strategy ` +
-          `(${configTerms.linkageStrategy}) is used. Set linkage_strategy in ` +
-          `${options.configFile} to change it.`,
+        `--linkage-strategy ${linkageStrategy} has no effect when the linkage ` +
+          "terms come from an existing configuration file; the file's " +
+          `linkage_strategy (${configTerms.linkageStrategy}) is used instead. ` +
+          `Edit linkage_strategy in ${options.configFile} to change it.`,
       );
     // Config-as-source: the config supplies the linkage terms and persists
     // unchanged. The config read above is the mode discriminator -- it must run

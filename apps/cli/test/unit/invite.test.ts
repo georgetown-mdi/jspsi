@@ -434,7 +434,10 @@ test("validateInvite: --linkage-strategy is warned-ignored when terms come from 
     // cascade: the config's strategy, not the ignored flag's single-pass.
     expect(token.linkageTerms.linkageStrategy).toBe("cascade");
     const warn = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
-    expect(warn).toContain("--linkage-strategy has no effect");
+    // The warning names what was requested and what the config uses instead, so
+    // an operator who wanted single-pass sees they did not get it.
+    expect(warn).toContain("--linkage-strategy single-pass has no effect");
+    expect(warn).toContain("linkage_strategy (cascade) is used instead");
   } finally {
     warnSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -463,7 +466,7 @@ test("validateInvite: a config's single-pass strategy is preserved when no flag 
     const token = await decodeInvitation(ready.invitation);
     expect(token.linkageTerms.linkageStrategy).toBe("single-pass");
     const warn = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
-    expect(warn).not.toContain("--linkage-strategy has no effect");
+    expect(warn).not.toContain("has no effect");
   } finally {
     warnSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });

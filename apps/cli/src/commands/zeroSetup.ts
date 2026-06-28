@@ -135,8 +135,8 @@ export function builder(cmd: Argv): Argv {
         "every key into one exchange for a constant round-trip count, at the " +
         "cost of disclosing your full per-key value structure to the receiver " +
         "-- a consented disclosure tradeoff, not a free speed-up (see " +
-        "docs/EXCHANGE_REFERENCE.md). Both parties must select the same value " +
-        "or the exchange aborts.",
+        "docs/EXCHANGE_REFERENCE.md, linkage_terms.linkage_strategy). Both " +
+        "parties must select the same value or the exchange aborts.",
     })
     .demand(1);
 }

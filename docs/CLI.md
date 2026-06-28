@@ -134,7 +134,7 @@ This is distinct from recovering a lost, reset, or compromised key (see [Recover
 psilink accept INVITATION [INPUT_FILE]
 ```
 
-The `INVITATION` argument is either a base64url string or an `@path` reference to a file containing one. This command decodes the invitation token, displays the linkage terms, and prompts the user to accept. If they accept, configuration and key files are created (with exceptions noted below) and the user is notified that they must fill in their connection parameters in order to conduct exchanges. Coordination with the partner happens out-of-band, for example if the linkage terms are unacceptable or if the invitation expires.
+The `INVITATION` argument is either a base64url string or an `@path` reference to a file containing one. This command decodes the invitation token, displays the linkage terms (including the linkage strategy, with the single-pass disclosure note when applicable), and prompts the user to accept. If they accept, configuration and key files are created (with exceptions noted below) and the user is notified that they must fill in their connection parameters in order to conduct exchanges. Coordination with the partner happens out-of-band, for example if the linkage terms are unacceptable or if the invitation expires.
 
 If `--config-file` is not used and a configuration file already exists at the default path, its linkage terms are compared against the invitation's; any disagreement causes acceptance to fail. The user is shown which values differ and instructed to resolve the conflict before retrying with the same invitation string or to supply an alternative configuration file path.
 
