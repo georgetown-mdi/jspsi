@@ -968,6 +968,29 @@ test("diffLinkageTerms: an algorithm mismatch is a conflict naming the field", (
   expect(conflicts[0].incoming).toBe("psi");
 });
 
+test("diffLinkageTerms: a linkage-strategy mismatch is a conflict naming the field", () => {
+  // linkageStrategy is mandatory-consistency like algorithm: a reused config whose
+  // strategy differs from the invitation must abort the reuse, not silently keep a
+  // config whose disclosure tradeoff differs from the one the acceptor was shown.
+  // Both directions, since either could persist a strategy the acceptor did not
+  // consent to (single-pass kept under a cascade invitation) or run a weaker one
+  // than consented (cascade kept under a single-pass invitation).
+  for (const [existingStrategy, incomingStrategy] of [
+    ["single-pass", "cascade"],
+    ["cascade", "single-pass"],
+  ] as const) {
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    existing.linkageStrategy = existingStrategy;
+    incoming.linkageStrategy = incomingStrategy;
+    const { conflicts } = diffLinkageTerms(existing, incoming);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].field).toBe("linkage_strategy");
+    expect(conflicts[0].existing).toBe(existingStrategy);
+    expect(conflicts[0].incoming).toBe(incomingStrategy);
+  }
+});
+
 test("diffLinkageTerms: a differing output policy is NOT a conflict (per-party)", () => {
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
   const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
