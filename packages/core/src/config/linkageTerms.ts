@@ -444,7 +444,7 @@ interface ZipCodeField {
 /**
  * A standardized PII field that participates in linkage. Linkage key elements
  * reference these fields by name; data cleaning pipelines produce them by name.
- * Constraints are standards both parties commit to meeting — the application
+ * Constraints are standards both parties commit to meeting -- the application
  * warns if violated but does not enforce them.
  */
 export type LinkageField =
@@ -859,21 +859,11 @@ const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
  * strategies produce the SAME association table; they differ only in how the
  * per-key PSI exchanges are sequenced on the wire.
  *
- * - `cascade` -- the default (materialized when terms are authored without a
- *   strategy): the keys are matched in a dependent sequence of rounds, each
- *   round excluding the records already matched by an earlier key. One PSI
- *   exchange per key.
- * - `single-pass` -- the per-key PSI data is batched into one exchange and the
- *   receiver reconstructs the cascade locally, sharing the result. Equivalent
- *   output with far fewer round-trips, which makes linkage practical over
- *   high-latency channels (file-sync) where a chain of dependent rounds is
- *   prohibitively slow.
+ * - `cascade` (the default) -- one dependent PSI exchange per key, in sequence.
+ * - `single-pass` -- all keys batched into one exchange, the cascade
+ *   reconstructed by the receiver; far fewer round-trips.
  *
- * Consistency: mandatory -- both parties must agree, like `algorithm`; a
- * mismatch aborts the exchange. The schema default makes the field always
- * present in parsed terms (and so in the agreed-terms hash), on equal footing
- * with the other mandatory-consistency fields. See docs/spec/PROTOCOL.md for
- * the wire shape of each strategy.
+ * See docs/spec/PROTOCOL.md for the wire shape and disclosure of each.
  */
 export type LinkageStrategy = "cascade" | "single-pass";
 
@@ -892,25 +882,24 @@ export const LinkageStrategySchema: z.ZodType<LinkageStrategy> = z.enum([
  * warning and an updated set of terms being output.
  *
  * Fields and their consistency requirements:
- * - `version` — mandatory. Two versions are incompatible if no migration path
+ * - `version` -- mandatory. Two versions are incompatible if no migration path
  *   exists.
- * - `identity` — none. Free-text identifying the holding party; recorded in
+ * - `identity` -- none. Free-text identifying the holding party; recorded in
  *   the exchange record (the disclosure log).
- * - `date` — soft. A mismatch warns that one party may have a stale copy.
- * - `algorithm` — mandatory. `psi` reveals matched identifiers; `psi-c` reveals
+ * - `date` -- soft. A mismatch warns that one party may have a stale copy.
+ * - `algorithm` -- mandatory. `psi` reveals matched identifiers; `psi-c` reveals
  *   only the count.
- * - `linkageStrategy` — mandatory. `cascade` (the default, materialized when
- *   terms are authored without a strategy) runs dependent per-key rounds;
- *   `single-pass` batches them into one exchange. Both produce the same output.
- * - `output` — mandatory.
- * - `deduplicate` — mandatory. Per-party; determines if multiple inputs can be
+ * - `linkageStrategy` -- mandatory. `cascade` (the default) or `single-pass`;
+ *   both produce the same output.
+ * - `output` -- mandatory.
+ * - `deduplicate` -- mandatory. Per-party; determines if multiple inputs can be
  *   matched to the same output.
- * - `linkageFields` — mandatory.
- * - `linkageKeys` — mandatory.
- * - `legalAgreement` — mandatory if present. The `reference`, `purpose`, and
+ * - `linkageFields` -- mandatory.
+ * - `linkageKeys` -- mandatory.
+ * - `legalAgreement` -- mandatory if present. The `reference`, `purpose`, and
  *   `expirationDate` are cross-checked; any mismatch, or an `expirationDate`
  *   that has passed, cancels the exchange.
- * - `payload` — mandatory if present.
+ * - `payload` -- mandatory if present.
  *
  * Constraints:
  * - `deduplicate: true` requires `output.expectsOutput: true`.
@@ -941,25 +930,20 @@ export interface LinkageTerms {
    * Free-text string identifying the party holding these linkage terms (e.g.
    * name organization, contact info). Included verbatim in the exchange
    * record.
-   * Consistency: none — parties may differ.
+   * Consistency: none -- parties may differ.
    */
   identity: string;
   /**
    * Date these linkage terms were last modified (ISO 8601, YYYY-MM-DD).
-   * Consistency: soft — a mismatch warns rather than cancels the exchange.
+   * Consistency: soft -- a mismatch warns rather than cancels the exchange.
    */
   date: string;
   /** `psi` reveals matched identifiers; `psi-c` reveals only the count. */
   algorithm: Algorithm;
   /**
-   * How the agreed linkage keys are exchanged: `cascade` (the default,
-   * materialized when terms are authored without a strategy) runs a dependent
-   * sequence of per-key PSI rounds, `single-pass` batches them into one exchange
-   * and reconstructs the identical association table. Both produce the same
-   * output.
-   * Consistency: mandatory -- both parties must agree; a mismatch aborts the
-   * exchange. Always present in parsed terms (via the schema default), on equal
-   * footing with the other mandatory-consistency fields.
+   * How the agreed linkage keys are exchanged; see {@link LinkageStrategy}.
+   * Consistency: mandatory -- a mismatch aborts the exchange. The input may omit
+   * it; the schema defaults it to `cascade`.
    */
   linkageStrategy: LinkageStrategy;
   output: Output;

@@ -491,13 +491,10 @@ export async function runExchange(
     },
   );
 
-  // Dispatch on the agreed linkage strategy (mandatory-consistency, always
-  // present via the schema default; validateCompatibility has already aborted a
-  // mismatch upstream). "cascade" runs the dependent per-key rounds in sequence;
-  // "single-pass" batches them into one exchange and reconstructs the identical
-  // association table. Both conform to the same call shape, so they are selected
-  // by function -- an allowlist on the single-pass value, with cascade the
-  // established default.
+  // Both strategies share linkViaPSI's call shape, so dispatch by function. No
+  // mismatch guard is needed here: validateCompatibility has already aborted
+  // upstream on a strategy mismatch. Allowlist the single-pass value; cascade is
+  // the default.
   const runLinkage =
     linkageTerms.linkageStrategy === "single-pass"
       ? linkViaSinglePassPSI

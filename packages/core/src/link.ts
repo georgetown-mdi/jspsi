@@ -377,10 +377,8 @@ export async function linkViaSinglePassPSI(
       );
     }
 
-    // Four same-direction frames (the transport carries one binary blob or one
-    // JSON object per frame, never mixed): setup, response, a record-count header,
-    // and the shape table packed as little-endian Int32 -- 4 bytes/token, far
-    // cheaper than JSON for its keyCount x recordCount bulk.
+    // Wire layout (frame order, never-mixed framing, Int32 packing) in
+    // docs/spec/PROTOCOL.md.
     log.debug(
       `${participant.id}: sending setup, response, header, shape table`,
     );
