@@ -821,9 +821,11 @@ export async function loadInputRows(
  * `--linkage-strategy`, so the schema default the factory already set --
  * `cascade` -- stands) or when it equals the strategy already present; only an
  * explicit `single-pass` selection changes anything. Returns a fresh object so
- * the caller's input is not mutated.
+ * the caller's input is not mutated. Shared by the two CLI commands that author
+ * fresh terms (`invite` via {@link buildDataSpec}, `zero-setup` over its
+ * prepared terms) so the selection is applied one way.
  */
-function withLinkageStrategy(
+export function withLinkageStrategy(
   terms: LinkageTerms,
   strategy: LinkageStrategy | undefined,
 ): LinkageTerms {

@@ -15,6 +15,7 @@ import type {
   ExchangeBootstrapResult,
   ExchangeSpec,
   FileDropConnectionConfig,
+  LinkageStrategy,
   SFTPConnectionConfig,
   PreparedExchange,
 } from "@psilink/core";
@@ -41,7 +42,10 @@ import {
   addCommonBootstrapOptions,
   connectionOverridesFrom,
   parseCommonBootstrapArgs,
+  parseLinkageStrategyFlag,
+  singlePassDisclosureNotice,
   warnUnsupportedFileSyncFlags,
+  withLinkageStrategy,
   type CommonBootstrapOptions,
 } from "./bootstrap";
 import { runProtocol, type ProtocolConnectionConfig } from "../protocol";
@@ -123,6 +127,17 @@ export function builder(cmd: Argv): Argv {
         "-- on its own it is rejected. Only use when you intend to discard the " +
         "transcript",
     })
+    .option("linkage-strategy", {
+      type: "string",
+      describe:
+        "how the agreed linkage keys are run on the wire (default: cascade). " +
+        "cascade runs one dependent PSI round per key; single-pass batches " +
+        "every key into one exchange for a constant round-trip count, at the " +
+        "cost of disclosing your full per-key value structure to the receiver " +
+        "-- a consented disclosure tradeoff, not a free speed-up (see " +
+        "docs/EXCHANGE_REFERENCE.md). Both parties must select the same value " +
+        "or the exchange aborts.",
+    })
     .demand(1);
 }
 
@@ -139,6 +154,10 @@ interface ZeroSetupArgs extends CommonBootstrapOptions {
   // schema.
   sweepExchangeFiles: boolean;
   forceRetainSweep: boolean;
+  // The operator's --linkage-strategy selection, applied to the terms this
+  // command authors from its input (see prepareDataset). Excluded from
+  // ZeroSetupOptions below: it shapes the linkage terms, not the connection.
+  linkageStrategy?: LinkageStrategy;
 }
 
 type ZeroSetupOptions = Omit<
@@ -149,6 +168,7 @@ type ZeroSetupOptions = Omit<
   | "verbosity"
   | "sweepExchangeFiles"
   | "forceRetainSweep"
+  | "linkageStrategy"
   | "record"
   | "recordFile"
 >;
@@ -176,6 +196,10 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
       (argv["sweep-exchange-files"] as boolean | undefined) ?? false,
     forceRetainSweep:
       (argv["force-retain-sweep"] as boolean | undefined) ?? false,
+    // Validated to the enum here (inside parseArgs -> parseOrExit), so an unknown
+    // value is a clean usage error (exit 64) before any side effect; singleValue
+    // rejects a repeat first. Undefined when unset, leaving the cascade default.
+    linkageStrategy: parseLinkageStrategyFlag(argv),
   };
 }
 
@@ -316,6 +340,7 @@ export function createConnection(
 async function prepareDataset(
   identity: string,
   input: string,
+  linkageStrategy: LinkageStrategy | undefined,
 ): Promise<PreparedExchange> {
   const log = getLogger("psilink");
 
@@ -329,6 +354,18 @@ async function prepareDataset(
     rawRows,
     csvResult.meta.fields ?? [],
   );
+  // Apply the operator's --linkage-strategy onto the terms prepareForExchange
+  // authored from the input (a no-op for the cascade default), so it rides into
+  // both the exchange and the --save spec. The strategy does not affect the
+  // standardization/dataset prepareForExchange already built, so reshaping the
+  // terms here is safe. Surface the disclosure tradeoff at selection, mirroring
+  // invite; zero-setup never sources terms from a config, so the note always
+  // reflects what is used.
+  prepared.linkageTerms = withLinkageStrategy(
+    prepared.linkageTerms,
+    linkageStrategy,
+  );
+  if (linkageStrategy === "single-pass") log.info(singlePassDisclosureNotice());
   for (const warning of prepared.warnings)
     log.warn("cleaning configuration issue:", warning);
   warnOnValueConstraints(prepared, log);
@@ -473,6 +510,7 @@ export async function handler(argv: Arguments): Promise<void> {
     verbosity,
     sweepExchangeFiles,
     forceRetainSweep,
+    linkageStrategy,
     ...options
   } = parsed;
 
@@ -595,7 +633,7 @@ export async function handler(argv: Arguments): Promise<void> {
       // here (exit 64), before any network activity.
       liveConnection = resolveConnectionCredentials(connection);
       const identity = options.identity ?? userInfo().username;
-      prepared = await prepareDataset(identity, input);
+      prepared = await prepareDataset(identity, input, linkageStrategy);
     } catch (err) {
       // A bad URL scheme or unsupported channel is a usage error (exit 64);
       // prepareDataset failures carry their own exitCode; otherwise exit 69.
