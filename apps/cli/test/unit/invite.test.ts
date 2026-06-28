@@ -381,23 +381,35 @@ test("validateInvite: omitting --linkage-strategy authors cascade with no disclo
   }
 });
 
-test("validateInvite: offline infer-from-input also carries the selected single-pass strategy", async () => {
+test("validateInvite: offline infer-from-input also carries the selected single-pass strategy and notes the disclosure", async () => {
   const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-sp-offline-"));
   tmpDirs.push(dir);
   const input = writeCsv(dir, "first_name,last_name,dob,ssn");
-  const ready = await validateInvite({
-    resolved: { mode: "offline", input },
-    options: testOptions({
-      configFile: path.join(dir, "psilink.yaml"),
-      keyFile: path.join(dir, ".psilink.key"),
-    }),
-    acceptTimeout: 900,
-    linkageStrategy: "single-pass",
-    log: silentLog,
-  });
-  expect(ready.mode).toBe("offline");
-  const token = await decodeInvitation(ready.invitation);
-  expect(token.linkageTerms.linkageStrategy).toBe("single-pass");
+  const log = getLogger("invite-strategy-offline-test");
+  log.setLevel("silent");
+  const infoSpy = vi.spyOn(log, "info");
+  try {
+    const ready = await validateInvite({
+      resolved: { mode: "offline", input },
+      options: testOptions({
+        configFile: path.join(dir, "psilink.yaml"),
+        keyFile: path.join(dir, ".psilink.key"),
+      }),
+      acceptTimeout: 900,
+      linkageStrategy: "single-pass",
+      log,
+    });
+    expect(ready.mode).toBe("offline");
+    const token = await decodeInvitation(ready.invitation);
+    expect(token.linkageTerms.linkageStrategy).toBe("single-pass");
+    // The offline-infer path emits the same disclosure note as the online path;
+    // assert it fired so deleting the note from this branch is caught here, not
+    // only by the online test.
+    const info = infoSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(info).toContain("consented disclosure tradeoff");
+  } finally {
+    infoSpy.mockRestore();
+  }
 });
 
 test("validateInvite: --linkage-strategy is warned-ignored when terms come from a config", async () => {
@@ -423,6 +435,35 @@ test("validateInvite: --linkage-strategy is warned-ignored when terms come from 
     expect(token.linkageTerms.linkageStrategy).toBe("cascade");
     const warn = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(warn).toContain("--linkage-strategy has no effect");
+  } finally {
+    warnSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: a config's single-pass strategy is preserved when no flag is passed, with no warning", async () => {
+  // The reverse of the warn case: a config that selects single-pass is honored
+  // verbatim when the operator passes no flag, and the ignore-warning stays quiet.
+  const terms: LinkageTerms = {
+    ...defaultTerms(),
+    linkageStrategy: "single-pass",
+  };
+  const { dir, configPath, keyPath } = withConfig(terms);
+  const log = getLogger("invite-strategy-config-keep-test");
+  log.setLevel("silent");
+  const warnSpy = vi.spyOn(log, "warn");
+  try {
+    const ready = await validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      log,
+    });
+    expect(ready.mode).toBe("offlineFromConfig");
+    const token = await decodeInvitation(ready.invitation);
+    expect(token.linkageTerms.linkageStrategy).toBe("single-pass");
+    const warn = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(warn).not.toContain("--linkage-strategy has no effect");
   } finally {
     warnSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -1152,6 +1193,42 @@ test("handler: an --accept-timeout above the 7d ceiling is rejected (exit 64) be
       $0: "psilink",
       args: [input],
       "accept-timeout": overCeiling,
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).toHaveBeenCalledWith(64);
+    expect(logSpy).not.toHaveBeenCalled();
+    expect(fs.existsSync(configFile)).toBe(false);
+    expect(fs.existsSync(keyFile)).toBe(false);
+  } finally {
+    logSpy.mockRestore();
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: an unrecognized --linkage-strategy is rejected (exit 64) before any side effect", async () => {
+  // The handler validates the enum (parseLinkageStrategyFlag) inside runOrExit
+  // before resolveInvitePositionals/validateInvite, so a bad value is a clean
+  // usage error (exit 64) and no token reaches stdout and no files are written --
+  // pinning the wiring symmetrically with the --accept-timeout guards above (the
+  // parser itself is unit-tested in bootstrap.test.ts).
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-strat-"));
+  const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+    const configFile = path.join(dir, "psilink.yaml");
+    const keyFile = path.join(dir, ".psilink.key");
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: [input],
+      "linkage-strategy": "complete",
       "config-file": configFile,
       "key-file": keyFile,
       "log-level": "silent",

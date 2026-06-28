@@ -819,11 +819,12 @@ export async function loadInputRows(
  * Apply the operator-selected linkage strategy onto CLI-authored default terms.
  * A no-op when `strategy` is undefined (the operator did not pass
  * `--linkage-strategy`, so the schema default the factory already set --
- * `cascade` -- stands) or when it equals the strategy already present; only an
- * explicit `single-pass` selection changes anything. Returns a fresh object so
- * the caller's input is not mutated. Shared by the two CLI commands that author
- * fresh terms (`invite` via {@link buildDataSpec}, `zero-setup` over its
- * prepared terms) so the selection is applied one way.
+ * `cascade` -- stands) or when it already equals the terms' current value;
+ * since CLI-authored default terms carry `cascade`, in practice only an explicit
+ * `single-pass` selection changes anything. Returns a fresh object so the
+ * caller's input is not mutated. Shared by the two CLI commands that author fresh
+ * terms (`invite` via {@link buildDataSpec}, `zero-setup` over its prepared
+ * terms) so the selection is applied one way.
  */
 export function withLinkageStrategy(
   terms: LinkageTerms,
@@ -867,8 +868,6 @@ export function parseLinkageStrategyFlag(
  * identical either way. Shared by `invite` (selection time) and `accept`
  * (consent prompt) so the operator and the partner read the same framing, and
  * points at the operator-facing reference, not the internal design note.
- *
- * @internal exported for testing
  */
 export function singlePassDisclosureNotice(): string {
   return (
