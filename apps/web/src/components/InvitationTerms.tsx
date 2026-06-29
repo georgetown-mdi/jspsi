@@ -203,15 +203,26 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
             : "Two of these elements may be matched in either order"}
         </Text>
       )}
-      {/* When both swapped elements carry transforms, the receiver applies each
-          element's transforms to the OTHER element's field value (the field
-          references swap, the transforms stay put), which the generic swap note
-          above does not convey. swapTransformInterchange implies swap is set. */}
+      {/* On the receiver each swapped element's transforms run against the OTHER
+          element's field value (the field references swap, the transforms stay
+          put), which the generic swap note above does not convey -- and which
+          anchors the partner-attributed breadth marker the header shows. When both
+          sides carry transforms it is a bidirectional interchange; when one does,
+          a one-directional donor -> recipient note (swapTransformDonor names the
+          transform-carrier first). Both flags imply swap is set and are mutually
+          exclusive. */}
       {summary.swapTransformInterchange && summary.swap !== undefined && (
         <Text size="xs" c="dimmed">
           When matched in that order, the transforms shown for {summary.swap[0]}{" "}
           are applied to {summary.swap[1]}&rsquo;s value, and those for{" "}
           {summary.swap[1]} to {summary.swap[0]}&rsquo;s value.
+        </Text>
+      )}
+      {summary.swapTransformDonor !== undefined && (
+        <Text size="xs" c="dimmed">
+          When matched in that order, the transforms shown for{" "}
+          {summary.swapTransformDonor[0]} are applied to{" "}
+          {summary.swapTransformDonor[1]}&rsquo;s value.
         </Text>
       )}
     </Stack>
