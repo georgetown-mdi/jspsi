@@ -646,13 +646,23 @@ function parseDateBreadth(
  *
  * Returns a SINGLE, most-salient marker, not one per rule: the always-visible
  * header is deliberately terse, so an element carrying more than one rule shows
- * just the first -- effect-named rules take precedence over the directly-named
- * ones -- while its complete rule set sits one expand down in
- * {@link MatchKeyDetails}. The element stays flagged either way.
+ * just the first -- the maximal-breadth "constant" date collapse ranks first,
+ * then the other effect-named rules, then the directly-named ones -- while its
+ * complete rule set sits one expand down in {@link MatchKeyDetails}. The element
+ * stays flagged either way.
  */
 function elementBreadthMarker(element: LinkageKeyElement): string | undefined {
   const steps = element.transform ?? [];
   const functions = new Set(steps.map((s) => s.function));
+  // A tokenless `parse_date` output collapses every date to one constant value --
+  // the maximal match breadth -- so it is checked first and outranks every other
+  // rule the element might also carry: once every value collapses to one, a
+  // further substring/fuzzy/expansion loosening is moot, so "constant" is the
+  // honest dominant effect and is never understated as a milder word. (A
+  // `parse_date` that drops only some components, not all, is the milder "partial"
+  // handled below at the parse_date position.)
+  const parseDateBreadths = steps.map(parseDateBreadth);
+  if (parseDateBreadths.includes("constant")) return "constant";
   // Effect named where the direction is determinable from the terms. "partial"
   // is a literal truncation, so a substring counts only where it slices the
   // literal value -- not after a value-recoding `phonetic` step, where it slices
@@ -668,13 +678,9 @@ function elementBreadthMarker(element: LinkageKeyElement): string | undefined {
   if (functions.has("split_on")) return "multiple";
   if (functions.has("coalesce")) return "fallback";
   // parse_date is routine date canonicalization UNLESS its output layout narrows
-  // matching. A tokenless output collapses every date to one constant value (the
-  // maximal breadth, "constant"); an output that keeps a token but drops a
-  // component its input carries matches on only part of the date ("partial"). The
-  // stronger word across the element's steps wins, so a constant-collapsing step
-  // is never understated as a partial drop.
-  const parseDateBreadths = steps.map(parseDateBreadth);
-  if (parseDateBreadths.includes("constant")) return "constant";
+  // matching: an output that keeps a date token but drops a component its input
+  // carries matches on only part of the date ("partial"). The tokenless
+  // every-date-to-one case is the stronger "constant", handled at the top.
   if (parseDateBreadths.includes("partial")) return "partial";
   // Rule named directly where a partner-authored pattern or value list makes the
   // matching direction indeterminate from the terms alone.

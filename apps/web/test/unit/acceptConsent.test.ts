@@ -1294,6 +1294,28 @@ describe("summarizeInvitation", () => {
         },
       ]),
     ).toBe("last name (constant)");
+    // Being the maximal breadth, it outranks even a literal-truncating substring
+    // (the otherwise-highest-precedence marker), in either order: once every date
+    // is one value, slicing that value leaves it constant, so "(partial)" would
+    // understate the collapse.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "registered" },
+        },
+        { function: "substring", params: { start: 1, length: 3 } },
+      ]),
+    ).toBe("last name (constant)");
+    expect(
+      headerFor([
+        { function: "substring", params: { start: 1, length: 3 } },
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "registered" },
+        },
+      ]),
+    ).toBe("last name (constant)");
   });
 
   test("shows a single most-salient marker, effect-named before directly-named", () => {
