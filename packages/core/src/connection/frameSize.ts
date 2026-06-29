@@ -87,9 +87,9 @@ export const MAX_SINGLE_PASS_CELLS = 2_000_000;
 // bound on the real serialized cost, so the derived cap can never reject a
 // legitimate frame -- it is a read gate, where undershooting would be a
 // correctness bug, while overshooting only loosens defense-in-depth slightly.
-//   - A masked value (one encrypted curve point) serializes to ~34 bytes in the
-//     protobuf `Raw` setup/response (a 32-byte point plus protobuf field
-//     framing); 40 rounds that up with margin.
+//   - A masked value (one encrypted curve point) serializes to ~35 bytes in the
+//     protobuf `Raw` setup/response (a 33-byte compressed curve point plus
+//     protobuf field framing); 40 rounds that up with margin.
 //   - An index-table cell is exactly one little-endian Int32 (4 bytes).
 // The reply packs, per (key, sender-record), one masked value (in the setup) and
 // one index cell; per (key, receiver-record), one masked value (in the response,

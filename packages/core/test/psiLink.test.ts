@@ -483,3 +483,29 @@ test("single-pass aborts symmetrically when the exchange exceeds the ceiling", a
   // The abort happened before any frame was exchanged: the peer saw nothing.
   void peer;
 });
+
+test("single-pass aborts symmetrically from the starter side too", async () => {
+  // Mirror of the joiner case, proving the verdict is role-symmetric. The
+  // over-ceiling gate runs before the role branch, so the starter (PSI sender)
+  // reaches it from the same exchanged counts. The same large partnerRecordCount
+  // lands in receiverRecordCount for a starter (vs senderRecordCount for a
+  // joiner), yet both compute the identical over-cap verdict and abort before any
+  // frame moves -- the starter throws before it ever reads the request.
+  const [conn, peer] = createMessagePipe();
+  const sender = new PSIParticipant("server", psiLibrary, {
+    role: "starter",
+    verbose: -1,
+  });
+  const run = linkViaSinglePassPSI(
+    { cardinality: "one-to-one" },
+    sender,
+    conn,
+    [["a", "b"]],
+    MAX_SINGLE_PASS_CELLS + 1, // partner alone is over the budget
+    -1,
+  );
+  await expect(run).rejects.toThrow(/single-pass cannot carry this dataset/);
+  await expect(run).rejects.not.toThrow(/cascade/);
+  // The starter aborted before receiving the request: the peer saw nothing.
+  void peer;
+});
