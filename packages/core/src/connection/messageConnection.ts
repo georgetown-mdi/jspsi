@@ -536,11 +536,10 @@ export function fromEventConnection(
             controls.fail(asConnectionError(buffered, "transport"));
         },
         // Forward to the underlying transport only when it bounds its inbound
-        // reads (file-sync); a transport without the method leaves this
-        // undefined, so the connection's setInboundFrameCap no-ops.
-        setInboundFrameCap: conn.setInboundFrameCap
-          ? (maxBytes) => conn.setInboundFrameCap?.(maxBytes)
-          : undefined,
+        // reads (file-sync); a transport without the method leaves this undefined,
+        // so the connection's setInboundFrameCap no-ops. Bound to `conn` so the
+        // method keeps its receiver when invoked through the hook.
+        setInboundFrameCap: conn.setInboundFrameCap?.bind(conn),
       };
     },
     {

@@ -166,28 +166,24 @@ export function prepareForExchange(
   // the PSI encryption. The authoritative, symmetric two-party check runs in
   // linkViaSinglePassPSI once both record counts are exchanged; that asymmetry --
   // a coarse local pre-flight versus the post-encryption authoritative gate -- is
-  // preserved deliberately. Pre-flight whenever this party could be the sender:
-  // couldSend is false only for a dedicated output-only receiver (expectsOutput
-  // but not shareWithPartner). The receiver is bounded too, but only the
-  // authoritative check, which knows both counts, can gate it precisely.
-  if (linkageTerms.linkageStrategy === "single-pass") {
-    const couldSend =
-      !linkageTerms.output.expectsOutput ||
-      linkageTerms.output.shareWithPartner;
-    if (
-      couldSend &&
-      singlePassDatasetExceedsCap(
-        linkageTerms.linkageKeys.length,
-        rawRows.length,
-      )
-    ) {
-      throw new Error(
-        `single-pass linkage cannot carry this dataset: ${rawRows.length} ` +
-          `record(s) across ${linkageTerms.linkageKeys.length} linkage key(s) ` +
-          "exceed the single-pass ceiling. Reduce the number of linkage keys or " +
-          "the record count, or split the dataset into smaller batches.",
-      );
-    }
+  // preserved deliberately. The check applies to EITHER role: the cell-count
+  // ceiling is symmetric (the receiver holds both encrypted sets resident, so its
+  // own dataset is bounded exactly as the sender's), so an over-ceiling exchange
+  // aborts whichever side is over -- and the coarse one-party gate predicts that
+  // from this party's own count regardless of whether it sends or receives. It is
+  // not narrowed to a potential sender: doing so would let a dedicated output-only
+  // receiver pay a full handshake and PSI encryption before the authoritative gate
+  // caught the same over-ceiling dataset.
+  if (
+    linkageTerms.linkageStrategy === "single-pass" &&
+    singlePassDatasetExceedsCap(linkageTerms.linkageKeys.length, rawRows.length)
+  ) {
+    throw new Error(
+      `single-pass linkage cannot carry this dataset: ${rawRows.length} ` +
+        `record(s) across ${linkageTerms.linkageKeys.length} linkage key(s) ` +
+        "exceed the single-pass ceiling. Reduce the number of linkage keys or " +
+        "the record count, or split the dataset into smaller batches.",
+    );
   }
 
   let dateInputFormat: string | undefined;

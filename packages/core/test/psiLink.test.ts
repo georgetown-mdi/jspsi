@@ -320,16 +320,21 @@ test("singlePassExchangeExceedsCap fires when EITHER party is over the budget", 
   expect(singlePassExchangeExceedsCap(1, 1, fits + 1)).toBe(true);
 });
 
-test("singlePassReplyByteCap is symmetric across parties and below the static frame cap at the ceiling", () => {
-  // Both parties derive the same byte cap from (keyCount, senderRows,
-  // receiverRows); the inputs are the same on both sides, so the value is too.
-  expect(singlePassReplyByteCap(3, 100, 200)).toBe(
-    singlePassReplyByteCap(3, 100, 200),
-  );
+test("singlePassReplyByteCap weights the sender heavier and stays below the static frame cap at the ceiling", () => {
   // The sender contributes a masked value + an index cell per (key, record); the
-  // receiver a masked value per (key, record); plus a fixed overhead.
+  // receiver a masked value per (key, record); plus a fixed overhead. Pinning the
+  // exact formula is what makes the cap reproducible across implementations.
   expect(singlePassReplyByteCap(2, 10, 5)).toBe(
     (40 + 4) * (2 * 10) + 40 * (2 * 5) + 256,
+  );
+  // The two arguments are NOT interchangeable: the sender carries the index table
+  // (+4/cell), so swapping the sender and receiver counts changes the value. This
+  // is why both parties must agree on which count is the sender's -- the role
+  // mapping in linkViaSinglePassPSI feeds (senderRows, receiverRows) in the same
+  // order on both sides, so they compute the identical cap from swapped local
+  // inputs (own vs partner count).
+  expect(singlePassReplyByteCap(3, 100, 200)).not.toBe(
+    singlePassReplyByteCap(3, 200, 100),
   );
   // At the ceiling (both parties' keyCount*rows at the budget) the cap is well
   // below the static file-sync backstop, so the per-transport clamp does not bind.
