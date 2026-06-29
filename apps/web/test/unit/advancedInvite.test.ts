@@ -1219,6 +1219,7 @@ describe("importedConstraintDivergenceMessage refuses a non-representable-constr
   // lean on inferMetadata's column-name heuristics.
   const metadata: Metadata = [
     { name: "ssn_col", type: "ssn", role: "linkage", isPayload: false },
+    { name: "ssn4_col", type: "ssn4", role: "linkage", isPayload: false },
     { name: "fn_col", type: "first_name", role: "linkage", isPayload: false },
     { name: "ln_col", type: "last_name", role: "linkage", isPayload: false },
     {
@@ -1228,9 +1229,15 @@ describe("importedConstraintDivergenceMessage refuses a non-representable-constr
       isPayload: false,
     },
   ];
-  const columns = ["ssn_col", "fn_col", "ln_col", "dob_col"];
+  const columns = ["ssn_col", "ssn4_col", "fn_col", "ln_col", "dob_col"];
   const rawRows = [
-    { ssn_col: "123456789", fn_col: "A", ln_col: "B", dob_col: "01/01/2000" },
+    {
+      ssn_col: "123456789",
+      ssn4_col: "6789",
+      fn_col: "A",
+      ln_col: "B",
+      dob_col: "01/01/2000",
+    },
   ];
 
   /** A fresh editor seed over these columns -- the import target. */
@@ -1302,21 +1309,32 @@ describe("importedConstraintDivergenceMessage refuses a non-representable-constr
     expect(
       importedConstraintDivergenceMessage(imported, seed, rawRows),
     ).toBeDefined();
+    // The refusal is load-bearing, not cosmetic: accepting this import would
+    // regenerate a different cross-party agreement than the document declared.
+    expect(
+      canonicalString(
+        buildAdvancedTerms(draftFromTerms(imported, seed, 3600, rawRows)),
+      ),
+    ).not.toEqual(canonicalString(imported));
   });
 
   test.each([
     ["a name allowedCharacters", "first_name"],
     ["a name affixesAllowed", "last_name"],
     ["a validOnly on a type with no default constraint", "date_of_birth"],
+    ["an ssn4 validOnly", "ssn4"],
   ] as const)(
     "%s deviating from the type default is refused",
     (_label, fieldName) => {
       const seed = seedFor();
       // A non-default value for each remaining constraint facet, per field type.
+      // ssn4's default is { validOnly: true }, so validOnly: false is a deviation
+      // -- it exercises a second DEFAULT_LINKAGE_FIELDS entry than ssn does.
       const byField: Record<string, Record<string, unknown>> = {
         first_name: { affixesAllowed: false, allowedCharacters: "A-Za-z " },
         last_name: { affixesAllowed: true, allowedCharacters: "A-Z " },
         date_of_birth: { validOnly: true },
+        ssn4: { validOnly: false },
       };
       const imported = withFieldConstraints(
         defaultExport(),
@@ -1364,6 +1382,76 @@ describe("importedConstraintDivergenceMessage refuses a non-representable-constr
     expect(
       canonicalString(
         buildAdvancedTerms(draftFromTerms(exported, seed, 3600, rawRows)),
+      ),
+    ).toEqual(canonicalString(exported));
+  });
+
+  test("a multi-field editor export (two same-typed fields) is accepted and round-trips", () => {
+    // The editor's own multi-field export: two first_name fields bound to distinct
+    // columns. Both carry the type-default name constraints, so the rebuild reproduces
+    // them and the guard must NOT refuse a legitimate export it can faithfully rebuild
+    // -- the precision counterpart of the refusal tests. Guards against a future
+    // change to authoredLinkageFields/buildAdvancedTerms that began refusing real
+    // multi-field exports.
+    const mfMetadata: Metadata = [
+      {
+        name: "maiden_col",
+        type: "first_name",
+        role: "linkage",
+        isPayload: false,
+      },
+      {
+        name: "current_col",
+        type: "first_name",
+        role: "linkage",
+        isPayload: false,
+      },
+      {
+        name: "dob_col",
+        type: "date_of_birth",
+        role: "linkage",
+        isPayload: false,
+      },
+    ];
+    const mfColumns = ["maiden_col", "current_col", "dob_col"];
+    const mfRows = [
+      { maiden_col: "Smith", current_col: "Jones", dob_col: "01/01/2000" },
+    ];
+    const NAME_STEPS = [{ function: "to_upper_case" }];
+    const exported = buildAdvancedTerms({
+      identity: "Inviter",
+      lifetimeSeconds: 3600,
+      outputDirection: "both",
+      algorithm: "psi",
+      deduplicate: false,
+      linkageStrategy: "cascade",
+      metadata: mfMetadata,
+      standardization: [
+        { output: "first_name", input: "maiden_col", steps: NAME_STEPS },
+        { output: "first_name_2", input: "current_col", steps: NAME_STEPS },
+      ],
+      keys: [
+        {
+          key: { name: "maiden", elements: [{ field: "first_name" }] },
+          enabled: true,
+        },
+        {
+          key: { name: "current", elements: [{ field: "first_name_2" }] },
+          enabled: true,
+        },
+      ],
+    });
+    const mfSeed: AdvancedInviteSeed = {
+      terms: getDefaultLinkageTerms("Inviter", mfMetadata),
+      metadata: mfMetadata,
+      columns: mfColumns,
+    };
+    expect(
+      importedConstraintDivergenceMessage(exported, mfSeed, mfRows),
+    ).toBeUndefined();
+    expect(
+      canonicalString(
+        buildAdvancedTerms(draftFromTerms(exported, mfSeed, 3600, mfRows)),
       ),
     ).toEqual(canonicalString(exported));
   });

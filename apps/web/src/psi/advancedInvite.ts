@@ -1064,23 +1064,31 @@ export function gatedActiveSettingMessage(
  * canonical form the agreement hashes ({@link canonicalString}). Name and type are
  * reproduced verbatim, so a surviving field whose canonical form differs differs
  * only in its constraints: exactly the silent-divergence case. This also catches the
- * inverse -- an import that STRIPS a default the rebuild adds back. Comparing only
- * the fields that survive generation (those a key references and the columns can
- * bind) is what keeps this from colliding with the disable-and-show handling for an
- * unsupplyable field, which is dropped rather than generated, so its constraints
- * never reach the agreement and there is nothing to diverge. An import carrying only
- * type-default constraints rebuilds to identical canonical fields and is accepted
- * unchanged -- so the guided and expert paths, which never author custom
+ * inverse -- an import that STRIPS a default the rebuild adds back. An import
+ * carrying only type-default constraints rebuilds to identical canonical fields and
+ * is accepted unchanged -- so the guided and expert paths, which never author custom
  * constraints, always pass.
  *
  * The message names no field value: an imported document is partner-influenceable,
  * the same reason {@link UNSUPPLYABLE_KEY_MESSAGE} and core's schema refines locate
  * an offender by path, not value.
  *
- * Scope: a different cross-type FIELD ORDER in an externally-authored document is a
- * sibling silent divergence with the same fixed-order root cause in
- * {@link authoredLinkageFields}; fields are matched by name here, so order alone
- * does not trip this refusal -- it is tracked as its own follow-up.
+ * Scope -- it compares only the fields that survive generation (the ones a key
+ * references and the columns can bind), and that bounds it in two ways. (1) It does
+ * NOT falsely refuse the disable-and-show case: a field a key references but the
+ * inviter's columns cannot supply is dropped rather than generated, and not being
+ * compared is what keeps a legitimate partial import from being refused. (2) The cost
+ * is that a field the rebuild drops ENTIRELY -- an unsupplyable one, or a declared
+ * field NO key references -- is not compared, so a custom constraint it carries is
+ * not caught here. That is a field-PRESENCE divergence, not the normalization of a
+ * field that still runs: an unreferenced or unsupplyable field is inert (never
+ * standardized, constraint-checked, or matched -- see
+ * {@link referencedLinkageFieldNames}), so the only thing that diverges is the
+ * agreement HASH between the imported document and the generated invitation -- the
+ * same hash-only category as a re-ordered cross-type field declaration. Both are the
+ * import round-trip-fidelity gap whose faithful-preservation fix is tracked
+ * separately; refusing a harmless inert field here would over-refuse, so this guard
+ * is scoped to the constraints a generated field actually runs.
  */
 export function importedConstraintDivergenceMessage(
   terms: LinkageTerms,
