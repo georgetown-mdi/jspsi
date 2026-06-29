@@ -87,7 +87,7 @@ function isPlainObject(value: object): boolean {
 
 /**
  * Reject a value that carries a callable `toJSON`. `canonicalize` tests
- * `object.toJSON instanceof Function` before it ever inspects `Array.isArray`
+ * `typeof object.toJSON === "function"` before it ever inspects `Array.isArray`
  * or enumerates keys (see canonicalize.js), so it would serialize the return of
  * `toJSON()` instead of the array or object actually passed -- a silent
  * coercion, and undetectable by an element/property walk (the method may be
@@ -144,7 +144,7 @@ function assertCanonical(value: unknown, path: string): void {
       if (value === null) return;
       if (Array.isArray(value)) {
         assertNoToJson(value, path);
-        // canonicalize serializes only elements [0, length) (via Array.reduce),
+        // canonicalize serializes only elements [0, length) (via Array.map),
         // so any own property it cannot reach -- a non-index string key
         // (`arr.foo`, enumerable or not) or a symbol key -- would be silently
         // dropped. Reject them so the array case is as complete as the object
@@ -163,8 +163,9 @@ function assertCanonical(value: unknown, path: string): void {
         if (Object.getOwnPropertySymbols(value).length > 0)
           fail("symbol-keyed array property", path);
         // Index loop, not forEach/for-of: both skip sparse holes (`[1,,3]`),
-        // which canonicalize would silently drop. A hole is a missing element,
-        // so reject it the same way an explicit `undefined` element is rejected.
+        // which canonicalize mis-serializes -- its `map`/`join` renders a hole
+        // as an empty element (the string `[1,,3]`, invalid JSON). A hole is a
+        // missing element, so reject it as an explicit `undefined` element is.
         for (let index = 0; index < value.length; index++) {
           if (!(index in value))
             fail(
@@ -232,7 +233,7 @@ function assertCanonical(value: unknown, path: string): void {
 export function canonicalString(value: unknown): string {
   try {
     // assertCanonical MUST run first: the safety of the output rests entirely on
-    // it catching every value canonicalize would coerce. canonicalize 2.1.0 does
+    // it catching every value canonicalize would coerce. canonicalize does
     // not uniformly skip out-of-domain values -- e.g. a function-valued property
     // is stringified to the literal `undefined`, producing invalid JSON -- so the
     // pre-validator, not canonicalize, is what guarantees well-formed output.

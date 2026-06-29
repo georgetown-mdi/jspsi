@@ -11,16 +11,25 @@ const pkg = require("./package.json");
 
 // Packages bundled into the output rather than kept as peer dependencies.
 // @openmined/psi.js is always bundled (WASM, no npm-installable form).
+// canonicalize is always bundled because it is ESM-only: from 3.0.0 its package
+// `exports` declares only an `import` condition (no `require`, no `default`), so
+// a `require("canonicalize")` left in the CJS build resolves to nothing and
+// crashes at load with ERR_PACKAGE_PATH_NOT_EXPORTED. Only the ESM-resolving dev
+// paths (vitest via Vite, the CLI's `node --import=tsx`) take the `import`
+// condition and so never hit it; the shipped CJS bundle (e.g. the Docker CLI run
+// as plain `node`) does. Its source is a single function, so inlining it into
+// every build is cheap and removes the runtime resolution of it entirely.
 // @noble/curves is bundled in the UMD browser build only because it ships
 // ESM-only and has no UMD global name; the ESM/CJS builds keep it external.
-const ALWAYS_BUNDLED = new Set(["@openmined/psi.js"]);
-// canonicalize, re2js, and yaml are bundled into the standalone UMD browser
-// build because they ship with no UMD global name; the ESM/CJS builds keep them
-// external (the consuming apps bundle them). re2js is the linear-time regex
-// engine that executes partner transform patterns; it is pure JS, so the same
-// build serves both the CLI (Node) and the web (browser) -- see
-// docs/spec/PROTOCOL.md "Transform regular-expression dialect". yaml reaches the
-// browser via the sensitiveFile.ts config-import chokepoint.
+const ALWAYS_BUNDLED = new Set(["@openmined/psi.js", "canonicalize"]);
+// re2js and yaml are bundled into the standalone UMD browser build because they
+// ship with no UMD global name; the ESM/CJS builds keep them external (the
+// consuming apps bundle them). re2js is the linear-time regex engine that
+// executes partner transform patterns; it is pure JS, so the same build serves
+// both the CLI (Node) and the web (browser) -- see docs/spec/PROTOCOL.md
+// "Transform regular-expression dialect". yaml reaches the browser via the
+// sensitiveFile.ts config-import chokepoint. (canonicalize is bundled here too,
+// via ALWAYS_BUNDLED above.)
 const UMD_BUNDLED = new Set([
   "@openmined/psi.js",
   "@noble/curves",
@@ -60,7 +69,10 @@ export default defineConfig([
   {
     input: "src/main.ts",
     external: makeExternal(ALWAYS_BUNDLED),
-    plugins: [typescript({ outputToFilesystem: true })],
+    // resolve() lets rollup inline the ALWAYS_BUNDLED packages (currently
+    // canonicalize) from node_modules; everything else is held external by the
+    // `external` predicate above, so only the bundled set is pulled in.
+    plugins: [resolve(), typescript({ outputToFilesystem: true })],
     output: [
       { file: pkg.main, format: "cjs" },
       { file: pkg.module, format: "es" },
@@ -74,7 +86,9 @@ export default defineConfig([
   {
     input: "src/testing.ts",
     external: makeExternal(ALWAYS_BUNDLED),
-    plugins: [typescript({ outputToFilesystem: true })],
+    // resolve() for the same reason as the main build above (testing.ts imports
+    // no ALWAYS_BUNDLED package today, but this keeps the two builds symmetric).
+    plugins: [resolve(), typescript({ outputToFilesystem: true })],
     output: [
       { file: "dist/testing.cjs", format: "cjs" },
       { file: "dist/testing.esm.js", format: "es" },
