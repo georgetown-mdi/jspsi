@@ -262,6 +262,70 @@ test("both parties compute the same role independently", async () => {
   expect(a.value).not.toBe(b.value);
 });
 
+test("the record-count exchange is unconditional and identical across output cases", async () => {
+  // The count exchange now runs on every exchange, not only when both parties
+  // expect output: the one-sided path drains the count frame, it does not skip
+  // it. Making the exchange unconditional is groundwork for the forthcoming
+  // data-dependent single-pass frame cap, which will need both counts on the
+  // wire for every exchange. Capture BOTH parties' sent frames for a both-output
+  // resolution and for each one-sided direction (initiator the sole receiver,
+  // then initiator the sole sender) with the same counts, and assert they are
+  // byte- and order-identical across all three: the only difference between the
+  // cases is the local role decision, never the wire.
+  const both: Output = { expectsOutput: true, shareWithPartner: true };
+  const oneSidedReceiver: Output = {
+    expectsOutput: true,
+    shareWithPartner: false,
+  };
+  const oneSidedSender: Output = {
+    expectsOutput: false,
+    shareWithPartner: true,
+  };
+
+  const captureFrames = async (local: Output, partner: Output) => {
+    const [connA, connB] = makeConnections();
+    const wrap = (
+      conn: MessageConnection,
+      sink: unknown[],
+    ): MessageConnection => ({
+      send: (m: unknown) => {
+        sink.push(m);
+        return conn.send(m);
+      },
+      receive: (t?: number) => conn.receive(t),
+      close: () => conn.close(),
+    });
+    const initiator: unknown[] = [];
+    const responder: unknown[] = [];
+    await Promise.all([
+      resolveRole(wrap(connA, initiator), "initiator", local, partner, 100),
+      resolveRole(wrap(connB, responder), "responder", partner, local, 200),
+    ]);
+    return { initiator, responder };
+  };
+
+  // Both-output: each party sends exactly its own record count, once.
+  const bothFrames = await captureFrames(both, both);
+  expect(bothFrames.initiator).toEqual([{ recordCount: 100 }]);
+  expect(bothFrames.responder).toEqual([{ recordCount: 200 }]);
+
+  // Each one-sided direction puts the identical frames on the wire -- both the
+  // initiator's and the responder's -- rather than skipping the exchange.
+  const initReceiverFrames = await captureFrames(
+    oneSidedReceiver,
+    oneSidedSender,
+  );
+  expect(initReceiverFrames.initiator).toEqual(bothFrames.initiator);
+  expect(initReceiverFrames.responder).toEqual(bothFrames.responder);
+
+  const initSenderFrames = await captureFrames(
+    oneSidedSender,
+    oneSidedReceiver,
+  );
+  expect(initSenderFrames.initiator).toEqual(bothFrames.initiator);
+  expect(initSenderFrames.responder).toEqual(bothFrames.responder);
+});
+
 // --- Incompatible terms ------------------------------------------------------
 
 test("algorithm mismatch -> both parties reject", async () => {
