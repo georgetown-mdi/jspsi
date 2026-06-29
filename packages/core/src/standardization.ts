@@ -1574,7 +1574,9 @@ const PARSE_DATE_REQUIRED_COMPONENTS: readonly DateFormatToken[] = [
  * re-implemented scan -- the encode-the-runtime-invariant-as-a-check rule, here
  * over a "this never produces a value" claim.
  */
-function parseDateInputDropsEveryRecord(params: Params | undefined): boolean {
+export function parseDateInputDropsEveryRecord(
+  params: Params | undefined,
+): boolean {
   const raw = params?.inputFormat;
   if (raw === null || raw === undefined) return false;
   if (typeof raw !== "string") return true;

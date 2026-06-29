@@ -1187,7 +1187,7 @@ describe("summarizeInvitation", () => {
     // year-only output keeps a token yet collapses every date within a year, so
     // it matches on only part of the date ("partial"); a tokenless output carries
     // no date token at all and collapses every date to one constant value -- the
-    // maximal breadth, marked distinctly ("constant").
+    // maximal breadth, marked distinctly ("any date").
     expect(
       headerFor([
         {
@@ -1203,7 +1203,7 @@ describe("summarizeInvitation", () => {
           params: { inputFormat: "MM/DD/YYYY", outputFormat: "registered" },
         },
       ]),
-    ).toBe("last name (constant)");
+    ).toBe("last name (any date)");
     expect(
       headerFor([
         {
@@ -1257,10 +1257,12 @@ describe("summarizeInvitation", () => {
           params: { inputFormat: "MM/DD/YYYY", outputFormat: "registered" },
         },
       ]),
-    ).toBe("last name (constant)");
-    // A tokenless output with a tokenless input is still a constant collapse: the
-    // input cannot un-collapse a constant output, and the most degenerate case is
-    // not left unmarked.
+    ).toBe("last name (any date)");
+    // The "(any date)" collapse presupposes the date is actually parsed: a
+    // tokenless OUTPUT whose INPUT also carries no date token drops every record at
+    // the input stage -- the element matches NOTHING, not everything -- so it earns
+    // no broadening marker (the dead-key advisory, a narrowing concern, surfaces it
+    // instead). See the dedicated input-drop test below.
     expect(
       headerFor([
         {
@@ -1268,9 +1270,9 @@ describe("summarizeInvitation", () => {
           params: { inputFormat: "none", outputFormat: "none" },
         },
       ]),
-    ).toBe("last name (constant)");
-    // Across an element's steps the stronger word wins, so a constant collapse is
-    // never understated as a partial drop by an accompanying partial step.
+    ).toBe("last name");
+    // Across an element's steps the stronger word wins, so an "(any date)" collapse
+    // is never understated as a partial drop by an accompanying partial step.
     expect(
       headerFor([
         {
@@ -1282,9 +1284,9 @@ describe("summarizeInvitation", () => {
           params: { inputFormat: "MM/DD/YYYY", outputFormat: "registered" },
         },
       ]),
-    ).toBe("last name (constant)");
-    // The constant collapse is an effect, so it wins over a directly-named rule
-    // the same way the partial drop does.
+    ).toBe("last name (any date)");
+    // The "(any date)" collapse is an effect, so it wins over a directly-named
+    // rule the same way the partial drop does.
     expect(
       headerFor([
         { function: "null_if", params: { values: ["x"] } },
@@ -1293,7 +1295,7 @@ describe("summarizeInvitation", () => {
           params: { inputFormat: "MM/DD/YYYY", outputFormat: "registered" },
         },
       ]),
-    ).toBe("last name (constant)");
+    ).toBe("last name (any date)");
     // Being the maximal breadth, it outranks even a literal-truncating substring
     // (the otherwise-highest-precedence marker), in either order: once every date
     // is one value, slicing that value leaves it constant, so "(partial)" would
@@ -1306,7 +1308,7 @@ describe("summarizeInvitation", () => {
         },
         { function: "substring", params: { start: 1, length: 3 } },
       ]),
-    ).toBe("last name (constant)");
+    ).toBe("last name (any date)");
     expect(
       headerFor([
         { function: "substring", params: { start: 1, length: 3 } },
@@ -1315,7 +1317,55 @@ describe("summarizeInvitation", () => {
           params: { inputFormat: "MM/DD/YYYY", outputFormat: "registered" },
         },
       ]),
-    ).toBe("last name (constant)");
+    ).toBe("last name (any date)");
+  });
+
+  test("shows no breadth marker for a parse_date whose input drops every record", () => {
+    const headerFor = (transform: LinkageKeyElement["transform"]) =>
+      summarizeInvitation(
+        makeToken({
+          linkageFields: [{ name: "ln", type: "last_name" }],
+          linkageKeys: [
+            {
+              name: "K",
+              elements: [{ field: "ln", ...(transform && { transform }) }],
+            },
+          ],
+        }),
+      ).linkageKeys[0].headerFields[0];
+
+    // A parse_date whose input format omits a component core requires (here no
+    // year) returns null for EVERY record -- the key matches nothing, a narrowing
+    // the separate dead-key advisory surfaces -- so the breadth marker, which
+    // signals BROADENING, stays silent rather than misreporting the drop as a
+    // widening (it showed "(partial)"/"(any date)" before this was fixed).
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD", outputFormat: "YYYYMMDD" },
+        },
+      ]),
+    ).toBe("last name");
+    // The input drop dominates the output classification: the value never reaches
+    // the output stage, so neither a tokenless output ("any date") ...
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD", outputFormat: "registered" },
+        },
+      ]),
+    ).toBe("last name");
+    // ... nor an output that itself drops a component ("partial") fires.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "DD", outputFormat: "YYYY" },
+        },
+      ]),
+    ).toBe("last name");
   });
 
   test("shows a single most-salient marker, effect-named before directly-named", () => {

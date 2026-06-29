@@ -1,4 +1,8 @@
-import { describeTransformCoercions, sanitizeForDisplay } from "@psilink/core";
+import {
+  describeTransformCoercions,
+  parseDateInputDropsEveryRecord,
+  sanitizeForDisplay,
+} from "@psilink/core";
 
 import { APPLIED_SETTINGS } from "@psi/appliedSettings";
 
@@ -569,9 +573,11 @@ function dateComponentsOf(format: string): Set<DateFormatToken> {
 /**
  * The breadth marker a `parse_date` step's output layout earns, or undefined when
  * it merely reformats between equivalent full layouts (routine canonicalization,
- * deliberately unflagged). Distinguishes two magnitudes of date collapse:
+ * deliberately unflagged) -- or when its INPUT format cannot supply a full date,
+ * which is not a broadening at all (see below). Distinguishes two magnitudes of
+ * date collapse:
  *
- * - "constant": the output layout carries NO date token at all, so every date
+ * - "any date": the output layout carries NO date token at all, so every date
  *   collapses to one constant value and the element matches every record's date
  *   as that single value -- the maximal match breadth (e.g. an `outputFormat` of
  *   "registered").
@@ -580,18 +586,31 @@ function dateComponentsOf(format: string): Set<DateFormatToken> {
  *   element matches on only part of the date (e.g. a year-only output matches
  *   every date within a year).
  *
- * Keyed on the OUTPUT's token set: a tokenless output is "constant" whatever the
- * input, since no input layout can un-collapse a constant output; the proper drop
- * is then a component the input carries that a non-empty output omits. The params
- * are partner-controlled and typed `unknown`, so each format is narrowed to a
- * string, falling back to core's default layout (which carries every component)
- * when absent. The returned word is one of these two fixed literals, never
- * partner text, so the marker is injection-safe by construction.
+ * A `parse_date` whose input format omits a component core requires drops EVERY
+ * record (it returns null for every value), so the element matches NOTHING, not
+ * more -- the opposite of a broadening -- and earns no breadth marker here: that
+ * self-defeating key is a narrowing surfaced by the separate dead-key advisory,
+ * and the output is classified only once a full date is actually parsed. This
+ * defers to core's own runtime-faithful `parseDateInputDropsEveryRecord` (which
+ * also covers a non-string input format) rather than re-deriving the
+ * required-component rule here, so the marker cannot drift from the runtime.
+ *
+ * The output classification is keyed on the OUTPUT's token set: a tokenless output
+ * is "any date" whatever the (now full) input, since no input layout can
+ * un-collapse a constant output; the proper drop is then a component the input
+ * carries that a non-empty output omits. The params are partner-controlled and
+ * typed `unknown`, so each format is narrowed to a string, falling back to core's
+ * default layout (which carries every component) when absent. The returned word is
+ * one of these two fixed literals, never partner text, so the marker is
+ * injection-safe by construction.
  */
 function parseDateBreadth(
   step: TransformStep,
-): "constant" | "partial" | undefined {
+): "any date" | "partial" | undefined {
   if (step.function !== "parse_date") return undefined;
+  // An input format core cannot assemble a full date from drops every record, so
+  // the element matches nothing rather than broadening -- no breadth marker.
+  if (parseDateInputDropsEveryRecord(step.params)) return undefined;
   const rawInput = step.params?.inputFormat;
   const rawOutput = step.params?.outputFormat;
   const input =
@@ -599,7 +618,7 @@ function parseDateBreadth(
   const output =
     typeof rawOutput === "string" ? rawOutput : DEFAULT_PARSE_DATE_OUTPUT;
   const outputComponents = dateComponentsOf(output);
-  if (outputComponents.size === 0) return "constant";
+  if (outputComponents.size === 0) return "any date";
   const dropsComponent = [...dateComponentsOf(input)].some(
     (component) => !outputComponents.has(component),
   );
@@ -620,7 +639,7 @@ function parseDateBreadth(
  * records match: where the direction is determinable from the terms it names the
  * EFFECT ("partial" for a truncation, or for a `parse_date` whose output layout
  * drops a date component its input carries and so matches on only part of the
- * date; "constant" for a `parse_date` whose output carries no date token at all,
+ * date; "any date" for a `parse_date` whose output carries no date token at all,
  * collapsing every date to one value -- a stronger breadth than the partial drop;
  * "fuzzy" / "sound-alike" / "multiple" / "fallback" for an expansion), and where
  * an arbitrary partner-authored pattern or value list makes the direction
@@ -646,8 +665,8 @@ function parseDateBreadth(
  *
  * Returns a SINGLE, most-salient marker, not one per rule: the always-visible
  * header is deliberately terse, so an element carrying more than one rule shows
- * just the first -- the maximal-breadth "constant" date collapse ranks first,
- * then the other effect-named rules, then the directly-named ones -- while its
+ * just the first -- the maximal-breadth "any date" collapse ranks first, then the
+ * other effect-named rules, then the directly-named ones -- while its
  * complete rule set sits one expand down in {@link MatchKeyDetails}. The element
  * stays flagged either way.
  */
@@ -657,12 +676,12 @@ function elementBreadthMarker(element: LinkageKeyElement): string | undefined {
   // A tokenless `parse_date` output collapses every date to one constant value --
   // the maximal match breadth -- so it is checked first and outranks every other
   // rule the element might also carry: once every value collapses to one, a
-  // further substring/fuzzy/expansion loosening is moot, so "constant" is the
+  // further substring/fuzzy/expansion loosening is moot, so "any date" is the
   // honest dominant effect and is never understated as a milder word. (A
   // `parse_date` that drops only some components, not all, is the milder "partial"
   // handled below at the parse_date position.)
   const parseDateBreadths = steps.map(parseDateBreadth);
-  if (parseDateBreadths.includes("constant")) return "constant";
+  if (parseDateBreadths.includes("any date")) return "any date";
   // Effect named where the direction is determinable from the terms. "partial"
   // is a literal truncation, so a substring counts only where it slices the
   // literal value -- not after a value-recoding `phonetic` step, where it slices
@@ -680,7 +699,7 @@ function elementBreadthMarker(element: LinkageKeyElement): string | undefined {
   // parse_date is routine date canonicalization UNLESS its output layout narrows
   // matching: an output that keeps a date token but drops a component its input
   // carries matches on only part of the date ("partial"). The tokenless
-  // every-date-to-one case is the stronger "constant", handled at the top.
+  // every-date-to-one case is the stronger "any date", handled at the top.
   if (parseDateBreadths.includes("partial")) return "partial";
   // Rule named directly where a partner-authored pattern or value list makes the
   // matching direction indeterminate from the terms alone.
