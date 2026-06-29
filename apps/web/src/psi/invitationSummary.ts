@@ -567,16 +567,31 @@ function dateComponentsOf(format: string): Set<DateFormatToken> {
 }
 
 /**
- * Whether a `parse_date` step's output layout omits a date component its input
- * carries -- the case that collapses distinct dates (an `outputFormat` of "YYYY"
- * makes every date in a year match; a tokenless output collapses every date to a
- * constant) rather than merely reformatting between equivalent layouts, which is
- * routine canonicalization. The params are partner-controlled and typed
- * `unknown`, so each format is narrowed to a string, falling back to core's
- * default layout (which carries every component) when absent.
+ * The breadth marker a `parse_date` step's output layout earns, or undefined when
+ * it merely reformats between equivalent full layouts (routine canonicalization,
+ * deliberately unflagged). Distinguishes two magnitudes of date collapse:
+ *
+ * - "constant": the output layout carries NO date token at all, so every date
+ *   collapses to one constant value and the element matches every record's date
+ *   as that single value -- the maximal match breadth (e.g. an `outputFormat` of
+ *   "registered").
+ * - "partial": the output keeps at least one date token but omits a component its
+ *   input carries, so distinct dates collapse onto a coarser bucket and the
+ *   element matches on only part of the date (e.g. a year-only output matches
+ *   every date within a year).
+ *
+ * Keyed on the OUTPUT's token set: a tokenless output is "constant" whatever the
+ * input, since no input layout can un-collapse a constant output; the proper drop
+ * is then a component the input carries that a non-empty output omits. The params
+ * are partner-controlled and typed `unknown`, so each format is narrowed to a
+ * string, falling back to core's default layout (which carries every component)
+ * when absent. The returned word is one of these two fixed literals, never
+ * partner text, so the marker is injection-safe by construction.
  */
-function parseDateDropsComponent(step: TransformStep): boolean {
-  if (step.function !== "parse_date") return false;
+function parseDateBreadth(
+  step: TransformStep,
+): "constant" | "partial" | undefined {
+  if (step.function !== "parse_date") return undefined;
   const rawInput = step.params?.inputFormat;
   const rawOutput = step.params?.outputFormat;
   const input =
@@ -584,9 +599,11 @@ function parseDateDropsComponent(step: TransformStep): boolean {
   const output =
     typeof rawOutput === "string" ? rawOutput : DEFAULT_PARSE_DATE_OUTPUT;
   const outputComponents = dateComponentsOf(output);
-  return [...dateComponentsOf(input)].some(
+  if (outputComponents.size === 0) return "constant";
+  const dropsComponent = [...dateComponentsOf(input)].some(
     (component) => !outputComponents.has(component),
   );
+  return dropsComponent ? "partial" : undefined;
 }
 
 /**
@@ -602,7 +619,9 @@ function parseDateDropsComponent(step: TransformStep): boolean {
  * despite removing characters. It names any rule that materially changes which
  * records match: where the direction is determinable from the terms it names the
  * EFFECT ("partial" for a truncation, or for a `parse_date` whose output layout
- * drops a component its input carries and so matches on only part of the date;
+ * drops a date component its input carries and so matches on only part of the
+ * date; "constant" for a `parse_date` whose output carries no date token at all,
+ * collapsing every date to one value -- a stronger breadth than the partial drop;
  * "fuzzy" / "sound-alike" / "multiple" / "fallback" for an expansion), and where
  * an arbitrary partner-authored pattern or value list makes the direction
  * indeterminate it names the RULE directly ("pattern replacement", "pattern
@@ -648,10 +667,15 @@ function elementBreadthMarker(element: LinkageKeyElement): string | undefined {
   if (functions.has("phonetic")) return "sound-alike";
   if (functions.has("split_on")) return "multiple";
   if (functions.has("coalesce")) return "fallback";
-  // parse_date is routine date canonicalization UNLESS its output layout drops a
-  // component its input carries, which collapses distinct dates -- then it
-  // matches on only part of the date.
-  if (steps.some(parseDateDropsComponent)) return "partial";
+  // parse_date is routine date canonicalization UNLESS its output layout narrows
+  // matching. A tokenless output collapses every date to one constant value (the
+  // maximal breadth, "constant"); an output that keeps a token but drops a
+  // component its input carries matches on only part of the date ("partial"). The
+  // stronger word across the element's steps wins, so a constant-collapsing step
+  // is never understated as a partial drop.
+  const parseDateBreadths = steps.map(parseDateBreadth);
+  if (parseDateBreadths.includes("constant")) return "constant";
+  if (parseDateBreadths.includes("partial")) return "partial";
   // Rule named directly where a partner-authored pattern or value list makes the
   // matching direction indeterminate from the terms alone.
   if (functions.has("replace_regex")) return "pattern replacement";

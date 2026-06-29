@@ -1183,9 +1183,11 @@ describe("summarizeInvitation", () => {
     ).toBe("last name (excludes values)");
 
     // parse_date is routine canonicalization when it reformats between full
-    // layouts, but matches on only part of the date when its output drops a
-    // component its input carries (a year-only output collapses every date in a
-    // year; a tokenless output collapses every date to a constant).
+    // layouts, but narrows matching when its output drops a date component. A
+    // year-only output keeps a token yet collapses every date within a year, so
+    // it matches on only part of the date ("partial"); a tokenless output carries
+    // no date token at all and collapses every date to one constant value -- the
+    // maximal breadth, marked distinctly ("constant").
     expect(
       headerFor([
         {
@@ -1198,10 +1200,10 @@ describe("summarizeInvitation", () => {
       headerFor([
         {
           function: "parse_date",
-          params: { inputFormat: "MM/DD/YYYY", outputFormat: "SAME" },
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "registered" },
         },
       ]),
-    ).toBe("last name (partial)");
+    ).toBe("last name (constant)");
     expect(
       headerFor([
         {
@@ -1218,6 +1220,80 @@ describe("summarizeInvitation", () => {
     // A bare parse_date defaults to the full layout on both sides -- no drop.
     expect(headerFor([{ function: "parse_date" }])).toBe("last name");
     expect(headerFor(undefined)).toBe("last name");
+  });
+
+  test("marks a tokenless parse_date output as a stronger breadth than a partial drop", () => {
+    const headerFor = (transform: LinkageKeyElement["transform"]) =>
+      summarizeInvitation(
+        makeToken({
+          linkageFields: [{ name: "ln", type: "last_name" }],
+          linkageKeys: [
+            {
+              name: "K",
+              elements: [{ field: "ln", ...(transform && { transform }) }],
+            },
+          ],
+        }),
+      ).linkageKeys[0].headerFields[0];
+
+    // An output that keeps a date token but drops a component its input carries
+    // collapses dates onto a coarser bucket -- it matches on only part of the
+    // date, so it wears the same "(partial)" marker a substring truncation does.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYY" },
+        },
+      ]),
+    ).toBe("last name (partial)");
+    // An output carrying NO date token collapses every date to one constant value
+    // -- the maximal match breadth -- so it earns a distinct, stronger marker
+    // rather than reading as the same magnitude as a one-component drop.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "registered" },
+        },
+      ]),
+    ).toBe("last name (constant)");
+    // A tokenless output with a tokenless input is still a constant collapse: the
+    // input cannot un-collapse a constant output, and the most degenerate case is
+    // not left unmarked.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "none", outputFormat: "none" },
+        },
+      ]),
+    ).toBe("last name (constant)");
+    // Across an element's steps the stronger word wins, so a constant collapse is
+    // never understated as a partial drop by an accompanying partial step.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYY" },
+        },
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "registered" },
+        },
+      ]),
+    ).toBe("last name (constant)");
+    // The constant collapse is an effect, so it wins over a directly-named rule
+    // the same way the partial drop does.
+    expect(
+      headerFor([
+        { function: "null_if", params: { values: ["x"] } },
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "registered" },
+        },
+      ]),
+    ).toBe("last name (constant)");
   });
 
   test("shows a single most-salient marker, effect-named before directly-named", () => {
