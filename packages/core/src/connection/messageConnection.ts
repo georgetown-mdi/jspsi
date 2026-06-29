@@ -100,6 +100,18 @@ export interface MessageConnection {
   receive(timeoutMs?: number): Promise<unknown>;
   /** Tears down the transport. Idempotent; always resolves on a clean close. */
   close(): Promise<void>;
+  /**
+   * Optional: bound the next inbound frame the underlying transport reads into
+   * memory to `maxBytes`, replacing its static frame-size cap for subsequent
+   * reads until cleared (`undefined` restores the default). Threaded straight
+   * through any decorator to the transport read gate. The single-pass receiver
+   * sets it to the per-exchange derived cap ({@link singlePassReplyByteCap})
+   * before reading the reply, so the read gate refuses a frame larger than the
+   * exchanged record counts imply. Absent on a transport that bounds its inbound
+   * path another way (the WebRTC data channel, fixed at `MAX_WEBRTC_FRAME_BYTES`),
+   * where the call is a no-op. See docs/spec/CHANNEL_SECURITY.md.
+   */
+  setInboundFrameCap?(maxBytes: number | undefined): void;
 }
 
 /** The transport's interface to push inbound events into the queue. */
@@ -168,6 +180,13 @@ export interface TransportHooks {
    * here.
    */
   start?: () => void;
+  /**
+   * Optional: forward a per-exchange inbound frame cap to the transport read
+   * gate (see {@link MessageConnection.setInboundFrameCap}). A transport that
+   * caps its inbound path another way omits it, making the connection's
+   * `setInboundFrameCap` a no-op.
+   */
+  setInboundFrameCap?: (maxBytes: number | undefined) => void;
 }
 
 type TransportConnect = (controls: TransportControls) => TransportHooks;
@@ -460,6 +479,14 @@ export class QueuedMessageConnection implements MessageConnection {
     // the link is already unusable.
     await this.hooks.close({ flush: true });
   }
+
+  // Forward a per-exchange inbound frame cap to the transport, when it supports
+  // one. A transport that bounds its inbound path another way (the WebRTC data
+  // channel) supplies no hook, so this is a no-op there -- the caller's
+  // `setInboundFrameCap?.()` is optional precisely so it can degrade silently.
+  setInboundFrameCap(maxBytes: number | undefined): void {
+    this.hooks.setInboundFrameCap?.(maxBytes);
+  }
 }
 
 /**
@@ -508,6 +535,12 @@ export function fromEventConnection(
           if (buffered !== undefined)
             controls.fail(asConnectionError(buffered, "transport"));
         },
+        // Forward to the underlying transport only when it bounds its inbound
+        // reads (file-sync); a transport without the method leaves this
+        // undefined, so the connection's setInboundFrameCap no-ops.
+        setInboundFrameCap: conn.setInboundFrameCap
+          ? (maxBytes) => conn.setInboundFrameCap?.(maxBytes)
+          : undefined,
       };
     },
     {

@@ -135,6 +135,49 @@ test("single-pass delivers the partner payload for the matched rows", async () =
   ]);
 });
 
+test("single-pass carries a larger dataset to completion under the derived cap", async () => {
+  // A dataset far above the toy examples above, well within the single-pass
+  // ceiling, must flow through the full runExchange path to completion without the
+  // derived frame cap rejecting it -- the regression the row-count-derived cap is
+  // meant to AVOID (single-pass now carries datasets larger than the old fixed
+  // ceiling). 600 rows per side over one key is 600 (key, record) cells per
+  // party, orders of magnitude below MAX_SINGLE_PASS_CELLS, yet large enough
+  // that the derived byte cap is far tighter than the static frame cap.
+  const n = 600;
+  const overlap = 200;
+  const bigServer = Array.from({ length: n }, (_, i) => ({
+    first_name: `srv-${i}`,
+    note: `s-${i}`,
+  }));
+  // The first `overlap` client rows share a value with the server; the rest are
+  // disjoint, so the intersection size is exactly `overlap`.
+  const bigClient = Array.from({ length: n }, (_, i) => ({
+    first_name: i < overlap ? `srv-${i}` : `cli-${i}`,
+    note: `c-${i}`,
+  }));
+
+  const [connInitiator, connResponder] = createMessagePipe();
+  const [initiator, responder] = await Promise.all([
+    runExchange(
+      connInitiator,
+      "initiator",
+      prepared("single-pass", "Initiator Co", both, bigClient),
+      { psiLibrary },
+    ),
+    runExchange(
+      connResponder,
+      "responder",
+      prepared("single-pass", "Responder Co", both, bigServer),
+      { psiLibrary },
+    ),
+  ]);
+
+  expect(initiator.associationTable?.[0]).toHaveLength(overlap);
+  expect(responder.associationTable?.[0]).toHaveLength(overlap);
+  expect(built(initiator).record.resultSize).toBe(overlap);
+  expect(built(responder).record.resultSize).toBe(overlap);
+});
+
 test("single-pass one-sided output: only the receiver gets the table and payload", async () => {
   const receiverOut: Output = { expectsOutput: true, shareWithPartner: false };
   const senderOut: Output = { expectsOutput: false, shareWithPartner: true };

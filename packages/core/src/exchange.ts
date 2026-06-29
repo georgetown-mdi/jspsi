@@ -16,11 +16,8 @@ import {
   resolveRole,
 } from "./protocolSetup.js";
 import { reconcileHostKeyFingerprints } from "./hostKeyReconciliation.js";
-import {
-  linkViaPSI,
-  linkViaSinglePassPSI,
-  singlePassReplyWouldExceedCap,
-} from "./link.js";
+import { linkViaPSI, linkViaSinglePassPSI } from "./link.js";
+import { singlePassDatasetExceedsCap } from "./connection/frameSize.js";
 import {
   preparePayload,
   exchangePayloads,
@@ -160,31 +157,35 @@ export function prepareForExchange(
   // paths, which author no payload block. See assertPayloadSendDisclosed.
   assertPayloadSendDisclosed(linkageTerms.payload, metadata);
 
-  // Pre-flight the single-pass size ceiling, before connecting. Single-pass ships
-  // this party's distinct-value index table (one int32 per linkage key per record)
-  // in one frame; if our own index table would not fit, single-pass cannot succeed
-  // and would otherwise abort mid-flight, after the handshake and the PSI
-  // encryption. Pre-flight it whenever this party could be the sender: couldSend is
-  // false only for a dedicated output-only receiver (expectsOutput but not
-  // shareWithPartner), which never ships an index table. The authoritative check is
-  // still in linkViaSinglePassPSI, where the encrypted sets' size is known too;
-  // this only catches the common case earlier.
+  // Pre-flight the single-pass dataset ceiling, before connecting. This is a
+  // coarse, ONE-PARTY lower-bound gate: it can only see this party's own row
+  // count, not the partner's nor either side's distinct-value counts (which are
+  // never known before connecting, and never exchanged). If this party's own
+  // keyCount * rows already exceeds the budget, single-pass cannot succeed
+  // whatever the partner's size, so fail here rather than after the handshake and
+  // the PSI encryption. The authoritative, symmetric two-party check runs in
+  // linkViaSinglePassPSI once both record counts are exchanged; that asymmetry --
+  // a coarse local pre-flight versus the post-encryption authoritative gate -- is
+  // preserved deliberately. Pre-flight whenever this party could be the sender:
+  // couldSend is false only for a dedicated output-only receiver (expectsOutput
+  // but not shareWithPartner). The receiver is bounded too, but only the
+  // authoritative check, which knows both counts, can gate it precisely.
   if (linkageTerms.linkageStrategy === "single-pass") {
     const couldSend =
       !linkageTerms.output.expectsOutput ||
       linkageTerms.output.shareWithPartner;
     if (
       couldSend &&
-      singlePassReplyWouldExceedCap(
+      singlePassDatasetExceedsCap(
         linkageTerms.linkageKeys.length,
         rawRows.length,
       )
     ) {
       throw new Error(
-        `single-pass linkage cannot fit this dataset: ${rawRows.length} ` +
+        `single-pass linkage cannot carry this dataset: ${rawRows.length} ` +
           `record(s) across ${linkageTerms.linkageKeys.length} linkage key(s) ` +
-          "exceed the single-pass frame ceiling -- use the cascade linkage " +
-          "strategy (set linkage_strategy: cascade)",
+          "exceed the single-pass ceiling. Reduce the number of linkage keys or " +
+          "the record count, or split the dataset into smaller batches.",
       );
     }
   }
@@ -501,7 +502,7 @@ export async function runExchange(
     bootstrap = { partnerSaveIntent, sharedSecret };
   }
 
-  const resolvedRole = await resolveRole(
+  const { role: resolvedRole, partnerRecordCount } = await resolveRole(
     conn,
     handshakeRole,
     linkageTerms.output,
@@ -526,19 +527,29 @@ export async function runExchange(
 
   // Single-pass is allowlisted; any other value (including the default) runs the
   // cascade. No mismatch guard needed here -- validateCompatibility already
-  // aborted upstream if the two parties' strategies differ.
-  const runLinkage =
+  // aborted upstream if the two parties' strategies differ. Single-pass takes the
+  // partner record count too: it (with this party's count and the agreed key
+  // count) derives the per-exchange frame cap and the abort-if-over-ceiling gate,
+  // identically on both parties (see linkViaSinglePassPSI and frameSize.ts).
+  const associationTable =
     linkageTerms.linkageStrategy === "single-pass"
-      ? linkViaSinglePassPSI
-      : linkViaPSI;
-  const associationTable = await runLinkage(
-    { cardinality: "one-to-one" },
-    participant,
-    conn,
-    linkageKeyIterables,
-    verbosity,
-    onStage,
-  );
+      ? await linkViaSinglePassPSI(
+          { cardinality: "one-to-one" },
+          participant,
+          conn,
+          linkageKeyIterables,
+          partnerRecordCount,
+          verbosity,
+          onStage,
+        )
+      : await linkViaPSI(
+          { cardinality: "one-to-one" },
+          participant,
+          conn,
+          linkageKeyIterables,
+          verbosity,
+          onStage,
+        );
 
   // Send-gate: transmit payload only to a partner entitled to the result. A party
   // with expectsOutput:false learns no matched records, so it has no use for

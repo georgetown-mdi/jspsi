@@ -28,6 +28,22 @@ import type { DataConnection } from "peerjs";
  * because BinaryPack `unpack` can allocate far more than the wire size. Fixed, not
  * operator-configurable: a configurable cap risks being raised to reintroduce
  * the denial of service.
+ *
+ * This is also the WebRTC half of the single-pass frame cap's per-transport
+ * clamp. Single-pass derives a per-exchange reply cap from the exchanged record
+ * counts (`singlePassReplyByteCap` in `@psilink/core`) and aborts an exchange
+ * whose `keyCount * rows` exceeds `MAX_SINGLE_PASS_CELLS` -- a shared,
+ * transport-agnostic check both parties run from authenticated counts, so it
+ * binds on the WebRTC path too (in core's `linkViaSinglePassPSI`). Per the
+ * per-transport clamp, WebRTC keeps THIS fixed browser-tab-safe envelope at the
+ * reassembly read gate rather than threading the per-exchange cap into it (the
+ * file-sync transport, with no such envelope, threads the derived cap into its
+ * `get()` read gate instead). At the single-pass ceiling the derived reply frame
+ * is well under 256 MiB, so this envelope never rejects a legitimate single-pass
+ * reply the count check already admitted; an over-ceiling single-pass exchange
+ * fails closed with the same actionable guidance on both transports, before any
+ * reply is read. See docs/spec/CHANNEL_SECURITY.md and docs/spec/PROTOCOL.md (the
+ * single-pass dataset ceiling).
  */
 export const MAX_WEBRTC_FRAME_BYTES = 256 * 1024 * 1024;
 

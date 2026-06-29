@@ -566,4 +566,14 @@ export class EncryptedMessageConnection implements MessageConnection {
     );
     await this.closeInner();
   }
+
+  // Forward the per-exchange inbound frame cap to the inner transport's read
+  // gate. This layer's own length check stays at MAX_FRAME_SIZE_BYTES: the inner
+  // read gate refuses an over-cap frame before it is ever read into memory, so a
+  // frame that reaches handleInbound is already within the tighter cap and this
+  // layer's static check never fires for it -- tightening it here would be
+  // redundant.
+  setInboundFrameCap(maxBytes: number | undefined): void {
+    this.inner.setInboundFrameCap?.(maxBytes);
+  }
 }

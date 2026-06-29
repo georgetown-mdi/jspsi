@@ -950,6 +950,17 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   private lastAckedNNN = -1;
   connected = false;
 
+  // Per-exchange inbound frame cap, replacing MAX_FRAME_SIZE_BYTES at the poll
+  // loop's read gate for the reads it spans (see setInboundFrameCap and poll()).
+  // undefined restores the static cap. The single-pass receiver sets it to the
+  // derived reply cap before reading the reply and clears it after, so the read
+  // gate refuses a reply larger than the exchanged record counts imply rather
+  // than allocating up to the static ceiling. Stored as min(value,
+  // MAX_FRAME_SIZE_BYTES) so a per-exchange cap can only ever TIGHTEN the static
+  // backstop, never widen it. Cleared at session reset so a stale tight cap from
+  // a prior exchange cannot reject a later one.
+  private inboundFrameCap: number | undefined;
+
   // The inbound directory: where this party READS the peer's files (hello,
   // messages, acks, the peer's abort marker). `path` is the inbound directory's
   // historical name, kept because tests and callers set it directly. undefined
@@ -1053,6 +1064,24 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // by close()/poll().
   get abortArmed(): boolean {
     return this.selfAbortToken !== undefined;
+  }
+
+  // Bound the next inbound frame the poll loop reads to `maxBytes`, replacing
+  // MAX_FRAME_SIZE_BYTES at the read gate until cleared (undefined restores the
+  // static cap). Clamped to min(maxBytes, MAX_FRAME_SIZE_BYTES) so a per-exchange
+  // cap can only tighten, never widen, the static memory backstop. Implements
+  // Connection.setInboundFrameCap; the single-pass receiver sets the derived
+  // reply cap before reading the reply and clears it after (see link.ts). It is
+  // safe against the poll loop's read-ahead because single-pass sets it after
+  // sending its request and before the reply -- one full peer round trip away --
+  // so no frame is read between the set and the read it governs; and even a lost
+  // race only falls back to the static cap plus the decode-time count/length
+  // coherence checks, never to an unbounded read.
+  setInboundFrameCap(maxBytes: number | undefined): void {
+    this.inboundFrameCap =
+      maxBytes === undefined
+        ? undefined
+        : Math.min(maxBytes, MAX_FRAME_SIZE_BYTES);
   }
 
   // The rendezvous path escaped for operator-facing logs and thrown errors. On an
@@ -4508,16 +4537,22 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         // passed to get() is the hard backstop for a server that under-reports
         // the size here. Terminal: a FrameSizeExceededError is a UsageError, so
         // poll()'s catch stops the poller rather than re-reading the file.
-        if (
-          declaredSize > MAX_FRAME_SIZE_BYTES ||
-          messageFile.size > MAX_FRAME_SIZE_BYTES
-        ) {
+        //
+        // The cap is the per-exchange inboundFrameCap when one is set (the
+        // single-pass receiver tightens it to the derived reply cap before
+        // reading the reply), else the static MAX_FRAME_SIZE_BYTES; the setter
+        // clamps it to never exceed the static backstop. This is what "replaces
+        // the static constant for that read" -- the read gate enforces the
+        // exchanged-count-derived cap, not a second check above a still-static
+        // one.
+        const frameCap = this.inboundFrameCap ?? MAX_FRAME_SIZE_BYTES;
+        if (declaredSize > frameCap || messageFile.size > frameCap) {
           throw new FrameSizeExceededError(
             `message file ${sanitizeForDisplay(messageFile.name)} from ` +
               `${sanitizeForDisplay(peerId)} in ${sanitizeForDisplay(path)} ` +
               `declares ${declaredSize} byte(s) (on disk: ${messageFile.size}), ` +
               `exceeding the maximum inbound frame size of ` +
-              `${MAX_FRAME_SIZE_BYTES} bytes; refusing to read it into memory`,
+              `${frameCap} bytes; refusing to read it into memory`,
           );
         }
 
@@ -4545,7 +4580,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             // never converted to a string (a capped read always resolves to a
             // Buffer regardless, but this states the intent).
             encoding: null,
-            maxBytes: MAX_FRAME_SIZE_BYTES,
+            // The hard backstop behind the pre-get size check above, for a
+            // server that under-reports the file's size in its listing: the same
+            // per-exchange frameCap (or the static cap when none is set).
+            maxBytes: frameCap,
           });
           reachedGet = false;
 
@@ -4835,6 +4873,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     this.lastAckedNNN = -1;
     this.lastSentFile = undefined;
     this.warnedUnexpectedFiles.clear();
+    // Clear any per-exchange inbound cap so a stale tight cap from a prior
+    // exchange on a reused connection cannot reject a later one. The protocol
+    // layer clears it explicitly after each single-pass reply too; this is the
+    // belt-and-suspenders reset on a fresh session.
+    this.inboundFrameCap = undefined;
   }
 
   start() {
