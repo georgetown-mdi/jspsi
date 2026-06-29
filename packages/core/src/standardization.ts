@@ -1604,8 +1604,8 @@ export function parseDateInputDropsEveryRecord(
  * legitimate pipeline. Only a value-independent certainty is reported, so this can
  * never claim a producible pipeline is dead.
  */
-function pipelineAlwaysDrops(
-  steps: ReadonlyArray<{ function: string; params?: Params }> | undefined,
+export function pipelineAlwaysDrops(
+  steps: ReadonlyArray<TransformStep> | undefined,
 ): boolean {
   if (steps === undefined) return false;
   let dropped = false;

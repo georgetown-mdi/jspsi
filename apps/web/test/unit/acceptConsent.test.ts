@@ -1366,6 +1366,84 @@ describe("summarizeInvitation", () => {
         },
       ]),
     ).toBe("last name");
+    // A non-string input format (params are partner-controlled `unknown`) also
+    // drops every record at runtime; core's check reports it dead without parsing
+    // it, so the web shows no marker rather than narrowing it to the default.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: 42, outputFormat: "registered" },
+        },
+      ]),
+    ).toBe("last name");
+  });
+
+  test("shows no breadth marker when a dead parse_date kills the element via a later rule", () => {
+    const headerFor = (transform: LinkageKeyElement["transform"]) =>
+      summarizeInvitation(
+        makeToken({
+          linkageFields: [{ name: "ln", type: "last_name" }],
+          linkageKeys: [
+            {
+              name: "K",
+              elements: [{ field: "ln", ...(transform && { transform }) }],
+            },
+          ],
+        }),
+      ).linkageKeys[0].headerFields[0];
+
+    // A parse_date whose input format omits a component drops every record, and a
+    // later step null-propagates it, so the element matches NOTHING. The breadth
+    // marker (a broadening signal) must stay silent even though the later rule,
+    // judged alone, would name an effect -- before the element-level guard this
+    // showed the later rule's marker (a wrong-direction "(partial)" / "(sound-
+    // alike)" / ... on an empty key).
+    const dead = {
+      function: "parse_date",
+      params: { inputFormat: "MM/DD", outputFormat: "YYYYMMDD" },
+    };
+    expect(
+      headerFor([
+        dead,
+        { function: "substring", params: { start: 1, length: 3 } },
+      ]),
+    ).toBe("last name");
+    expect(headerFor([dead, { function: "phonetic" }])).toBe("last name");
+    expect(
+      headerFor([dead, { function: "null_if", params: { values: ["x"] } }]),
+    ).toBe("last name");
+
+    // A later `coalesce` with a string default RESCUES every dropped value to that
+    // constant, so the element is NOT dead -- it matches every record as the
+    // fallback constant. That is a real broadening, honestly marked "(fallback)".
+    expect(
+      headerFor([dead, { function: "coalesce", params: { default: "X" } }]),
+    ).toBe("last name (fallback)");
+    // A coalesce with no string default does not rescue, so the element stays dead.
+    expect(headerFor([dead, { function: "coalesce", params: {} }])).toBe(
+      "last name",
+    );
+
+    // A fuzzy expansion declared on a dead element is likewise moot -- no marker.
+    const fuzzyDead = summarizeInvitation(
+      makeToken({
+        linkageFields: [{ name: "ln", type: "last_name" }],
+        linkageKeys: [
+          {
+            name: "K",
+            elements: [
+              {
+                field: "ln",
+                transform: [dead],
+                generateFuzzyComparisons: "adjacent_years",
+              },
+            ],
+          },
+        ],
+      }),
+    ).linkageKeys[0].headerFields[0];
+    expect(fuzzyDead).toBe("last name");
   });
 
   test("shows a single most-salient marker, effect-named before directly-named", () => {

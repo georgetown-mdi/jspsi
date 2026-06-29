@@ -1,6 +1,7 @@
 import {
   describeTransformCoercions,
   parseDateInputDropsEveryRecord,
+  pipelineAlwaysDrops,
   sanitizeForDisplay,
 } from "@psilink/core";
 
@@ -608,8 +609,13 @@ function parseDateBreadth(
   step: TransformStep,
 ): "any date" | "partial" | undefined {
   if (step.function !== "parse_date") return undefined;
-  // An input format core cannot assemble a full date from drops every record, so
-  // the element matches nothing rather than broadening -- no breadth marker.
+  // A parse_date whose input format cannot assemble a full date produces no value
+  // to classify (core drops every such record), so emit no date marker. Defer to
+  // core's check (which also covers a non-string input format). The element-level
+  // pipelineAlwaysDrops guard in elementBreadthMarker suppresses ALL markers when
+  // this kills the whole element; this step-level guard additionally stops a dead
+  // parse_date that a later `coalesce` RESCUES to a constant from mislabelling the
+  // element a date collapse (the honest marker there is the coalesce's "fallback").
   if (parseDateInputDropsEveryRecord(step.params)) return undefined;
   const rawInput = step.params?.inputFormat;
   const rawOutput = step.params?.outputFormat;
@@ -630,7 +636,11 @@ function parseDateBreadth(
  * undefined when the element matches exactly or only canonicalizes its value
  * (case, whitespace, accents, affixes, padding, and a `parse_date` that merely
  * reformats between equivalent layouts -- routine standardization, deliberately
- * not flagged so the recommended setup stays clean). `remove_affixes` is in that
+ * not flagged so the recommended setup stays clean). It is also undefined when the
+ * element's pipeline matches NOTHING -- a `parse_date` whose input format drops
+ * every record, unless a later `coalesce` rescues it to a constant -- since that is
+ * a narrowing-to-empty, not a broadening, and is surfaced separately by the
+ * dead-key advisory. `remove_affixes` is in that
  * routine set by deliberate decision: stripping titles and suffixes (Dr., Jr.)
  * is a BROADENING canonicalizer in the same family as accent and case folding --
  * it makes superficially-different spellings match -- not a record-DROPPING
@@ -673,6 +683,14 @@ function parseDateBreadth(
 function elementBreadthMarker(element: LinkageKeyElement): string | undefined {
   const steps = element.transform ?? [];
   const functions = new Set(steps.map((s) => s.function));
+  // An element whose pipeline produces no value for ANY record matches nothing,
+  // not more -- the opposite of a broadening, and a narrowing-to-empty the separate
+  // dead-key advisory surfaces -- so it earns no marker, whatever rule a later step
+  // would otherwise name: a substring/phonetic/... after a dead `parse_date`
+  // null-propagates, so the record is dropped regardless. Defer to core's
+  // pipelineAlwaysDrops, which also accounts for a rescuing `coalesce`, so the
+  // marker cannot drift from the runtime.
+  if (pipelineAlwaysDrops(element.transform)) return undefined;
   // A tokenless `parse_date` output collapses every date to one constant value --
   // the maximal match breadth -- so it is checked first and outranks every other
   // rule the element might also carry: once every value collapses to one, a
