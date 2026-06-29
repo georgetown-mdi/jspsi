@@ -373,6 +373,31 @@ export function InvitationTerms({
           )}
         </Term>
 
+        {/* Single-pass is disclosure-affecting AND a mandatory-consistency term the
+            acceptor adopts, so it must be visible at the consent point, not only on
+            the inviter's authoring control. Surfaced only for single-pass (cascade
+            is the baseline that discloses less, like algorithm=psi); viewer-neutral,
+            since which party becomes the disclosing sender is settled at exchange
+            time. Mirrors the inviter's Alert and the CLI's singlePassDisclosureNotice
+            so both parties read the same framing. The value is a fixed schema enum,
+            so the copy is static -- no partner text enters here. */}
+        {summary.linkageStrategy === "single-pass" && (
+          // No emphasis tag on the lead: the Term's bold "Linkage strategy"
+          // caption already anchors the block, so a second bold restating it would
+          // double up for screen readers and visual scanning alike.
+          <Term label="Linkage strategy">
+            <Text size="sm">
+              This exchange uses single-pass linkage. To run the match in one
+              batched round -- fewer network round trips -- one party hands the
+              other its full per-key value structure, so that party also sees
+              matches on less precise keys that cascade would have filtered out
+              first. Which party that is gets settled at exchange time, so it
+              may be you. Both parties must agree to single-pass. The matched
+              result is unchanged -- only what is observed along the way.
+            </Text>
+          </Term>
+        )}
+
         {/* The matching list as a default-collapsed disclosure, mirroring the
             per-key and "Other details" disclosures below: aria-expanded +
             aria-controls on the toggle, the id on the always-mounted wrapper (not

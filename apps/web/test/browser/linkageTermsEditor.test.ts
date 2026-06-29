@@ -17,7 +17,7 @@ import { LinkageTermsEditor } from "@components/LinkageTermsEditor";
 
 import type { Root } from "react-dom/client";
 
-import type { LinkageTerms } from "@psilink/core";
+import type { LinkageStrategy, LinkageTerms } from "@psilink/core";
 
 import type { AdvancedInviteSeed } from "@psi/advancedInvite";
 
@@ -33,8 +33,16 @@ function mount(
   initialIdentity = "County Health Dept",
   columns: Array<string> = ALL_COLUMNS,
   rawRows: Array<Record<string, string>> = [],
+  // Override the seeded strategy to stand in for an imported single-pass document
+  // (draftFromTerms sets the same draft state directly), so a seeded -- not
+  // click-driven -- single-pass can be exercised.
+  linkageStrategy?: LinkageStrategy,
 ): AdvancedInviteSeed {
-  const { seed } = seedAdvancedInvite(initialIdentity, columns);
+  const base = seedAdvancedInvite(initialIdentity, columns).seed;
+  const seed =
+    linkageStrategy === undefined
+      ? base
+      : { ...base, terms: { ...base.terms, linkageStrategy } };
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -274,6 +282,77 @@ describe("LinkageTermsEditor", () => {
       .toBeInTheDocument();
     await expect
       .element(page.getByRole("button", { name: "Download JSON" }))
+      .toBeInTheDocument();
+  });
+
+  test("linkage strategy renders both options, defaults to cascade, and spells out the tradeoff", async () => {
+    mount();
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    // Both options render and cascade is the default selection (so an unchanged
+    // expert draft authors cascade, not single-pass).
+    const cascade = page.getByRole("radio", { name: "Cascade (recommended)" });
+    const singlePass = page.getByRole("radio", { name: "Single-pass" });
+    await expect.element(cascade).toBeChecked();
+    await expect.element(singlePass).not.toBeChecked();
+    // The single-pass option spells out the disclosure tradeoff in its
+    // always-visible description, so it is readable before choosing -- and the
+    // consent Alert is NOT shown until single-pass is actually selected.
+    await expect
+      .element(
+        page.getByText("one party discloses its full per-key value structure", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    expect(
+      page.getByText("Single-pass widens what one of you can observe").query(),
+    ).toBeNull();
+    // Generating without touching the control authors cascade.
+    await userEvent.click(generateButton());
+    expect(onGenerate.mock.calls[0][0].linkageStrategy).toBe("cascade");
+  });
+
+  test("selecting single-pass surfaces the consent Alert and authors single-pass", async () => {
+    mount();
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    await userEvent.click(page.getByRole("radio", { name: "Single-pass" }));
+    // The consent Alert appears at the moment of choice, reinforcing the disclosure
+    // the inviter is agreeing to. Asserted by its "alert" role, not just its text:
+    // the announcement to assistive technology is load-bearing for the consent, so
+    // the live region is the invariant under test, not merely the visible string.
+    await expect
+      .element(
+        page.getByRole("alert", {
+          name: "Single-pass widens what one of you can observe",
+        }),
+      )
+      .toBeInTheDocument();
+    await userEvent.click(generateButton());
+    expect(onGenerate.mock.calls[0][0].linkageStrategy).toBe("single-pass");
+  });
+
+  test("an editor seeded with single-pass shows the consent Alert without a click", async () => {
+    // The import path (draftFromTerms) sets draft.linkageStrategy directly, so an
+    // imported single-pass document opens with the option already selected. The
+    // consent Alert must render from that seeded state on entering expert mode, not
+    // only after a Radio interaction.
+    mount("County Health Dept", ALL_COLUMNS, [], "single-pass");
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    await expect
+      .element(page.getByRole("radio", { name: "Single-pass" }))
+      .toBeChecked();
+    await expect
+      .element(
+        page.getByRole("alert", {
+          name: "Single-pass widens what one of you can observe",
+        }),
+      )
       .toBeInTheDocument();
   });
 
