@@ -423,12 +423,21 @@ test("lock-in: a received payload matching the consented set completes", async (
 test("the unconditional count exchange composes into a deadlock-free full exchange for every (handshake-role x strategy) combination", async () => {
   // The record-count exchange now runs on every exchange, immediately before
   // linkage. Verify it composes into a complete, lockstep full exchange for both
-  // linkage strategies and in every output orientation: both-output, and each
-  // one-sided direction (which handshake role is the sole output party). Each
-  // await resolving is the no-deadlock check; the role assertions pin the outcome.
+  // linkage strategies and in every output orientation: both-output, each
+  // one-sided direction (which handshake role is the sole output party), and the
+  // equal-count tie. Each Promise.all resolving over the in-memory pipe proves
+  // the receive-side lockstep does not deadlock (a both-parties-parked-on-receive
+  // hang would fail the suite); the role assertions pin the outcome, and the
+  // both-output result assertion pins that single-pass produces the right
+  // intersection end to end, not just the right role. (The in-memory pipe has no
+  // send gate, so this does not exercise the file-sync one-outstanding-per-
+  // direction backpressure; that seam is reasoned about in docs/spec/FILE_SYNC.md,
+  // not covered here.)
   const both: Output = { expectsOutput: true, shareWithPartner: true };
   const receiver: Output = { expectsOutput: true, shareWithPartner: false };
   const sender: Output = { expectsOutput: false, shareWithPartner: true };
+  // Equal-sized inputs for the tie case (clientRows has 3 rows).
+  const equalRows = serverRows.slice(0, clientRows.length);
 
   for (const strategy of ["cascade", "single-pass"] as const) {
     // Both-output: the smaller-row party is the receiver. The initiator holds
@@ -436,6 +445,32 @@ test("the unconditional count exchange composes into a deadlock-free full exchan
     const [bothInit, bothResp] = await runBoth(both, both, strategy);
     expect(bothInit.resolvedRole).toBe("receiver");
     expect(bothResp.resolvedRole).toBe("sender");
+    // Result correctness end to end (both strategies): Carol and Elizabeth
+    // overlap, so both parties record an intersection of two.
+    expect(built(bothInit).record.resultSize).toBe(2);
+    expect(built(bothResp).record.resultSize).toBe(2);
+
+    // Equal counts -> deterministic tie-break: initiator becomes the receiver,
+    // responder the sender. Both sides must agree (a both-receiver outcome would
+    // deadlock the exchange, not just mislabel it), which only a full exchange
+    // exercises.
+    const [connTieInit, connTieResp] = createMessagePipe();
+    const [tieInit, tieResp] = await Promise.all([
+      runExchange(
+        connTieInit,
+        "initiator",
+        prepared("Initiator Co", both, clientRows, strategy),
+        { psiLibrary },
+      ),
+      runExchange(
+        connTieResp,
+        "responder",
+        prepared("Responder Co", both, equalRows, strategy),
+        { psiLibrary },
+      ),
+    ]);
+    expect(tieInit.resolvedRole).toBe("receiver");
+    expect(tieResp.resolvedRole).toBe("sender");
 
     // One-sided, initiator the sole output party -> initiator is the receiver
     // regardless of the (smaller) row counts.

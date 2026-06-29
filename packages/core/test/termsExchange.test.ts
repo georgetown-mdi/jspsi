@@ -267,10 +267,11 @@ test("the record-count exchange is unconditional and identical across output cas
   // expect output: the one-sided path drains the count frame, it does not skip
   // it. Making the exchange unconditional is groundwork for the forthcoming
   // data-dependent single-pass frame cap, which will need both counts on the
-  // wire for every exchange. Capture the initiator's sent frames for a
-  // both-output and a one-sided resolution with the same local count and assert
-  // they are byte- and order-identical -- the only difference between the cases
-  // is the role decision, never the wire.
+  // wire for every exchange. Capture BOTH parties' sent frames for a both-output
+  // resolution and for each one-sided direction (initiator the sole receiver,
+  // then initiator the sole sender) with the same counts, and assert they are
+  // byte- and order-identical across all three: the only difference between the
+  // cases is the local role decision, never the wire.
   const both: Output = { expectsOutput: true, shareWithPartner: true };
   const oneSidedReceiver: Output = {
     expectsOutput: true,
@@ -281,34 +282,48 @@ test("the record-count exchange is unconditional and identical across output cas
     shareWithPartner: true,
   };
 
-  const captureInitiatorFrames = async (local: Output, partner: Output) => {
+  const captureFrames = async (local: Output, partner: Output) => {
     const [connA, connB] = makeConnections();
-    const sent: unknown[] = [];
-    const capturingA: MessageConnection = {
+    const wrap = (
+      conn: MessageConnection,
+      sink: unknown[],
+    ): MessageConnection => ({
       send: (m: unknown) => {
-        sent.push(m);
-        return connA.send(m);
+        sink.push(m);
+        return conn.send(m);
       },
-      receive: (t?: number) => connA.receive(t),
-      close: () => connA.close(),
-    };
+      receive: (t?: number) => conn.receive(t),
+      close: () => conn.close(),
+    });
+    const initiator: unknown[] = [];
+    const responder: unknown[] = [];
     await Promise.all([
-      resolveRole(capturingA, "initiator", local, partner, 100),
-      resolveRole(connB, "responder", partner, local, 200),
+      resolveRole(wrap(connA, initiator), "initiator", local, partner, 100),
+      resolveRole(wrap(connB, responder), "responder", partner, local, 200),
     ]);
-    return sent;
+    return { initiator, responder };
   };
 
-  // Exactly one frame -- this party's record count -- on the both-output path...
-  const bothFrames = await captureInitiatorFrames(both, both);
-  expect(bothFrames).toEqual([{ recordCount: 100 }]);
-  // ...and the one-sided path (here the initiator is the sole receiver) puts the
-  // identical frame on the wire rather than skipping the exchange.
-  const oneSidedFrames = await captureInitiatorFrames(
+  // Both-output: each party sends exactly its own record count, once.
+  const bothFrames = await captureFrames(both, both);
+  expect(bothFrames.initiator).toEqual([{ recordCount: 100 }]);
+  expect(bothFrames.responder).toEqual([{ recordCount: 200 }]);
+
+  // Each one-sided direction puts the identical frames on the wire -- both the
+  // initiator's and the responder's -- rather than skipping the exchange.
+  const initReceiverFrames = await captureFrames(
     oneSidedReceiver,
     oneSidedSender,
   );
-  expect(oneSidedFrames).toEqual(bothFrames);
+  expect(initReceiverFrames.initiator).toEqual(bothFrames.initiator);
+  expect(initReceiverFrames.responder).toEqual(bothFrames.responder);
+
+  const initSenderFrames = await captureFrames(
+    oneSidedSender,
+    oneSidedReceiver,
+  );
+  expect(initSenderFrames.initiator).toEqual(bothFrames.initiator);
+  expect(initSenderFrames.responder).toEqual(bothFrames.responder);
 });
 
 // --- Incompatible terms ------------------------------------------------------
