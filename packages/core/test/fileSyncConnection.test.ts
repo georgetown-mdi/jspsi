@@ -3,6 +3,9 @@ import { expect, test, vi } from "vitest";
 import {
   FileSyncConnection,
   normalizeFiledropPath,
+  serializeFileSyncMessage,
+  MESSAGE_TYPE_OBJECT,
+  MESSAGE_TYPE_BINARY,
   TERMINAL_FRAME_DRAIN_TIMEOUT_MS,
 } from "../src/connection/fileSyncConnection";
 import {
@@ -133,6 +136,22 @@ async function makeConnectedConn(
   };
   await conn.open(fakeConfig);
   return conn;
+}
+
+// Build a peer message file's on-disk bytes in the binary envelope the transport
+// now reads (version || type || seq || payload). `objectMessage` carries a JSON
+// control payload (the common case in these tests); `binaryMessage` carries a
+// raw binary frame. `seq` is the per-session counter the filename NNN and the
+// retain-mode body/filename cross-check key on.
+function objectMessage(payload: unknown, seq = 0): Buffer {
+  return serializeFileSyncMessage(
+    MESSAGE_TYPE_OBJECT,
+    seq,
+    Buffer.from(JSON.stringify(payload)),
+  );
+}
+function binaryMessage(payload: Uint8Array, seq = 0): Buffer {
+  return serializeFileSyncMessage(MESSAGE_TYPE_BINARY, seq, payload);
 }
 
 // A valid hello body advertising the default lock/non-retain flags. Tests whose
@@ -1533,14 +1552,7 @@ test("poll does not emit error when get() throws ENOENT after list() surfaced th
 test("poll delivers a subsequent valid message after swallowing an ENOENT", async () => {
   let getCount = 0;
   const peerId = "peer-test";
-  const validMessage = Buffer.from(
-    JSON.stringify({
-      ts: 1,
-      seq: 0,
-      type: "Object",
-      payload: { hello: "world" },
-    }),
-  );
+  const validMessage = objectMessage({ hello: "world" });
   const peerName = `${peerId}-${validMessage.length}.json`;
   const peerPath = `/test/${peerName}`;
 
@@ -2095,14 +2107,7 @@ test("poll() stops the poller on a stalled consume-delete, not swallowed-and-re-
   // transport-call site. Companion to the read-stall poll test above, for the
   // consume-delete consumer.
   const peerId = "peer-test";
-  const validMessage = Buffer.from(
-    JSON.stringify({
-      ts: 1,
-      seq: 0,
-      type: "Object",
-      payload: { hello: "world" },
-    }),
-  );
+  const validMessage = objectMessage({ hello: "world" });
   const peerName = `${peerId}-${validMessage.length}.json`;
   const peerPath = `/test/${peerName}`;
 
@@ -2177,14 +2182,7 @@ test("poll() stops the poller on a stalled retain-mode ack-write, not advanced-a
   // adapted from the retain-mode tests below.
   const peerId = "peer-sender";
   const id = "receiver-me";
-  const validMessage = Buffer.from(
-    JSON.stringify({
-      ts: 1,
-      seq: 0,
-      type: "Object",
-      payload: { hello: "world" },
-    }),
-  );
+  const validMessage = objectMessage({ hello: "world" });
   // Retain filename grammar: <peerId>-<timestamp>-<NNN>-<byteCount>.json, with
   // NNN === recvSeq (0) so poll() selects it as this cycle's message.
   const peerName = `${peerId}-20260101T000000-000-${validMessage.length}.json`;
@@ -3698,9 +3696,7 @@ test("send filename encodes timestamp and zero-padded counter when timestampInFi
 test("poll waits while the file is partially synced and reads it once the size matches", async () => {
   const { client, files } = makeMockClient();
   const peerId = "peer-partial";
-  const message = Buffer.from(
-    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { value: 42 } }),
-  );
+  const message = objectMessage({ value: 42 });
   const name = `${peerId}-${message.length}.json`;
   const fullPath = `/test/${name}`;
 
@@ -3784,9 +3780,7 @@ test("poll extracts the byte count from the last segment when the filename has m
   // A peer id containing hyphens plus an inserted timestamp and counter: the
   // right-anchored parse must still read the byte count from the final segment.
   const peerId = "00000000-0000-4000-8000-000000000abc";
-  const message = Buffer.from(
-    JSON.stringify({ ts: 1, seq: 7, type: "Object", payload: { ok: true } }),
-  );
+  const message = objectMessage({ ok: true }, 7);
   const name = `${peerId}-20260529T142301-007-${message.length}.json`;
   files.set(`/test/${name}`, message);
 
@@ -3820,9 +3814,7 @@ test("poll under the ignore policy skips a prefix-matching file whose final segm
   // which this test pins. The real message alongside it is still delivered.
   const { client, files } = makeMockClient();
   const peerId = "peer-leftover";
-  const message = Buffer.from(
-    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { ok: true } }),
-  );
+  const message = objectMessage({ ok: true });
   files.set(`/test/${peerId}-${message.length}.json`, message);
   files.set(`/test/${peerId}-backup.json`, Buffer.from("not a message"));
 
@@ -4521,9 +4513,7 @@ test("a <a>-<b>-lock.json tiebreaker is not mistaken for a message by poll() or 
   // `.json` extension but its terminal `lock` token is non-numeric.
   const peerLockPath = `/test/${peerId}-${conn.id}-lock.json`;
   files.set(peerLockPath, Buffer.alloc(0));
-  const message = Buffer.from(
-    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { ok: true } }),
-  );
+  const message = objectMessage({ ok: true });
   files.set(`/test/${peerId}-${message.length}.json`, message);
 
   const received: unknown[] = [];
@@ -5952,9 +5942,7 @@ test("retain mode: ack marker is written before the data event fires", async () 
   const peerId = "peer-sender";
   const id = "receiver-me";
 
-  const message = Buffer.from(
-    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { v: 1 } }),
-  );
+  const message = objectMessage({ v: 1 });
   const msgName = `${peerId}-20260101T000000-000-${message.length}.json`;
   files.set(`/test/${msgName}`, message);
 
@@ -6118,9 +6106,7 @@ test("retain mode: cleanup() does not delete exchange files", async () => {
   const peerId = "peer-sender";
   const id = "receiver-me";
 
-  const message = Buffer.from(
-    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { v: 1 } }),
-  );
+  const message = objectMessage({ v: 1 });
   const msgName = `${peerId}-20260101T000000-000-${message.length}.json`;
   files.set(`/test/${msgName}`, message);
 
@@ -6172,9 +6158,7 @@ test("retain mode: a consumed message file is retained on a delete-capable trans
   const peerId = "peer-sender";
   const id = "receiver-me";
 
-  const message = Buffer.from(
-    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { v: 1 } }),
-  );
+  const message = objectMessage({ v: 1 });
   const msgName = `${peerId}-20260101T000000-000-${message.length}.json`;
   const msgPath = `/test/${msgName}`;
   files.set(msgPath, message);
@@ -6226,9 +6210,7 @@ test("retain mode: a message reprocessed after an emit failure is not acked twic
   const peerId = "peer-sender";
   const id = "receiver-me";
 
-  const message = Buffer.from(
-    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { v: 1 } }),
-  );
+  const message = objectMessage({ v: 1 });
   const msgName = `${peerId}-20260101T000000-000-${message.length}.json`;
   files.set(`/test/${msgName}`, message);
 
@@ -6518,9 +6500,7 @@ test("retain mode: poll() duplicate-NNN error is a UsageError and stops the poll
 
   // Plant two message files with the same NNN (0): the poller scan for
   // recvSeq=0 will find both and throw the duplicate-NNN UsageError.
-  const msg = Buffer.from(
-    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { v: 1 } }),
-  );
+  const msg = objectMessage({ v: 1 });
   files.set(`/test/${peerId}-20260101T000000-000-${msg.length}.json`, msg);
   files.set(`/test/${peerId}-20260101T120000-000-${msg.length}.json`, msg);
 
@@ -6632,9 +6612,7 @@ test("retain mode: poll() seq-mismatch (UsageError) stops the poller", async () 
 
   // Plant a message whose body seq disagrees with the filename NNN (NNN=0,
   // body seq=99). The validator throws UsageError on the mismatch.
-  const msg = Buffer.from(
-    JSON.stringify({ ts: 1, seq: 99, type: "Object", payload: { v: 1 } }),
-  );
+  const msg = objectMessage({ v: 1 }, 99);
   files.set(`/test/${peerId}-20260101T000000-000-${msg.length}.json`, msg);
 
   const conn = new FileSyncConnection(client, {
@@ -6895,9 +6873,7 @@ test("I8: retain poll() ack-write failure -- recvSeq held, message reprocessed a
   const peerId = "peer-sender";
   const id = "receiver-me";
 
-  const message = Buffer.from(
-    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { v: 1 } }),
-  );
+  const message = objectMessage({ v: 1 });
   const msgName = `${peerId}-20260101T000000-000-${message.length}.json`;
   files.set(`/test/${msgName}`, message);
 
@@ -7430,9 +7406,14 @@ test("poll(): the loop recognizes a real temp-<uuid>.tmp but treats a non-UUID t
 test("poll() terminal: a fully-synced message with an unparseable body stops the poller", async () => {
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
-  // Body is not valid JSON; the filename declares its exact byte length so the
-  // size gate passes and poll() reaches the parse step.
-  const body = Buffer.from("this is not json");
+  // A valid binary envelope (MESSAGE_TYPE_OBJECT) wrapping a non-JSON payload, so
+  // the size gate and envelope parse pass and poll() reaches the JSON parse step.
+  // The filename declares the envelope's exact byte length so the size gate passes.
+  const body = serializeFileSyncMessage(
+    MESSAGE_TYPE_OBJECT,
+    0,
+    Buffer.from("this is not json"),
+  );
   files.set(`/shared/${peerId}-20260101T000000-000-${body.length}.json`, body);
   const conn = makeRetainConn(client, "receiver-me", peerId);
 
@@ -7477,9 +7458,13 @@ test("poll() terminal: a fully-synced message with an unparseable body stops the
 // JSON`). The message body is fully peer-controlled (`payload: z.json()`), so
 // that quoted span is a control/ANSI/Unicode injection vector one interpolation
 // over from the filename -- it must be escaped like the filename and peerId.
-async function pollUnparseableBodyError(body: Buffer): Promise<Error> {
+async function pollUnparseableBodyError(payload: Buffer): Promise<Error> {
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
+  // Wrap the malformed JSON payload in a valid envelope so the envelope parse
+  // passes and the failure surfaces at the bounded JSON parse, where the peer's
+  // payload bytes can be echoed back by V8's error and must be escaped.
+  const body = serializeFileSyncMessage(MESSAGE_TYPE_OBJECT, 0, payload);
   files.set(`/shared/${peerId}-20260101T000000-000-${body.length}.json`, body);
   const conn = makeRetainConn(client, "receiver-me", peerId);
 
@@ -7527,10 +7512,13 @@ test("poll() terminal: the unparseable-body error neutralizes deceptive Unicode 
   expect(err.message).toContain("\\u202e");
 });
 
-test("poll() terminal: a fully-synced message that fails schema validation stops the poller", async () => {
+test("poll() terminal: a fully-synced message with an unrecognized envelope stops the poller", async () => {
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
-  // Valid JSON, but missing the required Message fields -> schema failure.
+  // An old-format JSON message body: its first byte is `{` (0x7b), not the binary
+  // envelope's version marker, so the envelope parse rejects it -- the clean
+  // break with the pre-binary format surfaces as a terminal malformed-envelope
+  // failure rather than a silent misparse.
   const body = Buffer.from(JSON.stringify({ not: "a message" }));
   files.set(`/shared/${peerId}-20260101T000000-000-${body.length}.json`, body);
   const conn = makeRetainConn(client, "receiver-me", peerId);
@@ -7558,7 +7546,7 @@ test("poll() terminal: a fully-synced message that fails schema validation stops
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
-  expect((errors[0] as Error).message).toContain("failed schema validation");
+  expect((errors[0] as Error).message).toContain("malformed envelope");
   expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
     false,
   );
@@ -7569,9 +7557,7 @@ test("poll() terminal: a fully-synced message that fails schema validation stops
 test("poll() retryable: a transient list() failure reschedules and the message is delivered on a later cycle", async () => {
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
-  const body = Buffer.from(
-    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { v: 1 } }),
-  );
+  const body = objectMessage({ v: 1 });
   files.set(`/shared/${peerId}-20260101T000000-000-${body.length}.json`, body);
   const conn = makeRetainConn(client, "receiver-me", peerId);
 
@@ -7622,9 +7608,7 @@ test("composed via fromEventConnection: the first transient poll() error is term
   // docs/spec/FILE_SYNC.md.
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
-  const body = Buffer.from(
-    JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { v: 1 } }),
-  );
+  const body = objectMessage({ v: 1 });
   files.set(`/shared/${peerId}-20260101T000000-000-${body.length}.json`, body);
   const conn = makeRetainConn(client, "receiver-me", peerId);
 
@@ -7701,8 +7685,13 @@ test("poll() terminal: delete mode also stops the poller on a fully-synced corru
   const peerId = "peer-sender";
   conn.peerId = peerId;
 
-  // Non-timestamped delete-mode message name; body is corrupt but full length.
-  const body = Buffer.from("not json");
+  // Non-timestamped delete-mode message name; a valid envelope wrapping a
+  // non-JSON payload, so poll() reaches (and fails at) the JSON parse.
+  const body = serializeFileSyncMessage(
+    MESSAGE_TYPE_OBJECT,
+    0,
+    Buffer.from("not json"),
+  );
   const msgName = `${peerId}-${body.length}.json`;
   files.set(`/test/${msgName}`, body);
 
@@ -7739,6 +7728,93 @@ test("poll() terminal: delete mode also stops the poller on a fully-synced corru
   // No second error: the finally block did not reschedule.
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(errors).toHaveLength(1);
+});
+
+test("poll() delivers a binary frame as raw bytes (no base64, no JSON wrapper)", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client);
+  const peerId = "peer-sender";
+  conn.peerId = peerId;
+
+  // A raw binary frame -- the shape an encrypted AEAD envelope takes on the wire
+  // -- carried verbatim in the binary message envelope. The 0x7b (`{`) byte
+  // proves a binary frame is not confused with a JSON control body.
+  const frame = Uint8Array.from([0x01, 0x00, 0xff, 0x7b, 0xde, 0xad]);
+  const body = binaryMessage(frame);
+  files.set(`/test/${peerId}-${body.length}.json`, body);
+
+  const received: unknown[] = [];
+  let notify!: () => void;
+  const delivered = new Promise<void>((r) => (notify = r));
+  conn.on("data", (m) => {
+    received.push(m);
+    notify();
+  });
+  conn.on("error", () => {});
+  conn.start();
+  await Promise.race([
+    delivered,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("timed out waiting for frame")), 2_000),
+    ),
+  ]);
+  conn.stop();
+
+  expect(received).toHaveLength(1);
+  expect(received[0]).toBeInstanceOf(Uint8Array);
+  expect(Array.from(received[0] as Uint8Array)).toEqual(Array.from(frame));
+});
+
+test("poll() reads a binary frame whose size would exceed Node's max string length (never stringified)", async () => {
+  // The old read path .toString()'d every frame before parsing, so a frame above
+  // Node's maximum string length (~512 MiB) could not be read at all regardless
+  // of memory -- the ceiling MAX_FRAME_SIZE_BYTES was anchored to. The binary
+  // read path never stringifies a frame, lifting that artificial ceiling. A true
+  // >512 MiB allocation is too heavy for CI, so this proxies the failure mode: a
+  // frame buffer whose toString() throws exactly as Buffer.prototype.toString()
+  // does above the string limit. If a regression reintroduced a .toString() on
+  // the frame, this delivery would throw instead of succeeding.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client);
+  const peerId = "peer-sender";
+  conn.peerId = peerId;
+
+  const frame = Uint8Array.from([0x01, 0x02, 0x03, 0x04]);
+  const body = binaryMessage(frame);
+  Object.defineProperty(body, "toString", {
+    value: () => {
+      throw new RangeError(
+        "Cannot create a string longer than 0x1fffffe8 characters",
+      );
+    },
+  });
+  files.set(`/test/${peerId}-${body.length}.json`, body);
+
+  const received: unknown[] = [];
+  const errors: unknown[] = [];
+  let notify!: () => void;
+  const settled = new Promise<void>((r) => (notify = r));
+  conn.on("data", (m) => {
+    received.push(m);
+    notify();
+  });
+  conn.on("error", (e) => {
+    errors.push(e);
+    notify();
+  });
+  conn.start();
+  await Promise.race([
+    settled,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("timed out waiting for frame")), 2_000),
+    ),
+  ]);
+  conn.stop();
+
+  expect(errors).toEqual([]);
+  expect(received).toHaveLength(1);
+  expect(received[0]).toBeInstanceOf(Uint8Array);
+  expect(Array.from(received[0] as Uint8Array)).toEqual(Array.from(frame));
 });
 
 test("retain mode: send() honors an ack already on disk even when the TTL has elapsed", async () => {
@@ -8364,9 +8440,7 @@ test("poll(): recognized loop files (hellos, acks, lock, our writes, temp) never
     for (const name of recognized) files.set(`/test/${name}`, Buffer.alloc(0));
 
     // A real, fully-synced delete-mode peer message that must be delivered.
-    const message = Buffer.from(
-      JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { ok: true } }),
-    );
+    const message = objectMessage({ ok: true });
     files.set(`/test/peer-${message.length}.json`, message);
 
     conn.on("error", (err) => errors.push(err));
@@ -8624,9 +8698,7 @@ test("close() during a parked poll delete-retry emits no spurious error (site 6 
     conn.peerId = peerId;
 
     // A valid peer message the poller reads and then tries to delete.
-    const body = Buffer.from(
-      JSON.stringify({ ts: 1, seq: 0, type: "Object", payload: { hi: 1 } }),
-    );
+    const body = objectMessage({ hi: 1 });
     files.set(`/test/${peerId}-${body.length}.json`, body);
 
     // The first delete attempt fails AND signals the test, guaranteeing close()

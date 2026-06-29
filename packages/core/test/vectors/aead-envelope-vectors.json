@@ -1,7 +1,10 @@
 {
-  "description": "Known-answer vectors for the EncryptedMessageConnection AEAD encrypt path. Each vector fixes (sessionKey, role, sequence, plaintext) and records the exact serialized { enc } envelope the decorator emits: base64url(IV || ciphertext || 16-byte GCM tag), no padding. An independent implementation reproduces `enc` from the inputs below. The wire format is specified in docs/spec/CHANNEL_SECURITY.md; this file is distinct from the deriveAeadKey KAT in encryptedMessageConnection.test.ts, which pins only the key derivation.",
+  "description": "Known-answer vectors for the EncryptedMessageConnection AEAD encrypt path. Each vector fixes (sessionKey, role, sequence, plaintext) and records the exact binary envelope the decorator emits: version || IV || ciphertext || 16-byte GCM tag, carried as raw bytes (no base64url, no JSON wrapper). An independent implementation reproduces envelopeHex from the inputs below. The 1-byte type tag is inside the authenticated ciphertext, not a cleartext field. The wire format is specified in docs/spec/CHANNEL_SECURITY.md; this file is distinct from the deriveAeadKey KAT in encryptedMessageConnection.test.ts, which pins only the key derivation. Regenerate with generate-aead-envelope-vectors.mjs in this directory.",
   "cipher": "AES-256-GCM",
   "sessionKeyHex": "4242424242424242424242424242424242424242424242424242424242424242",
+  "envelopeVersion": 1,
+  "envelopeLayout": "version (1 byte) || IV (12 bytes) || ciphertext || GCM tag (16 bytes). envelopeHex is the concatenation of versionHex + ivHex + ciphertextHex + tagHex.",
+  "versionHex": "01",
   "keyDerivation": {
     "function": "HKDF-SHA-256",
     "saltHex": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -29,8 +32,7 @@
       "ivHex": "000000000000000000000000",
       "ciphertextHex": "caba33afbb3a76286cc0f54109589694226a479d9b4f5c1397",
       "tagHex": "d7d410cdc4c4e0d9411c7f2c5ab289b6",
-      "envelopeHex": "000000000000000000000000caba33afbb3a76286cc0f54109589694226a479d9b4f5c1397d7d410cdc4c4e0d9411c7f2c5ab289b6",
-      "enc": "AAAAAAAAAAAAAAAAyrozr7s6dihswPVBCViWlCJqR52bT1wTl9fUEM3ExODZQRx_LFqyibY"
+      "envelopeHex": "01000000000000000000000000caba33afbb3a76286cc0f54109589694226a479d9b4f5c1397d7d410cdc4c4e0d9411c7f2c5ab289b6"
     },
     {
       "name": "binary-initiator-seq4328719365",
@@ -44,8 +46,7 @@
       "ivHex": "000000000000000102030405",
       "ciphertextHex": "00c04fd8df",
       "tagHex": "8efad81942f87df44ced7b82ff2d9ded",
-      "envelopeHex": "00000000000000010203040500c04fd8df8efad81942f87df44ced7b82ff2d9ded",
-      "enc": "AAAAAAAAAAECAwQFAMBP2N-O-tgZQvh99Ezte4L_LZ3t"
+      "envelopeHex": "0100000000000000010203040500c04fd8df8efad81942f87df44ced7b82ff2d9ded"
     },
     {
       "name": "json-responder-seq1",
@@ -61,8 +62,7 @@
       "ivHex": "000000000000000000000001",
       "ciphertextHex": "69ce4b20a11adae637696d7aec",
       "tagHex": "9b0b2f484303041df450c2ea7edf8f64",
-      "envelopeHex": "00000000000000000000000169ce4b20a11adae637696d7aec9b0b2f484303041df450c2ea7edf8f64",
-      "enc": "AAAAAAAAAAAAAAABac5LIKEa2uY3aW167JsLL0hDAwQd9FDC6n7fj2Q"
+      "envelopeHex": "0100000000000000000000000169ce4b20a11adae637696d7aec9b0b2f484303041df450c2ea7edf8f64"
     }
   ]
 }

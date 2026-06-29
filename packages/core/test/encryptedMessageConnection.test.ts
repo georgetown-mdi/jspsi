@@ -4,6 +4,7 @@ import { expect, test } from "vitest";
 
 import {
   EncryptedMessageConnection,
+  AEAD_ENVELOPE_VERSION,
   IV_SEQ_OFFSET,
   TYPE_JSON,
 } from "../src/connection/encryptedMessageConnection";
@@ -17,7 +18,6 @@ import {
   type MessageConnection,
 } from "../src/connection/messageConnection";
 import { deriveAeadKey, AEAD_CONTEXTS, type AeadContext } from "../src/auth";
-import { fromBase64Url, toBase64Url } from "../src/utils/crypto";
 import type { HandshakeRole } from "../src/types";
 
 // Fixed 32-byte session key for deterministic tests.
@@ -49,10 +49,12 @@ async function makeInjectable(
   return [recv, rawPeer];
 }
 
-// Build the raw envelope bytes (IV || ciphertext || tag) for `plaintext` at
-// `seq`, sealed with the send key for `senderRole`. Mirrors the decorator's own
-// IV layout and per-direction keying so a crafted frame is indistinguishable
-// from a legitimate one except where the test deliberately corrupts it.
+// Build the binary envelope bytes (version || IV || ciphertext || tag) for
+// `plaintext` at `seq`, sealed with the send key for `senderRole`. Mirrors the
+// decorator's own envelope layout and per-direction keying so a crafted frame is
+// indistinguishable from a legitimate one except where the test deliberately
+// corrupts it. The inner transport now carries the raw envelope bytes, so this
+// is exactly what an injected frame passes to `peer.send`.
 async function sealRawBytes(
   senderRole: HandshakeRole,
   seq: number,
@@ -76,19 +78,12 @@ async function sealRawBytes(
     await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext),
   );
   const envelope = new Uint8Array(
-    12 + cipher.length,
+    1 + 12 + cipher.length,
   ) as Uint8Array<ArrayBuffer>;
-  envelope.set(iv);
-  envelope.set(cipher, 12);
+  envelope[0] = AEAD_ENVELOPE_VERSION;
+  envelope.set(iv, 1);
+  envelope.set(cipher, 13);
   return envelope;
-}
-
-async function sealRaw(
-  senderRole: HandshakeRole,
-  seq: number,
-  plaintext: Uint8Array<ArrayBuffer>,
-): Promise<{ enc: string }> {
-  return { enc: toBase64Url(await sealRawBytes(senderRole, seq, plaintext)) };
 }
 
 // The decorator's TYPE_JSON-tagged framing for an object payload.
@@ -184,10 +179,11 @@ test("binary and JSON payloads interleave over one connection", async () => {
   expect(await encB.receive()).toEqual({ status: "completed" });
 });
 
-test("a payload larger than the base64 chunk size round-trips", async () => {
+test("a large binary payload round-trips", async () => {
   const [encA, encB] = await makeEncryptedPair();
-  // Exceeds the 0x8000-byte chunk boundary in toBase64Url; PSI protobuf frames
-  // are legitimately this large. Guards the chunk-stitching in the encoder.
+  // A 100 KB frame; PSI protobuf frames are legitimately this large. Guards the
+  // binary envelope's encrypt/decrypt over a multi-block payload now that the
+  // frame is carried as raw bytes rather than chunk-stitched base64.
   const payload = new Uint8Array(100_000) as Uint8Array<ArrayBuffer>;
   for (let i = 0; i < payload.length; i++) payload[i] = i & 0xff;
   await encA.send(payload);
@@ -200,7 +196,7 @@ test("a payload larger than the base64 chunk size round-trips", async () => {
 
 test("a replayed frame is rejected as a security failure", async () => {
   const [recv, peer] = await makeInjectable("responder");
-  const envelope = await sealRaw("initiator", 0, jsonPlaintext({ n: 1 }));
+  const envelope = await sealRawBytes("initiator", 0, jsonPlaintext({ n: 1 }));
   await peer.send(envelope);
   await peer.send(envelope); // same seq again
   expect(await recv.receive()).toEqual({ n: 1 });
@@ -209,9 +205,9 @@ test("a replayed frame is rejected as a security failure", async () => {
 
 test("an out-of-order frame (seq <= last accepted) is rejected as a security failure", async () => {
   const [recv, peer] = await makeInjectable("responder");
-  await peer.send(await sealRaw("initiator", 0, jsonPlaintext({})));
-  await peer.send(await sealRaw("initiator", 1, jsonPlaintext({})));
-  await peer.send(await sealRaw("initiator", 1, jsonPlaintext({}))); // 1 <= 1
+  await peer.send(await sealRawBytes("initiator", 0, jsonPlaintext({})));
+  await peer.send(await sealRawBytes("initiator", 1, jsonPlaintext({})));
+  await peer.send(await sealRawBytes("initiator", 1, jsonPlaintext({}))); // 1 <= 1
   await recv.receive();
   await recv.receive();
   await expectSecurity(recv.receive(), /replay|out-of-order/i);
@@ -222,8 +218,8 @@ test("a forward-gap frame (seq skips ahead) is rejected as a security failure", 
   // The acceptance-criteria example: 0 then 5. Frame 0 is accepted, then a frame
   // whose seq jumps past the expected next value (1) is proof that frames 1..4
   // were dropped or withheld in transit.
-  await peer.send(await sealRaw("initiator", 0, jsonPlaintext({ n: 0 })));
-  await peer.send(await sealRaw("initiator", 5, jsonPlaintext({ n: 5 })));
+  await peer.send(await sealRawBytes("initiator", 0, jsonPlaintext({ n: 0 })));
+  await peer.send(await sealRawBytes("initiator", 5, jsonPlaintext({ n: 5 })));
   expect(await recv.receive()).toEqual({ n: 0 });
   await expectSecurity(recv.receive(), /skipped ahead|dropped or withheld/i);
 });
@@ -233,7 +229,7 @@ test("a withheld first frame (stream starts past seq 0) is rejected as a gap", a
   // recvSeq starts at -1, so the expected first seq is 0. A stream that opens at
   // seq 1 means the very first frame was withheld; this is the gap case at the
   // head of the stream, not a replay (seq 1 is not <= -1).
-  await peer.send(await sealRaw("initiator", 1, jsonPlaintext({ n: 1 })));
+  await peer.send(await sealRawBytes("initiator", 1, jsonPlaintext({ n: 1 })));
   await expectSecurity(recv.receive(), /skipped ahead|dropped or withheld/i);
 });
 
@@ -248,8 +244,8 @@ test("a strictly incrementing stream is accepted", async () => {
 
 test("a detected gap latches the wrapper", async () => {
   const [recv, peer] = await makeInjectable("responder");
-  await peer.send(await sealRaw("initiator", 0, jsonPlaintext({ n: 0 })));
-  await peer.send(await sealRaw("initiator", 2, jsonPlaintext({ n: 2 })));
+  await peer.send(await sealRawBytes("initiator", 0, jsonPlaintext({ n: 0 })));
+  await peer.send(await sealRawBytes("initiator", 2, jsonPlaintext({ n: 2 })));
   expect(await recv.receive()).toEqual({ n: 0 });
   const first = await expectSecurity(
     recv.receive(),
@@ -273,22 +269,36 @@ test("a flipped ciphertext/tag byte is rejected as a security failure", async ()
   const [recv, peer] = await makeInjectable("responder");
   const bytes = await sealRawBytes("initiator", 0, jsonPlaintext({ ok: true }));
   bytes[bytes.length - 1] ^= 0xff; // corrupt the GCM tag
-  await peer.send({ enc: toBase64Url(bytes) });
+  await peer.send(bytes);
   await expectSecurity(recv.receive(), /authentication tag/i);
 });
 
-test("an envelope shorter than IV + tag is rejected as a security failure", async () => {
+test("an envelope shorter than version + IV + tag is rejected as a security failure", async () => {
   const [recv, peer] = await makeInjectable("responder");
-  await peer.send({
-    enc: toBase64Url(new Uint8Array(20) as Uint8Array<ArrayBuffer>),
-  }); // < 28 bytes
+  // < 29 bytes (1 version + 12 IV + 16 tag): the minimum-length floor still
+  // fires, ahead of the version-byte check, as a security failure.
+  await peer.send(new Uint8Array(20) as Uint8Array<ArrayBuffer>);
   await expectSecurity(recv.receive(), /too short/i);
 });
 
-test("an envelope with invalid base64url is rejected as a security failure", async () => {
+test("an envelope with an unsupported version byte is rejected as a security failure", async () => {
   const [recv, peer] = await makeInjectable("responder");
-  await peer.send({ enc: "not valid base64url!!!" });
-  await expectSecurity(recv.receive(), /invalid base64url/i);
+  // A full-length, otherwise-valid envelope whose leading format marker is wrong
+  // (a different layout, or a frame from an incompatible build) fails cleanly
+  // rather than being misparsed as the start of the IV.
+  const bytes = await sealRawBytes("initiator", 0, jsonPlaintext({ ok: true }));
+  bytes[0] = (AEAD_ENVELOPE_VERSION + 1) & 0xff;
+  await peer.send(bytes);
+  await expectSecurity(recv.receive(), /unsupported envelope version/i);
+});
+
+test("a non-binary envelope (the old base64url-in-JSON object) is rejected as a security failure", async () => {
+  const [recv, peer] = await makeInjectable("responder");
+  // Clean break with the pre-binary format: an inbound that is not a Uint8Array
+  // -- here the old `{ enc }` object shape -- is rejected as an invalid envelope
+  // rather than silently misparsed.
+  await peer.send({ enc: "AAAAAAAAAAAAAAAA" });
+  await expectSecurity(recv.receive(), /invalid envelope/i);
 });
 
 test("a malformed envelope shape is rejected as a security failure", async () => {
@@ -300,7 +310,11 @@ test("a malformed envelope shape is rejected as a security failure", async () =>
 test("an empty decrypted payload is rejected as a security failure", async () => {
   const [recv, peer] = await makeInjectable("responder");
   await peer.send(
-    await sealRaw("initiator", 0, new Uint8Array(0) as Uint8Array<ArrayBuffer>),
+    await sealRawBytes(
+      "initiator",
+      0,
+      new Uint8Array(0) as Uint8Array<ArrayBuffer>,
+    ),
   );
   await expectSecurity(recv.receive(), /payload is empty/i);
 });
@@ -308,7 +322,7 @@ test("an empty decrypted payload is rejected as a security failure", async () =>
 test("an unknown type tag is rejected as a security failure", async () => {
   const [recv, peer] = await makeInjectable("responder");
   await peer.send(
-    await sealRaw(
+    await sealRawBytes(
       "initiator",
       0,
       new Uint8Array([99]) as Uint8Array<ArrayBuffer>,
@@ -323,7 +337,7 @@ test("invalid UTF-8 under a JSON tag is rejected as a security failure", async (
   // invalid UTF-8 byte. A non-fatal decoder would silently replace it with
   // U+FFFD and resolve with a mangled string; the fatal decoder rejects.
   await peer.send(
-    await sealRaw(
+    await sealRawBytes(
       "initiator",
       0,
       new Uint8Array([TYPE_JSON, 0x22, 0xff, 0x22]) as Uint8Array<ArrayBuffer>,
@@ -336,7 +350,7 @@ test("a non-JSON JSON-tagged payload is rejected as a security failure", async (
   const [recv, peer] = await makeInjectable("responder");
   // TYPE_JSON tag followed by '{', which is not valid JSON.
   await peer.send(
-    await sealRaw(
+    await sealRawBytes(
       "initiator",
       0,
       new Uint8Array([TYPE_JSON, 0x7b]) as Uint8Array<ArrayBuffer>,
@@ -355,7 +369,7 @@ test("a JSON object exceeding the per-object key bound is rejected without crash
   // frame at all (a true over-limit object would kill the worker outright).
   const wide: Record<string, number> = {};
   for (let i = 0; i <= MAX_JSON_OBJECT_KEYS; i++) wide[i] = 0;
-  await peer.send(await sealRaw("initiator", 0, jsonPlaintext(wide)));
+  await peer.send(await sealRawBytes("initiator", 0, jsonPlaintext(wide)));
   await expectSecurity(
     recv.receive(),
     /structure exceeds the permitted bound/i,
@@ -395,7 +409,7 @@ test("a JSON body nested past the depth bound is rejected without crashing", asy
   const plaintext = new Uint8Array(1 + json.length) as Uint8Array<ArrayBuffer>;
   plaintext[0] = TYPE_JSON;
   plaintext.set(json, 1);
-  await peer.send(await sealRaw("initiator", 0, plaintext));
+  await peer.send(await sealRawBytes("initiator", 0, plaintext));
   await expectSecurity(
     recv.receive(),
     /structure exceeds the permitted bound/i,
@@ -407,10 +421,13 @@ test("an inbound seq above MAX_SAFE_INTEGER is rejected before decryption", asyn
   const iv = new Uint8Array(12) as Uint8Array<ArrayBuffer>;
   new DataView(iv.buffer).setBigUint64(IV_SEQ_OFFSET, 2n ** 53n, false); // one above MAX_SAFE_INTEGER
   const garbage = new Uint8Array(32).fill(0xff);
-  const bytes = new Uint8Array(44) as Uint8Array<ArrayBuffer>;
-  bytes.set(iv);
-  bytes.set(garbage, 12);
-  await peer.send({ enc: toBase64Url(bytes) });
+  // version || IV || garbage (ciphertext+tag): passes the version and
+  // minimum-length checks so the inbound-seq range guard is the rejecting one.
+  const bytes = new Uint8Array(1 + 12 + 32) as Uint8Array<ArrayBuffer>;
+  bytes[0] = AEAD_ENVELOPE_VERSION;
+  bytes.set(iv, 1);
+  bytes.set(garbage, 13);
+  await peer.send(bytes);
   await expectSecurity(recv.receive(), /safe integer range/i);
 });
 
@@ -470,7 +487,7 @@ test("an inbound frame after recvSeq reaches MAX_SAFE_INTEGER is rejected", asyn
   // is terminal at the top of the counter; saturation opens no hole.
   (recv as unknown as { recvSeq: number }).recvSeq = Number.MAX_SAFE_INTEGER;
   await peer.send(
-    await sealRaw(
+    await sealRawBytes(
       "initiator",
       Number.MAX_SAFE_INTEGER,
       jsonPlaintext({ n: 1 }),
@@ -532,7 +549,7 @@ test("after any failure, subsequent send and receive reject with the same sticky
   const [recv, peer] = await makeInjectable("responder");
   const bytes = await sealRawBytes("initiator", 0, jsonPlaintext({ ok: true }));
   bytes[bytes.length - 1] ^= 0xff; // corrupt the GCM tag
-  await peer.send({ enc: toBase64Url(bytes) });
+  await peer.send(bytes);
 
   const first = await expectSecurity(recv.receive(), /authentication tag/i);
 
@@ -622,7 +639,7 @@ test("a security failure tears down the inner transport", async () => {
   const [recv, peer] = await makeInjectable("responder");
   const bytes = await sealRawBytes("initiator", 0, jsonPlaintext({ ok: true }));
   bytes[bytes.length - 1] ^= 0xff; // corrupt the GCM tag
-  await peer.send({ enc: toBase64Url(bytes) });
+  await peer.send(bytes);
   await expectSecurity(recv.receive(), /authentication tag/i);
 
   // The decorator latched terminal AND closed its inner connection, so the
@@ -749,13 +766,13 @@ test("deriveAeadKey rejects a context outside the fixed set", async () => {
 
 // --- AEAD encrypt-path wire vector (end-to-end known-answer) -------------------
 // Distinct from the deriveAeadKey KAT above, which pins only the HKDF key
-// derivation: this pins the full serialized `{ enc }` envelope the encrypt path
-// emits - the 12-byte IV layout, the GCM ciphertext, and the 16-byte tag - for
-// both a JSON and a Uint8Array payload. The expected bytes were produced by an
-// independent oracle (Node's crypto.hkdfSync + createCipheriv, a different code
-// path than the decorator's WebCrypto crypto.subtle) and are checked in at
-// test/vectors/aead-envelope-vectors.json for cross-implementation reuse; the
-// wire format is specified in docs/spec/CHANNEL_SECURITY.md. The
+// derivation: this pins the full binary envelope the encrypt path emits - the
+// 1-byte version marker, the 12-byte IV layout, the GCM ciphertext, and the
+// 16-byte tag - for both a JSON and a Uint8Array payload. The expected bytes were
+// produced by an independent oracle (Node's crypto.hkdfSync + createCipheriv, a
+// different code path than the decorator's WebCrypto crypto.subtle) and are
+// checked in at test/vectors/aead-envelope-vectors.json for cross-implementation
+// reuse; the wire format is specified in docs/spec/CHANNEL_SECURITY.md. The
 // assertion compares against that recorded literal, never a decrypt/round-trip,
 // so a symmetric encode/decode bug a round-trip would mask is still caught.
 
@@ -770,7 +787,6 @@ interface AeadEnvelopeVector {
   ciphertextHex: string;
   tagHex: string;
   envelopeHex: string;
-  enc: string;
 }
 
 const aeadVectors = JSON.parse(
@@ -780,7 +796,11 @@ const aeadVectors = JSON.parse(
       encoding: "utf8",
     },
   ),
-) as { sessionKeyHex: string; vectors: AeadEnvelopeVector[] };
+) as {
+  sessionKeyHex: string;
+  envelopeVersion: number;
+  vectors: AeadEnvelopeVector[];
+};
 
 function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -798,14 +818,15 @@ function fromHex(hex: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 
-// Capture the `{ enc }` the decorator hands to its inner connection. The inner
-// connection only records the outbound envelope - nothing decrypts it back - so
-// the test asserts against the checked-in literal rather than a round-trip.
-async function captureEnc(
+// Capture the raw binary envelope the decorator hands to its inner connection.
+// The inner connection only records the outbound envelope - nothing decrypts it
+// back - so the test asserts against the checked-in literal rather than a
+// round-trip.
+async function captureEnvelope(
   role: HandshakeRole,
   sequence: number,
   payload: unknown,
-): Promise<string> {
+): Promise<Uint8Array> {
   let captured: unknown;
   const inner: MessageConnection = {
     send: (d) => {
@@ -827,12 +848,12 @@ async function captureEnc(
   await conn.send(payload);
   // A successful send always calls inner.send, so `captured` is set here; guard
   // it anyway so a future regression fails with a clear message rather than an
-  // opaque "cannot read enc of undefined" TypeError.
-  if (captured === undefined)
+  // opaque "not a Uint8Array" assertion.
+  if (!(captured instanceof Uint8Array))
     throw new Error(
-      "captureEnc: conn.send resolved without calling inner.send",
+      "captureEnvelope: conn.send resolved without sending a binary envelope",
     );
-  return (captured as { enc: string }).enc;
+  return captured;
 }
 
 test("the AEAD envelope vector file is present and keyed by SESSION_KEY", () => {
@@ -840,10 +861,13 @@ test("the AEAD envelope vector file is present and keyed by SESSION_KEY", () => 
   // The checked-in vectors are derived from this session key; if the two drift
   // apart the recorded bytes no longer describe what the test drives.
   expect(toHex(SESSION_KEY)).toBe(aeadVectors.sessionKeyHex);
+  // The recorded version must match the decorator's, or the pinned envelopeHex
+  // describes a different format than the one under test.
+  expect(aeadVectors.envelopeVersion).toBe(AEAD_ENVELOPE_VERSION);
 });
 
 test.each(aeadVectors.vectors)(
-  "$name: the encrypt path emits the pinned { enc } envelope",
+  "$name: the encrypt path emits the pinned binary envelope",
   async (vector) => {
     let payload: unknown;
     if (vector.payloadType === "binary") {
@@ -862,27 +886,31 @@ test.each(aeadVectors.vectors)(
       payload = vector.payloadJson;
     }
 
-    const encStr = await captureEnc(vector.role, vector.sequence, payload);
+    const bytes = await captureEnvelope(vector.role, vector.sequence, payload);
 
     // Primary assertion: the exact serialized envelope, as a fixed literal.
-    expect(encStr).toBe(vector.enc);
+    expect(toHex(bytes)).toBe(vector.envelopeHex);
 
-    // Structural breakdown, so a failure names the field that diverged (IV,
-    // ciphertext, or tag) rather than only reporting that the blob differs.
-    const bytes = fromBase64Url(encStr);
-    const iv = bytes.slice(0, 12);
+    // Structural breakdown, so a failure names the field that diverged (version,
+    // IV, ciphertext, or tag) rather than only reporting that the blob differs.
+    // Layout: version (1) || IV (12) || ciphertext || tag (16).
+    expect(bytes[0]).toBe(AEAD_ENVELOPE_VERSION);
+    const iv = bytes.slice(1, 13);
     const tag = bytes.slice(bytes.length - 16);
-    const ciphertext = bytes.slice(12, bytes.length - 16);
+    const ciphertext = bytes.slice(13, bytes.length - 16);
     expect(toHex(iv)).toBe(vector.ivHex);
     expect(toHex(ciphertext)).toBe(vector.ciphertextHex);
     expect(toHex(tag)).toBe(vector.tagHex);
 
-    // envelopeHex records the full IV || ciphertext || tag for an external
-    // reader; pin it to the actual decorator output AND to the concatenation of
-    // the component fields, so it cannot silently drift when a vector is edited.
-    expect(toHex(bytes)).toBe(vector.envelopeHex);
+    // envelopeHex records the full version || IV || ciphertext || tag for an
+    // external reader; pin it to the actual decorator output AND to the
+    // concatenation of the component fields, so it cannot silently drift when a
+    // vector is edited.
     expect(vector.envelopeHex).toBe(
-      vector.ivHex + vector.ciphertextHex + vector.tagHex,
+      toHex(Uint8Array.from([AEAD_ENVELOPE_VERSION])) +
+        vector.ivHex +
+        vector.ciphertextHex +
+        vector.tagHex,
     );
 
     // IV layout: 4 reserved zero bytes, then the 8-byte big-endian sequence.

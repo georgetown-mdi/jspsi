@@ -1,6 +1,10 @@
 import { expect, test } from "vitest";
 
-import { FileSyncConnection } from "../src/connection/fileSyncConnection";
+import {
+  FileSyncConnection,
+  serializeFileSyncMessage,
+  MESSAGE_TYPE_OBJECT,
+} from "../src/connection/fileSyncConnection";
 import type {
   FileTransportClient,
   FileInfo,
@@ -105,8 +109,10 @@ function makeConnectedConn(
 }
 
 function envelope(payload: unknown, seq = 0): Buffer {
-  return Buffer.from(
-    JSON.stringify({ ts: Date.now(), seq, type: "Object", payload }),
+  return serializeFileSyncMessage(
+    MESSAGE_TYPE_OBJECT,
+    seq,
+    Buffer.from(JSON.stringify(payload)),
   );
 }
 
