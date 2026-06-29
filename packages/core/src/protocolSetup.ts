@@ -480,12 +480,15 @@ function pickRole(
  * Determine this party's PSI role after terms have been agreed.
  *
  * Both parties' record counts (the raw row counts) are exchanged unconditionally
- * at the start -- on every exchange, both- and one-sided-output alike -- so the
- * count is always on the wire for the role decision, the single-pass pre-flight,
- * and the data-dependent single-pass frame cap. The count frame is byte- and
- * order-identical across the two output cases (initiator sends first; responder
- * receives first then sends); only the role decision differs, and the one-sided
- * path drains the count frame rather than skipping it.
+ * at the start -- on every exchange, both- and one-sided-output alike. The
+ * exchanged counts feed the role decision below; that is their only current
+ * consumer. Making the exchange unconditional is groundwork for the forthcoming
+ * data-dependent single-pass frame cap, which will derive a bound from both
+ * counts on every exchange; the integer exchanged is the raw row count, the same
+ * quantity the single-pass pre-flight already checks locally. The count frame is
+ * byte- and order-identical across the two output cases (initiator sends first;
+ * responder receives first then sends); only the role decision differs, and the
+ * one-sided path drains the count frame rather than skipping it.
  *
  * When exactly one party has `expectsOutput: true`, that party is the receiver
  * regardless of the counts -- it is the only party that learns the result. When

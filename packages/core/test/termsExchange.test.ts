@@ -265,11 +265,12 @@ test("both parties compute the same role independently", async () => {
 test("the record-count exchange is unconditional and identical across output cases", async () => {
   // The count exchange now runs on every exchange, not only when both parties
   // expect output: the one-sided path drains the count frame, it does not skip
-  // it (the data-dependent single-pass frame cap needs both counts on the wire
-  // for every exchange). Capture the initiator's sent frames for a both-output
-  // and a one-sided resolution with the same local count and assert they are
-  // byte- and order-identical -- the only difference between the cases is the
-  // role decision, never the wire.
+  // it. Making the exchange unconditional is groundwork for the forthcoming
+  // data-dependent single-pass frame cap, which will need both counts on the
+  // wire for every exchange. Capture the initiator's sent frames for a
+  // both-output and a one-sided resolution with the same local count and assert
+  // they are byte- and order-identical -- the only difference between the cases
+  // is the role decision, never the wire.
   const both: Output = { expectsOutput: true, shareWithPartner: true };
   const oneSidedReceiver: Output = {
     expectsOutput: true,
