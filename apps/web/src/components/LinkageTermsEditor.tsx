@@ -11,6 +11,7 @@ import {
   Grid,
   Group,
   Paper,
+  Radio,
   Select,
   Stack,
   Switch,
@@ -21,6 +22,7 @@ import {
 } from "@mantine/core";
 import {
   IconAlertCircle,
+  IconAlertTriangle,
   IconArrowDown,
   IconArrowUp,
   IconInfoCircle,
@@ -28,6 +30,7 @@ import {
 
 import {
   INVITATION_LIFETIME_SECONDS,
+  LinkageStrategySchema,
   MAX_NAME_LENGTH,
   MAX_TEXT_LENGTH,
   assessLinkageSatisfiability,
@@ -118,8 +121,9 @@ const LIFETIME_OPTIONS: Array<{ value: string; label: string }> = [
  * by the same {@link InvitationTerms} component the acceptor consent screen uses,
  * and a sticky validation footer. It is seeded from the auto-derived terms for the
  * inviter's columns (never a blank form) and authors only what this iteration
- * supports -- identity, invitation lifetime, an optional legal agreement, and which
- * linkage keys are active and in what order.
+ * supports -- identity, invitation lifetime, an optional legal agreement, which
+ * linkage keys are active and in what order, and (under Expert authoring) the
+ * linkage strategy.
  *
  * The matching algorithm, deduplication, and fuzzy comparisons are deliberately
  * NOT settable here (see {@link buildAdvancedTerms}): each is a capability not yet
@@ -127,7 +131,10 @@ const LIFETIME_OPTIONS: Array<{ value: string; label: string }> = [
  * control would mint an invitation whose headline behavior silently does not
  * happen. They are visible read-only in the preview (it annotates dedup/fuzzy as
  * proposed-not-applied and states the matching method), so nothing is hidden --
- * only the unselectable controls are absent. Output sharing IS settable (the 3-way
+ * only the unselectable controls are absent. The linkage strategy, by contrast, IS
+ * settable (it is honored end-to-end), in the expert "Matching settings" block;
+ * single-pass is a consented disclosure tradeoff, so the control spells that
+ * tradeoff out in plain language at the point of choice. Output sharing IS settable (the 3-way
  * "who receives the matched results" control), and the invitation's payload is now
  * authored too: the send list is derived from each column's disclosure under "Your
  * columns" (so it cannot over-state what transmits), and receive is reconciled from
@@ -182,6 +189,10 @@ export function LinkageTermsEditor({
     // until APPLIED_SETTINGS flips (buildAdvancedTerms clamps them regardless).
     algorithm: seed.terms.algorithm,
     deduplicate: seed.terms.deduplicate,
+    // The recommended (default) linkage strategy, `cascade`. Ungated; "Reset to
+    // recommended" re-runs freshDraft, so this is also how a reset clears a
+    // single-pass selection back to cascade.
+    linkageStrategy: seed.terms.linkageStrategy,
     metadata: seed.metadata,
     // The recommended per-type cleaning, with the dob format inferred from the
     // rows; authoredLinkageFields over it reproduces the default field set, so the
@@ -928,6 +939,53 @@ export function LinkageTermsEditor({
                   <Text size="sm" fw={600}>
                     Matching settings
                   </Text>
+                  {/* Linkage strategy leads the section and, unlike the two controls
+                      below it, is NOT disabled: single-pass is honored end-to-end, so
+                      the one live control here should not read as bracketed by the
+                      disabled-until-applied psi-c/dedup ones. single-pass is a
+                      consented disclosure tradeoff, not a free speed-up, so the option
+                      states the tradeoff plainly at the point of choice and an Alert
+                      reinforces it once selected -- holding the app's bar of making
+                      disclosure consent visible. */}
+                  <Radio.Group
+                    label="Linkage strategy"
+                    description="How the agreed keys are exchanged. Both produce the same matched result; they differ in the number of network round trips and in what one party discloses to the other."
+                    value={draft.linkageStrategy}
+                    onChange={(value) =>
+                      // The radio values are exactly the LinkageStrategy union, so the
+                      // schema parse narrows Mantine's string with no cast -- and would
+                      // throw loudly if an option ever drifted from the enum.
+                      updateDraft({
+                        linkageStrategy: LinkageStrategySchema.parse(value),
+                      })
+                    }
+                  >
+                    <Stack gap="xs" mt="xs">
+                      <Radio
+                        value="cascade"
+                        label="Cascade (recommended)"
+                        description="Default. Matches the keys one at a time -- more network round trips, but your partner learns less along the way."
+                      />
+                      <Radio
+                        value="single-pass"
+                        label="Single-pass"
+                        description="Batches every key into one exchange, so the number of round trips stays constant no matter how many keys -- which makes a multi-key linkage practical over a high-latency file-drop or SFTP channel. In exchange, one party discloses its full per-key value structure to the other, who then sees matches on less precise keys that cascade would have filtered out first. The matched result is identical either way."
+                      />
+                    </Stack>
+                  </Radio.Group>
+                  {draft.linkageStrategy === "single-pass" && (
+                    <Alert
+                      variant="light"
+                      color="yellow"
+                      icon={<IconAlertTriangle aria-hidden />}
+                      title="Single-pass widens what your partner can observe"
+                    >
+                      Both parties must agree to single-pass, and one of you
+                      will hand the other its full per-key value structure. The
+                      records you match are unchanged -- only what is observed
+                      along the way.
+                    </Alert>
+                  )}
                   {/* psi-c and deduplicate are surfaced disabled until the run
                       applies them (APPLIED_SETTINGS), so the capability is
                       discoverable but cannot mint an invitation whose headline

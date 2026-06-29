@@ -277,6 +277,54 @@ describe("LinkageTermsEditor", () => {
       .toBeInTheDocument();
   });
 
+  test("linkage strategy renders both options, defaults to cascade, and spells out the tradeoff", async () => {
+    mount();
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    // Both options render and cascade is the default selection (so an unchanged
+    // expert draft authors cascade, not single-pass).
+    const cascade = page.getByRole("radio", { name: "Cascade (recommended)" });
+    const singlePass = page.getByRole("radio", { name: "Single-pass" });
+    await expect.element(cascade).toBeChecked();
+    await expect.element(singlePass).not.toBeChecked();
+    // The single-pass option spells out the disclosure tradeoff in its
+    // always-visible description, so it is readable before choosing -- and the
+    // consent Alert is NOT shown until single-pass is actually selected.
+    await expect
+      .element(
+        page.getByText("one party discloses its full per-key value structure", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByText("Single-pass widens what your partner can observe")
+        .query(),
+    ).toBeNull();
+    // Generating without touching the control authors cascade.
+    await userEvent.click(generateButton());
+    expect(onGenerate.mock.calls[0][0].linkageStrategy).toBe("cascade");
+  });
+
+  test("selecting single-pass surfaces the consent Alert and authors single-pass", async () => {
+    mount();
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    await userEvent.click(page.getByRole("radio", { name: "Single-pass" }));
+    // The consent Alert appears at the moment of choice, reinforcing the disclosure
+    // the inviter is agreeing to.
+    await expect
+      .element(
+        page.getByText("Single-pass widens what your partner can observe"),
+      )
+      .toBeInTheDocument();
+    await userEvent.click(generateButton());
+    expect(onGenerate.mock.calls[0][0].linkageStrategy).toBe("single-pass");
+  });
+
   test("expert keys start collapsed and reveal their element editor on toggle", async () => {
     mount();
     await userEvent.click(

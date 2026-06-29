@@ -19,6 +19,7 @@ import {
   buildAdvancedTerms,
   defaultStandardizationForRows,
   draftFromTerms,
+  gatedActiveSettingMessage,
   outputForDirection,
   seedAdvancedInvite,
   setDraftMetadata,
@@ -472,6 +473,45 @@ describe("controls the editor does not expose stay at their safe defaults", () =
   });
 });
 
+describe("the linkage-strategy control", () => {
+  test("(a) an unedited draft authors cascade, byte-identical to before the control", () => {
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    // The draft seeds from the default terms' strategy, and the build carries it
+    // through, so a draft no one touched still authors cascade.
+    expect(draft.linkageStrategy).toBe("cascade");
+    expect(buildAdvancedTerms(draft).linkageStrategy).toBe("cascade");
+  });
+
+  test("(b) selecting single-pass flows straight through into the built terms", () => {
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const built = buildAdvancedTerms({
+      ...draft,
+      linkageStrategy: "single-pass",
+    });
+    // Written straight through -- not clamped like algorithm/deduplicate -- and the
+    // built terms still parse through the core schema.
+    expect(built.linkageStrategy).toBe("single-pass");
+    expect(safeParseLinkageTerms(built).success).toBe(true);
+  });
+
+  test("(c) single-pass round-trips through export -> import and is not refused as gated", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const exported = buildAdvancedTerms({
+      ...draft,
+      linkageStrategy: "single-pass",
+    });
+    // Unlike a gated psi-c/deduplicate setting, an imported single-pass document is
+    // adopted rather than refused: single-pass is honored end-to-end, so it carries
+    // no gatedActiveSettingMessage. This is the lie-proof encoding of "not gated".
+    expect(gatedActiveSettingMessage(exported)).toBeUndefined();
+    const imported = draftFromTerms(exported, seed);
+    expect(imported.linkageStrategy).toBe("single-pass");
+    // Re-building the imported draft preserves the strategy, so an export round-trips
+    // it.
+    expect(buildAdvancedTerms(imported).linkageStrategy).toBe("single-pass");
+  });
+});
+
 describe("the 3-way output direction control", () => {
   const DIRECTIONS: ReadonlyArray<{
     direction: OutputDirection;
@@ -702,6 +742,7 @@ describe("inviter standardization: per-field column binding and multi-field", ()
       outputDirection: "both",
       algorithm: "psi",
       deduplicate: false,
+      linkageStrategy: "cascade",
       metadata,
       standardization: [
         { output: "first_name", input: "maiden_col", steps: NAME_STEPS },
@@ -789,6 +830,7 @@ describe("inviter standardization: per-field column binding and multi-field", ()
       outputDirection: "both",
       algorithm: "psi",
       deduplicate: false,
+      linkageStrategy: "cascade",
       metadata,
       standardization: [
         { output: "first_name", input: "maiden_col", steps: NAME_STEPS },
@@ -895,6 +937,7 @@ describe("draftFromTerms reconstructs multi-field bindings on import", () => {
       outputDirection: "both",
       algorithm: "psi",
       deduplicate: false,
+      linkageStrategy: "cascade",
       metadata,
       standardization: [
         { output: "first_name", input: "maiden_col", steps: NAME_STEPS },
@@ -1204,6 +1247,7 @@ describe("draftFromTerms degrades gracefully on an unsupplyable key", () => {
       outputDirection: "both",
       algorithm: "psi",
       deduplicate: false,
+      linkageStrategy: "cascade",
       metadata: threeNameMetadata,
       standardization: [
         { output: "first_name", input: "n1", steps: NAME_STEPS },
@@ -1319,6 +1363,7 @@ describe("draftFromTerms degrades gracefully on an unsupplyable key", () => {
       outputDirection: "both",
       algorithm: "psi",
       deduplicate: false,
+      linkageStrategy: "cascade",
       metadata: [
         { name: "n1", type: "first_name", role: "linkage", isPayload: false },
         { name: "n2", type: "first_name", role: "linkage", isPayload: false },
@@ -1368,6 +1413,7 @@ describe("draftFromTerms degrades gracefully on an unsupplyable key", () => {
       outputDirection: "both",
       algorithm: "psi",
       deduplicate: false,
+      linkageStrategy: "cascade",
       metadata: twoNameMetadata,
       standardization: [
         { output: "first_name", input: "maiden_col", steps: NAME_STEPS },
@@ -1421,6 +1467,7 @@ describe("draftFromTerms degrades gracefully on an unsupplyable key", () => {
       outputDirection: "both",
       algorithm: "psi",
       deduplicate: false,
+      linkageStrategy: "cascade",
       metadata: [
         { name: "n1", type: "first_name", role: "linkage", isPayload: false },
         { name: "n2", type: "first_name", role: "linkage", isPayload: false },

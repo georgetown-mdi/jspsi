@@ -23,6 +23,7 @@ import type {
   Algorithm,
   LinkageKey,
   LinkageKeyElement,
+  LinkageStrategy,
   LinkageTerms,
   Metadata,
   Output,
@@ -139,6 +140,16 @@ export interface AdvancedInviteDraft {
    * `linkage_terms.deduplicate`). Gated: {@link buildAdvancedTerms} clamps it to
    * `false` while {@link APPLIED_SETTINGS}.deduplicate is false. */
   deduplicate: boolean;
+  /** How the agreed linkage keys are exchanged (see {@link LinkageStrategy}).
+   * `cascade` (the default) matches keys one round at a time; `single-pass`
+   * batches them into one exchange for a round-trip count constant in the number
+   * of keys, at the cost of disclosing the sender's full per-key value structure
+   * to the receiver. Unlike {@link AdvancedInviteDraft.algorithm} and
+   * `deduplicate` this is NOT gated -- single-pass is honored end-to-end -- so
+   * {@link buildAdvancedTerms} writes it straight through with no clamp; the
+   * consent tradeoff is surfaced at the control. Seeded from the default terms
+   * (`cascade`) and reflected from an imported document. */
+  linkageStrategy: LinkageStrategy;
   legalAgreement?: DraftLegalAgreement;
   /** The inviter's per-party column metadata (semantic type + disclosure role),
    * editable in the grid. Editing a column's type re-derives which keys are
@@ -268,6 +279,10 @@ export function seedAdvancedInvite(
       // hold these at the safe defaults until APPLIED_SETTINGS flips.
       algorithm: terms.algorithm,
       deduplicate: terms.deduplicate,
+      // The default strategy (`cascade`). Ungated -- the control writes it straight
+      // through -- so a fresh draft authors cascade exactly as before the control
+      // existed.
+      linkageStrategy: terms.linkageStrategy,
       metadata,
       // The recommended per-type cleaning for these columns, with the dob format
       // inferred from the rows. authoredLinkageFields over this reproduces the
@@ -392,11 +407,13 @@ function normalizeText(value: string): string {
 }
 
 /**
- * Build the {@link LinkageTerms} a draft represents. `algorithm`, `deduplicate`,
- * `version`, and `date` are carried from the seed unchanged (the editor exposes no
- * control for them, so a draft cannot alter them); `identity`, the `output`
- * direction, and the optional legal agreement come from the draft (free text
- * NFC-normalized and trimmed); linkage keys are the enabled ones in draft order,
+ * Build the {@link LinkageTerms} a draft represents. `version` and `date` are
+ * carried from the seed unchanged (the editor exposes no control for them, so a
+ * draft cannot alter them); `algorithm` and `deduplicate` come from the draft but
+ * are clamped to the applied behavior while gated (see below); `linkageStrategy`,
+ * `identity`, the `output` direction, and the optional legal agreement come from
+ * the draft (free text NFC-normalized and trimmed); linkage keys are the enabled
+ * ones in draft order,
  * and linkage fields are filtered to those the enabled keys reference (mirroring
  * `getDefaultLinkageTerms`, so disabling a key drops a now-unreferenced field).
  *
@@ -445,6 +462,13 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
     identity: normalizeText(draft.identity),
     algorithm,
     deduplicate,
+    // Written straight through, NOT clamped like algorithm/deduplicate above:
+    // single-pass is honored end-to-end (core's exchange runs it and the
+    // mandatory-consistency check governs it), so there is no APPLIED_SETTINGS gate
+    // and no import refusal for it -- the draft's choice is the authored value. A
+    // default draft carries `cascade`, so the built terms are byte-identical to
+    // before the control existed unless the operator selects single-pass.
+    linkageStrategy: draft.linkageStrategy,
     // The chosen 3-way output direction; one of the three valid pairs, so it never
     // produces the forbidden "neither receives" combination (see OutputDirection).
     output: outputForDirection(draft.outputDirection),
@@ -1131,8 +1155,9 @@ function standardizationForImportedTerms(
 }
 
 /** Build an editor draft from imported, validated {@link LinkageTerms}. identity,
- * output direction, algorithm, deduplicate, the optional legal agreement, and
- * every linkage key (all enabled) come from the imported terms; the column
+ * output direction, algorithm, deduplicate, linkage strategy, the optional legal
+ * agreement, and every linkage key (all enabled) come from the imported terms; the
+ * column
  * metadata stays the inviter's own (`seed.metadata`), since terms carry no
  * per-party column binding, and the lifetime is the caller's (terms do not carry
  * it). The local standardization is reconstructed from the imported field
@@ -1173,6 +1198,11 @@ export function draftFromTerms(
     outputDirection: directionForOutput(terms.output),
     algorithm: terms.algorithm,
     deduplicate: terms.deduplicate,
+    // Reflect the imported strategy so the control shows it and an export
+    // round-trips it. Ungated, so unlike a gated psi-c/dedup an imported
+    // single-pass is adopted as-is rather than refused (gatedActiveSettingMessage
+    // deliberately carries no branch for it).
+    linkageStrategy: terms.linkageStrategy,
     legalAgreement:
       terms.legalAgreement !== undefined
         ? {
