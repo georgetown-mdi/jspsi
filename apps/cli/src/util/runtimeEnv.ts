@@ -21,9 +21,9 @@ export interface RuntimeEnvSnapshot {
   /**
    * The cgroup/OS memory limit in bytes from `process.constrainedMemory()`, or
    * `0` when undetermined. When the process is unconstrained this is a sentinel
-   * far larger than {@link hostMemBytes} (cgroup v2 reports "max" as ~2^63), so a
-   * "real" container limit is only the case `0 < constrainedMemBytes <
-   * hostMemBytes`.
+   * far larger than {@link hostMemBytes} (cgroup v2's "max" surfaces as
+   * UINT64_MAX, ~2^64), so a "real" container limit is only the case
+   * `0 < constrainedMemBytes < hostMemBytes`.
    */
   constrainedMemBytes: number;
 }
