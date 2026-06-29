@@ -1574,7 +1574,9 @@ const PARSE_DATE_REQUIRED_COMPONENTS: readonly DateFormatToken[] = [
  * re-implemented scan -- the encode-the-runtime-invariant-as-a-check rule, here
  * over a "this never produces a value" claim.
  */
-function parseDateInputDropsEveryRecord(params: Params | undefined): boolean {
+export function parseDateInputDropsEveryRecord(
+  params: Params | undefined,
+): boolean {
   const raw = params?.inputFormat;
   if (raw === null || raw === undefined) return false;
   if (typeof raw !== "string") return true;
@@ -1602,8 +1604,8 @@ function parseDateInputDropsEveryRecord(params: Params | undefined): boolean {
  * legitimate pipeline. Only a value-independent certainty is reported, so this can
  * never claim a producible pipeline is dead.
  */
-function pipelineAlwaysDrops(
-  steps: ReadonlyArray<{ function: string; params?: Params }> | undefined,
+export function pipelineAlwaysDrops(
+  steps: ReadonlyArray<TransformStep> | undefined,
 ): boolean {
   if (steps === undefined) return false;
   let dropped = false;
