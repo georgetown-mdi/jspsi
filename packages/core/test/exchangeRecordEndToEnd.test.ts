@@ -46,9 +46,14 @@ const clientRows = [
   { first_name: "Henry", note: "c-h" },
 ];
 
-function prepared(identity: string, output: Output, rows: typeof serverRows) {
+function prepared(
+  identity: string,
+  output: Output,
+  rows: typeof serverRows,
+  linkageStrategy: "cascade" | "single-pass" = "cascade",
+) {
   return prepareForExchange(
-    { linkageTerms: { ...firstNameTerms, identity, output } },
+    { linkageTerms: { ...firstNameTerms, identity, output, linkageStrategy } },
     identity,
     rows,
     ["first_name", "note"],
@@ -59,19 +64,20 @@ function prepared(identity: string, output: Output, rows: typeof serverRows) {
 async function runBoth(
   outInitiator: Output,
   outResponder: Output,
+  linkageStrategy: "cascade" | "single-pass" = "cascade",
 ): Promise<[ExchangeResult, ExchangeResult]> {
   const [connInitiator, connResponder] = createMessagePipe();
   return Promise.all([
     runExchange(
       connInitiator,
       "initiator",
-      prepared("Initiator Co", outInitiator, clientRows),
+      prepared("Initiator Co", outInitiator, clientRows, linkageStrategy),
       { psiLibrary },
     ),
     runExchange(
       connResponder,
       "responder",
-      prepared("Responder Co", outResponder, serverRows),
+      prepared("Responder Co", outResponder, serverRows, linkageStrategy),
       { psiLibrary },
     ),
   ]);
@@ -410,4 +416,44 @@ test("lock-in: a received payload matching the consented set completes", async (
     ),
   ]);
   expect(initiator.partnerPayload.columns).toEqual(["note"]);
+});
+
+// --- Universal count exchange: deadlock-free ordering ------------------------
+
+test("the unconditional count exchange composes into a deadlock-free full exchange for every (handshake-role x strategy) combination", async () => {
+  // The record-count exchange now runs on every exchange, immediately before
+  // linkage. Verify it composes into a complete, lockstep full exchange for both
+  // linkage strategies and in every output orientation: both-output, and each
+  // one-sided direction (which handshake role is the sole output party). Each
+  // await resolving is the no-deadlock check; the role assertions pin the outcome.
+  const both: Output = { expectsOutput: true, shareWithPartner: true };
+  const receiver: Output = { expectsOutput: true, shareWithPartner: false };
+  const sender: Output = { expectsOutput: false, shareWithPartner: true };
+
+  for (const strategy of ["cascade", "single-pass"] as const) {
+    // Both-output: the smaller-row party is the receiver. The initiator holds
+    // clientRows (3), the responder serverRows (4), so the initiator receives.
+    const [bothInit, bothResp] = await runBoth(both, both, strategy);
+    expect(bothInit.resolvedRole).toBe("receiver");
+    expect(bothResp.resolvedRole).toBe("sender");
+
+    // One-sided, initiator the sole output party -> initiator is the receiver
+    // regardless of the (smaller) row counts.
+    const [initRecvInit, initRecvResp] = await runBoth(
+      receiver,
+      sender,
+      strategy,
+    );
+    expect(initRecvInit.resolvedRole).toBe("receiver");
+    expect(initRecvResp.resolvedRole).toBe("sender");
+
+    // One-sided, responder the sole output party -> responder is the receiver.
+    const [respRecvInit, respRecvResp] = await runBoth(
+      sender,
+      receiver,
+      strategy,
+    );
+    expect(respRecvInit.resolvedRole).toBe("sender");
+    expect(respRecvResp.resolvedRole).toBe("receiver");
+  }
 });
