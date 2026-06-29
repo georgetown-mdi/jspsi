@@ -17,7 +17,7 @@ import { LinkageTermsEditor } from "@components/LinkageTermsEditor";
 
 import type { Root } from "react-dom/client";
 
-import type { LinkageTerms } from "@psilink/core";
+import type { LinkageStrategy, LinkageTerms } from "@psilink/core";
 
 import type { AdvancedInviteSeed } from "@psi/advancedInvite";
 
@@ -33,8 +33,16 @@ function mount(
   initialIdentity = "County Health Dept",
   columns: Array<string> = ALL_COLUMNS,
   rawRows: Array<Record<string, string>> = [],
+  // Override the seeded strategy to stand in for an imported single-pass document
+  // (draftFromTerms sets the same draft state directly), so a seeded -- not
+  // click-driven -- single-pass can be exercised.
+  linkageStrategy?: LinkageStrategy,
 ): AdvancedInviteSeed {
-  const { seed } = seedAdvancedInvite(initialIdentity, columns);
+  const base = seedAdvancedInvite(initialIdentity, columns).seed;
+  const seed =
+    linkageStrategy === undefined
+      ? base
+      : { ...base, terms: { ...base.terms, linkageStrategy } };
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -323,6 +331,25 @@ describe("LinkageTermsEditor", () => {
       .toBeInTheDocument();
     await userEvent.click(generateButton());
     expect(onGenerate.mock.calls[0][0].linkageStrategy).toBe("single-pass");
+  });
+
+  test("an editor seeded with single-pass shows the consent Alert without a click", async () => {
+    // The import path (draftFromTerms) sets draft.linkageStrategy directly, so an
+    // imported single-pass document opens with the option already selected. The
+    // consent Alert must render from that seeded state on entering expert mode, not
+    // only after a Radio interaction.
+    mount("County Health Dept", ALL_COLUMNS, [], "single-pass");
+    await userEvent.click(
+      page.getByRole("switch", { name: "Expert authoring" }),
+    );
+    await expect
+      .element(page.getByRole("radio", { name: "Single-pass" }))
+      .toBeChecked();
+    await expect
+      .element(
+        page.getByText("Single-pass widens what your partner can observe"),
+      )
+      .toBeInTheDocument();
   });
 
   test("expert keys start collapsed and reveal their element editor on toggle", async () => {

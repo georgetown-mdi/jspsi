@@ -189,9 +189,10 @@ export function LinkageTermsEditor({
     // until APPLIED_SETTINGS flips (buildAdvancedTerms clamps them regardless).
     algorithm: seed.terms.algorithm,
     deduplicate: seed.terms.deduplicate,
-    // The recommended (default) linkage strategy, `cascade`. Ungated; "Reset to
-    // recommended" re-runs freshDraft, so this is also how a reset clears a
-    // single-pass selection back to cascade.
+    // Carried from the recommended terms like algorithm/deduplicate above
+    // (currently `cascade`, the schema default). Ungated. "Reset to recommended"
+    // re-runs freshDraft, so it restores whatever the recommended strategy is --
+    // clearing a single-pass selection back to the default.
     linkageStrategy: seed.terms.linkageStrategy,
     metadata: seed.metadata,
     // The recommended per-type cleaning, with the dob format inferred from the
@@ -981,9 +982,10 @@ export function LinkageTermsEditor({
                       title="Single-pass widens what your partner can observe"
                     >
                       Both parties must agree to single-pass, and one of you
-                      will hand the other its full per-key value structure. The
-                      records you match are unchanged -- only what is observed
-                      along the way.
+                      will hand the other its full per-key value structure --
+                      which party is settled at exchange time, so it may be you.
+                      The records you match are unchanged -- only what is
+                      observed along the way.
                     </Alert>
                   )}
                   {/* psi-c and deduplicate are surfaced disabled until the run
