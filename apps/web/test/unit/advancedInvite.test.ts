@@ -20,6 +20,7 @@ import {
   defaultStandardizationForRows,
   draftFromTerms,
   gatedActiveSettingMessage,
+  importedConstraintDivergenceMessage,
   outputForDirection,
   seedAdvancedInvite,
   setDraftMetadata,
@@ -1024,9 +1025,9 @@ describe("draftFromTerms reconstructs multi-field bindings on import", () => {
     // the agreement and its receipt are unchanged. The import mirror of the
     // local-only invariance test above. Scope: this covers terms the editor itself
     // produced (default constraints, default field order). An externally-authored
-    // document carrying custom field constraints or a different cross-type field order
-    // is normalized by authoredLinkageFields on rebuild -- a separate, pre-existing
-    // limitation tracked on its own, not exercised here.
+    // document carrying custom field constraints is refused at the import door (see the
+    // importedConstraintDivergenceMessage tests below); a different cross-type field
+    // order is the remaining sibling divergence, tracked on its own, not exercised here.
     const exported = buildAdvancedTerms(multiFieldDraft());
     const seed = seedFor(columns, metadata);
     const imported = draftFromTerms(exported, seed, 3600, rawRows);
@@ -1210,6 +1211,165 @@ describe("draftFromTerms reconstructs multi-field bindings on import", () => {
     expect(canonicalString(buildAdvancedTerms(imported))).toEqual(
       canonicalString(exported),
     );
+  });
+});
+
+describe("importedConstraintDivergenceMessage refuses a non-representable-constraints import", () => {
+  // Columns for the four default-constrained types, hand-built so the test does not
+  // lean on inferMetadata's column-name heuristics.
+  const metadata: Metadata = [
+    { name: "ssn_col", type: "ssn", role: "linkage", isPayload: false },
+    { name: "fn_col", type: "first_name", role: "linkage", isPayload: false },
+    { name: "ln_col", type: "last_name", role: "linkage", isPayload: false },
+    {
+      name: "dob_col",
+      type: "date_of_birth",
+      role: "linkage",
+      isPayload: false,
+    },
+  ];
+  const columns = ["ssn_col", "fn_col", "ln_col", "dob_col"];
+  const rawRows = [
+    { ssn_col: "123456789", fn_col: "A", ln_col: "B", dob_col: "01/01/2000" },
+  ];
+
+  /** A fresh editor seed over these columns -- the import target. */
+  function seedFor(): AdvancedInviteSeed {
+    return {
+      terms: getDefaultLinkageTerms("Inviter", metadata),
+      metadata,
+      columns,
+    };
+  }
+
+  /** The default document the editor exports for these columns: the same draft shape
+   * seedAdvancedInvite builds, so its fields carry exactly the type-default
+   * constraints the rebuild re-stamps. The round-trip-faithful baseline the refusal
+   * must NOT trip. */
+  function defaultExport(): LinkageTerms {
+    const terms = getDefaultLinkageTerms("Inviter", metadata);
+    return buildAdvancedTerms({
+      identity: "Inviter",
+      lifetimeSeconds: 3600,
+      outputDirection: "both",
+      algorithm: "psi",
+      deduplicate: false,
+      linkageStrategy: "cascade",
+      metadata,
+      standardization: defaultStandardizationForRows(metadata, terms, rawRows),
+      keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),
+    });
+  }
+
+  /** Set (or, with `null`, strip) a named field's constraints in a document -- a
+   * hand-edit an external author could make that the editor has no control to
+   * produce. Mutates a clone via a localized cast: the constraint shape is per-type
+   * in the union, which the test deliberately violates to model an arbitrary input. */
+  function withFieldConstraints(
+    terms: LinkageTerms,
+    fieldName: string,
+    constraints: Record<string, unknown> | null,
+  ): LinkageTerms {
+    const clone = structuredClone(terms);
+    for (const field of clone.linkageFields) {
+      if (field.name !== fieldName) continue;
+      if (constraints === null)
+        delete (field as { constraints?: unknown }).constraints;
+      else (field as { constraints?: unknown }).constraints = constraints;
+    }
+    return clone;
+  }
+
+  test("a non-default ssn exclude denylist is refused, not silently rebuilt to the default", () => {
+    const seed = seedFor();
+    // The acceptance-criteria example: a different denylist, validOnly off.
+    const imported = withFieldConstraints(defaultExport(), "ssn", {
+      exclude: ["999999999"],
+      validOnly: false,
+    });
+
+    // The rebuild WOULD normalize it straight back to the type default -- the silent
+    // divergence the refusal exists to stop.
+    const rebuiltSsn = buildAdvancedTerms(
+      draftFromTerms(imported, seed, 3600, rawRows),
+    ).linkageFields.find((field) => field.name === "ssn");
+    expect(rebuiltSsn?.constraints).toEqual({
+      exclude: ["111111111", "123456789"],
+      validOnly: true,
+    });
+
+    // So the import door refuses it rather than generate a divergent agreement.
+    expect(
+      importedConstraintDivergenceMessage(imported, seed, rawRows),
+    ).toBeDefined();
+  });
+
+  test.each([
+    ["a name allowedCharacters", "fn_field", "first_name"],
+    ["a name affixesAllowed", "ln_field", "last_name"],
+    [
+      "a validOnly on a type with no default constraint",
+      "dob_field",
+      "date_of_birth",
+    ],
+  ] as const)(
+    "%s deviating from the type default is refused",
+    (_label, _id, fieldName) => {
+      const seed = seedFor();
+      // A non-default value for each remaining constraint facet, per field type.
+      const byField: Record<string, Record<string, unknown>> = {
+        first_name: { affixesAllowed: false, allowedCharacters: "A-Za-z " },
+        last_name: { affixesAllowed: true, allowedCharacters: "A-Z " },
+        date_of_birth: { validOnly: true },
+      };
+      const imported = withFieldConstraints(
+        defaultExport(),
+        fieldName,
+        byField[fieldName],
+      );
+      expect(
+        importedConstraintDivergenceMessage(imported, seed, rawRows),
+      ).toBeDefined();
+    },
+  );
+
+  test("stripping a default constraint is refused -- the rebuild adds it back", () => {
+    const seed = seedFor();
+    const imported = withFieldConstraints(defaultExport(), "ssn", null);
+    expect(
+      importedConstraintDivergenceMessage(imported, seed, rawRows),
+    ).toBeDefined();
+  });
+
+  test("the refusal names no partner-controlled constraint value", () => {
+    const seed = seedFor();
+    const imported = withFieldConstraints(defaultExport(), "ssn", {
+      exclude: ["999999999"],
+      validOnly: false,
+    });
+    const message = importedConstraintDivergenceMessage(
+      imported,
+      seed,
+      rawRows,
+    );
+    expect(message).toBeDefined();
+    expect(message).not.toContain("999999999");
+  });
+
+  test("a type-default import is accepted and rebuilds byte-for-byte (no refusal, agreement unchanged)", () => {
+    const seed = seedFor();
+    const exported = defaultExport();
+    // The editor's own export carries only type-default constraints, so the refusal
+    // does not fire ...
+    expect(
+      importedConstraintDivergenceMessage(exported, seed, rawRows),
+    ).toBeUndefined();
+    // ... and the accepted import regenerates the same agreement the document declared.
+    expect(
+      canonicalString(
+        buildAdvancedTerms(draftFromTerms(exported, seed, 3600, rawRows)),
+      ),
+    ).toEqual(canonicalString(exported));
   });
 });
 

@@ -12,8 +12,12 @@ import {
 import { IconAlertCircle, IconDownload, IconUpload } from "@tabler/icons-react";
 
 import { exportLinkageTerms, importLinkageTerms } from "@psi/linkageTermsIO";
-import { gatedActiveSettingMessage } from "@psi/advancedInvite";
+import {
+  gatedActiveSettingMessage,
+  importedConstraintDivergenceMessage,
+} from "@psi/advancedInvite";
 
+import type { AdvancedInviteSeed } from "@psi/advancedInvite";
 import type { LinkageTerms } from "@psilink/core";
 
 /** How long to keep a download's object URL alive after the click before revoking
@@ -58,16 +62,27 @@ function downloadDocument(
  * on-disk form (the "exported from the GUI" reference). Import routes through
  * {@link importLinkageTerms} -- which validates through `safeParseLinkageTerms`,
  * the single validation source -- then refuses any terms that turn on a setting
- * the run does not yet apply ({@link gatedActiveSettingMessage}), so the escape
- * hatch cannot bring a gated-active setting in past the GUI controls. A rejected
- * import surfaces a readable, value-free error and leaves the draft untouched.
+ * the run does not yet apply ({@link gatedActiveSettingMessage}) or that carry
+ * per-field constraints the editor cannot represent and would silently normalize
+ * ({@link importedConstraintDivergenceMessage}), so the escape hatch cannot bring
+ * either past the GUI controls. A rejected import surfaces a readable, value-free
+ * error and leaves the draft untouched.
  */
 export function TermsImportExport({
   currentTerms,
+  seed,
+  rawRows,
   onImport,
 }: {
   /** The terms the current draft represents, for export. */
   currentTerms: LinkageTerms;
+  /** The editor seed (inviter columns/metadata), needed to reconstruct what an
+   * imported document would generate for the constraint-divergence refusal. */
+  seed: AdvancedInviteSeed;
+  /** The inviter's parsed rows, threaded into the same reconstruction (the date
+   * format it infers does not affect the constraint comparison, but the rebuild
+   * takes them). */
+  rawRows: ReadonlyArray<Record<string, string>>;
   /** Called with validated, non-gated terms to load into the editor. */
   onImport: (terms: LinkageTerms) => void;
 }) {
@@ -87,6 +102,18 @@ export function TermsImportExport({
     const gated = gatedActiveSettingMessage(result.terms);
     if (gated !== undefined) {
       setError(gated);
+      return;
+    }
+    // Refuse a document whose per-field constraints the rebuild would silently
+    // normalize away (the editor cannot represent custom constraints), which would
+    // otherwise generate a different agreement than the document declared.
+    const constraintDivergence = importedConstraintDivergenceMessage(
+      result.terms,
+      seed,
+      rawRows,
+    );
+    if (constraintDivergence !== undefined) {
+      setError(constraintDivergence);
       return;
     }
     setError(undefined);
