@@ -670,7 +670,8 @@ export const MESSAGE_ENVELOPE_VERSION = 1;
 export const MESSAGE_TYPE_OBJECT = 0;
 /** @internal */
 export const MESSAGE_TYPE_BINARY = 1;
-const MESSAGE_HEADER_BYTES = 10;
+/** @internal */
+export const MESSAGE_HEADER_BYTES = 10;
 
 // Human-readable label for a message payload type, used only in log lines (it
 // preserves the pre-binary "Object"/"Uint8Array" wording so log-scraping stays
@@ -724,15 +725,20 @@ function deserializeFileSyncMessage(raw: Uint8Array): DeserializedMessage {
   const type = raw[1];
   if (type !== MESSAGE_TYPE_OBJECT && type !== MESSAGE_TYPE_BINARY)
     throw new Error(`unknown message payload type ${type}`);
-  // Number() of the 8-byte big-endian counter: the writer caps seq at the
-  // per-session message counter (far below 2^53), so the conversion is exact for
-  // any value an honest peer writes.
-  const seq = Number(
-    new DataView(raw.buffer, raw.byteOffset, raw.byteLength).getBigUint64(
-      2,
-      false,
-    ),
-  );
+  // An honest writer caps seq at the per-session message counter (far below
+  // 2^53), so reject anything above MAX_SAFE_INTEGER as malformed before
+  // narrowing to a Number -- a Number() conversion above that range loses
+  // precision, and comparing as BigInt first mirrors the AEAD decorator's
+  // inbound-seq guard (handleInbound) rather than leaning on the downstream
+  // retain-mode cross-check to fail-safe on the corrupted value.
+  const seqBig = new DataView(
+    raw.buffer,
+    raw.byteOffset,
+    raw.byteLength,
+  ).getBigUint64(2, false);
+  if (seqBig > BigInt(Number.MAX_SAFE_INTEGER))
+    throw new Error("message envelope sequence number exceeds safe range");
+  const seq = Number(seqBig);
   return { type, seq, payload: raw.subarray(MESSAGE_HEADER_BYTES) };
 }
 

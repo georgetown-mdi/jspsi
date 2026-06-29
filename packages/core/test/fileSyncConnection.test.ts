@@ -7817,6 +7817,50 @@ test("poll() reads a binary frame whose size would exceed Node's max string leng
   expect(Array.from(received[0] as Uint8Array)).toEqual(Array.from(frame));
 });
 
+test("poll() terminal: a message envelope seq above MAX_SAFE_INTEGER is rejected", async () => {
+  // The 8-byte seq field is read as BigInt and range-checked before narrowing to
+  // a Number, mirroring the AEAD decorator's inbound-seq guard: a hostile peer
+  // writing a seq above 2^53 is rejected as a malformed envelope rather than
+  // narrowed to a precision-lost value the retain-mode cross-check would have to
+  // fail-safe on.
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client);
+  const peerId = "peer-sender";
+  conn.peerId = peerId;
+
+  const body = binaryMessage(
+    Uint8Array.from([1, 2, 3, 4]),
+    Number.MAX_SAFE_INTEGER + 1,
+  );
+  files.set(`/test/${peerId}-${body.length}.json`, body);
+
+  const errors: unknown[] = [];
+  const received: unknown[] = [];
+  let notify!: () => void;
+  const settled = new Promise<void>((r) => (notify = r));
+  conn.on("data", (m) => {
+    received.push(m);
+    notify();
+  });
+  conn.on("error", (e) => {
+    errors.push(e);
+    notify();
+  });
+  conn.start();
+  await Promise.race([
+    settled,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("timed out waiting for error")), 2_000),
+    ),
+  ]);
+  conn.stop();
+
+  expect(received).toEqual([]);
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(UsageError);
+  expect((errors[0] as Error).message).toContain("exceeds safe range");
+});
+
 test("retain mode: send() honors an ack already on disk even when the TTL has elapsed", async () => {
   // Regression guard for the ack-gate ordering: the loop checks for the
   // qualifying ack BEFORE the deadline, so an ack present when send() is entered
