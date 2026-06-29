@@ -454,8 +454,8 @@ function renderStructural(
  * NOT the cross-party {@link validateCompatibility} (which checks that two
  * different parties' terms work together). Reusing the existing config must not
  * silently change what was agreed, so the agreement-defining fields -- version,
- * algorithm, linkage fields and keys, legal agreement, and payload -- must
- * match.
+ * algorithm, the linkage strategy, linkage fields and keys, legal agreement, and
+ * payload -- must match.
  *
  * The per-party fields are excluded, because each party legitimately holds its
  * own value (per the LinkageTerms consistency model): `identity` (the holding
@@ -520,17 +520,31 @@ export function diffLinkageTerms(
     return ca !== cb;
   };
 
-  // version and algorithm are compared by raw equality rather than the
-  // nfcCanonical fold used for the user-authored name fields below. Both are
-  // schema-constrained to ASCII -- version to a semver string (/^\d+\.\d+\.\d+$/)
-  // and algorithm to a fixed enum ("psi" | "psi-c") -- so neither can ever differ
-  // by Unicode normalization form, and the NFC fold would be a no-op. (Semver
-  // range matching, as opposed to exact equality, is a cross-cutting concern that
-  // belongs in core's validateCompatibility, which also compares version exactly.)
+  // version, algorithm, and linkageStrategy are compared by raw equality rather
+  // than the nfcCanonical fold used for the user-authored name fields below. All
+  // three are schema-constrained to ASCII -- version to a semver string
+  // (/^\d+\.\d+\.\d+$/), algorithm to a fixed enum ("psi" | "psi-c"), and
+  // linkageStrategy to a fixed enum ("cascade" | "single-pass") -- so none can
+  // ever differ by Unicode normalization form, and the NFC fold would be a no-op.
+  // (Semver range matching, as opposed to exact equality, is a cross-cutting
+  // concern that belongs in core's validateCompatibility, which also compares
+  // version exactly.)
   if (existing.version !== incoming.version)
     add("version", existing.version, incoming.version);
   if (existing.algorithm !== incoming.algorithm)
     add("algorithm", existing.algorithm, incoming.algorithm);
+  // linkageStrategy is mandatory-consistency exactly like algorithm (core's
+  // validateCompatibility aborts on a mismatch), so a reused config whose strategy
+  // differs from the invitation's is a conflict, not a silent reuse: without this
+  // the reconcile would report "matches" and keep a config whose linkage_strategy
+  // differs from the one the acceptor was shown on the consent prompt, so the
+  // later `psilink exchange` could run a strategy -- and a disclosure tradeoff --
+  // the operator never consented to (it would abort against the live partner, but
+  // only after the false "matches" assurance). Surfaced as a `single-pass`
+  // disclosure surface, so the reused config and the consented strategy stay
+  // identical.
+  if (existing.linkageStrategy !== incoming.linkageStrategy)
+    add("linkage_strategy", existing.linkageStrategy, incoming.linkageStrategy);
   // `output` and `deduplicate` are per-party (see this function's doc comment),
   // so they are intentionally not compared here.
 

@@ -6,6 +6,7 @@ import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
 import YAML from "yaml";
 import {
+  getDefaultLinkageTerms,
   getLogger,
   MAX_RECONNECT_ATTEMPTS,
   safeParseConnectionConfig,
@@ -31,8 +32,10 @@ import {
   logOnlineBootstrapOutcome,
   looksLikeUrl,
   parseCommonBootstrapArgs,
+  parseLinkageStrategyFlag,
   runOnlineBootstrap,
   runOrExit,
+  singlePassDisclosureNotice,
   warnOptionsOverridesIgnoredOffline,
   warnServerOverridesIgnoredOffline,
   warnUnsupportedFileSyncFlags,
@@ -2101,4 +2104,106 @@ test("loadInputRows: `-` at an interactive terminal is rejected (invite path inh
       /pipe/,
     );
   });
+});
+
+// --- linkage strategy selection ----------------------------------------------
+
+test("parseLinkageStrategyFlag: absent selection is undefined (terms keep the cascade default)", () => {
+  expect(
+    parseLinkageStrategyFlag({ _: [], $0: "psilink" } as unknown as Arguments),
+  ).toBeUndefined();
+});
+
+test("parseLinkageStrategyFlag: each valid value parses to itself", () => {
+  for (const value of ["cascade", "single-pass"] as const)
+    expect(
+      parseLinkageStrategyFlag({
+        _: [],
+        $0: "psilink",
+        "linkage-strategy": value,
+      } as unknown as Arguments),
+    ).toBe(value);
+});
+
+test("parseLinkageStrategyFlag: an unknown value is a usage error (exit 64 via runOrExit)", () => {
+  // Routed through runOrExit by the invite handler, so a UsageError exits 64 on
+  // the consistent error path, like the other bad enum flags (--log-level).
+  const parse = () =>
+    parseLinkageStrategyFlag({
+      _: [],
+      $0: "psilink",
+      "linkage-strategy": "complete",
+    } as unknown as Arguments);
+  expect(parse).toThrow(UsageError);
+  expect(parse).toThrow("unrecognized linkage-strategy: complete");
+  expect(parse).toThrow("cascade or single-pass");
+});
+
+test("parseLinkageStrategyFlag: a repeated flag is rejected before the enum check", () => {
+  // yargs collects a repeated --linkage-strategy into an array; singleValue
+  // rejects it with a flag-named usage error rather than letting the array reach
+  // the enum parse.
+  expect(() =>
+    parseLinkageStrategyFlag({
+      _: [],
+      $0: "psilink",
+      "linkage-strategy": ["cascade", "single-pass"],
+    } as unknown as Arguments),
+  ).toThrow("--linkage-strategy may be given only once");
+});
+
+// A one-row input whose columns infer to default linkage fields, so buildDataSpec
+// authors a full default terms set to apply the strategy onto.
+const STRATEGY_ROWS = {
+  rawRows: [
+    {
+      first_name: "Alice",
+      last_name: "Smith",
+      dob: "1990-01-02",
+      ssn: "123456789",
+    },
+  ],
+  columns: ["first_name", "last_name", "dob", "ssn"],
+};
+
+test("buildDataSpec: --linkage-strategy single-pass authors single-pass terms", () => {
+  const { dataSpec } = buildDataSpec({
+    identity: "tester",
+    rows: STRATEGY_ROWS,
+    linkageStrategy: "single-pass",
+  });
+  expect(dataSpec.linkageTerms.linkageStrategy).toBe("single-pass");
+});
+
+test("buildDataSpec: omitting the selection authors cascade (unchanged from today)", () => {
+  const { dataSpec } = buildDataSpec({
+    identity: "tester",
+    rows: STRATEGY_ROWS,
+  });
+  expect(dataSpec.linkageTerms.linkageStrategy).toBe("cascade");
+});
+
+test("buildDataSpec: a supplied terms object (accept's path) ignores the selection", () => {
+  // accept derives its terms from the invitation, which already carries the
+  // agreed strategy; the selection must not override the partner's choice.
+  const terms = {
+    ...getDefaultLinkageTerms("inviter"),
+    linkageStrategy: "single-pass" as const,
+  };
+  const { dataSpec } = buildDataSpec({
+    terms,
+    identity: "acceptor",
+    rows: STRATEGY_ROWS,
+    linkageStrategy: "cascade",
+  });
+  expect(dataSpec.linkageTerms.linkageStrategy).toBe("single-pass");
+});
+
+test("singlePassDisclosureNotice: names the disclosure tradeoff and the operator-facing doc", () => {
+  const note = singlePassDisclosureNotice();
+  expect(note).toContain("discloses");
+  expect(note).toContain("consented disclosure tradeoff");
+  // Links the operator-facing reference, not the internal design note.
+  expect(note).toContain("docs/EXCHANGE_REFERENCE.md");
+  expect(note).not.toContain("one-sided-disclosure");
 });

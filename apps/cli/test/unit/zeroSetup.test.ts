@@ -10,7 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import yargs, { type Arguments } from "yargs";
-import { sanitizeErrorForDisplay, UsageError } from "@psilink/core";
+import { getLogger, sanitizeErrorForDisplay, UsageError } from "@psilink/core";
 import type { SFTPConnectionConfig } from "@psilink/core";
 import {
   builder,
@@ -546,6 +546,130 @@ test("handler with --save carries the first-use pin into the written config", as
     // The mutated connection flowed through buildSaveSpec -> saveConfig.
     expect(fs.readFileSync(configFile, "utf8")).toContain(FP);
   } finally {
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- linkage strategy selection ----------------------------------------------
+
+test("handler: an unrecognized --linkage-strategy exits 64, naming the valid values", async () => {
+  // parseArgs validates the enum (parseLinkageStrategyFlag) before the logger
+  // exists, so an unknown value is a clean usage error (exit 64) reported on
+  // stderr, the same classification invite gives it.
+  const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        "linkage-strategy": "complete",
+        "log-level": "silent",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(errSpy).toHaveBeenCalledWith(
+      "unrecognized linkage-strategy: complete; expected cascade or single-pass",
+    );
+  } finally {
+    errSpy.mockRestore();
+    exitSpy.mockRestore();
+  }
+});
+
+test("handler --save: the selected strategy flows into the saved config (single-pass, vs cascade by default)", async () => {
+  // The selection rides into the terms zero-setup authors from its input and so
+  // into the --save spec; omitting it leaves the cascade default. Drive the
+  // handler to completion with runProtocol mocked and read the written config.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerostrategy-"));
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  vi.mocked(runProtocol).mockImplementation((async () => ({
+    bootstrap: { partnerSaveIntent: false },
+  })) as never);
+  try {
+    const input = path.join(dir, "input.csv");
+    fs.writeFileSync(
+      input,
+      "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+    );
+    const runSave = async (
+      configFile: string,
+      strategy?: string,
+    ): Promise<string> => {
+      await handler({
+        _: ["sftp://userb@localhost:2222/drop", input],
+        $0: "psilink",
+        save: true,
+        ...(strategy !== undefined && { "linkage-strategy": strategy }),
+        "config-file": configFile,
+        "key-file": path.join(dir, path.basename(configFile) + ".key"),
+        identity: "Tester",
+        record: false,
+        "log-level": "silent",
+      } as unknown as Arguments);
+      return fs.readFileSync(configFile, "utf8");
+    };
+
+    expect(await runSave(path.join(dir, "sp.yaml"), "single-pass")).toContain(
+      "linkage_strategy: single-pass",
+    );
+    // Omitting the flag is unchanged from before it existed: cascade.
+    expect(await runSave(path.join(dir, "def.yaml"))).toContain(
+      "linkage_strategy: cascade",
+    );
+  } finally {
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: zero-setup surfaces the single-pass disclosure note at selection", async () => {
+  // The selection note is the ONLY single-pass disclosure surface for a
+  // zero-setup party (there is no accept-side consent prompt), so pin that it
+  // actually fires -- the config-content test above would still pass if the note
+  // emission were deleted. getLogger("psilink").info routes through the prefix
+  // plugin to console.info; setLevel binds that method to the spy so the note is
+  // captured robustly regardless of the level a prior test left behind.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeronote-"));
+  const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  getLogger("psilink").setLevel("info");
+  vi.mocked(runProtocol).mockImplementation((async () => ({
+    bootstrap: { partnerSaveIntent: false },
+  })) as never);
+  try {
+    const input = path.join(dir, "input.csv");
+    fs.writeFileSync(
+      input,
+      "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+    );
+    await handler({
+      _: ["sftp://userb@localhost:2222/drop", input],
+      $0: "psilink",
+      "linkage-strategy": "single-pass",
+      "config-file": path.join(dir, "psilink.yaml"),
+      "key-file": path.join(dir, ".psilink.key"),
+      identity: "Tester",
+      record: false,
+      "log-level": "info",
+    } as unknown as Arguments);
+    const logged = infoSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(logged).toContain("consented disclosure tradeoff");
+  } finally {
+    getLogger("psilink").setLevel("silent");
+    infoSpy.mockRestore();
     exitSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
   }
