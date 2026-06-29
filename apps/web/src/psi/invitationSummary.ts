@@ -9,6 +9,7 @@ import type {
   LinkageField,
   LinkageKey,
   LinkageKeyElement,
+  LinkageStrategy,
   TransformStep,
 } from "@psilink/core";
 
@@ -323,6 +324,16 @@ export interface InvitationSummary {
    * claim cannot read as in force while it is not.
    */
   psiCApplied: boolean;
+  /**
+   * How the agreed linkage keys are exchanged: `cascade` (the default) or
+   * `single-pass`. single-pass is disclosure-affecting -- to run in one batched
+   * round the sender hands the receiver its full per-key value structure, so the
+   * receiver observes matches on less precise keys the cascade would have filtered
+   * out first -- so the renderer surfaces it as an always-visible consent note;
+   * cascade, the baseline that discloses less, is not flagged. A fixed schema enum
+   * (not partner free text), so it is rendered verbatim like {@link algorithm}.
+   */
+  linkageStrategy: LinkageStrategy;
   /** Whether the inviter expects to receive the intersection result. */
   inviterReceivesOutput: boolean;
   /** Whether the inviter will share the result with the accepting partner. */
@@ -843,6 +854,7 @@ export function summarizeInvitation(
     invitingParty: sanitizeForDisplay(terms.identity),
     algorithm: terms.algorithm,
     psiCApplied: APPLIED_SETTINGS.psiC,
+    linkageStrategy: terms.linkageStrategy,
     inviterReceivesOutput: terms.output.expectsOutput,
     inviterSharesResult: terms.output.shareWithPartner,
     deduplicate: terms.deduplicate,

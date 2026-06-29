@@ -13,7 +13,7 @@ import { InvitationTerms } from "@components/InvitationTerms";
 
 import type { Root } from "react-dom/client";
 
-import type { LinkageTerms } from "@psilink/core";
+import type { LinkageStrategy, LinkageTerms } from "@psilink/core";
 
 // Terms with two linkage keys whose breadth differs -- an exact key and a
 // first-initial-truncated one -- plus a constrained field, payload columns, and a
@@ -510,5 +510,62 @@ describe("InvitationTerms: always-visible egress and legal-agreement presence hi
     render({ ...terms, legalAgreement: undefined });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(container!.textContent).not.toContain("attaches a legal agreement");
+  });
+});
+
+describe("InvitationTerms: the linkage strategy is surfaced at the consent point", () => {
+  // The acceptor adopts the inviter's strategy (mandatory-consistency), and
+  // single-pass is disclosure-affecting, so the note lives in the always-visible
+  // core -- the acceptor must see the added disclosure before consenting. cascade,
+  // the baseline that discloses less, is not flagged.
+  function render(
+    linkageStrategy: LinkageStrategy,
+    perspective?: "review" | "accepted" | "proposing",
+  ) {
+    root!.render(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(InvitationTerms, {
+          linkageTerms: { ...terms, linkageStrategy },
+          ...(perspective ? { perspective } : {}),
+        }),
+      ),
+    );
+  }
+
+  test("single-pass is flagged always-visible, outside the 'Other details' disclosure", async () => {
+    render("single-pass");
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    // On screen without expanding any disclosure -- the acceptor sees the added
+    // disclosure before consenting.
+    expect(container!.textContent).toContain(
+      "This exchange uses single-pass linkage.",
+    );
+    // ... and OUTSIDE the "Other details" panel (structure, not styling).
+    expect(panelFor("Other details").textContent).not.toContain(
+      "This exchange uses single-pass linkage.",
+    );
+    // Stated viewer-neutrally: the acceptor itself could be the disclosing party.
+    expect(container!.textContent).toContain("so it may be you");
+  });
+
+  test("cascade (the baseline) surfaces no strategy note", async () => {
+    render("cascade");
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).not.toContain("single-pass linkage");
+  });
+
+  test("the note also appears in the inviter's own proposing preview", async () => {
+    // The note is viewer-neutral and not perspective-gated, so the inviter's editor
+    // preview (proposing) shows the same note the acceptor will read -- the editor's
+    // "author against what the partner sees" intent, and consistent with how the
+    // egress/legal presence hints also render across perspectives. Pinned so the
+    // note is not later narrowed to the acceptor perspectives only.
+    render("single-pass", "proposing");
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).toContain(
+      "This exchange uses single-pass linkage.",
+    );
   });
 });
