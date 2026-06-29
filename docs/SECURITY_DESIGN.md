@@ -253,7 +253,7 @@ PSI-Link does not transmit, log, or retain any personally identifiable informati
 
 **Third parties**: No PII is transmitted to any third party. The peer-coordination server used by the web application's WebRTC channel sees only connection metadata (peer IDs); it has no visibility into data-channel traffic (see [Channel security](#channel-security)). SFTP and filedrop channels use operator-managed infrastructure.
 
-**Logging**: PSI-Link does not write PII to log output. Any operational log output is limited to non-sensitive metadata: exchange timing, transport errors, and protocol state transitions. Log output should be reviewed before forwarding to a third-party logging service.
+**Logging**: PSI-Link does not write PII to log output. Any operational log output is limited to non-sensitive metadata: the runtime resource ceilings logged once at the start of each exchange (the Node version, host memory, the V8 heap limit, and a tighter container memory limit when one is set), exchange timing, transport errors, and protocol state transitions. Log output should be reviewed before forwarding to a third-party logging service.
 
 **Output**: The exchange output is an association table of row indices mapping each party's matched records. It does not contain raw PII fields from the input file. Parties are responsible for joining those indices against their own datasets and handling the resulting joined data under their applicable data governance policies.
 
