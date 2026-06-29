@@ -29,6 +29,7 @@ import { buildRotatedKeyFile, saveKeyFile } from "./keyFile";
 import { preflightKeyFilePath } from "./keyFilePreflight";
 import { writeExchangeRecord, type RecordOutput } from "./recordFile";
 import { writeOutput } from "./util/cli";
+import { formatRuntimeEnv, readRuntimeEnv } from "./util/runtimeEnv";
 
 /**
  * Operator guidance appended to the file-sync peer-silence timeout error.
@@ -208,6 +209,14 @@ export async function runProtocol(
   fileSyncRuntime: FileSyncRuntimeOptions = {},
 ): Promise<RunProtocolResult> {
   const log = getLogger(loggerName);
+
+  // One-line runtime banner at the top of every exchange log: the Node version
+  // and the memory ceilings (host, V8 heap limit, and any container cgroup limit)
+  // the run operates under. This is permanent support-log hygiene -- when a run is
+  // mailed in after a failure, the ceilings it ran under are already on record,
+  // so an out-of-memory death (heap-OOM error, or a silent container kill) can be
+  // read against the limits without a second attempt to reproduce.
+  log.info(formatRuntimeEnv(readRuntimeEnv()));
 
   if (connection.channel !== "filedrop" && connection.channel !== "sftp")
     // Inside this branch `connection` narrows to `never`; cast through unknown
