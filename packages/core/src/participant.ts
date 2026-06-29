@@ -207,18 +207,20 @@ export class PSIParticipant {
     return this.stages;
   }
 
-  // Per-step PSI primitives for the single-pass strategy (link.ts
-  // linkViaSinglePassPSI), which consumes the four operations directly rather than
-  // through identifyIntersection's orchestrated per-round exchange below. They wrap
-  // the same library calls, so the WASM key and the psi server/client stay private
-  // to this class -- callers get only bytes and indices. identifyIntersection could
-  // one day compose from these so each step has a single implementation.
+  // Building-block PSI steps used by the single-pass strategy
+  // (linkViaSinglePassPSI in link.ts). Unlike identifyIntersection below, which
+  // runs the whole back-and-forth itself, single-pass calls these one at a time
+  // and sequences the exchange on its own. Each wraps the underlying PSI library,
+  // keeping the secret key and the library's server/client objects private to this
+  // class; callers see only raw bytes and lists of indices.
 
   /**
-   * Encrypts this party's set once under the server key, returning the serialized
-   * setup message and the sorting permutation the library applied (sorted
-   * position -> original input index, used to map a match back to the input
-   * order). Requires the `"starter"` role.
+   * Encrypts this party's values once under the server key, returning the
+   * serialized setup message and a "permutation" -- a lookup that undoes the
+   * reordering the library does internally. The library sorts the values before
+   * encrypting; entry i of the lookup gives the original input position of the
+   * value now in sorted slot i, so a match reported in sorted terms can be traced
+   * back to the row it came from. Requires the `"starter"` role.
    */
   public createServerSetup(values: ReadonlyArray<string>): {
     setup: Uint8Array;
@@ -266,21 +268,24 @@ export class PSIParticipant {
   }
 
   /**
-   * Strips this party's client-key layer off the doubly-encrypted response and
-   * matches it against the partner's setup, returning the value-level equality
-   * relation as `[receiverDistinctIndex, senderSortedIndex]` pairs. The sender
-   * side is in setup-message SORTED order; the caller maps it back to the
-   * sender's original distinct order with the permutation from
-   * {@link createServerSetup}. NOT record indices -- the cascade replay turns
-   * this into record pairs. Requires the `"joiner"` role.
+   * Finishes the match for this party: removes its own encryption layer from the
+   * partner's doubly-encrypted response and compares it against the partner's
+   * setup, returning the list of value matches. Each pair is `[index among this
+   * party's distinct values, index among the partner's values]`. WARNING: these
+   * index de-duplicated VALUES, not data rows -- the cascade replay (link.ts) is
+   * what turns them into record pairs. The partner's index is in the library's
+   * internal sorted order; map it back to input order with the permutation from
+   * {@link createServerSetup}. Requires the `"joiner"` role.
    */
-  public computeMatchTable(
+  public computeValueMatches(
     setupBytes: Uint8Array,
     responseBytes: Uint8Array,
   ): [Array<number>, Array<number>] {
     const client = this.psi.client;
     if (!client)
-      throw new Error(`${this.id}: computeMatchTable requires the client role`);
+      throw new Error(
+        `${this.id}: computeValueMatches requires the client role`,
+      );
     const setup = this.library.serverSetup.deserializeBinary(setupBytes);
     const response = this.library.response.deserializeBinary(responseBytes);
     const table = client.getAssociationTable(setup, response);

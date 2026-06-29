@@ -9,10 +9,14 @@ import {
   linkViaPSI,
   linkViaSinglePassPSI,
   associationAndIterationArray,
-  singlePassHeaderMessage,
   encodeInt32LE,
   decodeInt32LE,
+  encodeSinglePassReply,
+  decodeSinglePassReply,
+  SINGLE_PASS_MAX_REPLY_BYTES,
+  singlePassReplyWouldExceedCap,
 } from "../src/link";
+import { MAX_FRAME_SIZE_BYTES } from "../src/connection/frameSize";
 
 import {
   createMessagePipe,
@@ -248,43 +252,64 @@ test("a mapped-elements element that is an array (not a plain object) is rejecte
   expect((err as ConnectionError).kind).toBe("protocol");
 });
 
-// ─── singlePassHeaderMessage: scalar header ───────────────────────────────────
-// Now that the sender remaps its shape table into the setup's sorted order, the
-// permutation no longer travels and the header is just the record count -- a
-// scalar object with none of the single-issue-array pathological surface the other
-// frames carry. A valid header parses; a non-number record count is a clean
-// protocol error.
-test("singlePassHeaderMessage parses a valid header and rejects a malformed one", () => {
-  expect(singlePassHeaderMessage.parse({ recordCount: 3 }).recordCount).toBe(3);
-
-  let err: unknown;
-  try {
-    parseOrProtocolError(singlePassHeaderMessage, { recordCount: "x" });
-  } catch (e) {
-    err = e;
-  }
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("protocol");
-});
-
-// ─── single-pass shape-frame codec and the receiver's frame-length tie ────────
-// The shape table is a partner-controlled binary frame; these pin the two
-// fail-closed gates that guard it (the channel-hardening controls).
+// ─── single-pass reply codec and the receiver's frame-length tie ──────────────
+// Message 2 -- setup, response, record count, and the distinct-value index table
+// -- is one binary frame; these pin the codec round-trip and the fail-closed
+// gates that guard it (the channel-hardening controls).
 test("encodeInt32LE / decodeInt32LE round-trip, and a non-aligned frame is rejected", () => {
   const values = [-1, 0, 1, 7, 2_000_000_000];
   expect(Array.from(decodeInt32LE(encodeInt32LE(values)))).toEqual(values);
   // A length that is not a whole number of int32s is a clean error, not a silent
-  // truncation -- the decode guard for the partner-supplied shape frame.
+  // truncation -- the decode guard for the partner-supplied index table.
   expect(() => decodeInt32LE(new Uint8Array(3))).toThrow(/int32/);
 });
 
-test("single-pass receiver rejects a shape frame inconsistent with the header", async () => {
-  // The receiver ties the shape frame to the header's record count:
-  // tokenBytes.byteLength must equal keyCount * senderRecordCount * 4. A
-  // contradicting frame is a clean protocol abort, not a wrong reconstruction.
-  // Drive the receiver (joiner) against a hostile sender that contradicts its own
-  // header. setup/response are consumed only after the length check, so dummies
-  // suffice; the check fires on the fourth frame.
+test("encodeSinglePassReply / decodeSinglePassReply round-trip, and a truncated frame is rejected", () => {
+  const setup = new Uint8Array([10, 20, 30]);
+  const response = new Uint8Array([40, 50]);
+  const indices = [-1, 0, 7, 2_000_000_000];
+  const out = decodeSinglePassReply(
+    encodeSinglePassReply(setup, response, 4, indices),
+  );
+  expect(Array.from(out.setup)).toEqual([10, 20, 30]);
+  expect(Array.from(out.response)).toEqual([40, 50]);
+  expect(out.numRecords).toBe(4);
+  expect(Array.from(out.distinctValueIndices)).toEqual(indices);
+  // A frame cut short of a length it declares is a clean protocol error, not a
+  // silent under-read.
+  const full = encodeSinglePassReply(setup, response, 4, indices);
+  expect(() => decodeSinglePassReply(full.subarray(0, 5))).toThrow(/truncated/);
+});
+
+// ─── single-pass size ceiling (base64-adjusted) and the pre-flight predicate ──
+// The reply is base64url-wrapped (~4/3) in an AES-GCM envelope before the inbound
+// cap measures it, so the raw-byte ceiling sits at ~3/4 of MAX_FRAME_SIZE_BYTES --
+// strictly below it, so an oversized dataset gets the actionable "use cascade"
+// error here instead of a generic frame-too-large rejection downstream.
+test("the single-pass reply ceiling leaves room for the channel's base64 envelope", () => {
+  expect(SINGLE_PASS_MAX_REPLY_BYTES).toBeLessThan(MAX_FRAME_SIZE_BYTES);
+  expect(SINGLE_PASS_MAX_REPLY_BYTES).toBeGreaterThan(
+    MAX_FRAME_SIZE_BYTES * 0.7,
+  );
+  expect(SINGLE_PASS_MAX_REPLY_BYTES).toBeLessThan(MAX_FRAME_SIZE_BYTES * 0.76);
+});
+
+test("singlePassReplyWouldExceedCap fires exactly at the index-table ceiling", () => {
+  const fits = Math.floor(SINGLE_PASS_MAX_REPLY_BYTES / 4); // one key, all table
+  expect(singlePassReplyWouldExceedCap(1, fits)).toBe(false);
+  expect(singlePassReplyWouldExceedCap(1, fits + 1)).toBe(true);
+  // The ceiling is per (key, record): more keys, fewer rows fit.
+  expect(singlePassReplyWouldExceedCap(4, Math.floor(fits / 4))).toBe(false);
+  expect(singlePassReplyWouldExceedCap(4, Math.floor(fits / 4) + 1)).toBe(true);
+});
+
+test("single-pass receiver rejects a reply whose index table contradicts its record count", async () => {
+  // The receiver ties the distinct-value index table to the reply's declared
+  // record count: its length must equal numLinkageKeys * numSenderRecords. A reply
+  // that declares a record count its index table does not match is a clean protocol
+  // abort, not a wrong reconstruction. Drive the receiver (joiner) against a hostile
+  // sender:
+  // setup/response are dummies (read but not used before the check).
   const [conn, peer] = createMessagePipe();
   const receiver = new PSIParticipant("client", psiLibrary, {
     role: "joiner",
@@ -298,9 +323,14 @@ test("single-pass receiver rejects a shape frame inconsistent with the header", 
     -1,
   );
   await peer.receive(); // consume the receiver's encrypted request
-  await peer.send(new Uint8Array([1, 2, 3, 4])); // setup (unused before the check)
-  await peer.send(new Uint8Array([5, 6, 7, 8])); // response
-  await peer.send({ recordCount: 5 }); // expects 1 * 5 * 4 = 20 bytes
-  await peer.send(new Uint8Array(8)); // 8 != 20
-  await expect(run).rejects.toThrow(/shape frame length/);
+  // Declares recordCount 5 (expects 1 * 5 = 5 value indices) but ships only 2.
+  await peer.send(
+    encodeSinglePassReply(
+      new Uint8Array([1, 2, 3, 4]),
+      new Uint8Array([5, 6, 7, 8]),
+      5,
+      [0, 1],
+    ),
+  );
+  await expect(run).rejects.toThrow(/index table\s+length does not match/);
 });

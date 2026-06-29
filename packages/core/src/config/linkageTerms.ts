@@ -855,15 +855,17 @@ const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
 // --- Linkage strategy --------------------------------------------------------
 
 /**
- * How the agreed linkage keys are run against the partner's data. Both
- * strategies produce the SAME association table; they differ only in how the
- * per-key PSI exchanges are sequenced on the wire.
+ * How the agreed linkage keys are matched between the two parties' records. Both
+ * strategies produce the SAME result; they differ only in how the per-key
+ * matching is sequenced over the network.
  *
- * - `cascade` (the default) -- one dependent PSI exchange per key, in sequence.
- * - `single-pass` -- all keys batched into one exchange, the cascade
- *   reconstructed by the receiver; far fewer round-trips.
+ * - `cascade` (the default) -- the keys are matched one at a time, each round
+ *   building on the results of the one before. More network round-trips.
+ * - `single-pass` -- all keys are sent together in a single round-trip; the
+ *   receiver then reproduces the same step-by-step result locally. Far fewer
+ *   round-trips.
  *
- * See docs/spec/PROTOCOL.md for the wire shape and disclosure of each.
+ * See docs/spec/PROTOCOL.md for the wire format and the disclosure each involves.
  */
 export type LinkageStrategy = "cascade" | "single-pass";
 
@@ -1328,13 +1330,9 @@ export function validateCompatibility(
     );
   }
 
-  // linkageStrategy is mandatory-consistency like algorithm: both parties must
-  // run the keys the same way or the reconstructed result could differ. The
-  // schema default materializes "cascade" when terms are authored without a
-  // strategy, so the field is always present here -- in both local terms and
-  // parsed partner terms -- and is compared directly, like algorithm. The values
-  // are validated enum members, not partner free text, but take the same
-  // sanitizeForDisplay path as algorithm for uniformity.
+  // Strictly consistent, like algorithm: both parties must use the same strategy
+  // or they would compute different matches. The schema fills in "cascade" when
+  // omitted, so the value is always present and compared directly.
   if (local.linkageStrategy !== partner.linkageStrategy) {
     errors.push(
       `linkage strategy mismatch: local is ${sanitizeForDisplay(local.linkageStrategy)}, ` +
