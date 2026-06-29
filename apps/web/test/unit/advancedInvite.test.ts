@@ -1305,16 +1305,12 @@ describe("importedConstraintDivergenceMessage refuses a non-representable-constr
   });
 
   test.each([
-    ["a name allowedCharacters", "fn_field", "first_name"],
-    ["a name affixesAllowed", "ln_field", "last_name"],
-    [
-      "a validOnly on a type with no default constraint",
-      "dob_field",
-      "date_of_birth",
-    ],
+    ["a name allowedCharacters", "first_name"],
+    ["a name affixesAllowed", "last_name"],
+    ["a validOnly on a type with no default constraint", "date_of_birth"],
   ] as const)(
     "%s deviating from the type default is refused",
-    (_label, _id, fieldName) => {
+    (_label, fieldName) => {
       const seed = seedFor();
       // A non-default value for each remaining constraint facet, per field type.
       const byField: Record<string, Record<string, unknown>> = {
