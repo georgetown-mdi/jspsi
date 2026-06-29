@@ -456,6 +456,16 @@ export async function exchangeBootstrapSecret(
 
 // --- Role resolution ---------------------------------------------------------
 
+// The work-minimizing PSI role assignment for two both-output parties, from
+// their exchanged row counts: the smaller-row party becomes the receiver. The
+// receiver's distinct-value set crosses the wire twice (its request, then that
+// request re-encrypted in the reply) and it bears the larger share of the curve
+// operations, so it is the heavier side; placing the smaller dataset there
+// minimizes total work (communication + compute) across both linkage strategies
+// for the near-unique keys linkage requires. The full derivation -- including
+// why the single-pass index table does not outweigh that re-encryption term --
+// is in docs/spec/PROTOCOL.md (Role resolution and work minimization). A tie is
+// work-neutral and broken deterministically: initiator -> receiver.
 function pickRole(
   localCount: number,
   partnerCount: number,
@@ -463,17 +473,29 @@ function pickRole(
 ): PsiRole {
   if (localCount < partnerCount) return "receiver";
   if (localCount > partnerCount) return "sender";
-  // Tie: initiator -> receiver.
   return handshakeRole === "initiator" ? "receiver" : "sender";
 }
 
 /**
- * Determine this party's PSI role after terms have been agreed. When exactly
- * one party has `expectsOutput: true` the role follows directly from the terms.
- * When both parties expect output, record counts are exchanged over the
- * connection so that the smaller dataset becomes the receiver (minimising data
- * transmitted); a tie is broken in favour of the initiator becoming the
- * receiver.
+ * Determine this party's PSI role after terms have been agreed.
+ *
+ * Both parties' record counts (the raw row counts) are exchanged unconditionally
+ * at the start -- on every exchange, both- and one-sided-output alike. The
+ * exchanged counts feed the role decision below; that is their only current
+ * consumer. Making the exchange unconditional is groundwork for the forthcoming
+ * data-dependent single-pass frame cap, which will derive a bound from both
+ * counts on every exchange; the integer exchanged is the raw row count, the same
+ * quantity the single-pass pre-flight already checks locally. The count frame is
+ * byte- and order-identical across the two output cases (initiator sends first;
+ * responder receives first then sends); only the role decision differs, and the
+ * one-sided path drains the count frame rather than skipping it.
+ *
+ * When exactly one party has `expectsOutput: true`, that party is the receiver
+ * regardless of the counts -- it is the only party that learns the result. When
+ * both parties expect output the assignment is free, so it minimizes total work:
+ * the smaller-row party becomes the receiver, a tie broken in favour of the
+ * initiator (see {@link pickRole} and docs/spec/PROTOCOL.md, Role resolution and
+ * work minimization).
  *
  * Call this immediately after a successful {@link exchangeTerms}.
  */
@@ -484,20 +506,28 @@ export async function resolveRole(
   partnerOutput: Output,
   localRecordCount: number,
 ): Promise<PsiRole> {
+  // Exchange record counts unconditionally. Initiator sends first; responder
+  // receives first then sends -- the same lockstep ordering the both-output path
+  // used before, now run on every exchange so the one-sided case puts an
+  // identical count frame on the wire instead of skipping it.
+  let partnerRecordCount: number;
+  if (handshakeRole === "initiator") {
+    await conn.send({ recordCount: localRecordCount });
+    partnerRecordCount = (await receiveParsed(conn, recordCountMessage))
+      .recordCount;
+  } else {
+    partnerRecordCount = (await receiveParsed(conn, recordCountMessage))
+      .recordCount;
+    await conn.send({ recordCount: localRecordCount });
+  }
+
+  // One-sided output: the party that expects output is the receiver regardless
+  // of the counts just exchanged -- it is the only party that learns the result.
   if (localOutput.expectsOutput && !partnerOutput.expectsOutput)
     return "receiver";
   if (!localOutput.expectsOutput && partnerOutput.expectsOutput)
     return "sender";
 
-  // Both expect output: exchange record counts. Initiator sends first;
-  // responder receives first then sends.
-  if (handshakeRole === "initiator") {
-    await conn.send({ recordCount: localRecordCount });
-    const msg = await receiveParsed(conn, recordCountMessage);
-    return pickRole(localRecordCount, msg.recordCount, handshakeRole);
-  } else {
-    const msg = await receiveParsed(conn, recordCountMessage);
-    await conn.send({ recordCount: localRecordCount });
-    return pickRole(localRecordCount, msg.recordCount, handshakeRole);
-  }
+  // Both expect output: the assignment is free, so minimize total work.
+  return pickRole(localRecordCount, partnerRecordCount, handshakeRole);
 }
