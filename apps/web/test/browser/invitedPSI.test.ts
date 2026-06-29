@@ -85,6 +85,7 @@ const firstNameOnlyTerms = {
   version: "1.0.0",
   date: "2026-01-01",
   algorithm: "psi" as const,
+  linkageStrategy: "cascade" as const,
   output: { expectsOutput: true, shareWithPartner: true },
   deduplicate: false,
   linkageFields: [{ name: "firstName", type: "first_name" as const }],

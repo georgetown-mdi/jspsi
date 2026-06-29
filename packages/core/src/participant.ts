@@ -207,6 +207,91 @@ export class PSIParticipant {
     return this.stages;
   }
 
+  // Building-block PSI steps used by the single-pass strategy
+  // (linkViaSinglePassPSI in link.ts). Unlike identifyIntersection below, which
+  // runs the whole back-and-forth itself, single-pass calls these one at a time
+  // and sequences the exchange on its own. Each wraps the underlying PSI library,
+  // keeping the secret key and the library's server/client objects private to this
+  // class; callers see only raw bytes and lists of indices.
+
+  /**
+   * Encrypts this party's values once under the server key, returning the
+   * serialized setup message and a "permutation" -- a lookup that undoes the
+   * reordering the library does internally. The library sorts the values before
+   * encrypting; entry i of the lookup gives the original input position of the
+   * value now in sorted slot i, so a match reported in sorted terms can be traced
+   * back to the row it came from. Requires the `"starter"` role.
+   */
+  public createServerSetup(values: ReadonlyArray<string>): {
+    setup: Uint8Array;
+    permutation: Array<number>;
+  } {
+    const server = this.psi.server;
+    if (!server)
+      throw new Error(`${this.id}: createServerSetup requires the server role`);
+    const permutation: Array<number> = [];
+    const setup = server.createSetupMessage(
+      0.0,
+      -1,
+      values,
+      this.library.dataStructure.Raw,
+      permutation,
+    );
+    return { setup: setup.serializeBinary(), permutation };
+  }
+
+  /**
+   * Doubly-encrypts the partner's request under the server key, returning the
+   * serialized response. Requires the `"starter"` role.
+   */
+  public processClientRequest(requestBytes: Uint8Array): Uint8Array {
+    const server = this.psi.server;
+    if (!server)
+      throw new Error(
+        `${this.id}: processClientRequest requires the server role`,
+      );
+    const request = this.library.request.deserializeBinary(requestBytes);
+    return server.processRequest(request).serializeBinary();
+  }
+
+  /**
+   * Encrypts this party's set once under the client key, returning the serialized
+   * request. Requires the `"joiner"` role.
+   */
+  public createClientRequest(values: ReadonlyArray<string>): Uint8Array {
+    const client = this.psi.client;
+    if (!client)
+      throw new Error(
+        `${this.id}: createClientRequest requires the client role`,
+      );
+    return client.createRequest(values).serializeBinary();
+  }
+
+  /**
+   * Finishes the match for this party: removes its own encryption layer from the
+   * partner's doubly-encrypted response and compares it against the partner's
+   * setup, returning the list of value matches. Each pair is `[index among this
+   * party's distinct values, index among the partner's values]`. WARNING: these
+   * index de-duplicated VALUES, not data rows -- the cascade replay (link.ts) is
+   * what turns them into record pairs. The partner's index is in the library's
+   * internal sorted order; map it back to input order with the permutation from
+   * {@link createServerSetup}. Requires the `"joiner"` role.
+   */
+  public computeValueMatches(
+    setupBytes: Uint8Array,
+    responseBytes: Uint8Array,
+  ): [Array<number>, Array<number>] {
+    const client = this.psi.client;
+    if (!client)
+      throw new Error(
+        `${this.id}: computeValueMatches requires the client role`,
+      );
+    const setup = this.library.serverSetup.deserializeBinary(setupBytes);
+    const response = this.library.response.deserializeBinary(responseBytes);
+    const table = client.getAssociationTable(setup, response);
+    return [table[0], table[1]];
+  }
+
   /**
    * Returns an association table with elements [localIndices, partnerIndices]
    */

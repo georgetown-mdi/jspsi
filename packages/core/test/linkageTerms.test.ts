@@ -1150,6 +1150,39 @@ test("transform params keys are normalized (params are not opaque)", () => {
   });
 });
 
+// ─── linkageStrategy schema ──────────────────────────────────────────────────
+
+describe("linkageStrategy", () => {
+  // snake_case `linkage_strategy` exercises the camelize pre-pass for the new
+  // field; the hyphenated VALUE "single-pass" is a value, not a key, so it is
+  // left untouched by camelizeKeys.
+  test("defaults to cascade when unspecified", () => {
+    const result = parseLinkageTerms(base);
+    expect(result.linkageStrategy).toBe("cascade");
+  });
+
+  test("parses an explicit cascade", () => {
+    const result = parseLinkageTerms({ ...base, linkage_strategy: "cascade" });
+    expect(result.linkageStrategy).toBe("cascade");
+  });
+
+  test("parses single-pass", () => {
+    const result = parseLinkageTerms({
+      ...base,
+      linkage_strategy: "single-pass",
+    });
+    expect(result.linkageStrategy).toBe("single-pass");
+  });
+
+  test("rejects an unknown strategy", () => {
+    const result = safeParseLinkageTerms({
+      ...base,
+      linkage_strategy: "two-pass",
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
 // ─── validateCompatibility ───────────────────────────────────────────────────
 
 const sharedFields: LinkageTerms["linkageFields"] = [
@@ -1164,6 +1197,7 @@ const termsA: LinkageTerms = {
   identity: "Party A",
   date: "2025-01-01",
   algorithm: "psi",
+  linkageStrategy: "cascade",
   output: { expectsOutput: true, shareWithPartner: true },
   deduplicate: false,
   linkageFields: sharedFields,
@@ -1205,6 +1239,24 @@ test("algorithm mismatch is an error", () => {
     algorithm: "psi-c",
   });
   expect(errors.some((e) => e.includes("algorithm mismatch"))).toBe(true);
+});
+
+test("linkage strategy mismatch is an error", () => {
+  const { errors } = validateCompatibility(
+    { ...termsA, linkageStrategy: "single-pass" },
+    { ...termsB, linkageStrategy: "cascade" },
+  );
+  expect(errors.some((e) => e.includes("linkage strategy mismatch"))).toBe(
+    true,
+  );
+});
+
+test("matching single-pass strategies are compatible", () => {
+  const { errors } = validateCompatibility(
+    { ...termsA, linkageStrategy: "single-pass" },
+    { ...termsB, linkageStrategy: "single-pass" },
+  );
+  expect(errors).toHaveLength(0);
 });
 
 test("neither party expects output is an error", () => {
@@ -2434,6 +2486,7 @@ const inviterBase: LinkageTerms = {
   identity: "Inviting Org",
   date: "2025-01-01",
   algorithm: "psi",
+  linkageStrategy: "cascade",
   output: { expectsOutput: true, shareWithPartner: true },
   deduplicate: false,
   linkageFields: [{ name: "ssn", type: "ssn" }],

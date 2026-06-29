@@ -75,6 +75,19 @@ Date these linkage terms were last modified. A mismatch produces a warning indic
 
 > **Not yet implemented:** the `psi-c` algorithm is not yet fully implemented. It is targeted for a release after 1.0; see [ROADMAP.md](ROADMAP.md). Use `psi` for now.
 
+### `linkage_terms.linkage_strategy`
+
+*Type:* enum: `cascade` | `single-pass`  
+*Required:* yes (defaults to `cascade` when omitted)  
+*Consistency:* mandatory
+
+How the agreed linkage keys are matched between the two parties' records. Both strategies produce the same association table; they differ only in how the per-key matching is sequenced on the wire, and in what one party discloses to the other.
+
+- `cascade` -- the default. Matches the keys one at a time, in order; each round excludes the records already matched by an earlier key. The number of network round trips grows with the number of keys.
+- `single-pass` -- batches every key into one exchange and has the receiver reconstruct the cascade locally. The number of round trips stays the same no matter how many keys there are, which makes a multi-key linkage practical over a high-latency channel (such as `filedrop` or `sftp`), where a chain of dependent rounds is prohibitively slow. It has a tighter scale ceiling than `cascade`; an exchange too large for it aborts with a clear error recommending `cascade`.
+
+`single-pass` is not a free optimization: to reconstruct the cascade in one pass, the sender sends the receiver the full record-by-record picture of which records share a value under each key, so the receiver sees matches on less precise keys that the step-by-step cascade would have discarded before they were ever shared. The emitted result is the same either way; the difference is what the receiver learns along the way. Choose `single-pass` when the round-trip saving matters and that additional disclosure to the receiver is acceptable. Both parties must agree on the value or the exchange aborts. The wire shape and disclosure are specified in [PROTOCOL.md](spec/PROTOCOL.md#linkage-strategies-cascade-and-single-pass).
+
 ### `linkage_terms.output`
 
 *Type:* object  

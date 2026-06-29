@@ -1200,6 +1200,7 @@ const minimalTerms: LinkageTerms = {
   identity: "test",
   date: "2025-01-01",
   algorithm: "psi",
+  linkageStrategy: "cascade",
   output: { expectsOutput: true, shareWithPartner: false },
   deduplicate: false,
   linkageFields: [
@@ -1549,6 +1550,7 @@ describe("resolveFieldColumns", () => {
     identity: "test",
     date: "2025-01-01",
     algorithm: "psi",
+    linkageStrategy: "cascade",
     output: { expectsOutput: true, shareWithPartner: false },
     deduplicate: false,
     linkageFields: [
@@ -2188,6 +2190,7 @@ describe("assessLinkageSatisfiability dead keys", () => {
     identity: "Party",
     date: "2025-01-01",
     algorithm: "psi",
+    linkageStrategy: "cascade",
     output: { expectsOutput: true, shareWithPartner: false },
     deduplicate: false,
     linkageFields: [{ name: "dob", type: "date_of_birth" }],
@@ -2414,6 +2417,7 @@ describe("assessLinkageSatisfiability matches buildStandardizedDataset", () => {
     identity: "Party",
     date: "2025-01-01",
     algorithm: "psi",
+    linkageStrategy: "cascade",
     output: { expectsOutput: true, shareWithPartner: false },
     deduplicate: false,
     linkageFields: [
@@ -3073,6 +3077,7 @@ describe("summarizeDatasetConstraintViolations", () => {
     identity: "test",
     date: "2025-01-01",
     algorithm: "psi",
+    linkageStrategy: "cascade",
     output: { expectsOutput: true, shareWithPartner: false },
     deduplicate: false,
     linkageFields: [

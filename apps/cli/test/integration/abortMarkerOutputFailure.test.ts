@@ -39,6 +39,7 @@ const baseTerms: Omit<LinkageTerms, "identity"> = {
   version: "1.0.0",
   date: "2026-01-01",
   algorithm: "psi",
+  linkageStrategy: "cascade",
   deduplicate: false,
   output: { expectsOutput: true, shareWithPartner: true },
   linkageFields: [{ name: "firstName", type: "first_name" }],

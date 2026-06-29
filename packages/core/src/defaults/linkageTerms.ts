@@ -238,6 +238,7 @@ export function getDefaultLinkageTerms(
     identity,
     date: new Date().toISOString().substring(0, 10),
     algorithm: "psi",
+    linkageStrategy: "cascade",
     output: {
       expectsOutput: true,
       shareWithPartner: true,

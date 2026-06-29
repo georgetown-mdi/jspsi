@@ -444,7 +444,7 @@ interface ZipCodeField {
 /**
  * A standardized PII field that participates in linkage. Linkage key elements
  * reference these fields by name; data cleaning pipelines produce them by name.
- * Constraints are standards both parties commit to meeting — the application
+ * Constraints are standards both parties commit to meeting -- the application
  * warns if violated but does not enforce them.
  */
 export type LinkageField =
@@ -852,6 +852,28 @@ const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
   expirationDate: z.iso.date(),
 });
 
+// --- Linkage strategy --------------------------------------------------------
+
+/**
+ * How the agreed linkage keys are matched between the two parties' records. Both
+ * strategies produce the SAME result; they differ only in how the per-key
+ * matching is sequenced over the network.
+ *
+ * - `cascade` (the default) -- the keys are matched one at a time, each round
+ *   building on the results of the one before. More network round-trips.
+ * - `single-pass` -- all keys are sent together in a single round-trip; the
+ *   receiver then reproduces the same step-by-step result locally. Far fewer
+ *   round-trips.
+ *
+ * See docs/spec/PROTOCOL.md for the wire format and the disclosure each involves.
+ */
+export type LinkageStrategy = "cascade" | "single-pass";
+
+export const LinkageStrategySchema: z.ZodType<LinkageStrategy> = z.enum([
+  "cascade",
+  "single-pass",
+]);
+
 // --- Linkage Terms -----------------------------------------------------------
 
 /**
@@ -862,22 +884,24 @@ const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
  * warning and an updated set of terms being output.
  *
  * Fields and their consistency requirements:
- * - `version` — mandatory. Two versions are incompatible if no migration path
+ * - `version` -- mandatory. Two versions are incompatible if no migration path
  *   exists.
- * - `identity` — none. Free-text identifying the holding party; recorded in
+ * - `identity` -- none. Free-text identifying the holding party; recorded in
  *   the exchange record (the disclosure log).
- * - `date` — soft. A mismatch warns that one party may have a stale copy.
- * - `algorithm` — mandatory. `psi` reveals matched identifiers; `psi-c` reveals
+ * - `date` -- soft. A mismatch warns that one party may have a stale copy.
+ * - `algorithm` -- mandatory. `psi` reveals matched identifiers; `psi-c` reveals
  *   only the count.
- * - `output` — mandatory.
- * - `deduplicate` — mandatory. Per-party; determines if multiple inputs can be
+ * - `linkageStrategy` -- mandatory. `cascade` (the default) or `single-pass`;
+ *   both produce the same output.
+ * - `output` -- mandatory.
+ * - `deduplicate` -- mandatory. Per-party; determines if multiple inputs can be
  *   matched to the same output.
- * - `linkageFields` — mandatory.
- * - `linkageKeys` — mandatory.
- * - `legalAgreement` — mandatory if present. The `reference`, `purpose`, and
+ * - `linkageFields` -- mandatory.
+ * - `linkageKeys` -- mandatory.
+ * - `legalAgreement` -- mandatory if present. The `reference`, `purpose`, and
  *   `expirationDate` are cross-checked; any mismatch, or an `expirationDate`
  *   that has passed, cancels the exchange.
- * - `payload` — mandatory if present.
+ * - `payload` -- mandatory if present.
  *
  * Constraints:
  * - `deduplicate: true` requires `output.expectsOutput: true`.
@@ -908,16 +932,22 @@ export interface LinkageTerms {
    * Free-text string identifying the party holding these linkage terms (e.g.
    * name organization, contact info). Included verbatim in the exchange
    * record.
-   * Consistency: none — parties may differ.
+   * Consistency: none -- parties may differ.
    */
   identity: string;
   /**
    * Date these linkage terms were last modified (ISO 8601, YYYY-MM-DD).
-   * Consistency: soft — a mismatch warns rather than cancels the exchange.
+   * Consistency: soft -- a mismatch warns rather than cancels the exchange.
    */
   date: string;
   /** `psi` reveals matched identifiers; `psi-c` reveals only the count. */
   algorithm: Algorithm;
+  /**
+   * How the agreed linkage keys are exchanged; see {@link LinkageStrategy}.
+   * Consistency: mandatory -- a mismatch aborts the exchange. The input may omit
+   * it; the schema defaults it to `cascade`.
+   */
+  linkageStrategy: LinkageStrategy;
   output: Output;
   /**
    * Whether this party's records may match more than one of the partners'.
@@ -948,6 +978,7 @@ const LinkageTermsBaseSchema = z.object({
   identity: z.string().min(1).max(MAX_TEXT_LENGTH),
   date: z.iso.date(),
   algorithm: AlgorithmSchema,
+  linkageStrategy: LinkageStrategySchema.default("cascade"),
   output: OutputSchema,
   deduplicate: z.boolean(),
   // Element COUNT bounded at MAX_LINKAGE_ENTRIES before per-element validation,
@@ -1296,6 +1327,16 @@ export function validateCompatibility(
     errors.push(
       `algorithm mismatch: local is ${sanitizeForDisplay(local.algorithm)}, ` +
         `partner is ${sanitizeForDisplay(partner.algorithm)}`,
+    );
+  }
+
+  // Strictly consistent, like algorithm: both parties must use the same strategy
+  // or they would compute different matches. The schema fills in "cascade" when
+  // omitted, so the value is always present and compared directly.
+  if (local.linkageStrategy !== partner.linkageStrategy) {
+    errors.push(
+      `linkage strategy mismatch: local is ${sanitizeForDisplay(local.linkageStrategy)}, ` +
+        `partner is ${sanitizeForDisplay(partner.linkageStrategy)}`,
     );
   }
 

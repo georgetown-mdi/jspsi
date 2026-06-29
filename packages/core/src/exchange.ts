@@ -16,7 +16,11 @@ import {
   resolveRole,
 } from "./protocolSetup.js";
 import { reconcileHostKeyFingerprints } from "./hostKeyReconciliation.js";
-import { linkViaPSI } from "./link.js";
+import {
+  linkViaPSI,
+  linkViaSinglePassPSI,
+  singlePassReplyWouldExceedCap,
+} from "./link.js";
 import {
   preparePayload,
   exchangePayloads,
@@ -155,6 +159,35 @@ export function prepareForExchange(
   // inherit the same fail-closed check; it is a no-op on the default and guided
   // paths, which author no payload block. See assertPayloadSendDisclosed.
   assertPayloadSendDisclosed(linkageTerms.payload, metadata);
+
+  // Pre-flight the single-pass size ceiling, before connecting. Single-pass ships
+  // this party's distinct-value index table (one int32 per linkage key per record)
+  // in one frame; if our own index table would not fit, single-pass cannot succeed
+  // and would otherwise abort mid-flight, after the handshake and the PSI
+  // encryption. Pre-flight it whenever this party could be the sender: couldSend is
+  // false only for a dedicated output-only receiver (expectsOutput but not
+  // shareWithPartner), which never ships an index table. The authoritative check is
+  // still in linkViaSinglePassPSI, where the encrypted sets' size is known too;
+  // this only catches the common case earlier.
+  if (linkageTerms.linkageStrategy === "single-pass") {
+    const couldSend =
+      !linkageTerms.output.expectsOutput ||
+      linkageTerms.output.shareWithPartner;
+    if (
+      couldSend &&
+      singlePassReplyWouldExceedCap(
+        linkageTerms.linkageKeys.length,
+        rawRows.length,
+      )
+    ) {
+      throw new Error(
+        `single-pass linkage cannot fit this dataset: ${rawRows.length} ` +
+          `record(s) across ${linkageTerms.linkageKeys.length} linkage key(s) ` +
+          "exceed the single-pass frame ceiling -- use the cascade linkage " +
+          "strategy (set linkage_strategy: cascade)",
+      );
+    }
+  }
 
   let dateInputFormat: string | undefined;
   if (exchangeDataSpec.standardization === undefined) {
@@ -491,7 +524,14 @@ export async function runExchange(
     },
   );
 
-  const associationTable = await linkViaPSI(
+  // Single-pass is allowlisted; any other value (including the default) runs the
+  // cascade. No mismatch guard needed here -- validateCompatibility already
+  // aborted upstream if the two parties' strategies differ.
+  const runLinkage =
+    linkageTerms.linkageStrategy === "single-pass"
+      ? linkViaSinglePassPSI
+      : linkViaPSI;
+  const associationTable = await runLinkage(
     { cardinality: "one-to-one" },
     participant,
     conn,

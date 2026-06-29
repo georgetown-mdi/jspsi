@@ -106,6 +106,7 @@ describe("acceptorExchangeDataSpec", () => {
     identity: "Inviting Org",
     date: "2025-01-01",
     algorithm: "psi",
+    linkageStrategy: "cascade",
     output: { expectsOutput: true, shareWithPartner: true },
     deduplicate: false,
     linkageFields: [

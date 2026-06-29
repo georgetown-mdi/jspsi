@@ -45,6 +45,7 @@ const baseTerms: LinkageTerms = {
   identity: "County Health Department",
   date: "2026-01-15",
   algorithm: "psi",
+  linkageStrategy: "cascade",
   output: { expectsOutput: true, shareWithPartner: false },
   deduplicate: false,
   linkageFields: [
