@@ -74,3 +74,32 @@ export function formatRuntimeEnv(snapshot: RuntimeEnvSnapshot): string {
       : "")
   );
 }
+
+/** The subset of a logger {@link logRuntimeEnv} writes to. */
+interface BannerLogger {
+  info(message: string): void;
+  warn(message: string): void;
+}
+
+/**
+ * Emit the runtime banner ({@link formatRuntimeEnv} of {@link readRuntimeEnv})
+ * at info level. Reading the runtime globals is best-effort: should it ever
+ * throw, the failure is reported at warn level and swallowed rather than
+ * propagated, because this banner only annotates the exchange log and must never
+ * be able to abort the exchange it precedes. The reader is a parameter so the
+ * failure path can be exercised from a test without mocking process/os/v8.
+ */
+export function logRuntimeEnv(
+  log: BannerLogger,
+  read: () => RuntimeEnvSnapshot = readRuntimeEnv,
+): void {
+  let banner: string;
+  try {
+    banner = formatRuntimeEnv(read());
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    log.warn(`runtime: environment probe failed (${reason})`);
+    return;
+  }
+  log.info(banner);
+}

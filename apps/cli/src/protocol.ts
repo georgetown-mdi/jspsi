@@ -29,7 +29,7 @@ import { buildRotatedKeyFile, saveKeyFile } from "./keyFile";
 import { preflightKeyFilePath } from "./keyFilePreflight";
 import { writeExchangeRecord, type RecordOutput } from "./recordFile";
 import { writeOutput } from "./util/cli";
-import { formatRuntimeEnv, readRuntimeEnv } from "./util/runtimeEnv";
+import { logRuntimeEnv } from "./util/runtimeEnv";
 
 /**
  * Operator guidance appended to the file-sync peer-silence timeout error.
@@ -215,8 +215,10 @@ export async function runProtocol(
   // the run operates under. This is permanent support-log hygiene -- when a run is
   // mailed in after a failure, the ceilings it ran under are already on record,
   // so an out-of-memory death (heap-OOM error, or a silent container kill) can be
-  // read against the limits without a second attempt to reproduce.
-  log.info(formatRuntimeEnv(readRuntimeEnv()));
+  // read against the limits without a second attempt to reproduce. Best-effort:
+  // a failure to probe the runtime warns and is swallowed, never aborting the
+  // exchange this line only annotates.
+  logRuntimeEnv(log);
 
   if (connection.channel !== "filedrop" && connection.channel !== "sftp")
     // Inside this branch `connection` narrows to `never`; cast through unknown
