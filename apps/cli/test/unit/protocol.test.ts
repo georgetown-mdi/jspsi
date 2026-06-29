@@ -89,6 +89,10 @@ import {
   PeerAbortError,
   ConnectionError,
   FrameSizeExceededError,
+  MESSAGE_ENVELOPE_VERSION,
+  MESSAGE_TYPE_BINARY,
+  MESSAGE_HEADER_BYTES,
+  AEAD_ENVELOPE_VERSION,
 } from "@psilink/core";
 import type { ExchangeRecord, OpeningData } from "@psilink/core";
 import {
@@ -2123,11 +2127,11 @@ test("runProtocol resolves (does not reject) when interrupted by SIGTERM mid-run
 
 // --- Application-layer AEAD encryption ----------------------------------------
 
-test("authenticated exchange runs through EncryptedMessageConnection: wire bytes are { enc } envelopes, not cleartext", async () => {
+test("authenticated exchange runs through EncryptedMessageConnection: wire bytes are binary AEAD frames, not cleartext", async () => {
   // After the key exchange, runProtocol must wrap mc in EncryptedMessageConnection and run
-  // the PSI exchange through it. This is asserted at the wire level: every PSI
-  // frame written to the drop directory is an { enc } AEAD envelope, the
-  // cleartext probe never appears on the wire, and the peer decrypts the frame
+  // the PSI exchange through it. This is asserted at the wire level: at least one
+  // PSI frame written to the drop directory is an encrypted binary AEAD frame,
+  // the cleartext probe never appears on the wire, and the peer decrypts the frame
   // back to its original form (proving a real AES-GCM round-trip through the
   // decorator, not a no-op pass-through). FileSyncConnection and
   // authenticateConnection are the real implementations here, so the session
@@ -2137,9 +2141,9 @@ test("authenticated exchange runs through EncryptedMessageConnection: wire bytes
   saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
   saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
-  // The probe carries a canary containing '!' (outside the base64url alphabet),
-  // so it can never appear inside an { enc } base64url string; if it ever
-  // crossed the wire in cleartext the substring check below would catch it.
+  // A distinctive cleartext probe; if it ever crossed the wire in cleartext the
+  // raw-bytes substring check below would catch it. It rides the encrypted
+  // channel, so it must never appear in any written frame.
   const CANARY = "PSILINK_CLEARTEXT_CANARY_!do-not-leak!";
 
   // Capture every byte the transport writes, at write time, before the peer's
@@ -2210,50 +2214,44 @@ test("authenticated exchange runs through EncryptedMessageConnection: wire bytes
     //    the decorator performed a real AES-GCM round-trip, not a pass-through.
     expect(received).toEqual({ probe: CANARY });
 
-    // Decode every non-empty buffer the transport wrote, keeping the raw text
-    // for the cleartext check and the parsed message envelopes for the shape
-    // check. send() serializes each message as { ts, seq, type, payload }.
-    // Every protocol frame is written as a Buffer (FileSyncConnection.send
-    // JSON.stringifies the message and calls put(Buffer, ...)). Assert that
-    // invariant rather than silently filtering: a future stream-based write
-    // must fail this test loudly instead of slipping a cleartext frame past
-    // the canary check below by being dropped from wireTexts.
+    // Collect every non-empty buffer the transport wrote. Every protocol frame
+    // is written as a Buffer (FileSyncConnection.send serializes the message to a
+    // binary envelope and calls put(Buffer, ...)). Assert that invariant rather
+    // than silently filtering: a future stream-based write must fail this test
+    // loudly instead of slipping a cleartext frame past the canary check below.
     const writtenSrcs = putSpy.mock.calls.map((call) => call[0]);
     for (const src of writtenSrcs) {
       expect(Buffer.isBuffer(src)).toBe(true);
     }
-    const wireTexts = writtenSrcs
-      .filter((src): src is Buffer => Buffer.isBuffer(src) && src.length > 0)
-      .map((src) => src.toString("utf8"));
+    const wireBuffers = writtenSrcs.filter(
+      (src): src is Buffer => Buffer.isBuffer(src) && src.length > 0,
+    );
 
-    // 2. The cleartext probe never crossed the wire in any frame (PSI or key-exchange).
-    for (const text of wireTexts) {
-      expect(text).not.toContain(CANARY);
+    // 2. The cleartext probe never crossed the wire in any frame (PSI or
+    //    key-exchange) -- checked over the raw bytes, since frames are now binary.
+    for (const buf of wireBuffers) {
+      expect(buf.includes(CANARY)).toBe(false);
     }
 
-    // 3. At least one message frame's payload is an { enc } envelope -- the PSI
-    //    frame went out encrypted, not as a cleartext protocol frame. Key-exchange
-    //    frames also carry a payload, but their key-exchange fields are never { enc }.
-    const encEnvelopes = wireTexts
-      .map((text) => {
-        try {
-          return JSON.parse(text) as { payload?: unknown };
-        } catch {
-          return undefined;
-        }
-      })
-      .filter(
-        (msg): msg is { payload: unknown } =>
-          msg !== undefined && msg !== null && "payload" in msg,
-      )
-      .map((msg) => msg.payload)
-      .filter(
-        (p): p is { enc: string } =>
-          typeof p === "object" &&
-          p !== null &&
-          typeof (p as { enc?: unknown }).enc === "string",
-      );
-    expect(encEnvelopes.length).toBeGreaterThanOrEqual(1);
+    // 3. At least one message frame is a binary-typed envelope whose payload is
+    //    itself an AEAD envelope -- the PSI frame went out encrypted, not as a
+    //    cleartext protocol frame. The file-sync envelope is
+    //    `version || type || seq || payload`; the key-exchange handshake frames
+    //    are MESSAGE_TYPE_OBJECT (JSON), while an encrypted AEAD frame rides a
+    //    MESSAGE_TYPE_BINARY envelope. Checking the inner payload's leading
+    //    AEAD_ENVELOPE_VERSION (not merely the outer cleartext MESSAGE_TYPE_BINARY
+    //    discriminator, which any Uint8Array send would set) keeps this specific
+    //    to the AEAD layer: a future raw-binary path that bypassed the decorator
+    //    would fail it. The min length is the file-sync header plus the AEAD
+    //    minimum (1-byte version + 12-byte IV + 16-byte tag).
+    const aeadFrames = wireBuffers.filter(
+      (buf) =>
+        buf.length >= MESSAGE_HEADER_BYTES + 1 + 12 + 16 &&
+        buf[0] === MESSAGE_ENVELOPE_VERSION &&
+        buf[1] === MESSAGE_TYPE_BINARY &&
+        buf[MESSAGE_HEADER_BYTES] === AEAD_ENVELOPE_VERSION,
+    );
+    expect(aeadFrames.length).toBeGreaterThanOrEqual(1);
   } finally {
     putSpy.mockRestore();
   }

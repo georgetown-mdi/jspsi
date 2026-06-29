@@ -644,12 +644,103 @@ interface Options {
   joinerRecoveryMs: number;
 }
 
-const Message = z.object({
-  ts: z.number().nonnegative(),
-  seq: z.number().nonnegative(),
-  type: z.literal(["Object", "Uint8Array"]),
-  payload: z.json(),
-});
+// Binary message-frame envelope. Every data-plane message file -- a JSON control
+// message (the pre-encryption handshake) and an encrypted binary PSI frame alike
+// -- is written as raw bytes `version || type || seq || payload`:
+//
+//   byte 0      version/format marker (MESSAGE_ENVELOPE_VERSION)
+//   byte 1      payload type (MESSAGE_TYPE_OBJECT | MESSAGE_TYPE_BINARY) -- the
+//               OUTER, cleartext discriminator the reader keys on, because an
+//               encrypted frame's own type tag lives inside the AEAD ciphertext
+//               and cannot drive the transport read
+//   bytes 2..9  per-session sequence number, 8-byte big-endian
+//   bytes 10..  payload: UTF-8 JSON (MESSAGE_TYPE_OBJECT) or raw frame bytes
+//               (MESSAGE_TYPE_BINARY)
+//
+// Carrying the payload as raw bytes -- rather than the former
+// `{ ts, seq, type, payload }` JSON with a Uint8Array payload base64url-encoded
+// into the `payload` string -- removes the ~4/3 base64 expansion and ends the
+// read path's reliance on `Buffer.prototype.toString()` (which throws above
+// Node's maximum string length), so a frame larger than that limit can be read.
+// The send-time `ts` is no longer carried in the body (it was write-only there;
+// a timestamped filename still records it).
+/** @internal */
+export const MESSAGE_ENVELOPE_VERSION = 1;
+/** @internal */
+export const MESSAGE_TYPE_OBJECT = 0;
+/** @internal */
+export const MESSAGE_TYPE_BINARY = 1;
+/** @internal */
+export const MESSAGE_HEADER_BYTES = 10;
+
+// Human-readable label for a message payload type, used only in log lines (it
+// preserves the pre-binary "Object"/"Uint8Array" wording so log-scraping stays
+// stable across this format change).
+const messageTypeLabel = (type: number): string =>
+  type === MESSAGE_TYPE_BINARY ? "Uint8Array" : "Object";
+
+/**
+ * Serialize a data-plane message into its on-disk binary envelope. `payload` is
+ * the raw payload bytes (UTF-8 JSON for {@link MESSAGE_TYPE_OBJECT}, the frame
+ * itself for {@link MESSAGE_TYPE_BINARY}). The returned Buffer's length is the
+ * exact on-disk byte count encoded into the message filename, so the receiver's
+ * sync-gate can distinguish a partially-synced file from a complete one.
+ *
+ * @internal exported for the file-sync transport tests.
+ */
+export function serializeFileSyncMessage(
+  type: number,
+  seq: number,
+  payload: Uint8Array,
+): Buffer {
+  const out = Buffer.allocUnsafe(MESSAGE_HEADER_BYTES + payload.length);
+  out[0] = MESSAGE_ENVELOPE_VERSION;
+  out[1] = type;
+  out.writeBigUInt64BE(BigInt(seq), 2);
+  out.set(payload, MESSAGE_HEADER_BYTES);
+  return out;
+}
+
+interface DeserializedMessage {
+  type: number;
+  seq: number;
+  // A view onto the source buffer (no copy): a MESSAGE_TYPE_OBJECT payload is
+  // handed to parseBoundedJson, a MESSAGE_TYPE_BINARY payload is delivered as-is,
+  // so the frame is never stringified regardless of its size.
+  payload: Uint8Array;
+}
+
+/**
+ * Parse a message file's bytes back into its envelope fields, validating the
+ * version marker, the type discriminator, and the minimum length. Throws a plain
+ * Error (the caller wraps it as a terminal UsageError) on any structural
+ * failure. Deliberately does NOT decode the payload, so a frame larger than
+ * Node's maximum string length is never converted to a string here.
+ */
+function deserializeFileSyncMessage(raw: Uint8Array): DeserializedMessage {
+  if (raw.length < MESSAGE_HEADER_BYTES)
+    throw new Error("message envelope is shorter than its header");
+  if (raw[0] !== MESSAGE_ENVELOPE_VERSION)
+    throw new Error(`unsupported message envelope version ${raw[0]}`);
+  const type = raw[1];
+  if (type !== MESSAGE_TYPE_OBJECT && type !== MESSAGE_TYPE_BINARY)
+    throw new Error(`unknown message payload type ${type}`);
+  // An honest writer caps seq at the per-session message counter (far below
+  // 2^53), so reject anything above MAX_SAFE_INTEGER as malformed before
+  // narrowing to a Number -- a Number() conversion above that range loses
+  // precision, and comparing as BigInt first mirrors the AEAD decorator's
+  // inbound-seq guard (handleInbound) rather than leaning on the downstream
+  // retain-mode cross-check to fail-safe on the corrupted value.
+  const seqBig = new DataView(
+    raw.buffer,
+    raw.byteOffset,
+    raw.byteLength,
+  ).getBigUint64(2, false);
+  if (seqBig > BigInt(Number.MAX_SAFE_INTEGER))
+    throw new Error("message envelope sequence number exceeds safe range");
+  const seq = Number(seqBig);
+  return { type, seq, payload: raw.subarray(MESSAGE_HEADER_BYTES) };
+}
 
 const getDefaultOptions = (): Options => {
   return {
@@ -3855,10 +3946,18 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         }
       }
 
-      let type = "Object";
+      // The outer, cleartext type discriminator: a raw Uint8Array (an encrypted
+      // PSI frame, or a raw binary frame on the unencrypted path) travels as its
+      // own bytes; anything else is JSON-encoded. No base64: a Uint8Array is
+      // carried verbatim, not expanded into a base64url string.
+      let type: number;
+      let payloadBytes: Uint8Array;
       if (data instanceof Uint8Array) {
-        data = Buffer.from(data).toString("base64");
-        type = "Uint8Array";
+        type = MESSAGE_TYPE_BINARY;
+        payloadBytes = data;
+      } else {
+        type = MESSAGE_TYPE_OBJECT;
+        payloadBytes = Buffer.from(JSON.stringify(data));
       }
 
       const ts = Date.now();
@@ -3869,9 +3968,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // the exact on-disk size; the peer waits until the synced file reaches
       // that many bytes before reading it, so a partial sync delivery is never
       // read as a complete message.
-      const payload = Buffer.from(
-        JSON.stringify({ ts, seq, type, payload: data }),
-      );
+      const payload = serializeFileSyncMessage(type, seq, payloadBytes);
       const outName = this.messageFilename(payload.byteLength, seq, ts);
       const outPath = `${outboundPath}/${outName}`;
 
@@ -4443,52 +4540,73 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
           reachedGet = true;
           const message = await this.client.get(inPath, {
-            encoding: "utf-8",
+            // Read raw bytes: a binary frame is delivered verbatim and a JSON
+            // control payload is bounded-parsed from its bytes, so the body is
+            // never converted to a string (a capped read always resolves to a
+            // Buffer regardless, but this states the intent).
+            encoding: null,
             maxBytes: MAX_FRAME_SIZE_BYTES,
           });
           reachedGet = false;
 
           // The file has already passed the byte-count gate above, so it is
-          // fully synced: a JSON-parse or schema-validation failure here is
-          // genuine corruption, not a partial write, and re-reading the same
-          // bytes cannot fix it. Classify it as a terminal UsageError (the
-          // catch below stops the poller on a UsageError) -- the same rule
+          // fully synced: an envelope or JSON-parse failure here is genuine
+          // corruption, not a partial write, and re-reading the same bytes
+          // cannot fix it. Classify it as a terminal UsageError (the catch below
+          // stops the poller on a UsageError) -- the same rule
           // readControlFileWithGate applies to control files. This is
           // mode-agnostic: in retain mode the never-deleted file would
           // otherwise be re-read every poll cycle until the peer timeout; in
           // delete mode it is deleted before this runs, but the classification
           // stays uniform so a corrupt frame is a clean terminal failure rather
           // than a silently dropped message.
-          const parseMessage = (): z.infer<typeof Message> => {
-            let parsed: unknown;
+          //
+          // The returned `data` is ready for emit: the parsed object for a JSON
+          // control message, or the raw frame bytes for a binary frame. Only the
+          // JSON path decodes to a string (through the bounded chokepoint); the
+          // binary frame is never stringified, so a frame larger than Node's
+          // maximum string length is read intact.
+          const parseMessage = (): {
+            seq: number;
+            type: number;
+            data: unknown;
+          } => {
+            let envelope: DeserializedMessage;
             try {
-              parsed = parseBoundedJson(message.toString());
+              envelope = deserializeFileSyncMessage(message);
             } catch (parseErr: unknown) {
-              // The parser's own message is sanitized too: V8's JSON.parse error
-              // quotes a span of the offending input (`Unexpected token 'x',
-              // "...." is not valid JSON`), so this whole error string carries
-              // the peer's raw message bytes -- the same control/ANSI/Unicode
-              // injection vector as the filename, one interpolation over.
+              // The envelope error carries only fixed text and small header
+              // numbers, but route it through the same escape as the sibling
+              // throws below for uniformity.
+              throw new UsageError(
+                `message file ${sanitizeForDisplay(messageFile.name)} from ` +
+                  `${sanitizeForDisplay(peerId)} is fully synced but has a ` +
+                  `malformed envelope: ${sanitizeForDisplay(errMessage(parseErr))}`,
+              );
+            }
+            if (envelope.type === MESSAGE_TYPE_BINARY)
+              return {
+                seq: envelope.seq,
+                type: envelope.type,
+                data: envelope.payload,
+              };
+            let value: unknown;
+            try {
+              // parseBoundedJson takes the raw payload bytes and structurally
+              // bounds them before JSON.parse. Its message is sanitized too:
+              // V8's JSON.parse error quotes a span of the offending input
+              // (`Unexpected token 'x', "...." is not valid JSON`), so the whole
+              // error string can carry the peer's raw bytes -- the same
+              // control/ANSI/Unicode injection vector as the filename.
+              value = parseBoundedJson(envelope.payload);
+            } catch (parseErr: unknown) {
               throw new UsageError(
                 `message file ${sanitizeForDisplay(messageFile.name)} from ` +
                   `${sanitizeForDisplay(peerId)} is fully synced but is not ` +
                   `valid JSON: ${sanitizeForDisplay(errMessage(parseErr))}`,
               );
             }
-            const result = Message.safeParse(parsed);
-            if (!result.success)
-              // Sanitized as well: the Message body is fully peer-controlled
-              // (`payload: z.json()`), and though today's zod reports schema
-              // paths and expected types rather than the received value, routing
-              // the parse-error text through the same escape keeps this sibling
-              // throw uniform with the JSON-parse one above and robust to a
-              // future schema/zod change that began echoing peer bytes.
-              throw new UsageError(
-                `message file ${sanitizeForDisplay(messageFile.name)} from ` +
-                  `${sanitizeForDisplay(peerId)} is fully synced but failed ` +
-                  `schema validation: ${sanitizeForDisplay(result.error.message)}`,
-              );
-            return result.data;
+            return { seq: envelope.seq, type: envelope.type, data: value };
           };
 
           if (this.options.retainFiles) {
@@ -4518,7 +4636,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
             this.log.trace(
               `[${this.role}] received message seq=${validatedMessage.seq}, ` +
-                `type=${validatedMessage.type}`,
+                `type=${messageTypeLabel(validatedMessage.type)}`,
             );
 
             // Write the ack marker before emit. The ack is the sender's go-ahead
@@ -4551,15 +4669,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               );
             }
 
-            if (validatedMessage.type === "Uint8Array") {
-              const bytes = Buffer.from(
-                validatedMessage.payload as string,
-                "base64",
-              );
-              this.emit("data", bytes);
-            } else {
-              this.emit("data", validatedMessage.payload);
-            }
+            // `data` is already the value to deliver: the parsed object for a
+            // JSON control message, or the raw frame bytes for a binary frame.
+            this.emit("data", validatedMessage.data);
             // Advance only after the application has seen the payload: if emit
             // throws, recvSeq stays at msgNNN so the (never-deleted) message file
             // is reprocessed on the next poll rather than permanently lost.
@@ -4573,7 +4685,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             const validatedMessage = parseMessage();
             this.log.trace(
               `[${this.role}] received message seq=${validatedMessage.seq}, ` +
-                `type=${validatedMessage.type}`,
+                `type=${messageTypeLabel(validatedMessage.type)}`,
             );
 
             this.log.debug(
@@ -4620,15 +4732,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               }
             }
 
-            if (validatedMessage.type === "Uint8Array") {
-              const bytes = Buffer.from(
-                validatedMessage.payload as string,
-                "base64",
-              );
-              this.emit("data", bytes);
-            } else {
-              this.emit("data", validatedMessage.payload);
-            }
+            // `data` is already the value to deliver: the parsed object for a
+            // JSON control message, or the raw frame bytes for a binary frame.
+            this.emit("data", validatedMessage.data);
           }
         }
       }

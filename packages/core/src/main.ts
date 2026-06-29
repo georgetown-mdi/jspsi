@@ -6,7 +6,10 @@ export * from "./types";
 export * from "./connection/fileSyncConnection";
 export type { HelloEnvelope } from "./connection/controlEnvelope";
 export * from "./connection/messageConnection";
-export { EncryptedMessageConnection } from "./connection/encryptedMessageConnection";
+export {
+  EncryptedMessageConnection,
+  AEAD_ENVELOPE_VERSION,
+} from "./connection/encryptedMessageConnection";
 export {
   getLogger,
   getLoggerForVerbosity,

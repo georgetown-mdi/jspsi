@@ -6,39 +6,38 @@
  * oversized file is refused before it is ingested. This closes the
  * memory-exhaustion denial of service a hostile SFTP/filedrop server admin
  * (an adversary under the threat model in docs/SECURITY_DESIGN.md) could
- * otherwise mount by writing an arbitrarily large ciphertext file: without the
- * bound the read allocates a string and byte array proportional to the
- * attacker-chosen file size. See docs/spec/CHANNEL_SECURITY.md.
+ * otherwise mount by writing an arbitrarily large frame file: without the bound
+ * the read allocates a byte array proportional to the attacker-chosen file
+ * size. See docs/spec/CHANNEL_SECURITY.md.
  *
- * Value: 536,870,888 bytes (~512 MiB), the exact value of Node's maximum string
- * length (`buffer.constants.MAX_STRING_LENGTH` on 64-bit). That length is the
- * hard ceiling above which the existing JSON-text read path cannot process a
- * frame at all: both read sites `.toString()` the buffer before parsing it
- * (through `parseBoundedJson`), and `Buffer.prototype.toString()` throws above
- * MAX_STRING_LENGTH. Anchoring the
- * cap there means it (a) never rejects a frame the transport could otherwise
- * decode -- anything larger already fails at `.toString()` regardless of memory
- * -- and (b) converts that late, opaque failure (raised only after the full,
- * attacker-sized buffer is already resident) into an early, clean refusal
- * before the allocation. The value is a deliberately derived platform ceiling,
- * not a round constant, and is fixed rather than configurable: a configurable
- * bound risks an operator raising it high enough to reintroduce the DoS.
+ * Value: 536,870,888 bytes (~512 MiB). This is a chosen memory bound, NOT a
+ * derived platform ceiling. It once equalled Node's maximum string length
+ * (`buffer.constants.MAX_STRING_LENGTH` on 64-bit) because the read path
+ * `.toString()`d each frame before parsing it (through `parseBoundedJson`) and
+ * `Buffer.prototype.toString()` throws above that length, so the string limit
+ * was the true hard ceiling and anchoring the cap there avoided rejecting any
+ * frame the transport could otherwise decode. That anchor is now void: the
+ * transport carries a binary frame as raw bytes and never stringifies it (the
+ * AEAD envelope and the file-sync message body are both binary; see
+ * encryptedMessageConnection.ts and fileSyncConnection.ts), so a frame larger
+ * than the former string limit can be read. The numeric value is retained
+ * unchanged -- still a reasonable ~512 MiB single-frame memory cap -- pending a
+ * separate rework that derives the single-pass frame cap from the exchanged
+ * record counts up to a fixed maximum dataset size (board item 206154573); the
+ * value is set there, not here.
  *
- * The literal is hard-coded rather than read from `buffer.constants` so this
- * module stays platform-neutral (it is imported by the transport-agnostic AEAD
- * decorator, which must not pull in Node's `buffer` module). MAX_STRING_LENGTH
- * has been this value on 64-bit Node for the project's supported range; a 32-bit
- * runtime would have a smaller string limit, in which case `.toString()` -- not
- * this cap -- would be the binding ceiling, which is still safe (a frame that
- * passes this cap but exceeds the smaller string limit is rejected at the parse
- * rather than read unbounded).
+ * It is fixed rather than configurable: a configurable bound risks an operator
+ * raising it high enough to reintroduce the DoS. The literal is hard-coded
+ * rather than read from `buffer.constants` so this module stays platform-neutral
+ * (it is imported by the transport-agnostic AEAD decorator, which must not pull
+ * in Node's `buffer` module).
  *
  * Headroom against the realistic worst-case legitimate frame: the largest PSI
  * frame is one party's full encrypted set sent as raw elliptic-curve points
- * (~64 bytes/element; see docs/spec/PROTOCOL.md), base64url-expanded by 4/3 on the
- * wire. 512 MiB of wire text decodes to ~384 MiB raw -- on the order of 6
- * million elements -- which is already more than this single-frame JSON-text
- * transport can carry, since a larger set would itself exceed MAX_STRING_LENGTH
- * and require chunking before this cap could ever bind it.
+ * (~35 bytes/element serialized on the wire; see docs/spec/PROTOCOL.md). With no
+ * base64 expansion the on-wire frame is its raw size plus a small fixed envelope,
+ * so 512 MiB carries on the order of 15 million elements -- already more than the
+ * single-frame single-pass transport practically ships before the separate
+ * single-pass dataset ceiling binds.
  */
 export const MAX_FRAME_SIZE_BYTES = 536_870_888;

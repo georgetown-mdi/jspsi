@@ -1,7 +1,5 @@
-import * as z from "zod";
-
 import { deriveAeadKey } from "../auth";
-import { toBase64Url, fromBase64Url, enc } from "../utils/crypto";
+import { enc } from "../utils/crypto";
 import {
   ConnectionError,
   asConnectionError,
@@ -14,25 +12,22 @@ import {
 } from "../utils/boundedJson";
 import type { HandshakeRole } from "../types";
 
-// The `.max()` on the base64url ciphertext is defense-in-depth, NOT the primary
-// frame-size control. By the time handleInbound() runs, the inner transport has
-// already read the whole file and JSON-parsed it, so the dominant allocation
-// has happened -- this only rejects an over-cap envelope, it does not prevent
-// the read. The real bound is enforced at the transport read layer (see
-// MAX_FRAME_SIZE_BYTES and docs/spec/CHANNEL_SECURITY.md). The
-// bound is the same single value: the `enc` string is a base64url substring of
-// the on-wire file, so it can never exceed the file-size cap. base64url is
-// ASCII, so the string length that z.string().max() measures (UTF-16 code
-// units) equals the byte count -- the byte-named cap applies cleanly -- and
-// reusing it here keeps one justified maximum across both layers.
-const Envelope = z.object({ enc: z.string().max(MAX_FRAME_SIZE_BYTES) });
+// Leading byte of the binary AEAD envelope: a format/version marker. A frame
+// whose first byte is not this value -- or, with the clean break from the former
+// base64url-in-JSON format, any inbound that is not a Uint8Array at all -- is
+// rejected as a security failure rather than silently misparsed. Bump it on any
+// change to the envelope layout (the IV/ciphertext/tag order or widths) so a
+// format mismatch fails cleanly instead of being read as an IV.
+/** @internal */
+export const AEAD_ENVELOPE_VERSION = 1;
 
 // First byte of the pre-encryption plaintext, preserving the original payload's
-// type across the wire. The transport underneath only ever sees the JSON
-// envelope `{ enc }`, so without this tag a Uint8Array would round-trip as a
-// plain object and the protobuf deserialize step in the PSI protocol would
-// fail. `TYPE_JSON` payloads are UTF-8 JSON; `TYPE_BINARY` payloads are the raw
-// bytes of a Uint8Array.
+// type across the wire. It lives INSIDE the authenticated ciphertext, so the
+// transport admin can neither read it nor flip it to reroute JSON/binary
+// handling without failing the GCM tag. Without this tag a Uint8Array would
+// round-trip as a plain object and the protobuf deserialize step in the PSI
+// protocol would fail. `TYPE_JSON` payloads are UTF-8 JSON; `TYPE_BINARY`
+// payloads are the raw bytes of a Uint8Array.
 /** @internal */
 export const TYPE_JSON = 0;
 /** @internal */
@@ -64,16 +59,19 @@ export const IV_SEQ_OFFSET = 4;
  * one key is catastrophic. One key per direction makes that reuse impossible
  * because each key is used by exactly one sender.
  *
- * Wire format: `{ enc: base64url(IV || ciphertext || 16-byte GCM tag) }` where
- * IV is 12 bytes: 4 leading bytes (zeroed by the sender) followed by an 8-byte
- * big-endian sequence number. Those leading bytes are part of the GCM IV, so
- * they are authenticated - tampering with them fails the tag - but the receiver
- * does not separately validate that they are zero. The encrypted plaintext is a
- * 1-byte type tag (`0` = JSON
- * object, `1` = Uint8Array) followed by the payload (UTF-8 JSON or raw bytes
- * respectively); the tag preserves the distinction between protobuf binary
- * frames and JSON control messages that the underlying transport's own
- * serialization would otherwise collapse. The sequence number increments by
+ * Wire format: a binary envelope `version || IV || ciphertext || 16-byte GCM
+ * tag`, carried as raw bytes (no base64url, no JSON wrapper) so the transport
+ * stores it byte-for-byte. `version` is a single leading format marker
+ * ({@link AEAD_ENVELOPE_VERSION}); IV is 12 bytes: 4 leading bytes (zeroed by
+ * the sender) followed by an 8-byte big-endian sequence number. Those leading
+ * bytes are part of the GCM IV, so they are authenticated - tampering with them
+ * fails the tag - but the receiver does not separately validate that they are
+ * zero. The encrypted plaintext is a 1-byte type tag (`0` = JSON object, `1` =
+ * Uint8Array) followed by the payload (UTF-8 JSON or raw bytes respectively);
+ * the tag stays INSIDE the authenticated ciphertext - never promoted to a
+ * cleartext envelope field - and preserves the distinction between binary frames
+ * and JSON control messages that the underlying transport's own serialization
+ * would otherwise collapse. The sequence number increments by
  * exactly one per sender. Any inbound message whose sequence number is not
  * exactly one greater than the last accepted sequence number - whether it
  * repeats or precedes it (replay/reorder) or skips ahead (a dropped or withheld
@@ -320,14 +318,19 @@ export class EncryptedMessageConnection implements MessageConnection {
     }
 
     const cipher = new Uint8Array(cipherBuffer);
+    // Binary envelope: a 1-byte version marker, the 12-byte IV, then the
+    // ciphertext+tag. Handed to the inner transport as raw bytes (no base64url,
+    // no JSON wrapper); the payload type tag stays inside the authenticated
+    // ciphertext (plaintext[0] above).
     const envelope = new Uint8Array(
-      12 + cipher.length,
+      1 + 12 + cipher.length,
     ) as Uint8Array<ArrayBuffer>;
-    envelope.set(iv);
-    envelope.set(cipher, 12);
+    envelope[0] = AEAD_ENVELOPE_VERSION;
+    envelope.set(iv, 1);
+    envelope.set(cipher, 13);
 
     try {
-      await this.inner.send({ enc: toBase64Url(envelope) });
+      await this.inner.send(envelope);
     } catch (err) {
       // A transport-layer send failure makes this wrapper terminal too (the
       // MessageConnection.send contract), so latch it rather than letting it
@@ -365,8 +368,10 @@ export class EncryptedMessageConnection implements MessageConnection {
   // `"security"` ConnectionError and throws it; a transport drop surfaced by
   // inner.receive propagates unchanged.
   private async handleInbound(data: unknown): Promise<unknown> {
-    const parsed = Envelope.safeParse(data);
-    if (!parsed.success) {
+    // The inner transport now delivers the raw binary envelope as a Uint8Array.
+    // Anything else -- notably an old base64url-in-JSON `{ enc }` object -- is a
+    // format mismatch (a clean break with the pre-binary format) rejected here.
+    if (!(data instanceof Uint8Array)) {
       throw this.fail(
         new ConnectionError(
           "EncryptedMessageConnection: received invalid envelope",
@@ -374,21 +379,26 @@ export class EncryptedMessageConnection implements MessageConnection {
         ),
       );
     }
+    const bytes = data as Uint8Array<ArrayBuffer>;
 
-    let bytes: Uint8Array<ArrayBuffer>;
-    try {
-      bytes = fromBase64Url(parsed.data.enc);
-    } catch {
+    // Binary length bound. The transport read layer already refuses an over-cap
+    // inbound file before reading it (see MAX_FRAME_SIZE_BYTES and
+    // docs/spec/CHANNEL_SECURITY.md); this is the same single value applied here
+    // as defense-in-depth -- now a binary length check, where the pre-binary
+    // format used a base64url-string `.max()`.
+    if (bytes.length > MAX_FRAME_SIZE_BYTES) {
       throw this.fail(
         new ConnectionError(
-          "EncryptedMessageConnection: envelope contains invalid base64url",
+          "EncryptedMessageConnection: envelope exceeds the maximum frame size",
           "security",
         ),
       );
     }
 
-    // Minimum: 12-byte IV + 16-byte GCM tag (zero-length plaintext)
-    if (bytes.length < 28) {
+    // Minimum: 1-byte version + 12-byte IV + 16-byte GCM tag (zero-length
+    // ciphertext). The 28-byte IV+tag floor is byte-for-byte the pre-version
+    // layout; the version byte adds one ahead of it.
+    if (bytes.length < 1 + 28) {
       throw this.fail(
         new ConnectionError(
           "EncryptedMessageConnection: envelope is too short",
@@ -397,8 +407,20 @@ export class EncryptedMessageConnection implements MessageConnection {
       );
     }
 
-    const iv = bytes.slice(0, 12) as Uint8Array<ArrayBuffer>;
-    const cipherWithTag = bytes.slice(12) as Uint8Array<ArrayBuffer>;
+    // Version/format marker. A wrong value -- a different envelope layout, or a
+    // frame from an incompatible build -- fails cleanly here instead of being
+    // misparsed as the start of the IV.
+    if (bytes[0] !== AEAD_ENVELOPE_VERSION) {
+      throw this.fail(
+        new ConnectionError(
+          `EncryptedMessageConnection: unsupported envelope version ${bytes[0]}`,
+          "security",
+        ),
+      );
+    }
+
+    const iv = bytes.slice(1, 13) as Uint8Array<ArrayBuffer>;
+    const cipherWithTag = bytes.slice(13) as Uint8Array<ArrayBuffer>;
 
     const seqBig = new DataView(iv.buffer, iv.byteOffset).getBigUint64(
       IV_SEQ_OFFSET,

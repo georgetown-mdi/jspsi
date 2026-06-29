@@ -293,14 +293,23 @@ export async function linkViaPSI(
 
 /**
  * The raw-byte ceiling for a single-pass reply (setup + response + record count +
- * distinct-value index table), which travels as one frame. The encrypted channel
- * base64url-wraps the frame in an AES-GCM envelope before the wire (~4/3 the size;
- * see encryptedMessageConnection.ts), and the inbound cap (MAX_FRAME_SIZE_BYTES)
- * bounds that on-wire frame, not the raw bytes -- so the raw reply must leave room
- * for the expansion. The sender checks the built reply against this and refuses an
- * oversized one before sending, rather than passing a looser check and being
- * rejected downstream by the envelope's own bound. The 256-byte slack covers the
- * GCM IV and tag, the type tag, base64 rounding, and the transport's JSON wrapper.
+ * distinct-value index table), which travels as one frame. The sender checks the
+ * built reply against this and refuses an oversized one before sending, rather
+ * than passing a looser check and being rejected downstream by the transport's
+ * own frame-size bound.
+ *
+ * The `* 3/4` factor once modelled the base64url expansion the AEAD envelope
+ * applied before the wire (~4/3 the raw size), so the raw reply had to leave room
+ * for it. That expansion is gone: the AEAD envelope and the file-sync message
+ * body now carry the frame as raw bytes plus a small fixed header (see
+ * encryptedMessageConnection.ts and fileSyncConnection.ts), so the on-wire frame
+ * is essentially its raw size and a reply up to nearly MAX_FRAME_SIZE_BYTES would
+ * now fit. The factor (and the 256-byte slack, which once also covered base64
+ * rounding and the JSON wrapper) is therefore conservative -- it rejects some
+ * replies that would now fit, never accepts one that would not -- and is left
+ * unchanged here pending the rework that derives the single-pass cap from the
+ * exchanged record counts up to a fixed maximum dataset size (board item
+ * 206154573), where this arithmetic is replaced rather than patched.
  *
  * @internal exported for the wire-message test.
  */
