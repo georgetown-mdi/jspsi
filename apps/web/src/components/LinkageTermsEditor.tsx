@@ -965,7 +965,7 @@ export function LinkageTermsEditor({
                       <Radio
                         value="cascade"
                         label="Cascade (recommended)"
-                        description="Default. Matches the keys one at a time -- more network round trips, but your partner learns less along the way."
+                        description="Default. Matches the keys one at a time -- more network round trips, but less is observed along the way."
                       />
                       <Radio
                         value="single-pass"
@@ -975,11 +975,17 @@ export function LinkageTermsEditor({
                     </Stack>
                   </Radio.Group>
                   {draft.linkageStrategy === "single-pass" && (
+                    // role="alert" is Mantine's default for Alert, but it is set
+                    // explicitly here because the announcement is load-bearing: this
+                    // is the consent reinforcement an assistive-technology user hears
+                    // on selecting single-pass, so it must stay an (assertive) live
+                    // region regardless of any future default change.
                     <Alert
                       variant="light"
                       color="yellow"
+                      role="alert"
                       icon={<IconAlertTriangle aria-hidden />}
-                      title="Single-pass widens what your partner can observe"
+                      title="Single-pass widens what one of you can observe"
                     >
                       Both parties must agree to single-pass, and one of you
                       will hand the other its full per-key value structure --

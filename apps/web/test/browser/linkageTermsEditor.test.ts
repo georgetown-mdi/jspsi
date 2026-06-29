@@ -307,9 +307,7 @@ describe("LinkageTermsEditor", () => {
       )
       .toBeInTheDocument();
     expect(
-      page
-        .getByText("Single-pass widens what your partner can observe")
-        .query(),
+      page.getByText("Single-pass widens what one of you can observe").query(),
     ).toBeNull();
     // Generating without touching the control authors cascade.
     await userEvent.click(generateButton());
@@ -323,10 +321,14 @@ describe("LinkageTermsEditor", () => {
     );
     await userEvent.click(page.getByRole("radio", { name: "Single-pass" }));
     // The consent Alert appears at the moment of choice, reinforcing the disclosure
-    // the inviter is agreeing to.
+    // the inviter is agreeing to. Asserted by its "alert" role, not just its text:
+    // the announcement to assistive technology is load-bearing for the consent, so
+    // the live region is the invariant under test, not merely the visible string.
     await expect
       .element(
-        page.getByText("Single-pass widens what your partner can observe"),
+        page.getByRole("alert", {
+          name: "Single-pass widens what one of you can observe",
+        }),
       )
       .toBeInTheDocument();
     await userEvent.click(generateButton());
@@ -347,7 +349,9 @@ describe("LinkageTermsEditor", () => {
       .toBeChecked();
     await expect
       .element(
-        page.getByText("Single-pass widens what your partner can observe"),
+        page.getByRole("alert", {
+          name: "Single-pass widens what one of you can observe",
+        }),
       )
       .toBeInTheDocument();
   });
