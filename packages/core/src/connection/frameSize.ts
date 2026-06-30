@@ -62,23 +62,28 @@ export const MAX_FRAME_SIZE_BYTES = 536_870_888;
  * Single-pass holds both parties' full encrypted value sets resident on the
  * receiver to run the match, so its peak memory is `O(total distinct values)` and
  * cannot stream (docs/spec/PROTOCOL.md, the single-pass dataset ceiling). The
- * binding cost is the receiver's peak RSS, measured by board item 206245686 at
- * about `~100 MB + ~2-4 KB per distinct value`; bounding each party's cell count
- * bounds its `D`, and so the receiver's peak.
+ * binding cost is the receiver's lifetime peak RSS. Live retained memory is small
+ * -- ~130 B per distinct value (board item 206377899) -- but the peak RSS climbs
+ * ~2-4 KB per distinct value in transient allocation churn that neither V8 nor
+ * emmalloc returns to the OS; bounding each party's cell count bounds its `D`, and
+ * so that peak.
  *
  * Value: 2,000,000 cells per party (so at most 2M distinct values per party). At
- * the conservative ~3-4 KB/value slope that projects to roughly 6-8 GB receiver
- * RSS, leaving headroom on a 16 GB execution target below the hard memory wall;
- * it admits ~143k rows at the ~14-key default template and ~2M rows at a single
- * key. It is a cell-count budget, not a bare row cap, on purpose: a rows-only cap
- * is off by ~14x between a 1-key and a 14-key linkage at the same memory (board
- * item 206245686). The byte cap below is a defense-in-depth tightening derived
- * from the same quantity; this cell-count budget is the real ceiling.
+ * the ~2-4 KB/value transient peak slope that projects to roughly 6-8 GB peak RSS,
+ * which the current value holds headroom against on a 16 GB target; it admits
+ * ~143k rows at the ~14-key default template and ~2M rows at a single key. That
+ * projection is the transient peak, not live data (2M distinct values is only
+ * ~260 MB live), so the budget is conservative against the true memory wall. It is
+ * a cell-count budget, not a bare row cap, on purpose: a rows-only cap is off by
+ * ~14x between a 1-key and a 14-key linkage at the same memory. The byte cap below
+ * is a defense-in-depth tightening derived from the same quantity; this cell-count
+ * budget is the real ceiling.
  *
  * Fixed, NOT operator-configurable: a configurable maximum reintroduces the
- * memory-exhaustion denial of service the bound exists for. It is a one-line
- * change as the PSI backend's per-value memory is reduced (board items 199653275,
- * 206377899); the methodology to re-derive it is in docs/spec/PROTOCOL.md.
+ * memory-exhaustion denial of service the bound exists for. It is slated to rise
+ * as board item 206377899 lowers the transient peak (a packages/core JS-churn and
+ * GC-pressure task) and re-derives the budget; the methodology is in
+ * docs/spec/PROTOCOL.md.
  */
 export const MAX_SINGLE_PASS_CELLS = 2_000_000;
 
