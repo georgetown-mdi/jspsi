@@ -225,9 +225,12 @@ export function loadCSVColumnSample(
     // ceiling and never trips; a no-terminator / giant-field / giant-header input
     // keeps the cursor pinned while bytes pile up, so the span crosses the ceiling
     // and the read fails fast. The span is checked before that reset (chunk
-    // callback below), so the bound fails closed whether the span accrues
-    // gradually across reads or arrives in one oversized read -- it does not rely
-    // on the source framing its reads at any particular size.
+    // callback below), so a single read larger than the ceiling fails closed --
+    // rejected, never silently forgiven. Production sources (fs.createReadStream
+    // and stdin) deliver <=64 KiB reads, far below the 8 MiB default, so the
+    // per-callback span tracks the partial line to within one read and a
+    // legitimate file is never delivered in one over-ceiling read; a source that
+    // did would be rejected, which is the safe direction.
     let bytesPulled = 0;
     let spanStart = 0;
     let lastCursor = 0;
@@ -257,6 +260,15 @@ export function loadCSVColumnSample(
     };
     if (isStream) source.on?.("data", countBytes);
 
+    // The ceiling rides PapaParse's public streaming API: the `chunk` callback,
+    // `results.meta.cursor` (advancing as complete lines -- the header included --
+    // are consumed), and `parser.abort()`. The one behavior it leans on past the
+    // bare documented surface is that `chunk` fires once per source `data` event
+    // even when that read completed no row, which is what checks a no-terminator
+    // input before EOF. If a future PapaParse fired `chunk` only on a completed
+    // row, the early abort would degrade to buffering the span until EOF -- a lost
+    // optimization on the operator's own file, still a reject, not a correctness
+    // or security regression. file.test.ts exercises these behaviors.
     Papa.parse(file, {
       // Inline, never a Web Worker -- same reasoning as loadCSVFile (the bundled
       // worker mis-applies header mode); init runs under Node, where the worker is
