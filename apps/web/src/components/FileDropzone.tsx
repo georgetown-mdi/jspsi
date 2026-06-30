@@ -11,6 +11,10 @@ import {
 
 import log from "loglevel";
 
+import {
+  DROPZONE_DRAG_ICON,
+  dragIconColor,
+} from "@components/dropzoneDragIcons";
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 
 import type { FileRejection } from "@mantine/dropzone";
@@ -130,28 +134,24 @@ export default function FileDropzone({
               failure (2.71:1). In dark the tint becomes the dark surface
               darken(shade-9, .5), where a deeper icon drops the other way
               below the bar, so dark stays at shade 6 (blue-6 = 3.53:1, red-6 =
-              3.83:1). light-dark() selects per scheme; the icon takes no
-              `color` prop so its stroke follows currentColor, which this
-              inline color sets. Both schemes' ratios are enforced by
+              3.83:1). The per-scheme shades live in DROPZONE_DRAG_ICON, shared
+              with the harness so the value painted here and the value asserted
+              cannot drift; dragIconColor renders them as the light-dark() the
+              icon takes as its inline `color` (no `color` prop, so the stroke
+              follows currentColor). Both schemes' ratios are enforced by
               test/unit/themeContrast.test.ts. */}
           <Dropzone.Accept>
             <IconUpload
               size={52}
               stroke={1.5}
-              style={{
-                color:
-                  "light-dark(var(--mantine-color-blue-8), var(--mantine-color-blue-6))",
-              }}
+              style={{ color: dragIconColor(DROPZONE_DRAG_ICON.accept) }}
             />
           </Dropzone.Accept>
           <Dropzone.Reject>
             <IconX
               size={52}
               stroke={1.5}
-              style={{
-                color:
-                  "light-dark(var(--mantine-color-red-8), var(--mantine-color-red-6))",
-              }}
+              style={{ color: dragIconColor(DROPZONE_DRAG_ICON.reject) }}
             />
           </Dropzone.Reject>
           <Dropzone.Idle>
