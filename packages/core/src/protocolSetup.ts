@@ -505,7 +505,7 @@ export async function resolveRole(
   localOutput: Output,
   partnerOutput: Output,
   localRecordCount: number,
-): Promise<PsiRole> {
+): Promise<{ role: PsiRole; partnerRecordCount: number }> {
   // Exchange record counts unconditionally. Initiator sends first; responder
   // receives first then sends -- the same lockstep ordering the both-output path
   // used before, now run on every exchange so the one-sided case puts an
@@ -521,13 +521,21 @@ export async function resolveRole(
     await conn.send({ recordCount: localRecordCount });
   }
 
-  // One-sided output: the party that expects output is the receiver regardless
-  // of the counts just exchanged -- it is the only party that learns the result.
-  if (localOutput.expectsOutput && !partnerOutput.expectsOutput)
-    return "receiver";
-  if (!localOutput.expectsOutput && partnerOutput.expectsOutput)
-    return "sender";
+  // The partner record count is returned alongside the role so the caller can
+  // feed both authenticated counts (and the agreed key count) into the
+  // single-pass frame-cap derivation; it is now consumed there as well as by the
+  // role decision below.
+  const role = ((): PsiRole => {
+    // One-sided output: the party that expects output is the receiver regardless
+    // of the counts just exchanged -- it is the only party that learns the result.
+    if (localOutput.expectsOutput && !partnerOutput.expectsOutput)
+      return "receiver";
+    if (!localOutput.expectsOutput && partnerOutput.expectsOutput)
+      return "sender";
 
-  // Both expect output: the assignment is free, so minimize total work.
-  return pickRole(localRecordCount, partnerRecordCount, handshakeRole);
+    // Both expect output: the assignment is free, so minimize total work.
+    return pickRole(localRecordCount, partnerRecordCount, handshakeRole);
+  })();
+
+  return { role, partnerRecordCount };
 }

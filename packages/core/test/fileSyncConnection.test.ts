@@ -1614,6 +1614,73 @@ test("poll delivers a subsequent valid message after swallowing an ENOENT", asyn
   expect((received[0] as Record<string, unknown>)["hello"]).toBe("world");
 });
 
+// --- per-exchange inbound frame cap (single-pass read gate) -------------------
+
+test("setInboundFrameCap tightens the poll-loop read gate; an over-cap frame is refused", async () => {
+  // The single-pass receiver sets a per-exchange inbound cap (the derived reply
+  // cap) before reading the reply. The poll loop must enforce THAT cap at the
+  // read gate, not the static MAX_FRAME_SIZE_BYTES: a frame within the static cap
+  // but over the per-exchange cap is refused with a terminal
+  // FrameSizeExceededError, before get() loads it into memory.
+  const peerId = "peer-test";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    peerTimeoutMs: 2_000,
+  });
+  conn.peerId = peerId;
+
+  const frame = binaryMessage(new Uint8Array(400).fill(7));
+  files.set(`/test/${peerId}-${frame.length}.json`, frame);
+  conn.setInboundFrameCap(200); // below the 400+ byte frame
+
+  const errored = new Promise<unknown>((resolve) => conn.on("error", resolve));
+  conn.start();
+  const err = await Promise.race([
+    errored,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("no error within budget")), 2_000),
+    ),
+  ]).catch((e: unknown) => e);
+  conn.stop();
+
+  expect(err).toBeInstanceOf(FrameSizeExceededError);
+  expect((err as Error).message).toMatch(
+    /exceeding the maximum inbound frame size of 200 bytes/,
+  );
+});
+
+test("setInboundFrameCap clamps to MAX_FRAME_SIZE_BYTES and delivers an in-cap frame", async () => {
+  // The cap can only tighten, never widen, the static backstop: a value above
+  // MAX_FRAME_SIZE_BYTES is clamped down, and a frame within the (clamped)
+  // per-exchange cap is delivered normally.
+  const peerId = "peer-test";
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    peerTimeoutMs: 2_000,
+  });
+  conn.peerId = peerId;
+
+  const payload = new Uint8Array(300).fill(9);
+  const frame = binaryMessage(payload);
+  files.set(`/test/${peerId}-${frame.length}.json`, frame);
+  conn.setInboundFrameCap(MAX_FRAME_SIZE_BYTES * 4); // clamped to the static cap
+
+  const delivered = new Promise<unknown>((resolve) => conn.on("data", resolve));
+  conn.start();
+  const msg = await Promise.race([
+    delivered,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("no frame within budget")), 2_000),
+    ),
+  ]);
+  conn.stop();
+
+  expect(msg).toBeInstanceOf(Uint8Array);
+  expect((msg as Uint8Array).length).toBe(payload.length);
+});
+
 test("poll emits error when ENOENT threshold is reached on consecutive poll cycles", async () => {
   // list() always surfaces a matching file (size matches declared count);
   // get() always throws ENOENT. After 3 consecutive ENOENT cycles the poller

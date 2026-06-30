@@ -79,6 +79,16 @@ export type Connection = {
   // so no transport macrotask can interleave between consumption of one
   // message and registration for the next.
   takeBufferedError: () => unknown;
+  // Optional: bound the next inbound frame this transport reads into memory to
+  // `maxBytes`, replacing the transport's static frame-size cap for subsequent
+  // reads until cleared (passing `undefined` restores the default). The
+  // single-pass receiver sets this to the per-exchange derived cap
+  // (singlePassReplyByteCap) before reading the reply, so the read gate refuses a
+  // frame larger than the exchanged record counts imply rather than allocating up
+  // to the static ceiling. A transport that bounds its inbound path another way
+  // (the WebRTC data channel, fixed at MAX_WEBRTC_FRAME_BYTES) omits this. See
+  // docs/spec/CHANNEL_SECURITY.md.
+  setInboundFrameCap?: (maxBytes: number | undefined) => void;
 };
 
 export type Role = "starter" | "joiner" | "either";

@@ -13,17 +13,23 @@ import {
   decodeInt32LE,
   encodeSinglePassReply,
   decodeSinglePassReply,
-  SINGLE_PASS_MAX_REPLY_BYTES,
-  singlePassReplyWouldExceedCap,
 } from "../src/link";
-import { MAX_FRAME_SIZE_BYTES } from "../src/connection/frameSize";
+import {
+  MAX_FRAME_SIZE_BYTES,
+  MAX_SINGLE_PASS_CELLS,
+  singlePassDatasetExceedsCap,
+  singlePassExchangeExceedsCap,
+  singlePassReplyByteCap,
+} from "../src/connection/frameSize";
 
 import {
   createMessagePipe,
   receiveParsed,
   parseOrProtocolError,
   ConnectionError,
+  type MessageConnection,
 } from "../src/connection/messageConnection";
+import type { AssociationTable } from "../src/types";
 import { sortAssociationTable } from "./utils/associationTable";
 
 const psiLibrary = await PSI();
@@ -101,11 +107,14 @@ test("single-pass yields the byte-identical association table as the cascade", a
   });
 
   let [spServerResult, spClientResult] = await Promise.all([
+    // partnerRecordCount: the server's partner is the client (3 rows) and vice
+    // versa (the server has 7 rows).
     linkViaSinglePassPSI(
       { cardinality: "one-to-one" },
       spServer,
       spServerConn,
       serverData,
+      clientData[0].length,
       -1,
     ),
     linkViaSinglePassPSI(
@@ -113,6 +122,7 @@ test("single-pass yields the byte-identical association table as the cascade", a
       spClient,
       spClientConn,
       clientData,
+      serverData[0].length,
       -1,
     ),
   ]);
@@ -146,7 +156,17 @@ test("single-pass reproduces the cascade's survivor-relative uniqueness", async 
     [undefined, "Z"],
   ];
 
-  const run = async (link: typeof linkViaPSI) => {
+  // Both parties have two rows, so each side's partner count is 2; the link
+  // adapter folds that in for single-pass and is a no-op for the cascade, which
+  // takes no partner count.
+  const run = async (
+    link: (
+      protocol: { cardinality: "one-to-one" },
+      participant: PSIParticipant,
+      conn: MessageConnection,
+      data: Array<Array<string | undefined>>,
+    ) => Promise<AssociationTable>,
+  ) => {
     const [senderConn, receiverConn] = createMessagePipe();
     const sender = new PSIParticipant("server", psiLibrary, {
       role: "starter",
@@ -157,14 +177,8 @@ test("single-pass reproduces the cascade's survivor-relative uniqueness", async 
       verbose: -1,
     });
     const [senderResult, receiverResult] = await Promise.all([
-      link({ cardinality: "one-to-one" }, sender, senderConn, senderData, -1),
-      link(
-        { cardinality: "one-to-one" },
-        receiver,
-        receiverConn,
-        receiverData,
-        -1,
-      ),
+      link({ cardinality: "one-to-one" }, sender, senderConn, senderData),
+      link({ cardinality: "one-to-one" }, receiver, receiverConn, receiverData),
     ]);
     return [
       sortAssociationTable(senderResult),
@@ -172,15 +186,18 @@ test("single-pass reproduces the cascade's survivor-relative uniqueness", async 
     ];
   };
 
-  const [cascadeSender, cascadeReceiver] = await run(linkViaPSI);
+  const [cascadeSender, cascadeReceiver] = await run((protocol, p, c, d) =>
+    linkViaPSI(protocol, p, c, d, -1),
+  );
   // Both sender rows match -- reachable only under survivor-relative uniqueness.
   expect(cascadeSender).toStrictEqual([
     [0, 1],
     [0, 1],
   ]);
 
-  const [singlePassSender, singlePassReceiver] =
-    await run(linkViaSinglePassPSI);
+  const [singlePassSender, singlePassReceiver] = await run(
+    (protocol, p, c, d) => linkViaSinglePassPSI(protocol, p, c, d, 2, -1),
+  );
   expect(singlePassSender).toStrictEqual(cascadeSender);
   expect(singlePassReceiver).toStrictEqual(cascadeReceiver);
 });
@@ -281,26 +298,99 @@ test("encodeSinglePassReply / decodeSinglePassReply round-trip, and a truncated 
   expect(() => decodeSinglePassReply(full.subarray(0, 5))).toThrow(/truncated/);
 });
 
-// ─── single-pass size ceiling (base64-adjusted) and the pre-flight predicate ──
-// The reply is base64url-wrapped (~4/3) in an AES-GCM envelope before the inbound
-// cap measures it, so the raw-byte ceiling sits at ~3/4 of MAX_FRAME_SIZE_BYTES --
-// strictly below it, so an oversized dataset gets the actionable "use cascade"
-// error here instead of a generic frame-too-large rejection downstream.
-test("the single-pass reply ceiling leaves room for the channel's base64 envelope", () => {
-  expect(SINGLE_PASS_MAX_REPLY_BYTES).toBeLessThan(MAX_FRAME_SIZE_BYTES);
-  expect(SINGLE_PASS_MAX_REPLY_BYTES).toBeGreaterThan(
-    MAX_FRAME_SIZE_BYTES * 0.7,
-  );
-  expect(SINGLE_PASS_MAX_REPLY_BYTES).toBeLessThan(MAX_FRAME_SIZE_BYTES * 0.76);
+// ─── single-pass dataset ceiling: derived from exchanged counts ───────────────
+// The cap is a per-party budget on keyCount * recordCount (the distinct-value
+// upper bound), with the read-gate/send-time byte cap derived from the same
+// quantity. These pin the deterministic arithmetic both parties compute.
+test("singlePassDatasetExceedsCap fires exactly at keyCount * rows = the budget", () => {
+  const fits = Math.floor(MAX_SINGLE_PASS_CELLS / 1); // one key
+  expect(singlePassDatasetExceedsCap(1, fits)).toBe(false);
+  expect(singlePassDatasetExceedsCap(1, fits + 1)).toBe(true);
+  // The budget is on keyCount * rows, so more keys fit proportionally fewer rows.
+  const perKey = Math.floor(MAX_SINGLE_PASS_CELLS / 4);
+  expect(singlePassDatasetExceedsCap(4, perKey)).toBe(false);
+  expect(singlePassDatasetExceedsCap(4, perKey + 1)).toBe(true);
 });
 
-test("singlePassReplyWouldExceedCap fires exactly at the index-table ceiling", () => {
-  const fits = Math.floor(SINGLE_PASS_MAX_REPLY_BYTES / 4); // one key, all table
-  expect(singlePassReplyWouldExceedCap(1, fits)).toBe(false);
-  expect(singlePassReplyWouldExceedCap(1, fits + 1)).toBe(true);
-  // The ceiling is per (key, record): more keys, fewer rows fit.
-  expect(singlePassReplyWouldExceedCap(4, Math.floor(fits / 4))).toBe(false);
-  expect(singlePassReplyWouldExceedCap(4, Math.floor(fits / 4) + 1)).toBe(true);
+test("singlePassExchangeExceedsCap fires when EITHER party is over the budget", () => {
+  const fits = MAX_SINGLE_PASS_CELLS; // one key, exactly at the budget
+  expect(singlePassExchangeExceedsCap(1, fits, fits)).toBe(false);
+  // Sender over, receiver under -> over (and vice versa).
+  expect(singlePassExchangeExceedsCap(1, fits + 1, 1)).toBe(true);
+  expect(singlePassExchangeExceedsCap(1, 1, fits + 1)).toBe(true);
+});
+
+test("singlePassReplyByteCap weights the sender heavier and stays below the static frame cap at the ceiling", () => {
+  // The sender contributes a masked value + an index cell per (key, record); the
+  // receiver a masked value per (key, record); plus a fixed overhead. Pinning the
+  // exact formula is what makes the cap reproducible across implementations.
+  expect(singlePassReplyByteCap(2, 10, 5)).toBe(
+    (40 + 4) * (2 * 10) + 40 * (2 * 5) + 256,
+  );
+  // The two arguments are NOT interchangeable: the sender carries the index table
+  // (+4/cell), so swapping the sender and receiver counts changes the value. This
+  // is why both parties must agree on which count is the sender's -- the role
+  // mapping in linkViaSinglePassPSI feeds (senderRows, receiverRows) in the same
+  // order on both sides, so they compute the identical cap from swapped local
+  // inputs (own vs partner count).
+  expect(singlePassReplyByteCap(3, 100, 200)).not.toBe(
+    singlePassReplyByteCap(3, 200, 100),
+  );
+  // At the ceiling (both parties' keyCount*rows at the budget) the cap is well
+  // below the static file-sync backstop, so the per-transport clamp does not bind.
+  const atCeiling = singlePassReplyByteCap(
+    1,
+    MAX_SINGLE_PASS_CELLS,
+    MAX_SINGLE_PASS_CELLS,
+  );
+  expect(atCeiling).toBeLessThan(MAX_FRAME_SIZE_BYTES);
+});
+
+test("the single-pass receiver read gate is bounded to the derived reply cap", async () => {
+  // The receiver tightens its transport read gate to singlePassReplyByteCap
+  // before reading the reply (setInboundFrameCap), then clears it. A fake
+  // MessageConnection records the cap set/cleared around the reply receive.
+  const setCalls: Array<number | undefined> = [];
+  let resolveReceive: ((v: unknown) => void) | undefined;
+  const receiver = new PSIParticipant("client", psiLibrary, {
+    role: "joiner",
+    verbose: -1,
+  });
+  // One key, three local rows; partner (sender) has two rows.
+  const keyCount = 1;
+  const localRows = 3;
+  const partnerRows = 2;
+  const fake: MessageConnection = {
+    send: async () => {},
+    receive: () =>
+      new Promise((resolve) => {
+        resolveReceive = resolve;
+      }),
+    close: async () => {},
+    setInboundFrameCap: (maxBytes) => setCalls.push(maxBytes),
+  };
+  const run = linkViaSinglePassPSI(
+    { cardinality: "one-to-one" },
+    receiver,
+    fake,
+    [["a", "b", "c"]],
+    partnerRows,
+    -1,
+  );
+  // Let the receiver send its request and park on receive(); then deliver a reply
+  // declaring partnerRows sender records but a mismatched index table, so decode
+  // fails fast after the gate is exercised.
+  await new Promise((r) => setTimeout(r, 0));
+  expect(setCalls[0]).toBe(
+    singlePassReplyByteCap(keyCount, partnerRows, localRows),
+  );
+  resolveReceive?.(
+    encodeSinglePassReply(new Uint8Array(), new Uint8Array(), partnerRows, [0]),
+  );
+  await expect(run).rejects.toThrow();
+  // The cap was cleared (undefined) after the read, so a later frame uses the
+  // default gate.
+  expect(setCalls[setCalls.length - 1]).toBeUndefined();
 });
 
 test("single-pass receiver rejects a reply whose index table contradicts its record count", async () => {
@@ -315,11 +405,14 @@ test("single-pass receiver rejects a reply whose index table contradicts its rec
     role: "joiner",
     verbose: -1,
   });
+  // partnerRecordCount 5 matches the reply's declared sender count, so the
+  // count-coherence check passes and the index-table-length check is what fires.
   const run = linkViaSinglePassPSI(
     { cardinality: "one-to-one" },
     receiver,
     conn,
     [["a", "b"]], // one key
+    5,
     -1,
   );
   await peer.receive(); // consume the receiver's encrypted request
@@ -333,4 +426,86 @@ test("single-pass receiver rejects a reply whose index table contradicts its rec
     ),
   );
   await expect(run).rejects.toThrow(/index table\s+length does not match/);
+});
+
+test("single-pass receiver rejects a reply whose sender count contradicts the exchanged count", async () => {
+  // The reply packs the sender's own record count; the receiver ties it to the
+  // count the sender exchanged over the authenticated channel (partnerRecordCount).
+  // A reply that declares a different count is a clean protocol abort -- before any
+  // allocation -- rather than a trusted-frame read.
+  const [conn, peer] = createMessagePipe();
+  const receiver = new PSIParticipant("client", psiLibrary, {
+    role: "joiner",
+    verbose: -1,
+  });
+  const run = linkViaSinglePassPSI(
+    { cardinality: "one-to-one" },
+    receiver,
+    conn,
+    [["a", "b"]], // one key, two local rows
+    3, // the sender exchanged 3 records
+    -1,
+  );
+  await peer.receive(); // consume the receiver's encrypted request
+  // Declares 4 sender records (with a matching 4-entry index table), not the 3
+  // the sender exchanged.
+  await peer.send(
+    encodeSinglePassReply(
+      new Uint8Array([1, 2, 3, 4]),
+      new Uint8Array([5, 6, 7, 8]),
+      4,
+      [0, 1, 2, 3],
+    ),
+  );
+  await expect(run).rejects.toThrow(/declares 4 sender record/);
+});
+
+test("single-pass aborts symmetrically when the exchange exceeds the ceiling", async () => {
+  // Both parties compute the over-ceiling verdict from the exchanged counts alone,
+  // before any single-pass frame moves, and both abort with the same guidance --
+  // which does not recommend cascade. Drive a tiny local dataset whose keyCount *
+  // partnerRecordCount exceeds the budget.
+  const [conn, peer] = createMessagePipe();
+  const receiver = new PSIParticipant("client", psiLibrary, {
+    role: "joiner",
+    verbose: -1,
+  });
+  const run = linkViaSinglePassPSI(
+    { cardinality: "one-to-one" },
+    receiver,
+    conn,
+    [["a", "b"]],
+    MAX_SINGLE_PASS_CELLS + 1, // partner alone is over the budget
+    -1,
+  );
+  await expect(run).rejects.toThrow(/single-pass cannot carry this dataset/);
+  await expect(run).rejects.not.toThrow(/cascade/);
+  // The abort happened before any frame was exchanged: the peer saw nothing.
+  void peer;
+});
+
+test("single-pass aborts symmetrically from the starter side too", async () => {
+  // Mirror of the joiner case, proving the verdict is role-symmetric. The
+  // over-ceiling gate runs before the role branch, so the starter (PSI sender)
+  // reaches it from the same exchanged counts. The same large partnerRecordCount
+  // lands in receiverRecordCount for a starter (vs senderRecordCount for a
+  // joiner), yet both compute the identical over-cap verdict and abort before any
+  // frame moves -- the starter throws before it ever reads the request.
+  const [conn, peer] = createMessagePipe();
+  const sender = new PSIParticipant("server", psiLibrary, {
+    role: "starter",
+    verbose: -1,
+  });
+  const run = linkViaSinglePassPSI(
+    { cardinality: "one-to-one" },
+    sender,
+    conn,
+    [["a", "b"]],
+    MAX_SINGLE_PASS_CELLS + 1, // partner alone is over the budget
+    -1,
+  );
+  await expect(run).rejects.toThrow(/single-pass cannot carry this dataset/);
+  await expect(run).rejects.not.toThrow(/cascade/);
+  // The starter aborted before receiving the request: the peer saw nothing.
+  void peer;
 });

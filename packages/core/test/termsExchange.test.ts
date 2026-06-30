@@ -218,8 +218,8 @@ test("only initiator expects output -> initiator is receiver", async () => {
   const outB = { expectsOutput: false, shareWithPartner: true };
   const [a, b] = await runRoleResolution(outA, outB, 100, 200);
   if (a.status !== "fulfilled" || b.status !== "fulfilled") throw new Error();
-  expect(a.value).toBe("receiver");
-  expect(b.value).toBe("sender");
+  expect(a.value.role).toBe("receiver");
+  expect(b.value.role).toBe("sender");
 });
 
 test("only responder expects output -> responder is receiver", async () => {
@@ -227,39 +227,43 @@ test("only responder expects output -> responder is receiver", async () => {
   const outB = { expectsOutput: true, shareWithPartner: false };
   const [a, b] = await runRoleResolution(outA, outB, 100, 200);
   if (a.status !== "fulfilled" || b.status !== "fulfilled") throw new Error();
-  expect(a.value).toBe("sender");
-  expect(b.value).toBe("receiver");
+  expect(a.value.role).toBe("sender");
+  expect(b.value.role).toBe("receiver");
 });
 
 test("both expect output, initiator has fewer records -> initiator is receiver", async () => {
   const out = { expectsOutput: true, shareWithPartner: true };
   const [a, b] = await runRoleResolution(out, out, 50, 200);
   if (a.status !== "fulfilled" || b.status !== "fulfilled") throw new Error();
-  expect(a.value).toBe("receiver");
-  expect(b.value).toBe("sender");
+  expect(a.value.role).toBe("receiver");
+  expect(b.value.role).toBe("sender");
+  // The partner record count is returned alongside the role so the single-pass
+  // frame-cap derivation can read both authenticated counts.
+  expect(a.value.partnerRecordCount).toBe(200);
+  expect(b.value.partnerRecordCount).toBe(50);
 });
 
 test("both expect output, responder has fewer records -> responder is receiver", async () => {
   const out = { expectsOutput: true, shareWithPartner: true };
   const [a, b] = await runRoleResolution(out, out, 200, 50);
   if (a.status !== "fulfilled" || b.status !== "fulfilled") throw new Error();
-  expect(a.value).toBe("sender");
-  expect(b.value).toBe("receiver");
+  expect(a.value.role).toBe("sender");
+  expect(b.value.role).toBe("receiver");
 });
 
 test("both expect output, equal record counts -> initiator is receiver", async () => {
   const out = { expectsOutput: true, shareWithPartner: true };
   const [a, b] = await runRoleResolution(out, out, 100, 100);
   if (a.status !== "fulfilled" || b.status !== "fulfilled") throw new Error();
-  expect(a.value).toBe("receiver");
-  expect(b.value).toBe("sender");
+  expect(a.value.role).toBe("receiver");
+  expect(b.value.role).toBe("sender");
 });
 
 test("both parties compute the same role independently", async () => {
   const out = { expectsOutput: true, shareWithPartner: true };
   const [a, b] = await runRoleResolution(out, out, 100, 200);
   if (a.status !== "fulfilled" || b.status !== "fulfilled") throw new Error();
-  expect(a.value).not.toBe(b.value);
+  expect(a.value.role).not.toBe(b.value.role);
 });
 
 test("the record-count exchange is unconditional and identical across output cases", async () => {

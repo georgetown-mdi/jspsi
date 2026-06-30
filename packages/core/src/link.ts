@@ -5,7 +5,10 @@ import {
   parseOrProtocolError,
   type MessageConnection,
 } from "./connection/messageConnection";
-import { MAX_FRAME_SIZE_BYTES } from "./connection/frameSize";
+import {
+  singlePassExchangeExceedsCap,
+  singlePassReplyByteCap,
+} from "./connection/frameSize";
 import { singleIssueArray } from "./utils/singleIssueArray";
 
 import { getLoggerForVerbosity } from "./utils/logger";
@@ -291,45 +294,26 @@ export async function linkViaPSI(
   }
 }
 
-/**
- * The raw-byte ceiling for a single-pass reply (setup + response + record count +
- * distinct-value index table), which travels as one frame. The sender checks the
- * built reply against this and refuses an oversized one before sending, rather
- * than passing a looser check and being rejected downstream by the transport's
- * own frame-size bound.
- *
- * The `* 3/4` factor once modelled the base64url expansion the AEAD envelope
- * applied before the wire (~4/3 the raw size), so the raw reply had to leave room
- * for it. That expansion is gone: the AEAD envelope and the file-sync message
- * body now carry the frame as raw bytes plus a small fixed header (see
- * encryptedMessageConnection.ts and fileSyncConnection.ts), so the on-wire frame
- * is essentially its raw size and a reply up to nearly MAX_FRAME_SIZE_BYTES would
- * now fit. The factor (and the 256-byte slack, which once also covered base64
- * rounding and the JSON wrapper) is therefore conservative -- it rejects some
- * replies that would now fit, never accepts one that would not -- and is left
- * unchanged here pending the rework that derives the single-pass cap from the
- * exchanged record counts up to a fixed maximum dataset size (board item
- * 206154573), where this arithmetic is replaced rather than patched.
- *
- * @internal exported for the wire-message test.
- */
-export const SINGLE_PASS_MAX_REPLY_BYTES =
-  Math.floor((MAX_FRAME_SIZE_BYTES * 3) / 4) - 256;
-
-/**
- * Would single-pass's distinct-value index table alone -- one int32 per linkage
- * key per record -- overflow the reply ceiling
- * ({@link SINGLE_PASS_MAX_REPLY_BYTES})? The index table is only part of the reply
- * (the encrypted setup and response ride alongside it), so this is a lower bound:
- * if the index table overflows, the whole reply certainly does, whatever the
- * encrypted sets weigh. Used by the prepareForExchange pre-flight, before the
- * encrypted sets exist.
- */
-export function singlePassReplyWouldExceedCap(
+// Actionable guidance for a dataset that exceeds the single-pass ceiling,
+// identical on both parties and across transports. Deliberately does NOT
+// recommend cascade: linkage_strategy is a mandatory-consistency agreed term that
+// cannot change unilaterally mid-exchange (re-agreeing on cascade is an
+// out-of-band step), so pointing at it here would be misleading. The cap is on
+// each party's (key, record) cell count keyCount * recordCount; reducing either
+// factor, or splitting the dataset, is the actionable remedy. See
+// docs/spec/PROTOCOL.md (the single-pass dataset ceiling).
+function singlePassOverCapMessage(
+  id: string,
   numLinkageKeys: number,
-  recordCount: number,
-): boolean {
-  return numLinkageKeys * recordCount * 4 > SINGLE_PASS_MAX_REPLY_BYTES;
+  senderRecordCount: number,
+  receiverRecordCount: number,
+): string {
+  return (
+    `${id}: single-pass cannot carry this dataset: ${numLinkageKeys} linkage ` +
+    `key(s) with ${senderRecordCount} sender and ${receiverRecordCount} ` +
+    "receiver record(s) exceed the single-pass ceiling. Reduce the number of " +
+    "linkage keys or the record count, or split the dataset into smaller batches."
+  );
 }
 
 /**
@@ -349,6 +333,12 @@ export function singlePassReplyWouldExceedCap(
  * result is returned. Wire format and the extra disclosure this costs:
  * docs/spec/PROTOCOL.md; the PSI building blocks it calls are on
  * {@link PSIParticipant}.
+ *
+ * @param partnerRecordCount - The partner's raw row count, exchanged over the
+ *   encrypted channel during role resolution. Together with this party's own row
+ *   count and the agreed key count it derives the per-exchange frame cap and the
+ *   abort-if-over-ceiling gate -- identically on both parties, so they reach the
+ *   same verdict from authenticated session state alone (see frameSize.ts).
  */
 export async function linkViaSinglePassPSI(
   protocol: {
@@ -357,6 +347,7 @@ export async function linkViaSinglePassPSI(
   participant: PSIParticipant,
   conn: MessageConnection,
   data: Array<IndexableIterable<string | undefined>>,
+  partnerRecordCount: number,
   verbosity: number = 0,
   setStage?: (id: string) => void,
 ): Promise<AssociationTable> {
@@ -388,6 +379,38 @@ export async function linkViaSinglePassPSI(
   const { distinctValues, distinctValueIndexTable, numRecords } =
     getDistinctValuesAndIndices(data);
 
+  // Map (own count, partner count, role) -> (senderRecordCount,
+  // receiverRecordCount). Both parties derive the SAME pair: the starter is the
+  // PSI sender, the joiner the receiver. This is the authenticated session state
+  // the frame cap and the over-ceiling gate read -- never the inbound frame.
+  const isSender = participant.config.role === "starter";
+  const senderRecordCount = isSender ? numRecords : partnerRecordCount;
+  const receiverRecordCount = isSender ? partnerRecordCount : numRecords;
+
+  // Authoritative, symmetric over-ceiling gate. Both parties compute it
+  // identically from the exchanged counts and the agreed key count, BEFORE
+  // exchanging any single-pass frame, so an over-cap exchange aborts on both
+  // sides in lockstep -- neither sends nor waits, so neither hangs to the
+  // inactivity timeout. The guidance is identical across parties and transports
+  // and does not recommend cascade. The prepareForExchange pre-flight is the
+  // coarse one-party shadow of this; this is the precise two-party check.
+  if (
+    singlePassExchangeExceedsCap(
+      numLinkageKeys,
+      senderRecordCount,
+      receiverRecordCount,
+    )
+  ) {
+    throw new Error(
+      singlePassOverCapMessage(
+        participant.id,
+        numLinkageKeys,
+        senderRecordCount,
+        receiverRecordCount,
+      ),
+    );
+  }
+
   if (participant.config.role === "starter") {
     // Need to send:
     // - this party's values, encrypted with own key ("setup" message)
@@ -414,12 +437,26 @@ export async function linkViaSinglePassPSI(
       numRecords,
       sortedDistinctValueIndices,
     );
-    if (reply.byteLength > SINGLE_PASS_MAX_REPLY_BYTES) {
+    // Send-time check against the SAME derived cap the receiver's read gate
+    // enforces (singlePassReplyByteCap), so the two are one computation. The
+    // over-ceiling gate above already aborted the common case from the counts
+    // alone; this is the defensive backstop, since the derived cap upper-bounds
+    // any legitimate reply, it fires only on a pathological build (an
+    // unexpectedly large serialized element). Same actionable guidance, no
+    // cascade.
+    const replyCap = singlePassReplyByteCap(
+      numLinkageKeys,
+      senderRecordCount,
+      receiverRecordCount,
+    );
+    if (reply.byteLength > replyCap) {
       throw new Error(
-        `${participant.id}: single-pass reply frame is ${reply.byteLength} ` +
-          `bytes, over the ${SINGLE_PASS_MAX_REPLY_BYTES}-byte single-pass ` +
-          "ceiling; this dataset is too large for single-pass - use the cascade " +
-          "linkage strategy",
+        singlePassOverCapMessage(
+          participant.id,
+          numLinkageKeys,
+          senderRecordCount,
+          receiverRecordCount,
+        ),
       );
     }
 
@@ -434,13 +471,49 @@ export async function linkViaSinglePassPSI(
   stage("encrypting my data");
   await conn.send(participant.createClientRequest(distinctValues));
 
+  // Tighten the read gate to the per-exchange derived cap before reading the
+  // reply, then clear it so the later payload read uses the default. Set after
+  // our request and before the reply (one peer round trip away), so the file-sync
+  // poll loop reads no frame between the set and the read it governs. A transport
+  // that bounds its inbound path another way (the WebRTC data channel, fixed at
+  // MAX_WEBRTC_FRAME_BYTES) no-ops setInboundFrameCap and relies on that envelope
+  // plus the coherence checks below.
+  const replyCap = singlePassReplyByteCap(
+    numLinkageKeys,
+    senderRecordCount,
+    receiverRecordCount,
+  );
+  conn.setInboundFrameCap?.(replyCap);
+  let replyFrame: Uint8Array;
+  try {
+    replyFrame = (await conn.receive()) as Uint8Array;
+  } finally {
+    conn.setInboundFrameCap?.(undefined);
+  }
+
   const {
     setup: setupBytes,
     response: responseBytes,
     numRecords: numSenderRecords,
     distinctValueIndices: stackedDistinctValueIndices,
-  } = decodeSinglePassReply((await conn.receive()) as Uint8Array);
+  } = decodeSinglePassReply(replyFrame);
 
+  // Validate every count the reply declares against authenticated state, before
+  // it drives any allocation. The sender packs its own record count into the
+  // reply (part (c) of the wire format); it must equal the count the sender
+  // exchanged over the encrypted channel during role resolution
+  // (partnerRecordCount), which the over-ceiling gate above already bounded. This
+  // ties the decoded count to authenticated state rather than trusting the frame,
+  // and the index-table consistency check then confirms the frame actually
+  // carries numLinkageKeys * numSenderRecords entries -- both before the
+  // allocations below, preserving the pre-allocation ordering.
+  if (numSenderRecords !== partnerRecordCount) {
+    throw new Error(
+      `${participant.id} protocol error: single-pass reply declares ` +
+        `${numSenderRecords} sender record(s), but the sender exchanged ` +
+        `${partnerRecordCount}`,
+    );
+  }
   if (
     stackedDistinctValueIndices.length !==
     numLinkageKeys * numSenderRecords
