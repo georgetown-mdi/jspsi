@@ -647,13 +647,13 @@ export function InvitationTerms({
 
             {/* Renders only when it has content: the acceptor's send list (hidden
                 in the inviter's "proposing" preview, which shows its send as chips
-                above) or a non-empty receive list. The guard mirrors the two inner
-                conditions below so the Term never renders an empty label -- which it
-                would in the inviter's preview, where the send block is suppressed
-                and receive is usually empty. */}
+                above) or a declared receive (present even when empty). The guard
+                mirrors the two inner conditions below so the Term never renders an
+                empty label -- which it would in the inviter's preview, where the
+                send block is suppressed and receive is usually undeclared. */}
             {summary.payload !== undefined &&
               ((summary.payload.sendDeclared && perspective !== "proposing") ||
-                summary.payload.receive.length > 0) && (
+                summary.payload.receiveDeclared) && (
                 <Term label="Additional data for matched records">
                   {/* Viewer-centric, like Result sharing: the acceptor reads the
                     inviter's send as the partner's ("Your partner will send"). The
@@ -681,23 +681,34 @@ export function InvitationTerms({
                           </List>
                         ) : (
                           <Text size="sm" c="dimmed">
-                            (none)
+                            (none) -- any payload column would abort the
+                            exchange
                           </Text>
                         )}
                       </Stack>
                     )}
-                  {summary.payload.receive.length > 0 && (
+                  {/* Mirror of the send block: a declared receive is shown even
+                      when empty, rendered "(none)" so the strict "the acceptor
+                      sends nothing" assertion is visible rather than inferred from
+                      a missing line. A lazy (undeclared) receive is omitted. */}
+                  {summary.payload.receiveDeclared && (
                     <Stack gap={2}>
                       <Text size="sm">
                         {perspective === "proposing"
                           ? "You request from your partner:"
                           : "Your partner requests from you:"}
                       </Text>
-                      <List size="sm" withPadding listStyleType="circle">
-                        {summary.payload.receive.map((column, index) => (
-                          <List.Item key={index}>{column}</List.Item>
-                        ))}
-                      </List>
+                      {summary.payload.receive.length > 0 ? (
+                        <List size="sm" withPadding listStyleType="circle">
+                          {summary.payload.receive.map((column, index) => (
+                            <List.Item key={index}>{column}</List.Item>
+                          ))}
+                        </List>
+                      ) : (
+                        <Text size="sm" c="dimmed">
+                          (none) -- any payload column would abort the exchange
+                        </Text>
+                      )}
                     </Stack>
                   )}
                 </Term>

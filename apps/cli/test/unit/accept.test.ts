@@ -988,6 +988,9 @@ test("displayInvitation escapes a hostile inviter identity and key names", () =>
       ...getDefaultLinkageTerms("Inviter Org"),
       identity: "\x1b[31mEVIL‮",
       linkageKeys: [{ name: "k\x1b[0m", elements: [{ field: "ssn" }] }],
+      // A hostile requested-from-you column name reaches the new "requests from
+      // you" line; it must be escaped there too.
+      payload: { receive: [{ name: "req\x1b[0m‮" }] },
     },
   };
   const log = getLogger("accept-display-test");
@@ -1026,10 +1029,45 @@ test("displayInvitation: the carried disclosed subset shows names, '(none)' when
     lines({ ...base, disclosedPayloadColumns: ["diagnosis", "notes"] }),
   ).toContain("columns you will receive: diagnosis, notes");
   expect(lines({ ...base, disclosedPayloadColumns: [] })).toContain(
-    "columns you will receive: (none)",
+    "columns you will receive: (none) -- any payload column would abort the exchange",
   );
   expect(lines({ ...base, disclosedPayloadColumns: undefined })).not.toContain(
     "columns you will receive",
+  );
+});
+
+test("displayInvitation: the inviter's request-from-acceptor receive shows names, '(none)' when empty, and nothing when absent", () => {
+  // The opposite direction from "columns you will receive": the inviter's
+  // payload.receive is what it requests FROM this party. A declared receive
+  // (present, even if empty) is shown -- an empty one as "(none)", since it
+  // strictly asserts this party sends nothing -- while an absent receive (lazy)
+  // shows no line at all. CLI counterpart of the web "requests from you" line.
+  const log = getLogger("accept-display-request-test");
+  log.setLevel("silent");
+  const lines = (token: InvitationToken): string => {
+    const infoSpy = vi.spyOn(log, "info");
+    try {
+      displayInvitation(token, log);
+      return infoSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    } finally {
+      infoSpy.mockRestore();
+    }
+  };
+  const base = sampleToken(FUTURE());
+  const withReceive = (
+    receive: { name: string }[] | undefined,
+  ): InvitationToken => ({
+    ...base,
+    linkageTerms: { ...base.linkageTerms, payload: { receive } },
+  });
+  expect(lines(withReceive([{ name: "dose" }, { name: "outcome" }]))).toContain(
+    "columns the inviting party requests from you: dose, outcome",
+  );
+  expect(lines(withReceive([]))).toContain(
+    "columns the inviting party requests from you: (none) -- any payload column would abort the exchange",
+  );
+  expect(lines(withReceive(undefined))).not.toContain(
+    "the inviting party requests from you",
   );
 });
 

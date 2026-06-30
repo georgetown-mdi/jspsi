@@ -237,7 +237,22 @@ export function displayInvitation(
           ? token.disclosedPayloadColumns
               .map((c) => sanitizeForDisplay(c))
               .join(", ")
-          : "(none)"),
+          : "(none) -- any payload column would abort the exchange"),
+    );
+  // The opposite direction: the columns the inviter requests FROM this party for
+  // matched records -- what YOU may send. A declared receive (present, even if
+  // empty) is cross-checked: an empty set strictly asserts you send nothing (a
+  // non-empty send then aborts), shown as (none); an absent receive reconciles
+  // lazily (the inviter takes whatever your metadata discloses) and is omitted.
+  // Partner-controlled names, so escaped. This is the CLI counterpart of the web
+  // consent screen's "your partner requests from you" line, mirroring the disclosed
+  // subset block above on the opposite direction.
+  if (t.payload?.receive !== undefined)
+    log.info(
+      `  columns the inviting party requests from you: ` +
+        (t.payload.receive.length > 0
+          ? t.payload.receive.map((c) => sanitizeForDisplay(c.name)).join(", ")
+          : "(none) -- any payload column would abort the exchange"),
     );
   if (token.expires !== undefined) log.info(`  expires: ${token.expires}`);
 }
