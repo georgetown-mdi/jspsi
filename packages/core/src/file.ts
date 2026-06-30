@@ -146,8 +146,12 @@ type StreamSource = {
  * past (a false negative), never wrongly reject a valid file -- the safe direction
  * for an operator-local backstop. Byte-wise is safe for UTF-8 (0x0a/0x0d are below
  * 0x80, so neither occurs as a continuation byte of a multi-byte character).
+ *
+ * @internal exported only for the unit tests, which drive its scan and trip
+ * directly against a fake stream source -- isolating the run accounting from
+ * PapaParse's row splitting (which never sees CR-only or the inner-overflow case).
  */
-function guardStreamLineByteCeiling(
+export function guardStreamLineByteCeiling(
   source: StreamSource,
   byteCeiling: number,
 ): () => void {

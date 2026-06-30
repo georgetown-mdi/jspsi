@@ -5,6 +5,7 @@ import { expect, test, vi } from "vitest";
 import {
   assertLeadingLineWithinByteCeiling,
   CSV_LINE_BYTE_CEILING,
+  guardStreamLineByteCeiling,
   loadCSVColumnSample,
   loadCSVFile,
 } from "../src/file";
@@ -354,10 +355,9 @@ test("loadCSVFile: a giant field arriving in one data event fails fast", async (
 });
 
 test("loadCSVFile: destroys the source stream once the ceiling aborts the read", async () => {
-  // The ceiling trip's parser.abort() tears down the parser but not the source, so
-  // the loader must release the stream rather than leak its descriptor until GC --
-  // the same release loadCSVColumnSample makes on its early aborts, now reachable in
-  // loadCSVFile through the ceiling.
+  // On a ceiling trip the guard destroys the source itself (surfacing the error
+  // through PapaParse), and the error path releases it again; either way the stream
+  // is destroyed rather than leaked until GC. The spy fires on the guard's destroy.
   const ceiling = 512;
   const stream = chunkedStreamOf("x".repeat(ceiling * 4), 64);
   const destroySpy = vi.spyOn(stream, "destroy");
@@ -492,10 +492,134 @@ test("assertLeadingLineWithinByteCeiling: a no-terminator file over a ceiling ab
 test("loadCSVFile: a browser File with a no-newline leading line over the ceiling fails fast", async () => {
   // Wires the pre-read into loadCSVFile end to end: the File the web caller passes
   // rejects before parsing, so PapaParse's FileReader path is never reached. This
-  // bounds the web path the data-event counter cannot observe.
+  // bounds the web path, which exposes no `data` events for the stream guard.
   const ceiling = 512;
   const file = new File(["x".repeat(ceiling * 2)], "data.csv", {
     type: "text/csv",
   });
   await expect(loadCSVFile(file, ceiling)).rejects.toThrow(/single-line limit/);
+});
+
+// The stream guard's run accounting, exercised directly against a fake stream
+// source so the cases PapaParse's row splitting cannot reach -- CR-only endings,
+// and an over-ceiling run terminated LATER in the same chunk (the inner-overflow
+// path, which must trip rather than be forgiven by that later terminator) -- are
+// pinned. A false positive (tripping a valid stream) is the dangerous direction;
+// these confirm well-formed input never trips.
+
+/**
+ * A stand-in for the Node stream the guard attaches to: it captures the guard's
+ * `data` listener so the test can feed chunks, and records destroy() calls (the
+ * trip). Mirrors only the public surface the guard touches (on/removeListener/
+ * destroy), no real stream.
+ */
+function fakeGuardSource() {
+  let listener: ((chunk: Buffer | string) => void) | undefined;
+  const destroyedWith: Array<Error | undefined> = [];
+  const source = {
+    on(_event: "data", l: (chunk: Buffer | string) => void) {
+      listener = l;
+    },
+    removeListener() {
+      listener = undefined;
+    },
+    destroy(error?: Error) {
+      destroyedWith.push(error);
+    },
+  };
+  return {
+    source,
+    push: (chunk: Buffer | string) => listener?.(chunk),
+    tripped: () => destroyedWith.length > 0,
+    trippedMessage: () => destroyedWith[0]?.message,
+  };
+}
+
+test("guardStreamLineByteCeiling: well-formed CRLF lines under the ceiling do not trip", () => {
+  const g = fakeGuardSource();
+  guardStreamLineByteCeiling(g.source, 16);
+  g.push(Buffer.from("a,b\r\n"));
+  g.push(Buffer.from("c,d\r\n"));
+  g.push(Buffer.from("ee,ff\r\n"));
+  expect(g.tripped()).toBe(false);
+});
+
+test("guardStreamLineByteCeiling: CR-only line endings reset the run like LF/CRLF", () => {
+  // Lines separated only by CR (0x0d), each well under the ceiling, total far over.
+  // PapaParse's row splitting never exercises a lone CR, so the guard owns this.
+  const g = fakeGuardSource();
+  guardStreamLineByteCeiling(g.source, 8);
+  g.push(Buffer.from("ab\rcd\ref\rgh\r"));
+  expect(g.tripped()).toBe(false);
+});
+
+test("guardStreamLineByteCeiling: an over-ceiling run terminated later in the same chunk still trips", () => {
+  // The inner-overflow path: the over-ceiling segment must trip BEFORE the
+  // terminator that follows it in the same chunk resets the run -- otherwise an
+  // oversized-but-terminated leading line would be silently forgiven.
+  const g = fakeGuardSource();
+  const ceiling = 10;
+  guardStreamLineByteCeiling(g.source, ceiling);
+  g.push(Buffer.from(`${"x".repeat(ceiling + 2)}\nshort\n`));
+  expect(g.tripped()).toBe(true);
+  expect(g.trippedMessage()).toMatch(/single-line limit/);
+});
+
+test("guardStreamLineByteCeiling: an over-ceiling run accumulated across chunks trips before a later terminator", () => {
+  // The same inner overflow, but the run is carried across `data` events: the bytes
+  // that cross the ceiling arrive in a later chunk, ahead of that chunk's terminator.
+  const g = fakeGuardSource();
+  guardStreamLineByteCeiling(g.source, 10);
+  g.push(Buffer.from("xxxxxxx")); // run = 7, no terminator
+  expect(g.tripped()).toBe(false);
+  g.push(Buffer.from("xxxx\ny")); // 4 more before the \n -> run = 11 > 10
+  expect(g.tripped()).toBe(true);
+  expect(g.trippedMessage()).toMatch(/single-line limit/);
+});
+
+test("guardStreamLineByteCeiling: a line of exactly the ceiling passes, one byte over trips", () => {
+  // The terminator byte is not counted, so content == ceiling is accepted and
+  // content == ceiling + 1 trips -- the same boundary the pre-read uses.
+  const atCeiling = fakeGuardSource();
+  guardStreamLineByteCeiling(atCeiling.source, 10);
+  atCeiling.push(Buffer.from(`${"x".repeat(10)}\n`));
+  expect(atCeiling.tripped()).toBe(false);
+
+  const overCeiling = fakeGuardSource();
+  guardStreamLineByteCeiling(overCeiling.source, 10);
+  overCeiling.push(Buffer.from(`${"x".repeat(11)}\n`));
+  expect(overCeiling.tripped()).toBe(true);
+});
+
+test("guardStreamLineByteCeiling: many short lines whose total exceeds the ceiling do not trip", () => {
+  // The run resets at every terminator, so cumulative bytes far over the ceiling are
+  // fine. Pushes strings to exercise the Buffer.from(chunk) path.
+  const g = fakeGuardSource();
+  guardStreamLineByteCeiling(g.source, 8);
+  for (let i = 0; i < 100; i++) g.push("ab,cd\n");
+  expect(g.tripped()).toBe(false);
+});
+
+test("guardStreamLineByteCeiling: the detach function stops further scanning", () => {
+  const g = fakeGuardSource();
+  const detach = guardStreamLineByteCeiling(g.source, 8);
+  detach();
+  g.push(Buffer.from("x".repeat(100))); // would trip if still attached
+  expect(g.tripped()).toBe(false);
+});
+
+test("guardStreamLineByteCeiling: a non-stream source (no `on`) is inert", () => {
+  // A browser File has no `on`; the guard returns a no-op detach and never touches
+  // it (that path is bounded by assertLeadingLineWithinByteCeiling instead).
+  let destroyed = false;
+  const detach = guardStreamLineByteCeiling(
+    {
+      destroy: () => {
+        destroyed = true;
+      },
+    },
+    8,
+  );
+  detach();
+  expect(destroyed).toBe(false);
 });
