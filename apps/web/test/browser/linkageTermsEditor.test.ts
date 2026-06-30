@@ -172,42 +172,66 @@ describe("LinkageTermsEditor", () => {
       "last_name",
       "dob",
     ]);
+    // The VISIBLE error is shown for sighted users (queried by testid -- the
+    // announcement carries the same text, so a getByText would be ambiguous).
     await expect
-      .element(
-        page.getByText(
-          "Only one column can be the row identifier. Choose a single identifier.",
-        ),
-      )
-      .toBeInTheDocument();
+      .element(page.getByTestId("identifier-conflict"))
+      .toHaveTextContent(
+        "Only one column can be the row identifier. Choose a single identifier.",
+      );
     await expect.element(generateButton()).toBeDisabled();
     await expect
       .element(page.getByText("Resolve the highlighted items to continue."))
       .toBeInTheDocument();
 
     // The block is announced, not a silent visual-only footer swap: the footer
-    // status sits in a polite live region (the acceptor verdict idiom), so a
-    // screen reader hears the gate engage and later release.
-    const footerStatus = page
+    // status's spoken form sits in a SEPARATE, stable polite live region, so a
+    // screen reader hears the gate even when the inviter mounts already blocked.
+    const footerAnnouncement = page.getByTestId("generate-status-announcement");
+    await expect
+      .element(footerAnnouncement)
+      .toHaveTextContent("still need to be resolved");
+    expect(footerAnnouncement.element().getAttribute("role")).toBe("status");
+    expect(footerAnnouncement.element().getAttribute("aria-live")).toBe(
+      "polite",
+    );
+    // The VISIBLE footer text is NOT itself a live region (it would otherwise
+    // double-announce and fire against the heading focus on mount) -- the symmetric
+    // guard to the acceptor verdict's "visible node is not a live region" check.
+    const visibleFooter = page
       .getByText("Resolve the highlighted items to continue.")
-      .element()
-      .closest('[role="status"]');
-    expect(footerStatus?.getAttribute("aria-live")).toBe("polite");
+      .element();
+    expect(visibleFooter.closest('[role="status"]')).toBeNull();
+    expect(visibleFooter.closest("[aria-live]")).toBeNull();
 
-    // The grid's identifier-conflict message itself reaches assistive tech
-    // through a STABLE, always-present polite live region whose content swaps,
-    // not a conditionally-mounted assertive node: the wrapper carries
-    // role="status"/aria-live="polite" and the red text sits inside it with no
-    // nested role="alert" (which would fire assertively on mount and fight the
-    // editor's heading focus when a seed mounts already in conflict).
-    const conflictRegion = document.querySelector(
-      '[data-testid="identifier-conflict"]',
+    // The grid's identifier-conflict reaches assistive tech through a SEPARATE,
+    // stable, always-present polite live region that carries the message with no
+    // nested role="alert" (which would fire assertively against the heading focus).
+    // The deferred empty -> non-empty timing that makes a present-on-mount conflict
+    // announce is the hook's job and is not observable here; this asserts the
+    // channel. The visible error carries no role of its own, so it neither
+    // announces on mount nor double-announces with this region.
+    expect(
+      page.getByTestId("identifier-conflict").element().getAttribute("role"),
+    ).toBeNull();
+    const conflictAnnouncement = page.getByTestId(
+      "identifier-conflict-announcement",
     );
-    expect(conflictRegion?.getAttribute("role")).toBe("status");
-    expect(conflictRegion?.getAttribute("aria-live")).toBe("polite");
-    expect(conflictRegion?.querySelector('[role="alert"]')).toBeNull();
-    expect(conflictRegion?.textContent).toContain(
-      "Only one column can be the row identifier",
+    await expect
+      .element(conflictAnnouncement)
+      .toHaveTextContent(
+        "Only one column can be the row identifier. Choose a single identifier.",
+      );
+    expect(conflictAnnouncement.element().getAttribute("role")).toBe("status");
+    expect(conflictAnnouncement.element().getAttribute("aria-live")).toBe(
+      "polite",
     );
+    expect(
+      conflictAnnouncement.element().querySelector('[role="alert"]'),
+    ).toBeNull();
+    // Capture the announcer node to prove the SAME node survives the swap below (a
+    // stable channel), not merely that some announcer exists after the re-render.
+    const announcerNode = conflictAnnouncement.element();
 
     // Demote one identifier to Ignored, leaving a single row identifier: the grid
     // error clears and Generate re-enables. The disclosure dropdown opens
@@ -219,25 +243,19 @@ describe("LinkageTermsEditor", () => {
     );
     await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
     await expect
-      .element(
-        page.getByText(
-          "Only one column can be the row identifier. Choose a single identifier.",
-        ),
-      )
+      .element(page.getByTestId("identifier-conflict"))
       .not.toBeInTheDocument();
     await expect.element(generateButton()).toBeEnabled();
 
-    // The live region persists across the swap (it is the always-present wrapper,
-    // not the message node): its wrapper is still in the DOM, now emptied of the
-    // conflict text -- proof the announcement channel is stable rather than
-    // mounted with its content.
-    const persistedRegion = document.querySelector(
-      '[data-testid="identifier-conflict"]',
+    // The announcement channel is the SAME always-present node across the swap (not
+    // a teardown/remount) and clears to empty -- proof the channel is stable rather
+    // than mounted with its content.
+    expect(page.getByTestId("identifier-conflict-announcement").element()).toBe(
+      announcerNode,
     );
-    expect(persistedRegion).not.toBeNull();
-    expect(persistedRegion?.textContent).not.toContain(
-      "Only one column can be the row identifier",
-    );
+    await expect
+      .element(page.getByTestId("identifier-conflict-announcement"))
+      .not.toHaveTextContent("Only one column can be the row identifier");
   });
 
   test("Reset to recommended restores the seeded name after an edit", async () => {

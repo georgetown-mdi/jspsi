@@ -62,6 +62,7 @@ import { FieldCoverage } from "@components/FieldCoverage";
 import { MetadataGrid } from "@components/MetadataGrid";
 import { StandardizationCards } from "@components/StandardizationCards";
 import { TermsImportExport } from "@components/TermsImportExport";
+import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 import { useNonEmptyRates } from "@components/useNonEmptyRates";
 
 import type {
@@ -256,6 +257,19 @@ export function LinkageTermsEditor({
   // new validation rule.
   const canGenerate =
     validation.canGenerate && !hasMultipleIdentifiers(draft.metadata);
+
+  // The footer status's spoken form for the deferred announcer below. Worded
+  // differently from the visible footer text on purpose (one concise spoken line),
+  // which also keeps the visible-text test query unambiguous. Deferred so the
+  // blocked state present on MOUNT (e.g. a two-identifier seed) is announced as an
+  // empty -> non-empty transition rather than skipped as present-on-mount content,
+  // while still queuing politely behind the heading focus.
+  const footerStatusAnnouncement = canGenerate
+    ? "The invitation is ready to generate."
+    : "Some highlighted items still need to be resolved before you can generate the invitation.";
+  const deferredFooterAnnouncement = useDeferredAnnouncement(
+    footerStatusAnnouncement,
+  );
 
   // Per-key satisfiability badge, derived from the draft's CURRENT metadata AND
   // authored standardization so it tracks both column-type edits and per-field
@@ -1089,15 +1103,14 @@ export function LinkageTermsEditor({
         }}
       >
         <Group justify="space-between">
-          {/* The validation status lives in ONE stable, polite, atomic live
-              region -- the same idiom as the acceptor's PrepareData verdict. The
-              wrapper persists across renders while the inner text swaps, so a
-              screen reader hears the Ready <-> Resolve transition (including the
-              inviter newly blocking on the two-identifier state), not only the
-              sighted footer change; a bare swap of two separately-mounted nodes
-              would not reliably announce it. Polite, not assertive, so it does
-              not fight the heading focus on mount. */}
-          <div role="status" aria-live="polite" aria-atomic="true">
+          {/* The VISIBLE footer status renders immediately and is NOT a live
+              region: the spoken Ready <-> Resolve status is voiced by the deferred
+              polite region below (the same decoupled idiom as PrepareData's
+              verdict). Decoupling lets the blocked state present on MOUNT (the
+              inviter seeded with two identifiers) announce as an empty ->
+              non-empty transition rather than be skipped as present-on-mount
+              content, while still queuing politely behind the heading focus. */}
+          <div>
             {canGenerate ? (
               <Text size="sm" c="dimmed">
                 Ready to generate.
@@ -1131,6 +1144,17 @@ export function LinkageTermsEditor({
       {/* Polite live region for validation/reorder announcements. */}
       <VisuallyHidden role="status" aria-live="polite">
         {announcement}
+      </VisuallyHidden>
+      {/* The footer status's announcement channel (see the footer wrapper above):
+          a stable polite region whose deferred text voices the Ready <-> Resolve
+          status to assistive tech without fighting the heading focus on mount. */}
+      <VisuallyHidden
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="generate-status-announcement"
+      >
+        {deferredFooterAnnouncement}
       </VisuallyHidden>
     </Stack>
   );
