@@ -87,8 +87,9 @@ export const MAX_FRAME_SIZE_BYTES = 536_870_888;
  * {@link singlePassReplyByteCap}) must stay below the 256 MiB MAX_WEBRTC_FRAME_BYTES
  * so a legitimate single-pass reply is never rejected mid-exchange on the WebRTC
  * path. 3M is the largest round value that keeps that envelope from binding (a
- * browser, which never exposes gc, also hits its own unrelieved memory wall around
- * the same scale), so raising further would help only file-sync and would require
+ * browser, which never exposes gc, is expected to hit its own unrelieved memory
+ * wall near the same scale -- estimated from the relief factor, not separately
+ * measured), so raising further would help only file-sync and would require
  * decoupling the cap per transport. It is a cell-count budget, not a bare row cap,
  * on purpose: a rows-only cap is off by ~14x between a 1-key and a 14-key linkage at
  * the same memory. The byte cap below is a defense-in-depth tightening derived from
