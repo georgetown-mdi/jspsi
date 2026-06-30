@@ -326,8 +326,8 @@ function singlePassOverCapMessage(
 // binding layer reached through createClientRequest/computeValueMatches/
 // createServerSetup -- not by the WebAssembly linear heap (a flat ~16 MB at
 // D = 14,000) or by retained JS (a ~20 MB live floor); collecting at the phase
-// boundaries recovers it, measured ~160 -> ~120 MB at D = 14,000 (board item
-// 206377899; methodology and the breakdown in docs/spec/PROTOCOL.md). A no-op
+// boundaries recovers it (board item 206377899; the measured sizes, methodology,
+// and breakdown are in docs/spec/PROTOCOL.md). A no-op
 // unless the runtime exposes a global gc: the CLI launches Node with --expose-gc
 // (the Dockerfile entrypoint and the apps/cli dev script), so it gets the relief;
 // a browser never exposes gc, so the web receiver does not, and its ceiling rests
