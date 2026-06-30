@@ -541,6 +541,8 @@ describe("InvitationTerms: a declared-empty receive is surfaced, not collapsed w
     const panel = panelFor("Other details");
     expect(panel.textContent).toContain("Your partner requests from you:");
     expect(panel.textContent).toContain("(none)");
+    // The "(none)" names its strict consequence rather than reading as innocuous.
+    expect(panel.textContent).toContain("would abort the exchange");
   });
 
   test("a lazy (undeclared) receive renders no request line", async () => {
@@ -559,6 +561,7 @@ describe("InvitationTerms: a declared-empty receive is surfaced, not collapsed w
     const panel = panelFor("Other details");
     expect(panel.textContent).toContain("You request from your partner:");
     expect(panel.textContent).toContain("(none)");
+    expect(panel.textContent).toContain("would abort the exchange");
   });
 });
 

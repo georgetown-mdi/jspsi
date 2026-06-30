@@ -1029,7 +1029,7 @@ test("displayInvitation: the carried disclosed subset shows names, '(none)' when
     lines({ ...base, disclosedPayloadColumns: ["diagnosis", "notes"] }),
   ).toContain("columns you will receive: diagnosis, notes");
   expect(lines({ ...base, disclosedPayloadColumns: [] })).toContain(
-    "columns you will receive: (none)",
+    "columns you will receive: (none) -- any payload column would abort the exchange",
   );
   expect(lines({ ...base, disclosedPayloadColumns: undefined })).not.toContain(
     "columns you will receive",
@@ -1064,7 +1064,7 @@ test("displayInvitation: the inviter's request-from-acceptor receive shows names
     "columns the inviting party requests from you: dose, outcome",
   );
   expect(lines(withReceive([]))).toContain(
-    "columns the inviting party requests from you: (none)",
+    "columns the inviting party requests from you: (none) -- any payload column would abort the exchange",
   );
   expect(lines(withReceive(undefined))).not.toContain(
     "the inviting party requests from you",

@@ -237,7 +237,7 @@ export function displayInvitation(
           ? token.disclosedPayloadColumns
               .map((c) => sanitizeForDisplay(c))
               .join(", ")
-          : "(none)"),
+          : "(none) -- any payload column would abort the exchange"),
     );
   // The opposite direction: the columns the inviter requests FROM this party for
   // matched records -- what YOU may send. A declared receive (present, even if
@@ -252,7 +252,7 @@ export function displayInvitation(
       `  columns the inviting party requests from you: ` +
         (t.payload.receive.length > 0
           ? t.payload.receive.map((c) => sanitizeForDisplay(c.name)).join(", ")
-          : "(none)"),
+          : "(none) -- any payload column would abort the exchange"),
     );
   if (token.expires !== undefined) log.info(`  expires: ${token.expires}`);
 }

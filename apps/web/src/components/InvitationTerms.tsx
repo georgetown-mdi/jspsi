@@ -681,7 +681,8 @@ export function InvitationTerms({
                           </List>
                         ) : (
                           <Text size="sm" c="dimmed">
-                            (none)
+                            (none) -- any payload column would abort the
+                            exchange
                           </Text>
                         )}
                       </Stack>
@@ -705,7 +706,7 @@ export function InvitationTerms({
                         </List>
                       ) : (
                         <Text size="sm" c="dimmed">
-                          (none)
+                          (none) -- any payload column would abort the exchange
                         </Text>
                       )}
                     </Stack>
