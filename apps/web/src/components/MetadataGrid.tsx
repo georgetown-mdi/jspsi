@@ -15,6 +15,8 @@ import {
   setColumnType,
 } from "@psi/metadataEditing";
 
+import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
+
 import type { Metadata, SemanticType } from "@psilink/core";
 
 import type { DisclosureChoice } from "@psi/metadataEditing";
@@ -30,6 +32,11 @@ const TYPE_OPTIONS = SEMANTIC_TYPES.map((type) => ({
  * a burst of edits announces once rather than on every keystroke. The visible
  * summary updates synchronously; only the announcement is debounced. */
 const ANNOUNCE_DEBOUNCE_MS = 600;
+
+/** The single-identifier conflict text, shared by the visible error and its
+ * announcement so the two cannot drift. */
+const SINGLE_IDENTIFIER_MESSAGE =
+  "Only one column can be the row identifier. Choose a single identifier.";
 
 /**
  * The shared metadata grid: a real table mapping each input column to a semantic
@@ -114,6 +121,16 @@ export function MetadataGrid({
 
   const multipleIdentifiers = hasMultipleIdentifiers(metadata);
 
+  // The conflict announcement is deferred one commit (see useDeferredAnnouncement),
+  // so a seed that mounts ALREADY in the two-identifier state is announced as an
+  // empty -> non-empty transition rather than skipped as present-on-mount content;
+  // a conflict that appears later (e.g. Reset restoring such a seed) announces the
+  // same way. The visible error below is NOT deferred, so sighted users see it on
+  // the first paint.
+  const conflictAnnouncement = useDeferredAnnouncement(
+    multipleIdentifiers ? SINGLE_IDENTIFIER_MESSAGE : "",
+  );
+
   return (
     <Stack gap="xs">
       <Table withTableBorder withColumnBorders verticalSpacing="xs">
@@ -164,9 +181,19 @@ export function MetadataGrid({
         </Table.Tbody>
       </Table>
 
+      {/* The single-identifier conflict is conveyed on two decoupled surfaces. The
+          VISIBLE red error renders immediately for sighted users and carries no
+          ARIA role of its own -- it is not the live region, so it neither
+          announces on mount (fighting focus) nor double-announces with the region
+          below, and being conditional it adds no empty in-flow box when there is
+          no conflict. The deferred polite region (last child, visually hidden) is
+          what reaches assistive tech: see the conflictAnnouncement note above for
+          why it is deferred. Both read the same message constant so they cannot
+          drift; tests query the visible error by its data-testid (the announcement
+          carries the same text, so a getByText would be ambiguous). */}
       {multipleIdentifiers && (
-        <Text size="sm" c="red" role="alert">
-          Only one column can be the row identifier. Choose a single identifier.
+        <Text size="sm" c="red" data-testid="identifier-conflict">
+          {SINGLE_IDENTIFIER_MESSAGE}
         </Text>
       )}
 
@@ -186,6 +213,18 @@ export function MetadataGrid({
           whole sentence is read, never a fragment. */}
       <VisuallyHidden role="status" aria-live="polite" aria-atomic="true">
         {actionAnnouncement}
+      </VisuallyHidden>
+      {/* The single-identifier conflict's announcement channel (see the visible
+          error above and conflictAnnouncement): a stable, always-present polite
+          region whose deferred text reaches assistive tech without fighting mount
+          focus. */}
+      <VisuallyHidden
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="identifier-conflict-announcement"
+      >
+        {conflictAnnouncement}
       </VisuallyHidden>
     </Stack>
   );

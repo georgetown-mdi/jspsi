@@ -389,7 +389,7 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
     expect(exchange.lastProps.initialWarning).toBeUndefined();
   });
 
-  test("the verdict is announced from one stable live region, not the swapped alert", async () => {
+  test("the verdict is announced from a separate stable live region, not the visible alert", async () => {
     window.location.hash = await encodeAcceptToken();
     mountAcceptRoute();
     await expect
@@ -401,19 +401,30 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
       .element(page.getByText("This file cannot match yet"))
       .toBeInTheDocument();
 
-    // The live region is the stable wrapper -- unconditional markup OUTSIDE the
-    // verdict ternary, so its node persists as the inner Alert swaps and a
-    // remap-driven transition is announced (three separately-mounted Alerts would
-    // not). The colored Alert inside must NOT be a live region of EITHER
-    // politeness: Mantine's Alert defaults role to "alert" (assertive) when none is
-    // set, which would nest an assertive region in this polite wrapper and fire on
-    // mount against the heading focus. This is the residue that regression guards.
+    // The VISIBLE verdict container is NOT a live region and its Alert is
+    // role="presentation": the colored verdict renders immediately (no flash or
+    // shift) but announces nothing directly, so it neither fires on mount against
+    // the heading focus nor nests an assertive region. This is the residue that
+    // regression guards.
     const verdict = document.querySelector('[data-testid="verdict"]');
-    expect(verdict?.getAttribute("role")).toBe("status");
-    expect(verdict?.getAttribute("aria-live")).toBe("polite");
+    expect(verdict?.getAttribute("role")).toBeNull();
+    expect(verdict?.getAttribute("aria-live")).toBeNull();
     expect(
       verdict?.querySelector('[role="alert"], [role="status"]'),
     ).toBeNull();
+
+    // The verdict reaches assistive tech through a SEPARATE, stable polite live
+    // region that carries the verdict text (the deferred empty -> non-empty timing
+    // that makes a present-on-mount verdict announce is the hook's job and is not
+    // observable here; this asserts the channel, the regression-guarded residue).
+    const announcement = page.getByTestId("verdict-announcement");
+    await expect
+      .element(announcement)
+      .toHaveTextContent(
+        "No agreed linkage key can be satisfied by your columns",
+      );
+    expect(announcement.element().getAttribute("role")).toBe("status");
+    expect(announcement.element().getAttribute("aria-live")).toBe("polite");
   });
 
   test("Back returns to the review screen and a different file reseeds the editor", async () => {
@@ -479,17 +490,45 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
     await reachEditor(
       csvFile("id,identifier,first_name,last_name\n1,2,Alice,Smith\n"),
     );
+    // The VISIBLE error is shown for sighted users (queried by testid -- the
+    // announcement carries the same text, so a getByText would be ambiguous).
     await expect
-      .element(
-        page.getByText(
-          "Only one column can be the row identifier. Choose a single identifier.",
-        ),
-      )
-      .toBeInTheDocument();
+      .element(page.getByTestId("identifier-conflict"))
+      .toHaveTextContent(
+        "Only one column can be the row identifier. Choose a single identifier.",
+      );
     await expect
       .element(page.getByRole("button", { name: "Start exchange" }))
       .toBeDisabled();
     expect(exchangeMounted()).toBe(false);
+
+    // The visible error carries no role of its own, so it neither announces on
+    // mount nor double-announces with the channel below.
+    expect(
+      page.getByTestId("identifier-conflict").element().getAttribute("role"),
+    ).toBeNull();
+
+    // The grid's identifier-conflict reaches assistive tech through a SEPARATE,
+    // stable, always-present polite live region that carries the message with no
+    // nested role="alert" (which would fight the "Prepare your data" heading focus).
+    // The deferred empty -> non-empty timing that makes a present-on-mount conflict
+    // announce is the hook's job and is not observable here; this asserts the
+    // channel. This is the acceptor half of the same fix the inviter test asserts.
+    const conflictAnnouncement = page.getByTestId(
+      "identifier-conflict-announcement",
+    );
+    await expect
+      .element(conflictAnnouncement)
+      .toHaveTextContent(
+        "Only one column can be the row identifier. Choose a single identifier.",
+      );
+    expect(conflictAnnouncement.element().getAttribute("role")).toBe("status");
+    expect(conflictAnnouncement.element().getAttribute("aria-live")).toBe(
+      "polite",
+    );
+    expect(
+      conflictAnnouncement.element().querySelector('[role="alert"]'),
+    ).toBeNull();
   });
 
   test("a zero-coverage file shows the block and disables Start exchange, so nothing dials", async () => {
@@ -546,6 +585,13 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
     await expect
       .element(page.getByText("1 of 2 keys can match"))
       .toBeInTheDocument();
+    // The verdict transition is also voiced through the separate announcer (the
+    // partial-state spoken string, distinct from the visible alert prose).
+    await expect
+      .element(page.getByTestId("verdict-announcement"))
+      .toHaveTextContent(
+        "1 of 2 linkage keys can be satisfied by your columns",
+      );
 
     // Map `beta` to Last name: now every key is satisfiable, the block is gone, and
     // "Start exchange" is enabled. Before the fix this remained "This file cannot
@@ -559,6 +605,11 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
     await expect
       .element(page.getByText("All 2 keys can match"))
       .toBeInTheDocument();
+    // The all-clear transition is voiced through the announcer too -- proof the
+    // partial and all-clear announcer strings are wired, not just the blocked one.
+    await expect
+      .element(page.getByTestId("verdict-announcement"))
+      .toHaveTextContent("All 2 linkage keys can be satisfied by your columns");
     await expect
       .element(page.getByRole("button", { name: "Start exchange" }))
       .toBeEnabled();

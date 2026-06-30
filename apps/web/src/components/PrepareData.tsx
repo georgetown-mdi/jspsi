@@ -46,6 +46,7 @@ import { ExchangeSummary } from "@components/ExchangeSummary";
 import { FieldCoverage } from "@components/FieldCoverage";
 import { MetadataGrid } from "@components/MetadataGrid";
 import { StandardizationCards } from "@components/StandardizationCards";
+import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 import { useNonEmptyRates } from "@components/useNonEmptyRates";
 
 import type {
@@ -245,6 +246,18 @@ export function PrepareData({
   const satisfiable = verdict.satisfiableKeyCount;
   const blocked = satisfiable === 0;
   const partial = satisfiable > 0 && satisfiable < totalKeys;
+  // The verdict's spoken form for the deferred announcer below. Deliberately worded
+  // differently from the visible Alert titles -- a screen reader hears one concise
+  // line rather than the alert prose, which also keeps the visible-title test
+  // queries unambiguous. Always non-empty (one of the three verdict states always
+  // holds), so the region is voiced on mount and on every transition.
+  const verdictAnnouncement = blocked
+    ? "No agreed linkage key can be satisfied by your columns yet."
+    : partial
+      ? `${satisfiable} of ${totalKeys} linkage keys can be satisfied by your columns.`
+      : `All ${totalKeys} linkage keys can be satisfied by your columns.`;
+  const deferredVerdictAnnouncement =
+    useDeferredAnnouncement(verdictAnnouncement);
   // Keys whose columns are all present (so the column verdict passes them) yet whose
   // declared cleaning can never produce a value -- a self-defeating parse_date in
   // the partner's adopted terms. Value-independent, so it does not change as the
@@ -386,22 +399,18 @@ export function PrepareData({
         {/* Primary column: verdict, disclosure/quick-fix, columns, cleaning. */}
         <Grid.Col span={{ base: 12, md: 7 }}>
           <Stack>
-            {/* The verdict lives in ONE stable, polite, atomic live region whose
-                inner Alert swaps as the verdict changes. Because the wrapper node
-                persists across the swap, a remap that flips blocked->all-clear is
-                announced. Kept polite, not assertive: the verdict is a standing
-                condition the operator is here to resolve. Each inner Alert is
-                role="presentation" -- Mantine's Alert defaults to "alert" (assertive)
-                when none is set, which would nest an assertive region inside this
-                polite one. tabIndex=-1 makes it the focus target after a remap. */}
-            <div
-              ref={verdictRef}
-              tabIndex={-1}
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-              data-testid="verdict"
-            >
+            {/* The verdict's VISIBLE alerts render immediately, so the colored
+                verdict neither flashes nor shifts layout on mount. This wrapper is
+                NOT a live region and each inner Alert is role="presentation"
+                (Mantine's Alert defaults to assertive "alert"), so nothing here
+                announces directly. The spoken verdict is voiced by the deferred
+                polite region right after this div -- decoupled so a verdict already
+                present on MOUNT (e.g. a file that lands blocked) is announced as an
+                empty -> non-empty transition rather than skipped as
+                present-on-mount content, while still queuing politely behind the
+                heading focus. tabIndex=-1 keeps this the focus target after a
+                remap. */}
+            <div ref={verdictRef} tabIndex={-1} data-testid="verdict">
               {blocked ? (
                 <Alert
                   role="presentation"
@@ -436,6 +445,17 @@ export function PrepareData({
                 </Alert>
               )}
             </div>
+            {/* The verdict's announcement channel (see the wrapper above): a stable
+                polite region whose deferred text reaches assistive tech without
+                fighting the heading focus on mount. */}
+            <VisuallyHidden
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              data-testid="verdict-announcement"
+            >
+              {deferredVerdictAnnouncement}
+            </VisuallyHidden>
 
             {/* A dead key the column verdict cannot see: the columns are present
                 (so the verdict above may read all-clear), but a cleaning rule in
