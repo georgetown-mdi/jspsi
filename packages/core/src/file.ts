@@ -24,7 +24,10 @@ import type { LocalFile } from "papaparse";
  * single-digit MiB and a data row far smaller -- and well below the
  * hundred-MiB-plus spans that drove the gigabyte-scale memory growth this guards
  * against. The input is the operator's own local file, so this is a robustness
- * backstop, not a partner- or transport-reachable bound.
+ * backstop, not a partner- or transport-reachable bound. Its classification --
+ * what the bound does not cover and why it is operator-local rather than a
+ * threat-model control -- lives in `docs/spec/CHANNEL_SECURITY.md` (CSV-read
+ * single-line byte ceiling).
  */
 export const CSV_LINE_BYTE_CEILING = 8 * 1024 * 1024;
 
