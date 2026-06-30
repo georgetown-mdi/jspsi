@@ -4,6 +4,10 @@ import { DEFAULT_THEME, darken, mergeMantineTheme } from "@mantine/core";
 
 import { cssVariablesResolver, mantineTheme } from "@theme";
 
+import { DROPZONE_DRAG_ICON } from "@components/dropzoneDragIcons";
+
+import type { PaletteShade } from "@components/dropzoneDragIcons";
+
 // Enforces the WCAG 2.1 AA contrast invariants the theme is tuned to: 4.5:1 for
 // normal-weight text (1.4.3) and 3:1 for non-text UI / focus indicators (1.4.11).
 // The JSDoc in theme.ts records the chosen colors and their ratios; this is the
@@ -77,25 +81,29 @@ const darkShade =
 const darkPrimary = theme.colors[theme.primaryColor][darkShade];
 const white = theme.white;
 const gray0 = theme.colors.gray[0];
-const cyan1 = theme.colors.cyan[1];
 const yellow1 = theme.colors.yellow[1];
 const red1 = theme.colors.red[1];
 const dark7 = theme.colors.dark[7];
 const dark6 = theme.colors.dark[6];
 
 // Per-component Dropzone drag-state icon overrides (FileDropzone.tsx), not theme
-// tokens, so these are read straight off the palette and checked against the
-// Dropzone's light-variant drag-over tints. The tint inverts with the scheme so
-// the icon shade does too (light shade 8, dark shade 6, via light-dark):
+// tokens, checked against the Dropzone's light-variant drag-over tints. The icon
+// SHADES are read from DROPZONE_DRAG_ICON -- the same source FileDropzone paints
+// from -- so re-pointing the icon at an inaccessible shade is necessarily an edit
+// to this assertion's input, the gap a hand-copied `theme.colors.blue[8]` left
+// open. The tint inverts with the scheme so the icon shade does too (light shade
+// 8, dark shade 6, via the shared constant's per-scheme branches):
 //   - light tints: accept = primary colour shade 1 (Dropzone's acceptColor
 //     defaults to theme.primaryColor), reject = red-1 (its default rejectColor);
 //   - dark tints: darken(shade-9, .5), Mantine's dark `-light` variant -- the
 //     real darken() so a resolver change re-runs the arithmetic, not a restated
 //     constant.
-const dropzoneAcceptIconLight = theme.colors.blue[8];
-const dropzoneRejectIconLight = theme.colors.red[8];
-const dropzoneAcceptIconDark = theme.colors.blue[6];
-const dropzoneRejectIconDark = theme.colors.red[6];
+const paletteShade = ([name, shade]: PaletteShade): string =>
+  theme.colors[name][shade];
+const dropzoneAcceptIconLight = paletteShade(DROPZONE_DRAG_ICON.accept.light);
+const dropzoneRejectIconLight = paletteShade(DROPZONE_DRAG_ICON.reject.light);
+const dropzoneAcceptIconDark = paletteShade(DROPZONE_DRAG_ICON.accept.dark);
+const dropzoneRejectIconDark = paletteShade(DROPZONE_DRAG_ICON.reject.dark);
 const dropzoneAcceptTintLight = theme.colors[theme.primaryColor][1];
 const dropzoneAcceptTintDark = darken(theme.colors[theme.primaryColor][9], 0.5);
 const dropzoneRejectTintDark = darken(theme.colors.red[9], 0.5);
@@ -159,12 +167,12 @@ describe("theme colour contrast (WCAG 2.1 AA)", () => {
         bg: white,
         floor: 3,
       },
-      {
-        name: "copied-state copy icon: primary on cyan-1 (non-text)",
-        fg: primary,
-        bg: cyan1,
-        floor: 3,
-      },
+      // The copied-state copy icon (ShareBlock's variant="light" ActionIcon) is
+      // pinned in test/browser/themeContrast.test.ts instead: Mantine owns that
+      // glyph's color through --mantine-color-{primary}-light-color (hardcoded to
+      // shade 9, independent of primaryShade), so there is no per-component
+      // constant to share and re-deriving the shade here would be the same blind
+      // re-statement this harness avoids -- only a real render pins what it paints.
       // Dark scheme primary (shade 6): the counterpart to the light primary fix. A
       // lighter dark shade lifts the focus indicators on the dark surfaces, and the
       // filled-primary text -- routed to --mantine-primary-color-contrast (black on

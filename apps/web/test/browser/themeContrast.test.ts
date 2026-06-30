@@ -25,8 +25,9 @@ const PrimaryCheckbox = Checkbox as unknown as ComponentType<{
   defaultChecked?: boolean;
   "aria-label"?: string;
 }>;
-const FilledActionIcon = ActionIcon as unknown as ComponentType<{
+const PrimaryActionIcon = ActionIcon as unknown as ComponentType<{
   children?: ReactNode;
+  variant?: string;
   "aria-label"?: string;
 }>;
 
@@ -39,9 +40,16 @@ const FilledActionIcon = ActionIcon as unknown as ComponentType<{
 // idealized autoContrast stayed green), so this measures the REAL computed colors
 // of all three contrast-routed filled-primary surfaces -- the Button label, the
 // (consent-gate) Checkbox checkmark, and the copy ActionIcon glyph -- in both schemes
-// and checks them against the WCAG 2.1 AA 1.4.3 text floor. The focus ring / input
-// border use the per-scheme --mantine-primary-color-filled directly (a plain shade
-// lookup, not the autoContrast path), so the unit test covers them.
+// and checks them against the WCAG 2.1 AA 1.4.3 text floor.
+//
+// It also pins the copied-state copy ActionIcon (ShareBlock flips it to
+// variant="light"): a non-text check glyph (1.4.11, 3:1) whose color Mantine owns
+// through --mantine-color-{primary}-light-color and resolves per scheme, with no
+// per-component constant to share -- so, like the filled surfaces, only a render
+// pins what it paints. The focus ring / input border (the per-scheme
+// --mantine-primary-color-filled, a plain shade lookup) and the Dropzone drag-icon
+// shades (a literal inline color shared with the unit test through
+// DROPZONE_DRAG_ICON) stay in the unit test, which checks them by arithmetic.
 
 let container: HTMLElement | undefined;
 let root: Root | undefined;
@@ -160,7 +168,7 @@ describe("rendered theme colour contrast (WCAG 2.1 AA)", () => {
       mount(
         scheme,
         createElement(
-          FilledActionIcon,
+          PrimaryActionIcon,
           { "aria-label": "copy" },
           createElement("span", null, "i"),
         ),
@@ -170,6 +178,34 @@ describe("rendered theme colour contrast (WCAG 2.1 AA)", () => {
       const backgroundColor = await restingBackground(ai);
       const { color } = getComputedStyle(ai);
       expect(contrast(color, backgroundColor)).toBeGreaterThanOrEqual(4.5);
+    });
+
+    test(`copied-state copy icon glyph is AA-legible (${scheme})`, async () => {
+      // ShareBlock swaps the copy ActionIcon to variant="light" once copied; the
+      // check glyph is a non-text graphic, so the WCAG 1.4.11 3:1 floor. Mantine
+      // owns this color: --ai-color resolves to --mantine-color-{primary}-light-color
+      // on the --mantine-color-{primary}-light tint, both per scheme (light: cyan-9
+      // on cyan-1; dark: cyan-0 on darken(cyan-9, .5)). No variant override touches
+      // the light variant, so this reads exactly what Mantine paints -- the dark
+      // branch in particular was never covered by the unit test's single light case.
+      // Resting bg via restingBackground so a stale hover (light-variant hover =
+      // cyan-2, a darker tint) is not sampled in place of the resting fill.
+      mount(
+        scheme,
+        createElement(
+          PrimaryActionIcon,
+          { variant: "light", "aria-label": "copied" },
+          createElement("span", null, "i"),
+        ),
+      );
+      const ai = await waitForEl(".mantine-ActionIcon-root");
+      // Unlike the filled cases, this does not poll the color to an expected value
+      // first: the shade is Mantine's to own (no value to await), and Mantine sets
+      // --ai-color inline at render, so the element never exists without its
+      // resolved color -- waitForEl plus restingBackground already settle the read.
+      const backgroundColor = await restingBackground(ai);
+      const { color } = getComputedStyle(ai);
+      expect(contrast(color, backgroundColor)).toBeGreaterThanOrEqual(3);
     });
   }
 
