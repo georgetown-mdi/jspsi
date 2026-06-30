@@ -63,7 +63,12 @@ export * from "./config/metadata";
 export * from "./config/signing";
 export * from "./signingIdentity";
 export * from "./standardization";
-export { loadCSVFile, loadCSVColumns, loadCSVColumnSample } from "./file";
+export {
+  loadCSVFile,
+  loadCSVColumns,
+  loadCSVColumnSample,
+  CSV_LINE_BYTE_CEILING,
+} from "./file";
 
 export {
   inferDateFormat,

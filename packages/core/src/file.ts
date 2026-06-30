@@ -137,6 +137,28 @@ export function loadCSVColumns(file: LocalFile): Promise<Array<string>> {
 }
 
 /**
+ * Per-logical-line byte ceiling for {@link loadCSVColumnSample}'s streamed read.
+ * Its row cap bounds the number of retained rows, but PapaParse must buffer one
+ * whole logical line -- a data row, or the entire header -- before it can yield a
+ * chunk and the read can stop, so an input whose first row terminator is far from
+ * the start (one giant line with no newline, one enormous field, or a
+ * multi-megabyte header) would drive the accumulated partial line, and the
+ * repeated re-splitting of it, linearly-to-quadratically with that span no matter
+ * the row cap. This ceiling bounds the bytes pulled from the source between row
+ * terminators, so those shapes fail fast with a clear error rather than consuming
+ * memory and CPU proportional to the span.
+ *
+ * 8 MiB sits comfortably above any realistic operator CSV's single line -- even a
+ * pathologically wide file of tens of thousands of columns is a header of low
+ * single-digit MiB and a data row far smaller -- and well below the
+ * hundred-MiB-plus spans that drove the gigabyte-scale memory growth this guards
+ * against. The input is the operator's own local file, so this is a robustness
+ * backstop on the bounded read's own guarantee, not a partner- or
+ * transport-reachable bound.
+ */
+export const CSV_LINE_BYTE_CEILING = 8 * 1024 * 1024;
+
+/**
  * Read a CSV's column header plus a bounded sample of one column's values,
  * without materializing the full row set {@link loadCSVFile} returns. Streams the
  * file in PapaParse chunks and stops (`parser.abort()`) as soon as the header
@@ -146,11 +168,16 @@ export function loadCSVColumns(file: LocalFile): Promise<Array<string>> {
  * of which needs every row.
  *
  * For a well-formed CSV this holds peak memory to the header plus one parse chunk
- * rather than the whole input. The bound is on retained rows, not on a single
- * line: like {@link loadCSVFile}, PapaParse must buffer one logical line (a row,
- * or the header) whole before it yields a chunk, so a pathological line or header
- * with no terminator is still read in full -- that worst case is unchanged from
- * the full read, not introduced here.
+ * rather than the whole input. Two bounds enforce that: `sampleLimit` caps the
+ * retained rows, and `byteCeiling` caps the bytes pulled from the source between
+ * row terminators -- the accumulated partial line PapaParse must buffer whole
+ * before it yields a chunk. Because PapaParse buffers one logical line (a data
+ * row, or the entire header) before its first chunk, without the byte ceiling an
+ * input whose first terminator is far from the start -- one giant line with no
+ * newline, one enormous field, or a multi-megabyte header -- would still drive
+ * memory (and CPU, via repeated re-splitting of that partial line) with the span.
+ * The ceiling makes those shapes reject fast with a clear error instead; see
+ * {@link CSV_LINE_BYTE_CEILING}.
  *
  * `selectColumn` is invoked with the header field list and returns the name of
  * the column to sample (the DOB column, for date-format inference) or `undefined`
@@ -178,6 +205,7 @@ export function loadCSVColumnSample(
   file: LocalFile,
   selectColumn: (columns: Array<string>) => string | undefined,
   sampleLimit: number,
+  byteCeiling: number = CSV_LINE_BYTE_CEILING,
 ): Promise<{
   columns: Array<string>;
   sampledColumn: string | undefined;
@@ -187,6 +215,60 @@ export function loadCSVColumnSample(
     let columns: Array<string> | undefined;
     let target: string | undefined;
     const sample: Array<string> = [];
+
+    // Bound the span between row terminators (the accumulated partial line), not
+    // just the retained rows. `bytesPulled` counts every byte the source emits;
+    // `spanStart` is reset to it each time the parse cursor advances past a
+    // completed line (the header, or a data row), so `bytesPulled - spanStart` is
+    // the bytes pulled since the last terminator -- the partial line PapaParse is
+    // still buffering. A well-formed input terminates each line well under the
+    // ceiling and never trips; a no-terminator / giant-field / giant-header input
+    // keeps the cursor pinned while bytes pile up, so the span crosses the ceiling
+    // and the read fails fast. The span is checked before that reset (chunk
+    // callback below), so a single read larger than the ceiling fails closed --
+    // rejected, never silently forgiven. Production sources (fs.createReadStream
+    // and stdin) deliver <=64 KiB reads, far below the 8 MiB default, so the
+    // per-callback span tracks the partial line to within one read and a
+    // legitimate file is never delivered in one over-ceiling read; a source that
+    // did would be rejected, which is the safe direction.
+    let bytesPulled = 0;
+    let spanStart = 0;
+    let lastCursor = 0;
+    let ceilingError: Error | undefined;
+
+    // Count bytes off the source's raw `data` events, BEFORE PapaParse buffers
+    // them: the unterminated partial line is invisible to the chunk callback,
+    // which sees only parsed rows, never the remainder. Registered before
+    // Papa.parse so it precedes PapaParse's own `data` listener and `bytesPulled`
+    // is current when the chunk callback reads it -- the source is a Node stream
+    // for every caller (init reads a file path or stdin). A non-stream LocalFile
+    // (a browser File/string, no current caller) has no `on`, so the ceiling is
+    // inert there: such a source is already materialized whole, with no streamed
+    // accumulation to bound.
+    const source = file as {
+      on?: (event: "data", listener: (chunk: Buffer | string) => void) => void;
+      removeListener?: (
+        event: "data",
+        listener: (chunk: Buffer | string) => void,
+      ) => void;
+      destroy?: () => void;
+    };
+    const isStream = typeof source.on === "function";
+    const countBytes = (chunk: Buffer | string): void => {
+      bytesPulled +=
+        typeof chunk === "string" ? Buffer.byteLength(chunk) : chunk.length;
+    };
+    if (isStream) source.on?.("data", countBytes);
+
+    // The ceiling rides PapaParse's public streaming API: the `chunk` callback,
+    // `results.meta.cursor` (advancing as complete lines -- the header included --
+    // are consumed), and `parser.abort()`. The one behavior it leans on past the
+    // bare documented surface is that `chunk` fires once per source `data` event
+    // even when that read completed no row, which is what checks a no-terminator
+    // input before EOF. If a future PapaParse fired `chunk` only on a completed
+    // row, the early abort would degrade to buffering the span until EOF -- a lost
+    // optimization on the operator's own file, still a reject, not a correctness
+    // or security regression. file.test.ts exercises these behaviors.
     Papa.parse(file, {
       // Inline, never a Web Worker -- same reasoning as loadCSVFile (the bundled
       // worker mis-applies header mode); init runs under Node, where the worker is
@@ -195,6 +277,29 @@ export function loadCSVColumnSample(
       header: true,
       skipEmptyLines: true,
       chunk: (results, parser) => {
+        // Check the bytes pulled since the last completed line, THEN advance the
+        // baseline past it. The order matters: a single chunk that both completes
+        // a line and carries a huge unterminated remainder (e.g. the whole input
+        // arriving in one large `data` event) must be judged against the OLD
+        // baseline -- resetting first would credit the remainder to `spanStart`
+        // and forgive the very span it should reject. An over-ceiling span is a
+        // line or header with no terminator in range. This runs before the header
+        // logic below, which returns early until the header lands -- the exact
+        // window a no-terminator input would otherwise spin in, accumulating
+        // unbounded.
+        if (bytesPulled - spanStart > byteCeiling) {
+          ceilingError = new Error(
+            `CSV input exceeded the ${byteCeiling}-byte single-line limit ` +
+              "before a line terminator; the file may be malformed (no newline) " +
+              "or carry an oversized header or field",
+          );
+          parser.abort();
+          return;
+        }
+        if (results.meta.cursor > lastCursor) {
+          lastCursor = results.meta.cursor;
+          spanStart = bytesPulled;
+        }
         if (target === undefined) {
           // Settle the header and the column to sample as soon as a non-empty
           // header is available -- not unconditionally on the first chunk. A
@@ -233,11 +338,20 @@ export function loadCSVColumnSample(
         // An early `parser.abort()` tears down PapaParse's parser but not the
         // underlying source, so a Node stream's listeners (and an
         // fs.createReadStream's file descriptor) would linger until GC -- the
-        // opposite of the bounded read's intent. Release it explicitly; a no-op
-        // once a natural end-of-input has already closed it, and skipped for a
-        // non-stream LocalFile (a browser File/string has no `destroy`).
-        const source = file as { destroy?: () => void };
+        // opposite of the bounded read's intent. Detach the byte counter and
+        // release the source explicitly; destroy is a no-op once a natural
+        // end-of-input has already closed it, and skipped for a non-stream
+        // LocalFile (a browser File/string has no `destroy`).
+        if (isStream) source.removeListener?.("data", countBytes);
         if (typeof source.destroy === "function") source.destroy();
+        // The byte ceiling tripped: reject before the no-chunk invariant below,
+        // since a no-terminator input aborts before any header lands (leaving
+        // columns unset), and its operator-readable cause must win over the
+        // generic message.
+        if (ceilingError) {
+          reject(ceilingError);
+          return;
+        }
         // chunk fires at least once for any input -- even an empty or header-only
         // file -- so columns is set unless the parse produced no chunk. Reject that
         // unreachable case rather than mask it, matching loadCSVFile's invariant.
@@ -248,6 +362,12 @@ export function loadCSVColumnSample(
         resolve({ columns, sampledColumn: target, sample });
       },
       error: (error) => {
+        // Same release as complete, which the error path does not reach:
+        // PapaParse's _sendError detaches only its own listeners and never calls
+        // complete, so without this an fs.createReadStream descriptor (and the
+        // byte counter) would linger past a read error until GC.
+        if (isStream) source.removeListener?.("data", countBytes);
+        if (typeof source.destroy === "function") source.destroy();
         reject(error);
       },
     });

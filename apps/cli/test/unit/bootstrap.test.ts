@@ -6,6 +6,7 @@ import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
 import YAML from "yaml";
 import {
+  CSV_LINE_BYTE_CEILING,
   getDefaultLinkageTerms,
   getLogger,
   INFER_DATE_SCAN_CAP,
@@ -2255,6 +2256,20 @@ test("loadInputRowsForInference: a `-` CSV from stdin infers the same terms as t
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("loadInputRowsForInference: a no-newline input fails fast rather than buffering the span", async () => {
+  // init's bounded read carries the byte ceiling end to end: a pathological local
+  // CSV with no row terminator (one giant line) aborts with an operator-readable
+  // error instead of consuming memory proportional to the span. Exercised over
+  // stdin to match init's allowStdin path, with a span just over the default
+  // ceiling so init -- which passes no explicit ceiling -- still trips it.
+  const giant = "x".repeat(CSV_LINE_BYTE_CEILING + 1024);
+  await withStdin(streamOf(giant), async () => {
+    await expect(
+      loadInputRowsForInference("-", { allowStdin: true }),
+    ).rejects.toThrow(/single-line limit/);
+  });
 });
 
 // --- linkage strategy selection ----------------------------------------------
