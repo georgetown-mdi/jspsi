@@ -6,6 +6,8 @@ import logLibrary from "loglevel";
 import {
   getLogger,
   loadCSVFile,
+  loadCSVColumnSample,
+  INFER_DATE_SCAN_CAP,
   prepareForExchange,
   inferMetadata,
   getDefaultLinkageTerms,
@@ -811,6 +813,49 @@ export async function loadInputRows(
     rawRows: csvResult.data as Array<Record<string, string>>,
     columns: csvResult.meta.fields ?? [],
   };
+}
+
+/**
+ * Load only what `init`'s inference needs from a CSV -- the column header names
+ * and a bounded sample of the date-of-birth column -- instead of the full row set
+ * {@link loadInputRows} reads. `init` infers column metadata and linkage fields
+ * from the header alone and the date-input format from the DOB column, and never
+ * consumes any other row data, so this caps `init`'s peak memory at one parse
+ * chunk rather than letting it scale with the input file (board item 206482800).
+ *
+ * The result is shaped exactly as {@link loadInputRows}'s -- `{ rawRows, columns
+ * }` -- so it drops straight into {@link buildDataSpec} unchanged, keeping `init`
+ * on the same inference path as `invite`/`accept` (matching their inferred terms
+ * is a design goal). The trick is that `buildDataSpec` reads `rawRows` for one
+ * purpose only: the DOB column's values, fed to {@link inferDateFormat}. So
+ * `rawRows` here holds just that column's bounded sample, projected to one-field
+ * records keyed by the DOB column name. The bound is exact, not heuristic: the
+ * sample caps at {@link INFER_DATE_SCAN_CAP} non-empty values, the same cap
+ * `inferDateFormat` stops its own scan at, so the date format inferred from the
+ * sample is identical to one inferred from a full read.
+ *
+ * The DOB column is resolved by running {@link inferMetadata} over the header --
+ * the same resolution `buildDataSpec` repeats internally, so the column the sample
+ * is keyed on always matches the one `buildDataSpec` reads. When no DOB column is
+ * inferred, the sample is empty and `rawRows` is empty (only the header was read).
+ */
+export async function loadInputRowsForInference(
+  input: string,
+  { allowStdin = false }: { allowStdin?: boolean } = {},
+): Promise<{ rawRows: Array<Record<string, string>>; columns: string[] }> {
+  const dobColumnOf = (columns: string[]): string | undefined =>
+    inferMetadata(columns).find((c) => c.type === "date_of_birth")?.name;
+  const { columns, sample } = await loadCSVColumnSample(
+    openInputSource(input, { allowStdin }),
+    dobColumnOf,
+    INFER_DATE_SCAN_CAP,
+  );
+  const dobColumn = dobColumnOf(columns);
+  const rawRows =
+    dobColumn !== undefined
+      ? sample.map((value) => ({ [dobColumn]: value }))
+      : [];
+  return { rawRows, columns };
 }
 
 // --- Linkage strategy selection ----------------------------------------------

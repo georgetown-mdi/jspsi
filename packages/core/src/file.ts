@@ -135,3 +135,90 @@ export function loadCSVColumns(file: LocalFile): Promise<Array<string>> {
     });
   });
 }
+
+/**
+ * Read a CSV's column header plus a bounded sample of one column's values,
+ * without materializing the full row set {@link loadCSVFile} returns. Streams the
+ * file in PapaParse chunks and stops (`parser.abort()`) as soon as the header
+ * yields no column to sample or `sampleLimit` non-empty values of the selected
+ * column have been collected, so peak memory is bounded by one parse chunk rather
+ * than the input size -- the read path `init` uses to infer column metadata from
+ * the header and the date-input format from the date-of-birth column, neither of
+ * which needs every row.
+ *
+ * `selectColumn` is invoked once with the header field list and returns the name
+ * of the column to sample (the DOB column, for date-format inference) or
+ * `undefined` to collect no sample. Resolving the column from the header inside
+ * the single pass -- rather than the caller re-opening the source -- is what lets
+ * the same read serve a non-rewindable stdin stream.
+ *
+ * The sample holds only non-empty (after-trim) values, capped at `sampleLimit`.
+ * Set the cap to {@link inferDateFormat}'s own non-empty-value scan cap and the
+ * sampled inference is identical to a full-column scan by construction: that scan
+ * never consumes past the cap either, so the first `sampleLimit` non-empty values
+ * are the exact prefix it would see.
+ *
+ * Parsed inline (no `worker`), like the loaders above. Resolves with the header
+ * field list (empty when the file has no header) and the bounded sample; rejects
+ * on a read/parse error, the same contract as {@link loadCSVFile}.
+ */
+export function loadCSVColumnSample(
+  file: LocalFile,
+  selectColumn: (columns: Array<string>) => string | undefined,
+  sampleLimit: number,
+): Promise<{ columns: Array<string>; sample: Array<string> }> {
+  return new Promise((resolve, reject) => {
+    let columns: Array<string> | undefined;
+    let target: string | undefined;
+    const sample: Array<string> = [];
+    Papa.parse(file, {
+      // Inline, never a Web Worker -- same reasoning as loadCSVFile (the bundled
+      // worker mis-applies header mode); init runs under Node, where the worker is
+      // unavailable regardless.
+      worker: false,
+      header: true,
+      skipEmptyLines: true,
+      chunk: (results, parser) => {
+        if (columns === undefined) {
+          // The header field list persists across chunks, so the first chunk
+          // settles both the returned columns and which column (if any) to sample.
+          columns = results.meta.fields ?? [];
+          target = selectColumn(columns);
+          if (target === undefined) {
+            // Nothing to sample: the header alone is the whole result, so stop
+            // rather than stream the rest of the file for values no one reads.
+            parser.abort();
+            return;
+          }
+        }
+        // Unreachable once target is set (the no-column case aborted above), but
+        // keeps the indexing below well-typed across chunks.
+        if (target === undefined) return;
+        for (const row of results.data as Array<Record<string, string>>) {
+          const value = row[target];
+          if (value !== undefined && value.trim() !== "") {
+            sample.push(value);
+            // Enough to reproduce a full scan; stop reading the rest of the file.
+            if (sample.length >= sampleLimit) {
+              parser.abort();
+              return;
+            }
+          }
+        }
+      },
+      complete: () => {
+        // chunk fires at least once for any input -- even an empty or header-only
+        // file -- so columns is set unless the parse produced no chunk. Reject that
+        // unreachable case rather than mask it, matching loadCSVFile's invariant.
+        if (columns === undefined) {
+          reject(new Error("CSV parse completed without producing a chunk"));
+          return;
+        }
+        resolve({ columns, sample });
+      },
+      error: (error) => {
+        reject(error);
+      },
+    });
+  });
+}
