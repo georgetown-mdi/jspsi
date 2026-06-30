@@ -373,10 +373,16 @@ function ipcConnection() {
     else queue.push(msg.wire);
   });
   return {
-    send: (data) => {
-      process.send({ wire: data });
-      return Promise.resolve();
-    },
+    send: (data) =>
+      // Resolve only once the IPC message has been handed to the OS, not on the
+      // bare synchronous return. process.send is fire-and-forget, so a child that
+      // sends its final frame and then disconnects can drop it: at high D the
+      // receiver's closing result frame raced its own process.disconnect() and was
+      // lost, deadlocking the sender on its receiveParsed. The post-flush callback
+      // serialises the send before any later disconnect.
+      new Promise((resolve, reject) => {
+        process.send({ wire: data }, (err) => (err ? reject(err) : resolve()));
+      }),
     receive: () =>
       queue.length
         ? Promise.resolve(queue.shift())
@@ -469,22 +475,26 @@ async function runChildRole(role, rows, keys, overlap) {
     postGcLiveHeapKib = process.memoryUsage().heapUsed / 1024;
   }
 
-  process.send({
-    result: {
-      role,
-      rows,
-      keys,
-      wallMs,
-      maskMs,
-      matches,
-      maxRSS: process.resourceUsage().maxRSS,
-      wasmHeapBytes: wasmHeap,
-      postGcLiveHeapKib,
-      marks,
+  process.send(
+    {
+      result: {
+        role,
+        rows,
+        keys,
+        wallMs,
+        maskMs,
+        matches,
+        maxRSS: process.resourceUsage().maxRSS,
+        wasmHeapBytes: wasmHeap,
+        postGcLiveHeapKib,
+        marks,
+      },
     },
-  });
-  // Detach IPC so the event loop can drain and the child exits cleanly.
-  process.disconnect();
+    // Detach IPC only after the result frame has flushed, so it is never dropped
+    // by an early channel close (the same race as ipcConnection.send above). Then
+    // the event loop drains and the child exits cleanly.
+    () => process.disconnect(),
+  );
 }
 
 // --- entry ---------------------------------------------------------------------
