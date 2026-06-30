@@ -456,6 +456,39 @@ test("assertLeadingLineWithinByteCeiling: a non-sliceable input (a stream) is in
   ).resolves.toBeUndefined();
 });
 
+// The cases above use a tiny ceiling, so `limit` stays under the helper's 256 KiB
+// head window and only the head read runs. These two reach the tail read (the
+// `limit > window` branch) with a ceiling above that window, which the small-ceiling
+// cases never exercise -- the path where a head/tail seam off-by-one could wrongly
+// reject a valid file, the one false-positive direction this backstop must avoid.
+const HEAD_WINDOW = 256 * 1024;
+
+test("assertLeadingLineWithinByteCeiling: a terminator past the first read window is still found", async () => {
+  // A header that terminates only after the head window but within the ceiling must
+  // resolve: the head/tail split must drop no bytes at the seam, so a legitimate
+  // large header is never wrongly rejected.
+  const ceiling = 2 * HEAD_WINDOW;
+  const headerLen = HEAD_WINDOW + 4096; // past the head window, well under the ceiling
+  const file = new File(
+    [`${"h".repeat(headerLen)}\n${"v".repeat(HEAD_WINDOW)}`],
+    "wide-header.csv",
+  );
+  expect(file.size).toBeGreaterThan(ceiling);
+  await expect(
+    assertLeadingLineWithinByteCeiling(file, ceiling),
+  ).resolves.toBeUndefined();
+});
+
+test("assertLeadingLineWithinByteCeiling: a no-terminator file over a ceiling above the window rejects via the tail read", async () => {
+  // The reject path through the tail read: with the ceiling above the head window
+  // and no terminator anywhere, head and tail are both scanned and then it rejects.
+  const ceiling = 2 * HEAD_WINDOW;
+  const file = new File(["x".repeat(ceiling * 2)], "huge.csv");
+  await expect(
+    assertLeadingLineWithinByteCeiling(file, ceiling),
+  ).rejects.toThrow(/single-line limit/);
+});
+
 test("loadCSVFile: a browser File with a no-newline leading line over the ceiling fails fast", async () => {
   // Wires the pre-read into loadCSVFile end to end: the File the web caller passes
   // rejects before parsing, so PapaParse's FileReader path is never reached. This

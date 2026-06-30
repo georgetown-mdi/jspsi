@@ -94,6 +94,12 @@ export async function assertLeadingLineWithinByteCeiling(
   // no await-in-loop.
   const limit = byteCeiling + 1;
   const window = 256 * 1024;
+  // Scan raw bytes for LF or CR. This deliberately does not honor RFC 4180
+  // quoting, so a newline embedded in a quoted field counts as a terminator here;
+  // that can only let a pathological line slip past (a false negative) and never
+  // wrongly reject a valid file, the safe direction for an operator-local backstop.
+  // Byte-wise is safe for UTF-8: 0x0a/0x0d are below 0x80, so neither can occur as
+  // a continuation byte of a multi-byte character.
   const hasTerminator = (bytes: Uint8Array): boolean =>
     bytes.indexOf(0x0a) !== -1 || bytes.indexOf(0x0d) !== -1;
   const head = new Uint8Array(
