@@ -167,10 +167,10 @@ test("loadCSVColumnSample: an empty input yields an empty header and sample", as
 
 test("loadCSVColumnSample: a no-newline span over the byte ceiling fails fast", async () => {
   // One logical line with no terminator anywhere: PapaParse can never yield a row
-  // or settle the header, so the read would buffer the whole span. The byte
-  // ceiling aborts it with an operator-readable error once the bytes pulled since
-  // the (never-advancing) cursor cross the limit. Delivered in small chunks, as
-  // fs.createReadStream / stdin would deliver a large file.
+  // or settle the header, so the read would buffer the whole span. The guard
+  // destroys the stream with an operator-readable error once the run since the last
+  // terminator crosses the limit. Delivered in small chunks, as fs.createReadStream
+  // / stdin would deliver a large file.
   const ceiling = 512;
   const giant = "x".repeat(ceiling * 4);
   await expect(
@@ -180,9 +180,9 @@ test("loadCSVColumnSample: a no-newline span over the byte ceiling fails fast", 
 
 test("loadCSVColumnSample: a single field over the byte ceiling fails fast", async () => {
   // The header terminates normally, then one data field grows without a row
-  // terminator. The cursor advances past the header and then stalls, so the span
-  // measured since that last terminator -- the unbounded field -- crosses the
-  // ceiling and the read fails fast rather than buffering the whole field.
+  // terminator. The guard's run resets at the header's newline, then the unbounded
+  // field drives the run past the ceiling, so the read fails fast rather than
+  // buffering the whole field.
   const ceiling = 512;
   const giantField = "y".repeat(ceiling * 4);
   const csv = `name,dob\nAlice,${giantField}`;
@@ -192,9 +192,9 @@ test("loadCSVColumnSample: a single field over the byte ceiling fails fast", asy
 });
 
 test("loadCSVColumnSample: a header over the byte ceiling fails fast", async () => {
-  // A header of very many columns with its terminator beyond the ceiling: the
-  // cursor stays at zero until that newline, so the header span crosses the limit
-  // first and the read aborts before settling -- the giant-header shape.
+  // A header of very many columns with its terminator beyond the ceiling: the run
+  // grows from the first byte with no terminator to reset it, so it crosses the
+  // limit before the header settles -- the giant-header shape.
   const ceiling = 512;
   const cols = Array.from({ length: 400 }, (_v, i) => `col_${i}`);
   const header = cols.join(",");
@@ -211,11 +211,11 @@ test("loadCSVColumnSample: a header over the byte ceiling fails fast", async () 
 });
 
 test("loadCSVColumnSample: a giant field arriving in one data event fails fast", async () => {
-  // Delivery-shape independence: when the header completes and an unterminated
-  // giant field arrive in a SINGLE data event (a lone push, or any source with a
-  // read buffer larger than the span), the span must be judged before the
-  // cursor-advance reset can credit the remainder to the baseline -- otherwise
-  // the whole span is forgiven and the bound silently does not fire. streamOf
+  // Delivery-shape independence: the header and an unterminated giant field arrive
+  // in a SINGLE data event (a lone push, or any source with a read buffer larger
+  // than the span). The guard scans within that one chunk -- resetting the run at
+  // the header's newline, then accumulating the field past the ceiling -- so a
+  // chunk carrying both a terminator and an over-ceiling tail still trips. streamOf
   // pushes the entire content as one event, reproducing that shape.
   const ceiling = 512;
   const csv = `name,dob\nAlice,${"y".repeat(ceiling * 4)}`;
@@ -302,9 +302,9 @@ test("loadCSVColumnSample: a header split across stream chunks is read whole", a
 test("loadCSVFile: a no-newline span over the byte ceiling fails fast", async () => {
   // One logical line with no terminator anywhere: PapaParse can never yield a row
   // or settle the header, so without the ceiling the read would buffer the whole
-  // span. The byte ceiling aborts it with an operator-readable error once the bytes
-  // pulled since the (never-advancing) cursor cross the limit. Delivered in small
-  // chunks, as fs.createReadStream / stdin would deliver a large file.
+  // span. The guard destroys the stream with an operator-readable error once the
+  // run since the last terminator crosses the limit. Delivered in small chunks, as
+  // fs.createReadStream / stdin would deliver a large file.
   const ceiling = 512;
   const giant = "x".repeat(ceiling * 4);
   await expect(
@@ -314,9 +314,9 @@ test("loadCSVFile: a no-newline span over the byte ceiling fails fast", async ()
 
 test("loadCSVFile: a single field over the byte ceiling fails fast", async () => {
   // The header terminates normally, then one data field grows without a row
-  // terminator. The cursor advances past the header and then stalls, so the span
-  // measured since that last terminator -- the unbounded field -- crosses the
-  // ceiling and the read fails fast rather than buffering the whole field.
+  // terminator. The guard's run resets at the header's newline, then the unbounded
+  // field drives the run past the ceiling, so the read fails fast rather than
+  // buffering the whole field.
   const ceiling = 512;
   const giantField = "y".repeat(ceiling * 4);
   const csv = `name,dob\nAlice,${giantField}`;
@@ -326,9 +326,9 @@ test("loadCSVFile: a single field over the byte ceiling fails fast", async () =>
 });
 
 test("loadCSVFile: a header over the byte ceiling fails fast", async () => {
-  // A header of very many columns with its terminator beyond the ceiling: the
-  // cursor stays at zero until that newline, so the header span crosses the limit
-  // first and the read aborts before settling -- the giant-header shape.
+  // A header of very many columns with its terminator beyond the ceiling: the run
+  // grows from the first byte with no terminator to reset it, so it crosses the
+  // limit before the header settles -- the giant-header shape.
   const ceiling = 512;
   const cols = Array.from({ length: 400 }, (_v, i) => `col_${i}`);
   const header = cols.join(",");
@@ -340,12 +340,12 @@ test("loadCSVFile: a header over the byte ceiling fails fast", async () => {
 });
 
 test("loadCSVFile: a giant field arriving in one data event fails fast", async () => {
-  // Delivery-shape independence: when the header completes and an unterminated
-  // giant field arrive in a SINGLE data event (a lone push, or any source with a
-  // read buffer larger than the span), the span must be judged before the
-  // cursor-advance reset can credit the remainder to the baseline -- otherwise the
-  // whole span is forgiven and the bound silently does not fire. streamOf pushes
-  // the entire content as one event, reproducing that shape.
+  // Delivery-shape independence: the header and an unterminated giant field arrive
+  // in a SINGLE data event (a lone push, or any source with a read buffer larger
+  // than the span). The guard scans within that one chunk -- resetting the run at
+  // the header's newline, then accumulating the field past the ceiling -- so a
+  // chunk carrying both a terminator and an over-ceiling tail still trips. streamOf
+  // pushes the entire content as one event, reproducing that shape.
   const ceiling = 512;
   const csv = `name,dob\nAlice,${"y".repeat(ceiling * 4)}`;
   await expect(loadCSVFile(streamOf(csv), ceiling)).rejects.toThrow(
