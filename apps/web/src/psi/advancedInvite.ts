@@ -21,6 +21,7 @@ import { isStepValid } from "./standardizationAuthoring";
 
 import type {
   Algorithm,
+  LinkageField,
   LinkageKey,
   LinkageKeyElement,
   LinkageStrategy,
@@ -172,6 +173,23 @@ export interface AdvancedInviteDraft {
    * {@link setDraftMetadata}. */
   standardization: Standardization;
   keys: Array<DraftKey>;
+  /**
+   * The `linkageFields` declaration of an IMPORTED terms document, carried verbatim so
+   * an import-then-regenerate round-trip preserves it. Set only by {@link draftFromTerms}
+   * (the one door an externally- or hand-authored document enters by); absent for the
+   * seed, guided, and expert paths, which never carry an external declaration.
+   *
+   * Present, {@link buildAdvancedTerms} re-emits fields in this declaration's ORDER and
+   * keeps any declared-but-unreferenced field (and its constraints) rather than
+   * re-deriving fields in the fixed {@link authoredLinkageFields} order and dropping the
+   * unreferenced ones -- the faithful-round-trip fidelity {@link reconcileImportedFields}
+   * implements. It does NOT defeat {@link importedConstraintDivergenceMessage}: a custom
+   * constraint on a field a key references is still re-stamped to the type default on
+   * rebuild (so that guard still refuses it); only field order, inert unreferenced
+   * fields, and a benign empty `constraints: {}` are preserved. "Reset to recommended"
+   * drops it (a fresh draft has none), returning to the default derivation.
+   */
+  importedLinkageFields?: Array<LinkageField>;
 }
 
 /** The fixed starting point for an editor session: the auto-derived terms the
@@ -406,6 +424,93 @@ function normalizeText(value: string): string {
   return value.normalize("NFC").trim();
 }
 
+/** Whether `constraints` is an empty object (`{}`) -- a present key declaring nothing.
+ * An empty `{}` is behaviorally identical to absent constraints (core's
+ * `checkValueConstraints` flags nothing for it; it never affects matching), but its
+ * canonical form differs from an absent key, so the faithful import round-trip preserves
+ * it verbatim for a field whose type has no default constraint rather than dropping it --
+ * which would move the agreement hash and (before this) trip 203437315's refuse-on-import
+ * guard. See {@link reconcileImportedFields}. */
+function isEmptyConstraints(constraints: unknown): boolean {
+  return (
+    typeof constraints === "object" &&
+    constraints !== null &&
+    !Array.isArray(constraints) &&
+    Object.keys(constraints).length === 0
+  );
+}
+
+/**
+ * The linkage fields an IMPORTED draft re-emits, reconciled against the imported
+ * `linkageFields` declaration so an import-then-regenerate round-trip preserves its
+ * field ORDER and any declared-but-unreferenced field -- rather than re-deriving fields
+ * in the fixed {@link authoredLinkageFields} order and dropping the unreferenced ones.
+ * Drives {@link buildAdvancedTerms} only when {@link AdvancedInviteDraft.importedLinkageFields}
+ * is set; the guided/expert/seed paths keep the plain referenced-filter derivation.
+ *
+ * Per imported field, in imported order:
+ * - Referenced by an enabled key AND derivable from the inviter's columns: emit the
+ *   editor's AUTHORED (type-default-constraints) field, NOT the imported one -- so a
+ *   custom constraint the editor cannot represent still diverges from the import and is
+ *   caught fail-closed by {@link importedConstraintDivergenceMessage}, which this fix
+ *   deliberately does not defeat. The lone exception is a benign empty `constraints: {}`
+ *   on a type whose default is absent ({@link isEmptyConstraints}): preserved verbatim so
+ *   it round-trips (a no-op, behaviorally identical to absent) instead of being
+ *   over-refused by that guard.
+ * - Referenced by an enabled key but NOT derivable: dropped, leaving the key to dangle
+ *   the built terms (blocking generation) -- keeping this field set in lockstep with
+ *   {@link declarableFieldNames}, the disable/build invariant the import path rests on.
+ * - Referenced by NO key at all: an inert declared field (never standardized,
+ *   constraint-checked, or matched -- see {@link referencedLinkageFieldNames}), preserved
+ *   verbatim so the round-trip keeps the imported declaration and its hash.
+ * - Referenced only by DISABLED keys: dropped, matching the disable-and-show handling for
+ *   an unsupplyable key (the field is not part of the satisfiable subset being generated).
+ *
+ * A field a post-import edit newly references that the imported declaration did not carry
+ * is appended in the default order with type-default constraints, mirroring the no-import
+ * derivation so an edited draft still declares everything its enabled keys reference.
+ */
+function reconcileImportedFields(
+  imported: ReadonlyArray<LinkageField>,
+  draftKeys: ReadonlyArray<DraftKey>,
+  authored: ReadonlyArray<LinkageField>,
+  referenced: ReadonlySet<string>,
+): Array<LinkageField> {
+  const authoredByName = new Map(authored.map((field) => [field.name, field]));
+  const referencedByAnyKey = referencedLinkageFieldNames(
+    draftKeys.map((entry) => entry.key),
+  );
+  const result: Array<LinkageField> = [];
+  const emitted = new Set<string>();
+  for (const field of imported) {
+    if (referenced.has(field.name)) {
+      const authoredField = authoredByName.get(field.name);
+      // Not derivable from the inviter's columns: leave it undeclared so the
+      // referencing key dangles and blocks (lockstep with declarableFieldNames).
+      if (authoredField === undefined) continue;
+      result.push(
+        isEmptyConstraints(field.constraints) &&
+          authoredField.constraints === undefined
+          ? field
+          : authoredField,
+      );
+      emitted.add(field.name);
+    } else if (!referencedByAnyKey.has(field.name)) {
+      // Declared but referenced by no key: inert, preserved verbatim.
+      result.push(field);
+      emitted.add(field.name);
+    }
+    // else: referenced only by a disabled key -> dropped (disable-and-show).
+  }
+  for (const field of authored) {
+    if (referenced.has(field.name) && !emitted.has(field.name)) {
+      result.push(field);
+      emitted.add(field.name);
+    }
+  }
+  return result;
+}
+
 /**
  * Build the {@link LinkageTerms} a draft represents. `version` and `date` are
  * carried from the seed unchanged (the editor exposes no control for them, so a
@@ -450,12 +555,22 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   // cleaning this equals baseTerms.linkageFields byte-for-byte (the seed's
   // standardization is getDefaultStandardization, whose outputs are the default field
   // names), so the guided path's terms -- and the cross-party hash -- are unchanged.
-  // Filtered to the fields the enabled keys reference, mirroring the prior derivation
-  // so disabling a key still drops a now-unreferenced field.
-  const linkageFields = authoredLinkageFields(
-    draft.metadata,
-    draft.standardization,
-  ).filter((field) => referenced.has(field.name));
+  const authored = authoredLinkageFields(draft.metadata, draft.standardization);
+  // The guided/expert/seed paths filter to the fields the enabled keys reference,
+  // mirroring getDefaultLinkageTerms so disabling a key drops a now-unreferenced field.
+  // An IMPORTED draft (draft.importedLinkageFields present) instead reconciles against
+  // the imported declaration so the round-trip preserves its field ORDER and any
+  // declared-but-unreferenced field, rather than re-emitting in the fixed authored
+  // order and dropping the unreferenced ones (see reconcileImportedFields).
+  const linkageFields =
+    draft.importedLinkageFields === undefined
+      ? authored.filter((field) => referenced.has(field.name))
+      : reconcileImportedFields(
+          draft.importedLinkageFields,
+          draft.keys,
+          authored,
+          referenced,
+        );
 
   const terms: LinkageTerms = {
     ...baseTerms,
@@ -1073,22 +1188,22 @@ export function gatedActiveSettingMessage(
  * the same reason {@link UNSUPPLYABLE_KEY_MESSAGE} and core's schema refines locate
  * an offender by path, not value.
  *
- * Scope -- it compares only the fields that survive generation (the ones a key
- * references and the columns can bind), and that bounds it in two ways. (1) It does
- * NOT falsely refuse the disable-and-show case: a field a key references but the
- * inviter's columns cannot supply is dropped rather than generated, and not being
- * compared is what keeps a legitimate partial import from being refused. (2) The cost
- * is that a field the rebuild drops ENTIRELY -- an unsupplyable one, or a declared
- * field NO key references -- is not compared, so a custom constraint it carries is
- * not caught here. That is a field-PRESENCE divergence, not the normalization of a
- * field that still runs: an unreferenced or unsupplyable field is inert (never
- * standardized, constraint-checked, or matched -- see
- * {@link referencedLinkageFieldNames}), so the only thing that diverges is the
- * agreement HASH between the imported document and the generated invitation -- the
- * same hash-only category as a re-ordered cross-type field declaration. Both are the
- * import round-trip-fidelity gap whose faithful-preservation fix is tracked
- * separately; refusing a harmless inert field here would over-refuse, so this guard
- * is scoped to the constraints a generated field actually runs.
+ * Scope -- it owns the one divergence direction the faithful round-trip does NOT close:
+ * a SURVIVING field (one a key references and the columns can bind) whose custom
+ * constraint the rebuild re-stamps to the type default, the genuine silent-normalization
+ * case. It need not own the others, because {@link buildAdvancedTerms} now preserves the
+ * imported field declaration on rebuild (see {@link reconcileImportedFields}): (1) it
+ * does NOT falsely refuse the disable-and-show case -- a field a key references but the
+ * inviter's columns cannot supply is dropped rather than generated, so it is not compared
+ * and a legitimate partial import is not refused; (2) a declared field NO key references
+ * is preserved verbatim on rebuild, so it is compared and MATCHES rather than diverging --
+ * an inert field's custom constraint is carried, not refused (it is never standardized,
+ * constraint-checked, or matched -- see {@link referencedLinkageFieldNames} -- so carrying
+ * it moves nothing but the agreement hash, which faithful preservation keeps equal); and
+ * (3) field ORDER and a benign empty `constraints: {}` (on a type whose default is absent)
+ * are likewise preserved, so neither diverges here, and the empty `{}` no longer
+ * over-refuses. So this guard stays scoped to the constraints a generated field actually
+ * runs, while the rest of the round-trip fidelity is preserved upstream.
  */
 export function importedConstraintDivergenceMessage(
   terms: LinkageTerms,
@@ -1144,14 +1259,17 @@ export function importedConstraintDivergenceMessage(
  * imported fields by name and type, bound to their reconstructed columns, which lets
  * {@link buildAdvancedTerms} build and validate terms referencing them. For terms the
  * editor itself produced this reproduces the imported `linkageFields` exactly (see the
- * import round-trip test). It is NOT a faithful round-trip for an externally-authored
- * document: `authoredLinkageFields` normalizes each field's `constraints` to its type
- * default and emits fields in the fixed default-field order. The constraint case is
- * caught fail-closed at the import door -- {@link importedConstraintDivergenceMessage}
- * refuses a document whose custom constraints this rebuild would normalize away, so it
- * never silently reaches a generated agreement. A different cross-type field ORDER is
- * the remaining sibling divergence (same fixed-order root cause), tracked as its own
- * follow-up.
+ * import round-trip test). For an externally-authored document the FIELD declaration
+ * itself is preserved by {@link buildAdvancedTerms} via
+ * {@link AdvancedInviteDraft.importedLinkageFields} -- field order and any
+ * declared-but-unreferenced field are kept rather than normalized to the fixed authored
+ * order ({@link reconcileImportedFields}) -- so this reconstruction only has to bind the
+ * fields its keys reference. The one facet not carried is a custom per-field
+ * `constraint` the editor cannot represent: it is re-stamped to the type default on
+ * rebuild and caught fail-closed at the import door
+ * ({@link importedConstraintDivergenceMessage} refuses a document whose custom
+ * constraints that rebuild would normalize away), so it never silently reaches a
+ * generated agreement.
  *
  * Fail-closed: a field whose type has no free `role: linkage` column left (the
  * inviter's columns cannot supply a distinct binding the operator marked for
@@ -1297,6 +1415,10 @@ export function draftFromTerms(
         : undefined,
     metadata: seed.metadata,
     standardization,
+    // Carry the imported field declaration so buildAdvancedTerms re-emits it faithfully
+    // (order + declared-but-unreferenced fields + a benign empty `constraints: {}`); see
+    // AdvancedInviteDraft.importedLinkageFields and reconcileImportedFields.
+    importedLinkageFields: terms.linkageFields,
     keys: terms.linkageKeys.map((key) => ({
       key,
       enabled: keyIsSupplyable(key, declarable),

@@ -1026,8 +1026,9 @@ describe("draftFromTerms reconstructs multi-field bindings on import", () => {
     // local-only invariance test above. Scope: this covers terms the editor itself
     // produced (default constraints, default field order). An externally-authored
     // document carrying custom field constraints is refused at the import door (see the
-    // importedConstraintDivergenceMessage tests below); a different cross-type field
-    // order is the remaining sibling divergence, tracked on its own, not exercised here.
+    // importedConstraintDivergenceMessage tests below); its cross-type field order and
+    // any declared-but-unreferenced field are now preserved on rebuild (see the
+    // "import round-trip preserves field order" tests below), not exercised here.
     const exported = buildAdvancedTerms(multiFieldDraft());
     const seed = seedFor(columns, metadata);
     const imported = draftFromTerms(exported, seed, 3600, rawRows);
@@ -1454,6 +1455,202 @@ describe("importedConstraintDivergenceMessage refuses a non-representable-constr
         buildAdvancedTerms(draftFromTerms(exported, mfSeed, 3600, mfRows)),
       ),
     ).toEqual(canonicalString(exported));
+  });
+});
+
+describe("import round-trip preserves field order and declared-but-unreferenced fields", () => {
+  // Columns for the four default-constrained types plus a date, so the editor's own
+  // export carries the type-default constraints the rebuild re-stamps. Hand-built so the
+  // test does not lean on inferMetadata's column-name heuristics.
+  const metadata: Metadata = [
+    { name: "ssn_col", type: "ssn", role: "linkage", isPayload: false },
+    { name: "ssn4_col", type: "ssn4", role: "linkage", isPayload: false },
+    { name: "fn_col", type: "first_name", role: "linkage", isPayload: false },
+    { name: "ln_col", type: "last_name", role: "linkage", isPayload: false },
+    {
+      name: "dob_col",
+      type: "date_of_birth",
+      role: "linkage",
+      isPayload: false,
+    },
+  ];
+  const columns = ["ssn_col", "ssn4_col", "fn_col", "ln_col", "dob_col"];
+  const rawRows = [
+    {
+      ssn_col: "123456789",
+      ssn4_col: "6789",
+      fn_col: "A",
+      ln_col: "B",
+      dob_col: "01/01/2000",
+    },
+  ];
+
+  /** A fresh editor seed over these columns -- the import target. */
+  function seedFor(): AdvancedInviteSeed {
+    return {
+      terms: getDefaultLinkageTerms("Inviter", metadata),
+      metadata,
+      columns,
+    };
+  }
+
+  /** The default document the editor exports for these columns: fields carry exactly
+   * the type-default constraints, in the canonical DEFAULT_LINKAGE_FIELDS order. */
+  function defaultExport(): LinkageTerms {
+    const terms = getDefaultLinkageTerms("Inviter", metadata);
+    return buildAdvancedTerms({
+      identity: "Inviter",
+      lifetimeSeconds: 3600,
+      outputDirection: "both",
+      algorithm: "psi",
+      deduplicate: false,
+      linkageStrategy: "cascade",
+      metadata,
+      standardization: defaultStandardizationForRows(metadata, terms, rawRows),
+      keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),
+    });
+  }
+
+  /** Set a named field's constraints in a document -- a hand-edit an external author
+   * could make that the editor has no control to produce. Mutates a clone via a
+   * localized cast: the constraint shape is per-type in the union, which the test
+   * deliberately bends to model an arbitrary input. */
+  function withFieldConstraints(
+    terms: LinkageTerms,
+    fieldName: string,
+    constraints: Record<string, unknown>,
+  ): LinkageTerms {
+    const clone = structuredClone(terms);
+    for (const field of clone.linkageFields) {
+      if (field.name === fieldName)
+        (field as { constraints?: unknown }).constraints = constraints;
+    }
+    return clone;
+  }
+
+  /** What an import-then-regenerate produces for `terms` against these columns. */
+  function rebuild(terms: LinkageTerms): LinkageTerms {
+    return buildAdvancedTerms(draftFromTerms(terms, seedFor(), 3600, rawRows));
+  }
+
+  test("a cross-type out-of-order field declaration round-trips with order (and hash) preserved", () => {
+    const exported = defaultExport();
+    // The editor's own export is in canonical DEFAULT_LINKAGE_FIELDS order.
+    expect(exported.linkageFields.map((f) => f.name)).toEqual([
+      "ssn",
+      "ssn4",
+      "first_name",
+      "last_name",
+      "date_of_birth",
+    ]);
+    // Reorder two types out of that canonical order: move date_of_birth to the front and
+    // swap first_name/last_name. Schema-valid (field order is free; referential
+    // integrity holds regardless), and different from what authoredLinkageFields emits.
+    const reordered = structuredClone(exported);
+    const byName = new Map(reordered.linkageFields.map((f) => [f.name, f]));
+    const order = ["date_of_birth", "ssn", "ssn4", "last_name", "first_name"];
+    reordered.linkageFields = order.map((name) => byName.get(name)!);
+    expect(reordered.linkageFields.map((f) => f.name)).not.toEqual(
+      exported.linkageFields.map((f) => f.name),
+    );
+    expect(safeParseLinkageTerms(reordered).success).toBe(true);
+
+    // A clean import (only type-default constraints), so the constraint guard does not
+    // fire ...
+    expect(
+      importedConstraintDivergenceMessage(reordered, seedFor(), rawRows),
+    ).toBeUndefined();
+    // ... and the rebuild re-emits the fields in the IMPORTED order, so the
+    // receipt/agreement hash is unchanged across the round-trip.
+    const rebuilt = rebuild(reordered);
+    expect(rebuilt.linkageFields.map((f) => f.name)).toEqual(order);
+    expect(canonicalString(rebuilt)).toEqual(canonicalString(reordered));
+  });
+
+  test("a canonically-ordered import rebuilds byte-for-byte unchanged", () => {
+    const exported = defaultExport();
+    expect(canonicalString(rebuild(exported))).toEqual(
+      canonicalString(exported),
+    );
+  });
+
+  test("a declared-but-unreferenced field carrying a non-default constraint is preserved, not dropped", () => {
+    // Append a zip_code field NO key references, with a non-default exclude denylist. The
+    // referential-integrity refine forbids only a dangling key->field reference, not a
+    // declared-but-unreferenced field, so this is schema-valid.
+    const exported = defaultExport();
+    const withExtra = structuredClone(exported);
+    const extra: LinkageTerms["linkageFields"][number] = {
+      name: "zip_extra",
+      type: "zip_code",
+      constraints: { exclude: ["00000"] },
+    };
+    withExtra.linkageFields = [...withExtra.linkageFields, extra];
+    expect(safeParseLinkageTerms(withExtra).success).toBe(true);
+
+    // The unreferenced field is inert (no key references it), so it survives generation
+    // unchanged rather than being dropped by the key-referenced filter -- and the guard
+    // does not refuse it (the rebuild now preserves it, so its canonical form matches).
+    expect(
+      importedConstraintDivergenceMessage(withExtra, seedFor(), rawRows),
+    ).toBeUndefined();
+    const rebuilt = rebuild(withExtra);
+    expect(rebuilt.linkageFields.find((f) => f.name === "zip_extra")).toEqual(
+      extra,
+    );
+    // The field AND its constraint survive, so the agreement hash is unchanged.
+    expect(canonicalString(rebuilt)).toEqual(canonicalString(withExtra));
+
+    // The realistic flow still generates: the inert extra field neither blocks the
+    // satisfiability gate (no key references it) nor fails the schema parse.
+    const validation = validateAdvancedInvite(
+      draftFromTerms(withExtra, seedFor(), 3600, rawRows),
+      seedFor(),
+      new Date("2026-06-20T00:00:00.000Z"),
+    );
+    expect(validation.canGenerate).toBe(true);
+    expect(safeParseLinkageTerms(validation.terms).success).toBe(true);
+  });
+
+  test("a document with no out-of-order or extra unreferenced field is byte-for-byte unchanged", () => {
+    // The acceptance-criteria no-op baseline: the editor's own default export rebuilds
+    // identically, so the common import is untouched by the faithful-round-trip change.
+    const exported = defaultExport();
+    const rebuilt = rebuild(exported);
+    expect(rebuilt.linkageFields).toEqual(exported.linkageFields);
+    expect(canonicalString(rebuilt)).toEqual(canonicalString(exported));
+  });
+
+  test("a benign empty constraints object on a no-default-constraint field round-trips verbatim, not over-refused", () => {
+    // date_of_birth has no default constraint, so a from-defaults rebuild emits no
+    // constraints key -- diverging from an imported empty {} and (before the faithful
+    // round-trip) tripping 203437315's refuse-on-import guard even though {} is
+    // behaviorally identical to absent. Preserving the {} keeps the canonical forms
+    // equal: neither a silent divergence nor an over-refusal.
+    const imported = withFieldConstraints(defaultExport(), "date_of_birth", {});
+    expect(
+      imported.linkageFields.find((f) => f.name === "date_of_birth"),
+    ).toHaveProperty("constraints", {});
+
+    expect(
+      importedConstraintDivergenceMessage(imported, seedFor(), rawRows),
+    ).toBeUndefined();
+    const rebuilt = rebuild(imported);
+    expect(
+      rebuilt.linkageFields.find((f) => f.name === "date_of_birth"),
+    ).toHaveProperty("constraints", {});
+    expect(canonicalString(rebuilt)).toEqual(canonicalString(imported));
+  });
+
+  test("an empty constraints object that STRIPS a type default (ssn) stays refused", () => {
+    // ssn's default is { exclude, validOnly }, so an empty {} is NOT a benign no-op -- it
+    // drops the SSN validity checks the editor would author. That is a real,
+    // non-representable change on a field a key references, so it stays refused: the
+    // benign-{} preservation is scoped to a type with NO default constraint.
+    const imported = withFieldConstraints(defaultExport(), "ssn", {});
+    expect(
+      importedConstraintDivergenceMessage(imported, seedFor(), rawRows),
+    ).toBeDefined();
   });
 });
 
