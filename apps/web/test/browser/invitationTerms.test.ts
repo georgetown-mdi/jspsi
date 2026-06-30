@@ -118,6 +118,34 @@ function collapseFor(name: string): HTMLElement {
   return panel;
 }
 
+// Mantine 9's Collapse keeps a collapsed panel's content mounted inside a React
+// Activity (mode="hidden") boundary, which React commits at a DEFERRED priority.
+// Under load that commit can lag the always-visible core, so reading a panel
+// synchronously races it -- an empty textContent, or a not-yet-present Collapse
+// child. Resolve a panel only once its content has committed, so a collapsed-
+// content assertion waits the deferral out rather than sampling an empty panel
+// (every disclosure here has content, so this always settles). The synchronous
+// reads this replaces are why the suite flaked under full-suite CPU contention.
+async function readyPanel(name: string): Promise<HTMLElement> {
+  await expect
+    .poll(() => {
+      try {
+        return panelFor(name).textContent;
+      } catch {
+        return "";
+      }
+    })
+    .not.toBe("");
+  return panelFor(name);
+}
+
+// The Mantine Collapse element inside a ready panel -- the aria-hidden + inert host
+// -- resolved only after its content has committed (see readyPanel).
+async function readyCollapse(name: string): Promise<HTMLElement> {
+  await readyPanel(name);
+  return collapseFor(name);
+}
+
 describe("InvitationTerms: per-key matching disclosures", () => {
   test("each key is its own disclosure, the rule detail collapsed and hidden from AT while the header stays visible", async () => {
     renderTerms();
@@ -144,13 +172,14 @@ describe("InvitationTerms: per-key matching disclosures", () => {
 
     // The truncated key's collapsed body is out of the accessibility tree and the
     // tab order until opened.
-    const collapse = collapseFor("SSN + FN1");
+    const collapse = await readyCollapse("SSN + FN1");
     expect(collapse.getAttribute("aria-hidden")).toBe("true");
     expect(collapse.hasAttribute("inert")).toBe(true);
 
     // The per-element rule detail (the literal slice phrase) lives in the
     // collapsed body, not the always-visible header.
-    expect(panelFor("SSN + FN1").textContent).toContain(
+    const truncatedPanel = await readyPanel("SSN + FN1");
+    expect(truncatedPanel.textContent).toContain(
       "Matches on the first character",
     );
 
@@ -163,7 +192,7 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     expect(container!.textContent).toContain(
       "Matches on SSN - last name - date of birth",
     );
-    expect(panelFor("SSN + FN1").textContent).not.toContain("(partial)");
+    expect(truncatedPanel.textContent).not.toContain("(partial)");
   });
 
   test("the fields matched on are summarized always-visible, outside the collapsed matching list", async () => {
@@ -181,7 +210,7 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     );
     // Structurally outside the disclosure: the summary is not inside the matching
     // panel, which carries the collapsed per-key detail even while hidden.
-    expect(panelFor("Matching strategies").textContent).not.toContain(
+    expect((await readyPanel("Matching strategies")).textContent).not.toContain(
       "Matching on SSN, last name, date of birth, first name.",
     );
   });
@@ -196,7 +225,7 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     expect(toggle("SSN + FN1").element().getAttribute("aria-expanded")).toBe(
       "true",
     );
-    const opened = collapseFor("SSN + FN1");
+    const opened = await readyCollapse("SSN + FN1");
     expect(opened.getAttribute("aria-hidden")).toBe("false");
     expect(opened.hasAttribute("inert")).toBe(false);
 
@@ -204,9 +233,9 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     expect(
       toggle("SSN + LN + DOB").element().getAttribute("aria-expanded"),
     ).toBe("false");
-    expect(collapseFor("SSN + LN + DOB").getAttribute("aria-hidden")).toBe(
-      "true",
-    );
+    expect(
+      (await readyCollapse("SSN + LN + DOB")).getAttribute("aria-hidden"),
+    ).toBe("true");
   });
 
   test("the toggle's accessible name is the key name; the field one-liner is its description", async () => {
@@ -236,6 +265,12 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     // counted alongside the top-level disclosures.
     await userEvent.click(toggle("Matching strategies"));
 
+    // The nested per-key toggles mount inside the now-expanded matching panel,
+    // whose content React commits at a deferred priority -- wait for all four
+    // disclosures to be present before counting them.
+    await expect
+      .poll(() => container!.querySelectorAll("[aria-controls]").length)
+      .toBe(4);
     const ids = Array.from(container!.querySelectorAll("[aria-controls]")).map(
       (el) => el.getAttribute("aria-controls"),
     );
@@ -254,13 +289,13 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     // The master collapse is hidden from AT + the tab order while closed, like
     // each per-key disclosure (so its dense legal/payload detail cannot leak into
     // the tab order or accessibility tree while visually hidden).
-    const masterCollapse = collapseFor("Other details");
+    const masterCollapse = await readyCollapse("Other details");
     expect(masterCollapse.getAttribute("aria-hidden")).toBe("true");
     expect(masterCollapse.hasAttribute("inert")).toBe(true);
 
     // The non-key blocks (field constraints, payload, legal agreement, dedup) are
     // in the master disclosure ...
-    const panel = panelFor("Other details");
+    const panel = await readyPanel("Other details");
     expect(panel.textContent).toContain("characters limited to A-Z");
     expect(panel.textContent).toContain("risk_score");
     expect(panel.textContent).toContain("MOU-2025-0042");
@@ -449,12 +484,13 @@ describe("InvitationTerms: always-visible egress and legal-agreement presence hi
     // ... and OUTSIDE the disclosure (structure, not styling): the hint text is
     // not inside the "Other details" panel, which carries the collapsed detail
     // even while hidden.
-    expect(panelFor("Other details").textContent).not.toContain(
+    const panel = await readyPanel("Other details");
+    expect(panel.textContent).not.toContain(
       "This invitation requests 2 additional data columns from you",
     );
     // The column NAMES themselves stay one expand down in the disclosure -- the
     // hint surfaces only the count, not the detail.
-    expect(panelFor("Other details").textContent).toContain("zip_code");
+    expect(panel.textContent).toContain("zip_code");
   });
 
   test("the egress hint reads singular for a single requested column", async () => {
@@ -499,11 +535,10 @@ describe("InvitationTerms: always-visible egress and legal-agreement presence hi
       "This invitation attaches a legal agreement.",
     );
     // Outside the disclosure, by structure ...
-    expect(panelFor("Other details").textContent).not.toContain(
-      "attaches a legal agreement",
-    );
+    const panel = await readyPanel("Other details");
+    expect(panel.textContent).not.toContain("attaches a legal agreement");
     // ... while the agreement detail (its reference) stays inside it.
-    expect(panelFor("Other details").textContent).toContain("MOU-2025-0042");
+    expect(panel.textContent).toContain("MOU-2025-0042");
   });
 
   test("no legal-agreement hint when the invitation attaches none", async () => {
@@ -538,7 +573,7 @@ describe("InvitationTerms: a declared-empty receive is surfaced, not collapsed w
   test("a declared-empty receive shows the request as (none) in the detail", async () => {
     render({ ...terms, payload: { receive: [] } });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    const panel = panelFor("Other details");
+    const panel = await readyPanel("Other details");
     expect(panel.textContent).toContain("Your partner requests from you:");
     expect(panel.textContent).toContain("(none)");
     // The "(none)" names its strict consequence rather than reading as innocuous.
@@ -550,7 +585,7 @@ describe("InvitationTerms: a declared-empty receive is surfaced, not collapsed w
     // absent receive is lazy, not a request, and must not read as "(none)".
     render({ ...terms, payload: { send: [{ name: "risk_score" }] } });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(panelFor("Other details").textContent).not.toContain(
+    expect((await readyPanel("Other details")).textContent).not.toContain(
       "requests from you",
     );
   });
@@ -558,7 +593,7 @@ describe("InvitationTerms: a declared-empty receive is surfaced, not collapsed w
   test("the inviter's own preview frames a declared-empty receive as its own request", async () => {
     render({ ...terms, payload: { receive: [] } }, "proposing");
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    const panel = panelFor("Other details");
+    const panel = await readyPanel("Other details");
     expect(panel.textContent).toContain("You request from your partner:");
     expect(panel.textContent).toContain("(none)");
     expect(panel.textContent).toContain("would abort the exchange");
@@ -595,7 +630,7 @@ describe("InvitationTerms: the linkage strategy is surfaced at the consent point
       "This exchange uses single-pass linkage.",
     );
     // ... and OUTSIDE the "Other details" panel (structure, not styling).
-    expect(panelFor("Other details").textContent).not.toContain(
+    expect((await readyPanel("Other details")).textContent).not.toContain(
       "This exchange uses single-pass linkage.",
     );
     // Stated viewer-neutrally: the acceptor itself could be the disclosing party.
