@@ -94,12 +94,12 @@ export async function assertLeadingLineWithinByteCeiling(
   // no await-in-loop.
   const limit = byteCeiling + 1;
   const window = 256 * 1024;
-  // Scan raw bytes for LF or CR. This deliberately does not honor RFC 4180
-  // quoting, so a newline embedded in a quoted field counts as a terminator here;
-  // that can only let a pathological line slip past (a false negative) and never
-  // wrongly reject a valid file, the safe direction for an operator-local backstop.
-  // Byte-wise is safe for UTF-8: 0x0a/0x0d are below 0x80, so neither can occur as
-  // a continuation byte of a multi-byte character.
+  // Scan raw bytes for LF or CR. Like the stream guard, this does not honor RFC
+  // 4180 quoting -- a quoted newline counts as a terminator, so it never wrongly
+  // rejects a valid file (the safe direction), at the cost of not bounding a single
+  // quoted field full of embedded newlines (bounded instead by MAX_CSV_FILE_BYTES
+  // on this web path). Byte-wise is safe for UTF-8: 0x0a/0x0d are below 0x80, so
+  // neither can occur as a continuation byte of a multi-byte character.
   const hasTerminator = (bytes: Uint8Array): boolean =>
     bytes.indexOf(0x0a) !== -1 || bytes.indexOf(0x0d) !== -1;
   const head = new Uint8Array(
@@ -141,11 +141,16 @@ type StreamSource = {
  * caller runs once the parse settles. Inert (a no-op detach) for a source without
  * `on` -- a browser File, bounded by {@link assertLeadingLineWithinByteCeiling}.
  *
- * The byte scan deliberately ignores RFC 4180 quoting: a newline embedded in a
- * quoted field resets the run early, which can only let a pathological line slip
- * past (a false negative), never wrongly reject a valid file -- the safe direction
- * for an operator-local backstop. Byte-wise is safe for UTF-8 (0x0a/0x0d are below
- * 0x80, so neither occurs as a continuation byte of a multi-byte character).
+ * The byte scan deliberately ignores RFC 4180 quoting, so it never wrongly rejects
+ * a valid file (a newline inside a quoted field just resets the run -- the safe,
+ * false-negative direction). The cost is one shape this ceiling does NOT bound: a
+ * single quoted field carrying embedded newlines, which PapaParse buffers whole as
+ * one logical row while the run keeps resetting, so its memory and (quadratic)
+ * re-split CPU scale with the field, not the ceiling. That shape stays bounded only
+ * by the input being operator-local -- the CLI sets no size cap -- or, on the web,
+ * by MAX_CSV_FILE_BYTES; it is not a regression, the read was unbounded for it
+ * before this ceiling too. Byte-wise is safe for UTF-8 (0x0a/0x0d are below 0x80,
+ * so neither occurs as a continuation byte of a multi-byte character).
  *
  * @internal exported only for the unit tests, which drive its scan and trip
  * directly against a fake stream source -- isolating the run accounting from
