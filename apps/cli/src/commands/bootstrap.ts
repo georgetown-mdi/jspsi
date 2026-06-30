@@ -836,24 +836,22 @@ export async function loadInputRows(
  *
  * The DOB column is resolved by running {@link inferMetadata} over the header --
  * the same resolution `buildDataSpec` repeats internally, so the column the sample
- * is keyed on always matches the one `buildDataSpec` reads. When no DOB column is
- * inferred, the sample is empty and `rawRows` is empty (only the header was read).
+ * is keyed on always matches the one `buildDataSpec` reads. The loader reports the
+ * column it sampled, so that resolution runs once. When no DOB column is inferred,
+ * the sample is empty and `rawRows` is empty (only the header was read).
  */
 export async function loadInputRowsForInference(
   input: string,
   { allowStdin = false }: { allowStdin?: boolean } = {},
 ): Promise<{ rawRows: Array<Record<string, string>>; columns: string[] }> {
-  const dobColumnOf = (columns: string[]): string | undefined =>
-    inferMetadata(columns).find((c) => c.type === "date_of_birth")?.name;
-  const { columns, sample } = await loadCSVColumnSample(
+  const { columns, sampledColumn, sample } = await loadCSVColumnSample(
     openInputSource(input, { allowStdin }),
-    dobColumnOf,
+    (cols) => inferMetadata(cols).find((c) => c.type === "date_of_birth")?.name,
     INFER_DATE_SCAN_CAP,
   );
-  const dobColumn = dobColumnOf(columns);
   const rawRows =
-    dobColumn !== undefined
-      ? sample.map((value) => ({ [dobColumn]: value }))
+    sampledColumn !== undefined
+      ? sample.map((value) => ({ [sampledColumn]: value }))
       : [];
   return { rawRows, columns };
 }

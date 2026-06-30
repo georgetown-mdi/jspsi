@@ -159,14 +159,20 @@ export function loadCSVColumns(file: LocalFile): Promise<Array<string>> {
  * are the exact prefix it would see.
  *
  * Parsed inline (no `worker`), like the loaders above. Resolves with the header
- * field list (empty when the file has no header) and the bounded sample; rejects
- * on a read/parse error, the same contract as {@link loadCSVFile}.
+ * field list (empty when the file has no header), the column `selectColumn`
+ * chose (`undefined` when it selected none), and the bounded sample; rejects on a
+ * read/parse error, the same contract as {@link loadCSVFile}. Returning the
+ * resolved column lets a caller key the sample without re-running `selectColumn`.
  */
 export function loadCSVColumnSample(
   file: LocalFile,
   selectColumn: (columns: Array<string>) => string | undefined,
   sampleLimit: number,
-): Promise<{ columns: Array<string>; sample: Array<string> }> {
+): Promise<{
+  columns: Array<string>;
+  sampledColumn: string | undefined;
+  sample: Array<string>;
+}> {
   return new Promise((resolve, reject) => {
     let columns: Array<string> | undefined;
     let target: string | undefined;
@@ -191,8 +197,9 @@ export function loadCSVColumnSample(
             return;
           }
         }
-        // Unreachable once target is set (the no-column case aborted above), but
-        // keeps the indexing below well-typed across chunks.
+        // Once a column is selected it stays set for every later chunk, and the
+        // no-column case already aborted, so this never returns at runtime -- its
+        // job is to narrow `target` to a string for the indexing below.
         if (target === undefined) return;
         for (const row of results.data as Array<Record<string, string>>) {
           const value = row[target];
@@ -207,6 +214,14 @@ export function loadCSVColumnSample(
         }
       },
       complete: () => {
+        // An early `parser.abort()` tears down PapaParse's parser but not the
+        // underlying source, so a Node stream's listeners (and an
+        // fs.createReadStream's file descriptor) would linger until GC -- the
+        // opposite of the bounded read's intent. Release it explicitly; a no-op
+        // once a natural end-of-input has already closed it, and skipped for a
+        // non-stream LocalFile (a browser File/string has no `destroy`).
+        const source = file as { destroy?: () => void };
+        if (typeof source.destroy === "function") source.destroy();
         // chunk fires at least once for any input -- even an empty or header-only
         // file -- so columns is set unless the parse produced no chunk. Reject that
         // unreachable case rather than mask it, matching loadCSVFile's invariant.
@@ -214,7 +229,7 @@ export function loadCSVColumnSample(
           reject(new Error("CSV parse completed without producing a chunk"));
           return;
         }
-        resolve({ columns, sample });
+        resolve({ columns, sampledColumn: target, sample });
       },
       error: (error) => {
         reject(error);

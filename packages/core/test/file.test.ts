@@ -1,6 +1,6 @@
 import { Readable } from "node:stream";
 
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import { loadCSVColumnSample } from "../src/file";
 import { inferDateFormat, columnValues } from "../src/utils/date";
@@ -17,25 +17,28 @@ function streamOf(content: string): Readable {
 const pickDob = (columns: string[]): string | undefined =>
   columns.find((c) => c === "dob");
 
-test("loadCSVColumnSample: returns the header and the selected column's values", async () => {
+test("loadCSVColumnSample: returns the header, the sampled column, and its values", async () => {
   const csv =
     "first_name,dob,ssn\n" + "Alice,1990-01-02,111\n" + "Bob,1985-12-31,222\n";
-  const { columns, sample } = await loadCSVColumnSample(
+  const { columns, sampledColumn, sample } = await loadCSVColumnSample(
     streamOf(csv),
     pickDob,
     1000,
   );
   expect(columns).toEqual(["first_name", "dob", "ssn"]);
+  expect(sampledColumn).toBe("dob");
   expect(sample).toEqual(["1990-01-02", "1985-12-31"]);
 });
 
 test("loadCSVColumnSample: a header-only file yields the columns and an empty sample", async () => {
-  const { columns, sample } = await loadCSVColumnSample(
+  const { columns, sampledColumn, sample } = await loadCSVColumnSample(
     streamOf("first_name,dob,ssn\n"),
     pickDob,
     1000,
   );
   expect(columns).toEqual(["first_name", "dob", "ssn"]);
+  // The column was selected even though there were no rows to sample from it.
+  expect(sampledColumn).toBe("dob");
   expect(sample).toEqual([]);
 });
 
@@ -43,13 +46,31 @@ test("loadCSVColumnSample: no selected column reads only the header", async () =
   // The selector returns undefined (no DOB column), so nothing is sampled even
   // though the rows have values -- the header alone is the result.
   const csv = "first_name,ssn\nAlice,111\nBob,222\n";
-  const { columns, sample } = await loadCSVColumnSample(
+  const { columns, sampledColumn, sample } = await loadCSVColumnSample(
     streamOf(csv),
     pickDob,
     1000,
   );
   expect(columns).toEqual(["first_name", "ssn"]);
+  expect(sampledColumn).toBeUndefined();
   expect(sample).toEqual([]);
+});
+
+test("loadCSVColumnSample: destroys the source stream once the read stops early", async () => {
+  // The early parser.abort() must release the underlying stream rather than leak
+  // its descriptor until GC -- the bounded read's whole point. Both early-stop
+  // paths (sample cap reached, and no column to sample) end through completion.
+  const capStream = streamOf(
+    "name,dob\nA,1990-01-01\nB,1990-01-02\nC,1990-01-03\n",
+  );
+  const capDestroy = vi.spyOn(capStream, "destroy");
+  await loadCSVColumnSample(capStream, pickDob, 1);
+  expect(capDestroy).toHaveBeenCalled();
+
+  const noColStream = streamOf("name,ssn\nA,111\nB,222\n");
+  const noColDestroy = vi.spyOn(noColStream, "destroy");
+  await loadCSVColumnSample(noColStream, pickDob, 1000);
+  expect(noColDestroy).toHaveBeenCalled();
 });
 
 test("loadCSVColumnSample: empty (after-trim) values are skipped, not sampled", async () => {
