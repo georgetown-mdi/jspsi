@@ -11,8 +11,10 @@
  * component consumes is enough -- no render needed to catch a regression.
  */
 
+import type { MantineColorShade } from "@mantine/core";
+
 /** A Mantine palette coordinate: a color name and a shade index (0-9). */
-export type PaletteShade = readonly [name: string, shade: number];
+export type PaletteShade = readonly [name: string, shade: MantineColorShade];
 
 /**
  * The accept/reject drag-state icon colors as Mantine palette coordinates, per

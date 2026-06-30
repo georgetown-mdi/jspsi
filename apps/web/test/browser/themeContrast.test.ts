@@ -199,6 +199,10 @@ describe("rendered theme colour contrast (WCAG 2.1 AA)", () => {
         ),
       );
       const ai = await waitForEl(".mantine-ActionIcon-root");
+      // Let the light-variant color resolve before sampling, as the filled cases
+      // do (they poll it to its expected value first). The exact shade is
+      // Mantine's to own here, so settle on a resolved rgb() rather than pin one.
+      await expect.poll(() => getComputedStyle(ai).color).toMatch(/^rgb/);
       const backgroundColor = await restingBackground(ai);
       const { color } = getComputedStyle(ai);
       expect(contrast(color, backgroundColor)).toBeGreaterThanOrEqual(3);
