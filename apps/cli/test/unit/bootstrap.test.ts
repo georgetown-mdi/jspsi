@@ -8,6 +8,7 @@ import YAML from "yaml";
 import {
   getDefaultLinkageTerms,
   getLogger,
+  INFER_DATE_SCAN_CAP,
   MAX_RECONNECT_ATTEMPTS,
   safeParseConnectionConfig,
   SHARED_SECRET_REGEX,
@@ -29,6 +30,7 @@ import {
   endpointFromConnection,
   generateSharedSecret,
   loadInputRows,
+  loadInputRowsForInference,
   logOnlineBootstrapOutcome,
   looksLikeUrl,
   parseCommonBootstrapArgs,
@@ -2104,6 +2106,155 @@ test("loadInputRows: `-` at an interactive terminal is rejected (invite path inh
       /pipe/,
     );
   });
+});
+
+// --- loadInputRowsForInference (init's bounded read) -------------------------
+
+// A column set where date_of_birth joins a satisfiable default linkage key (a
+// name + DOB combination), so the inferred terms include a date_of_birth field
+// and its parse_date pipeline -- the path whose date format the bounded sample
+// must reproduce. The dob column is a fixed YYYY-MM-DD date.
+const INFER_COLUMNS = ["first_name", "last_name", "dob", "member_id"];
+
+/** Build a CSV with `rows` data rows over {@link INFER_COLUMNS}. */
+function csvWithRows(rows: number): string {
+  const body = Array.from(
+    { length: rows },
+    (_v, i) =>
+      `First${i},Last${i},1990-01-${String((i % 28) + 1).padStart(2, "0")},${i}`,
+  ).join("\n");
+  return `${INFER_COLUMNS.join(",")}\n${body}\n`;
+}
+
+/** The parse_date input format a standardization inferred for the dob column. */
+function dobInputFormat(
+  dataSpec: ReturnType<typeof buildDataSpec>["dataSpec"],
+): unknown {
+  const step = (dataSpec.standardization ?? [])
+    .flatMap((s) => s.steps ?? [])
+    .find((s) => s.function === "parse_date");
+  return (step?.params as { inputFormat?: unknown } | undefined)?.inputFormat;
+}
+
+test("loadInputRowsForInference: infers the same metadata, fields, standardization, and dob format as a full read", async () => {
+  // The divergence guard the issue makes load-bearing: init's lighter read must
+  // author terms byte-identical to what invite/accept derive from a full read of
+  // the same file. Pin all four inferred outputs by comparing the two dataSpecs.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-infer-"));
+  try {
+    const file = path.join(dir, "in.csv");
+    fs.writeFileSync(file, csvWithRows(40));
+    const full = buildDataSpec({
+      identity: "Org",
+      rows: await loadInputRows(file),
+    });
+    const light = buildDataSpec({
+      identity: "Org",
+      rows: await loadInputRowsForInference(file),
+    });
+    expect(light.dataSpec.metadata).toEqual(full.dataSpec.metadata);
+    expect(light.dataSpec.linkageTerms).toEqual(full.dataSpec.linkageTerms);
+    expect(light.dataSpec.standardization).toEqual(
+      full.dataSpec.standardization,
+    );
+    expect(dobInputFormat(light.dataSpec)).toBe("YYYY-MM-DD");
+    expect(dobInputFormat(light.dataSpec)).toBe(dobInputFormat(full.dataSpec));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadInputRowsForInference: does not read the full row set -- the dob sample is bounded to the scan cap", async () => {
+  // A file with more dob rows than the inference cap: the full read returns every
+  // row, the inference read returns the header plus a sample capped at
+  // INFER_DATE_SCAN_CAP, so init's memory does not scale with the file.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bounded-"));
+  try {
+    const file = path.join(dir, "in.csv");
+    const rowCount = INFER_DATE_SCAN_CAP + 500;
+    fs.writeFileSync(file, csvWithRows(rowCount));
+    const full = await loadInputRows(file);
+    expect(full.rawRows).toHaveLength(rowCount);
+
+    const light = await loadInputRowsForInference(file);
+    // The header is read whole...
+    expect(light.columns).toEqual(INFER_COLUMNS);
+    // ...but the rows handed to inference are capped at the scan limit, and hold
+    // only the projected dob column rather than the full record.
+    expect(light.rawRows).toHaveLength(INFER_DATE_SCAN_CAP);
+    expect(Object.keys(light.rawRows[0])).toEqual(["dob"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadInputRowsForInference: a file with no dob column reads only the header", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-nodob-"));
+  try {
+    const file = path.join(dir, "in.csv");
+    fs.writeFileSync(file, "first_name,last_name,member_id\nAlice,Smith,1\n");
+    const { columns, rawRows } = await loadInputRowsForInference(file);
+    expect(columns).toEqual(["first_name", "last_name", "member_id"]);
+    // No DOB column to sample, so no row data is retained at all.
+    expect(rawRows).toEqual([]);
+    // Inference over it still matches a full read (no date format to infer).
+    const full = buildDataSpec({
+      identity: "Org",
+      rows: await loadInputRows(file),
+    });
+    const light = buildDataSpec({
+      identity: "Org",
+      rows: { columns, rawRows },
+    });
+    expect(light.dataSpec).toEqual(full.dataSpec);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadInputRowsForInference: a header larger than the read buffer is read whole, matching the full read", async () => {
+  // A header longer than fs.createReadStream's 64 KiB read buffer spans multiple
+  // stream reads, so the bounded loader must not commit to the first (empty-field)
+  // chunk -- otherwise init reads an empty header and silently infers nothing
+  // while the full read infers correctly. Compare the header both paths recover.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bighdr-"));
+  try {
+    const cols = Array.from({ length: 8000 }, (_v, i) =>
+      i === 4000 ? "dob" : `column_${i}`,
+    );
+    expect(Buffer.byteLength(cols.join(","))).toBeGreaterThan(64 * 1024);
+    const row = cols.map((c) => (c === "dob" ? "1990-01-02" : "x")).join(",");
+    const file = path.join(dir, "in.csv");
+    fs.writeFileSync(file, `${cols.join(",")}\n${row}\n`);
+
+    const full = await loadInputRows(file);
+    const light = await loadInputRowsForInference(file);
+    expect(light.columns).toEqual(full.columns);
+    expect(light.columns).toHaveLength(8000);
+    // The DOB sample was still taken from the (now correctly read) header.
+    expect(light.rawRows).toEqual([{ dob: "1990-01-02" }]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadInputRowsForInference: a `-` CSV from stdin infers the same terms as the file", async () => {
+  // init reads its input with allowStdin enabled; the bounded read must work over
+  // a non-rewindable stdin stream in a single pass, matching the file path.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-infer-stdin-"));
+  try {
+    const file = path.join(dir, "in.csv");
+    fs.writeFileSync(file, csvWithRows(10));
+    const fromFile = await loadInputRowsForInference(file, {
+      allowStdin: true,
+    });
+    const fromStdin = await withStdin(streamOf(csvWithRows(10)), () =>
+      loadInputRowsForInference("-", { allowStdin: true }),
+    );
+    expect(fromStdin).toEqual(fromFile);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // --- linkage strategy selection ----------------------------------------------

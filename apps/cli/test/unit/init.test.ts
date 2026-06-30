@@ -26,6 +26,7 @@ import {
   handler as initHandler,
   resolveInitInput,
 } from "../../src/commands/init";
+import { buildDataSpec, loadInputRows } from "../../src/commands/bootstrap";
 import { streamOf, ttyStream, withStdin } from "../stdinStream";
 
 // promptConfirm is mocked so the handler's interactive overwrite branch is
@@ -226,6 +227,39 @@ test("buildTemplateData: a file input infers metadata, fields, and standardizati
   const data = await buildTemplateData(file, "Org", log);
   expect(data.metadata?.map((m) => m.name)).toContain("ssn");
   expect(data.standardization?.map((s) => s.output)).toContain("ssn");
+});
+
+test("buildTemplateData: the bounded read infers the same terms (incl. DOB format) as a full read", async () => {
+  // The acceptance constraint: init's lighter read must author terms identical to
+  // a full read of the same file. Use a non-default DOB format (MM/DD/YYYY) so the
+  // date inference is doing real work, and pin metadata, linkage fields, the
+  // standardization, and the inferred DOB format -- comparing init's path against
+  // buildDataSpec over a full loadInputRows of the same file.
+  const dir = scratchDir();
+  const file = path.join(dir, "in.csv");
+  fs.writeFileSync(
+    file,
+    "first_name,last_name,dob,ssn\n" +
+      "Alice,Smith,03/14/1990,123456789\n" +
+      "Bob,Jones,11/02/1985,234567891\n",
+  );
+  const data = await buildTemplateData(file, "Org", log);
+  const full = buildDataSpec({
+    identity: "Org",
+    rows: await loadInputRows(file),
+  });
+
+  expect(data.metadata).toEqual(full.dataSpec.metadata);
+  expect(data.linkageTerms.linkageFields).toEqual(
+    full.dataSpec.linkageTerms.linkageFields,
+  );
+  expect(data.standardization).toEqual(full.dataSpec.standardization);
+  const parseDate = (data.standardization ?? [])
+    .flatMap((s) => s.steps ?? [])
+    .find((s) => s.function === "parse_date");
+  expect(
+    (parseDate?.params as { inputFormat?: string } | undefined)?.inputFormat,
+  ).toBe("MM/DD/YYYY");
 });
 
 test("buildTemplateData: `-` reads the CSV from stdin", async () => {

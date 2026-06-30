@@ -18,7 +18,11 @@ import {
   promptConfirm,
   singleValue,
 } from "../util/cli";
-import { buildDataSpec, loadInputRows, runOrExit } from "./bootstrap";
+import {
+  buildDataSpec,
+  loadInputRowsForInference,
+  runOrExit,
+} from "./bootstrap";
 
 // The identity written into a fresh template when --identity is not given. A
 // placeholder, like the connection's host/username -- init produces a scaffold to
@@ -180,7 +184,9 @@ export function resolveInitInput(
  * linkage fields, and standardization when an input CSV is given, or just the
  * default linkage terms when it is not. Reuses `buildDataSpec` -- the same
  * inference `invite`/`accept`/zero-setup run -- so the template's terms match
- * what those commands would author from the same file.
+ * what those commands would author from the same file. Reads the input through
+ * `loadInputRowsForInference` (header plus a bounded DOB sample), not the full
+ * row set the exchange commands load, since init's inference needs no more.
  *
  * @internal exported for testing
  */
@@ -194,7 +200,7 @@ export async function buildTemplateData(
 
   let rows;
   try {
-    rows = await loadInputRows(input, { allowStdin: true });
+    rows = await loadInputRowsForInference(input, { allowStdin: true });
   } catch (err) {
     // openInputSource's stdin-specific rejections (`-` disallowed, `-` at a bare
     // TTY) are already UsageErrors with actionable wording -- keep them. A missing

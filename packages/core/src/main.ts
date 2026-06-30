@@ -63,9 +63,13 @@ export * from "./config/metadata";
 export * from "./config/signing";
 export * from "./signingIdentity";
 export * from "./standardization";
-export { loadCSVFile, loadCSVColumns } from "./file";
+export { loadCSVFile, loadCSVColumns, loadCSVColumnSample } from "./file";
 
-export { inferDateFormat, columnValues } from "./utils/date.js";
+export {
+  inferDateFormat,
+  columnValues,
+  INFER_DATE_SCAN_CAP,
+} from "./utils/date.js";
 export {
   computeHostKeyFingerprint,
   verifyHostKeyFingerprint,

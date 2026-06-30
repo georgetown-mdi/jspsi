@@ -135,3 +135,121 @@ export function loadCSVColumns(file: LocalFile): Promise<Array<string>> {
     });
   });
 }
+
+/**
+ * Read a CSV's column header plus a bounded sample of one column's values,
+ * without materializing the full row set {@link loadCSVFile} returns. Streams the
+ * file in PapaParse chunks and stops (`parser.abort()`) as soon as the header
+ * yields no column to sample or `sampleLimit` non-empty values of the selected
+ * column have been collected -- the read path `init` uses to infer column metadata
+ * from the header and the date-input format from the date-of-birth column, neither
+ * of which needs every row.
+ *
+ * For a well-formed CSV this holds peak memory to the header plus one parse chunk
+ * rather than the whole input. The bound is on retained rows, not on a single
+ * line: like {@link loadCSVFile}, PapaParse must buffer one logical line (a row,
+ * or the header) whole before it yields a chunk, so a pathological line or header
+ * with no terminator is still read in full -- that worst case is unchanged from
+ * the full read, not introduced here.
+ *
+ * `selectColumn` is invoked with the header field list and returns the name of
+ * the column to sample (the DOB column, for date-format inference) or `undefined`
+ * to collect no sample. It is called once the header lands -- which, for a header
+ * longer than the source stream's read buffer, is a later chunk than the first
+ * (the same whole-header read `loadCSVFile` performs), so the returned columns are
+ * never the truncated prefix a first-chunk-only read would yield. Resolving the
+ * column from the header inside the single pass -- rather than the caller
+ * re-opening the source -- is what lets the same read serve a non-rewindable
+ * stdin stream.
+ *
+ * The sample holds only non-empty (after-trim) values, capped at `sampleLimit`.
+ * Set the cap to {@link inferDateFormat}'s own non-empty-value scan cap and the
+ * sampled inference is identical to a full-column scan by construction: that scan
+ * never consumes past the cap either, so the first `sampleLimit` non-empty values
+ * are the exact prefix it would see.
+ *
+ * Parsed inline (no `worker`), like the loaders above. Resolves with the header
+ * field list (empty when the file has no header), the column `selectColumn`
+ * chose (`undefined` when it selected none), and the bounded sample; rejects on a
+ * read/parse error, the same contract as {@link loadCSVFile}. Returning the
+ * resolved column lets a caller key the sample without re-running `selectColumn`.
+ */
+export function loadCSVColumnSample(
+  file: LocalFile,
+  selectColumn: (columns: Array<string>) => string | undefined,
+  sampleLimit: number,
+): Promise<{
+  columns: Array<string>;
+  sampledColumn: string | undefined;
+  sample: Array<string>;
+}> {
+  return new Promise((resolve, reject) => {
+    let columns: Array<string> | undefined;
+    let target: string | undefined;
+    const sample: Array<string> = [];
+    Papa.parse(file, {
+      // Inline, never a Web Worker -- same reasoning as loadCSVFile (the bundled
+      // worker mis-applies header mode); init runs under Node, where the worker is
+      // unavailable regardless.
+      worker: false,
+      header: true,
+      skipEmptyLines: true,
+      chunk: (results, parser) => {
+        if (target === undefined) {
+          // Settle the header and the column to sample as soon as a non-empty
+          // header is available -- not unconditionally on the first chunk. A
+          // header longer than the source stream's read buffer arrives split
+          // across the first chunks, so `meta.fields` is `[]` until a later chunk
+          // completes the header row (loadCSVFile likewise reads the latest
+          // fields, not the first chunk's). Keep the latest and wait: until the
+          // header lands there are no data rows to sample anyway.
+          columns = results.meta.fields ?? [];
+          if (columns.length === 0) return;
+          target = selectColumn(columns);
+          if (target === undefined) {
+            // Nothing to sample: the header alone is the whole result, so stop
+            // rather than stream the rest of the file for values no one reads.
+            parser.abort();
+            return;
+          }
+        }
+        // `target` is non-undefined past this point, but it is an outer-scope
+        // `let` read inside this callback, which TypeScript will not narrow on its
+        // own; this guard does the narrowing for the indexing below.
+        if (target === undefined) return;
+        for (const row of results.data as Array<Record<string, string>>) {
+          const value = row[target];
+          if (value !== undefined && value.trim() !== "") {
+            sample.push(value);
+            // Enough to reproduce a full scan; stop reading the rest of the file.
+            if (sample.length >= sampleLimit) {
+              parser.abort();
+              return;
+            }
+          }
+        }
+      },
+      complete: () => {
+        // An early `parser.abort()` tears down PapaParse's parser but not the
+        // underlying source, so a Node stream's listeners (and an
+        // fs.createReadStream's file descriptor) would linger until GC -- the
+        // opposite of the bounded read's intent. Release it explicitly; a no-op
+        // once a natural end-of-input has already closed it, and skipped for a
+        // non-stream LocalFile (a browser File/string has no `destroy`).
+        const source = file as { destroy?: () => void };
+        if (typeof source.destroy === "function") source.destroy();
+        // chunk fires at least once for any input -- even an empty or header-only
+        // file -- so columns is set unless the parse produced no chunk. Reject that
+        // unreachable case rather than mask it, matching loadCSVFile's invariant.
+        if (columns === undefined) {
+          reject(new Error("CSV parse completed without producing a chunk"));
+          return;
+        }
+        resolve({ columns, sampledColumn: target, sample });
+      },
+      error: (error) => {
+        reject(error);
+      },
+    });
+  });
+}
