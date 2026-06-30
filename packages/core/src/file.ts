@@ -344,7 +344,12 @@ export function loadCSVColumnSample(
         resolve({ columns, sampledColumn: target, sample });
       },
       error: (error) => {
+        // Same release as complete, which the error path does not reach:
+        // PapaParse's _sendError detaches only its own listeners and never calls
+        // complete, so without this an fs.createReadStream descriptor (and the
+        // byte counter) would linger past a read error until GC.
         if (isStream) source.removeListener?.("data", countBytes);
+        if (typeof source.destroy === "function") source.destroy();
         reject(error);
       },
     });

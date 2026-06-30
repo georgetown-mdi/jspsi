@@ -95,6 +95,21 @@ test("loadCSVColumnSample: destroys the source stream once the read stops early"
   expect(noColDestroy).toHaveBeenCalled();
 });
 
+test("loadCSVColumnSample: a source error releases the stream and rejects", async () => {
+  // A read error settles through PapaParse's error path, which never reaches
+  // completion, so the stream must still be released there -- otherwise an
+  // fs.createReadStream descriptor would leak past the failure until GC.
+  const stream = new Readable({ read() {} });
+  const destroySpy = vi.spyOn(stream, "destroy");
+  // Emit after PapaParse has attached its listeners (it parses on the microtask
+  // queue, so a queued error fires once the error listener is in place).
+  queueMicrotask(() => stream.emit("error", new Error("read failed")));
+  await expect(loadCSVColumnSample(stream, pickDob, 1000)).rejects.toThrow(
+    "read failed",
+  );
+  expect(destroySpy).toHaveBeenCalled();
+});
+
 test("loadCSVColumnSample: empty (after-trim) values are skipped, not sampled", async () => {
   const csv =
     "name,dob\n" +
