@@ -141,10 +141,16 @@ export function loadCSVColumns(file: LocalFile): Promise<Array<string>> {
  * without materializing the full row set {@link loadCSVFile} returns. Streams the
  * file in PapaParse chunks and stops (`parser.abort()`) as soon as the header
  * yields no column to sample or `sampleLimit` non-empty values of the selected
- * column have been collected, so peak memory is bounded by one parse chunk rather
- * than the input size -- the read path `init` uses to infer column metadata from
- * the header and the date-input format from the date-of-birth column, neither of
- * which needs every row.
+ * column have been collected -- the read path `init` uses to infer column metadata
+ * from the header and the date-input format from the date-of-birth column, neither
+ * of which needs every row.
+ *
+ * For a well-formed CSV this holds peak memory to the header plus one parse chunk
+ * rather than the whole input. The bound is on retained rows, not on a single
+ * line: like {@link loadCSVFile}, PapaParse must buffer one logical line (a row,
+ * or the header) whole before it yields a chunk, so a pathological line or header
+ * with no terminator is still read in full -- that worst case is unchanged from
+ * the full read, not introduced here.
  *
  * `selectColumn` is invoked with the header field list and returns the name of
  * the column to sample (the DOB column, for date-format inference) or `undefined`
