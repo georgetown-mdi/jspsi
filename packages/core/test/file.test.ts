@@ -13,6 +13,28 @@ function streamOf(content: string): Readable {
   return s;
 }
 
+/**
+ * A readable emitting `content` in fixed-size pieces, so PapaParse sees multiple
+ * data events and a header longer than `pieceSize` lands split across chunks --
+ * the way `fs.createReadStream` (64 KB reads) delivers a large header, which a
+ * single-push {@link streamOf} cannot reproduce.
+ */
+function chunkedStreamOf(content: string, pieceSize: number): Readable {
+  const buf = Buffer.from(content, "utf8");
+  let off = 0;
+  return new Readable({
+    read() {
+      if (off >= buf.length) {
+        this.push(null);
+        return;
+      }
+      const end = Math.min(off + pieceSize, buf.length);
+      this.push(buf.subarray(off, end));
+      off = end;
+    },
+  });
+}
+
 /** Pick the `dob` column when present, the selector init uses in spirit. */
 const pickDob = (columns: string[]): string | undefined =>
   columns.find((c) => c === "dob");
@@ -121,4 +143,29 @@ test("loadCSVColumnSample: an empty input yields an empty header and sample", as
   );
   expect(columns).toEqual([]);
   expect(sample).toEqual([]);
+});
+
+test("loadCSVColumnSample: a header split across stream chunks is read whole", async () => {
+  // A header longer than one stream read arrives split across chunks, so the
+  // first chunk carries no fields yet. The loader must wait for the complete
+  // header rather than committing to the first chunk's empty field list -- else
+  // it returns an empty header and init's inference silently diverges from the
+  // full read. The header here (~8000 columns) far exceeds the 16 KiB piece size.
+  const cols = Array.from({ length: 8000 }, (_v, i) =>
+    i === 4000 ? "dob" : `column_${i}`,
+  );
+  const header = cols.join(",");
+  expect(Buffer.byteLength(header)).toBeGreaterThan(16384);
+  const row = cols.map((c) => (c === "dob" ? "1990-01-02" : "x")).join(",");
+  const csv = `${header}\n${row}\n${row}\n`;
+
+  const { columns, sampledColumn, sample } = await loadCSVColumnSample(
+    chunkedStreamOf(csv, 16384),
+    pickDob,
+    1000,
+  );
+  expect(columns).toHaveLength(8000);
+  expect(columns).toContain("dob");
+  expect(sampledColumn).toBe("dob");
+  expect(sample).toEqual(["1990-01-02", "1990-01-02"]);
 });

@@ -2212,6 +2212,32 @@ test("loadInputRowsForInference: a file with no dob column reads only the header
   }
 });
 
+test("loadInputRowsForInference: a header larger than the read buffer is read whole, matching the full read", async () => {
+  // A header longer than fs.createReadStream's 64 KiB read buffer spans multiple
+  // stream reads, so the bounded loader must not commit to the first (empty-field)
+  // chunk -- otherwise init reads an empty header and silently infers nothing
+  // while the full read infers correctly. Compare the header both paths recover.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bighdr-"));
+  try {
+    const cols = Array.from({ length: 8000 }, (_v, i) =>
+      i === 4000 ? "dob" : `column_${i}`,
+    );
+    expect(Buffer.byteLength(cols.join(","))).toBeGreaterThan(64 * 1024);
+    const row = cols.map((c) => (c === "dob" ? "1990-01-02" : "x")).join(",");
+    const file = path.join(dir, "in.csv");
+    fs.writeFileSync(file, `${cols.join(",")}\n${row}\n`);
+
+    const full = await loadInputRows(file);
+    const light = await loadInputRowsForInference(file);
+    expect(light.columns).toEqual(full.columns);
+    expect(light.columns).toHaveLength(8000);
+    // The DOB sample was still taken from the (now correctly read) header.
+    expect(light.rawRows).toEqual([{ dob: "1990-01-02" }]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("loadInputRowsForInference: a `-` CSV from stdin infers the same terms as the file", async () => {
   // init reads its input with allowStdin enabled; the bounded read must work over
   // a non-rewindable stdin stream in a single pass, matching the file path.

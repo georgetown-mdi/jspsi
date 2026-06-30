@@ -146,11 +146,15 @@ export function loadCSVColumns(file: LocalFile): Promise<Array<string>> {
  * the header and the date-input format from the date-of-birth column, neither of
  * which needs every row.
  *
- * `selectColumn` is invoked once with the header field list and returns the name
- * of the column to sample (the DOB column, for date-format inference) or
- * `undefined` to collect no sample. Resolving the column from the header inside
- * the single pass -- rather than the caller re-opening the source -- is what lets
- * the same read serve a non-rewindable stdin stream.
+ * `selectColumn` is invoked with the header field list and returns the name of
+ * the column to sample (the DOB column, for date-format inference) or `undefined`
+ * to collect no sample. It is called once the header lands -- which, for a header
+ * longer than the source stream's read buffer, is a later chunk than the first
+ * (the same whole-header read `loadCSVFile` performs), so the returned columns are
+ * never the truncated prefix a first-chunk-only read would yield. Resolving the
+ * column from the header inside the single pass -- rather than the caller
+ * re-opening the source -- is what lets the same read serve a non-rewindable
+ * stdin stream.
  *
  * The sample holds only non-empty (after-trim) values, capped at `sampleLimit`.
  * Set the cap to {@link inferDateFormat}'s own non-empty-value scan cap and the
@@ -185,10 +189,16 @@ export function loadCSVColumnSample(
       header: true,
       skipEmptyLines: true,
       chunk: (results, parser) => {
-        if (columns === undefined) {
-          // The header field list persists across chunks, so the first chunk
-          // settles both the returned columns and which column (if any) to sample.
+        if (target === undefined) {
+          // Settle the header and the column to sample as soon as a non-empty
+          // header is available -- not unconditionally on the first chunk. A
+          // header longer than the source stream's read buffer arrives split
+          // across the first chunks, so `meta.fields` is `[]` until a later chunk
+          // completes the header row (loadCSVFile likewise reads the latest
+          // fields, not the first chunk's). Keep the latest and wait: until the
+          // header lands there are no data rows to sample anyway.
           columns = results.meta.fields ?? [];
+          if (columns.length === 0) return;
           target = selectColumn(columns);
           if (target === undefined) {
             // Nothing to sample: the header alone is the whole result, so stop
@@ -197,9 +207,9 @@ export function loadCSVColumnSample(
             return;
           }
         }
-        // Once a column is selected it stays set for every later chunk, and the
-        // no-column case already aborted, so this never returns at runtime -- its
-        // job is to narrow `target` to a string for the indexing below.
+        // `target` is non-undefined past this point, but it is an outer-scope
+        // `let` read inside this callback, which TypeScript will not narrow on its
+        // own; this guard does the narrowing for the indexing below.
         if (target === undefined) return;
         for (const row of results.data as Array<Record<string, string>>) {
           const value = row[target];
