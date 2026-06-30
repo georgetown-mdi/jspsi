@@ -64,7 +64,9 @@ function singleLineCeilingError(byteCeiling: number): Error {
  * bounds it) or a string (parsed whole in one pass, no cross-chunk growth) returns
  * at once.
  *
- * @internal
+ * @internal exported only so the unit tests can drive its resolve cases directly:
+ * loadCSVFile cannot reach them in Node, where a File hits PapaParse's FileReader
+ * path (absent there). Not re-exported from the package entry point.
  */
 export async function assertLeadingLineWithinByteCeiling(
   file: LocalFile,
