@@ -1642,6 +1642,36 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
     expect(canonicalString(rebuilt)).toEqual(canonicalString(imported));
   });
 
+  test("a name/type-confused referenced field with an empty {} stays refused, not preserved", () => {
+    // The empty-{} preservation must not become a hole for TYPE confusion: the
+    // referential-integrity refine checks a field NAME only, so a schema-valid document
+    // can name a field "date_of_birth" yet type it "ssn" and carry constraints: {} (a
+    // valid SsnField named date_of_birth). Keyed on name alone, the rebuild would commit
+    // that ssn-typed field verbatim -- the inviter binds date_of_birth by name while an
+    // acceptor type-falls-back to its ssn column, a cross-party under-match -- and slip
+    // the import guard, which refused it before the faithful round-trip. Requiring the
+    // imported type to match the authored (column) type keeps it refused.
+    const confusedField: LinkageTerms["linkageFields"][number] = {
+      name: "date_of_birth",
+      type: "ssn",
+      constraints: {},
+    };
+    const confused = structuredClone(defaultExport());
+    confused.linkageFields = confused.linkageFields.map((f) =>
+      f.name === "date_of_birth" ? confusedField : f,
+    );
+    expect(safeParseLinkageTerms(confused).success).toBe(true);
+    expect(
+      importedConstraintDivergenceMessage(confused, seedFor(), rawRows),
+    ).toBeDefined();
+    // The fallthrough re-derives the field at its authored (column) type, so even if the
+    // guard were bypassed the rebuild never commits the confused ssn type.
+    expect(
+      rebuild(confused).linkageFields.find((f) => f.name === "date_of_birth")
+        ?.type,
+    ).toBe("date_of_birth");
+  });
+
   test("an empty constraints object that STRIPS a type default (ssn) stays refused", () => {
     // ssn's default is { exclude, validOnly }, so an empty {} is NOT a benign no-op -- it
     // drops the SSN validity checks the editor would author. That is a real,

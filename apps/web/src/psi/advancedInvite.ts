@@ -454,9 +454,11 @@ function isEmptyConstraints(constraints: unknown): boolean {
  *   custom constraint the editor cannot represent still diverges from the import and is
  *   caught fail-closed by {@link importedConstraintDivergenceMessage}, which this fix
  *   deliberately does not defeat. The lone exception is a benign empty `constraints: {}`
- *   on a type whose default is absent ({@link isEmptyConstraints}): preserved verbatim so
- *   it round-trips (a no-op, behaviorally identical to absent) instead of being
- *   over-refused by that guard.
+ *   on a field whose authored type has no default constraint AND whose imported type
+ *   matches that authored type ({@link isEmptyConstraints}): preserved verbatim so it
+ *   round-trips (a no-op, behaviorally identical to absent) instead of being over-refused.
+ *   A type mismatch is NOT preserved -- it falls through to the authored field so the
+ *   guard refuses it, since the imported declaration checks a field's name, not its type.
  * - Referenced by an enabled key but NOT derivable: dropped, leaving the key to dangle
  *   the built terms (blocking generation) -- keeping this field set in lockstep with
  *   {@link declarableFieldNames}, the disable/build invariant the import path rests on.
@@ -488,9 +490,20 @@ function reconcileImportedFields(
       // Not derivable from the inviter's columns: leave it undeclared so the
       // referencing key dangles and blocks (lockstep with declarableFieldNames).
       if (authoredField === undefined) continue;
+      // Emit the editor's authored field (type-default constraints), EXCEPT preserve a
+      // benign empty `constraints: {}` verbatim -- but only when the imported field also
+      // agrees with the authored field's TYPE. This is the one place a referenced field
+      // is emitted from the imported declaration rather than re-derived, so without the
+      // type guard a schema-valid name/type-confused field (the referential-integrity
+      // refine checks a field's NAME only, so a `date_of_birth`-named field can be typed
+      // `ssn`) would be committed with a type the inviter's column does not back --
+      // binding the two parties' key element to different-typed columns -- and slip
+      // importedConstraintDivergenceMessage. A type mismatch falls through to the
+      // authored field, so that guard refuses the divergence as it did before this fix.
       result.push(
         isEmptyConstraints(field.constraints) &&
-          authoredField.constraints === undefined
+          authoredField.constraints === undefined &&
+          field.type === authoredField.type
           ? field
           : authoredField,
       );
