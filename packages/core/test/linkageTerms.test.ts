@@ -1639,6 +1639,69 @@ test("a declared receive still aborts when the partner's send does not satisfy i
   ).toBe(true);
 });
 
+test("an explicit empty receive: [] is strict and aborts a partner that sends columns (local side)", () => {
+  // Decision (item 203599248): an explicit `receive: []` is STRICT, not lazy. It
+  // asserts "the partner sends nothing" -- distinct from an ABSENT receive (lazy) --
+  // so it takes the present-field branch of the gate and a partner that discloses
+  // any column fails the check. This agrees with the received-payload runtime
+  // lock-in (an empty committed set is strict) and the web consent display's
+  // "(none)" lock-in; reading [] as lazy here would admit an exchange that lock-in
+  // then aborts.
+  const local = { ...termsA, payload: { receive: [] } };
+  const partner = {
+    ...termsB,
+    payload: { send: [{ name: "disclosed_col" }] },
+  };
+  // The diagnostic names the empty-declaration meaning rather than printing an
+  // empty bracket pair, and points the operator at the lazy alternative.
+  expect(
+    validateCompatibility(local, partner).errors.some(
+      (e) =>
+        e.includes("payload mismatch") &&
+        e.includes("local declared an empty payload.receive") &&
+        e.includes("Omit payload.receive"),
+    ),
+  ).toBe(true);
+});
+
+test("an explicit empty receive: [] is strict and aborts a partner that sends columns (partner side)", () => {
+  // The symmetric direction: the empty declaration on the PARTNER's receive aborts
+  // against the local send, so the two parties (which call this with swapped
+  // arguments) reach the same verdict as the local-side case above.
+  const local = {
+    ...termsA,
+    payload: { send: [{ name: "disclosed_col" }] },
+  };
+  const partner = { ...termsB, payload: { receive: [] } };
+  expect(
+    validateCompatibility(local, partner).errors.some(
+      (e) =>
+        e.includes("payload mismatch") &&
+        e.includes("partner declared an empty payload.receive"),
+    ),
+  ).toBe(true);
+});
+
+test("an explicit empty receive: [] is satisfied when the partner sends nothing", () => {
+  // The strict empty assertion ("the partner sends nothing") is HONORED, not
+  // violated, when the partner declares no send -- absent payload or an explicit
+  // empty send -- so no payload mismatch fires. This is the case the strict reading
+  // is meant to permit.
+  const local = { ...termsA, payload: { receive: [] } };
+  const partnerNoPayload = { ...termsB };
+  const partnerEmptySend = { ...termsB, payload: { send: [] } };
+  expect(
+    validateCompatibility(local, partnerNoPayload).errors.filter((e) =>
+      e.includes("payload"),
+    ),
+  ).toHaveLength(0);
+  expect(
+    validateCompatibility(local, partnerEmptySend).errors.filter((e) =>
+      e.includes("payload"),
+    ),
+  ).toHaveLength(0);
+});
+
 test("payload comparison is element-wise: a comma in a column name does not alias the set", () => {
   // The column-name sets are compared per sorted element, not by a comma-joined
   // string. A partner-controlled name containing the separator must not collapse
@@ -2616,6 +2679,25 @@ test("deriveAcceptedLinkageTerms mirrors payload send/receive (asymmetric invite
     receive: [{ name: "enrollment_date", description: "Date enrolled" }],
   });
   expect(derived.payload?.send).toBeUndefined();
+  expect(validateCompatibility(inviterTerms, derived).errors).toEqual([]);
+  expect(validateCompatibility(derived, inviterTerms).errors).toEqual([]);
+});
+
+test("deriveAcceptedLinkageTerms mirrors an explicit empty inviter receive to an explicit empty acceptor send", () => {
+  // Decision (item 203599248): an explicit `receive: []` is strict. The acceptor
+  // mirror carries it through as an explicit empty `send: []` -- present, not absent
+  // -- so the inviter's strict "send me nothing" becomes the acceptor's strict "I
+  // send nothing." (An ABSENT inviter receive instead yields an absent acceptor
+  // send, the lazy case the asymmetric-shape test above covers.) The mirror stays
+  // coherent: both directions pass validateCompatibility.
+  const inviterTerms: LinkageTerms = {
+    ...inviterBase,
+    output: { expectsOutput: true, shareWithPartner: true },
+    payload: { receive: [] },
+  };
+  const derived = deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org");
+  expect(derived.payload).toStrictEqual({ send: [] });
+  expect(derived.payload?.receive).toBeUndefined();
   expect(validateCompatibility(inviterTerms, derived).errors).toEqual([]);
   expect(validateCompatibility(derived, inviterTerms).errors).toEqual([]);
 });

@@ -1212,7 +1212,12 @@ export function safeParseLinkageTerms(raw: unknown) {
  *   transmission is governed by its metadata, and the inviter is lazy about what it
  *   receives (an unauthored `receive` is not cross-checked; see
  *   {@link validateCompatibility}). The acceptor's `receive` becomes the inviter's
- *   `send`, so the acceptor validates exactly what it will get.
+ *   `send`, so the acceptor validates exactly what it will get. An explicit empty
+ *   inviter `receive: []` (strict "send me nothing"; see {@link validateCompatibility})
+ *   mirrors to an explicit empty acceptor `send: []` -- present, not absent -- which
+ *   is coherent: the acceptor declares it sends nothing, the inviter strictly expects
+ *   nothing, and `sameColumnSet([], [])` passes both directions. This is the strict
+ *   empty case kept distinct from the absent case above, which yields an absent send.
  *
  * `deduplicate` is left as adopted from the inviter's terms. It is per-party in
  * principle, but the web Advanced-options editor and the CLI default acceptance
@@ -1256,7 +1261,9 @@ export function deriveAcceptedLinkageTerms(
   };
   // Mirror the payload `send`/`receive` (see the doc comment). Built explicitly so
   // an absent inviter `receive` yields an absent acceptor `send` (rather than an
-  // empty list), keeping the acceptor lazy on a direction the inviter left open.
+  // empty list), keeping the acceptor lazy on a direction the inviter left open; an
+  // explicit empty inviter `receive: []` mirrors to an explicit empty acceptor
+  // `send: []` (present, not absent), preserving the strict reading on that direction.
   if (inviterTerms.payload !== undefined) {
     const mirrored: Payload = {};
     if (inviterTerms.payload.receive !== undefined)
@@ -1504,7 +1511,16 @@ export function validateCompatibility(
   // - `receive` DECLARED (the field is present, even if empty) asserts "I expect
   //   exactly these columns": the partner's `send` must match it byte-for-byte or
   //   the exchange aborts -- the strict mirror, unchanged. This is the recurring /
-  //   loaded-config case, where both parties carry an agreed payload.
+  //   loaded-config case, where both parties carry an agreed payload. An explicit
+  //   empty `receive: []` is strict BY INTENT (item 203599248): it asserts "the
+  //   partner sends nothing," distinct from an absent `receive`, so a partner that
+  //   discloses any column fails this check. Empty-is-strict is chosen here to agree
+  //   with the received-payload runtime lock-in -- an empty committed set
+  //   (`expectedPayloadColumns` / reconcileReceivedPayload) is likewise strict
+  //   ("receive nothing") and only `undefined` is lazy -- and with the web consent
+  //   display, which renders a declared-empty receive as a "(none)" lock-in, not
+  //   lazy. Reading `[]` as lazy here would admit an exchange the runtime lock-in
+  //   then aborts. Only a hand-authored config or crafted token can produce `[]`.
   // - `receive` ABSENT means "take whatever I'm given": that direction is skipped.
   //   This is what lets the invite/accept flow reconcile without the inviter
   //   knowing the acceptor's schema. The inviter authors only its `send` and leaves
@@ -1542,9 +1558,16 @@ export function validateCompatibility(
       const partnerShown = partnerReceiveNames
         .map((n) => sanitizeForDisplay(n))
         .join(",");
+      // An empty partner receive is the strict "partner expects no payload"
+      // declaration (see the gate comment above); spell that out rather than
+      // printing an empty bracket pair that reads like a rendering glitch.
       errors.push(
-        `payload mismatch: local send columns [${localShown}] do not match ` +
-          `partner receive columns [${partnerShown}]`,
+        partnerReceiveNames.length === 0
+          ? `payload mismatch: partner declared an empty payload.receive ` +
+              `(asserting local sends no payload columns), but local sends ` +
+              `[${localShown}]`
+          : `payload mismatch: local send columns [${localShown}] do not match ` +
+              `partner receive columns [${partnerShown}]`,
       );
     }
   }
@@ -1561,9 +1584,17 @@ export function validateCompatibility(
       const partnerShown = partnerSendNames
         .map((n) => sanitizeForDisplay(n))
         .join(",");
+      // An empty local receive is the strict "I expect no payload" declaration;
+      // name it and point the operator at the lazy alternative (omit the field),
+      // since a hand-authored `receive: []` is the most likely way to land here.
       errors.push(
-        `payload mismatch: local receive columns [${localShown}] do not ` +
-          `match partner send columns [${partnerShown}]`,
+        localReceiveNames.length === 0
+          ? `payload mismatch: local declared an empty payload.receive ` +
+              `(asserting partner sends no payload columns), but partner sends ` +
+              `[${partnerShown}]. Omit payload.receive to accept whatever the ` +
+              `partner sends.`
+          : `payload mismatch: local receive columns [${localShown}] do not ` +
+              `match partner send columns [${partnerShown}]`,
       );
     }
   }
