@@ -73,8 +73,10 @@ export const MAX_FRAME_SIZE_BYTES = 536_870_888;
  * the ~2-4 KB/value transient peak slope that projects to roughly 6-8 GB peak RSS,
  * which the current value holds headroom against on a 16 GB target; it admits
  * ~143k rows at the ~14-key default template and ~2M rows at a single key. That
- * projection is the transient peak, not live data (2M distinct values is only
- * ~260 MB live), so the budget is conservative against the true memory wall. It is
+ * projection is the transient peak, not live data (the JS-and-wire live term at 2M
+ * distinct values is only ~260 MB; the grow-only WASM floor adds to that but stays
+ * well under the projected peak), so the budget is conservative against the true
+ * memory wall. It is
  * a cell-count budget, not a bare row cap, on purpose: a rows-only cap is off by
  * ~14x between a 1-key and a 14-key linkage at the same memory. The byte cap below
  * is a defense-in-depth tightening derived from the same quantity; this cell-count
