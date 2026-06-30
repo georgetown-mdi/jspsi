@@ -63,10 +63,11 @@ export const MAX_FRAME_SIZE_BYTES = 536_870_888;
  * receiver to run the match, so its peak memory is `O(total distinct values)` and
  * cannot stream (docs/spec/PROTOCOL.md, the single-pass dataset ceiling). The
  * binding cost is the receiver's lifetime peak RSS. Live retained memory is small
- * -- ~130 B per distinct value (board item 206377899) -- but the peak RSS climbs
- * ~2-4 KB per distinct value in transient allocation churn that neither V8 nor
- * emmalloc returns to the OS; bounding each party's cell count bounds its `D`, and
- * so that peak.
+ * -- on the order of a few hundred B per distinct value: psilink JS, transport
+ * wire-buffer copies, and a grow-only WebAssembly heap floor (board item 206377899)
+ * -- but the peak RSS climbs ~2-4 KB per distinct value in mostly collectable
+ * transient allocation churn the OS allocator does not return; bounding each party's
+ * cell count bounds its `D`, and so that peak.
  *
  * Value: 2,000,000 cells per party (so at most 2M distinct values per party). At
  * the ~2-4 KB/value transient peak slope that projects to roughly 6-8 GB peak RSS,
@@ -80,10 +81,13 @@ export const MAX_FRAME_SIZE_BYTES = 536_870_888;
  * budget is the real ceiling.
  *
  * Fixed, NOT operator-configurable: a configurable maximum reintroduces the
- * memory-exhaustion denial of service the bound exists for. It is slated to rise
- * as board item 206377899 lowers the transient peak (a packages/core JS-churn and
- * GC-pressure task) and re-derives the budget; the methodology is in
- * docs/spec/PROTOCOL.md.
+ * memory-exhaustion denial of service the bound exists for. It MAY be raised only
+ * after board item 206377899 has measurably lowered the transient peak in shipped
+ * code and re-derived the budget from a fresh measurement -- never ahead of that,
+ * since the transient peak (not the live floor) is what this value bounds. The
+ * re-derivation must measure the grow-only WASM linear heap directly at high `D`
+ * (it grows super-linearly in chunked steps, so a low-`D` linear fit under-projects
+ * it), not extrapolate from the wire figure. Methodology in docs/spec/PROTOCOL.md.
  */
 export const MAX_SINGLE_PASS_CELLS = 2_000_000;
 
