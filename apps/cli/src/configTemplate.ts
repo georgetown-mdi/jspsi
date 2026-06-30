@@ -210,7 +210,10 @@ export const FIELD_DOCS: Array<{ path: Array<string>; lines: Array<string> }> =
 // uncomment and edit rather than written active. Kept in sync with the optional
 // top-level sections of ExchangeSpec (see init.test.ts, which asserts every
 // schema section appears in the template).
-const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to enable) ------------------------
+//
+// @internal exported so a test un-comments each example and validates it against
+// the schema -- an operator who enables a section must get a loadable config.
+export const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to enable) ------------------------
 
 # authentication: partner shared-secret policy. The secret itself lives in the
 # key file, never here; only policy belongs in the config.

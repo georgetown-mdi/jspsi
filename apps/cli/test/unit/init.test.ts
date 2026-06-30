@@ -17,6 +17,7 @@ import {
 import {
   FIELD_DOCS,
   INFERRED_SECTIONS_HINT,
+  OPTIONAL_SECTIONS,
   renderConfigTemplate,
 } from "../../src/configTemplate";
 import {
@@ -39,6 +40,19 @@ vi.mock("../../src/util/cli", async () => {
 const { promptConfirm } = await import("../../src/util/cli");
 const promptConfirmMock = vi.mocked(promptConfirm);
 
+// writeFileOwnerOnly is wrapped in a spy that delegates to the real impl, so most
+// tests write for real and the fail-closed test can force a FileExistsError (the
+// post-decision race) without an actual filesystem race.
+vi.mock("../../src/fileUtils", async () => {
+  const actual = await vi.importActual<typeof import("../../src/fileUtils")>(
+    "../../src/fileUtils",
+  );
+  return { ...actual, writeFileOwnerOnly: vi.fn(actual.writeFileOwnerOnly) };
+});
+const { writeFileOwnerOnly, FileExistsError } =
+  await import("../../src/fileUtils");
+const writeFileOwnerOnlyMock = vi.mocked(writeFileOwnerOnly);
+
 const log = getLogger("init");
 log.setLevel("silent");
 
@@ -57,6 +71,9 @@ afterEach(() => {
   for (const dir of tmpDirs.splice(0))
     fs.rmSync(dir, { recursive: true, force: true });
   promptConfirmMock.mockReset();
+  // Clear call history but keep writeFileOwnerOnly delegating to the real impl
+  // (a mockReset would strip that and silently no-op every later write).
+  writeFileOwnerOnlyMock.mockClear();
   vi.restoreAllMocks();
 });
 
@@ -161,6 +178,35 @@ test("the commented metadata/standardization hint is valid when uncommented", ()
   expect(() =>
     StandardizationSchema.parse(parsed.standardization),
   ).not.toThrow();
+});
+
+test("every commented OPTIONAL section is valid when uncommented", async () => {
+  // The four opt-in sections are documented as commented YAML; an operator who
+  // enables one must get a loadable config. Un-comment each example, merge it
+  // onto the active base, and validate against the production schema -- the same
+  // guard the metadata/standardization hint has, extended to these so a future
+  // schema change (e.g. a new required field, or a strictObject rejecting a
+  // typo) cannot drift the examples to invalid without a failing test.
+  const base = YAML.parse(
+    renderConfigTemplate(await buildTemplateData(undefined, "Org", log)),
+  ) as Record<string, unknown>;
+  for (const key of [
+    "authentication",
+    "signing",
+    "retention_disposition",
+    "expected_payload_columns",
+  ]) {
+    const section = YAML.parse(
+      uncommentOptionalSection(OPTIONAL_SECTIONS, key),
+    ) as Record<string, unknown>;
+    // Guard against a vacuous pass: the extraction must actually yield the
+    // section, or merging nothing onto a valid base would parse regardless.
+    expect(section?.[key], `${key} not extracted`).toBeDefined();
+    expect(
+      () => parseExchangeSpec({ ...base, ...section }),
+      `${key} invalid when uncommented`,
+    ).not.toThrow();
+  }
 });
 
 // --- buildTemplateData: inference --------------------------------------------
@@ -320,6 +366,33 @@ test("handler: an input file infers metadata and standardization into the file",
   expect(parsed.standardization?.some((s) => s.output === "ssn")).toBe(true);
 });
 
+test("handler: a file appearing after the check fails closed (exit 64)", async () => {
+  // The post-decision exclusive-write race: decideOverwrite returns "create"
+  // (path free), but a file appears before the write. writeFileOwnerOnly surfaces
+  // that as FileExistsError, which the handler must map to a fail-closed usage
+  // error rather than clobber. Forced via the write mock since a real filesystem
+  // race is not reproducible in a unit test.
+  const dir = scratchDir();
+  const configFile = path.join(dir, "psilink.yaml");
+  writeFileOwnerOnlyMock.mockImplementationOnce(() => {
+    throw new FileExistsError(configFile);
+  });
+  const logErr = vi
+    .spyOn(getLogger("init"), "error")
+    .mockImplementation(() => {});
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => {}) as never);
+
+  await initHandler(argvFor({ "config-file": configFile }));
+
+  expect(exit).toHaveBeenCalledWith(64);
+  expect(logErr).toHaveBeenCalledWith(
+    expect.stringContaining("after the overwrite check"),
+  );
+  logErr.mockRestore();
+});
+
 test("handler: an existing file with no terminal fails closed (exit 64), unchanged", async () => {
   const dir = scratchDir();
   const configFile = path.join(dir, "psilink.yaml");
@@ -419,6 +492,30 @@ test("handler: an unrecognized --log-level exits 64", async () => {
 });
 
 // --- helpers -----------------------------------------------------------------
+
+/**
+ * Extract a commented section's YAML example from OPTIONAL_SECTIONS and
+ * un-comment it. Sections are blank-line-separated paragraphs of prose followed
+ * by a commented YAML example; the example begins at the last `# <key>:` line in
+ * the paragraph (the prose may mention the key earlier) and runs to its end.
+ */
+function uncommentOptionalSection(block: string, key: string): string {
+  const header = new RegExp(`^#\\s*${key}:`);
+  const paragraph = block
+    .split("\n\n")
+    .find((p) => p.split("\n").some((l) => header.test(l)));
+  if (paragraph === undefined)
+    throw new Error(`no commented section for ${key}`);
+  const lines = paragraph.split("\n");
+  let start = -1;
+  lines.forEach((l, i) => {
+    if (header.test(l)) start = i;
+  });
+  return lines
+    .slice(start)
+    .map((l) => l.replace(/^#\s?/, ""))
+    .join("\n");
+}
 
 /** Run `fn` with process.stdin reporting as an interactive terminal. */
 async function withInteractiveStdin(fn: () => Promise<void>): Promise<void> {
