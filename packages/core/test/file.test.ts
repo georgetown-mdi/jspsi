@@ -2,7 +2,7 @@ import { Readable } from "node:stream";
 
 import { expect, test, vi } from "vitest";
 
-import { loadCSVColumnSample } from "../src/file";
+import { CSV_LINE_BYTE_CEILING, loadCSVColumnSample } from "../src/file";
 import { inferDateFormat, columnValues } from "../src/utils/date";
 
 /** A readable emitting `content` then EOF, standing in for a CSV file/stream. */
@@ -143,6 +143,101 @@ test("loadCSVColumnSample: an empty input yields an empty header and sample", as
   );
   expect(columns).toEqual([]);
   expect(sample).toEqual([]);
+});
+
+test("loadCSVColumnSample: a no-newline span over the byte ceiling fails fast", async () => {
+  // One logical line with no terminator anywhere: PapaParse can never yield a row
+  // or settle the header, so the read would buffer the whole span. The byte
+  // ceiling aborts it with an operator-readable error once the bytes pulled since
+  // the (never-advancing) cursor cross the limit. Delivered in small chunks, as
+  // fs.createReadStream / stdin would deliver a large file.
+  const ceiling = 512;
+  const giant = "x".repeat(ceiling * 4);
+  await expect(
+    loadCSVColumnSample(chunkedStreamOf(giant, 64), pickDob, 1000, ceiling),
+  ).rejects.toThrow(/single-line limit/);
+});
+
+test("loadCSVColumnSample: a single field over the byte ceiling fails fast", async () => {
+  // The header terminates normally, then one data field grows without a row
+  // terminator. The cursor advances past the header and then stalls, so the span
+  // measured since that last terminator -- the unbounded field -- crosses the
+  // ceiling and the read fails fast rather than buffering the whole field.
+  const ceiling = 512;
+  const giantField = "y".repeat(ceiling * 4);
+  const csv = `name,dob\nAlice,${giantField}`;
+  await expect(
+    loadCSVColumnSample(chunkedStreamOf(csv, 64), pickDob, 1000, ceiling),
+  ).rejects.toThrow(/single-line limit/);
+});
+
+test("loadCSVColumnSample: a header over the byte ceiling fails fast", async () => {
+  // A header of very many columns with its terminator beyond the ceiling: the
+  // cursor stays at zero until that newline, so the header span crosses the limit
+  // first and the read aborts before settling -- the giant-header shape.
+  const ceiling = 512;
+  const cols = Array.from({ length: 400 }, (_v, i) => `col_${i}`);
+  const header = cols.join(",");
+  expect(Buffer.byteLength(header)).toBeGreaterThan(ceiling);
+  const row = cols.map(() => "v").join(",");
+  await expect(
+    loadCSVColumnSample(
+      chunkedStreamOf(`${header}\n${row}\n`, 64),
+      pickDob,
+      1000,
+      ceiling,
+    ),
+  ).rejects.toThrow(/single-line limit/);
+});
+
+test("loadCSVColumnSample: many short rows whose total exceeds the ceiling do not trip", async () => {
+  // The ceiling bounds a single line, not the total bytes pulled: a file of many
+  // short, terminated rows whose cumulative size far exceeds the ceiling reads
+  // normally, because the span resets at every row terminator. This is the
+  // distinction that keeps a legitimate large input -- which the bounded sample
+  // walks up to the scan cap -- from tripping the limit.
+  const ceiling = 256;
+  const rows = Array.from(
+    { length: 400 },
+    (_v, i) => `Person${i},1990-01-0${(i % 9) + 1}`,
+  ).join("\n");
+  const csv = `name,dob\n${rows}\n`;
+  expect(Buffer.byteLength(csv)).toBeGreaterThan(ceiling * 4);
+  const { columns, sampledColumn, sample } = await loadCSVColumnSample(
+    chunkedStreamOf(csv, 64),
+    pickDob,
+    1000,
+    ceiling,
+  );
+  expect(columns).toEqual(["name", "dob"]);
+  expect(sampledColumn).toBe("dob");
+  expect(sample).toHaveLength(400);
+});
+
+test("loadCSVColumnSample: a well-formed input under the ceiling reads unchanged", async () => {
+  // The ceiling leaves a normal input untouched: the same header, sampled column,
+  // and bounded sample as without it, even delivered in tiny chunks (lines split
+  // mid-field across reads) so the per-line span reset is exercised.
+  const csv =
+    "first_name,dob,ssn\n" + "Alice,1990-01-02,111\n" + "Bob,1985-12-31,222\n";
+  const { columns, sampledColumn, sample } = await loadCSVColumnSample(
+    chunkedStreamOf(csv, 8),
+    pickDob,
+    1000,
+    256,
+  );
+  expect(columns).toEqual(["first_name", "dob", "ssn"]);
+  expect(sampledColumn).toBe("dob");
+  expect(sample).toEqual(["1990-01-02", "1985-12-31"]);
+});
+
+test("loadCSVColumnSample: the default ceiling is well above a realistic header", () => {
+  // A guard on the constant itself: 8 MiB must clear any realistic operator CSV
+  // (a wide header here is tens of KiB) so a well-formed input never trips.
+  const header = Array.from({ length: 2000 }, (_v, i) => `column_${i}`).join(
+    ",",
+  );
+  expect(Buffer.byteLength(header)).toBeLessThan(CSV_LINE_BYTE_CEILING);
 });
 
 test("loadCSVColumnSample: a header split across stream chunks is read whole", async () => {
