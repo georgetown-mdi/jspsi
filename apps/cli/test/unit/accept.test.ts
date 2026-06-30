@@ -324,6 +324,45 @@ test("validateAccept: offline `-` with consentToTerms false is still rejected", 
   expect((caught as Error).message).toMatch(/stdin/);
 });
 
+test("validateAccept: online `-` with consentToTerms reads the CSV from stdin and proceeds", async () => {
+  // The online path gates stdin on consentToTerms exactly as the offline path
+  // does; exercise it through the same stdin swap so the symmetric `-` relaxation
+  // is covered on both branches, not just offline.
+  const csv =
+    "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n";
+  const dir = fs.mkdtempSync(
+    path.join(tmpdir(), "psilink-accept-online-stdin-"),
+  );
+  const encoded = await encodeInvitation(
+    sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
+  );
+  try {
+    const ready = await withStdin(csv, () =>
+      validateAccept({
+        resolved: {
+          mode: "online",
+          url: new URL("sftp://host/drop"),
+          invitation: encoded,
+          input: "-",
+        },
+        options: testOptions({
+          configFile: path.join(dir, "psilink.yaml"),
+          keyFile: path.join(dir, ".psilink.key"),
+        }),
+        consentToTerms: true,
+        log: silentLog,
+      }),
+    );
+    expect(ready.mode).toBe("online");
+    // The metadata names match the stdin header, so the stdin CSV reached the spec.
+    expect(ready.dataSpec.metadata?.map((c) => c.name)).toEqual(
+      expect.arrayContaining(["first_name", "last_name", "dob", "ssn"]),
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("validateAccept: an unsupported URL is rejected before the input file is read", async () => {
   const encoded = await encodeInvitation(
     sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
@@ -1248,7 +1287,9 @@ test("handler: --consent-to-terms skips the confirmation prompt and writes the c
   // called, so stdin is not read for a confirmation) and the offline acceptance
   // proceeds to write both files, on the recorded advance consent.
   const { dir, input, configFile, keyFile } = offlineAcceptFixture();
-  promptConfirmMock.mockClear();
+  // Reset (not just clear): drop any implementation a prior test left on the
+  // shared mock, so this test's "never called" assertion does not depend on order.
+  promptConfirmMock.mockReset();
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as never);
@@ -1280,7 +1321,9 @@ test("handler: without --consent-to-terms the prompt runs and a decline writes n
   // The unchanged default: the prompt runs, and a "no" (here the mocked decline,
   // which an EOF/non-TTY stdin also produces) leaves both files unwritten.
   const { dir, input, configFile, keyFile } = offlineAcceptFixture();
-  promptConfirmMock.mockClear();
+  // Reset then set the impl, so the decline behavior is established here
+  // unconditionally rather than relying on what a prior test left behind.
+  promptConfirmMock.mockReset();
   promptConfirmMock.mockResolvedValue(false);
   const exit = vi
     .spyOn(process, "exit")
