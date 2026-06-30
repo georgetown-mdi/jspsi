@@ -193,6 +193,22 @@ describe("LinkageTermsEditor", () => {
       .closest('[role="status"]');
     expect(footerStatus?.getAttribute("aria-live")).toBe("polite");
 
+    // The grid's identifier-conflict message itself reaches assistive tech
+    // through a STABLE, always-present polite live region whose content swaps,
+    // not a conditionally-mounted assertive node: the wrapper carries
+    // role="status"/aria-live="polite" and the red text sits inside it with no
+    // nested role="alert" (which would fire assertively on mount and fight the
+    // editor's heading focus when a seed mounts already in conflict).
+    const conflictRegion = document.querySelector(
+      '[data-testid="identifier-conflict"]',
+    );
+    expect(conflictRegion?.getAttribute("role")).toBe("status");
+    expect(conflictRegion?.getAttribute("aria-live")).toBe("polite");
+    expect(conflictRegion?.querySelector('[role="alert"]')).toBeNull();
+    expect(conflictRegion?.textContent).toContain(
+      "Only one column can be the row identifier",
+    );
+
     // Demote one identifier to Ignored, leaving a single row identifier: the grid
     // error clears and Generate re-enables. The disclosure dropdown opens
     // highlighting the current "Row identifier - not sent" choice; two steps down
@@ -210,6 +226,18 @@ describe("LinkageTermsEditor", () => {
       )
       .not.toBeInTheDocument();
     await expect.element(generateButton()).toBeEnabled();
+
+    // The live region persists across the swap (it is the always-present wrapper,
+    // not the message node): its wrapper is still in the DOM, now emptied of the
+    // conflict text -- proof the announcement channel is stable rather than
+    // mounted with its content.
+    const persistedRegion = document.querySelector(
+      '[data-testid="identifier-conflict"]',
+    );
+    expect(persistedRegion).not.toBeNull();
+    expect(persistedRegion?.textContent).not.toContain(
+      "Only one column can be the row identifier",
+    );
   });
 
   test("Reset to recommended restores the seeded name after an edit", async () => {

@@ -490,6 +490,23 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
       .element(page.getByRole("button", { name: "Start exchange" }))
       .toBeDisabled();
     expect(exchangeMounted()).toBe(false);
+
+    // The grid's identifier-conflict message reaches assistive tech through a
+    // STABLE, always-present polite live region whose content swaps, not a
+    // conditionally-mounted assertive node: the wrapper carries
+    // role="status"/aria-live="polite" and the red text sits inside it with no
+    // nested role="alert" (which would fire assertively on mount and fight the
+    // "Prepare your data" heading focus when a seed mounts already in conflict).
+    // This is the acceptor half of the same fix the inviter test asserts.
+    const conflictRegion = document.querySelector(
+      '[data-testid="identifier-conflict"]',
+    );
+    expect(conflictRegion?.getAttribute("role")).toBe("status");
+    expect(conflictRegion?.getAttribute("aria-live")).toBe("polite");
+    expect(conflictRegion?.querySelector('[role="alert"]')).toBeNull();
+    expect(conflictRegion?.textContent).toContain(
+      "Only one column can be the row identifier",
+    );
   });
 
   test("a zero-coverage file shows the block and disables Start exchange, so nothing dials", async () => {

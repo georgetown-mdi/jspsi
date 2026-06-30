@@ -164,11 +164,31 @@ export function MetadataGrid({
         </Table.Tbody>
       </Table>
 
-      {multipleIdentifiers && (
-        <Text size="sm" c="red" role="alert">
-          Only one column can be the row identifier. Choose a single identifier.
-        </Text>
-      )}
+      {/* The single-identifier conflict lives in ONE stable, polite, atomic live
+          region whose visible red Text swaps in and out -- the same idiom as the
+          two regions below and PrepareData's verdict. The wrapper persists in the
+          DOM whether or not the conflict is active, so a conflict that reappears
+          (Reset restores a two-identifier seed) is announced rather than silently
+          re-mounted with its content; polite, not assertive, so a seed that mounts
+          already in conflict does not fire on mount and fight the host editor's
+          heading focus. The Text carries no role of its own -- an inner
+          role="alert" would nest an assertive region inside this polite wrapper
+          (the gotcha PrepareData's role="presentation" inner Alert avoids), and a
+          single shared text node keeps each host's getByText conflict query
+          unambiguous. */}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="identifier-conflict"
+      >
+        {multipleIdentifiers && (
+          <Text size="sm" c="red">
+            Only one column can be the row identifier. Choose a single
+            identifier.
+          </Text>
+        )}
+      </div>
 
       {/* The disclosure readout is shown VISIBLY by the host's column chips
           (the "Columns you will send to your partner" list beside the agreed
