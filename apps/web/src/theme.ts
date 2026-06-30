@@ -96,6 +96,25 @@ export const mantineTheme: MantineThemeOverride = createTheme({
   // autoContrast does NOT by itself recolor filled theme-color text per scheme -- see
   // FILLED_PRIMARY_CONTRAST above for why the overrides, not autoContrast, are the fix.
   autoContrast: true,
+  // Honor the OS `prefers-reduced-motion` setting: Mantine then skips the
+  // transition animations its components drive in JS (Collapse, Transition, and the
+  // Menu/Tooltip/Popover overlays all read this flag and zero their duration), and
+  // arms the `[data-respect-reduced-motion] [data-reduce-motion]` global CSS rule
+  // for the components that opt in through that attribute. Off (Mantine's default)
+  // until the disclosure/overlay surfaces were audited for the class of latent bug
+  // where a closed Collapse panel goes away for a reduced-motion user and a toggle's
+  // aria-controls / focus target then dangles -- every such id sits on an
+  // always-mounted wrapper, not the Collapse panel (the InvitationTerms,
+  // ExpertKeyEditor, and DisclosureSection disclosures), pinned by the reduced-motion
+  // render tests. Motion this flag does NOT reach is gated on useReducedMotion()
+  // directly at its source instead: the hand-rolled chevron rotate transitions (raw
+  // inline styles, not Mantine nodes) and the Status progress bar's looping `animated`
+  // stripe (a Mantine CSS keyframe with no data-reduce-motion guard, and decorative --
+  // the bar's fill already conveys progress without it). The Mantine `Loader` spinner
+  // is likewise unreached but deliberately left animating: it is the sole "working"
+  // indicator with no static channel to fall back to, so suppressing its motion would
+  // remove the signal rather than just its decoration.
+  respectReducedMotion: true,
   // Per-scheme primary shade, each tuned to WCAG 2.1 AA (1.4.3 text 4.5:1, 1.4.11
   // non-text 3:1) against its own surfaces; enforced by
   // test/unit/themeContrast.test.ts.

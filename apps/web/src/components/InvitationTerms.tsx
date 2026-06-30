@@ -12,6 +12,7 @@ import {
 } from "@mantine/core";
 
 import { IconChevronRight } from "@tabler/icons-react";
+import { useReducedMotion } from "@mantine/hooks";
 
 import { sanitizeForDisplay } from "@psilink/core";
 
@@ -66,6 +67,7 @@ function MatchKeyDisclosure({ summary }: { summary: InvitationKeySummary }) {
   // called once per widget (never inside a map).
   const panelId = useId();
   const sublineId = useId();
+  const reduceMotion = useReducedMotion();
   return (
     <Stack gap={2} role="listitem">
       <UnstyledButton
@@ -80,7 +82,7 @@ function MatchKeyDisclosure({ summary }: { summary: InvitationKeySummary }) {
             aria-hidden
             style={{
               transform: open ? "rotate(90deg)" : "rotate(0deg)",
-              transition: "transform 150ms ease",
+              transition: reduceMotion ? undefined : "transform 150ms ease",
             }}
           />
           <Text size="sm" fw={500}>
@@ -344,6 +346,7 @@ export function InvitationTerms({
   // Associates the per-key disclosure list with its "Matching strategies" caption,
   // so assistive tech announces the keys as a named group.
   const matchedOnLabelId = useId();
+  const reduceMotion = useReducedMotion();
   return (
     <Stack gap="sm">
       <Title order={headingOrder} size="h2" ref={headingRef} tabIndex={-1}>
@@ -431,7 +434,7 @@ export function InvitationTerms({
                 aria-hidden
                 style={{
                   transform: matchingOpen ? "rotate(90deg)" : "rotate(0deg)",
-                  transition: "transform 150ms ease",
+                  transition: reduceMotion ? undefined : "transform 150ms ease",
                 }}
               />
               <Text size="sm" fw={600} id={matchedOnLabelId}>
@@ -603,7 +606,7 @@ export function InvitationTerms({
             aria-hidden
             style={{
               transform: detailsOpen ? "rotate(90deg)" : "rotate(0deg)",
-              transition: "transform 150ms ease",
+              transition: reduceMotion ? undefined : "transform 150ms ease",
             }}
           />
           <Text size="sm" fw={500}>
