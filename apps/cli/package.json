@@ -7,7 +7,7 @@
   },
   "scripts": {
     "build": "rollup -c rollup.config.ts --configPlugin \"@rollup/plugin-typescript={outputToFilesystem:true}\"",
-    "dev": "PKG_DIR=$(pwd) && cd \"$INIT_CWD\" && node --import=tsx \"$PKG_DIR/dist/index.js\"",
+    "dev": "PKG_DIR=$(pwd) && cd \"$INIT_CWD\" && node --expose-gc --import=tsx \"$PKG_DIR/dist/index.js\"",
     "test": "vitest run --project unit",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
