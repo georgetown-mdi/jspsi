@@ -800,9 +800,10 @@ export function expiresFromNow(durationSeconds: number): string {
 /**
  * Load and parse a CSV input into raw rows and column names. `input` is a file
  * path or `-` for stdin; the caller gates stdin via `allowStdin` because the two
- * commands sharing this loader differ on it -- `invite` supports `-`, `accept`
- * rejects it (it reads its confirmation prompt from stdin). Defaults to stdin
- * disabled so the shared loader never enables it unconditionally.
+ * commands sharing this loader differ on it -- `invite` supports `-`, and
+ * `accept` rejects it unless `--consent-to-terms` skips the confirmation prompt
+ * that otherwise owns stdin. Defaults to stdin disabled so the shared loader never
+ * enables it unconditionally.
  */
 export async function loadInputRows(
   input: string,

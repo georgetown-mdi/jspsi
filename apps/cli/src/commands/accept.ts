@@ -85,7 +85,29 @@ export function builder(cmd: Argv): Argv {
           "files. Online: also connect, complete the handshake, and run the\n" +
           "exchange.",
       ),
-  );
+    // --consent-to-terms is the one accept-specific option: it records, in
+    // advance, the operator's consent to THIS invitation's disclosed terms -- the
+    // consent the interactive prompt otherwise collects -- so accept can run
+    // unattended. The name states the object of consent (the terms), and is scoped
+    // to this one decision: it does NOT bypass the separate SSH host-key trust
+    // step (which keeps its own pin / fail-closed resolution), nor any prompt
+    // added later -- each such gate takes its own opt-in. No short form: bypassing
+    // the command's central human checkpoint should be a deliberate, legible
+    // token, and accept's `unknown-options-as-args` (which lets a `-`-leading
+    // invitation positional through) would make a single-letter flag ambiguous
+    // besides.
+  ).option("consent-to-terms", {
+    type: "boolean",
+    default: false,
+    describe:
+      "consent in advance to this invitation's disclosed terms, skipping the " +
+      "interactive confirmation, so accept can run unattended or in a script. " +
+      "This BYPASSES the one human checkpoint before the configuration and " +
+      "linkage key are written from the partner-supplied invitation, so review " +
+      "the terms before using it; it does not affect SSH host-key verification. " +
+      "It also frees standard input, so INPUT_FILE may be `-` to read the CSV " +
+      "from stdin.",
+  });
 }
 
 // --- Positional parsing ------------------------------------------------------
@@ -306,8 +328,17 @@ export async function validateAccept(params: {
   resolved: ReturnType<typeof resolveAcceptPositionals>;
   options: CommonBootstrapOptions;
   log: ReturnType<typeof getLogger>;
+  /**
+   * The operator passed `--consent-to-terms`, so the confirmation prompt is
+   * skipped. Because the prompt is what otherwise owns the single-use stdin, this
+   * also frees stdin to carry the input CSV, so a `-` input is allowed
+   * (`allowStdin`); without it `-` stays rejected, as the prompt would starve.
+   * Defaults to false so a caller that omits it keeps the prompt-and-reject-`-`
+   * behavior.
+   */
+  consentToTerms?: boolean;
 }): Promise<AcceptReady> {
-  const { resolved, options, log } = params;
+  const { resolved, options, log, consentToTerms = false } = params;
 
   // Validate (checksum, schema, expiry) first, so the user is never prompted for
   // an invalid invitation. A pre-existing key file remains a hard conflict on
@@ -369,8 +400,10 @@ export async function validateAccept(params: {
       log,
     });
     // accept reads its y/N confirmation from stdin (promptConfirm), so it cannot
-    // also take the CSV there: reject `-` rather than starve the prompt.
-    const rows = await loadInputRows(input, { allowStdin: false });
+    // also take the CSV there -- unless `--consent-to-terms` skips that prompt,
+    // which frees stdin for the CSV. Gate `-` on it: rejected when the prompt
+    // would run, allowed when it is bypassed (see the consentToTerms doc above).
+    const rows = await loadInputRows(input, { allowStdin: consentToTerms });
     checkLinkageSatisfiability(
       rows.columns,
       myTerms,
@@ -418,9 +451,12 @@ export async function validateAccept(params: {
     myTerms,
     log,
   });
+  // `-` is gated on `--consent-to-terms` here exactly as on the online path
+  // above: stdin serves the confirmation prompt unless the flag skips it, freeing
+  // it for the CSV.
   const rows =
     resolved.input !== undefined
-      ? await loadInputRows(resolved.input, { allowStdin: false })
+      ? await loadInputRows(resolved.input, { allowStdin: consentToTerms })
       : undefined;
   if (rows !== undefined)
     checkLinkageSatisfiability(
@@ -592,16 +628,41 @@ export async function handler(argv: Arguments): Promise<void> {
       const log = getLogger("accept");
       const positionals = (argv["args"] as Array<string> | undefined) ?? [];
       const resolved = resolveAcceptPositionals(positionals);
+      // --consent-to-terms records advance consent to the invitation's terms and
+      // bypasses the confirmation prompt for unattended runs. Read as `=== true`
+      // so an absent flag (a hand-built argv in tests, or a parse that did not set
+      // it) is a definite false rather than undefined. A boolean option may be
+      // repeated, so it is read directly, not via singleValue.
+      const consentToTerms = argv["consent-to-terms"] === true;
       // All validation runs before the prompt: the user is never asked to confirm
       // an invitation, URL, or input file that has not validated, and the prompt
       // itself runs inside runOrExit so a stdin error exits cleanly rather than
-      // crashing.
-      const ready = await validateAccept({ resolved, options, log });
+      // crashing. consentToTerms also lets a `-` input read the CSV from stdin
+      // (the prompt that otherwise owns stdin is skipped).
+      const ready = await validateAccept({
+        resolved,
+        options,
+        consentToTerms,
+        log,
+      });
 
       displayInvitation(ready.token, log);
-      const confirmed = await promptConfirm(
-        "Accept this invitation and write configuration?",
-      );
+      // With --consent-to-terms, skip the prompt and proceed on the recorded
+      // advance consent. Log the bypass so an unattended run's own log shows the
+      // human checkpoint was deliberately satisfied ahead of time, not silently
+      // absent.
+      let confirmed: boolean;
+      if (consentToTerms) {
+        log.info(
+          "--consent-to-terms given: proceeding on advance consent without the " +
+            "confirmation prompt.",
+        );
+        confirmed = true;
+      } else {
+        confirmed = await promptConfirm(
+          "Accept this invitation and write configuration?",
+        );
+      }
       if (!confirmed) {
         log.info("invitation declined; no files were written");
         return;
