@@ -1624,7 +1624,7 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
   test("a benign empty constraints object on a no-default-constraint field round-trips verbatim, not over-refused", () => {
     // date_of_birth has no default constraint, so a from-defaults rebuild emits no
     // constraints key -- diverging from an imported empty {} and (before the faithful
-    // round-trip) tripping 203437315's refuse-on-import guard even though {} is
+    // round-trip) tripping item 203437315's refuse-on-import guard even though {} is
     // behaviorally identical to absent. Preserving the {} keeps the canonical forms
     // equal: neither a silent divergence nor an over-refusal.
     const imported = withFieldConstraints(defaultExport(), "date_of_birth", {});
