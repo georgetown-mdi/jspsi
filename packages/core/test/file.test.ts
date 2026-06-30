@@ -205,6 +205,20 @@ test("loadCSVColumnSample: a header over the byte ceiling fails fast", async () 
   ).rejects.toThrow(/single-line limit/);
 });
 
+test("loadCSVColumnSample: a giant field arriving in one data event fails fast", async () => {
+  // Delivery-shape independence: when the header completes and an unterminated
+  // giant field arrive in a SINGLE data event (a lone push, or any source with a
+  // read buffer larger than the span), the span must be judged before the
+  // cursor-advance reset can credit the remainder to the baseline -- otherwise
+  // the whole span is forgiven and the bound silently does not fire. streamOf
+  // pushes the entire content as one event, reproducing that shape.
+  const ceiling = 512;
+  const csv = `name,dob\nAlice,${"y".repeat(ceiling * 4)}`;
+  await expect(
+    loadCSVColumnSample(streamOf(csv), pickDob, 1000, ceiling),
+  ).rejects.toThrow(/single-line limit/);
+});
+
 test("loadCSVColumnSample: many short rows whose total exceeds the ceiling do not trip", async () => {
   // The ceiling bounds a single line, not the total bytes pulled: a file of many
   // short, terminated rows whose cumulative size far exceeds the ceiling reads

@@ -224,9 +224,10 @@ export function loadCSVColumnSample(
     // still buffering. A well-formed input terminates each line well under the
     // ceiling and never trips; a no-terminator / giant-field / giant-header input
     // keeps the cursor pinned while bytes pile up, so the span crosses the ceiling
-    // and the read fails fast. The source streams in chunks (fs.createReadStream
-    // and stdin deliver <=64 KiB reads), so the cursor advances chunk by chunk and
-    // the span tracks the partial line to within one chunk.
+    // and the read fails fast. The span is checked before that reset (chunk
+    // callback below), so the bound fails closed whether the span accrues
+    // gradually across reads or arrives in one oversized read -- it does not rely
+    // on the source framing its reads at any particular size.
     let bytesPulled = 0;
     let spanStart = 0;
     let lastCursor = 0;
@@ -264,15 +265,16 @@ export function loadCSVColumnSample(
       header: true,
       skipEmptyLines: true,
       chunk: (results, parser) => {
-        // Reset the span baseline whenever the cursor advances past a completed
-        // line, then check the bytes pulled since: an over-ceiling span is a line
-        // or header with no terminator in range. Checked before the header logic
-        // below, which returns early until the header lands -- the exact window a
-        // no-terminator input would otherwise spin in, accumulating unbounded.
-        if (results.meta.cursor > lastCursor) {
-          lastCursor = results.meta.cursor;
-          spanStart = bytesPulled;
-        }
+        // Check the bytes pulled since the last completed line, THEN advance the
+        // baseline past it. The order matters: a single chunk that both completes
+        // a line and carries a huge unterminated remainder (e.g. the whole input
+        // arriving in one large `data` event) must be judged against the OLD
+        // baseline -- resetting first would credit the remainder to `spanStart`
+        // and forgive the very span it should reject. An over-ceiling span is a
+        // line or header with no terminator in range. This runs before the header
+        // logic below, which returns early until the header lands -- the exact
+        // window a no-terminator input would otherwise spin in, accumulating
+        // unbounded.
         if (bytesPulled - spanStart > byteCeiling) {
           ceilingError = new Error(
             `CSV input exceeded the ${byteCeiling}-byte single-line limit ` +
@@ -281,6 +283,10 @@ export function loadCSVColumnSample(
           );
           parser.abort();
           return;
+        }
+        if (results.meta.cursor > lastCursor) {
+          lastCursor = results.meta.cursor;
+          spanStart = bytesPulled;
         }
         if (target === undefined) {
           // Settle the header and the column to sample as soon as a non-empty
