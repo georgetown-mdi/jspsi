@@ -2,7 +2,13 @@ import { Readable } from "node:stream";
 
 import { expect, test, vi } from "vitest";
 
-import { CSV_LINE_BYTE_CEILING, loadCSVColumnSample } from "../src/file";
+import {
+  assertLeadingLineWithinByteCeiling,
+  CSV_LINE_BYTE_CEILING,
+  guardStreamLineByteCeiling,
+  loadCSVColumnSample,
+  loadCSVFile,
+} from "../src/file";
 import { inferDateFormat, columnValues } from "../src/utils/date";
 
 /** A readable emitting `content` then EOF, standing in for a CSV file/stream. */
@@ -162,10 +168,10 @@ test("loadCSVColumnSample: an empty input yields an empty header and sample", as
 
 test("loadCSVColumnSample: a no-newline span over the byte ceiling fails fast", async () => {
   // One logical line with no terminator anywhere: PapaParse can never yield a row
-  // or settle the header, so the read would buffer the whole span. The byte
-  // ceiling aborts it with an operator-readable error once the bytes pulled since
-  // the (never-advancing) cursor cross the limit. Delivered in small chunks, as
-  // fs.createReadStream / stdin would deliver a large file.
+  // or settle the header, so the read would buffer the whole span. The guard
+  // destroys the stream with an operator-readable error once the run since the last
+  // terminator crosses the limit. Delivered in small chunks, as fs.createReadStream
+  // / stdin would deliver a large file.
   const ceiling = 512;
   const giant = "x".repeat(ceiling * 4);
   await expect(
@@ -175,9 +181,9 @@ test("loadCSVColumnSample: a no-newline span over the byte ceiling fails fast", 
 
 test("loadCSVColumnSample: a single field over the byte ceiling fails fast", async () => {
   // The header terminates normally, then one data field grows without a row
-  // terminator. The cursor advances past the header and then stalls, so the span
-  // measured since that last terminator -- the unbounded field -- crosses the
-  // ceiling and the read fails fast rather than buffering the whole field.
+  // terminator. The guard's run resets at the header's newline, then the unbounded
+  // field drives the run past the ceiling, so the read fails fast rather than
+  // buffering the whole field.
   const ceiling = 512;
   const giantField = "y".repeat(ceiling * 4);
   const csv = `name,dob\nAlice,${giantField}`;
@@ -187,9 +193,9 @@ test("loadCSVColumnSample: a single field over the byte ceiling fails fast", asy
 });
 
 test("loadCSVColumnSample: a header over the byte ceiling fails fast", async () => {
-  // A header of very many columns with its terminator beyond the ceiling: the
-  // cursor stays at zero until that newline, so the header span crosses the limit
-  // first and the read aborts before settling -- the giant-header shape.
+  // A header of very many columns with its terminator beyond the ceiling: the run
+  // grows from the first byte with no terminator to reset it, so it crosses the
+  // limit before the header settles -- the giant-header shape.
   const ceiling = 512;
   const cols = Array.from({ length: 400 }, (_v, i) => `col_${i}`);
   const header = cols.join(",");
@@ -206,11 +212,11 @@ test("loadCSVColumnSample: a header over the byte ceiling fails fast", async () 
 });
 
 test("loadCSVColumnSample: a giant field arriving in one data event fails fast", async () => {
-  // Delivery-shape independence: when the header completes and an unterminated
-  // giant field arrive in a SINGLE data event (a lone push, or any source with a
-  // read buffer larger than the span), the span must be judged before the
-  // cursor-advance reset can credit the remainder to the baseline -- otherwise
-  // the whole span is forgiven and the bound silently does not fire. streamOf
+  // Delivery-shape independence: the header and an unterminated giant field arrive
+  // in a SINGLE data event (a lone push, or any source with a read buffer larger
+  // than the span). The guard scans within that one chunk -- resetting the run at
+  // the header's newline, then accumulating the field past the ceiling -- so a
+  // chunk carrying both a terminator and an over-ceiling tail still trips. streamOf
   // pushes the entire content as one event, reproducing that shape.
   const ceiling = 512;
   const csv = `name,dob\nAlice,${"y".repeat(ceiling * 4)}`;
@@ -292,4 +298,328 @@ test("loadCSVColumnSample: a header split across stream chunks is read whole", a
   expect(columns).toContain("dob");
   expect(sampledColumn).toBe("dob");
   expect(sample).toEqual(["1990-01-02", "1990-01-02"]);
+});
+
+test("loadCSVFile: a no-newline span over the byte ceiling fails fast", async () => {
+  // One logical line with no terminator anywhere: PapaParse can never yield a row
+  // or settle the header, so without the ceiling the read would buffer the whole
+  // span. The guard destroys the stream with an operator-readable error once the
+  // run since the last terminator crosses the limit. Delivered in small chunks, as
+  // fs.createReadStream / stdin would deliver a large file.
+  const ceiling = 512;
+  const giant = "x".repeat(ceiling * 4);
+  await expect(
+    loadCSVFile(chunkedStreamOf(giant, 64), ceiling),
+  ).rejects.toThrow(/single-line limit/);
+});
+
+test("loadCSVFile: a single field over the byte ceiling fails fast", async () => {
+  // The header terminates normally, then one data field grows without a row
+  // terminator. The guard's run resets at the header's newline, then the unbounded
+  // field drives the run past the ceiling, so the read fails fast rather than
+  // buffering the whole field.
+  const ceiling = 512;
+  const giantField = "y".repeat(ceiling * 4);
+  const csv = `name,dob\nAlice,${giantField}`;
+  await expect(loadCSVFile(chunkedStreamOf(csv, 64), ceiling)).rejects.toThrow(
+    /single-line limit/,
+  );
+});
+
+test("loadCSVFile: a header over the byte ceiling fails fast", async () => {
+  // A header of very many columns with its terminator beyond the ceiling: the run
+  // grows from the first byte with no terminator to reset it, so it crosses the
+  // limit before the header settles -- the giant-header shape.
+  const ceiling = 512;
+  const cols = Array.from({ length: 400 }, (_v, i) => `col_${i}`);
+  const header = cols.join(",");
+  expect(Buffer.byteLength(header)).toBeGreaterThan(ceiling);
+  const row = cols.map(() => "v").join(",");
+  await expect(
+    loadCSVFile(chunkedStreamOf(`${header}\n${row}\n`, 64), ceiling),
+  ).rejects.toThrow(/single-line limit/);
+});
+
+test("loadCSVFile: a giant field arriving in one data event fails fast", async () => {
+  // Delivery-shape independence: the header and an unterminated giant field arrive
+  // in a SINGLE data event (a lone push, or any source with a read buffer larger
+  // than the span). The guard scans within that one chunk -- resetting the run at
+  // the header's newline, then accumulating the field past the ceiling -- so a
+  // chunk carrying both a terminator and an over-ceiling tail still trips. streamOf
+  // pushes the entire content as one event, reproducing that shape.
+  const ceiling = 512;
+  const csv = `name,dob\nAlice,${"y".repeat(ceiling * 4)}`;
+  await expect(loadCSVFile(streamOf(csv), ceiling)).rejects.toThrow(
+    /single-line limit/,
+  );
+});
+
+test("loadCSVFile: destroys the source stream once the ceiling aborts the read", async () => {
+  // On a ceiling trip the guard destroys the source itself (surfacing the error
+  // through PapaParse), and the error path releases it again; either way the stream
+  // is destroyed rather than leaked until GC. The spy fires on the guard's destroy.
+  const ceiling = 512;
+  const stream = chunkedStreamOf("x".repeat(ceiling * 4), 64);
+  const destroySpy = vi.spyOn(stream, "destroy");
+  await expect(loadCSVFile(stream, ceiling)).rejects.toThrow(
+    /single-line limit/,
+  );
+  expect(destroySpy).toHaveBeenCalled();
+});
+
+test("loadCSVFile: many short rows whose total exceeds the ceiling do not trip", async () => {
+  // The ceiling bounds a single line, not the total bytes pulled: a file of many
+  // short, terminated rows whose cumulative size far exceeds the ceiling reads
+  // whole, because the span resets at every row terminator. This is the distinction
+  // that keeps a legitimate large operator file -- which loadCSVFile reads in full --
+  // from tripping the limit, delivered in tiny chunks to exercise the reset.
+  const ceiling = 256;
+  const rows = Array.from(
+    { length: 400 },
+    (_v, i) => `Person${i},1990-01-0${(i % 9) + 1}`,
+  ).join("\n");
+  const csv = `name,dob\n${rows}\n`;
+  expect(Buffer.byteLength(csv)).toBeGreaterThan(ceiling * 4);
+  const result = await loadCSVFile(chunkedStreamOf(csv, 64), ceiling);
+  expect(result.meta.fields).toEqual(["name", "dob"]);
+  expect(result.data).toHaveLength(400);
+});
+
+test("loadCSVFile: a well-formed input under the ceiling reads unchanged", async () => {
+  // The ceiling leaves a normal input untouched: the same header and every parsed
+  // row as without it, even delivered in tiny chunks (lines split mid-field across
+  // reads) so the per-line span reset is exercised. Pins both data and meta.fields
+  // against the pre-ceiling behavior.
+  const csv =
+    "first_name,dob,ssn\n" + "Alice,1990-01-02,111\n" + "Bob,1985-12-31,222\n";
+  const result = await loadCSVFile(chunkedStreamOf(csv, 8), 256);
+  expect(result.meta.fields).toEqual(["first_name", "dob", "ssn"]);
+  expect(result.data).toEqual([
+    { first_name: "Alice", dob: "1990-01-02", ssn: "111" },
+    { first_name: "Bob", dob: "1985-12-31", ssn: "222" },
+  ]);
+});
+
+// The non-stream (browser File) bound. loadCSVFile's data-event counter is inert
+// for a File -- PapaParse reads it whole through FileReader, which Node lacks -- so
+// the leading-line pre-read enforces the ceiling there instead. These exercise the
+// pre-read directly (no FileReader needed); the end-to-end parse of a real File is
+// pinned in apps/web's browser suite, where FileReader exists.
+
+test("assertLeadingLineWithinByteCeiling: a File whose leading line exceeds the ceiling rejects", async () => {
+  // No terminator anywhere and a body past the ceiling: the header (here, the whole
+  // file) is one over-ceiling line, so the pre-read rejects before any parse.
+  const ceiling = 512;
+  const file = new File(["x".repeat(ceiling * 2)], "huge.csv");
+  await expect(
+    assertLeadingLineWithinByteCeiling(file, ceiling),
+  ).rejects.toThrow(/single-line limit/);
+});
+
+test("assertLeadingLineWithinByteCeiling: an oversized header preceding a terminator rejects", async () => {
+  // The first terminator exists but sits past the ceiling: the leading line (the
+  // header) alone exceeds it, so the pre-read still rejects.
+  const ceiling = 512;
+  const file = new File([`${"h".repeat(ceiling * 2)}\nrow\n`], "wide.csv");
+  await expect(
+    assertLeadingLineWithinByteCeiling(file, ceiling),
+  ).rejects.toThrow(/single-line limit/);
+});
+
+test("assertLeadingLineWithinByteCeiling: a terminator within the ceiling resolves despite a huge body", async () => {
+  // Only the LEADING line is gated: a short header terminates early, so a body far
+  // past the ceiling (a later-row span, left to the intake cap) reads through.
+  const ceiling = 512;
+  const file = new File([`name,dob\n${"y".repeat(ceiling * 8)}`], "ok.csv");
+  await expect(
+    assertLeadingLineWithinByteCeiling(file, ceiling),
+  ).resolves.toBeUndefined();
+});
+
+test("assertLeadingLineWithinByteCeiling: a File no larger than the ceiling is not read", async () => {
+  // A file that cannot hold an over-ceiling line is passed through without a read,
+  // so the common case pays nothing -- pinned by spying on slice().
+  const ceiling = 512;
+  const file = new File(["x".repeat(ceiling)], "small.csv");
+  const sliceSpy = vi.spyOn(file, "slice");
+  await expect(
+    assertLeadingLineWithinByteCeiling(file, ceiling),
+  ).resolves.toBeUndefined();
+  expect(sliceSpy).not.toHaveBeenCalled();
+});
+
+test("assertLeadingLineWithinByteCeiling: a non-sliceable input (a stream) is inert", async () => {
+  // A Node stream has no Blob read surface; it is bounded by the data-event counter
+  // instead, so the pre-read returns at once rather than mis-handling it.
+  await expect(
+    assertLeadingLineWithinByteCeiling(streamOf("a,b\n1,2\n"), 512),
+  ).resolves.toBeUndefined();
+});
+
+// The cases above use a tiny ceiling, so `limit` stays under the helper's 256 KiB
+// head window and only the head read runs. These two reach the tail read (the
+// `limit > window` branch) with a ceiling above that window, which the small-ceiling
+// cases never exercise -- the path where a head/tail seam off-by-one could wrongly
+// reject a valid file, the one false-positive direction this backstop must avoid.
+const HEAD_WINDOW = 256 * 1024;
+
+test("assertLeadingLineWithinByteCeiling: a terminator past the first read window is still found", async () => {
+  // A header that terminates only after the head window but within the ceiling must
+  // resolve: the head/tail split must drop no bytes at the seam, so a legitimate
+  // large header is never wrongly rejected.
+  const ceiling = 2 * HEAD_WINDOW;
+  const headerLen = HEAD_WINDOW + 4096; // past the head window, well under the ceiling
+  const file = new File(
+    [`${"h".repeat(headerLen)}\n${"v".repeat(HEAD_WINDOW)}`],
+    "wide-header.csv",
+  );
+  expect(file.size).toBeGreaterThan(ceiling);
+  await expect(
+    assertLeadingLineWithinByteCeiling(file, ceiling),
+  ).resolves.toBeUndefined();
+});
+
+test("assertLeadingLineWithinByteCeiling: a no-terminator file over a ceiling above the window rejects via the tail read", async () => {
+  // The reject path through the tail read: with the ceiling above the head window
+  // and no terminator anywhere, head and tail are both scanned and then it rejects.
+  const ceiling = 2 * HEAD_WINDOW;
+  const file = new File(["x".repeat(ceiling * 2)], "huge.csv");
+  await expect(
+    assertLeadingLineWithinByteCeiling(file, ceiling),
+  ).rejects.toThrow(/single-line limit/);
+});
+
+test("loadCSVFile: a browser File with a no-newline leading line over the ceiling fails fast", async () => {
+  // Wires the pre-read into loadCSVFile end to end: the File the web caller passes
+  // rejects before parsing, so PapaParse's FileReader path is never reached. This
+  // bounds the web path, which exposes no `data` events for the stream guard.
+  const ceiling = 512;
+  const file = new File(["x".repeat(ceiling * 2)], "data.csv", {
+    type: "text/csv",
+  });
+  await expect(loadCSVFile(file, ceiling)).rejects.toThrow(/single-line limit/);
+});
+
+// The stream guard's run accounting, exercised directly against a fake stream
+// source so the cases PapaParse's row splitting cannot reach -- CR-only endings,
+// and an over-ceiling run terminated LATER in the same chunk (the inner-overflow
+// path, which must trip rather than be forgiven by that later terminator) -- are
+// pinned. A false positive (tripping a valid stream) is the dangerous direction;
+// these confirm well-formed input never trips.
+
+/**
+ * A stand-in for the Node stream the guard attaches to: it captures the guard's
+ * `data` listener so the test can feed chunks, and records destroy() calls (the
+ * trip). Mirrors only the public surface the guard touches (on/removeListener/
+ * destroy), no real stream.
+ */
+function fakeGuardSource() {
+  let listener: ((chunk: Buffer | string) => void) | undefined;
+  const destroyedWith: Array<Error | undefined> = [];
+  const source = {
+    on(_event: "data", l: (chunk: Buffer | string) => void) {
+      listener = l;
+    },
+    removeListener() {
+      listener = undefined;
+    },
+    destroy(error?: Error) {
+      destroyedWith.push(error);
+    },
+  };
+  return {
+    source,
+    push: (chunk: Buffer | string) => listener?.(chunk),
+    tripped: () => destroyedWith.length > 0,
+    trippedMessage: () => destroyedWith[0]?.message,
+  };
+}
+
+test("guardStreamLineByteCeiling: well-formed CRLF lines under the ceiling do not trip", () => {
+  const g = fakeGuardSource();
+  guardStreamLineByteCeiling(g.source, 16);
+  g.push(Buffer.from("a,b\r\n"));
+  g.push(Buffer.from("c,d\r\n"));
+  g.push(Buffer.from("ee,ff\r\n"));
+  expect(g.tripped()).toBe(false);
+});
+
+test("guardStreamLineByteCeiling: CR-only line endings reset the run like LF/CRLF", () => {
+  // Lines separated only by CR (0x0d), each well under the ceiling, total far over.
+  // PapaParse's row splitting never exercises a lone CR, so the guard owns this.
+  const g = fakeGuardSource();
+  guardStreamLineByteCeiling(g.source, 8);
+  g.push(Buffer.from("ab\rcd\ref\rgh\r"));
+  expect(g.tripped()).toBe(false);
+});
+
+test("guardStreamLineByteCeiling: an over-ceiling run terminated later in the same chunk still trips", () => {
+  // The inner-overflow path: the over-ceiling segment must trip BEFORE the
+  // terminator that follows it in the same chunk resets the run -- otherwise an
+  // oversized-but-terminated leading line would be silently forgiven.
+  const g = fakeGuardSource();
+  const ceiling = 10;
+  guardStreamLineByteCeiling(g.source, ceiling);
+  g.push(Buffer.from(`${"x".repeat(ceiling + 2)}\nshort\n`));
+  expect(g.tripped()).toBe(true);
+  expect(g.trippedMessage()).toMatch(/single-line limit/);
+});
+
+test("guardStreamLineByteCeiling: an over-ceiling run accumulated across chunks trips before a later terminator", () => {
+  // The same inner overflow, but the run is carried across `data` events: the bytes
+  // that cross the ceiling arrive in a later chunk, ahead of that chunk's terminator.
+  const g = fakeGuardSource();
+  guardStreamLineByteCeiling(g.source, 10);
+  g.push(Buffer.from("xxxxxxx")); // run = 7, no terminator
+  expect(g.tripped()).toBe(false);
+  g.push(Buffer.from("xxxx\ny")); // 4 more before the \n -> run = 11 > 10
+  expect(g.tripped()).toBe(true);
+  expect(g.trippedMessage()).toMatch(/single-line limit/);
+});
+
+test("guardStreamLineByteCeiling: a line of exactly the ceiling passes, one byte over trips", () => {
+  // The terminator byte is not counted, so content == ceiling is accepted and
+  // content == ceiling + 1 trips -- the same boundary the pre-read uses.
+  const atCeiling = fakeGuardSource();
+  guardStreamLineByteCeiling(atCeiling.source, 10);
+  atCeiling.push(Buffer.from(`${"x".repeat(10)}\n`));
+  expect(atCeiling.tripped()).toBe(false);
+
+  const overCeiling = fakeGuardSource();
+  guardStreamLineByteCeiling(overCeiling.source, 10);
+  overCeiling.push(Buffer.from(`${"x".repeat(11)}\n`));
+  expect(overCeiling.tripped()).toBe(true);
+});
+
+test("guardStreamLineByteCeiling: many short lines whose total exceeds the ceiling do not trip", () => {
+  // The run resets at every terminator, so cumulative bytes far over the ceiling are
+  // fine. Pushes strings to exercise the Buffer.from(chunk) path.
+  const g = fakeGuardSource();
+  guardStreamLineByteCeiling(g.source, 8);
+  for (let i = 0; i < 100; i++) g.push("ab,cd\n");
+  expect(g.tripped()).toBe(false);
+});
+
+test("guardStreamLineByteCeiling: the detach function stops further scanning", () => {
+  const g = fakeGuardSource();
+  const detach = guardStreamLineByteCeiling(g.source, 8);
+  detach();
+  g.push(Buffer.from("x".repeat(100))); // would trip if still attached
+  expect(g.tripped()).toBe(false);
+});
+
+test("guardStreamLineByteCeiling: a non-stream source (no `on`) is inert", () => {
+  // A browser File has no `on`; the guard returns a no-op detach and never touches
+  // it (that path is bounded by assertLeadingLineWithinByteCeiling instead).
+  let destroyed = false;
+  const detach = guardStreamLineByteCeiling(
+    {
+      destroy: () => {
+        destroyed = true;
+      },
+    },
+    8,
+  );
+  detach();
+  expect(destroyed).toBe(false);
 });

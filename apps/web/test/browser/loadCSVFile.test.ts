@@ -125,3 +125,48 @@ describe("loadCSVFile rejects a malformed header", () => {
     ).rejects.toThrow(/non-string column/);
   });
 });
+
+// The non-stream (browser File) byte-ceiling bound, exercised end to end in a real
+// browser where FileReader exists. loadCSVFile's stream `data`-event counter is
+// inert for a File, so a bounded pre-read of the leading line enforces the ceiling
+// for the web path; the core unit suite pins the pre-read's branches directly,
+// these confirm it is wired through loadCSVFile against a genuine File.
+describe("loadCSVFile bounds an oversized leading line for a browser File", () => {
+  test("rejects a File whose leading line exceeds the byte ceiling", async () => {
+    // One unterminated span past the ceiling: the pre-read rejects before parsing.
+    // A small explicit ceiling keeps the input tiny.
+    const ceiling = 512;
+    const file = new File(["x".repeat(ceiling * 2)], "huge-line.csv", {
+      type: "text/csv",
+    });
+    await expect(loadCSVFile(file, ceiling)).rejects.toThrow(
+      /single-line limit/,
+    );
+  });
+
+  test("parses a large File whose leading line is within the ceiling", async () => {
+    // The header terminates immediately, then a body far past the small ceiling
+    // streams through -- proving the pre-read gates only the LEADING line and a
+    // well-formed File still parses whole, every row intact.
+    const ceiling = 512;
+    const header = "id,value";
+    const rowCount = 2000;
+    const rows = Array.from(
+      { length: rowCount },
+      (_v, i) => `${i},${"v".repeat(8)}`,
+    ).join("\n");
+    const csv = `${header}\n${rows}\n`;
+    expect(csv.length).toBeGreaterThan(ceiling * 4);
+
+    const file = new File([csv], "ok.csv", { type: "text/csv" });
+    const result = await loadCSVFile(file, ceiling);
+    const rowsParsed = result.data as Array<Record<string, string>>;
+    expect(result.meta.fields).toEqual(["id", "value"]);
+    expect(rowsParsed.length).toBe(rowCount);
+    expect(rowsParsed[0]).toEqual({ id: "0", value: "vvvvvvvv" });
+    expect(rowsParsed[rowCount - 1]).toEqual({
+      id: String(rowCount - 1),
+      value: "vvvvvvvv",
+    });
+  });
+});
