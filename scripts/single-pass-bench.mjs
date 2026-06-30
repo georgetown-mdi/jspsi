@@ -27,6 +27,10 @@
 //     (process.resourceUsage().maxRSS) is isolated and faithful -- the receiver
 //     decode + index-table build + cascade replay are exercised exactly as in a
 //     live exchange. Prints a table of masking wall-clock and peak RSS per side.
+//     maxRSS is the WHOLE-PROCESS LIFETIME high-water mark, so it captures transient
+//     allocation churn across all phases, not an isolated single phase's peak; most
+//     of the per-value slope is collectable JS garbage, not live retained memory
+//     (board item 206377899).
 //
 // The masking ops require a shared PSI client key between the receiver's request
 // and its match step, so the two sides cannot run as independent processes that
@@ -279,11 +283,16 @@ async function runChildRole(role, rows, keys, overlap) {
   const setStage = (id) => marks.push({ id, t: performance.now() });
 
   const start = performance.now();
+  // partnerRecordCount is the peer's row count -- equal to `rows` in this
+  // symmetric sweep. It must be the real count: the derived single-pass cap gate
+  // (frameSize.ts, board item 206154573) rejects a negative placeholder. verbosity
+  // is -1 (silent); setStage is the 7th argument.
   const table = await linkViaSinglePassPSI(
     { cardinality: "one-to-one" },
     participant,
     conn,
     data,
+    rows,
     -1,
     setStage,
   );
