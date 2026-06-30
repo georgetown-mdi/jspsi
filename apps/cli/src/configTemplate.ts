@@ -68,9 +68,10 @@ export const FIELD_DOCS: Array<{ path: Array<string>; lines: Array<string> }> =
       path: ["connection", "server"],
       lines: [
         "SFTP server both parties drop files on. Supply a credential by adding one",
-        "of (preferably as an @path, never a literal secret):",
-        "  password: @./sftp-password.txt",
-        "  private_key: @~/.ssh/id_psilink",
+        "of (preferably as an @path, never a literal secret -- quote the value, as",
+        "a leading @ is reserved in YAML):",
+        '  password: "@./sftp-password.txt"',
+        '  private_key: "@~/.ssh/id_psilink"',
         "Optionally pin the host key to verify the server on connect:",
         "  host_key_fingerprint: SHA256:....",
       ],
@@ -125,8 +126,9 @@ export const FIELD_DOCS: Array<{ path: Array<string>; lines: Array<string> }> =
     {
       path: ["connection", "options", "retain_files"],
       lines: [
-        "Keep every message as a durable transcript instead of deleting it; both",
-        "parties must set this identically and start from a fresh directory.",
+        "Keep every message as a durable transcript instead of deleting it.",
+        "Requires lockless_rendezvous and timestamp_in_filename both true; both",
+        "parties must set it identically and start from a fresh directory.",
       ],
     },
     {
@@ -153,7 +155,10 @@ export const FIELD_DOCS: Array<{ path: Array<string>; lines: Array<string> }> =
     },
     {
       path: ["linkage_terms", "algorithm"],
-      lines: ["psi reveals matched ids; psi-c reveals only the match count."],
+      lines: [
+        "psi reveals matched ids; psi-c reveals only the match count (psi-c is",
+        "not yet implemented -- use psi).",
+      ],
     },
     {
       path: ["linkage_terms", "linkage_strategy"],
@@ -164,7 +169,9 @@ export const FIELD_DOCS: Array<{ path: Array<string>; lines: Array<string> }> =
     },
     {
       path: ["linkage_terms", "deduplicate"],
-      lines: ["Allow one of your records to match several of the partner's."],
+      lines: [
+        "Allow several of your records to match the same partner record.",
+      ],
     },
     {
       path: ["linkage_terms", "output"],
@@ -235,13 +242,17 @@ const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to enable
 // was given (with an input file these sections are inferred and written active).
 // Their presence -- active or commented -- is what keeps every ExchangeSpec
 // section represented in the template.
-const INFERRED_SECTIONS_HINT = `# metadata and standardization are inferred from an input CSV: run
+//
+// @internal exported so a test un-comments the example and validates it against
+// the schema -- an operator who follows it by hand must get a loadable config.
+export const INFERRED_SECTIONS_HINT = `# metadata and standardization are inferred from an input CSV: run
 # 'psilink init data.csv' to fill them in, or author them by hand.
 #
 # metadata:
 #   - name: ssn
 #     type: ssn
 #     role: linkage
+#     is_payload: false
 # standardization:
 #   - output: ssn
 #     input: ssn

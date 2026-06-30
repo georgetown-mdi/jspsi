@@ -7,6 +7,7 @@ import { DEFAULT_CONFIG_PATH } from "../config";
 import {
   detectFileConflicts,
   expandTilde,
+  FileExistsError,
   writeFileOwnerOnly,
 } from "../fileUtils";
 import { renderConfigTemplate } from "../configTemplate";
@@ -116,12 +117,25 @@ export async function handler(argv: Arguments): Promise<void> {
       const data = await buildTemplateData(input, identity, log);
       const template = renderConfigTemplate(data);
       try {
-        writeFileOwnerOnly(configFile, template);
+        // Exclusive on the "create" path (the path was free at the check): if a
+        // file appeared between the check and this write -- a window a `-` stdin
+        // CSV can hold open arbitrarily long -- fail closed rather than silently
+        // clobber it, re-asserting the never-overwrite-unprompted contract at the
+        // write the way provisionConfigAndKey re-gates. On the "overwrite" path
+        // the operator already confirmed, so the write replaces in place.
+        writeFileOwnerOnly(configFile, template, {
+          exclusive: decision === "create",
+        });
       } catch (err) {
         // init performs no network activity, so every failure is a local,
         // operator-fixable problem -- classify a write failure as a usage error
         // (exit 64) rather than letting runOrExit's transport-failure default (69)
         // misclassify it.
+        if (err instanceof FileExistsError)
+          throw new UsageError(
+            `a file appeared at ${configFile} after the overwrite check; ` +
+              "refusing to overwrite it unprompted. Re-run to decide.",
+          );
         throw new UsageError(
           `could not write ${configFile}: ` +
             (err instanceof Error ? err.message : String(err)),
@@ -200,30 +214,31 @@ export async function buildTemplateData(
 }
 
 /**
- * Decide whether `init` should write the template, asking for confirmation when
- * a file already exists at `configPath`. Returns `"write"` when the path is free
- * or the user confirms the overwrite, `"skip"` when the user declines. When a
- * file exists but no interactive confirmation is possible (no terminal, or a `-`
- * stdin CSV already owns stdin), fails closed with a {@link UsageError} rather
- * than silently overwriting -- the same conservative default the host-key and
- * key-file non-interactive paths use.
+ * Decide what `init` should do about the output path. Returns `"create"` when
+ * the path is free (the caller then writes exclusively, so a file that appears
+ * before the write fails closed rather than being clobbered), `"overwrite"` when
+ * a file exists and the user confirms replacing it, and `"skip"` when the user
+ * declines. When a file exists but no interactive confirmation is possible (no
+ * terminal, or a `-` stdin CSV already owns stdin), fails closed with a
+ * {@link UsageError} rather than silently overwriting -- the same conservative
+ * default the host-key and key-file non-interactive paths use.
  *
  * @internal exported for testing
  */
 export async function decideOverwrite(
   configPath: string,
   opts: { interactive: boolean; confirm: () => Promise<boolean> },
-): Promise<"write" | "skip"> {
+): Promise<"create" | "overwrite" | "skip"> {
   // detectFileConflicts (lstat, not existsSync) so a dangling symlink at the
   // path is treated as occupied and still prompts -- existsSync resolves it to
   // false yet a write would follow it, the same fail-closed reasoning the
   // provisioning conflict gate uses.
-  if (detectFileConflicts([configPath]).length === 0) return "write";
+  if (detectFileConflicts([configPath]).length === 0) return "create";
   if (!opts.interactive)
     throw new UsageError(
       `a file already exists at ${configPath}; refusing to overwrite it ` +
         "without an interactive confirmation. Delete it, or pass --config-file " +
         "to write the template elsewhere.",
     );
-  return (await opts.confirm()) ? "write" : "skip";
+  return (await opts.confirm()) ? "overwrite" : "skip";
 }

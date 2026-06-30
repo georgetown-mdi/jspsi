@@ -7,12 +7,18 @@ import type { Arguments } from "yargs";
 import YAML from "yaml";
 import {
   ExchangeSpecSchema,
+  StandardizationSchema,
   UsageError,
   getLogger,
   parseExchangeSpec,
+  safeParseMetadata,
 } from "@psilink/core";
 
-import { FIELD_DOCS, renderConfigTemplate } from "../../src/configTemplate";
+import {
+  FIELD_DOCS,
+  INFERRED_SECTIONS_HINT,
+  renderConfigTemplate,
+} from "../../src/configTemplate";
 import {
   buildTemplateData,
   decideOverwrite,
@@ -134,6 +140,29 @@ test("renderConfigTemplate: every FIELD_DOCS entry lands a comment in the docume
   }
 });
 
+test("the commented metadata/standardization hint is valid when uncommented", () => {
+  // An operator who follows the no-input hint to hand-author these sections must
+  // get a config the loader accepts. Drop the leading prose, un-comment the YAML
+  // example, and validate each half against the real schema -- this guards the
+  // class of bug where a commented example is syntactically fine but
+  // schema-invalid (e.g. metadata missing the required is_payload).
+  const lines = INFERRED_SECTIONS_HINT.split("\n");
+  const start = lines.findIndex((l) => /^#\s*metadata:/.test(l));
+  expect(start).toBeGreaterThanOrEqual(0);
+  const yaml = lines
+    .slice(start)
+    .map((l) => l.replace(/^#\s?/, ""))
+    .join("\n");
+  const parsed = YAML.parse(yaml) as {
+    metadata: unknown;
+    standardization: unknown;
+  };
+  expect(safeParseMetadata(parsed.metadata).success).toBe(true);
+  expect(() =>
+    StandardizationSchema.parse(parsed.standardization),
+  ).not.toThrow();
+});
+
 // --- buildTemplateData: inference --------------------------------------------
 
 test("buildTemplateData: no input yields the default linkage terms only", async () => {
@@ -189,18 +218,18 @@ test("resolveInitInput: a second positional is a usage error", () => {
 
 // --- decideOverwrite ---------------------------------------------------------
 
-test("decideOverwrite: a free path writes without prompting", async () => {
+test("decideOverwrite: a free path is a create, without prompting", async () => {
   const dir = scratchDir();
   const confirm = vi.fn(async () => true);
   const decision = await decideOverwrite(path.join(dir, "psilink.yaml"), {
     interactive: true,
     confirm,
   });
-  expect(decision).toBe("write");
+  expect(decision).toBe("create");
   expect(confirm).not.toHaveBeenCalled();
 });
 
-test("decideOverwrite: an existing path is overwritten on an interactive yes", async () => {
+test("decideOverwrite: an existing path is an overwrite on an interactive yes", async () => {
   const dir = scratchDir();
   const target = path.join(dir, "psilink.yaml");
   fs.writeFileSync(target, "old\n");
@@ -208,7 +237,7 @@ test("decideOverwrite: an existing path is overwritten on an interactive yes", a
     interactive: true,
     confirm: async () => true,
   });
-  expect(decision).toBe("write");
+  expect(decision).toBe("overwrite");
 });
 
 test("decideOverwrite: declining preserves the file (skip)", async () => {
