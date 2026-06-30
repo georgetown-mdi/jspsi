@@ -14,6 +14,7 @@ import {
 } from "@mantine/core";
 
 import { IconDownload } from "@tabler/icons-react";
+import { useReducedMotion } from "@mantine/hooks";
 
 import { ProcessState } from "@psilink/core";
 
@@ -84,6 +85,8 @@ export function Status(props: StatusProps) {
     return { stageMap: map, numProgressBarStages: count };
   }, [stages]);
 
+  const reduceMotion = useReducedMotion();
+
   const info = stageMap[stageId];
   if (!info) {
     if (import.meta.env.DEV)
@@ -151,7 +154,11 @@ export function Status(props: StatusProps) {
             }
             radius="xl"
             striped
-            animated={!isCompleted}
+            // The looping stripe is a continuous animation Mantine drives by a CSS
+            // keyframe with no reduced-motion guard (unlike its JS-gated Transition /
+            // Collapse), so respectReducedMotion does not reach it; suppress the
+            // motion here while keeping the static stripe as the working-state cue.
+            animated={!isCompleted && !reduceMotion}
           />
 
           {/*

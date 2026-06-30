@@ -23,6 +23,7 @@ import {
   IconPlus,
   IconTrash,
 } from "@tabler/icons-react";
+import { useReducedMotion } from "@mantine/hooks";
 
 import { sanitizeForDisplay } from "@psilink/core";
 
@@ -149,6 +150,7 @@ export function ExpertKeyEditor({
       else next.add(id);
       return next;
     });
+  const reduceMotion = useReducedMotion();
 
   const fieldOptions = declaredFields.map((field) => ({
     value: field.name,
@@ -285,7 +287,9 @@ export function ExpertKeyEditor({
                         style={{
                           flexShrink: 0,
                           transform: keyOpen ? "rotate(90deg)" : "rotate(0deg)",
-                          transition: "transform 150ms ease",
+                          transition: reduceMotion
+                            ? undefined
+                            : "transform 150ms ease",
                         }}
                       />
                       <Text size="sm" fw={500} truncate>
