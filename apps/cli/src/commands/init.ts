@@ -1,15 +1,22 @@
-import fs from "node:fs";
-
 import type { Argv, Arguments } from "yargs";
 import logLibrary from "loglevel";
 
 import { getDefaultLinkageTerms, getLogger, UsageError } from "@psilink/core";
 
 import { DEFAULT_CONFIG_PATH } from "../config";
-import { expandTilde, writeFileOwnerOnly } from "../fileUtils";
+import {
+  detectFileConflicts,
+  expandTilde,
+  writeFileOwnerOnly,
+} from "../fileUtils";
 import { renderConfigTemplate } from "../configTemplate";
 import type { TemplateDataSpec } from "../configTemplate";
-import { LOG_LEVELS, promptConfirm, singleValue } from "../util/cli";
+import {
+  configureLogFile,
+  LOG_LEVELS,
+  promptConfirm,
+  singleValue,
+} from "../util/cli";
 import { buildDataSpec, loadInputRows, runOrExit } from "./bootstrap";
 
 // The identity written into a fresh template when --identity is not given. A
@@ -45,6 +52,10 @@ export function builder(cmd: Argv): Argv {
         type: "string",
         describe: "silent, error, warn, info, debug, or trace (default: info)",
       })
+      .option("log-file", {
+        type: "string",
+        describe: "append diagnostics to this file instead of the terminal",
+      })
       .usage(
         "Usage:\n" +
           "  $0 init [options] [INPUT_FILE]\n\n" +
@@ -58,64 +69,78 @@ export function builder(cmd: Argv): Argv {
 }
 
 export async function handler(argv: Arguments): Promise<void> {
-  await runOrExit("init", async () => {
-    // Resolve the log level before creating the logger (loglevel binds a logger's
-    // level at creation) and inside runOrExit, so an unrecognized value is a clean
-    // usage error (exit 64) on the same path as everything else.
-    const rawLogLevel = (
-      (singleValue(argv, "log-level") as string | undefined) || "info"
-    ).toLowerCase();
-    const logLevel = LOG_LEVELS[rawLogLevel];
-    if (logLevel === undefined)
-      throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
-    logLibrary.setDefaultLevel(logLevel);
-    const log = getLogger("init");
+  let logFileSink: ReturnType<typeof configureLogFile> | undefined;
+  try {
+    await runOrExit("init", async () => {
+      // Resolve the log level before creating the logger (loglevel binds a
+      // logger's level at creation) and inside runOrExit, so an unrecognized
+      // value is a clean usage error (exit 64) on the same path as everything
+      // else.
+      const rawLogLevel = (
+        (singleValue(argv, "log-level") as string | undefined) || "info"
+      ).toLowerCase();
+      const logLevel = LOG_LEVELS[rawLogLevel];
+      if (logLevel === undefined)
+        throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
+      // Redirect logging to the file (if requested) before the level is applied
+      // and any logger is created, so getLogger("init") below inherits the file
+      // sink. A missing parent directory is a UsageError -> exit 64 here.
+      const logFile = singleValue(argv, "log-file") as string | undefined;
+      if (logFile !== undefined) logFileSink = configureLogFile(logFile);
+      logLibrary.setDefaultLevel(logLevel);
+      const log = getLogger("init");
 
-    const configFile =
-      expandTilde(singleValue(argv, "config-file") as string | undefined) ??
-      DEFAULT_CONFIG_PATH;
-    const identity =
-      (singleValue(argv, "identity") as string | undefined) ??
-      PLACEHOLDER_IDENTITY;
-    const input = resolveInitInput(
-      (argv["args"] as Array<string> | undefined) ?? [],
-    );
-
-    // Decide whether to (over)write before reading the input, so a `-` stdin CSV
-    // is never consumed when the answer is "fail-closed" or "leave it" -- the
-    // overwrite prompt and a stdin CSV both want stdin, the same conflict accept
-    // resolves by refusing `-`.
-    const decision = await decideOverwrite(configFile, {
-      interactive: process.stdin.isTTY === true && input !== "-",
-      confirm: () => promptConfirm(`Overwrite ${configFile}?`),
-    });
-    if (decision === "skip") {
-      log.info(`left the existing file at ${configFile} unchanged.`);
-      return;
-    }
-
-    const data = await buildTemplateData(input, identity, log);
-    const template = renderConfigTemplate(data);
-    try {
-      writeFileOwnerOnly(configFile, template);
-    } catch (err) {
-      // init performs no network activity, so every failure is a local,
-      // operator-fixable problem -- classify a write failure as a usage error
-      // (exit 64) rather than letting runOrExit's transport-failure default (69)
-      // misclassify it.
-      throw new UsageError(
-        `could not write ${configFile}: ` +
-          (err instanceof Error ? err.message : String(err)),
+      const configFile =
+        expandTilde(singleValue(argv, "config-file") as string | undefined) ??
+        DEFAULT_CONFIG_PATH;
+      const identity =
+        (singleValue(argv, "identity") as string | undefined) ??
+        PLACEHOLDER_IDENTITY;
+      const input = resolveInitInput(
+        (argv["args"] as Array<string> | undefined) ?? [],
       );
-    }
 
-    log.info(
-      `wrote a configuration template to ${configFile}. No key file was ` +
-        "created and no exchange was run. Edit the file -- at least the " +
-        "connection block and the identity -- then run 'psilink invite' or " +
-        "'psilink accept' to set up an exchange.",
-    );
-  });
+      // Decide whether to (over)write before reading the input, so a `-` stdin CSV
+      // is never consumed when the answer is "fail-closed" or "leave it" -- the
+      // overwrite prompt and a stdin CSV both want stdin, the same conflict accept
+      // resolves by refusing `-`.
+      const decision = await decideOverwrite(configFile, {
+        interactive: process.stdin.isTTY === true && input !== "-",
+        confirm: () => promptConfirm(`Overwrite ${configFile}?`),
+      });
+      if (decision === "skip") {
+        log.info(`left the existing file at ${configFile} unchanged.`);
+        return;
+      }
+
+      const data = await buildTemplateData(input, identity, log);
+      const template = renderConfigTemplate(data);
+      try {
+        writeFileOwnerOnly(configFile, template);
+      } catch (err) {
+        // init performs no network activity, so every failure is a local,
+        // operator-fixable problem -- classify a write failure as a usage error
+        // (exit 64) rather than letting runOrExit's transport-failure default (69)
+        // misclassify it.
+        throw new UsageError(
+          `could not write ${configFile}: ` +
+            (err instanceof Error ? err.message : String(err)),
+        );
+      }
+
+      log.info(
+        `wrote a configuration template to ${configFile}. No key file was ` +
+          "created and no exchange was run. Edit the file -- at least the " +
+          "connection block and the identity -- then run 'psilink invite' or " +
+          "'psilink accept' to set up an exchange.",
+      );
+    });
+  } finally {
+    // Close the log-file descriptor on the normal exit path. Writes are
+    // synchronous and already durable, so the error path's process.exit (which
+    // bypasses this finally) loses nothing -- this is only descriptor cleanup.
+    logFileSink?.close();
+  }
 }
 
 /**
@@ -189,7 +214,11 @@ export async function decideOverwrite(
   configPath: string,
   opts: { interactive: boolean; confirm: () => Promise<boolean> },
 ): Promise<"write" | "skip"> {
-  if (!fs.existsSync(configPath)) return "write";
+  // detectFileConflicts (lstat, not existsSync) so a dangling symlink at the
+  // path is treated as occupied and still prompts -- existsSync resolves it to
+  // false yet a write would follow it, the same fail-closed reasoning the
+  // provisioning conflict gate uses.
+  if (detectFileConflicts([configPath]).length === 0) return "write";
   if (!opts.interactive)
     throw new UsageError(
       `a file already exists at ${configPath}; refusing to overwrite it ` +

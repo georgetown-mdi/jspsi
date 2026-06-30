@@ -36,7 +36,7 @@ The timeout flags `--connection-timeout`, `--peer-timeout`, and `--accept-timeou
 psilink init [INPUT_FILE]
 ```
 
-This creates a configuration file and then exits - no exchange or invitation is generated, and no key file is created. The file is a commented template with every option documented inline and all defaults pre-filled; if an input file is provided, column metadata, linkage fields, and data standardizing transformations are inferred from it. The user can then edit the file by hand before running their first exchange. Guided interactive setup is available through the web application. On success the command prints a notice identifying the configuration file it wrote and exits 0; invalid caller input (an unreadable or malformed `INPUT_FILE`) exits 64, and the command performs no network activity on any path.
+This creates a configuration file and then exits - no exchange or invitation is generated, and no key file is created. The file is a commented template with every option documented inline and all defaults pre-filled; if an input file is provided, column metadata, linkage fields, and data standardizing transformations are inferred from it. The user can then edit the file by hand before running their first exchange. Pass `--identity` to pre-fill the linkage-terms identity (a placeholder is written for you to edit otherwise). Guided interactive setup is available through the web application. On success the command prints a notice identifying the configuration file it wrote and exits 0; invalid caller input (an unreadable or malformed `INPUT_FILE`) exits 64, and the command performs no network activity on any path.
 
 If a file already exists at the output path, the user is prompted before overwriting; declining leaves the existing file untouched. When no terminal is available to prompt (a non-interactive run, or a `-` stdin CSV that has already claimed standard input), `init` fails closed with a usage error rather than overwriting silently - delete the file or pass `--config-file` to write elsewhere.
 
@@ -240,7 +240,7 @@ See [Compromise response](SECURITY_DESIGN.md#compromise-response) for the full p
 
 ## Logging
 
-Every command that produces diagnostic output - `invite`, `accept`, `exchange`, the zero-setup form, and `fingerprint` - accepts `--log-level` and `--log-file`.
+Every command that produces diagnostic output - `init`, `invite`, `accept`, `exchange`, the zero-setup form, and `fingerprint` - accepts `--log-level` and `--log-file`.
 
 `--log-level <level>` selects the verbosity: `silent`, `error`, `warn`, `info` (the default), `debug`, or `trace`. `silent` suppresses all log output.
 

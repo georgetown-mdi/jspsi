@@ -12,7 +12,7 @@ import {
   parseExchangeSpec,
 } from "@psilink/core";
 
-import { renderConfigTemplate } from "../../src/configTemplate";
+import { FIELD_DOCS, renderConfigTemplate } from "../../src/configTemplate";
 import {
   buildTemplateData,
   decideOverwrite,
@@ -114,6 +114,24 @@ test("renderConfigTemplate: an input file populates metadata and standardization
   expect(parsed.linkageTerms.linkageFields.map((f) => f.name)).toContain("ssn");
   expect(parsed.metadata?.some((m) => m.name === "ssn")).toBe(true);
   expect(parsed.standardization?.some((s) => s.output === "ssn")).toBe(true);
+});
+
+test("renderConfigTemplate: every FIELD_DOCS entry lands a comment in the document", async () => {
+  // With an input file all documented sections (including metadata and
+  // standardization) are present, so every FIELD_DOCS path must resolve and its
+  // comment must appear. commentKey no-ops on a miss, so this guards against a
+  // renamed field silently dropping its inline documentation.
+  const dir = scratchDir();
+  const file = path.join(dir, "in.csv");
+  fs.writeFileSync(file, SAMPLE_CSV);
+  const template = renderConfigTemplate(
+    await buildTemplateData(file, "Org", log),
+  );
+  for (const { path: docPath, lines } of FIELD_DOCS) {
+    expect(template, `comment for ${docPath.join(".")} missing`).toContain(
+      lines[0],
+    );
+  }
 });
 
 // --- buildTemplateData: inference --------------------------------------------
@@ -234,6 +252,24 @@ test("handler: writes a parseable template and no key file, then exits 0", async
   expect(fs.readdirSync(dir)).toEqual(["psilink.yaml"]);
   // The written file is a valid config skeleton.
   parseExchangeSpec(YAML.parse(fs.readFileSync(configFile, "utf8")));
+});
+
+test("handler: --log-file is accepted and the config is still written", async () => {
+  const dir = scratchDir();
+  const configFile = path.join(dir, "psilink.yaml");
+  const logFile = path.join(dir, "init.log");
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => {}) as never);
+
+  await initHandler(
+    argvFor({ "config-file": configFile, "log-file": logFile }),
+  );
+
+  expect(exit).not.toHaveBeenCalled();
+  expect(fs.existsSync(configFile)).toBe(true);
+  // configureLogFile opens (creates) the file; the redirect lifecycle ran.
+  expect(fs.existsSync(logFile)).toBe(true);
 });
 
 test("handler: an input file infers metadata and standardization into the file", async () => {

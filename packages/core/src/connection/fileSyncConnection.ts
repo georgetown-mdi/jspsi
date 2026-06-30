@@ -258,7 +258,20 @@ export const DEFAULT_PEER_TIMEOUT_MS = 1000 * 60 * 60;
 // resolves well inside it.
 /** @internal */
 export const TERMINAL_FRAME_DRAIN_TIMEOUT_MS = 1000 * 60;
-const DEFAULT_POLLING_FREQUENCY_MS = 100;
+/**
+ * Default interval, in milliseconds, between polls for a partner's file when the
+ * connection options do not set `pollIntervalMs`. Exported so the CLI's
+ * configuration-template emitter pre-fills the same value it documents as the
+ * default, instead of a literal that could drift from this one.
+ */
+export const DEFAULT_POLLING_FREQUENCY_MS = 100;
+/**
+ * Default number of reconnect attempts after a transient connection failure when
+ * the connection options do not set `maxReconnectAttempts`. Exported for the same
+ * reason as {@link DEFAULT_POLLING_FREQUENCY_MS}; bounded above by
+ * {@link MAX_RECONNECT_ATTEMPTS}.
+ */
+export const DEFAULT_MAX_RECONNECT_ATTEMPTS = 3;
 const DEFAULT_VERBOSITY = 1;
 // Bounds the pre-sweep retain-signal inspection's peer-hello read (see
 // sweepProtocolFiles). The read goes through the I5a gate, which retries a
@@ -1340,7 +1353,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         // here rather than relied on downstream.
         config.options?.serverConnectTimeoutMs ??
         DEFAULT_SERVER_CONNECT_TIMEOUT_MS;
-      const maxReconnectAttempts = config.options?.maxReconnectAttempts ?? 3;
+      const maxReconnectAttempts =
+        config.options?.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
       await this.client.connect({
         path: inboundDir,
         connectTimeoutMs,
@@ -1685,7 +1699,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
     connectOptions["host"] = config.server.host;
     connectOptions["maxReconnectAttempts"] =
-      config.options?.maxReconnectAttempts ?? 3;
+      config.options?.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
     if (config.server.port !== undefined)
       connectOptions["port"] = config.server.port;
     if (config.server.username !== undefined)
