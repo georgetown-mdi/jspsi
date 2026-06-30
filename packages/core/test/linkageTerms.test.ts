@@ -1702,6 +1702,20 @@ test("an explicit empty receive: [] is satisfied when the partner sends nothing"
   ).toHaveLength(0);
 });
 
+test("both parties declaring an empty receive is compatible (neither sends)", () => {
+  // A coherent shape: both parties strictly declare they receive nothing, and
+  // neither sends. Both strict-empty gates compare [] against [] and pass, in
+  // either argument order.
+  const x = { ...termsA, payload: { receive: [] } };
+  const y = { ...termsB, payload: { receive: [] } };
+  expect(
+    validateCompatibility(x, y).errors.filter((e) => e.includes("payload")),
+  ).toHaveLength(0);
+  expect(
+    validateCompatibility(y, x).errors.filter((e) => e.includes("payload")),
+  ).toHaveLength(0);
+});
+
 test("payload comparison is element-wise: a comma in a column name does not alias the set", () => {
   // The column-name sets are compared per sorted element, not by a comma-joined
   // string. A partner-controlled name containing the separator must not collapse
@@ -1810,6 +1824,24 @@ test("a partner payload column name with a control sequence is neutralized", () 
   );
   const msg = errors.find((e) => e.includes("payload mismatch"));
   expect(msg).toBeDefined();
+  expect(msg).not.toContain("\x1b");
+  expect(msg).toContain("\\x1b");
+});
+
+test("the empty-receive diagnostic neutralizes a partner-supplied send column name", () => {
+  // The empty-receive branch is a DIFFERENT code path from the non-empty mismatch
+  // above and embeds the SENDER's column names in the message. When local strictly
+  // declares receive:[] and the partner's advertised send names carry a control
+  // sequence, those partner-controlled names must still be sanitized in the
+  // operator-facing diagnostic -- the non-empty test above does not reach this
+  // branch.
+  const { errors } = validateCompatibility(
+    { ...termsA, payload: { receive: [] } },
+    { ...termsB, payload: { send: [{ name: "case_id\x1b[31m" }] } },
+  );
+  const msg = errors.find((e) => e.includes("payload mismatch"));
+  expect(msg).toBeDefined();
+  expect(msg).toContain("local declared an empty payload.receive");
   expect(msg).not.toContain("\x1b");
   expect(msg).toContain("\\x1b");
 });
@@ -2698,6 +2730,25 @@ test("deriveAcceptedLinkageTerms mirrors an explicit empty inviter receive to an
   const derived = deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org");
   expect(derived.payload).toStrictEqual({ send: [] });
   expect(derived.payload?.receive).toBeUndefined();
+  expect(validateCompatibility(inviterTerms, derived).errors).toEqual([]);
+  expect(validateCompatibility(derived, inviterTerms).errors).toEqual([]);
+});
+
+test("deriveAcceptedLinkageTerms mirrors an explicit empty inviter send to an explicit empty acceptor receive", () => {
+  // The opposite-direction mirror of the case above: an inviter that declares an
+  // explicit empty `payload.send` must produce an acceptor with an explicit empty
+  // `receive` -- present, not absent -- preserving the strict reading on that
+  // direction (a future `?.length > 0` mirror guard would silently make the
+  // acceptor lazy here). The mirror stays coherent: both directions pass
+  // validateCompatibility.
+  const inviterTerms: LinkageTerms = {
+    ...inviterBase,
+    output: { expectsOutput: true, shareWithPartner: true },
+    payload: { send: [] },
+  };
+  const derived = deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org");
+  expect(derived.payload).toStrictEqual({ receive: [] });
+  expect(derived.payload?.send).toBeUndefined();
   expect(validateCompatibility(inviterTerms, derived).errors).toEqual([]);
   expect(validateCompatibility(derived, inviterTerms).errors).toEqual([]);
 });
