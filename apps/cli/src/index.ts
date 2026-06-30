@@ -23,6 +23,10 @@ import {
   builder as acceptBuilder,
   handler as acceptHandler,
 } from "./commands/accept";
+import {
+  builder as initBuilder,
+  handler as initHandler,
+} from "./commands/init";
 
 yargs(hideBin(process.argv))
   .scriptName("psilink")
@@ -33,13 +37,10 @@ yargs(hideBin(process.argv))
     zeroSetupHandler,
   )
   .command(
-    "init [input]",
-    "Generate a configuration template",
-    () => {},
-    () => {
-      console.error("psilink init: not yet implemented");
-      process.exit(1);
-    },
+    "init [args..]",
+    "Write a commented configuration template (no exchange, no key file)",
+    initBuilder,
+    initHandler,
   )
   .command(
     "invite [args..]",

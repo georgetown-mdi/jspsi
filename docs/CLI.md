@@ -24,7 +24,7 @@ A leading `~` (or `~/`) in any local filesystem path -- whether given on the com
 
 When a connection is supplied as a URL, psilink percent-decodes the host, path, username, and password into the stored connection fields, so a reserved or non-ASCII character must be percent-encoded in the URL and is stored decoded -- for example `sftp://user@host/my%20drop` targets the directory `my drop`, and a percent-encoded password is sent decoded. All URL-to-config paths decode identically. A malformed percent-escape (such as a lone `%`) is rejected with a usage error (exit 64), and the credential is redacted from the message.
 
-An `INPUT_FILE` argument may be given as `-` to read the CSV from standard input instead of a file on disk -- for example, `cat data.csv | psilink exchange - results.csv` -- so a pipeline need not stage a temporary file. This applies to `psilink exchange`, the zero-setup form (`psilink URL INPUT_FILE`), and `psilink invite`. It does not apply to `psilink accept`, which reads its interactive confirmation from standard input and so cannot also take the CSV there; give `accept` a file path. Passing `-` at an interactive terminal with nothing piped in is reported as an error rather than left waiting silently for input -- pipe the CSV or pass a file path.
+An `INPUT_FILE` argument may be given as `-` to read the CSV from standard input instead of a file on disk -- for example, `cat data.csv | psilink exchange - results.csv` -- so a pipeline need not stage a temporary file. This applies to `psilink exchange`, the zero-setup form (`psilink URL INPUT_FILE`), `psilink invite`, and `psilink init`. It does not apply to `psilink accept`, which reads its interactive confirmation from standard input and so cannot also take the CSV there; give `accept` a file path. `psilink init` reads its CSV from standard input the same way, so a `-` input means `init` cannot also prompt there: when a configuration file already exists at the output path and the CSV comes from stdin, `init` fails closed rather than overwriting unprompted (the same conservative default it applies in any non-interactive context). Passing `-` at an interactive terminal with nothing piped in is reported as an error rather than left waiting silently for input -- pipe the CSV or pass a file path.
 
 Durations on the command line are written as a positive integer followed by a single-character unit -- `s` (seconds), `m` (minutes), `h` (hours), or `d` (days); for example `45s`, `30m`, `2h`, or `1d`. The unit suffix is required: a bare number is not a valid duration, and an old seconds-only value such as `30` is rejected with the suffixed form to use (`30s`) rather than silently reinterpreted. This applies to every duration-valued option, including `--expires-in`, `--accept-timeout`, `--connection-timeout`, and `--peer-timeout`.
 
@@ -36,9 +36,9 @@ The timeout flags `--connection-timeout`, `--peer-timeout`, and `--accept-timeou
 psilink init [INPUT_FILE]
 ```
 
-> **Not yet implemented:** `psilink init` is stubbed; it currently prints a "not yet implemented" message and exits. It is targeted for the 1.0 release (see [ROADMAP.md](ROADMAP.md)). The behavior below is the intended design.
+This creates a configuration file and then exits - no exchange or invitation is generated, and no key file is created. The file is a commented template with every option documented inline and all defaults pre-filled; if an input file is provided, column metadata, linkage fields, and data standardizing transformations are inferred from it. The user can then edit the file by hand before running their first exchange. Guided interactive setup is available through the web application. On success the command prints a notice identifying the configuration file it wrote and exits 0; invalid caller input (an unreadable or malformed `INPUT_FILE`) exits 64, and the command performs no network activity on any path.
 
-This creates a configuration file and then exits - no exchange or invitation is generated. The file is a commented template with every option documented inline and all defaults pre-filled; if an input file is provided, column metadata, linkage fields, and data standardizing transformations are inferred from it. The user can then edit the file by hand before running their first exchange. Guided interactive setup is available through the web application. If a file already exists at the output path, the user is prompted before overwriting.
+If a file already exists at the output path, the user is prompted before overwriting; declining leaves the existing file untouched. When no terminal is available to prompt (a non-interactive run, or a `-` stdin CSV that has already claimed standard input), `init` fails closed with a usage error rather than overwriting silently - delete the file or pass `--config-file` to write elsewhere.
 
 ## Zero-setup exchange
 
@@ -71,8 +71,6 @@ psilink file:///mnt/sftp-share/drop input.csv output.csv
 Before running, users are warned about the limitations of the security model, namely that they must trust the server's administrator.
 
 If `--save` is not specified, after running users are instructed how to use `psilink invite` and `psilink accept` to establish a recurring exchange. `--save` usage can be discussed during onboarding.
-
-> **Not yet implemented:** `psilink init` is reserved for the configuration workflow but is not yet wired up in the CLI; it is targeted for the 1.0 release (see [ROADMAP.md](ROADMAP.md)). The `init` command currently prints a "not yet implemented" message and exits. The `--save` flag, `psilink invite`, and `psilink accept` are implemented; see the sections below.
 
 If `--save` is specified, intent is advertised to the partner in-band at the start of the exchange; outcomes for each party are described in [Bootstrapping a shared secret](SECURITY_DESIGN.md#bootstrapping-a-shared-secret).
 
