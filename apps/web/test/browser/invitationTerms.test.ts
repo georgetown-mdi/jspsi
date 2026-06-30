@@ -513,6 +513,55 @@ describe("InvitationTerms: always-visible egress and legal-agreement presence hi
   });
 });
 
+describe("InvitationTerms: a declared-empty receive is surfaced, not collapsed with lazy", () => {
+  // Mirror of the send-side "(none)" treatment: an authored empty payload.receive
+  // is the strict "the acceptor sends nothing" assertion, which the consent screen
+  // must show rather than confuse with the lazy (undeclared) case -- the latter
+  // accepts whatever the acceptor discloses. Before this, the receive side rendered
+  // only a non-empty list, so a declared-empty receive was invisible.
+  function render(
+    linkageTerms: LinkageTerms,
+    perspective?: "review" | "accepted" | "proposing",
+  ) {
+    root!.render(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(InvitationTerms, {
+          linkageTerms,
+          ...(perspective ? { perspective } : {}),
+        }),
+      ),
+    );
+  }
+
+  test("a declared-empty receive shows the request as (none) in the detail", async () => {
+    render({ ...terms, payload: { receive: [] } });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const panel = panelFor("Other details");
+    expect(panel.textContent).toContain("Your partner requests from you:");
+    expect(panel.textContent).toContain("(none)");
+  });
+
+  test("a lazy (undeclared) receive renders no request line", async () => {
+    // Send is declared so the block still renders, but with no receive line: an
+    // absent receive is lazy, not a request, and must not read as "(none)".
+    render({ ...terms, payload: { send: [{ name: "risk_score" }] } });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(panelFor("Other details").textContent).not.toContain(
+      "requests from you",
+    );
+  });
+
+  test("the inviter's own preview frames a declared-empty receive as its own request", async () => {
+    render({ ...terms, payload: { receive: [] } }, "proposing");
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const panel = panelFor("Other details");
+    expect(panel.textContent).toContain("You request from your partner:");
+    expect(panel.textContent).toContain("(none)");
+  });
+});
+
 describe("InvitationTerms: the linkage strategy is surfaced at the consent point", () => {
   // The acceptor adopts the inviter's strategy (mandatory-consistency), and
   // single-pass is disclosure-affecting, so the note lives in the always-visible

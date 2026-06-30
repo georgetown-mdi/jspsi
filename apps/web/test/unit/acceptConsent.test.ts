@@ -197,6 +197,7 @@ describe("summarizeInvitation", () => {
       send: ["risk_score"],
       sendDeclared: true,
       receive: ["program_outcome"],
+      receiveDeclared: true,
     });
   });
 

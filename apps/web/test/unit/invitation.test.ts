@@ -429,6 +429,28 @@ describe("generateInvitation", () => {
       send: [],
       sendDeclared: true,
       receive: [],
+      receiveDeclared: false,
+    });
+  });
+
+  test("summarizeInvitation surfaces an authored empty payload.receive as a declared request", () => {
+    // The receive-side mirror of the declared-empty send case above: an authored
+    // `payload.receive: []` is the strict "the acceptor sends nothing" assertion,
+    // distinct from an absent receive (lazy). It must surface as a DECLARED receive
+    // (receiveDeclared true, receive empty -> the renderer shows "(none)") so the
+    // consent screen does not collapse it with the lazy case the way it once did.
+    const terms = getDefaultLinkageTerms(
+      "Inviter",
+      inferMetadata(["ssn", "first_name", "last_name", "dob"]),
+    );
+    const summary = summarizeInvitation({
+      linkageTerms: { ...terms, payload: { receive: [] } },
+    });
+    expect(summary.payload).toEqual({
+      send: [],
+      sendDeclared: false,
+      receive: [],
+      receiveDeclared: true,
     });
   });
 

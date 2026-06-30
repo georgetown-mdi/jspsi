@@ -156,8 +156,22 @@ export interface InvitationPayloadSummary {
    * line; when false the send side is lazy and is not shown.
    */
   sendDeclared: boolean;
-  /** Columns the inviter requests from the acceptor for matched records. */
+  /** Columns the inviter requests from the acceptor for matched records (what
+   * the acceptor sends). Empty when the declared set is empty; read
+   * {@link receiveDeclared} to tell that apart from the lazy case. */
   receive: Array<string>;
+  /**
+   * Whether the receive set is a definite DECLARATION (an authored
+   * `payload.receive`, present even when empty) as opposed to the lazy case (no
+   * `receive` authored: the inviter takes whatever the acceptor's own metadata
+   * discloses, nothing requested up front). When true and {@link receive} is
+   * empty the inviter has asserted "the acceptor sends nothing" (a later
+   * non-empty payload from the acceptor aborts the exchange), so the renderer
+   * states that explicitly ("(none)") rather than omitting the line; when false
+   * the receive side is lazy and is not shown. Mirrors {@link sendDeclared} on
+   * the opposite direction.
+   */
+  receiveDeclared: boolean;
 }
 
 /**
@@ -1007,20 +1021,26 @@ export function summarizeInvitation(
   // discloses). A declared-but-empty set is the strict "receive nothing" lock-in,
   // which the renderer shows as "(none)" rather than suppressing -- so it is not
   // confused with the lazy case, which has the opposite runtime behavior (a stray
-  // payload aborts under the lock-in, is accepted under lazy). The section renders
-  // whenever the send is declared OR a receive is listed.
+  // payload aborts under the lock-in, is accepted under lazy). receiveDeclared is
+  // the mirror of sendDeclared for the opposite direction: an authored
+  // `payload.receive` (present even when empty) is a definite request, while an
+  // absent one is lazy. A declared-but-empty receive is the strict "the acceptor
+  // sends nothing" assertion, rendered "(none)" for the same reason. The section
+  // renders whenever the send OR the receive is declared.
   const sendDeclared =
     source.disclosedPayloadColumns !== undefined ||
     (terms.payload?.send ?? []).length > 0;
+  const receiveDeclared = terms.payload?.receive !== undefined;
   const send =
     source.disclosedPayloadColumns ??
     (terms.payload?.send ?? []).map((column) => column.name);
   const receive = (terms.payload?.receive ?? []).map((column) => column.name);
-  if (sendDeclared || receive.length > 0) {
+  if (sendDeclared || receiveDeclared) {
     summary.payload = {
       send: send.map((name) => sanitizeForDisplay(name)),
       sendDeclared,
       receive: receive.map((name) => sanitizeForDisplay(name)),
+      receiveDeclared,
     };
   }
 
