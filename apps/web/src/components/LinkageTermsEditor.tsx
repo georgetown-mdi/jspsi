@@ -1033,6 +1033,8 @@ export function LinkageTermsEditor({
                 <Divider />
                 <TermsImportExport
                   currentTerms={previewTerms}
+                  seed={seed}
+                  rawRows={rawRows}
                   onImport={handleImport}
                 />
               </>

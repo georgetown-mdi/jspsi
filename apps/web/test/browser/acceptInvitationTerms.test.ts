@@ -550,4 +550,43 @@ describe("accept screen: terms render from a decoded token", () => {
     expect(plain).toContain("may be matched in either order");
     expect(plain).not.toContain("transforms shown for");
   });
+
+  test("depicts a one-directional cross-application for a single-transform swap", async () => {
+    const html = await renderPanel({
+      decode: {
+        status: "ready",
+        invitation: makeInvitation({
+          linkageFields: [
+            { name: "first_name", type: "first_name" },
+            { name: "last_name", type: "last_name" },
+          ],
+          linkageKeys: [
+            {
+              name: "Name",
+              elements: [
+                {
+                  field: "first_name",
+                  transform: [
+                    { function: "substring", params: { start: 1, length: 3 } },
+                  ],
+                },
+                { field: "last_name" },
+              ],
+              swap: ["first_name", "last_name"],
+            },
+          ],
+        }),
+      },
+    });
+    // The header attributes the truncation to the field the receiver applies it to
+    // -- last name, the swapped partner -- not the declared first name.
+    expect(html).toContain("last name (partial)");
+    expect(html).not.toContain("first name (partial)");
+    // The detail anchors that with a one-directional donor note, not the
+    // bidirectional both-transform interchange.
+    expect(html).toContain(
+      "transforms shown for First name are applied to Last name",
+    );
+    expect(html).not.toContain("and those for Last name");
+  });
 });

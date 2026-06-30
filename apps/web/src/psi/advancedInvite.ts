@@ -1038,6 +1038,88 @@ export function gatedActiveSettingMessage(
 }
 
 /**
+ * A message refusing an import whose linkage fields carry constraints the editor
+ * cannot represent, or `undefined` when none does -- the constraints counterpart of
+ * {@link gatedActiveSettingMessage}, applied at the same door. The draft holds no
+ * per-field constraint state ({@link AdvancedInviteDraft} has none) and
+ * {@link authoredLinkageFields} re-stamps each rebuilt field with its semantic
+ * type's DEFAULT-template constraints, so an imported field's own `constraints` -- a
+ * non-default `exclude` denylist, `validOnly`, `allowedCharacters`, or
+ * `affixesAllowed` -- would be silently normalized away on rebuild. Constraints are
+ * warn-not-enforce (they govern the data-quality warning surface, not which records
+ * match -- see core's `checkValueConstraints`), but they ARE hashed into the
+ * cross-party agreement, so a silent normalization re-generates a DIFFERENT
+ * agreement than the imported document declared, with no signal to the operator.
+ *
+ * Refuse, not preserve: the editor has no surface to view or edit per-field
+ * constraints, so preserving them would carry hash- and warning-relevant state the
+ * operator can neither see nor change -- a worse footgun than refusing. Fail-closed
+ * at the one door (import) that can introduce a constraint the authoring UI never
+ * produces.
+ *
+ * Rather than enumerate the constraint shapes, it asks the precise question -- would
+ * the rebuild change any field's declaration? -- by reconstructing exactly what an
+ * import would generate ({@link draftFromTerms} then {@link buildAdvancedTerms}) and
+ * comparing each GENERATED field against the imported field of the same name in the
+ * canonical form the agreement hashes ({@link canonicalString}). Name and type are
+ * reproduced verbatim, so a surviving field whose canonical form differs differs
+ * only in its constraints: exactly the silent-divergence case. This also catches the
+ * inverse -- an import that STRIPS a default the rebuild adds back. An import
+ * carrying only type-default constraints rebuilds to identical canonical fields and
+ * is accepted unchanged -- so the guided and expert paths, which never author custom
+ * constraints, always pass.
+ *
+ * The message names no field value: an imported document is partner-influenceable,
+ * the same reason {@link UNSUPPLYABLE_KEY_MESSAGE} and core's schema refines locate
+ * an offender by path, not value.
+ *
+ * Scope -- it compares only the fields that survive generation (the ones a key
+ * references and the columns can bind), and that bounds it in two ways. (1) It does
+ * NOT falsely refuse the disable-and-show case: a field a key references but the
+ * inviter's columns cannot supply is dropped rather than generated, and not being
+ * compared is what keeps a legitimate partial import from being refused. (2) The cost
+ * is that a field the rebuild drops ENTIRELY -- an unsupplyable one, or a declared
+ * field NO key references -- is not compared, so a custom constraint it carries is
+ * not caught here. That is a field-PRESENCE divergence, not the normalization of a
+ * field that still runs: an unreferenced or unsupplyable field is inert (never
+ * standardized, constraint-checked, or matched -- see
+ * {@link referencedLinkageFieldNames}), so the only thing that diverges is the
+ * agreement HASH between the imported document and the generated invitation -- the
+ * same hash-only category as a re-ordered cross-type field declaration. Both are the
+ * import round-trip-fidelity gap whose faithful-preservation fix is tracked
+ * separately; refusing a harmless inert field here would over-refuse, so this guard
+ * is scoped to the constraints a generated field actually runs.
+ */
+export function importedConstraintDivergenceMessage(
+  terms: LinkageTerms,
+  seed: AdvancedInviteSeed,
+  rawRows: ReadonlyArray<Record<string, string>> = [],
+): string | undefined {
+  const rebuilt = buildAdvancedTerms(
+    draftFromTerms(terms, seed, INVITATION_LIFETIME_SECONDS, rawRows),
+  );
+  const importedByName = new Map(
+    terms.linkageFields.map((field) => [field.name, field]),
+  );
+  for (const generated of rebuilt.linkageFields) {
+    const imported = importedByName.get(generated.name);
+    // A generated field the import did not name cannot occur for a name-matched
+    // rebuild; were it to, its declaration is the editor's, not the document's, so
+    // there is nothing imported for it to diverge from -- skip it.
+    if (imported === undefined) continue;
+    if (canonicalString(generated) !== canonicalString(imported))
+      return (
+        "These terms set custom constraints on one or more linkage fields that " +
+        "this editor cannot represent. Importing them would silently change the " +
+        "agreement the parties commit to (and the data-quality warnings shown), so " +
+        "they are refused. Edit the document to use the default field constraints, " +
+        "or use it directly without the editor."
+      );
+  }
+  return undefined;
+}
+
+/**
  * Reconstruct the importer's local standardization for an imported terms document.
  * Standardization is per-party and never travels in the token, so the imported
  * {@link LinkageTerms} carry the field DECLARATIONS (`linkageFields`) but not the
@@ -1064,10 +1146,12 @@ export function gatedActiveSettingMessage(
  * editor itself produced this reproduces the imported `linkageFields` exactly (see the
  * import round-trip test). It is NOT a faithful round-trip for an externally-authored
  * document: `authoredLinkageFields` normalizes each field's `constraints` to its type
- * default and emits fields in the fixed default-field order, so a document carrying
- * custom constraints or a different cross-type field order is normalized on rebuild --
- * a pre-existing editor-model limitation, independent of this binding reconstruction
- * (tracked as its own follow-up).
+ * default and emits fields in the fixed default-field order. The constraint case is
+ * caught fail-closed at the import door -- {@link importedConstraintDivergenceMessage}
+ * refuses a document whose custom constraints this rebuild would normalize away, so it
+ * never silently reaches a generated agreement. A different cross-type field ORDER is
+ * the remaining sibling divergence (same fixed-order root cause), tracked as its own
+ * follow-up.
  *
  * Fail-closed: a field whose type has no free `role: linkage` column left (the
  * inviter's columns cannot supply a distinct binding the operator marked for

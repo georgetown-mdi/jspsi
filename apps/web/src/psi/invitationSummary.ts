@@ -266,11 +266,25 @@ export interface InvitationKeySummary {
    * `swapElements`), so each element's transforms are applied to the OTHER
    * element's field value. When both sides carry transforms the generic
    * "matched in either order" note understates this interchange, so the renderer
-   * depicts it; implies {@link swap} is present (the interchange is named in
-   * terms of the two distinct field labels). False whenever fewer than both
-   * swapped elements carry a transform, or the labels did not resolve distinctly.
+   * depicts it bidirectionally; implies {@link swap} is present (the interchange
+   * is named in terms of the two distinct field labels). Mutually exclusive with
+   * {@link swapTransformDonor}: false whenever fewer than both swapped elements
+   * carry a transform, or the labels did not resolve distinctly.
    */
   swapTransformInterchange: boolean;
+  /**
+   * `[donor, recipient]` field labels when EXACTLY ONE swapped element carries a
+   * transform, else undefined. The receiver applies the transform-carrier's
+   * (donor's) transforms to the partner's (recipient's) field value (core's
+   * `swapElements`), so the recipient's header slot shows the donor's breadth
+   * marker (see {@link headerFields}); the renderer states that one-directional
+   * cross-application in the detail so the re-attributed marker is anchored.
+   * Mutually exclusive with {@link swapTransformInterchange} (the both-transform
+   * case); implies {@link swap} is present, and its two labels are the same
+   * resolved field labels {@link swap} holds, never the raw swap-reference
+   * identifier.
+   */
+  swapTransformDonor?: [string, string];
   /**
    * The always-visible one-liner of the fields this key matches on: one entry per
    * element, each a COMPACT semantic-type label carrying a terse breadth marker
@@ -283,6 +297,13 @@ export interface InvitationKeySummary {
    * decoded token (and cosmetic-only if ever reached -- the renderer joins these
    * for display). The honest anchor a partner-controlled key {@link name} cannot
    * misrepresent; the swap "either order" note is carried by {@link hasSwap}.
+   *
+   * A swap re-attributes markers to the receiver's terms: each swapped element
+   * keeps all its own rules but reads the OTHER element's field value on the
+   * receiver (core's `swapElements`), so each element's breadth marker is shown on
+   * its swapped PARTNER's field here, not the sender-order field it is declared on.
+   * The cross-application of the rules the detail lists is anchored there by
+   * {@link swapTransformInterchange} / {@link swapTransformDonor}.
    */
   headerFields: Array<string>;
 }
@@ -779,23 +800,16 @@ function summarizeKey(
     },
   );
 
-  // The always-visible field one-liner: a compact label per element with a terse
-  // breadth marker, deduped by the full entry so a truncated element does not
-  // collapse onto a whole-value one of the same field.
-  const headerFields: Array<string> = [];
-  const seenHeaderFields = new Set<string>();
-  for (const element of key.elements) {
-    const label = compactLabelForField(element.field);
-    const marker = elementBreadthMarker(element);
-    const entry = marker !== undefined ? `${label} (${marker})` : label;
-    if (seenHeaderFields.has(entry)) continue;
-    seenHeaderFields.add(entry);
-    headerFields.push(entry);
-  }
-
   const hasSwap = key.swap !== undefined;
   let swap: [string, string] | undefined;
   let swapTransformInterchange = false;
+  let swapTransformDonor: [string, string] | undefined;
+  // Header-marker re-attribution across a swap: maps each swapped element to the
+  // breadth marker its header entry should show INSTEAD of its own (an explicit
+  // `undefined` blanks the marker). Empty for a non-swap or same-label swap, so
+  // the header loop falls back to each element's own marker. Built here because
+  // the swap resolution below supplies the element pairing it needs.
+  const headerMarkerOverride = new Map<LinkageKeyElement, string | undefined>();
   if (key.swap !== undefined) {
     // A swap names two elements by their effective identifier (element `name`
     // if present, otherwise `field`); resolve each to its element so the note
@@ -816,17 +830,54 @@ function summarizeKey(
       const secondLabel = labelForField(second.field);
       if (firstLabel !== secondLabel) {
         swap = [firstLabel, secondLabel];
-        // Depict the transformed-value interchange only when BOTH swapped
-        // elements carry a transform: on the receiver side each element keeps
-        // its own transforms but reads the OTHER element's field value, so the
-        // transforms cross-apply. Only when both sides carry transforms does the
-        // generic "matched in either order" note understate what the receiver
-        // does; the narrow case this depiction exists for.
-        swapTransformInterchange =
-          (first.transform?.length ?? 0) > 0 &&
-          (second.transform?.length ?? 0) > 0;
+        // On the receiver each swapped element keeps ALL its own rules but reads
+        // the OTHER element's field value (core's `swapElements` rewrites only the
+        // field reference). So every breadth marker an element earns describes,
+        // for the acceptor, what happens to its PARTNER's field -- and the honest
+        // header shows it on the partner's slot. Re-attribute uniformly: each
+        // element's header entry shows its partner's marker. This is exact for
+        // every configuration (one marker, two equal, two different, transform or
+        // fuzzy), since the whole element moves; a same-marker pair swaps to an
+        // identical header, and a no-marker pair to the bare labels.
+        headerMarkerOverride.set(first, elementBreadthMarker(second));
+        headerMarkerOverride.set(second, elementBreadthMarker(first));
+        // The expanded detail lists each element's transforms under its DECLARED
+        // field, so a re-attributed header marker has no anchor there unless the
+        // detail also states the cross-application. Flag it for the renderer: a
+        // bidirectional interchange when both swapped elements carry transforms,
+        // else a one-directional donor -> recipient note when exactly one does
+        // (`swapTransformDonor` names the transform-carrier first). Keyed on
+        // transforms, the applied rules the detail enumerates; a not-yet-applied
+        // fuzzy comparison carries its own "(proposed)" caveat in the detail and
+        // earns no separate note here.
+        const firstTransforms = (first.transform?.length ?? 0) > 0;
+        const secondTransforms = (second.transform?.length ?? 0) > 0;
+        if (firstTransforms && secondTransforms)
+          swapTransformInterchange = true;
+        else if (firstTransforms)
+          swapTransformDonor = [firstLabel, secondLabel];
+        else if (secondTransforms)
+          swapTransformDonor = [secondLabel, firstLabel];
       }
     }
+  }
+
+  // The always-visible field one-liner: a compact label per element with a terse
+  // breadth marker, deduped by the full entry so a truncated element does not
+  // collapse onto a whole-value one of the same field. A swap re-attributes each
+  // marker to its partner's field (see headerMarkerOverride above); a non-swapped
+  // element shows its own marker.
+  const headerFields: Array<string> = [];
+  const seenHeaderFields = new Set<string>();
+  for (const element of key.elements) {
+    const label = compactLabelForField(element.field);
+    const marker = headerMarkerOverride.has(element)
+      ? headerMarkerOverride.get(element)
+      : elementBreadthMarker(element);
+    const entry = marker !== undefined ? `${label} (${marker})` : label;
+    if (seenHeaderFields.has(entry)) continue;
+    seenHeaderFields.add(entry);
+    headerFields.push(entry);
   }
 
   return {
@@ -836,6 +887,7 @@ function summarizeKey(
     hasSwap,
     swap,
     swapTransformInterchange,
+    swapTransformDonor,
   };
 }
 
