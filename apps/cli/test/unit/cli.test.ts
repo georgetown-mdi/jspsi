@@ -605,15 +605,33 @@ test("writeOutput: the stdout branch writes to process.stdout unchanged", async 
 
 // --- writeOutput: redirected-stdout permission warning -----------------------
 
-// Drive writeOutput's stdout branch with fd 1's stat forced to a chosen kind, so
-// the redirect detection is exercised deterministically regardless of what the
-// test runner's real stdout is. Returns the stdout the rows were written to and
-// the warnings the logger collected; the stdout spy also proves no warning ever
-// reaches the result stream.
-async function runStdoutBranch(fd1IsFile: boolean): Promise<{
+// The distinct fd-1 kinds writeOutput's redirect detection must tell apart. Each
+// models a real fstat verdict: a `> file` redirect is the only regular file; a
+// pipe is a FIFO; a TTY and /dev/null are character devices. `stdoutIsRedirectedFile`
+// keys solely on isFile(), so only `regular-file` should warn -- but building each
+// Stats with its own true predicate (not just isFile() flipped) keeps the fixtures
+// honest models of the real fd shapes rather than three copies of one stub.
+const STDOUT_KINDS = {
+  "regular-file": { isFile: true },
+  pipe: { isFIFO: true },
+  tty: { isCharacterDevice: true },
+  "/dev/null": { isCharacterDevice: true },
+} as const;
+
+// Drive writeOutput's stdout branch with fd 1's stat forced to one of the kinds
+// above, so the redirect detection is exercised deterministically regardless of
+// what the test runner's real stdout is. Returns the stdout the rows were written
+// to and the warnings the logger collected; the stdout spy also proves no warning
+// ever reaches the result stream.
+async function runStdoutBranch(kind: keyof typeof STDOUT_KINDS): Promise<{
   stdout: string;
   warnings: string[];
 }> {
+  const shape: {
+    isFile?: boolean;
+    isFIFO?: boolean;
+    isCharacterDevice?: boolean;
+  } = STDOUT_KINDS[kind];
   const chunks: string[] = [];
   const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
     chunk: string | Uint8Array,
@@ -623,7 +641,7 @@ async function runStdoutBranch(fd1IsFile: boolean): Promise<{
     );
     return true;
   }) as typeof process.stdout.write);
-  // Force only fd 1's stat; a real Stats for its isFile() verdict avoids
+  // Force only fd 1's stat; a real Stats with the kind's predicate set avoids
   // reconstructing the class. Other fds fall through to the real fstatSync.
   const realFstat = fs.fstatSync.bind(fs);
   const fstatSpy = vi.spyOn(fs, "fstatSync").mockImplementation(((
@@ -632,7 +650,9 @@ async function runStdoutBranch(fd1IsFile: boolean): Promise<{
   ) => {
     if (fd === 1) {
       const stats = Object.create(fs.Stats.prototype) as fs.Stats;
-      stats.isFile = () => fd1IsFile;
+      stats.isFile = () => shape.isFile === true;
+      stats.isFIFO = () => shape.isFIFO === true;
+      stats.isCharacterDevice = () => shape.isCharacterDevice === true;
       return stats;
     }
     return (realFstat as (...a: unknown[]) => fs.Stats)(fd, ...rest);
@@ -651,7 +671,7 @@ test("writeOutput: a redirected regular-file stdout warns about umask exposure",
   // `psilink exchange data.csv > results.csv`: fd 1 is a regular file the shell
   // created under its umask, not the owner-only 0600 an OUTPUT_FILE path gets, so
   // the operator is warned about the exposure and pointed at the alternative.
-  const { stdout, warnings } = await runStdoutBranch(true);
+  const { stdout, warnings } = await runStdoutBranch("regular-file");
   expect(warnings).toHaveLength(1);
   // Names the exposure (umask, not owner-only) and the OUTPUT_FILE-path fix.
   expect(warnings[0]).toMatch(/umask/);
@@ -665,10 +685,12 @@ test("writeOutput: a pipe, a TTY, or /dev/null stdout does not warn", async () =
   // Every non-file stdout (`| cat`, an interactive terminal, `> /dev/null`)
   // reports isFile() false and leaves no under-permissioned file behind, so none
   // warn -- including the pipe and TTY a bare `process.stdout.isTTY` check could
-  // not distinguish from a `> file` redirect. All three share the isFile()-false
-  // verdict, so one no-warn assertion per kind covers the contract.
-  for (const kind of ["pipe", "tty", "/dev/null"]) {
-    const { stdout, warnings } = await runStdoutBranch(false);
+  // not distinguish from a `> file` redirect. Each kind is a distinct fstat shape
+  // (a FIFO, a character device) rather than the same stub, so the assertion is
+  // that isFile()-false is what suppresses the warning regardless of the concrete
+  // non-file kind.
+  for (const kind of ["pipe", "tty", "/dev/null"] as const) {
+    const { stdout, warnings } = await runStdoutBranch(kind);
     expect(warnings, kind).toHaveLength(0);
     expect(stdout, kind).toBe("a,b\n1,2\n");
   }
