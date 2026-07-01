@@ -363,17 +363,17 @@ function writeAll(fd: number, text: string): void {
  * Thrown errors carry an `exitCode` for the caller to forward to `process.exit`:
  * a missing file throws with `exitCode: 69`, exactly as before.
  *
- * `allowStdin` gates the `-` case. Every input command supports stdin except
- * `accept`, which reads its interactive y/N confirmation from `process.stdin`
- * (`promptConfirm`); stdin is single-use, so a stdin CSV would starve that prompt
- * into a silent decline. `accept` passes `allowStdin: false`, turning `-` into an
+ * `allowStdin` gates the `-` case. Every input command supports stdin; `accept`
+ * supports it only with `--consent-to-terms`, because otherwise it reads its
+ * interactive y/N confirmation from `process.stdin` (`promptConfirm`) and stdin is
+ * single-use, so a stdin CSV would starve that prompt into a silent decline. So
+ * `accept` passes `allowStdin: false` on the prompting path -- turning `-` into an
  * actionable {@link UsageError} (exit 64) that names the file-path alternative
- * rather than returning a stream -- a usage violation, distinct from the
- * missing-file case below (exit 69, the input named cannot be opened). The
+ * rather than returning a stream, a usage violation distinct from the missing-file
+ * case below (exit 69, the input named cannot be opened) -- and `allowStdin: true`
+ * once `--consent-to-terms` has skipped the prompt that owns stdin. The rejection
  * message is command-agnostic because the default is `false`, so a future caller
- * inherits a rejection that does not misattribute itself to `accept`. (Re-enable
- * for `accept` once it gains a non-interactive confirmation bypass -- board item
- * 200218548.)
+ * inherits a rejection that does not misattribute itself to `accept`.
  *
  * When `-` is allowed but `process.stdin` is an interactive terminal with nothing
  * piped in, reading it would block on an EOF that never arrives -- the parser

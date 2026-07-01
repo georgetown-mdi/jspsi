@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { Readable } from "node:stream";
 
 import { afterEach, expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
@@ -18,6 +19,18 @@ import type {
   LinkageTerms,
 } from "@psilink/core";
 
+// Mock only promptConfirm; every other cli.ts export (openInputSource, which the
+// `-` stdin tests exercise for real, configureLogFile, etc.) is the genuine
+// implementation. This lets the handler tests assert whether the confirmation
+// prompt ran without driving a real readline over the test runner's stdin.
+vi.mock("../../src/util/cli", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../src/util/cli")>(
+      "../../src/util/cli",
+    );
+  return { ...actual, promptConfirm: vi.fn() };
+});
+
 import {
   decodeAndValidateInvitation,
   displayInvitation,
@@ -28,6 +41,9 @@ import {
 import { generateSharedSecret } from "../../src/commands/bootstrap";
 import type { CommonBootstrapOptions } from "../../src/commands/bootstrap";
 import { saveConfig } from "../../src/config";
+import { promptConfirm } from "../../src/util/cli";
+
+const promptConfirmMock = vi.mocked(promptConfirm);
 
 const silentLog = getLogger("accept-test");
 silentLog.setLevel("silent");
@@ -51,6 +67,10 @@ function testOptions(
 
 afterEach(() => {
   vi.useRealTimers();
+  // Reset the shared promptConfirm mock after every test so none inherits a stale
+  // implementation or call count from a prior one -- the guarantee lives here
+  // rather than each handler test having to remember to reset it.
+  promptConfirmMock.mockReset();
 });
 
 function sampleToken(
@@ -233,6 +253,118 @@ test("validateAccept: offline `-` input is rejected as a usage error before the 
     invitation: encoded,
     input: "-",
   });
+});
+
+// --- `--consent-to-terms` (consentToTerms) relaxes the `-` rejection ---------
+// With the prompt skipped, stdin is free for the CSV, so `-` is read rather than
+// rejected. Run validateAccept with process.stdin replaced by a byte stream that
+// emits a CSV then EOF, mirroring `cat data.csv | psilink accept --consent-to-terms - INVITE`.
+
+/** A byte-stream stand-in for process.stdin that emits `csv` then ends. */
+function makeStdin(csv: string): Readable {
+  const stream = new Readable({ read() {} });
+  stream.push(Buffer.from(csv, "utf8"));
+  stream.push(null);
+  return stream;
+}
+
+/** Run `fn` with process.stdin replaced by a stream emitting `csv`, restoring it. */
+async function withStdin<T>(csv: string, fn: () => Promise<T>): Promise<T> {
+  const original = Object.getOwnPropertyDescriptor(process, "stdin");
+  Object.defineProperty(process, "stdin", {
+    value: makeStdin(csv),
+    configurable: true,
+  });
+  try {
+    return await fn();
+  } finally {
+    if (original !== undefined)
+      Object.defineProperty(process, "stdin", original);
+  }
+}
+
+test("validateAccept: offline `-` with consentToTerms reads the CSV from stdin and proceeds", async () => {
+  // A CSV the default linkage terms can satisfy, so the satisfiability pre-flight
+  // passes and the dataSpec carries metadata inferred from the stdin header --
+  // proof the CSV was actually read from stdin rather than `-` being rejected.
+  const csv =
+    "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n";
+  const encoded = await encodeInvitation(
+    sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
+  );
+  const ready = await withStdin(csv, () =>
+    validateAccept({
+      resolved: { mode: "offline", invitation: encoded, input: "-" },
+      options: testOptions(),
+      consentToTerms: true,
+      log: silentLog,
+    }),
+  );
+  expect(ready.mode).toBe("offline");
+  // The metadata names match the stdin header, so the stdin CSV reached the spec.
+  expect(ready.dataSpec.metadata?.map((c) => c.name)).toEqual(
+    expect.arrayContaining(["first_name", "last_name", "dob", "ssn"]),
+  );
+});
+
+test("validateAccept: offline `-` with consentToTerms false is still rejected", async () => {
+  // The gate flips on consentToTerms: with it off (the default the prompt path
+  // uses), `-` stays an up-front UsageError, the unchanged no-flag behavior.
+  const encoded = await encodeInvitation(
+    sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
+  );
+  let caught: unknown;
+  try {
+    await validateAccept({
+      resolved: { mode: "offline", invitation: encoded, input: "-" },
+      options: testOptions(),
+      consentToTerms: false,
+      log: silentLog,
+    });
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  expect((caught as Error).message).toMatch(/stdin/);
+});
+
+test("validateAccept: online `-` with consentToTerms reads the CSV from stdin and proceeds", async () => {
+  // The online path gates stdin on consentToTerms exactly as the offline path
+  // does; exercise it through the same stdin swap so the symmetric `-` relaxation
+  // is covered on both branches, not just offline.
+  const csv =
+    "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n";
+  const dir = fs.mkdtempSync(
+    path.join(tmpdir(), "psilink-accept-online-stdin-"),
+  );
+  const encoded = await encodeInvitation(
+    sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
+  );
+  try {
+    const ready = await withStdin(csv, () =>
+      validateAccept({
+        resolved: {
+          mode: "online",
+          url: new URL("sftp://host/drop"),
+          invitation: encoded,
+          input: "-",
+        },
+        options: testOptions({
+          configFile: path.join(dir, "psilink.yaml"),
+          keyFile: path.join(dir, ".psilink.key"),
+        }),
+        consentToTerms: true,
+        log: silentLog,
+      }),
+    );
+    expect(ready.mode).toBe("online");
+    // The metadata names match the stdin header, so the stdin CSV reached the spec.
+    expect(ready.dataSpec.metadata?.map((c) => c.name)).toEqual(
+      expect.arrayContaining(["first_name", "last_name", "dob", "ssn"]),
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("validateAccept: an unsupported URL is rejected before the input file is read", async () => {
@@ -1128,5 +1260,94 @@ test("handler: a repeated single-value flag is rejected (exit 64) via runOrExit"
   } finally {
     logErr.mockRestore();
     exit.mockRestore();
+  }
+});
+
+// --- handler: `--consent-to-terms` gates the confirmation prompt -------------
+
+/** A temp dir with a satisfiable offline-accept input CSV and config/key paths. */
+function offlineAcceptFixture(): {
+  dir: string;
+  input: string;
+  configFile: string;
+  keyFile: string;
+} {
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-accept-consent-"));
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n",
+  );
+  return {
+    dir,
+    input,
+    configFile: path.join(dir, "psilink.yaml"),
+    keyFile: path.join(dir, ".psilink.key"),
+  };
+}
+
+test("handler: --consent-to-terms skips the confirmation prompt and writes the config and key", async () => {
+  // With --consent-to-terms the prompt is never consulted (promptConfirm is not
+  // called, so stdin is not read for a confirmation) and the offline acceptance
+  // proceeds to write both files, on the recorded advance consent.
+  const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+  // afterEach resets the shared mock, so it starts clean here; this test needs no
+  // implementation because it asserts promptConfirm is never called.
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    const encoded = await encodeInvitation(
+      sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
+    );
+    await acceptHandler({
+      _: [],
+      $0: "psilink",
+      args: [encoded, input],
+      "consent-to-terms": true,
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).not.toHaveBeenCalled();
+    expect(promptConfirmMock).not.toHaveBeenCalled();
+    expect(fs.existsSync(configFile)).toBe(true);
+    expect(fs.existsSync(keyFile)).toBe(true);
+  } finally {
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: without --consent-to-terms the prompt runs and a decline writes no files", async () => {
+  // The unchanged default: the prompt runs, and a "no" (here the mocked decline,
+  // which an EOF/non-TTY stdin also produces) leaves both files unwritten.
+  const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+  // afterEach reset the mock to a clean slate; set the decline impl this test needs.
+  promptConfirmMock.mockResolvedValue(false);
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    const encoded = await encodeInvitation(
+      sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
+    );
+    await acceptHandler({
+      _: [],
+      $0: "psilink",
+      args: [encoded, input],
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).not.toHaveBeenCalled();
+    expect(promptConfirmMock).toHaveBeenCalledTimes(1);
+    expect(fs.existsSync(configFile)).toBe(false);
+    expect(fs.existsSync(keyFile)).toBe(false);
+  } finally {
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
