@@ -559,9 +559,8 @@ export async function prepareDataset(
   // would otherwise reach a silent empty result indistinguishable from a real
   // non-match. Gated on explicit linkageTerms only: the guard targets the
   // operator's committed terms, not the default terms derived from the CSV when
-  // none are committed. The config's
-  // standardization and metadata are passed so the verdict matches what
-  // prepareForExchange resolves (accept passes neither).
+  // none are committed. The config's standardization and metadata are passed so
+  // the verdict matches what prepareForExchange resolves (accept passes neither).
   if (exchangeDataSpec.linkageTerms !== undefined)
     checkLinkageSatisfiability(
       columns,
