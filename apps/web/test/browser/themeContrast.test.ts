@@ -1,23 +1,33 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { userEvent } from "vitest/browser";
 
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
 import "@mantine/core/styles.css";
-import { ActionIcon, Button, Checkbox, MantineProvider } from "@mantine/core";
+import {
+  Alert,
+  Button,
+  Checkbox,
+  MantineProvider,
+  Text,
+  TextInput,
+} from "@mantine/core";
 
-import { mantineTheme } from "@theme";
+import { ShareBlock } from "@components/ShareBlock";
+
+import { cssVariablesResolver, mantineTheme } from "@theme";
 
 import type { ComponentType, ReactNode } from "react";
 import type { Root } from "react-dom/client";
 
-// Button and Checkbox are polymorphic factory components; this is a `.ts` file (the
-// browser project globs `.ts`, not `.tsx`, so no JSX), and createElement cannot
-// resolve their overloaded type directly -- cast each to the plain component shape
-// this test renders.
+// Button / Checkbox / Text / TextInput / Alert are polymorphic factory components;
+// this is a `.ts` file (the browser project globs `.ts`, not `.tsx`, so no JSX), and
+// createElement cannot resolve their overloaded type directly -- cast each to the
+// plain component shape this test renders. ShareBlock is a plain function component
+// and needs no cast.
 const FilledButton = Button as unknown as ComponentType<{
   children?: ReactNode;
 }>;
@@ -25,34 +35,63 @@ const PrimaryCheckbox = Checkbox as unknown as ComponentType<{
   defaultChecked?: boolean;
   "aria-label"?: string;
 }>;
-const PrimaryActionIcon = ActionIcon as unknown as ComponentType<{
+const DimmedText = Text as unknown as ComponentType<{
+  c?: string;
+  "data-testid"?: string;
   children?: ReactNode;
-  variant?: string;
+}>;
+const AppInput = TextInput as unknown as ComponentType<{
+  placeholder?: string;
+  error?: ReactNode;
   "aria-label"?: string;
 }>;
+const StatusAlert = Alert as unknown as ComponentType<{
+  color?: string;
+  title?: ReactNode;
+  children?: ReactNode;
+}>;
 
-// Render-level counterpart to test/unit/themeContrast.test.ts. The unit test
-// asserts the palette arithmetic and that the theme ROUTES filled-primary text
-// through --mantine-primary-color-contrast; it cannot prove the browser actually
-// paints that color, because Mantine resolves a filled surface's text color
-// color-scheme-blind in JS. That blind spot already shipped one regression (a dark
-// button rendered white-on-cyan-6 = 2.79:1 while a unit test that modeled an
-// idealized autoContrast stayed green), so this measures the REAL computed colors
-// of all three contrast-routed filled-primary surfaces -- the Button label, the
-// (consent-gate) Checkbox checkmark, and the copy ActionIcon glyph -- in both schemes
-// and checks them against the WCAG 2.1 AA 1.4.3 text floor.
+// Render-level counterpart to test/unit/themeContrast.test.ts. The unit test asserts
+// the palette arithmetic (an idealized model); it cannot prove the browser actually
+// paints those colors, because Mantine resolves several theme colors in JS
+// color-scheme-blind. That blind spot already shipped one regression (a dark button
+// rendered white-on-cyan-6 = 2.79:1 while a unit test that modeled an idealized
+// autoContrast stayed green), so this measures the REAL computed colors the browser
+// paints, in both schemes, against the WCAG 2.1 AA floors.
 //
-// It also pins the copied-state copy ActionIcon (ShareBlock flips it to
-// variant="light"): a non-text check glyph (1.4.11, 3:1) whose color Mantine owns
-// through --mantine-color-{primary}-light-color and resolves per scheme, with no
-// per-component constant to share -- so, like the filled surfaces, only a render
-// pins what it paints. The focus ring / input border (the per-scheme
-// --mantine-primary-color-filled, a plain shade lookup) and the Dropzone drag-icon
-// shades (a literal inline color shared with the unit test through
-// DROPZONE_DRAG_ICON) stay in the unit test, which checks them by arithmetic.
+// Two groups:
+//  - Filled-primary surfaces (1.4.3 text, 4.5:1). The copy ActionIcon glyph is driven
+//    from the REAL component (ShareBlock's CopyRow), in both its filled and its copied
+//    (variant="light", a non-text glyph judged on 1.4.11's 3:1) states, so a
+//    contrast-affecting change authored inside that component -- an added color prop,
+//    a flipped variant conditional, a re-wrapped glyph -- fails here rather than
+//    slipping past a hardcoded stand-in. The Button label and consent Checkbox
+//    checkmark are rendered as bare Mantine defaults on purpose: the app paints those
+//    surfaces with a bare <Button>/<Checkbox> (the theme's default variant, no color)
+//    and no wrapping component, so a bare primitive IS what the app paints -- there is
+//    no component to author a regression into, and the theme's isFilledPrimary scoping
+//    (proven by the unit test) is what routes their contrast color. The focus ring /
+//    input border (a plain per-scheme shade) and the Dropzone drag-icon shades (a
+//    literal inline color shared with the unit test through DROPZONE_DRAG_ICON) stay
+//    in the unit test, which checks them by arithmetic.
+//  - Resolver-owned tokens (theme.ts cssVariablesResolver): dimmed, placeholder,
+//    error, and the yellow/red light-variant status text. The harness now mounts under
+//    the app's real cssVariablesResolver (see mount below), so these are exercised at
+//    the render level for the first time -- previously only the arithmetic unit test
+//    saw them. Each token's raised value clears the AA floor while Mantine's default
+//    (which the resolver overrides) fails it (e.g. placeholder gray-5 = 2.08:1), so a
+//    case's floor assertion doubles as proof the resolver reached the surface: drop
+//    the resolver and the failing default trips the floor.
 
 let container: HTMLElement | undefined;
 let root: Root | undefined;
+
+// ShareBlock renders a copy control per artifact; the copied color is theme-driven and
+// independent of the value, so any non-empty strings suffice.
+const SHARE = {
+  deepLink: "https://example.test/accept#invitation-token",
+  encoded: "INVITATION-TOKEN",
+};
 
 function mount(scheme: "light" | "dark", node: ReactNode) {
   container = document.createElement("div");
@@ -61,17 +100,31 @@ function mount(scheme: "light" | "dark", node: ReactNode) {
   root.render(
     createElement(
       MantineProvider,
-      { theme: mantineTheme, forceColorScheme: scheme },
+      // The app root (routes/__root.tsx) configures the provider with BOTH the theme
+      // and the cssVariablesResolver; render under the same config so a resolver
+      // override on a covered surface is exercised here, not only in the idealized
+      // arithmetic of the unit test.
+      { theme: mantineTheme, cssVariablesResolver, forceColorScheme: scheme },
       node,
     ),
   );
 }
+
+beforeEach(() => {
+  // Drive the real CopyButton without depending on the headless browser's clipboard
+  // permission or secure-context state: CopyRow's guard only needs navigator.clipboard
+  // to exist (it does in the browser project) and useClipboard only flips `copied`
+  // once writeText RESOLVES. Stubbing writeText to resolve makes the copied-state case
+  // deterministic; it is otherwise unused (the other cases never click).
+  vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+});
 
 afterEach(() => {
   root?.unmount();
   container?.remove();
   root = undefined;
   container = undefined;
+  vi.restoreAllMocks();
 });
 
 /** Wait for a mounted element (createRoot.render is not synchronous), then return
@@ -122,7 +175,7 @@ function contrast(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
-describe("rendered theme colour contrast (WCAG 2.1 AA)", () => {
+describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
   // Black resolves brighter on cyan-6 (7.53) than white does on cyan-9 (5.59), so a
   // single >= 4.5 floor covers both schemes; expectedText pins WHICH text colour
   // renders, the half that regressed before. The background is read through
@@ -161,18 +214,12 @@ describe("rendered theme colour contrast (WCAG 2.1 AA)", () => {
       ).toBeGreaterThanOrEqual(4.5);
     });
 
-    test(`filled-primary action icon glyph is AA-legible (${scheme})`, async () => {
-      // The copy ActionIcon (ShareBlock) in its filled state; glyph colour is
-      // --ai-color, routed to the contrast variable. No variant prop -> the default
-      // filled, matching how the override is scoped.
-      mount(
-        scheme,
-        createElement(
-          PrimaryActionIcon,
-          { "aria-label": "copy" },
-          createElement("span", null, "i"),
-        ),
-      );
+    test(`filled copy icon glyph is AA-legible (${scheme})`, async () => {
+      // The REAL copy control (ShareBlock's CopyRow) in its resting, filled state.
+      // ShareBlock is the app's only filled-primary ActionIcon; its glyph colour is
+      // --ai-color, routed to the per-scheme contrast variable by the theme override.
+      // Query the first of the two copy buttons (the invitation-link row).
+      mount(scheme, createElement(ShareBlock, SHARE));
       const ai = await waitForEl(".mantine-ActionIcon-root");
       await expect.poll(() => getComputedStyle(ai).color).toBe(expectedText);
       const backgroundColor = await restingBackground(ai);
@@ -180,29 +227,26 @@ describe("rendered theme colour contrast (WCAG 2.1 AA)", () => {
       expect(contrast(color, backgroundColor)).toBeGreaterThanOrEqual(4.5);
     });
 
-    test(`copied-state copy icon glyph is AA-legible (${scheme})`, async () => {
-      // ShareBlock swaps the copy ActionIcon to variant="light" once copied; the
-      // check glyph is a non-text graphic, so the WCAG 1.4.11 3:1 floor. Mantine
-      // owns this color: --ai-color resolves to --mantine-color-{primary}-light-color
-      // on the --mantine-color-{primary}-light tint, both per scheme (light: cyan-9
-      // on cyan-1; dark: cyan-0 on darken(cyan-9, .5)). No variant override touches
-      // the light variant, so this reads exactly what Mantine paints -- the dark
-      // branch in particular was never covered by the unit test's single light case.
+    test(`copied copy icon glyph is AA-legible (${scheme})`, async () => {
+      // Drive the SAME real control into its copied state: CopyRow swaps the
+      // ActionIcon to variant="light" and the glyph to IconCheck once copied. The
+      // check glyph is a non-text graphic, so the WCAG 1.4.11 3:1 floor. Mantine owns
+      // this colour: --ai-color resolves to --mantine-color-{primary}-light-color on
+      // the --mantine-color-{primary}-light tint, both per scheme (light: cyan-9 on
+      // cyan-1; dark: cyan-0 on darken(cyan-9, .5)) -- no override touches the light
+      // variant, so this reads exactly what Mantine paints, including the dark branch
+      // the unit test's single light case never covered.
+      mount(scheme, createElement(ShareBlock, SHARE));
+      const ai = await waitForEl(".mantine-ActionIcon-root");
+      await userEvent.click(ai);
+      // The copied state is signalled by the ActionIcon's aria-label flipping to
+      // "<label> copied" (CopyRow); poll it rather than a timer so the read happens
+      // only once the variant has actually flipped to light.
+      await expect
+        .poll(() => ai.getAttribute("aria-label"))
+        .toContain("copied");
       // Resting bg via restingBackground so a stale hover (light-variant hover =
       // cyan-2, a darker tint) is not sampled in place of the resting fill.
-      mount(
-        scheme,
-        createElement(
-          PrimaryActionIcon,
-          { variant: "light", "aria-label": "copied" },
-          createElement("span", null, "i"),
-        ),
-      );
-      const ai = await waitForEl(".mantine-ActionIcon-root");
-      // Unlike the filled cases, this does not poll the color to an expected value
-      // first: the shade is Mantine's to own (no value to await), and Mantine sets
-      // --ai-color inline at render, so the element never exists without its
-      // resolved color -- waitForEl plus restingBackground already settle the read.
       const backgroundColor = await restingBackground(ai);
       const { color } = getComputedStyle(ai);
       expect(contrast(color, backgroundColor)).toBeGreaterThanOrEqual(3);
@@ -236,4 +280,118 @@ describe("rendered theme colour contrast (WCAG 2.1 AA)", () => {
     expect(restingContrast).toBeGreaterThanOrEqual(4.5);
     expect(restingContrast).toBeGreaterThan(hoverContrast);
   });
+});
+
+describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
+  // dimmed and error text sit on the app body surface; wrap the render in a container
+  // painted with --mantine-color-body so the measured background is the real
+  // per-scheme body (white light / dark-7 dark) rather than a transparent ancestor.
+  function bodySurface(node: ReactNode): ReactNode {
+    return createElement(
+      "div",
+      {
+        "data-testid": "surface",
+        style: { background: "var(--mantine-color-body)" },
+      },
+      node,
+    );
+  }
+
+  for (const scheme of ["light", "dark"] as const) {
+    test(`dimmed text is AA-legible (${scheme})`, async () => {
+      // c="dimmed" -> --mantine-color-dimmed, raised by the resolver in both schemes
+      // (Mantine's gray-6 / dark-2 default fails 4.5:1 on the body).
+      mount(
+        scheme,
+        bodySurface(
+          createElement(
+            DimmedText,
+            { c: "dimmed", "data-testid": "dimmed" },
+            "Secondary supporting text",
+          ),
+        ),
+      );
+      const text = await waitForEl('[data-testid="dimmed"]');
+      const surface = await waitForEl('[data-testid="surface"]');
+      const bg = getComputedStyle(surface).backgroundColor;
+      expect(contrast(getComputedStyle(text).color, bg)).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    });
+
+    test(`input placeholder is AA-legible (${scheme})`, async () => {
+      // --mantine-color-placeholder, raised by the resolver in both schemes (Mantine's
+      // gray-5 / dark-3 default is the lightest failing token, 2.08:1 / 2.47:1). The
+      // placeholder paints on the input's own fill (white light / dark-6 dark).
+      mount(
+        scheme,
+        createElement(AppInput, {
+          placeholder: "Your name",
+          "aria-label": "name",
+        }),
+      );
+      const input = await waitForEl("input");
+      const placeholderColor = getComputedStyle(input, "::placeholder").color;
+      const bg = getComputedStyle(input).backgroundColor;
+      // Guard against a vacuous pass: if the ::placeholder pseudo read ever fell back
+      // to the input's own (dark, high-contrast) text color, the floor below would
+      // pass without measuring the placeholder token at all. The muted placeholder is
+      // deliberately lower-emphasis than the entered text, so the two must differ.
+      expect(placeholderColor).not.toBe(getComputedStyle(input).color);
+      expect(contrast(placeholderColor, bg)).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+
+  // error and the yellow/red light-variant status text are overridden by the resolver
+  // in the LIGHT scheme only (that is where the dark-on-light failures are; the dark
+  // scheme keeps Mantine's inverse near-white-on-tint arrangement, which passes).
+  test("error validation text is AA-legible (light)", async () => {
+    // --mantine-color-error, raised by the resolver in light (Mantine's red-6 default
+    // = 3.28:1 on the white page fails the 1.4.3 validation-text floor).
+    mount(
+      "light",
+      bodySurface(
+        createElement(AppInput, {
+          "aria-label": "field",
+          error: "This field is required",
+        }),
+      ),
+    );
+    const input = await waitForEl("input");
+    const describedBy = input.getAttribute("aria-describedby");
+    const errorEl = describedBy
+      ? (document.getElementById(describedBy) as HTMLElement)
+      : await waitForEl('[class*="Error"]');
+    const surface = await waitForEl('[data-testid="surface"]');
+    const bg = getComputedStyle(surface).backgroundColor;
+    expect(
+      contrast(getComputedStyle(errorEl).color, bg),
+    ).toBeGreaterThanOrEqual(4.5);
+  });
+
+  for (const { color, label } of [
+    { color: "yellow", label: "warning" },
+    { color: "red", label: "error" },
+  ]) {
+    test(`${label} alert title is AA-legible (light)`, async () => {
+      // --mantine-color-{color}-light-color on the {color}-light tint, raised by the
+      // resolver in light (Mantine's yellow-9 on yellow-1 = 2.69:1 fails even 3:1;
+      // red-9 on red-1 = 4.51:1 is a fragile hairline). The Alert owns both the title
+      // colour and its tint background, so this is self-contained.
+      mount(
+        "light",
+        createElement(
+          StatusAlert,
+          { color, title: "Heads up" },
+          "Body copy for the alert.",
+        ),
+      );
+      const alert = await waitForEl('[role="alert"]');
+      const title = alert.querySelector('[class*="title"]') as HTMLElement;
+      const bg = getComputedStyle(alert).backgroundColor;
+      expect(
+        contrast(getComputedStyle(title).color, bg),
+      ).toBeGreaterThanOrEqual(4.5);
+    });
+  }
 });
