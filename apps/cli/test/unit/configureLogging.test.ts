@@ -6,6 +6,7 @@ import logLibrary from "loglevel";
 import {
   getDiagnosticSink,
   setDiagnosticSink,
+  UsageError,
   type DiagnosticSink,
 } from "@psilink/core";
 
@@ -117,6 +118,33 @@ test("configureLogging: without a logFile, routes diagnostics to stderr, never s
   expect(stdoutWrites.join("")).toBe("");
   // No file is opened on the stderr branch.
   expect(fs.readdirSync(tmpDir)).toHaveLength(0);
+});
+
+// --- an unopenable --log-file surfaces as a UsageError -----------------------
+
+test("configureLogging: an unopenable logFile throws UsageError and installs no sink", () => {
+  // The helper is the single seam all six handlers route through, so its
+  // --log-file failure contract is load-bearing: configureLogFile opens the file
+  // synchronously and throws a UsageError on a missing parent directory, and
+  // configureLogging must let that propagate (not swallow or reshape it) so each
+  // handler's parseOrExit/runOrExit maps it to exit 64. The sink open runs before
+  // setDefaultLevel/getLogger, so a failed open must also leave the diagnostic
+  // sink untouched -- pin both, so a regression that catches the throw, or installs
+  // the sink before opening, is caught here rather than silently breaking
+  // --log-file for every command at once.
+  const before = getDiagnosticSink();
+  const logPath = path.join(tmpDir, "does-not-exist", "run.log");
+  expect(() =>
+    configureLogging({
+      logLevel: logLibrary.levels.INFO,
+      logFile: logPath,
+      name: "configlog-unopenable",
+    }),
+  ).toThrow(UsageError);
+  // The failed open installed nothing: the diagnostic sink is left as it was, and
+  // the synchronous open created no directory.
+  expect(getDiagnosticSink()).toBe(before);
+  expect(fs.existsSync(path.join(tmpDir, "does-not-exist"))).toBe(false);
 });
 
 // --- the closer's factory-restore --------------------------------------------
