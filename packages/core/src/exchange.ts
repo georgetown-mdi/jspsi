@@ -454,6 +454,7 @@ export async function runExchange(
   const {
     partnerTerms,
     warnings,
+    partnerRecordCount,
     partnerSaveIntent,
     partnerHostKey,
     partnerHostKeyMalformed,
@@ -461,6 +462,7 @@ export async function runExchange(
     conn,
     handshakeRole,
     linkageTerms,
+    rowCount,
     options.saveIntent,
     options.observedHostKey,
   );
@@ -501,12 +503,15 @@ export async function runExchange(
     bootstrap = { partnerSaveIntent, sharedSecret };
   }
 
-  const { role: resolvedRole, partnerRecordCount } = await resolveRole(
-    conn,
+  // Local computation: both parties' record counts were carried on the terms
+  // exchange above (partnerRecordCount), so the role follows without a further
+  // message.
+  const resolvedRole = resolveRole(
     handshakeRole,
     linkageTerms.output,
     partnerTerms.output,
     rowCount,
+    partnerRecordCount,
   );
   onProtocolConfirmed(partnerTerms, resolvedRole);
 
@@ -609,9 +614,9 @@ export async function runExchange(
   //   is stored only when both sides are entitled to the result. A single-output
   //   helper can observe its match count during the clean cascade, but the record
   //   deliberately does not surface it: privacy here is enforced by what the tool
-  //   writes down, not by what is theoretically discoverable. (resolveRole's
-  //   exchanged record counts are total dataset sizes, not the intersection, and
-  //   are not used here.)
+  //   writes down, not by what is theoretically discoverable. (The record counts
+  //   carried on the terms exchange are total dataset sizes, not the
+  //   intersection, and are not used here.)
   //
   // The association table is committed only when this party is entitled to the
   // result (expectsOutput) -- both parties in a both-output exchange, only the

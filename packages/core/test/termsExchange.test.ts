@@ -4,6 +4,7 @@ import { exchangeTerms, resolveRole } from "../src/protocolSetup";
 import { MAX_NAME_LENGTH } from "../src/config/linkageTerms";
 import type { LinkageTerms, Output } from "../src/config/linkageTerms";
 import type { PresentedHostKey } from "../src/connection/fileSyncConnection";
+import type { PsiRole } from "../src/types";
 
 import {
   createMessagePipe,
@@ -42,27 +43,31 @@ function makeConnections(): [MessageConnection, MessageConnection] {
   return createMessagePipe();
 }
 
-/** Run an exchange between A (initiator) and B (responder). */
+/** Run an exchange between A (initiator) and B (responder). The record counts
+ *  are fixed placeholders -- these fixtures exercise terms agreement, not role
+ *  selection, which resolveRole covers separately below. */
 async function runExchange(tA: LinkageTerms, tB: LinkageTerms) {
   const [connA, connB] = makeConnections();
   return Promise.allSettled([
-    exchangeTerms(connA, "initiator", tA),
-    exchangeTerms(connB, "responder", tB),
+    exchangeTerms(connA, "initiator", tA, 100),
+    exchangeTerms(connB, "responder", tB, 200),
   ]);
 }
 
-/** Run role resolution between A (initiator) and B (responder). */
-async function runRoleResolution(
+/** Resolve both parties' PSI roles from the pure local computation, given each
+ *  party's output expectation and record count. resolveRole no longer touches a
+ *  connection -- the counts are carried on the terms exchange -- so this is a
+ *  synchronous double call, one per party's viewpoint. */
+function resolveBothRoles(
   outA: Output,
   outB: Output,
   sizeA: number,
   sizeB: number,
-) {
-  const [connA, connB] = makeConnections();
-  return Promise.allSettled([
-    resolveRole(connA, "initiator", outA, outB, sizeA),
-    resolveRole(connB, "responder", outB, outA, sizeB),
-  ]);
+): { a: PsiRole; b: PsiRole } {
+  return {
+    a: resolveRole("initiator", outA, outB, sizeA, sizeB),
+    b: resolveRole("responder", outB, outA, sizeB, sizeA),
+  };
 }
 
 // --- Happy path --------------------------------------------------------------
@@ -110,8 +115,8 @@ const hostKeyB: PresentedHostKey = {
 test("each party reads back the other's advertised observed host key", async () => {
   const [connA, connB] = makeConnections();
   const [a, b] = await Promise.all([
-    exchangeTerms(connA, "initiator", termsA, undefined, hostKeyA),
-    exchangeTerms(connB, "responder", termsB, undefined, hostKeyB),
+    exchangeTerms(connA, "initiator", termsA, 100, undefined, hostKeyA),
+    exchangeTerms(connB, "responder", termsB, 200, undefined, hostKeyB),
   ]);
   expect(a.partnerHostKey).toEqual(hostKeyB);
   expect(b.partnerHostKey).toEqual(hostKeyA);
@@ -124,8 +129,8 @@ test("a party that observed no host key advertises none and reads partner's", as
   const [connA, connB] = makeConnections();
   const [a, b] = await Promise.all([
     // Initiator advertises; responder (e.g. a file-drop mount) does not.
-    exchangeTerms(connA, "initiator", termsA, undefined, hostKeyA),
-    exchangeTerms(connB, "responder", termsB),
+    exchangeTerms(connA, "initiator", termsA, 100, undefined, hostKeyA),
+    exchangeTerms(connB, "responder", termsB, 200),
   ]);
   expect(a.partnerHostKey).toBeUndefined();
   expect(b.partnerHostKey).toEqual(hostKeyA);
@@ -150,8 +155,8 @@ test("no hostKey field is put on the wire when none is observed", async () => {
     close: () => connA.close(),
   };
   await Promise.all([
-    exchangeTerms(capturingA, "initiator", termsA),
-    exchangeTerms(connB, "responder", termsB),
+    exchangeTerms(capturingA, "initiator", termsA, 100),
+    exchangeTerms(connB, "responder", termsB, 200),
   ]);
   expect(sent.length).toBeGreaterThan(0);
   for (const frame of sent) expect("hostKey" in frame).toBe(false);
@@ -166,9 +171,10 @@ test("responder flags a present-but-malformed partner hostKey without aborting",
   // as no host key), but the present-but-malformed case is surfaced separately
   // from a genuine absence so the CLI can log it.
   const [connA, connB] = makeConnections();
-  const responder = exchangeTerms(connB, "responder", termsB);
+  const responder = exchangeTerms(connB, "responder", termsB, 200);
   await connA.send({
     linkageTerms: termsA,
+    recordCount: 100,
     hostKey: { fingerprint: "x".repeat(200), keyType: "ssh-ed25519" },
   });
   await connA.receive(); // drain the responder's terms + proceed (msg 2)
@@ -184,8 +190,8 @@ test("a null partner hostKey is treated as absent, not malformed", async () => {
   // (the benign no-host-key path) rather than a malformed advertisement -- the
   // malformed flag stays false so no spurious diagnostic fires.
   const [connA, connB] = makeConnections();
-  const responder = exchangeTerms(connB, "responder", termsB);
-  await connA.send({ linkageTerms: termsA, hostKey: null });
+  const responder = exchangeTerms(connB, "responder", termsB, 200);
+  await connA.send({ linkageTerms: termsA, recordCount: 100, hostKey: null });
   await connA.receive(); // drain the responder's terms + proceed (msg 2)
   await connA.send({ decision: "proceed" }); // msg 3
   const result = await responder;
@@ -198,11 +204,12 @@ test("initiator flags a present-but-malformed partner hostKey without aborting",
   // responder's message 2 is detected by the initiator. Drive the responder by
   // hand so the bad value can be injected on its frame.
   const [connA, connB] = makeConnections();
-  const initiator = exchangeTerms(connA, "initiator", termsA);
+  const initiator = exchangeTerms(connA, "initiator", termsA, 100);
   await connB.receive(); // msg 1: initiator's terms
   await connB.send({
     linkageTerms: termsB,
     decision: "proceed",
+    recordCount: 200,
     hostKey: { fingerprint: "x".repeat(200), keyType: "ssh-ed25519" },
   });
   await connB.receive(); // msg 3: initiator's proceed
@@ -213,121 +220,174 @@ test("initiator flags a present-but-malformed partner hostKey without aborting",
 
 // --- Role determination ------------------------------------------------------
 
-test("only initiator expects output -> initiator is receiver", async () => {
+test("only initiator expects output -> initiator is receiver", () => {
   const outA = { expectsOutput: true, shareWithPartner: false };
   const outB = { expectsOutput: false, shareWithPartner: true };
-  const [a, b] = await runRoleResolution(outA, outB, 100, 200);
-  if (a.status !== "fulfilled" || b.status !== "fulfilled") throw new Error();
-  expect(a.value.role).toBe("receiver");
-  expect(b.value.role).toBe("sender");
+  const { a, b } = resolveBothRoles(outA, outB, 100, 200);
+  expect(a).toBe("receiver");
+  expect(b).toBe("sender");
 });
 
-test("only responder expects output -> responder is receiver", async () => {
+test("only responder expects output -> responder is receiver", () => {
   const outA = { expectsOutput: false, shareWithPartner: true };
   const outB = { expectsOutput: true, shareWithPartner: false };
-  const [a, b] = await runRoleResolution(outA, outB, 100, 200);
-  if (a.status !== "fulfilled" || b.status !== "fulfilled") throw new Error();
-  expect(a.value.role).toBe("sender");
-  expect(b.value.role).toBe("receiver");
+  const { a, b } = resolveBothRoles(outA, outB, 100, 200);
+  expect(a).toBe("sender");
+  expect(b).toBe("receiver");
 });
 
-test("both expect output, initiator has fewer records -> initiator is receiver", async () => {
+test("both expect output, initiator has fewer records -> initiator is receiver", () => {
   const out = { expectsOutput: true, shareWithPartner: true };
-  const [a, b] = await runRoleResolution(out, out, 50, 200);
-  if (a.status !== "fulfilled" || b.status !== "fulfilled") throw new Error();
-  expect(a.value.role).toBe("receiver");
-  expect(b.value.role).toBe("sender");
-  // The partner record count is returned alongside the role so the single-pass
-  // frame-cap derivation can read both authenticated counts.
-  expect(a.value.partnerRecordCount).toBe(200);
-  expect(b.value.partnerRecordCount).toBe(50);
+  const { a, b } = resolveBothRoles(out, out, 50, 200);
+  expect(a).toBe("receiver");
+  expect(b).toBe("sender");
 });
 
-test("both expect output, responder has fewer records -> responder is receiver", async () => {
+test("both expect output, responder has fewer records -> responder is receiver", () => {
   const out = { expectsOutput: true, shareWithPartner: true };
-  const [a, b] = await runRoleResolution(out, out, 200, 50);
-  if (a.status !== "fulfilled" || b.status !== "fulfilled") throw new Error();
-  expect(a.value.role).toBe("sender");
-  expect(b.value.role).toBe("receiver");
+  const { a, b } = resolveBothRoles(out, out, 200, 50);
+  expect(a).toBe("sender");
+  expect(b).toBe("receiver");
 });
 
-test("both expect output, equal record counts -> initiator is receiver", async () => {
+test("both expect output, equal record counts -> initiator is receiver", () => {
   const out = { expectsOutput: true, shareWithPartner: true };
-  const [a, b] = await runRoleResolution(out, out, 100, 100);
-  if (a.status !== "fulfilled" || b.status !== "fulfilled") throw new Error();
-  expect(a.value.role).toBe("receiver");
-  expect(b.value.role).toBe("sender");
+  const { a, b } = resolveBothRoles(out, out, 100, 100);
+  expect(a).toBe("receiver");
+  expect(b).toBe("sender");
 });
 
-test("both parties compute the same role independently", async () => {
+test("both parties compute the same role independently", () => {
   const out = { expectsOutput: true, shareWithPartner: true };
-  const [a, b] = await runRoleResolution(out, out, 100, 200);
-  if (a.status !== "fulfilled" || b.status !== "fulfilled") throw new Error();
-  expect(a.value.role).not.toBe(b.value.role);
+  const { a, b } = resolveBothRoles(out, out, 100, 200);
+  expect(a).not.toBe(b);
 });
 
-test("the record-count exchange is unconditional and identical across output cases", async () => {
-  // The count exchange now runs on every exchange, not only when both parties
-  // expect output: the one-sided path drains the count frame, it does not skip
-  // it. Making the exchange unconditional is groundwork for the forthcoming
-  // data-dependent single-pass frame cap, which will need both counts on the
-  // wire for every exchange. Capture BOTH parties' sent frames for a both-output
-  // resolution and for each one-sided direction (initiator the sole receiver,
-  // then initiator the sole sender) with the same counts, and assert they are
-  // byte- and order-identical across all three: the only difference between the
-  // cases is the local role decision, never the wire.
-  const both: Output = { expectsOutput: true, shareWithPartner: true };
-  const oneSidedReceiver: Output = {
-    expectsOutput: true,
-    shareWithPartner: false,
-  };
-  const oneSidedSender: Output = {
-    expectsOutput: false,
-    shareWithPartner: true,
-  };
+test("record counts ride the terms messages, not a separate frame", async () => {
+  // The count now travels on the terms-exchange envelope (beside linkageTerms),
+  // so role resolution is a local computation and there is no dedicated
+  // {recordCount} frame. Capture every frame each party sends and assert the
+  // counts arrive on the terms messages and nowhere on their own.
+  const [connA, connB] = makeConnections();
+  const wrap = (
+    conn: MessageConnection,
+    sink: Array<Record<string, unknown>>,
+  ): MessageConnection => ({
+    send: (m: unknown) => {
+      sink.push(m as Record<string, unknown>);
+      return conn.send(m);
+    },
+    receive: (t?: number) => conn.receive(t),
+    close: () => conn.close(),
+  });
+  const initiatorSent: Array<Record<string, unknown>> = [];
+  const responderSent: Array<Record<string, unknown>> = [];
+  const [a, b] = await Promise.all([
+    exchangeTerms(wrap(connA, initiatorSent), "initiator", termsA, 100),
+    exchangeTerms(wrap(connB, responderSent), "responder", termsB, 200),
+  ]);
 
-  const captureFrames = async (local: Output, partner: Output) => {
+  // Each party read the other's count off the terms exchange.
+  expect(a.partnerRecordCount).toBe(200);
+  expect(b.partnerRecordCount).toBe(100);
+
+  // The initiator's message 1 carries its count on the terms frame; its message
+  // 3 is a bare decision with no count.
+  expect(initiatorSent[0]).toMatchObject({
+    linkageTerms: termsA,
+    recordCount: 100,
+  });
+  // The responder's message 2 carries its count on its terms + decision frame.
+  expect(responderSent[0]).toMatchObject({
+    linkageTerms: termsB,
+    decision: "proceed",
+    recordCount: 200,
+  });
+
+  // No party ever sends a standalone {recordCount} frame: a count only ever
+  // rides a frame that also carries the terms.
+  for (const frame of [...initiatorSent, ...responderSent]) {
+    if ("recordCount" in frame) expect("linkageTerms" in frame).toBe(true);
+  }
+});
+
+test("both-output role resolves over the folded terms exchange (both selections)", async () => {
+  // The whole-path guard for criterion 2: run the real terms exchange (which now
+  // carries the counts), then resolve the role from the returned
+  // partnerRecordCount, for each smaller-dataset selection.
+  const out: Output = { expectsOutput: true, shareWithPartner: true };
+
+  // Selection 1: initiator has fewer records -> initiator is the receiver.
+  {
     const [connA, connB] = makeConnections();
-    const wrap = (
-      conn: MessageConnection,
-      sink: unknown[],
-    ): MessageConnection => ({
-      send: (m: unknown) => {
-        sink.push(m);
-        return conn.send(m);
-      },
-      receive: (t?: number) => conn.receive(t),
-      close: () => conn.close(),
-    });
-    const initiator: unknown[] = [];
-    const responder: unknown[] = [];
-    await Promise.all([
-      resolveRole(wrap(connA, initiator), "initiator", local, partner, 100),
-      resolveRole(wrap(connB, responder), "responder", partner, local, 200),
+    const [a, b] = await Promise.all([
+      exchangeTerms(connA, "initiator", termsA, 50),
+      exchangeTerms(connB, "responder", termsB, 200),
     ]);
-    return { initiator, responder };
-  };
+    expect(a.partnerRecordCount).toBe(200);
+    expect(b.partnerRecordCount).toBe(50);
+    expect(resolveRole("initiator", out, out, 50, a.partnerRecordCount)).toBe(
+      "receiver",
+    );
+    expect(resolveRole("responder", out, out, 200, b.partnerRecordCount)).toBe(
+      "sender",
+    );
+  }
 
-  // Both-output: each party sends exactly its own record count, once.
-  const bothFrames = await captureFrames(both, both);
-  expect(bothFrames.initiator).toEqual([{ recordCount: 100 }]);
-  expect(bothFrames.responder).toEqual([{ recordCount: 200 }]);
+  // Selection 2: responder has fewer records -> responder is the receiver.
+  {
+    const [connA, connB] = makeConnections();
+    const [a, b] = await Promise.all([
+      exchangeTerms(connA, "initiator", termsA, 200),
+      exchangeTerms(connB, "responder", termsB, 50),
+    ]);
+    expect(a.partnerRecordCount).toBe(50);
+    expect(b.partnerRecordCount).toBe(200);
+    expect(resolveRole("initiator", out, out, 200, a.partnerRecordCount)).toBe(
+      "sender",
+    );
+    expect(resolveRole("responder", out, out, 50, b.partnerRecordCount)).toBe(
+      "receiver",
+    );
+  }
+});
 
-  // Each one-sided direction puts the identical frames on the wire -- both the
-  // initiator's and the responder's -- rather than skipping the exchange.
-  const initReceiverFrames = await captureFrames(
-    oneSidedReceiver,
-    oneSidedSender,
+// --- Missing record count ----------------------------------------------------
+
+test("initiator aborts when a proceed frame omits the record count", async () => {
+  // recordCount is optional on the message-2 schema because that frame doubles as
+  // the responder's abort frame, so a proceed that omits it is not a schema
+  // rejection: the initiator enforces presence explicitly (the count feeds role
+  // resolution and the single-pass element bounds) and aborts rather than
+  // proceeding without it. Drive the responder by hand to inject a countless
+  // proceed frame.
+  const [connA, connB] = makeConnections();
+  const initiator = exchangeTerms(connA, "initiator", termsA, 100);
+  await connB.receive(); // msg 1: initiator's terms
+  await connB.send({ linkageTerms: termsB, decision: "proceed" }); // no recordCount
+  // The initiator sends an abort (msg 3) and then throws; drain the abort so
+  // connB does not dangle, and confirm it carries the reason.
+  const abort = await connB.receive();
+  expect(abort).toMatchObject({
+    decision: "abort",
+    abortReasons: ["partner omitted record count"],
+  });
+  await expect(initiator).rejects.toThrow(
+    "partner omitted record count on terms exchange",
   );
-  expect(initReceiverFrames.initiator).toEqual(bothFrames.initiator);
-  expect(initReceiverFrames.responder).toEqual(bothFrames.responder);
+});
 
-  const initSenderFrames = await captureFrames(
-    oneSidedSender,
-    oneSidedReceiver,
-  );
-  expect(initSenderFrames.initiator).toEqual(bothFrames.initiator);
-  expect(initSenderFrames.responder).toEqual(bothFrames.responder);
+test("responder rejects a message 1 that omits the record count", async () => {
+  // recordCount is required on message 1 (the initiator's opening terms are never
+  // an abort), so an omitted count is a schema rejection: the responder relays it
+  // as a failed-to-parse abort rather than proceeding without a count.
+  const [connA, connB] = makeConnections();
+  const responder = exchangeTerms(connB, "responder", termsB, 200);
+  await connA.send({ linkageTerms: termsA }); // msg 1 without recordCount
+  // The responder aborts (msg 2) with a parse-failure reason; drain it.
+  const abort = await connA.receive();
+  expect(abort).toMatchObject({ decision: "abort" });
+  await expect(responder).rejects.toThrow("linkage terms are incompatible");
 });
 
 // --- Incompatible terms ------------------------------------------------------
@@ -381,8 +441,9 @@ test("responder neutralizes partner bytes in a linkage-terms parse error", async
   // dump leaks U+202E verbatim).
   const evilKey = "\x1b[31m‮" + "x".repeat(MAX_NAME_LENGTH);
   const [connA, connB] = makeConnections();
-  const responder = exchangeTerms(connB, "responder", termsB);
+  const responder = exchangeTerms(connB, "responder", termsB, 200);
   await connA.send({
+    recordCount: 100,
     linkageTerms: {
       ...termsA,
       linkageKeys: [
@@ -417,8 +478,10 @@ test("initiator: a pathological-count abortReasons fails cleanly, not with a Ran
   // boundedArray gate turns it into one clean count issue, so receiveParsed
   // surfaces a ConnectionError("protocol") with a non-RangeError cause.
   const [connA, connB] = makeConnections();
-  const initiator = exchangeTerms(connA, "initiator", termsA);
+  const initiator = exchangeTerms(connA, "initiator", termsA, 100);
   await connB.receive(); // consume the initiator's terms (message 1)
+  // An abort frame carries no recordCount (like save, role metadata is not spread
+  // onto an abort); the initiator throws on the abort before it would read one.
   await connB.send({
     linkageTerms: termsB,
     decision: "abort",
@@ -450,13 +513,17 @@ test("exchangeTerms responder: rejects (does not hang) when abort send fails on 
     close: () => connB.close(),
   };
 
-  const responder = exchangeTerms(failingB, "responder", {
-    ...termsB,
-    algorithm: "psi-c",
-  });
+  const responder = exchangeTerms(
+    failingB,
+    "responder",
+    { ...termsB, algorithm: "psi-c" },
+    200,
+  );
   // Inject msg1 (the initiator's terms) directly. Running the initiator's
   // exchangeTerms is not possible here because the responder's reply (the
-  // failed abort send) never reaches connA, and the initiator would hang.
-  await connA.send({ linkageTerms: termsA });
+  // failed abort send) never reaches connA, and the initiator would hang. The
+  // recordCount keeps msg1 well-formed so the responder reaches the algorithm
+  // incompatibility (not a parse error) before its abort send fails.
+  await connA.send({ linkageTerms: termsA, recordCount: 100 });
   await expect(responder).rejects.toThrow("linkage terms are incompatible");
 });
