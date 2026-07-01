@@ -1,8 +1,11 @@
+import { Readable } from "node:stream";
+
 import { describe, expect, test, vi } from "vitest";
 
 import { TransportOperationStalledError } from "@psilink/core";
 
 import {
+  SFTP_PUT_PROGRESS_CHUNK_BYTES,
   SFTP_SLOW_OPERATION_WARNING_MS,
   createBoundedPutSource,
   transportOperationStalledError,
@@ -194,6 +197,50 @@ describe("createBoundedPutSource source teardown", () => {
     void result;
     complete("uploaded");
     expect(source.destroyed).toBe(true);
+  });
+});
+
+// createBoundedPutSource accepts a [header, payload] chunk list and streams the
+// parts back-to-back, so the transport writes header || payload without the
+// source ever concatenating them in memory (the send-path peak-shaving).
+describe("createBoundedPutSource chunk list", () => {
+  const drain = (source: Readable): Promise<Buffer> =>
+    new Promise((resolve, reject) => {
+      const received: Buffer[] = [];
+      source.on("data", (c: Buffer) => received.push(c));
+      source.on("end", () => resolve(Buffer.concat(received)));
+      source.on("error", reject);
+    });
+
+  test("emits the parts in order, reassembling to their concatenation", async () => {
+    const header = Buffer.from([1, 1, 0, 0, 0, 0, 0, 0, 0, 5]);
+    // A plain Uint8Array part (not a Buffer) crossing a chunk boundary exercises
+    // the zero-copy Buffer-view path and the multi-part slicing loop.
+    const payload = new Uint8Array(SFTP_PUT_PROGRESS_CHUNK_BYTES + 40);
+    for (let i = 0; i < payload.length; i += 1)
+      payload[i] = (i * 17 + 3) & 0xff;
+    const { source, result, complete } = createBoundedPutSource(
+      "/remote/framed",
+      [header, payload],
+    );
+    void result.catch(() => {});
+    const bytes = await drain(source);
+    complete("uploaded");
+    expect(bytes.equals(Buffer.concat([header, payload]))).toBe(true);
+    // Every emitted chunk is a Buffer (what ssh2's write stream consumes), and the
+    // header led, so byte 0 is the version marker.
+    expect(bytes[0]).toBe(1);
+  });
+
+  test("skips zero-length parts and still reaches EOF", async () => {
+    const { source, result, complete } = createBoundedPutSource(
+      "/remote/framed",
+      [Buffer.alloc(0), Buffer.from("abc"), Buffer.alloc(0)],
+    );
+    void result.catch(() => {});
+    const bytes = await drain(source);
+    complete("uploaded");
+    expect(bytes.toString()).toBe("abc");
   });
 });
 

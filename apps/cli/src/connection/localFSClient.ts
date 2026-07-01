@@ -12,6 +12,7 @@ import type {
   FileTransportClient,
   GetOptions,
   PutOptions,
+  PutSource,
 } from "@psilink/core";
 
 import { frameSizeExceededError } from "./frameSizeGuard";
@@ -222,11 +223,7 @@ export class LocalFSClient implements FileTransportClient {
     }
   }
 
-  async put(
-    src: string | Buffer | NodeJS.ReadableStream,
-    dest: string,
-    options?: PutOptions,
-  ): Promise<void> {
+  async put(src: PutSource, dest: string, options?: PutOptions): Promise<void> {
     if (typeof src === "string") {
       // ssh2-sftp-client interprets a string src as a local file path to copy
       // from; LocalFSClient does not support that usage.
@@ -241,6 +238,19 @@ export class LocalFSClient implements FileTransportClient {
     };
     if (Buffer.isBuffer(src)) {
       await fs.writeFile(dest, src, writeOptions);
+    } else if (Array.isArray(src)) {
+      // A [header, payload] chunk list: write the parts back-to-back with one
+      // positional writev so the 10-byte header is prepended WITHOUT
+      // concatenating the payload into a fresh buffer (the send-path
+      // peak-shaving this mirrors -- for a binary frame the payload is never
+      // copied). The resulting on-disk bytes are the parts joined, byte-identical
+      // to writing their concatenation.
+      const handle = await fs.open(dest, writeOptions.flag);
+      try {
+        await handle.writev(src);
+      } finally {
+        await handle.close();
+      }
     } else {
       const chunks: Buffer[] = [];
       for await (const chunk of src) {

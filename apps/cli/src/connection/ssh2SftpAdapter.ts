@@ -10,6 +10,7 @@ import {
   FileTransportClient,
   GetOptions,
   PutOptions,
+  PutSource,
   TransportOperationStalledError,
   getLoggerForVerbosity,
   retryPromise,
@@ -689,103 +690,105 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     });
   }
 
-  put(
-    src: string | Buffer | NodeJS.ReadableStream,
-    dest: string,
-    options?: PutOptions,
-  ): Promise<unknown> {
-    if (!Buffer.isBuffer(src)) {
-      // string (a local file path) and ReadableStream are permitted by the
-      // transport-agnostic FileTransportClient.put signature but never produced by
-      // this app: every FileSyncConnection put() call site builds a Buffer. They
-      // carry no per-op idle window -- it needs a re-runnable source, which a
-      // one-shot stream cannot give. Retry safety differs by type: a string is
-      // re-runnable (ssh2-sftp-client opens a fresh fs.createReadStream per
-      // attempt), but a provided ReadableStream is one-shot -- a failed attempt
-      // half-drains it, so a retry would re-pipe an already-consumed stream and
-      // silently upload nothing. So retry only a string; a stream gets a single
-      // attempt. Both stay bounded only by the whole-exchange budget (no per-op
-      // idle window). A stream/string src has no cheap size, so the slow-op warning
-      // falls back to elapsed-only.
-      const retries =
-        typeof src === "string" ? (this.options!.retries ?? 5) : 0;
+  put(src: PutSource, dest: string, options?: PutOptions): Promise<unknown> {
+    if (Buffer.isBuffer(src) || Array.isArray(src)) {
+      // Buffer or a [header, payload] chunk list -- the two shapes this app
+      // produces. Both are re-iterable, so the bounded source is rebuilt per retry
+      // attempt, and both go through the progress-based idle window
+      // (createBoundedPutSource): the payload is streamed in chunks so a withheld
+      // write acknowledgement stalls the source and trips the window, while a
+      // slow-but-progressing large upload keeps resetting it and is never
+      // false-failed. A flat whole-operation deadline (as the metadata ops use)
+      // would wrongly fail a legitimately large/slow ciphertext write. The chunk
+      // list is streamed part-by-part without concatenation, so the hottest
+      // (largest) binary frame keeps both the stall window and the retry.
+      const payload = src;
+      const payloadBytes = Buffer.isBuffer(src)
+        ? src.length
+        : src.reduce((total, part) => total + part.length, 0);
       return this.warnIfSlow(
         retryPromise(
           () => {
-            // Re-check the dead-session guard before every attempt, as the Buffer
-            // branch does: a fatal SFTP error landing between string-src retries
-            // would otherwise issue put() on the dead channel, whose buffered
-            // request never calls back, and ride the whole-exchange budget. (For a
-            // single-attempt stream this is just the method-entry check.)
+            // Re-check the dead-session guard before EVERY attempt, not only at
+            // method entry -- mirroring rename(). A fatal SFTP protocol error can
+            // land between attempts (the guarded wrapper 'error' listener sets it)
+            // and leave no in-flight request for cleanupRequests to fail; without
+            // this re-check the next attempt would issue put() on the dead channel,
+            // whose write stream never opens, so the source is never pulled and the
+            // idle window would run its full bound before the typed terminal error
+            // (which is not retryable) ended the retry. Re-checking turns that wait
+            // into the prompt failure rename() already gives.
             const dead = this.deadSessionError("file write", dest);
             if (dead) return Promise.reject(dead);
-            return this.client.put(src, dest, { writeStreamOptions: options });
+            // Fresh source + idle window per attempt: the source is single-use, but
+            // it is rebuilt from the retained Buffer/chunk list on each retry, so
+            // the broad retry behavior is preserved. The over-window stall is owned
+            // by the source, decided at the point of detection; this attempt's
+            // settle only feeds the non-stall outcomes via complete()/fail().
+            const { source, result, complete, fail } = createBoundedPutSource(
+              dest,
+              payload,
+              SFTP_PUT_PROGRESS_CHUNK_BYTES,
+              this.stallDeadlineMs,
+            );
+            void this.client
+              .put(source, dest, { writeStreamOptions: options })
+              .then(complete, fail);
+            return result;
           },
-          // `??` not `||` (in the string case) so an explicit retries: 0 disables
-          // the retry rather than being coerced to the default of 5.
-          retries,
+          // `??` not `||` so an explicit retries: 0 disables the retry rather than
+          // being coerced to the default of 5.
+          this.options!.retries ?? 5,
           100,
-          // Terminate on the dead-session typed error rather than retrying it --
-          // the only TransportOperationStalledError this branch can see, since it
-          // has no idle window; mirrors the Buffer branch's predicate.
+          // Do not retry the idle-window stall: a TransportOperationStalledError is
+          // terminal (a server withholding acks will keep withholding), so retrying
+          // would stack the 60 s bound. Mirrors rename(), which likewise excludes
+          // the typed stall from its retry predicate; the dead-session short-circuit
+          // (also a TransportOperationStalledError) is excluded for the same reason.
           (error) => !(error instanceof TransportOperationStalledError),
         ),
         "file write",
         dest,
+        () => `${payloadBytes} byte payload`,
       );
     }
 
-    // Buffer src -- the only kind this app produces. Bound the upload by a
-    // progress-based idle window (createBoundedPutSource): the payload is streamed
-    // in chunks so a withheld write acknowledgement stalls the source and trips the
-    // window, while a slow-but-progressing large upload keeps resetting it and is
-    // never false-failed. A flat whole-operation deadline (as the metadata ops use)
-    // would wrongly fail a legitimately large/slow ciphertext write.
-    const payload = src;
+    // string (a local file path) or a one-shot ReadableStream: permitted by the
+    // transport-agnostic FileTransportClient.put signature but never produced by
+    // this app (every FileSyncConnection put() call site hands a Buffer or a chunk
+    // list). They carry no per-op idle window -- it needs a re-runnable source,
+    // which a one-shot stream cannot give. Retry safety differs by type: a string
+    // is re-runnable (ssh2-sftp-client opens a fresh fs.createReadStream per
+    // attempt), but a provided ReadableStream is one-shot -- a failed attempt
+    // half-drains it, so a retry would re-pipe an already-consumed stream and
+    // silently upload nothing. So retry only a string; a stream gets a single
+    // attempt. Both stay bounded only by the whole-exchange budget (no per-op idle
+    // window). A stream/string src has no cheap size, so the slow-op warning falls
+    // back to elapsed-only.
+    const retries = typeof src === "string" ? (this.options!.retries ?? 5) : 0;
     return this.warnIfSlow(
       retryPromise(
         () => {
-          // Re-check the dead-session guard before EVERY attempt, not only at
-          // method entry -- mirroring rename(). A fatal SFTP protocol error can
-          // land between attempts (the guarded wrapper 'error' listener sets it)
-          // and leave no in-flight request for cleanupRequests to fail; without
-          // this re-check the next attempt would issue put() on the dead channel,
-          // whose write stream never opens, so the source is never pulled and the
-          // idle window would run its full bound before the typed terminal error
-          // (which is not retryable) ended the retry. Re-checking turns that wait
-          // into the prompt failure rename() already gives.
+          // Re-check the dead-session guard before every attempt, as the Buffer
+          // branch does: a fatal SFTP error landing between string-src retries
+          // would otherwise issue put() on the dead channel, whose buffered
+          // request never calls back, and ride the whole-exchange budget. (For a
+          // single-attempt stream this is just the method-entry check.)
           const dead = this.deadSessionError("file write", dest);
           if (dead) return Promise.reject(dead);
-          // Fresh source + idle window per attempt: the source is single-use, but
-          // it is rebuilt from the retained Buffer on each retry, so the broad
-          // retry behavior is preserved. The over-window stall is owned by the
-          // source, decided at the point of detection; this attempt's settle only
-          // feeds the non-stall outcomes via complete()/fail().
-          const { source, result, complete, fail } = createBoundedPutSource(
-            dest,
-            payload,
-            SFTP_PUT_PROGRESS_CHUNK_BYTES,
-            this.stallDeadlineMs,
-          );
-          void this.client
-            .put(source, dest, { writeStreamOptions: options })
-            .then(complete, fail);
-          return result;
+          return this.client.put(src, dest, { writeStreamOptions: options });
         },
-        // `??` not `||` so an explicit retries: 0 disables the retry rather than
-        // being coerced to the default of 5.
-        this.options!.retries ?? 5,
+        // `??` not `||` (in the string case) so an explicit retries: 0 disables
+        // the retry rather than being coerced to the default of 5.
+        retries,
         100,
-        // Do not retry the idle-window stall: a TransportOperationStalledError is
-        // terminal (a server withholding acks will keep withholding), so retrying
-        // would stack the 60 s bound. Mirrors rename(), which likewise excludes the
-        // typed stall from its retry predicate; the dead-session short-circuit (also
-        // a TransportOperationStalledError) is excluded for the same reason.
+        // Terminate on the dead-session typed error rather than retrying it --
+        // the only TransportOperationStalledError this branch can see, since it
+        // has no idle window; mirrors the Buffer branch's predicate.
         (error) => !(error instanceof TransportOperationStalledError),
       ),
       "file write",
       dest,
-      () => `${payload.length} byte payload`,
     );
   }
 

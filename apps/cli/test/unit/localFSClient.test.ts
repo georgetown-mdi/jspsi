@@ -301,6 +301,30 @@ test("put with flags: 'a' appends to an existing file", async () => {
   expect(await fs.readFile(dest, "utf8")).toBe("hello world");
 });
 
+test("put writes a [header, payload] chunk list as header || payload", async () => {
+  // The send path hands put() a [header, payload] chunk list; LocalFSClient must
+  // write the parts back-to-back (one positional writev) so the on-disk bytes
+  // equal their concatenation, without concatenating the payload into a fresh
+  // buffer. The payload is a plain Uint8Array (not a Buffer), the send path's
+  // binary-frame case.
+  const dest = path.join(dir, "framed.bin");
+  const header = Buffer.from([1, 1, 0, 0, 0, 0, 0, 0, 0, 4]);
+  const payload = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
+  await client.put([header, payload], dest);
+  expect(await fs.readFile(dest)).toEqual(Buffer.concat([header, payload]));
+});
+
+test("put with a chunk list and flags: 'a' appends the joined parts", async () => {
+  const dest = path.join(dir, "framed-append.bin");
+  await fs.writeFile(dest, Buffer.from([0x00]));
+  await client.put([Buffer.from([0x01]), Buffer.from([0x02, 0x03])], dest, {
+    flags: "a",
+  });
+  expect(await fs.readFile(dest)).toEqual(
+    Buffer.from([0x00, 0x01, 0x02, 0x03]),
+  );
+});
+
 // --- delete ------------------------------------------------------------------
 
 test("delete removes an existing file", async () => {

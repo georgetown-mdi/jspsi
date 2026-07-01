@@ -2214,18 +2214,29 @@ test("authenticated exchange runs through EncryptedMessageConnection: wire bytes
     //    the decorator performed a real AES-GCM round-trip, not a pass-through.
     expect(received).toEqual({ probe: CANARY });
 
-    // Collect every non-empty buffer the transport wrote. Every protocol frame
-    // is written as a Buffer (FileSyncConnection.send serializes the message to a
-    // binary envelope and calls put(Buffer, ...)). Assert that invariant rather
-    // than silently filtering: a future stream-based write must fail this test
-    // loudly instead of slipping a cleartext frame past the canary check below.
+    // Collect every non-empty body the transport wrote, normalized to its on-disk
+    // bytes. A protocol frame is written either as a single Buffer (a hello or
+    // ack) or, for a message, as a [header, payload] chunk list the transport
+    // writes back-to-back -- FileSyncConnection.send streams the 10-byte header
+    // and the payload as two chunks rather than concatenating them (the
+    // peak-shaving framing). Assert every src is one of those two shapes -- never
+    // a string or a stream, either of which could slip a cleartext frame past the
+    // canary check below -- rather than silently filtering, so a future write that
+    // smuggled bytes fails this test loudly.
     const writtenSrcs = putSpy.mock.calls.map((call) => call[0]);
+    const wireBuffers: Buffer[] = [];
     for (const src of writtenSrcs) {
-      expect(Buffer.isBuffer(src)).toBe(true);
+      let buf: Buffer;
+      if (Buffer.isBuffer(src)) {
+        buf = src;
+      } else {
+        expect(
+          Array.isArray(src) && src.every((part) => part instanceof Uint8Array),
+        ).toBe(true);
+        buf = Buffer.concat(src as Uint8Array[]);
+      }
+      if (buf.length > 0) wireBuffers.push(buf);
     }
-    const wireBuffers = writtenSrcs.filter(
-      (src): src is Buffer => Buffer.isBuffer(src) && src.length > 0,
-    );
 
     // 2. The cleartext probe never crossed the wire in any frame (PSI or
     //    key-exchange) -- checked over the raw bytes, since frames are now binary.

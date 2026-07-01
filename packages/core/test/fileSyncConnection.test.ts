@@ -6,6 +6,7 @@ import {
   serializeFileSyncMessage,
   MESSAGE_TYPE_OBJECT,
   MESSAGE_TYPE_BINARY,
+  MESSAGE_HEADER_BYTES,
   TERMINAL_FRAME_DRAIN_TIMEOUT_MS,
 } from "../src/connection/fileSyncConnection";
 import {
@@ -35,6 +36,24 @@ import {
 } from "../src/connection/messageConnection";
 import { withCapturedLogs } from "../src/testing";
 import logLibrary from "loglevel";
+
+// Reduce a put() src to the on-disk bytes a real transport writes, so every mock
+// transport in this file agrees on the framing. send() now hands put() a
+// [header, payload] chunk list instead of one pre-concatenated Buffer (the
+// peak-shaving change), so a mock store must JOIN the chunks; a lone Buffer and a
+// drained stream are unchanged. Returns undefined for a string src (a local path,
+// never an in-memory body); callers that must reject a string check for undefined.
+async function putSrcBytes(
+  src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
+): Promise<Buffer | undefined> {
+  if (typeof src === "string") return undefined;
+  if (Buffer.isBuffer(src)) return src;
+  if (Array.isArray(src)) return Buffer.concat(src);
+  const chunks: Buffer[] = [];
+  for await (const chunk of src)
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks);
+}
 
 // Minimal in-memory FileTransportClient mock.  Only the methods called by
 // send() need real implementations; everything else is a no-op.
@@ -68,18 +87,10 @@ function makeMockClient(): {
       if (!data) throw new Error(`${path}: not found`);
       return data as Buffer<ArrayBufferLike>;
     },
-    put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
-      if (typeof src === "string") {
-        throw new Error("string src is not supported");
-      } else if (Buffer.isBuffer(src)) {
-        files.set(dest, src);
-      } else {
-        const chunks: Buffer[] = [];
-        for await (const chunk of src) {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-        }
-        files.set(dest, Buffer.concat(chunks));
-      }
+    put: async (src, dest) => {
+      const bytes = await putSrcBytes(src);
+      if (bytes === undefined) throw new Error("string src is not supported");
+      files.set(dest, bytes);
     },
     delete: async (path: string) => {
       files.delete(path);
@@ -1387,6 +1398,54 @@ test("send writes the in-flight file with a .tmp extension and renames to .json"
   expect(renameTargets[0]).toMatch(
     new RegExp(`^/test/${conn.id}-\\d+\\.json$`),
   );
+});
+
+test("send streams the header and payload as two chunks, without a concat copy", async () => {
+  // The peak-shaving change: send() hands put() a [header, payload] chunk list
+  // rather than one pre-concatenated buffer, so prepending the 10-byte header no
+  // longer copies the whole payload -- a binary frame holds ~1x its size live, not
+  // ~2x. Pin (a) put() receives a two-element array, (b) the payload part is the
+  // SAME reference the caller passed (never copied), and (c) the bytes the
+  // transport writes are byte-identical to the single-buffer serialization, with
+  // the on-disk byte count the filename encodes matching.
+  const { client } = makeMockClient();
+  const conn = await makeConnectedConn(client);
+  conn.peerId = "stub-peer";
+
+  let putSrc:
+    | string
+    | Buffer
+    | Uint8Array[]
+    | NodeJS.ReadableStream
+    | undefined;
+  const origPut = client.put.bind(client);
+  client.put = async (src, dest, opts) => {
+    putSrc = src;
+    return origPut(src, dest, opts);
+  };
+  let renamedTo: string | undefined;
+  const origRename = client.rename.bind(client);
+  client.rename = async (from, to) => {
+    renamedTo = to;
+    return origRename(from, to);
+  };
+
+  const frame = new Uint8Array([0x10, 0x20, 0x30, 0x40, 0x50]);
+  await conn.send(frame);
+
+  // (a) A two-chunk list: the header then the payload.
+  expect(Array.isArray(putSrc)).toBe(true);
+  const parts = putSrc as Uint8Array[];
+  expect(parts).toHaveLength(2);
+  expect(parts[0].length).toBe(MESSAGE_HEADER_BYTES);
+  // (b) The payload chunk IS the caller's array, not a copy -- the ~1x proof.
+  expect(parts[1]).toBe(frame);
+  // (c) On-disk bytes equal the single-buffer serialization (header || payload)
+  // for the same seq, and the filename encodes that exact length.
+  const expected = serializeFileSyncMessage(MESSAGE_TYPE_BINARY, 0, frame);
+  expect(Buffer.concat(parts).equals(expected)).toBe(true);
+  expect(renamedTo).toBe(`/test/${conn.id}-${expected.length}.json`);
+  expect(expected.length).toBe(MESSAGE_HEADER_BYTES + frame.length);
 });
 
 test("send removes the .tmp file in-process when the rename fails", async () => {
@@ -4262,8 +4321,12 @@ test("synchronize() lockless mode completes rendezvous when createExclusive and 
       if (!data) throw new Error(`${path}: not found`);
       return data as Buffer<ArrayBufferLike>;
     },
-    put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
-      if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
+    put: async (
+      src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
+      dest: string,
+    ) => {
+      const bytes = await putSrcBytes(src);
+      if (bytes !== undefined) sharedFiles.set(dest, bytes);
     },
     delete: async () => {
       throw new Error("delete not supported on this transport");
@@ -4339,8 +4402,12 @@ test("synchronize() lockless mode role assignment matches the lexicographic rule
       if (!data) throw new Error(`${path}: not found`);
       return data as Buffer<ArrayBufferLike>;
     },
-    put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
-      if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
+    put: async (
+      src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
+      dest: string,
+    ) => {
+      const bytes = await putSrcBytes(src);
+      if (bytes !== undefined) sharedFiles.set(dest, bytes);
     },
     delete: async () => {
       throw new Error("delete not supported");
@@ -4429,8 +4496,12 @@ test("synchronize() lockless mode joiner fast-path is skipped; lockless barrier 
       if (!data) throw new Error(`${path}: not found`);
       return data as Buffer<ArrayBufferLike>;
     },
-    put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
-      if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
+    put: async (
+      src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
+      dest: string,
+    ) => {
+      const bytes = await putSrcBytes(src);
+      if (bytes !== undefined) sharedFiles.set(dest, bytes);
     },
     delete: async () => {
       deleteCalled = true;
@@ -4949,8 +5020,12 @@ test("synchronize() lockless mode: round-trip hello body and zero-length ack mar
       if (!data) throw new Error(`${path}: not found`);
       return data as Buffer<ArrayBufferLike>;
     },
-    put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
-      if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
+    put: async (
+      src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
+      dest: string,
+    ) => {
+      const bytes = await putSrcBytes(src);
+      if (bytes !== undefined) sharedFiles.set(dest, bytes);
     },
     delete: async (path: string) => {
       sharedFiles.delete(path);
@@ -5104,8 +5179,12 @@ test("synchronize() lockless: rendezvous completes on ack existence; ack body is
       if (data === undefined) throw new Error(`${path}: not found`);
       return data as Buffer<ArrayBufferLike>;
     },
-    put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
-      if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
+    put: async (
+      src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
+      dest: string,
+    ) => {
+      const bytes = await putSrcBytes(src);
+      if (bytes !== undefined) sharedFiles.set(dest, bytes);
     },
     delete: async (path: string) => {
       sharedFiles.delete(path);
@@ -5957,8 +6036,12 @@ test("retain mode: multi-message exchange completes when delete() always fails",
       if (!data) throw new Error(`${path}: not found`);
       return data as Buffer<ArrayBufferLike>;
     },
-    put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
-      if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
+    put: async (
+      src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
+      dest: string,
+    ) => {
+      const bytes = await putSrcBytes(src);
+      if (bytes !== undefined) sharedFiles.set(dest, bytes);
     },
     delete: async () => {
       throw new Error("delete not supported on this transport");
@@ -6386,8 +6469,12 @@ test("retain mode + lockless rendezvous: multi-message exchange completes end-to
       if (!data) throw new Error(`${path}: not found`);
       return data as Buffer<ArrayBufferLike>;
     },
-    put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
-      if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
+    put: async (
+      src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
+      dest: string,
+    ) => {
+      const bytes = await putSrcBytes(src);
+      if (bytes !== undefined) sharedFiles.set(dest, bytes);
     },
     delete: async (path: string) => {
       deleteCalls.push(path);
@@ -8063,10 +8150,11 @@ test.each([
         return data as Buffer<ArrayBufferLike>;
       },
       put: async (
-        src: string | Buffer | NodeJS.ReadableStream,
+        src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
         dest: string,
       ) => {
-        if (Buffer.isBuffer(src)) sharedFiles.set(dest, src);
+        const bytes = await putSrcBytes(src);
+        if (bytes !== undefined) sharedFiles.set(dest, bytes);
       },
       delete: async () => {
         throw new Error("delete not supported on this transport");
@@ -9839,8 +9927,12 @@ test("split directories: a full retain-mode exchange between two bridged parties
         throw Object.assign(new Error(`${p}: not found`), { code: "ENOENT" });
       return data as Buffer<ArrayBufferLike>;
     },
-    put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
-      if (Buffer.isBuffer(src)) store.set(dest, src);
+    put: async (
+      src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
+      dest: string,
+    ) => {
+      const bytes = await putSrcBytes(src);
+      if (bytes !== undefined) store.set(dest, bytes);
     },
     delete: async (p: string) => {
       store.delete(p);

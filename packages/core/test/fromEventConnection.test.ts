@@ -54,11 +54,15 @@ function makeMockClient(): {
       if (!data) throw new Error(`${path}: not found`);
       return data as Buffer<ArrayBufferLike>;
     },
-    put: async (src: string | Buffer | NodeJS.ReadableStream, dest: string) => {
+    put: async (src, dest) => {
       if (Buffer.isBuffer(src)) {
         files.set(dest, src);
       } else if (typeof src === "string") {
         files.set(dest, Buffer.from(src));
+      } else if (Array.isArray(src)) {
+        // A [header, payload] chunk list from send(): join the parts into the
+        // on-disk bytes a real transport writes back-to-back.
+        files.set(dest, Buffer.concat(src));
       } else {
         const chunks: Buffer[] = [];
         for await (const chunk of src) {

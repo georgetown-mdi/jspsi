@@ -1092,6 +1092,121 @@ describe("bounded put (idle window)", () => {
     expect(Buffer.concat(received).equals(payload)).toBe(true);
   });
 
+  test("uploads a [header, payload] chunk list byte-for-byte without concatenation", async () => {
+    // The send path hands put() a [header, payload] chunk list instead of one
+    // pre-concatenated buffer. The chunked source must stream the parts
+    // back-to-back so the on-disk bytes equal header || payload exactly, with the
+    // 10-byte header first (byte 0 is the version marker the receiver keys on).
+    const adapter = new SSH2SFTPClientAdapter();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).options = {};
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn: vi.fn() };
+    const received: Buffer[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = {
+      put: vi.fn().mockImplementation((source: Readable) => {
+        return new Promise<string>((resolve) => {
+          source.on("data", (c: Buffer) => received.push(c));
+          source.on("end", () => resolve("uploaded data stream"));
+        });
+      }),
+    };
+    const header = Buffer.from([1, 1, 0, 0, 0, 0, 0, 0, 0, 5]);
+    // A plain Uint8Array payload (not a Buffer) that crosses a chunk boundary,
+    // exercising the zero-copy Buffer-view path and multi-part streaming.
+    const payload = new Uint8Array(SFTP_PUT_PROGRESS_CHUNK_BYTES + 40);
+    for (let i = 0; i < payload.length; i += 1)
+      payload[i] = (i * 17 + 3) & 0xff;
+    await adapter.put([header, payload], "/remote/framed.bin");
+    expect(
+      Buffer.concat(received).equals(Buffer.concat([header, payload])),
+    ).toBe(true);
+    // The header's first byte reached the server first (parts not reordered).
+    expect(received[0][0]).toBe(1);
+  });
+
+  test("bounds a stalled [header, payload] chunk-list put via the idle window", async () => {
+    // The idle/stall window (and its typed terminal error) must cover the chunk
+    // list exactly as it covers a lone Buffer -- this is the hottest (largest)
+    // binary send path, so losing the stall guard here would be the regression the
+    // task guards against.
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).options = {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn() };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = {
+        put: vi.fn().mockImplementation((source: Readable) => {
+          return new Promise<never>(() => {
+            let consumed = 0;
+            source.on("data", () => {
+              consumed += 1;
+              if (consumed >= 2) source.pause();
+            });
+          });
+        }),
+      };
+      const header = Buffer.alloc(10, 9);
+      const payload = Buffer.alloc(3 * SFTP_PUT_PROGRESS_CHUNK_BYTES, 7);
+      const writing = adapter.put([header, payload], "/remote/out.bin");
+      const captured = writing.catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(SFTP_STALL_DEADLINE_MS + 1);
+      const err = await captured;
+      expect(err).toBeInstanceOf(TransportOperationStalledError);
+      expect((err as Error).message).toContain("made no upload progress");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("retries a [header, payload] chunk-list put on transient failure (source rebuilt per attempt)", async () => {
+    // The chunk list is re-iterable, so a failed attempt rebuilds the bounded
+    // source from the retained parts and re-streams the identical bytes -- the
+    // retry the one-shot stream branch cannot offer. Each successful attempt must
+    // deliver the full header || payload.
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).options = { retries: 2 };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn() };
+      let calls = 0;
+      let delivered: Buffer | undefined;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = {
+        put: vi.fn().mockImplementation((source: Readable) => {
+          calls += 1;
+          if (calls < 3) {
+            // Consume nothing and reject: the retryable transient failure.
+            return Promise.reject(new Error("transient write failure"));
+          }
+          const received: Buffer[] = [];
+          return new Promise<string>((resolve) => {
+            source.on("data", (c: Buffer) => received.push(c));
+            source.on("end", () => {
+              delivered = Buffer.concat(received);
+              resolve("uploaded");
+            });
+          });
+        }),
+      };
+      const header = Buffer.from([1, 1, 0, 0, 0, 0, 0, 0, 0, 3]);
+      const payload = Buffer.from([0xaa, 0xbb, 0xcc]);
+      const writing = adapter.put([header, payload], "/remote/out.json");
+      await vi.advanceTimersByTimeAsync(250);
+      await expect(writing).resolves.toBe("uploaded");
+      expect(calls).toBe(3);
+      expect(delivered?.equals(Buffer.concat([header, payload]))).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("stops retrying when a fatal session error lands between put attempts", async () => {
     // Mirrors the rename() between-attempts case. The first attempt fails with a
     // retryable (non-stall) error while a fatal protocol error lands in the
