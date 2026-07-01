@@ -194,8 +194,54 @@ test("fingerprint (created): stdout is the bare fingerprint value, diagnostics o
     expect(stdout).not.toContain("Share the fingerprint");
 
     // The action banner, the bound identity, and the sharing instructions are
-    // diagnostics, so they land on stderr.
+    // diagnostics, so they land on stderr (naming the stream each is on, not just
+    // asserting its absence from stdout, so dropping a line entirely still fails).
     expect(stderr).toContain("Created signing identity");
+    expect(stderr).toContain("Identity:");
+    expect(stderr).toContain("Share the fingerprint");
+    expect(stderr).toMatch(DIAGNOSTIC_PREFIX);
+  } finally {
+    process.chdir(cwd);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("fingerprint (loaded): stdout is the bare fingerprint value, diagnostics on stderr", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-stdout-fp-load-"));
+  const cwd = process.cwd();
+  try {
+    process.chdir(dir); // hermetic: no ambient ./psilink.yaml is consulted
+    const idPath = path.join(dir, "id.json");
+    // Seed an existing identity so a plain (no --force) run loads it (Loaded)
+    // rather than creating or regenerating; report() runs the same on this path,
+    // so a stray console.log added only to the load path is caught here.
+    saveSigningIdentity(idPath, generateSigningIdentity("Party A"));
+
+    const { stdout, stderr } = await runCapturing(() =>
+      fingerprintHandler({
+        _: [],
+        $0: "psilink",
+        "identity-file": idPath,
+        "log-level": "info",
+        force: false,
+      } as unknown as Arguments),
+    );
+
+    // stdout is exactly the loaded identity's fingerprint (loading does not
+    // change it), bare and alone.
+    const loaded = loadSigningIdentity(idPath);
+    if (loaded === undefined) throw new Error("identity was not loaded");
+    const fingerprint = await computeCertificateFingerprint(loaded.certificate);
+    expect(stdout).toBe(fingerprint + "\n");
+    expect(stdout).not.toMatch(DIAGNOSTIC_PREFIX);
+    expect(stdout).not.toContain(" ");
+    expect(stdout).not.toContain("signing identity");
+    expect(stdout).not.toContain("Share the fingerprint");
+
+    // The load banner, the bound identity, and the sharing instructions are
+    // diagnostics on stderr.
+    expect(stderr).toContain("Loaded signing identity");
+    expect(stderr).toContain("Identity:");
     expect(stderr).toContain("Share the fingerprint");
     expect(stderr).toMatch(DIAGNOSTIC_PREFIX);
   } finally {
