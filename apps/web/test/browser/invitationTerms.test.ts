@@ -126,16 +126,27 @@ function collapseFor(name: string): HTMLElement {
 // content assertion waits the deferral out rather than sampling an empty panel
 // (every disclosure here has content, so this always settles). The synchronous
 // reads this replaces are why the suite flaked under full-suite CPU contention.
+//
+// Gating on non-empty (rather than on each asserted substring) suffices because
+// React commits the hidden subtree atomically -- empty, then fully populated in
+// one pass -- so a non-empty panel is a fully-rendered one; a toContain cannot
+// read a torn commit and a not-toContain cannot pass on half-rendered content. A
+// disclosure body that nested its own Suspense/Activity/lazy boundary would split
+// that commit and need a stricter, substring-specific gate.
 async function readyPanel(name: string): Promise<HTMLElement> {
   await expect
     .poll(() => {
-      try {
-        return panelFor(name).textContent;
-      } catch {
-        return "";
-      }
+      // query(), not element(): a not-yet-present toggle is the expected transient
+      // (query returns null), while an unexpected fault -- e.g. a strict-mode
+      // multiple match -- still throws out of the poll rather than being swallowed.
+      const id = toggle(name).query()?.getAttribute("aria-controls");
+      const panel = id ? document.getElementById(id) : null;
+      // trim so a whitespace-only intermediate render does not read as settled.
+      return panel?.textContent.trim() ?? "";
     })
     .not.toBe("");
+  // panelFor re-resolves the same node: the id lives on an always-mounted wrapper
+  // the component never unmounts, so it cannot have been swapped since the poll.
   return panelFor(name);
 }
 
