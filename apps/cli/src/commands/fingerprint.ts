@@ -21,8 +21,7 @@ import {
   saveSigningIdentity,
 } from "../signingIdentityFile";
 import {
-  configureLogFile,
-  configureStderrLogging,
+  configureLogging,
   exitWithError,
   LOG_LEVELS,
   parseOrExit,
@@ -320,23 +319,23 @@ export async function handler(argv: Arguments): Promise<void> {
       throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
     return resolved;
   });
-  // Install the logging sink before the level is applied and the logger is
-  // created, so getLogger("fingerprint") below inherits it: the file sink when
-  // --log-file is given, otherwise the default stderr sink, so the command's
-  // logged diagnostics (the preflight warnings and the report's banner, bound
-  // identity, regeneration warning, and sharing instructions) stay off stdout.
-  // report() prints only the bare fingerprint value through console.log;
-  // everything else it emits routes through this logger. singleValue rejects a
-  // repeated --log-file and configureLogFile rejects an unopenable path; both are
-  // UsageErrors mapped to stderr + exit 64 here.
-  const logSink = parseOrExit(() => {
-    const logFilePath = singleValue(argv, "log-file") as string | undefined;
-    return logFilePath !== undefined
-      ? configureLogFile(logFilePath)
-      : configureStderrLogging();
-  });
-  logLibrary.setDefaultLevel(logLevel);
-  const log = getLogger("fingerprint");
+  // Install the sink, apply the level, and build getLogger("fingerprint") through
+  // the shared configureLogging helper (in that order, so the logger inherits the
+  // sink): the file sink when --log-file is given, otherwise the default stderr
+  // sink, so the command's logged diagnostics (the preflight warnings and the
+  // report's banner, bound identity, regeneration warning, and sharing
+  // instructions) stay off stdout. report() prints only the bare fingerprint value
+  // through console.log; everything else it emits routes through this logger.
+  // singleValue rejects a repeated --log-file and configureLogFile rejects an
+  // unopenable path; both are UsageErrors mapped to stderr + exit 64 by the
+  // surrounding parseOrExit.
+  const { log, close: closeLogging } = parseOrExit(() =>
+    configureLogging({
+      logLevel,
+      logFile: singleValue(argv, "log-file") as string | undefined,
+      name: "fingerprint",
+    }),
+  );
 
   try {
     // Read the single-value flags through singleValue inside the try so a
@@ -407,6 +406,6 @@ export async function handler(argv: Arguments): Promise<void> {
     // file sink) on the normal exit path. Writes are synchronous and already
     // durable, so exitWithError's process.exit (which bypasses this finally)
     // loses nothing -- this is only factory/descriptor cleanup.
-    logSink.close();
+    closeLogging();
   }
 }

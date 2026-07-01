@@ -6,6 +6,7 @@ import type { Arguments } from "yargs";
 
 import {
   getDiagnosticSink,
+  getLogger,
   sanitizeErrorForDisplay,
   setDiagnosticSink,
   UsageError,
@@ -398,6 +399,56 @@ export function configureStderrLogging(): LogSink {
       // back out of a log call into the exchange.
     }
   });
+}
+
+/**
+ * The logger-and-cleanup pair returned by {@link configureLogging}: the command's
+ * logger, built after the sink and level are installed, and a `close` that
+ * restores the prior diagnostic sink and releases any file descriptor.
+ */
+export interface ConfiguredLogging {
+  /** The command's logger, created after the sink is installed and the level applied. */
+  log: ReturnType<typeof getLogger>;
+  /**
+   * Restore the diagnostic sink in place before the redirect and, for the file
+   * sink, close the underlying descriptor; best-effort and idempotent. A handler
+   * calls this in its `finally`; the error path's `process.exit` bypasses it, but
+   * the sink's writes are synchronous and already durable, so nothing is lost.
+   */
+  close(): void;
+}
+
+/**
+ * The one logging bootstrap every command handler shares: pick the diagnostic
+ * sink ({@link configureLogFile} when `logFile` is given, else the default
+ * {@link configureStderrLogging}), apply the resolved `logLevel`, and build the
+ * logger named `name` -- in that order, because core's sink must be installed and
+ * the level set before {@link getLogger} constructs the logger that inherits
+ * them. Returns the logger plus a single `close` that restores the prior sink and
+ * releases any file descriptor, so a handler installs and tears down its logging
+ * through one call rather than repeating the sink/level/getLogger/close sequence.
+ *
+ * `logLevel` and `logFile` are resolved by the caller -- through
+ * {@link LOG_LEVELS} inline, or `parseCommonBootstrapArgs` -- so this helper does
+ * no argv parsing and neither reads nor validates flags. It composes the two sink
+ * builders without changing them: {@link configureLogFile} still throws a
+ * {@link UsageError} on an unopenable `--log-file` path, so a caller keeps that
+ * mapped to exit 64 by invoking this inside its existing usage boundary
+ * ({@link parseOrExit}, or a command's `runOrExit`).
+ */
+export function configureLogging(params: {
+  logLevel: logLibrary.LogLevelNumbers;
+  logFile: string | undefined;
+  name: string;
+}): ConfiguredLogging {
+  const { logLevel, logFile, name } = params;
+  const sink =
+    logFile !== undefined
+      ? configureLogFile(logFile)
+      : configureStderrLogging();
+  logLibrary.setDefaultLevel(logLevel);
+  const log = getLogger(name);
+  return { log, close: () => sink.close() };
 }
 
 // Write the whole buffer to `fd`, looping over a partial write. fs.writeSync on a

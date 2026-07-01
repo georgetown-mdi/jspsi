@@ -1,6 +1,5 @@
 import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
-import logLibrary from "loglevel";
 import { userInfo } from "node:os";
 
 import {
@@ -32,8 +31,7 @@ import { resolveRecordOutput } from "../recordFile";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { resolveAtSignRefs, resolveExchangeSpecRefs } from "../util/atSignRefs";
 import {
-  configureLogFile,
-  configureStderrLogging,
+  configureLogging,
   exitWithError,
   parseOrExit,
   openInputSource,
@@ -627,17 +625,14 @@ export async function handler(argv: Arguments): Promise<void> {
     ...options
   } = parsed;
 
-  // Redirect logging to the file (if requested) before the level is applied and
-  // the logger is created, so getLogger("exchange") below inherits the file
-  // sink. A missing parent directory is a UsageError reported on stderr (the
-  // file is not the sink) and exits 64.
-  const logSink =
-    logFile !== undefined
-      ? parseOrExit(() => configureLogFile(logFile))
-      : configureStderrLogging();
-
-  logLibrary.setDefaultLevel(logLevel);
-  const log = getLogger("exchange");
+  // Install the sink, apply the level, and build getLogger("exchange") through the
+  // shared configureLogging helper (in that order, so the logger inherits the
+  // sink): the file sink when --log-file is given, otherwise the default stderr
+  // sink. A missing parent directory (configureLogFile) is a UsageError reported
+  // on stderr and mapped to exit 64 by parseOrExit here.
+  const { log, close: closeLogging } = parseOrExit(() =>
+    configureLogging({ logLevel, logFile, name: "exchange" }),
+  );
 
   try {
     try {
@@ -800,6 +795,6 @@ export async function handler(argv: Arguments): Promise<void> {
     // file sink) on the normal exit path. Writes are synchronous and already
     // durable, so exitWithError's process.exit (which bypasses this finally)
     // loses nothing -- this is only factory/descriptor cleanup.
-    logSink.close();
+    closeLogging();
   }
 }
