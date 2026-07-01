@@ -68,7 +68,7 @@ const MIN_ENCODED_ELEMENT_BYTES = 32;
  * real (>= ~35-byte) elements, so the ceiling never rejects a legitimate frame; a
  * frame declaring more is necessarily the amplification attack and is refused
  * pre-deserialize. It bounds the worst-case deserialize allocation to about
- * MAX_PSI_DECODE_ELEMENTS * ~211 B ~= 3.5 GiB -- the same order as a legitimate
+ * MAX_PSI_DECODE_ELEMENTS * ~211 B ~= 3.3 GiB -- the same order as a legitimate
  * near-cap cascade frame of real curve points, and comfortably below an OOM on the
  * 16 GiB target. The tighter authenticated `keyCount * recordCount` bound still
  * applies where it is smaller (always, for single-pass, via the cell-count gate);

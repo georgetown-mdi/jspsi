@@ -1,6 +1,8 @@
 import { expect, test } from "vitest";
 
 import {
+  MAX_FRAME_SIZE_BYTES,
+  MAX_PSI_DECODE_ELEMENTS,
   MAX_RECORD_COUNT,
   psiElementBounds,
 } from "../src/connection/frameSize";
@@ -51,4 +53,30 @@ test("psiElementBounds maps each message kind to keyCount * the relevant party's
   expect(bounds.setup).toBe(3 * 10); // sender's set
   expect(bounds.request).toBe(3 * 7); // receiver's set
   expect(bounds.response).toBe(3 * 7); // re-encrypted receiver's set
+});
+
+// ─── MAX_PSI_DECODE_ELEMENTS: the pre-deserialize ceiling's two security props ──
+// The absolute element ceiling (connection/psiElementScan.ts is the enforcer) rests
+// on two numeric properties. Both are derived from MAX_FRAME_SIZE_BYTES and the
+// per-element sizes, so a future edit to either input could silently break one --
+// pin them here.
+
+test("MAX_PSI_DECODE_ELEMENTS admits every legitimate frame yet bounds deserialize memory", () => {
+  // (a) Never rejects a legitimate frame: the ceiling is at least the most real
+  // elements a max-size frame can carry (a real element is a ~33-byte curve point
+  // plus protobuf framing, ~35 bytes on the wire), so any frame the byte cap admits
+  // clears the element ceiling too.
+  const REAL_ELEMENT_WIRE_BYTES = 35;
+  const maxLegitimateElements = Math.floor(
+    MAX_FRAME_SIZE_BYTES / REAL_ELEMENT_WIRE_BYTES,
+  );
+  expect(MAX_PSI_DECODE_ELEMENTS).toBeGreaterThanOrEqual(maxLegitimateElements);
+
+  // (b) Bounds the deserialize allocation: at the measured ~211 bytes the protobuf
+  // deserializer allocates per declared element, the worst ceiling-passing frame
+  // stays well under the 16 GiB target (a 4 GiB guard here), so it cannot OOM.
+  const DESERIALIZE_BYTES_PER_ELEMENT = 211;
+  expect(MAX_PSI_DECODE_ELEMENTS * DESERIALIZE_BYTES_PER_ELEMENT).toBeLessThan(
+    4 * 1024 ** 3,
+  );
 });
