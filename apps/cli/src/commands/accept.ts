@@ -30,7 +30,12 @@ import {
 import { detectFileConflicts } from "../fileUtils";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
-import { configureLogFile, promptConfirm } from "../util/cli";
+import {
+  configureLogFile,
+  configureStderrLogging,
+  type LogSink,
+  promptConfirm,
+} from "../util/cli";
 import { resolveRecordOutput } from "../recordFile";
 import {
   checkLinkageSatisfiability,
@@ -610,7 +615,7 @@ const INVITATION_PREFLIGHT_MESSAGING: LinkagePreflightMessaging = {
 // --- Handler -----------------------------------------------------------------
 
 export async function handler(argv: Arguments): Promise<void> {
-  let logFileSink: ReturnType<typeof configureLogFile> | undefined;
+  let logSink: LogSink | undefined;
   try {
     await runOrExit("accept", async () => {
       // Parse and apply the log level before creating the logger, so the
@@ -619,11 +624,15 @@ export async function handler(argv: Arguments): Promise<void> {
       // (e.g. an unrecognized --log-level) through the same error->exit path as
       // everything else, rather than yargs's noisier top-level catch.
       const options = parseCommonBootstrapArgs(argv);
-      // Redirect logging to the file (if requested) before the level is applied
-      // and any logger is created, so getLogger("accept") below inherits the
-      // file sink. A missing parent directory is a UsageError -> exit 64 here.
-      if (options.logFile !== undefined)
-        logFileSink = configureLogFile(options.logFile);
+      // Install the logging sink before the level is applied and any logger is
+      // created, so getLogger("accept") below inherits it: the file sink when
+      // --log-file is given, otherwise the default stderr sink so stdout carries
+      // only result data (the exchange CSV when no OUTPUT_FILE positional is
+      // given). A missing parent directory is a UsageError -> exit 64 here.
+      logSink =
+        options.logFile !== undefined
+          ? configureLogFile(options.logFile)
+          : configureStderrLogging();
       logLibrary.setDefaultLevel(options.logLevel);
       const log = getLogger("accept");
       const positionals = (argv["args"] as Array<string> | undefined) ?? [];
@@ -740,9 +749,10 @@ export async function handler(argv: Arguments): Promise<void> {
       log.info(`wrote key file to ${keyPath}. Keep it private.`);
     });
   } finally {
-    // Close the log-file descriptor on the normal exit path. Writes are
-    // synchronous and already durable, so the error path's process.exit (which
-    // bypasses this finally) loses nothing -- this is only descriptor cleanup.
-    logFileSink?.close();
+    // Restore the loglevel factory (and close the log-file descriptor, for the
+    // file sink) on the normal exit path. Writes are synchronous and already
+    // durable, so the error path's process.exit (which bypasses this finally)
+    // loses nothing -- this is only factory/descriptor cleanup.
+    logSink?.close();
   }
 }

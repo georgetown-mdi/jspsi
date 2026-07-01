@@ -27,6 +27,8 @@ import { resolveRecordOutput } from "../recordFile";
 import { DURATION_VALUE_HELP, parseDuration } from "../util/duration";
 import {
   configureLogFile,
+  configureStderrLogging,
+  type LogSink,
   durationFlagSeconds,
   MAX_TIMEOUT_SECONDS,
   singleValue,
@@ -538,7 +540,7 @@ export async function validateInvite(params: {
 // --- Handler -----------------------------------------------------------------
 
 export async function handler(argv: Arguments): Promise<void> {
-  let logFileSink: ReturnType<typeof configureLogFile> | undefined;
+  let logSink: LogSink | undefined;
   try {
     await runOrExit("invite", async () => {
       // Parse and apply the log level before creating the logger, so the
@@ -547,11 +549,15 @@ export async function handler(argv: Arguments): Promise<void> {
       // (e.g. an unrecognized --log-level) through the same error->exit path as
       // everything else, rather than yargs's noisier top-level catch.
       const options = parseCommonBootstrapArgs(argv);
-      // Redirect logging to the file (if requested) before the level is applied
-      // and any logger is created, so getLogger("invite") below inherits the
-      // file sink. A missing parent directory is a UsageError -> exit 64 here.
-      if (options.logFile !== undefined)
-        logFileSink = configureLogFile(options.logFile);
+      // Install the logging sink before the level is applied and any logger is
+      // created, so getLogger("invite") below inherits it: the file sink when
+      // --log-file is given, otherwise the default stderr sink so stdout carries
+      // only the invitation token. A missing parent directory is a UsageError ->
+      // exit 64 here.
+      logSink =
+        options.logFile !== undefined
+          ? configureLogFile(options.logFile)
+          : configureStderrLogging();
       logLibrary.setDefaultLevel(options.logLevel);
       const log = getLogger("invite");
       // accept-timeout is parsed to seconds here (not in validateInvite) so a
@@ -664,10 +670,11 @@ export async function handler(argv: Arguments): Promise<void> {
       );
     });
   } finally {
-    // Close the log-file descriptor on the normal exit path. Writes are
-    // synchronous and already durable, so the error path's process.exit (which
-    // bypasses this finally) loses nothing -- this is only descriptor cleanup.
-    logFileSink?.close();
+    // Restore the loglevel factory (and close the log-file descriptor, for the
+    // file sink) on the normal exit path. Writes are synchronous and already
+    // durable, so the error path's process.exit (which bypasses this finally)
+    // loses nothing -- this is only factory/descriptor cleanup.
+    logSink?.close();
   }
 }
 

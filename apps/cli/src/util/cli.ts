@@ -4,7 +4,12 @@ import readline from "node:readline/promises";
 import logLibrary from "loglevel";
 import type { Arguments } from "yargs";
 
-import { sanitizeErrorForDisplay, UsageError } from "@psilink/core";
+import {
+  getDiagnosticSink,
+  sanitizeErrorForDisplay,
+  setDiagnosticSink,
+  UsageError,
+} from "@psilink/core";
 
 import { createOwnerOnlyWriteStream } from "../fileUtils";
 import { parseDurationFlag } from "./duration";
@@ -200,33 +205,72 @@ export const LOG_LEVELS: Record<string, logLibrary.LogLevelNumbers> = {
   trace: logLibrary.levels.TRACE,
 };
 
-/** A redirect of loglevel output to a file, returned by {@link configureLogFile}. */
-export interface LogFileSink {
+/**
+ * A redirect of diagnostic output, returned by {@link configureLogFile} (to a
+ * file) and {@link configureStderrLogging} (to stderr). A CLI handler installs
+ * exactly one and closes it when the command ends.
+ */
+export interface LogSink {
   /**
-   * Restore the loglevel factory in place before the redirect and close the
-   * underlying file descriptor; best-effort and idempotent.
+   * Restore the diagnostic sink in place before the redirect and, for the file
+   * sink, close the underlying descriptor; best-effort and idempotent.
    */
   close(): void;
 }
 
 /**
- * Redirect every loglevel message to `logFilePath` (append mode) instead of the
- * terminal, returning a {@link LogFileSink} the caller closes after the exchange.
+ * Install `writeLine` as core's process-wide {@link DiagnosticSink}, returning a
+ * {@link LogSink} that restores the prior sink (and runs `onClose`, if given) on
+ * close. This is the shared seam behind both CLI sinks -- the
+ * {@link configureLogFile} file redirect and the default
+ * {@link configureStderrLogging} stderr routing.
+ *
+ * core resolves the diagnostic sink at each log CALL (not when a logger is
+ * built), so unlike a loglevel `methodFactory` swap this reroutes every logger --
+ * including the ones core and the CLI construct at import time (`cleaning`,
+ * `file-utils`) before a command runs -- the moment it is installed, with no
+ * creation-order constraint. core's `setLogPrefixer` hands the sink the assembled
+ * `[ISO] [LEVEL] [CONTEXT]` prefix and the raw message arguments; `util.format`
+ * renders them into one line exactly as `console.log` would, and `writeLine`
+ * appends the newline and delivers it. The `methodName` is unused here -- both CLI
+ * sinks route every level uniformly -- and level filtering happens upstream in
+ * loglevel (it installs `noop` for methods below the active level), so
+ * `--log-level silent` never reaches `writeLine`.
+ */
+function installLogSink(
+  writeLine: (line: string) => void,
+  onClose?: () => void,
+): LogSink {
+  const previousSink = getDiagnosticSink();
+  setDiagnosticSink((_methodName, prefix, args) =>
+    writeLine(util.format(prefix, ...args) + "\n"),
+  );
+  return {
+    close(): void {
+      // Restore the prior sink first, then run onClose (the file sink closes its
+      // descriptor there). Because core resolves the sink per log call, restoring
+      // it detaches this sink from every logger at once -- a log emitted after
+      // close() goes to the restored sink (or the default console routing), never
+      // to a descriptor onClose has already closed.
+      setDiagnosticSink(previousSink);
+      onClose?.();
+    },
+  };
+}
+
+/**
+ * Redirect every diagnostic log line to `logFilePath` (append mode) instead of
+ * the terminal, returning a {@link LogSink} the caller closes after the exchange.
  * Omitting the flag leaves logging on the terminal untouched -- a handler only
  * calls this when `--log-file` was given.
  *
- * loglevel has no built-in file sink, so this installs one by overriding the
- * library's global `methodFactory` -- the factory every named logger inherits at
- * construction (loglevel's `getLogger` does `new Logger(name,
- * defaultLogger.methodFactory)`). The installed factory returns a function that
- * writes its formatted arguments to the file rather than calling
- * `console[method]`. core's `setLogPrefixer` wraps this leaf factory per logger,
- * so each line keeps its `[ISO] [LEVEL] [CONTEXT]` prefix: the prefixer passes
- * that prefix as the first argument to the function returned here, and
- * `util.format` renders it ahead of the message exactly as `console.log` would.
- * Unlike `setLogPrefixer`, this factory does not chain to the previous factory:
- * the file sink replaces console output rather than decorating it, so there is
- * no prior return value to forward.
+ * The redirect is core's process-wide {@link DiagnosticSink} (installed via
+ * {@link installLogSink}), which core resolves at each log CALL: the file sink
+ * writes the assembled `[ISO] [LEVEL] [CONTEXT]` line to the descriptor rather
+ * than the console. Because the sink is call-resolved, it captures EVERY logger
+ * regardless of when the logger was built -- including the two constructed at
+ * import time (`file-utils`, `cleaning`), which a creation-time `methodFactory`
+ * swap could not reach, so `--log-file` now captures their warnings too.
  *
  * Writes are synchronous (`fs.writeSync` to the open descriptor), not buffered
  * through a `WriteStream`. This is deliberate: a handler reports its final error
@@ -237,26 +281,15 @@ export interface LogFileSink {
  * `console` writes to a file descriptor, the `> file` redirection this replaces.
  *
  * Level filtering is unaffected: loglevel installs `noop` for methods below the
- * active level and calls `methodFactory` only for enabled ones, so
- * `--log-level silent` writes nothing to the file.
+ * active level and calls the sink only for enabled ones, so `--log-level silent`
+ * writes nothing to the file.
  *
- * A logger binds its method to a factory at CREATION (and only rebuilds on its
- * own `setLevel`), so this must run before the loggers whose output should land
- * in the file exist -- the handlers call it before `setDefaultLevel` and
- * `getLogger`. A logger that already exists is NOT redirected, and `rebuild()`
- * cannot help: it re-runs each logger's own captured factory rather than
- * reassigning it. In a fresh CLI process this affects only the two loggers
- * created at import time (`file-utils`, `cleaning`) -- the same limitation core's
- * `withCapturedLogs` documents -- so their occasional warnings reach the
- * terminal. The other case is a logger cached from a PRIOR handler invocation in
- * the same process, which only arises in shared-process tests, never in the
- * one-command-per-process CLI; {@link LogFileSink.close} restoring the prior
- * factory keeps that case from leaving the global seam pointed at a closed
- * descriptor for whatever runs next. The converse also holds: a logger created
- * WHILE the redirect is active holds the file descriptor in its captured method
- * and must not be used after `close()` -- a write would hit the closed fd (caught
- * and surfaced on stderr, never thrown). The one-command-per-process CLI exits
- * right after `close()`, so this is a constraint only for shared-process tests.
+ * {@link LogSink.close} restores the prior sink and then closes the descriptor.
+ * Restoring the sink first detaches the file sink from every logger at once, so a
+ * log emitted after `close()` (a later handler invocation in a shared-process
+ * test) routes to the restored sink or the default console -- never to the closed
+ * descriptor. The write path still guards a failed `fs.writeSync` (a full disk)
+ * and surfaces it on stderr rather than throwing back into the log call.
  *
  * The file is opened synchronously (`openSync` with `"a"`) so a missing parent
  * directory or other open failure surfaces here, as a {@link UsageError} before
@@ -265,7 +298,7 @@ export interface LogFileSink {
  * does not apply the `O_NOFOLLOW`/`O_EXCL` hardening psilink's credential writers
  * use for paths it derives itself.
  */
-export function configureLogFile(logFilePath: string): LogFileSink {
+export function configureLogFile(logFilePath: string): LogSink {
   // Windows paths are accepted: fold backslashes to forward slashes on ingestion
   // (the Windows-path convention in CONTRIBUTING.md -- normalize backslashes
   // wherever a user can supply a local path) so a backslash or UNC form opens the
@@ -293,18 +326,12 @@ export function configureLogFile(logFilePath: string): LogFileSink {
     );
   }
 
-  // Capture the factory we are replacing so close() can restore it, leaving the
-  // global seam as it was found. The install/restore is bracketed; it does not
+  // The install/restore is bracketed by installLogSink; it does not
   // retro-redirect loggers that already exist (see the limitation above).
-  const previousFactory = logLibrary.methodFactory;
-
-  // The factory ignores its (methodName, level, loggerName) arguments: the level
-  // is already encoded in the prefix setLogPrefixer prepends, and level filtering
-  // is handled by loglevel before the factory is consulted.
-  logLibrary.methodFactory = () => {
-    return (...args: unknown[]) => {
+  return installLogSink(
+    (line) => {
       try {
-        writeAll(fd, util.format(...args) + "\n");
+        writeAll(fd, line);
       } catch (err) {
         // loglevel is redirected into this descriptor, so a mid-run write failure
         // (e.g. the disk filling) cannot be reported through the logger, and must
@@ -322,24 +349,55 @@ export function configureLogFile(logFilePath: string): LogFileSink {
           // Nothing left to report to; drop it.
         }
       }
-    };
-  };
-
-  return {
-    close(): void {
-      // Restore the prior factory first, so a logger created after close() (e.g.
-      // a later handler invocation in a shared-process test) binds to the
-      // original sink rather than this closed descriptor; then release the fd.
-      // Both steps are idempotent: a redundant restore is a no-op and a double
-      // close throws EBADF, which is swallowed.
-      logLibrary.methodFactory = previousFactory;
+    },
+    () => {
+      // installLogSink has already restored the prior sink; release the fd last.
+      // A double close throws EBADF, which is swallowed.
       try {
         fs.closeSync(fd);
       } catch {
         // Best-effort: the descriptor may already be closed.
       }
     },
-  };
+  );
+}
+
+/**
+ * Route ALL loglevel diagnostic output to stderr, returning a {@link LogSink} the
+ * caller closes when the command ends. This is the CLI's default logging sink,
+ * installed whenever `--log-file` is NOT given, and it reserves stdout
+ * exclusively for a command's result data -- the exchange result CSV
+ * ({@link writeOutput}'s stdout branch), the invitation token, the `fingerprint`
+ * summary -- so a piped or redirected result is never corrupted by an interleaved
+ * diagnostic line.
+ *
+ * Without it, loglevel's default routing sends `info`/`debug` to `console.info` /
+ * `console.log` (stdout) and only `warn`/`error` to stderr, so
+ * `psilink accept ... > out.csv` would splice the invitation-terms display, the
+ * "wrote key file" line, the runtime banner, and the `--consent-to-terms` note
+ * into out.csv. This sink sends every level -- `trace`/`debug`/`info` as well as
+ * `warn`/`error` -- to `process.stderr`, so `psilink <cmd> 2>/dev/null` yields
+ * clean result data on stdout while the same run without the redirect still shows
+ * the diagnostics on stderr. The interactive confirmation prompt
+ * ({@link promptConfirm}) already writes to stderr for the same reason.
+ *
+ * `--log-file` supersedes this: a handler installs {@link configureLogFile}
+ * instead, so when a log file is requested every level is captured to the file.
+ * Because core resolves the diagnostic sink per log call, this routing covers even
+ * the loggers built at import time (`file-utils`, `cleaning`) -- a
+ * creation-time mechanism would have left their output on the default console --
+ * so no diagnostic reaches stdout regardless of when its logger was created.
+ */
+export function configureStderrLogging(): LogSink {
+  return installLogSink((line) => {
+    try {
+      process.stderr.write(line);
+    } catch {
+      // process.stderr is the only sink here, so a wedged stderr leaves nowhere
+      // to report the failure; drop the line rather than let a write error throw
+      // back out of a log call into the exchange.
+    }
+  });
 }
 
 // Write the whole buffer to `fd`, looping over a partial write. fs.writeSync on a

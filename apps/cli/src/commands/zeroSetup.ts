@@ -34,6 +34,7 @@ import { resolveConnectionCredentials } from "../util/atSignRefs";
 import { establishHostKeyTrust } from "../hostKeyTrust";
 import {
   configureLogFile,
+  configureStderrLogging,
   exitWithError,
   parseOrExit,
   openInputSource,
@@ -518,10 +519,10 @@ export async function handler(argv: Arguments): Promise<void> {
   // the logger is created, so getLogger("psilink") below inherits the file sink.
   // A missing parent directory is a UsageError reported on stderr (the file is
   // not the sink) and exits 64.
-  const logFileSink =
+  const logSink =
     logFile !== undefined
       ? parseOrExit(() => configureLogFile(logFile))
-      : undefined;
+      : configureStderrLogging();
 
   logLibrary.setDefaultLevel(logLevel);
   const log = getLogger("psilink");
@@ -710,10 +711,11 @@ export async function handler(argv: Arguments): Promise<void> {
       exitWithError(log, err, err instanceof UsageError ? 64 : 69);
     }
   } finally {
-    // Close the log-file descriptor on the normal exit path (including the early
-    // return above). Writes are synchronous and already durable, so
-    // exitWithError's process.exit (which bypasses this finally) loses nothing --
-    // this is only descriptor cleanup.
-    logFileSink?.close();
+    // Restore the loglevel factory (and close the log-file descriptor, for the
+    // file sink) on the normal exit path (including the early return above).
+    // Writes are synchronous and already durable, so exitWithError's process.exit
+    // (which bypasses this finally) loses nothing -- this is only
+    // factory/descriptor cleanup.
+    logSink.close();
   }
 }

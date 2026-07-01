@@ -22,6 +22,7 @@ import {
 } from "../signingIdentityFile";
 import {
   configureLogFile,
+  configureStderrLogging,
   exitWithError,
   LOG_LEVELS,
   parseOrExit,
@@ -302,15 +303,20 @@ export async function handler(argv: Arguments): Promise<void> {
       throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
     return resolved;
   });
-  // Open the log-file sink (if requested) before the level is applied and the
-  // logger is created, so getLogger("fingerprint") below inherits the file sink.
-  // singleValue rejects a repeated --log-file and configureLogFile rejects an
-  // unopenable path; both are UsageErrors mapped to stderr + exit 64 here.
-  const logFileSink = parseOrExit(() => {
+  // Install the logging sink before the level is applied and the logger is
+  // created, so getLogger("fingerprint") below inherits it: the file sink when
+  // --log-file is given, otherwise the default stderr sink, so the command's
+  // logged diagnostics (e.g. the preflight warnings) stay off stdout. The
+  // fingerprint report itself is printed through console.log; routing its banner
+  // and instructions off stdout -- leaving only the fingerprint value there -- is
+  // a separate follow-up (board item 207023432). singleValue rejects a repeated
+  // --log-file and configureLogFile rejects an unopenable path; both are
+  // UsageErrors mapped to stderr + exit 64 here.
+  const logSink = parseOrExit(() => {
     const logFilePath = singleValue(argv, "log-file") as string | undefined;
     return logFilePath !== undefined
       ? configureLogFile(logFilePath)
-      : undefined;
+      : configureStderrLogging();
   });
   logLibrary.setDefaultLevel(logLevel);
   const log = getLogger("fingerprint");
@@ -380,9 +386,10 @@ export async function handler(argv: Arguments): Promise<void> {
   } catch (err) {
     exitWithError(log, err, err instanceof UsageError ? 64 : 69);
   } finally {
-    // Close the log-file descriptor on the normal exit path. Writes are
-    // synchronous and already durable, so exitWithError's process.exit (which
-    // bypasses this finally) loses nothing -- this is only descriptor cleanup.
-    logFileSink?.close();
+    // Restore the loglevel factory (and close the log-file descriptor, for the
+    // file sink) on the normal exit path. Writes are synchronous and already
+    // durable, so exitWithError's process.exit (which bypasses this finally)
+    // loses nothing -- this is only factory/descriptor cleanup.
+    logSink.close();
   }
 }

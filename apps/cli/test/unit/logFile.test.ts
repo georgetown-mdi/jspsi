@@ -4,28 +4,34 @@ import os from "node:os";
 import path from "node:path";
 import logLibrary from "loglevel";
 import type { Arguments } from "yargs";
-import { getLogger, UsageError } from "@psilink/core";
+import {
+  getDiagnosticSink,
+  getLogger,
+  setDiagnosticSink,
+  UsageError,
+  type DiagnosticSink,
+} from "@psilink/core";
 
 import { configureLogFile } from "../../src/util/cli";
 import { parseCommonBootstrapArgs } from "../../src/commands/bootstrap";
 
-// configureLogFile mutates loglevel's global methodFactory (the seam every named
-// logger captures at creation). These tests snapshot and restore that factory --
-// and the level -- around each case, and give every test a uniquely named logger
-// so a cached logger from one test never writes into another's closed descriptor.
+// configureLogFile installs core's process-wide diagnostic sink (the seam every
+// prefixed logger consults at emit time). These tests snapshot and restore that
+// sink -- and the level -- around each case, and give every test a uniquely named
+// logger so state from one test never bleeds into another.
 
 let tmpDir: string;
-let originalFactory: typeof logLibrary.methodFactory;
+let originalSink: DiagnosticSink | undefined;
 let originalLevel: number;
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-logfile-"));
-  originalFactory = logLibrary.methodFactory;
+  originalSink = getDiagnosticSink();
   originalLevel = logLibrary.getLevel();
 });
 
 afterEach(() => {
-  logLibrary.methodFactory = originalFactory;
+  setDiagnosticSink(originalSink);
   logLibrary.setLevel(
     originalLevel as Parameters<typeof logLibrary.setLevel>[0],
   );
@@ -140,14 +146,14 @@ test("configureLogFile: a Windows-style backslash path is normalized before open
   expect(fs.readFileSync(target, "utf8")).toContain("windows path line");
 });
 
-test("configureLogFile: close() restores the methodFactory in place before it", () => {
-  // The install/restore is bracketed, so the global loglevel seam is left as it
-  // was found and a logger created after close() does not bind to the closed fd.
-  const before = logLibrary.methodFactory;
+test("configureLogFile: close() restores the diagnostic sink in place before it", () => {
+  // The install/restore is bracketed, so core's diagnostic sink is left as it was
+  // found and a log emitted after close() routes to the restored sink, not the fd.
+  const before = getDiagnosticSink();
   const sink = configureLogFile(path.join(tmpDir, "restore.log"));
-  expect(logLibrary.methodFactory).not.toBe(before);
+  expect(getDiagnosticSink()).not.toBe(before);
   sink.close();
-  expect(logLibrary.methodFactory).toBe(before);
+  expect(getDiagnosticSink()).toBe(before);
 });
 
 test("configureLogFile: close() is idempotent", () => {
@@ -158,26 +164,77 @@ test("configureLogFile: close() is idempotent", () => {
   expect(() => sink.close()).not.toThrow();
 });
 
-test("configureLogFile: a write to the closed descriptor is caught, not thrown into the log call", () => {
-  // A logger created during the redirect keeps writing to the captured fd; after
-  // close() that fd is gone, so the write fails. The failure must be caught and
-  // surfaced on stderr, never thrown back out of the log call -- the invariant
-  // that keeps a mid-run write failure from crashing an exchange.
-  const sink = configureLogFile(path.join(tmpDir, "closed.log"));
+test("configureLogFile: after close(), logging detaches from the file and does not throw", () => {
+  // close() restores the prior sink and then closes the fd. Because core resolves
+  // the diagnostic sink per log call, a log emitted after close() routes to the
+  // restored sink (the default console routing here), never to the closed
+  // descriptor -- so it neither throws nor appends to the file. This is the
+  // guarantee that replaces the old creation-time hazard, where a logger bound to
+  // the fd could write into it after close().
+  const logPath = path.join(tmpDir, "closed.log");
+  const sink = configureLogFile(logPath);
   logLibrary.setDefaultLevel(logLibrary.levels.INFO);
   const log = getLogger("logfile-test-closed");
   log.info("before close");
   sink.close();
 
-  const stderrSpy = vi
-    .spyOn(process.stderr, "write")
-    .mockImplementation(() => true);
+  const afterCloseContents = fs.readFileSync(logPath, "utf8");
+  expect(afterCloseContents).toContain("before close");
+  expect(() => log.info("after close")).not.toThrow();
+  // The file did not grow: the post-close log went to the restored sink, not the fd.
+  expect(fs.readFileSync(logPath, "utf8")).toBe(afterCloseContents);
+});
+
+test("configureLogFile: diagnostics go to the file, never stdout", () => {
+  // The file sink is a distinct branch from the stderr sink, so pin its stdout
+  // purity directly: a regression that wrote the file sink's line to stdout would
+  // corrupt a piped result exactly as the original interleaving bug did, yet every
+  // other test here only reads the file. Spy stdout, log every level to the file,
+  // and assert stdout stays clean while the file captures the lines.
+  const logPath = path.join(tmpDir, "purity.log");
+  const stdoutWrites: string[] = [];
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    stdoutWrites.push(String(chunk));
+    return true;
+  }) as typeof process.stdout.write);
+  const sink = configureLogFile(logPath);
+  logLibrary.setDefaultLevel(logLibrary.levels.TRACE);
   try {
-    expect(() => log.info("after close")).not.toThrow();
-    expect(stderrSpy).toHaveBeenCalled();
+    const log = getLogger("logfile-test-purity");
+    log.trace("trace to file");
+    log.info("info to file");
+    log.debug("debug to file");
+    log.warn("warn to file");
+    log.error("error to file");
   } finally {
-    stderrSpy.mockRestore();
+    sink.close();
+    stdoutSpy.mockRestore();
   }
+  const stdout = stdoutWrites.join("");
+  expect(stdout).not.toMatch(/\[(TRACE|DEBUG|INFO|WARN|ERROR)\]/);
+  expect(stdout).not.toContain("to file");
+  const contents = fs.readFileSync(logPath, "utf8");
+  for (const level of ["TRACE", "INFO", "DEBUG", "WARN", "ERROR"])
+    expect(contents).toContain(`[${level}]`);
+});
+
+test("configureLogFile: reroutes a logger created BEFORE the sink was installed", () => {
+  // The call-time property the stderr sink's twin test pins, here for the file
+  // sink: a logger built before configureLogFile runs -- as core's and the CLI's
+  // import-time loggers (cleaning, file-utils) are -- still writes to the file once
+  // the sink is installed, so --log-file captures them.
+  const logPath = path.join(tmpDir, "precreated.log");
+  logLibrary.setDefaultLevel(logLibrary.levels.INFO);
+  const log = getLogger("logfile-test-precreated"); // created before the sink
+  const sink = configureLogFile(logPath);
+  try {
+    log.info("late-routed to file");
+  } finally {
+    sink.close();
+  }
+  expect(fs.readFileSync(logPath, "utf8")).toContain("late-routed to file");
 });
 
 // --- (b) no file is created when the option is omitted -----------------------

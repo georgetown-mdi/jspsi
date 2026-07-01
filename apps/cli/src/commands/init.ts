@@ -14,6 +14,8 @@ import { renderConfigTemplate } from "../configTemplate";
 import type { TemplateDataSpec } from "../configTemplate";
 import {
   configureLogFile,
+  configureStderrLogging,
+  type LogSink,
   LOG_LEVELS,
   promptConfirm,
   singleValue,
@@ -74,7 +76,7 @@ export function builder(cmd: Argv): Argv {
 }
 
 export async function handler(argv: Arguments): Promise<void> {
-  let logFileSink: ReturnType<typeof configureLogFile> | undefined;
+  let logSink: LogSink | undefined;
   try {
     await runOrExit("init", async () => {
       // Resolve the log level before creating the logger (loglevel binds a
@@ -87,11 +89,16 @@ export async function handler(argv: Arguments): Promise<void> {
       const logLevel = LOG_LEVELS[rawLogLevel];
       if (logLevel === undefined)
         throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
-      // Redirect logging to the file (if requested) before the level is applied
-      // and any logger is created, so getLogger("init") below inherits the file
-      // sink. A missing parent directory is a UsageError -> exit 64 here.
+      // Install the logging sink before the level is applied and any logger is
+      // created, so getLogger("init") below inherits it: the file sink when
+      // --log-file is given, otherwise the default stderr sink so stdout carries
+      // only result data. A missing parent directory is a UsageError -> exit 64
+      // here.
       const logFile = singleValue(argv, "log-file") as string | undefined;
-      if (logFile !== undefined) logFileSink = configureLogFile(logFile);
+      logSink =
+        logFile !== undefined
+          ? configureLogFile(logFile)
+          : configureStderrLogging();
       logLibrary.setDefaultLevel(logLevel);
       const log = getLogger("init");
 
@@ -154,10 +161,11 @@ export async function handler(argv: Arguments): Promise<void> {
       );
     });
   } finally {
-    // Close the log-file descriptor on the normal exit path. Writes are
-    // synchronous and already durable, so the error path's process.exit (which
-    // bypasses this finally) loses nothing -- this is only descriptor cleanup.
-    logFileSink?.close();
+    // Restore the loglevel factory (and close the log-file descriptor, for the
+    // file sink) on the normal exit path. Writes are synchronous and already
+    // durable, so the error path's process.exit (which bypasses this finally)
+    // loses nothing -- this is only factory/descriptor cleanup.
+    logSink?.close();
   }
 }
 

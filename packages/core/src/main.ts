@@ -14,7 +14,10 @@ export {
   getLogger,
   getLoggerForVerbosity,
   setLogPrefixer,
+  setDiagnosticSink,
+  getDiagnosticSink,
 } from "./utils/logger";
+export type { DiagnosticSink } from "./utils/logger";
 export { retryPromise, withTimeout, TimeoutError } from "./utils/promise";
 // @internal: the CLI config writer (saveConfig) delegates to this snakeize
 // direction so the read and write paths share one recurse-and-skip traversal;
