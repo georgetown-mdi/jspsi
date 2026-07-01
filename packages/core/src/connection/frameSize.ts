@@ -126,9 +126,9 @@ export const MAX_SINGLE_PASS_CELLS = 3_000_000;
  *
  * Value: 1,000,000,000,000 (10^12). With the key count bounded at
  * MAX_LINKAGE_ENTRIES (256, config/linkageTerms.ts), `keyCount * recordCount` at
- * this ceiling is 2.56 x 10^14, three orders of magnitude below 2^53, so the
- * product is always exact -- a `frameSize.test.ts` invariant pins that headroom
- * against MAX_LINKAGE_ENTRIES. It is also astronomically above any legitimate
+ * this ceiling is 2.56 x 10^14, about 35x below 2^53, so the product is always
+ * exact -- a `frameSize.test.ts` invariant pins that headroom against
+ * MAX_LINKAGE_ENTRIES. It is also astronomically above any legitimate
  * dataset (the static frame cap admits ~15M curve points; the single-pass cell
  * cap is 3M), so it never rejects a real record count. Defense-in-depth: the same
  * bound keeps the {@link psiElementBounds} products exact for the same reason.

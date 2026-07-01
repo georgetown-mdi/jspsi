@@ -205,6 +205,13 @@ test("a legitimately large original-index frame parses", () => {
 // handful of 2-byte entries, so a ~tens-of-bytes frame -- orders of magnitude
 // under any byte cap) and assert the abort. The bound is tightened to a small
 // value to stand in for a real authenticated count.
+//
+// Each assertion matches the guard's OWN message text, and that is load-bearing
+// for the "aborts before materialization" claim: the 2-byte entries are not valid
+// curve points, so if the guard were ever reordered after the library call the
+// library would throw its own (different) error on them -- failing the specific
+// match rather than passing. Keep these matches specific; a bare `.toThrow()`
+// would stop pinning the pre-materialization ordering.
 
 // A tiny encrypted-element list whose declared count far exceeds any bound the
 // tests set, in a frame of only a few dozen bytes.
