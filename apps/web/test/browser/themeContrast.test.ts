@@ -78,10 +78,11 @@ const StatusAlert = Alert as unknown as ComponentType<{
 //    error, and the yellow/red light-variant status text. The harness now mounts under
 //    the app's real cssVariablesResolver (see mount below), so these are exercised at
 //    the render level for the first time -- previously only the arithmetic unit test
-//    saw them. Each token's raised value clears the AA floor while Mantine's default
-//    (which the resolver overrides) fails it (e.g. placeholder gray-5 = 2.08:1), so a
-//    case's floor assertion doubles as proof the resolver reached the surface: drop
-//    the resolver and the failing default trips the floor.
+//    saw them. Each case pins the EXACT resolved token colour (proof the resolver
+//    reached the surface) as well as the AA floor (proof it is legible). Pinning the
+//    colour, not just the floor, is necessary: one default the resolver replaces
+//    (red's light-variant, red-9-on-red-1 = 4.51:1) already clears the floor, so a
+//    floor-only check would not notice that token regressing back to its default.
 
 let container: HTMLElement | undefined;
 let root: Root | undefined;
@@ -92,6 +93,20 @@ const SHARE = {
   deepLink: "https://example.test/accept#invitation-token",
   encoded: "INVITATION-TOKEN",
 };
+
+// Exact computed colours the resolver paints, pinned by the token cases below so a
+// case cannot pass on a coincidental value or a default that happens to clear the
+// floor. Mirror theme.ts: MUTED_TEXT (dimmed + placeholder) per scheme, ERROR_TEXT,
+// and STATUS_TEXT (yellow warning / red error), the last three light-scheme only.
+const MUTED_TEXT = {
+  light: "rgb(99, 107, 115)",
+  dark: "rgb(146, 150, 155)",
+} as const;
+const ERROR_TEXT = "rgb(201, 42, 42)";
+const STATUS_TEXT = {
+  yellow: "rgb(146, 64, 14)",
+  red: "rgb(165, 17, 17)",
+} as const;
 
 function mount(scheme: "light" | "dark", node: ReactNode) {
   container = document.createElement("div");
@@ -221,9 +236,17 @@ describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
       // Query the first of the two copy buttons (the invitation-link row).
       mount(scheme, createElement(ShareBlock, SHARE));
       const ai = await waitForEl(".mantine-ActionIcon-root");
-      await expect.poll(() => getComputedStyle(ai).color).toBe(expectedText);
+      // Measure the glyph's OWN paint (its SVG stroke), not the ActionIcon root's
+      // color. The root always reports --ai-color, but the glyph only wears that by
+      // inheriting currentColor; reading the root would stay green if the glyph were
+      // re-wrapped to hardcode its own colour (a Gap A regression this case names).
+      // For the real control the two agree; the stroke is what the checkmark paints.
+      const glyph = await waitForEl(".mantine-ActionIcon-root svg");
+      await expect
+        .poll(() => getComputedStyle(glyph).stroke)
+        .toBe(expectedText);
       const backgroundColor = await restingBackground(ai);
-      const { color } = getComputedStyle(ai);
+      const color = getComputedStyle(glyph).stroke;
       expect(contrast(color, backgroundColor)).toBeGreaterThanOrEqual(4.5);
     });
 
@@ -245,11 +268,20 @@ describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
       await expect
         .poll(() => ai.getAttribute("aria-label"))
         .toContain("copied");
+      // Query the glyph AFTER the flip: React swaps IconCopy for IconCheck, so the
+      // pre-click SVG node is stale. Measure the check glyph's own stroke, not the
+      // ActionIcon root (see the filled case).
+      const glyph = await waitForEl(".mantine-ActionIcon-root svg");
       // Resting bg via restingBackground so a stale hover (light-variant hover =
       // cyan-2, a darker tint) is not sampled in place of the resting fill.
       const backgroundColor = await restingBackground(ai);
-      const { color } = getComputedStyle(ai);
+      const color = getComputedStyle(glyph).stroke;
       expect(contrast(color, backgroundColor)).toBeGreaterThanOrEqual(3);
+      // useClipboard reverts `copied` to false 1000ms after writeText resolves, which
+      // would silently restore the (also-passing) filled colours. The reads above run
+      // well inside that window; assert we were still copied at read time so a
+      // pathologically slow run fails loudly rather than measuring the reverted state.
+      expect(ai.getAttribute("aria-label")).toContain("copied");
     });
   }
 
@@ -313,10 +345,12 @@ describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
       );
       const text = await waitForEl('[data-testid="dimmed"]');
       const surface = await waitForEl('[data-testid="surface"]');
+      const color = getComputedStyle(text).color;
       const bg = getComputedStyle(surface).backgroundColor;
-      expect(contrast(getComputedStyle(text).color, bg)).toBeGreaterThanOrEqual(
-        4.5,
-      );
+      // Pin the resolved token colour (proof the resolver reached the surface), then
+      // the AA floor against the real body background.
+      expect(color).toBe(MUTED_TEXT[scheme]);
+      expect(contrast(color, bg)).toBeGreaterThanOrEqual(4.5);
     });
 
     test(`input placeholder is AA-legible (${scheme})`, async () => {
@@ -333,11 +367,10 @@ describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
       const input = await waitForEl("input");
       const placeholderColor = getComputedStyle(input, "::placeholder").color;
       const bg = getComputedStyle(input).backgroundColor;
-      // Guard against a vacuous pass: if the ::placeholder pseudo read ever fell back
-      // to the input's own (dark, high-contrast) text color, the floor below would
-      // pass without measuring the placeholder token at all. The muted placeholder is
-      // deliberately lower-emphasis than the entered text, so the two must differ.
-      expect(placeholderColor).not.toBe(getComputedStyle(input).color);
+      // Pin the resolved token colour: this both proves the resolver reached the
+      // placeholder and guards the vacuous pass where the ::placeholder pseudo read
+      // falls back to the input's own (dark, high-contrast) text colour.
+      expect(placeholderColor).toBe(MUTED_TEXT[scheme]);
       expect(contrast(placeholderColor, bg)).toBeGreaterThanOrEqual(4.5);
     });
   }
@@ -368,16 +401,16 @@ describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
       throw new Error("errored input has no aria-describedby message");
     const errorEl = await waitForEl(`#${CSS.escape(errorId)}`);
     const surface = await waitForEl('[data-testid="surface"]');
+    const color = getComputedStyle(errorEl).color;
     const bg = getComputedStyle(surface).backgroundColor;
-    expect(
-      contrast(getComputedStyle(errorEl).color, bg),
-    ).toBeGreaterThanOrEqual(4.5);
+    expect(color).toBe(ERROR_TEXT);
+    expect(contrast(color, bg)).toBeGreaterThanOrEqual(4.5);
   });
 
   for (const { color, label } of [
     { color: "yellow", label: "warning" },
     { color: "red", label: "error" },
-  ]) {
+  ] as const) {
     test(`${label} alert title is AA-legible (light)`, async () => {
       // --mantine-color-{color}-light-color on the {color}-light tint, raised by the
       // resolver in light (Mantine's yellow-9 on yellow-1 = 2.69:1 fails even 3:1;
@@ -396,10 +429,12 @@ describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
       // change surfaces as a clear waitForEl timeout rather than a getComputedStyle
       // TypeError on a null cast.
       const title = await waitForEl('[role="alert"] [class*="title"]');
+      const titleColor = getComputedStyle(title).color;
       const bg = getComputedStyle(alert).backgroundColor;
-      expect(
-        contrast(getComputedStyle(title).color, bg),
-      ).toBeGreaterThanOrEqual(4.5);
+      // Pin the resolved status colour: unlike the other tokens, red's Mantine
+      // default clears the floor, so only pinning the colour catches it regressing.
+      expect(titleColor).toBe(STATUS_TEXT[color]);
+      expect(contrast(titleColor, bg)).toBeGreaterThanOrEqual(4.5);
     });
   }
 });
