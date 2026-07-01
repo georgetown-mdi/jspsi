@@ -45,6 +45,41 @@
  */
 export const MAX_FRAME_SIZE_BYTES = 536_870_888;
 
+// A safe lower bound on the on-wire byte footprint of a LEGITIMATE encrypted
+// element: a ~33-byte compressed curve point plus protobuf field framing (~35
+// bytes in practice). 32 is a conservative floor -- below the real ~35 -- so the
+// element ceiling derived from it never under-counts the legitimate maximum and so
+// never rejects a real frame.
+const MIN_ENCODED_ELEMENT_BYTES = 32;
+
+/**
+ * Absolute ceiling on the number of encrypted elements an inbound PSI frame may
+ * DECLARE, enforced by a wire-format scan BEFORE deserialization (see
+ * {@link countDeclaredPsiElements} in connection/psiElementScan.ts, called at the
+ * participant.ts decode seams). It closes a memory-exhaustion amplification the
+ * per-message authenticated bound alone does not: google-protobuf
+ * `deserializeBinary` allocates one heap object -- measured ~211 bytes -- per
+ * declared repeated `bytes` entry, so a frame packed with minimal ~2-byte entries
+ * (within the frame byte cap, yet declaring up to ~frameBytes/2 elements) would
+ * deserialize into tens of GiB before any post-deserialize count could run.
+ *
+ * Value: floor(MAX_FRAME_SIZE_BYTES / MIN_ENCODED_ELEMENT_BYTES) = 16,777,215. No
+ * legitimate frame within the ~512 MiB frame cap can carry more than this many
+ * real (>= ~35-byte) elements, so the ceiling never rejects a legitimate frame; a
+ * frame declaring more is necessarily the amplification attack and is refused
+ * pre-deserialize. It bounds the worst-case deserialize allocation to about
+ * MAX_PSI_DECODE_ELEMENTS * ~211 B ~= 3.5 GiB -- the same order as a legitimate
+ * near-cap cascade frame of real curve points, and comfortably below an OOM on the
+ * 16 GiB target. The tighter authenticated `keyCount * recordCount` bound still
+ * applies where it is smaller (always, for single-pass, via the cell-count gate);
+ * this absolute ceiling is what binds a cascade frame whose partner over-declares
+ * its record count. Fixed, not operator-configurable, for the same reason as the
+ * frame-size bound. See docs/spec/CHANNEL_SECURITY.md.
+ */
+export const MAX_PSI_DECODE_ELEMENTS = Math.floor(
+  MAX_FRAME_SIZE_BYTES / MIN_ENCODED_ELEMENT_BYTES,
+);
+
 /**
  * The single-pass dataset ceiling, expressed as a per-party budget on the
  * (key, record) cell count `keyCount * recordCount` (NOT a bare row count).

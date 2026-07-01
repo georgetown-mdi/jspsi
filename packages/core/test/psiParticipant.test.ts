@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
@@ -197,21 +197,15 @@ test("a legitimately large original-index frame parses", () => {
 // ─── PSI decode element-count guard: frame-bytes vs element-count amplification ─
 // A malicious partner can pack a PSI setup / request / response with many minimal
 // (~2-byte) repeated encrypted-element entries -- staying within the frame byte
-// cap, yet declaring far more curve points than the cap's ~40-byte-per-value
-// sizing assumes. Each entry becomes a curve point when the message is handed to
-// the library, so the participant validates the declared element count against the
-// authenticated keyCount * recordCount bound at the deserializeBinary seam and
-// aborts BEFORE that materialization. These craft such an over-declared frame (a
-// handful of 2-byte entries, so a ~tens-of-bytes frame -- orders of magnitude
-// under any byte cap) and assert the abort. The bound is tightened to a small
-// value to stand in for a real authenticated count.
-//
-// Each assertion matches the guard's OWN message text, and that is load-bearing
-// for the "aborts before materialization" claim: the 2-byte entries are not valid
-// curve points, so if the guard were ever reordered after the library call the
-// library would throw its own (different) error on them -- failing the specific
-// match rather than passing. Keep these matches specific; a bare `.toThrow()`
-// would stop pinning the pre-materialization ordering.
+// cap, yet declaring up to ~frameBytes/2 elements. deserializeBinary allocates one
+// heap object (~211 bytes, measured) per declared entry, so such a within-cap frame
+// would exhaust memory (tens of GiB) inside deserializeBinary itself. The
+// participant therefore SCANS the protobuf wire format and rejects an over-declared
+// frame BEFORE deserializeBinary is ever called (connection/psiElementScan.ts). The
+// ceiling is min(authenticated keyCount * recordCount, MAX_PSI_DECODE_ELEMENTS).
+// These craft an over-declared frame (a handful of 2-byte entries) and assert the
+// abort with the pre-scan's own message; the bound is tightened to a small value to
+// stand in for a real authenticated count.
 
 // A tiny encrypted-element list whose declared count far exceeds any bound the
 // tests set, in a frame of only a few dozen bytes.
@@ -220,7 +214,7 @@ const tinyElements = () =>
   Array.from({ length: OVER_DECLARED_COUNT }, () => new Uint8Array([1, 2]));
 
 test("processClientRequest rejects a request declaring more elements than the bound", () => {
-  // Single-pass sender seam: the starter deserializes the receiver's request.
+  // Single-pass sender seam: the starter would deserialize the receiver's request.
   const sender = new PSIParticipant(
     "sender",
     psiLibrary,
@@ -233,13 +227,23 @@ test("processClientRequest rejects a request declaring more elements than the bo
   // The over-declared frame is a few dozen bytes, far within any byte cap, yet
   // declares 64 elements against a bound of 4.
   expect(bytes.byteLength).toBeLessThan(1024);
-  expect(() => sender.processClientRequest(bytes)).toThrow(
-    /request declares 64 encrypted element\(s\), exceeding the authenticated bound of 4/,
-  );
+  // deserializeBinary is the amplifying allocation, so the guard must fire BEFORE
+  // it. Spy on it and assert it is never reached -- this pins the pre-deserialize
+  // ordering as a runtime check, not an inference from statement order.
+  const deserialize = vi.spyOn(psiLibrary.request, "deserializeBinary");
+  try {
+    expect(() => sender.processClientRequest(bytes)).toThrow(
+      /inbound PSI request declares more than 4 encrypted element\(s\)/,
+    );
+    expect(deserialize).not.toHaveBeenCalled();
+  } finally {
+    deserialize.mockRestore();
+  }
 });
 
 test("computeValueMatches rejects a setup declaring more elements than the bound", () => {
-  // Single-pass receiver seam (setup): the joiner deserializes the sender's setup.
+  // Single-pass receiver seam (setup): the joiner would deserialize the sender's
+  // setup.
   const receiver = new PSIParticipant(
     "receiver",
     psiLibrary,
@@ -255,7 +259,9 @@ test("computeValueMatches rejects a setup declaring more elements than the bound
   const response = new psiLibrary.response().serializeBinary();
   expect(() =>
     receiver.computeValueMatches(setup.serializeBinary(), response),
-  ).toThrow(/server setup declares 64 encrypted element\(s\)/);
+  ).toThrow(
+    /inbound PSI serverSetup declares more than 4 encrypted element\(s\)/,
+  );
 });
 
 test("computeValueMatches rejects a response declaring more elements than the bound", () => {
@@ -278,13 +284,13 @@ test("computeValueMatches rejects a response declaring more elements than the bo
       setup.serializeBinary(),
       response.serializeBinary(),
     ),
-  ).toThrow(/response declares 64 encrypted element\(s\)/);
+  ).toThrow(/inbound PSI response declares more than 4 encrypted element\(s\)/);
 });
 
 test("cascade identifyIntersection (starter) rejects an over-declared request frame", async () => {
   // Cascade decode path shares the same seam: inject an over-declared request as
-  // the frame the starter deserializes (its 1st receive) and assert it aborts
-  // before processing it. The bound stands in for the authenticated
+  // the frame the starter reads (its 1st receive) and assert it aborts before
+  // deserializing it. The bound stands in for the authenticated
   // keyCount * receiverRecordCount.
   const [serverConn, clientConn] = createMessagePipe();
   const starter = new PSIParticipant(
@@ -304,13 +310,13 @@ test("cascade identifyIntersection (starter) rejects an over-declared request fr
   // frame from the peer to unblock it; the over-declared request stands in.
   await clientConn.send(new Uint8Array([0]));
   await expect(run).rejects.toThrow(
-    /request declares 64 encrypted element\(s\), exceeding the authenticated bound of 4/,
+    /inbound PSI request declares more than 4 encrypted element\(s\)/,
   );
 });
 
 test("cascade identifyIntersection (joiner) rejects an over-declared server setup frame", async () => {
-  // The mirror seam: the joiner deserializes the sender's server setup on its 1st
-  // receive. An over-declared setup aborts before curve-point materialization.
+  // The mirror seam: the joiner reads the sender's server setup on its 1st receive.
+  // An over-declared setup aborts before it is deserialized.
   const [serverConn, clientConn] = createMessagePipe();
   const joiner = new PSIParticipant(
     "joiner",
@@ -330,7 +336,7 @@ test("cascade identifyIntersection (joiner) rejects an over-declared server setu
   // from the peer to unblock it, and the over-declared setup stands in.
   await serverConn.send(new Uint8Array([0]));
   await expect(run).rejects.toThrow(
-    /server setup declares 64 encrypted element\(s\), exceeding the authenticated bound of 4/,
+    /inbound PSI serverSetup declares more than 4 encrypted element\(s\)/,
   );
 });
 
