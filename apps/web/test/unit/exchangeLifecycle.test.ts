@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { default as EventEmitter } from "eventemitter3";
 
-import { ConnectionError, runExchange } from "@psilink/core";
+import { ConnectionError, UsageError, runExchange } from "@psilink/core";
 
 import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
 import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
@@ -214,6 +214,30 @@ describe("runExchangeLifecycle", () => {
     expect(s.onError).toHaveBeenCalledWith({
       category: "exchange",
       error: expect.any(Error),
+    });
+    expect(s.onResult).not.toHaveBeenCalled();
+    expect(mockedOpen).not.toHaveBeenCalled();
+  });
+
+  test("a prepare-time UsageError is category 'config', not 'exchange'", async () => {
+    // prepareForExchange fails closed (a UsageError) inside acquire, before any
+    // peer connection -- e.g. an authored standardization that contradicts the
+    // terms. It must surface as an actionable config problem, not the generic
+    // retryable transport failure.
+    const acquire: Acquire = () =>
+      Promise.reject(new UsageError("standardization contradicts its terms"));
+    const s = seams();
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "responder",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(s.onError).toHaveBeenCalledWith({
+      category: "config",
+      error: expect.any(UsageError),
     });
     expect(s.onResult).not.toHaveBeenCalled();
     expect(mockedOpen).not.toHaveBeenCalled();

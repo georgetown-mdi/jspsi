@@ -510,6 +510,17 @@ export function ExchangeView(config: ExchangeConfig) {
               // A single message (not the cause chain) keeps the sentence intact.
               sanitizeForDisplay(errorMessage(error)),
           });
+        } else if (category === "config") {
+          // A configuration/usage error (UsageError) raised during data
+          // preparation, before any exchange ran -- e.g. an authored
+          // standardization that contradicts the linkage terms. Not a transport
+          // drop: retrying as-is fails identically, so surface the (sanitized)
+          // message, which is actionable and value-free, rather than the generic
+          // transient-failure copy that would wrongly deny a data/config problem.
+          setErrorAlert({
+            title: "Could not prepare the exchange",
+            message: sanitizeForDisplay(errorMessage(error)),
+          });
         } else if (category === "security") {
           // The authenticated key exchange failed closed: this connection could
           // not be confirmed as the invited partner. Unlike a transport drop

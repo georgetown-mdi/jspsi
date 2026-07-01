@@ -1,4 +1,9 @@
-import { ConnectionError, getLogger, runExchange } from "@psilink/core";
+import {
+  ConnectionError,
+  UsageError,
+  getLogger,
+  runExchange,
+} from "@psilink/core";
 
 import { authenticateExchange } from "./authenticateExchange";
 import { openPeerMessageConnection } from "./peerMessageConnection";
@@ -32,10 +37,20 @@ export interface StageDefinition {
  * authenticated key exchange (or, once it is wrapped, the AEAD layer) reported a
  * wrong secret, tamper, or replay, so the user must NOT silently re-run it -- it
  * is surfaced as an authentication failure rather than a retryable transport
- * drop. It is the one category keyed off {@link ConnectionError} kind
- * (`"security"`); `"exchange"` and `"output"` are owner-local discriminants (an
+ * drop. A `"config"` failure is a {@link UsageError} raised during data
+ * preparation -- before any peer connection -- such as an authored standardization
+ * that contradicts the linkage terms: not a transport drop, so retrying as-is
+ * fails identically; its message is actionable and safe to surface. It is the one
+ * category keyed off {@link UsageError}; on the web every reachable `UsageError`
+ * is a prepare-time config error (the transport-bound `UsageError` subclasses are
+ * SFTP-only, and the web inbound bound raises a `ConnectionError`, not a
+ * `UsageError`). `"exchange"` and `"output"` are owner-local discriminants (an
  * output-generation failure is not a connection error). */
-export type ExchangeErrorCategory = "exchange" | "output" | "security";
+export type ExchangeErrorCategory =
+  | "exchange"
+  | "output"
+  | "security"
+  | "config";
 
 /** Maps a lifecycle failure to the alert {@link ExchangeErrorCategory} the UI
  * shows. A `security`-kind {@link ConnectionError} -- the authenticated key
@@ -45,8 +60,11 @@ export type ExchangeErrorCategory = "exchange" | "output" | "security";
  * call site, since the exchange already succeeded there.) Keying off the
  * connection-error kind rather than the handshake step means a future
  * `EncryptedMessageConnection` surfacing a `security` failure mid-exchange is
- * routed the same way for free. */
+ * routed the same way for free. A `UsageError` -- only ever a prepare-time config
+ * error on this path -- is classified `config` so the UI can surface its actionable
+ * message rather than the generic transient-failure copy. */
 function classifyExchangeFailure(error: unknown): ExchangeErrorCategory {
+  if (error instanceof UsageError) return "config";
   return error instanceof ConnectionError && error.kind === "security"
     ? "security"
     : "exchange";
@@ -236,8 +254,12 @@ export async function runExchangeLifecycle(
     });
   } catch (error) {
     // acquire is atomic: it has already torn down anything it built, so there is
-    // nothing here for the owner to release. On abort, emitError no-ops.
-    emitError({ category: "exchange", error });
+    // nothing here for the owner to release. On abort, emitError no-ops. Classify
+    // like the run half: acquire runs prepareForExchange, whose fail-closed config
+    // errors (a UsageError, e.g. an authored standardization contradicting the
+    // terms) must surface as an actionable "config" alert rather than the generic
+    // retryable "exchange" one; a plain load/transport failure stays "exchange".
+    emitError({ category: classifyExchangeFailure(error), error });
     return;
   }
 
