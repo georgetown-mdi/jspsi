@@ -276,6 +276,15 @@ function report(
   const cert = identity.certificate;
   log.info(`${action} signing identity (${cert.algorithm}) at ${identityPath}`);
   log.info(`  Identity: ${cert.identity}`);
+  // The regeneration warning is a diagnostic, so it goes to stderr via log.warn
+  // (not an ungated write): it obeys --log-level like every other warning, so a
+  // re-key at --log-level error/silent shows only the new value with no warning.
+  // That is deliberate -- --force is itself the explicit destructive gesture, and
+  // the resolveSigningIdentity re-key/adopt warnings are likewise log.warn;
+  // singling this one out as un-silenceable would be inconsistent, and an ungated
+  // stderr write would also escape --log-file capture. The stdout-purity contract
+  // requires only that the warning leave stdout (so a captured value stays clean),
+  // which routing it through the logger satisfies at every level.
   if (action === "Regenerated")
     log.warn(
       "this is a NEW identity with a NEW fingerprint. Any partner who pinned " +
