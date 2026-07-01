@@ -17,6 +17,7 @@ import {
   diffLinkageTerms,
   formatReconcileDiffs,
   loadConfigLinkageSource,
+  persistDisclosedPayloadColumns,
   persistHostKeyFingerprint,
   saveConfig,
 } from "../../src/config";
@@ -915,6 +916,148 @@ test("saveConfig preserves WebRTC connection.role and prunes the authentication 
     expect(raw).not.toContain("shared_secret");
     expect(raw).not.toContain(token);
     expect(raw).not.toContain("expires");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- persistDisclosedPayloadColumns ------------------------------------------
+
+test("persistDisclosedPayloadColumns adds the field and preserves comments and other fields", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "# hand-authored config",
+        "connection:",
+        "  channel: sftp",
+        "  server:",
+        "    host: sftp.example.org # the drop",
+        "",
+      ].join("\n"),
+    );
+    persistDisclosedPayloadColumns(configPath, ["notes", "member_id"]);
+    const raw = fs.readFileSync(configPath, "utf8");
+    // Operator comments and other fields survive the surgical write.
+    expect(raw).toContain("# hand-authored config");
+    expect(raw).toContain("host: sftp.example.org # the drop");
+    const parsed = YAML.parse(raw) as {
+      disclosed_payload_columns: string[];
+    };
+    expect(parsed.disclosed_payload_columns).toEqual(["notes", "member_id"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("persistDisclosedPayloadColumns refreshes a stale value (the re-invite fix)", () => {
+  // A config carrying an OLD commitment, re-minted over changed metadata: the
+  // field must be overwritten to the new set, never left stale (else the next
+  // exchange false-fires against a promise the partner no longer holds).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "connection:",
+        "  channel: sftp",
+        "  server:",
+        "    host: h",
+        "disclosed_payload_columns:",
+        "  - old_col",
+        "",
+      ].join("\n"),
+    );
+    persistDisclosedPayloadColumns(configPath, ["new_col"]);
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).not.toContain("old_col");
+    const parsed = YAML.parse(raw) as { disclosed_payload_columns: string[] };
+    expect(parsed.disclosed_payload_columns).toEqual(["new_col"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("persistDisclosedPayloadColumns removes the field when the commitment is undefined", () => {
+  // A re-invite from a config whose metadata is unknown publishes no subset, so a
+  // previously-recorded commitment must be cleared, not retained stale.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "connection:",
+        "  channel: sftp",
+        "  server:",
+        "    host: h",
+        "disclosed_payload_columns:",
+        "  - old_col",
+        "",
+      ].join("\n"),
+    );
+    persistDisclosedPayloadColumns(configPath, undefined);
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).not.toContain("disclosed_payload_columns");
+    expect(raw).not.toContain("old_col");
+    // The rest of the config is intact.
+    const parsed = YAML.parse(raw) as {
+      connection: { channel: string };
+      disclosed_payload_columns?: string[];
+    };
+    expect(parsed.connection.channel).toBe("sftp");
+    expect(parsed.disclosed_payload_columns).toBeUndefined();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("persistDisclosedPayloadColumns writes an empty array verbatim (strict disclose-nothing)", () => {
+  // Empty is a real commitment ("disclose nothing"), distinct from absent; it must
+  // be written, not dropped.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      "connection:\n  channel: sftp\n  server:\n    host: h\n",
+    );
+    persistDisclosedPayloadColumns(configPath, []);
+    const raw = fs.readFileSync(configPath, "utf8");
+    const parsed = YAML.parse(raw) as { disclosed_payload_columns: string[] };
+    expect(parsed.disclosed_payload_columns).toEqual([]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("persistDisclosedPayloadColumns writes the config owner-read-only (0600)", () => {
+  if (process.platform === "win32") return;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      "connection:\n  channel: sftp\n  server:\n    host: h\n",
+    );
+    persistDisclosedPayloadColumns(configPath, ["notes"]);
+    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("persistDisclosedPayloadColumns throws (not silently) on a malformed config", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(configPath, "connection: [unbalanced\n");
+    expect(() =>
+      persistDisclosedPayloadColumns(configPath, ["notes"]),
+    ).toThrow();
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

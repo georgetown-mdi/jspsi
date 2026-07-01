@@ -313,6 +313,39 @@ test("validateInvite: online carries the disclosed-columns subset from the infer
     ),
   );
   expect(token.disclosedPayloadColumns).toEqual(["notes", "member_id"]);
+  // The same disclosed set is persisted into the saved config's
+  // disclosedPayloadColumns (the send-side commitment), so a later recurring
+  // `psilink exchange` can verify its metadata still discloses it before
+  // connecting -- byte-identical to the token copy.
+  if (ready.mode !== "online") throw new Error("expected online mode");
+  expect(ready.dataSpec.disclosedPayloadColumns).toEqual(
+    token.disclosedPayloadColumns,
+  );
+});
+
+test("validateInvite: offline infer-from-input persists the disclosed subset as the send commitment", async () => {
+  // The offline infer path writes a config, so it persists the disclosed set it
+  // published on the token into disclosedPayloadColumns too -- the send-side
+  // commitment the later recurring `psilink exchange` checks.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-disc-off-"));
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,dob,ssn,notes,member_id\n" +
+      "Alice,Smith,1990-01-02,123456789,vip,M001\n",
+  );
+  const ready = await validateInvite({
+    resolved: { mode: "offline", input },
+    options: testOptions({ configFile: path.join(dir, "psilink.yaml") }),
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.disclosedPayloadColumns).toEqual(["notes", "member_id"]);
+  if (ready.mode !== "offline") throw new Error("expected offline mode");
+  expect(ready.dataSpec.disclosedPayloadColumns).toEqual(
+    token.disclosedPayloadColumns,
+  );
 });
 
 test("validateInvite: an all-linkage input carries an empty disclosed subset", async () => {
@@ -589,6 +622,64 @@ test("validateInvite: derives terms from a config when no input file is given", 
     // The minted invitation carries the config's terms, not inferred ones.
     const token = await decodeInvitation(ready.invitation);
     expect(token.linkageTerms).toEqual(terms);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: config-as-source threads the disclosed subset for the send commitment", async () => {
+  // A config with an explicit metadata block: the disclosed set is derived from
+  // it, carried on the token, AND threaded to the handler so it is persisted into
+  // the reused config's disclosed_payload_columns (closing the init-config gap and
+  // refreshing a stale prior commitment on re-invite).
+  const terms = defaultTerms();
+  const metadata = inferMetadata([
+    "first_name",
+    "last_name",
+    "dob",
+    "ssn",
+    "notes",
+  ]);
+  const { dir, configPath, keyPath } = withConfig(terms, undefined, metadata);
+  try {
+    const ready = await validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      log: silentLog,
+    });
+    expect(ready.mode).toBe("offlineFromConfig");
+    if (ready.mode !== "offlineFromConfig") return;
+    const token = await decodeInvitation(ready.invitation);
+    expect(ready.disclosedPayloadColumns).toEqual(
+      disclosedColumnNames(metadata),
+    );
+    expect(ready.disclosedPayloadColumns).toEqual(
+      token.disclosedPayloadColumns,
+    );
+    expect(ready.disclosedPayloadColumns).toEqual(["notes"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: config-as-source with no metadata block carries no commitment (lazy)", async () => {
+  // Without a metadata block the transmitted set is unknown at mint, so nothing is
+  // committed and the handler removes any stale field rather than freezing one.
+  const terms = defaultTerms();
+  const { dir, configPath, keyPath } = withConfig(terms);
+  try {
+    const ready = await validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      log: silentLog,
+    });
+    expect(ready.mode).toBe("offlineFromConfig");
+    if (ready.mode !== "offlineFromConfig") return;
+    expect(ready.disclosedPayloadColumns).toBeUndefined();
+    const token = await decodeInvitation(ready.invitation);
+    expect(token.disclosedPayloadColumns).toBeUndefined();
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

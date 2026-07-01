@@ -20,7 +20,10 @@ import type {
   PreparedExchange,
 } from "@psilink/core";
 
-import { loadConfigLinkageSource } from "../config";
+import {
+  loadConfigLinkageSource,
+  persistDisclosedPayloadColumns,
+} from "../config";
 import { detectFileConflicts } from "../fileUtils";
 import { resolveRecordOutput } from "../recordFile";
 import { DURATION_VALUE_HELP, parseDuration } from "../util/duration";
@@ -210,12 +213,19 @@ type InviteReady =
     }
   | {
       // Offline sourcing terms from a pre-existing config: the config supplies
-      // the linkage terms (and persists unchanged), so only the key file is
-      // written. When an input file was also supplied it has already been
-      // checked against the config's linkage fields here.
+      // the linkage terms (and its operator-authored content persists unchanged),
+      // so the key file is written and the machine-managed
+      // disclosed_payload_columns commitment is refreshed in place. When an input
+      // file was also supplied it has already been checked against the config's
+      // linkage fields here.
       mode: "offlineFromConfig";
       configPath: string;
       linkageTerms: LinkageTerms;
+      // The disclosed set this re-invite published (this party's own namespace),
+      // persisted into the reused config so a later exchange can verify it still
+      // holds; undefined when the config declares no metadata (reconcile lazily,
+      // and any stale field is removed). See persistDisclosedPayloadColumns.
+      disclosedPayloadColumns?: string[];
       invitation: string;
       expires: string;
       sharedSecret: string;
@@ -324,13 +334,31 @@ export async function validateInvite(params: {
       );
 
     const rows = await loadInputRows(input, { allowStdin: true });
-    const { dataSpec, warnings } = buildDataSpec({
+    const { dataSpec: builtDataSpec, warnings } = buildDataSpec({
       identity,
       rows,
       linkageStrategy,
     });
     for (const w of warnings) log.warn(w);
     noteSinglePassSelection(linkageStrategy, log);
+
+    // The columns this party will transmit for matched records, computed over the
+    // same metadata prepareForExchange uses (dataSpec.metadata, or inferred from
+    // the input columns), so the declared set equals what preparePayload
+    // transmits. Carried on the token AND persisted into the saved config as
+    // disclosedPayloadColumns, so a later recurring `psilink exchange` verifies
+    // its current metadata still discloses exactly this set before connecting
+    // (assertDisclosureMatchesCommitment) -- the send-side commitment the online
+    // path would otherwise keep only on the discarded token.
+    const disclosedPayloadColumns = disclosedColumnsFor(
+      builtDataSpec.metadata ?? inferMetadata(rows.columns),
+    );
+    const dataSpec: ResolvedDataSpec = {
+      ...builtDataSpec,
+      ...(disclosedPayloadColumns !== undefined
+        ? { disclosedPayloadColumns }
+        : {}),
+    };
 
     const expires = expiresFromNow(lifetimeSeconds);
     const sharedSecret = generateSharedSecret();
@@ -346,14 +374,9 @@ export async function validateInvite(params: {
       // or `--outbound-path` override is reflected; carries no credentials by
       // construction (see endpointFromConnection).
       connectionEndpoint: endpointFromConnection(connection),
-      // Carry the columns this party will transmit for matched records so the
-      // acceptor's consent screen and runtime lock-in derive from the wire's own
-      // disclosure predicate. Computed over the same metadata prepareForExchange
-      // will use (dataSpec.metadata, or inferred from the input columns), so the
-      // declared set equals what preparePayload transmits.
-      disclosedPayloadColumns: disclosedColumnsFor(
-        dataSpec.metadata ?? inferMetadata(rows.columns),
-      ),
+      // The same disclosed-columns subset persisted above: the acceptor's consent
+      // screen and runtime lock-in derive from the wire's own disclosure predicate.
+      disclosedPayloadColumns,
     });
     // prepareForOnlineExchange can throw; run it here, before the token print in
     // the caller's commit step, so a failure never follows disclosure.
@@ -472,6 +495,15 @@ export async function validateInvite(params: {
     if (configSource.metadata !== undefined)
       assertPayloadSendDisclosed(configTerms.payload, configSource.metadata);
 
+    // Carry the disclosed-columns subset only when the config declares an
+    // explicit metadata block: without one the run infers metadata from the
+    // exchange input (which this offline invite never reads), so the transmitted
+    // set is unknown at mint and the acceptor reconciles lazily. The same value
+    // is persisted into the reused config's disclosed_payload_columns below, so a
+    // later recurring `psilink exchange` (and a re-invite) checks and refreshes
+    // the commitment; undefined here means the field is removed, never left stale.
+    const disclosedPayloadColumns = disclosedColumnsFor(configSource.metadata);
+
     const expires = expiresFromNow(lifetimeSeconds);
     const sharedSecret = generateSharedSecret();
     const invitation = await encodeInvitation({
@@ -479,17 +511,14 @@ export async function validateInvite(params: {
       linkageTerms: configTerms,
       sharedSecret,
       expires,
-      // Carry the disclosed-columns subset only when the config declares an
-      // explicit metadata block: without one the run infers metadata from the
-      // exchange input (which this offline invite never reads), so the
-      // transmitted set is unknown at mint and the acceptor reconciles lazily.
-      disclosedPayloadColumns: disclosedColumnsFor(configSource.metadata),
+      disclosedPayloadColumns,
     });
 
     return {
       mode: "offlineFromConfig",
       configPath: options.configFile,
       linkageTerms: configTerms,
+      disclosedPayloadColumns,
       invitation,
       expires,
       sharedSecret,
@@ -508,13 +537,29 @@ export async function validateInvite(params: {
   });
 
   const rows = await loadInputRows(resolved.input, { allowStdin: true });
-  const { dataSpec, warnings } = buildDataSpec({
+  const { dataSpec: builtDataSpec, warnings } = buildDataSpec({
     identity,
     rows,
     linkageStrategy,
   });
   for (const w of warnings) log.warn(w);
   noteSinglePassSelection(linkageStrategy, log);
+
+  // The disclosed-columns subset over the same metadata the inferred terms (and
+  // the eventual exchange) use, so the acceptor's consent and lock-in derive from
+  // what preparePayload will actually transmit. Carried on the token AND persisted
+  // into the written config as disclosedPayloadColumns, so a later recurring
+  // `psilink exchange` verifies its metadata still discloses exactly this set
+  // before connecting (assertDisclosureMatchesCommitment).
+  const disclosedPayloadColumns = disclosedColumnsFor(
+    builtDataSpec.metadata ?? inferMetadata(rows.columns),
+  );
+  const dataSpec: ResolvedDataSpec = {
+    ...builtDataSpec,
+    ...(disclosedPayloadColumns !== undefined
+      ? { disclosedPayloadColumns }
+      : {}),
+  };
 
   const expires = expiresFromNow(lifetimeSeconds);
   const sharedSecret = generateSharedSecret();
@@ -523,12 +568,7 @@ export async function validateInvite(params: {
     linkageTerms: dataSpec.linkageTerms,
     sharedSecret,
     expires,
-    // Carry the disclosed-columns subset over the same metadata the inferred
-    // terms (and the eventual exchange) use, so the acceptor's consent and
-    // lock-in derive from what preparePayload will actually transmit.
-    disclosedPayloadColumns: disclosedColumnsFor(
-      dataSpec.metadata ?? inferMetadata(rows.columns),
-    ),
+    disclosedPayloadColumns,
   });
 
   return { mode: "offline", dataSpec, invitation, expires, sharedSecret };
@@ -632,13 +672,27 @@ export async function handler(argv: Arguments): Promise<void> {
       if (ready.mode === "offlineFromConfig") {
         // The config already exists and sourced the linkage terms; reuse it and
         // write only the key file (refusing to clobber an existing one). Under
-        // reuseExistingConfig the spec is ignored and the existing config is left
-        // untouched, so the placeholder spec here is never written.
+        // reuseExistingConfig the spec is ignored and the operator-authored config
+        // content is left untouched, so the placeholder spec here is never written.
         const { keyPath } = provisionConfigAndKey(
           specWithPlaceholderConnection({ linkageTerms: ready.linkageTerms }),
           { sharedSecret: ready.sharedSecret, expires: ready.expires },
           { configPath: ready.configPath, keyPath: options.keyFile },
           { reuseExistingConfig: true },
+        );
+
+        // Refresh the machine-managed send-side commitment in place (comments and
+        // operator content preserved), binding the write to this mint so it can
+        // never lag the token the acceptor locks in: this closes the drift the
+        // partner would otherwise abort on mid-exchange, whether this is a first
+        // invite from a metadata-only config (no commitment persisted before) or a
+        // re-invite over edited metadata (a prior commitment now stale). A config
+        // with no metadata publishes no subset, so the field is removed here rather
+        // than left stale. Before the token print, so a failure never follows
+        // disclosure.
+        persistDisclosedPayloadColumns(
+          ready.configPath,
+          ready.disclosedPayloadColumns,
         );
 
         printInvitation(ready.invitation, undefined);

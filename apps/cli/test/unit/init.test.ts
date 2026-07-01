@@ -99,6 +99,7 @@ test("renderConfigTemplate: every exchange-spec section is represented", async (
   expect(template).toContain("# signing:");
   expect(template).toContain("# retention_disposition:");
   expect(template).toContain("# expected_payload_columns:");
+  expect(template).toContain("# disclosed_payload_columns:");
   // With no input file, metadata/standardization are documented as commented
   // examples rather than written active.
   expect(template).toContain("# metadata:");
