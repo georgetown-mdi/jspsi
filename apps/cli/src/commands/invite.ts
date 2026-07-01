@@ -614,6 +614,12 @@ export async function handler(argv: Arguments): Promise<void> {
             enabled: options.record,
             recordFile: options.recordFile,
           }),
+          // The inviter's received-payload set is unknown until the acceptor
+          // transmits it, so crystallize the observed set into the saved config
+          // after this first exchange -- a later `psilink exchange` then fails
+          // closed on a divergent payload. (The acceptor learns its set up front
+          // from the token, so its online path does not request this.)
+          persistObservedReceivedPayload: true,
         });
         logOnlineBootstrapOutcome(log, {
           configFile: options.configFile,

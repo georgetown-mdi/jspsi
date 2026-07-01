@@ -40,6 +40,7 @@ import {
 import {
   addCommonBootstrapOptions,
   connectionOverridesFrom,
+  observedReceivedColumnsForSave,
   parseCommonBootstrapArgs,
   parseLinkageStrategyFlag,
   singlePassDisclosureNotice,
@@ -381,16 +382,28 @@ async function prepareDataset(
  * config stays minimal. The connection carries whatever credentials the URL or
  * --server-* flags supplied; `saveConfig` writes it owner-read-only.
  *
+ * `observedReceivedColumns` is the received-payload set this party observed in the
+ * exchange (from {@link runProtocol}'s result). When non-empty it is recorded as
+ * `expectedPayloadColumns` so a later recurring `psilink exchange` fails closed on
+ * a divergent received payload; an empty or absent observation records nothing and
+ * stays lazy (see {@link observedReceivedColumnsForSave} for why an empty
+ * observation must not be persisted).
+ *
  * @internal exported for testing
  */
 export function buildSaveSpec(
   connection: ConnectionConfig,
   prepared: PreparedExchange,
+  observedReceivedColumns?: string[],
 ): ExchangeSpec {
+  const expectedPayloadColumns = observedReceivedColumnsForSave(
+    observedReceivedColumns,
+  );
   return {
     connection,
     linkageTerms: prepared.linkageTerms,
     metadata: prepared.metadata,
+    ...(expectedPayloadColumns !== undefined ? { expectedPayloadColumns } : {}),
   };
 }
 
@@ -683,7 +696,7 @@ export async function handler(argv: Arguments): Promise<void> {
       exitWithError(log, err, err instanceof UsageError ? 64 : 69);
     }
 
-    const { bootstrap } = runResult;
+    const { bootstrap, observedReceivedPayloadColumns } = runResult;
     // bootstrap is undefined only when a signal cut the run short and the process
     // is already exiting; there is nothing to save or announce in that case.
     if (bootstrap === undefined) return;
@@ -697,7 +710,15 @@ export async function handler(argv: Arguments): Promise<void> {
       finalizeBootstrap({
         save: options.save,
         bootstrap,
-        spec: buildSaveSpec(connection, prepared),
+        // Record the received-payload set observed in this first exchange so a
+        // later `psilink exchange` on the saved config fails closed on a divergent
+        // payload; buildSaveSpec drops the ambiguous empty observation and stays
+        // lazy. Only persisted when this party actually saves (finalizeBootstrap).
+        spec: buildSaveSpec(
+          connection,
+          prepared,
+          observedReceivedPayloadColumns,
+        ),
         configFile: options.configFile,
         keyFile: options.keyFile,
         log,

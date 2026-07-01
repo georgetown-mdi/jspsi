@@ -17,6 +17,7 @@ import {
   LinkageStrategySchema,
   MAX_ENDPOINT_HOST_LENGTH,
   MAX_ENDPOINT_PATH_LENGTH,
+  MAX_PAYLOAD_ENTRIES,
   normalizeFiledropPath,
   safeParseConnectionConfig,
   sanitizeErrorForDisplay,
@@ -1017,6 +1018,54 @@ export async function prepareForOnlineExchange(
   return prepared;
 }
 
+/**
+ * The received-payload lock-in to persist from an OBSERVED first exchange, or
+ * `undefined` to persist nothing (leaving the field absent so the recurring path
+ * reconciles lazily). A party that learns its received-payload set only by
+ * observation -- the online inviter (its received set is whatever the acceptor
+ * transmits, unknown until the first run) and a zero-setup `--save` party --
+ * crystallizes that observed set into the saved config's `expectedPayloadColumns`
+ * so a later recurring `psilink exchange` fails closed on a divergent received
+ * payload ({@link reconcileReceivedPayload}). It is the observe-by-first-exchange
+ * counterpart to the acceptor's up-front token lock-in (which learns the set at
+ * invitation time and needs no observation).
+ *
+ * An EMPTY observation is deliberately NOT persisted: the partner transmits an
+ * empty payload BOTH when it discloses nothing AND when the first exchange simply
+ * had zero matched rows ({@link preparePayload} returns a no-data message in both
+ * cases), and the two are indistinguishable on the receive side. Persisting `[]`
+ * -- a strict "receive nothing" lock-in -- would abort an otherwise-honest later
+ * run that does match and carries the partner's real columns. So an empty
+ * observation stays lazy; a partner that starts transmitting columns later is
+ * then accepted, which does not widen disclosure (each sender's own
+ * `isDisclosedToPartner` metadata still governs what leaves its machine --
+ * receiving is not disclosing). Only a NON-EMPTY observation, an unambiguous
+ * agreed set, is crystallized.
+ *
+ * An observation of MORE than `MAX_PAYLOAD_ENTRIES` columns is likewise dropped
+ * (stays lazy). The received-payload wire schema bounds each column NAME's length
+ * but not the column COUNT (only the frame size does), whereas the persisted
+ * `expectedPayloadColumns` field is bounded to `MAX_PAYLOAD_ENTRIES` on reload.
+ * Persisting an over-cap observed set would write a config this party can no
+ * longer load (the next `psilink exchange` would reject it, exit 64) -- a
+ * self-inflicted brick a wide (honest or hostile) partner payload could trigger.
+ * Truncating instead is wrong: a persisted subset would then diverge from the
+ * partner's full re-transmitted set and false-abort every recurring run. Staying
+ * lazy keeps the config loadable and degrades to the pre-crystallization behavior
+ * (which never widens disclosure). The offline-accept/token path cannot hit this
+ * because the invitation bounds its disclosed-columns subset to the same cap at
+ * intake; this observe-on-save path is the first writer whose source is unbounded.
+ *
+ * @internal exported for testing
+ */
+export function observedReceivedColumnsForSave(
+  observed: string[] | undefined,
+): string[] | undefined {
+  if (observed === undefined || observed.length === 0) return undefined;
+  if (observed.length > MAX_PAYLOAD_ENTRIES) return undefined;
+  return observed;
+}
+
 // --- Online exchange ---------------------------------------------------------
 
 /**
@@ -1071,6 +1120,18 @@ export async function runOnlineBootstrap(params: {
   recordOutput?: RecordOutput;
   /** Keep a pre-existing, already-reconciled config: skip the config write. */
   reuseExistingConfig?: boolean;
+  /**
+   * Crystallize the received-payload set this party OBSERVES during the exchange
+   * into the freshly-written config's `expectedPayloadColumns`, so a later
+   * recurring `psilink exchange` fails closed on a divergent payload. Passed by
+   * the online INVITER, whose received set is unknown until the acceptor
+   * transmits it (the lazy receive-side fill-to-disk this closes). The online
+   * ACCEPTOR does not pass it: it learns its received set up front from the
+   * invitation token and enforces that in memory for its single run. No-op unless
+   * a fresh config was actually written (never the reuse path). See the
+   * post-exchange second write below and {@link observedReceivedColumnsForSave}.
+   */
+  persistObservedReceivedPayload?: boolean;
 }): Promise<{ configWriteError?: unknown }> {
   // `connection` is already narrowed to the channels runProtocol supports
   // (RunnableConnectionConfig); authentication is passed to runProtocol on its
@@ -1130,7 +1191,7 @@ export async function runOnlineBootstrap(params: {
   // would falsely promise `psilink exchange` recovery in the latter.
   let keyPersisted = false;
   try {
-    const { onAuthenticatedError } = await runProtocol(
+    const runResult = await runProtocol(
       liveConnection,
       auth,
       params.prepared,
@@ -1200,6 +1261,56 @@ export async function runOnlineBootstrap(params: {
         configWritten = true;
       },
     );
+    // observedReceivedPayloadColumns is what this party received during the
+    // completed exchange (undefined on a signal-interrupted run); it feeds the
+    // observe-then-persist crystallization below.
+    const { onAuthenticatedError, observedReceivedPayloadColumns } = runResult;
+
+    // Crystallize the OBSERVED received-payload set into the freshly-written
+    // config so a later recurring `psilink exchange` fails closed on a divergent
+    // payload (reconcileReceivedPayload). This is a SECOND write, deliberately
+    // distinct from the hook's: the hook persists at acceptance, BEFORE the data
+    // exchange, so the received set is unknown to it; the set is known only after
+    // runProtocol returns the completed exchange's observation. Moving the whole
+    // write here instead is not an option -- it would forfeit the recovery
+    // guarantee that a handshake-then-exchange failure still leaves a config on
+    // disk. Gated on: persistObservedReceivedPayload (only the inviter, which
+    // learns its received set by observation; the online accept path knows its set
+    // up front from the token and does not pass this), configWritten (a fresh
+    // config the hook actually wrote -- never the reuse path, which keeps the
+    // operator's config untouched, nor a hook that failed), and a non-empty
+    // observation (observedReceivedColumnsForSave drops the ambiguous empty case).
+    // Unlike the hook's first saveConfig this write is deliberately NOT preceded by
+    // a detectFileConflicts re-gate: it overwrites the config THIS run wrote at
+    // acceptance, so a conflict check would always fire on our own just-written
+    // file. The "do not clobber the operator's config" gate already ran at that
+    // first write -- configWritten is true only if it passed -- so re-gating here
+    // would add nothing but a spurious self-conflict.
+    // Non-fatal: the config is already on disk from the hook, so a failure here
+    // only leaves the recurring path reconciling lazily -- its prior behavior --
+    // and must not fail the already-completed exchange.
+    if (params.persistObservedReceivedPayload && configWritten) {
+      const observedLockIn = observedReceivedColumnsForSave(
+        observedReceivedPayloadColumns,
+      );
+      if (observedLockIn !== undefined) {
+        try {
+          saveConfig(params.configPath, {
+            connection: params.connection,
+            ...params.dataSpec,
+            expectedPayloadColumns: observedLockIn,
+          });
+        } catch (err) {
+          getLogger(params.loggerName).warn(
+            `the exchange succeeded and ${params.configPath} was written, but ` +
+              "recording the observed received-payload columns for fail-closed " +
+              "recurring enforcement failed; the next 'psilink exchange' will " +
+              "reconcile the received payload lazily: " +
+              (err instanceof Error ? err.message : String(err)),
+          );
+        }
+      }
+    }
 
     // onAuthenticatedError is the config-write failure, if any: the hook is just
     // the saveConfig call above, so surface it under a name the caller speaks.
