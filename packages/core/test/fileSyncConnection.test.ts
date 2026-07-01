@@ -1450,6 +1450,51 @@ test("send streams the header and payload as two chunks, without a concat copy",
   expect(expected.length).toBe(MESSAGE_HEADER_BYTES + frame.length);
 });
 
+test("a binary frame sent through the new framing is read back byte-exactly by a peer", async () => {
+  // End-to-end guard the shape-only test above does not give: it stops at the
+  // mock's file store. Here a SENDER writes a binary frame through send()'s
+  // [header, payload] framing and a PEER polls the same directory and decodes it,
+  // so a header/payload reorder, a wrong seq/version byte, or a byte-count vs
+  // on-disk-size mismatch that opened or jammed the partial-sync read gate would
+  // corrupt (or never deliver) the read-back rather than pass silently. The
+  // receiver's size gate must accept the frame for it to be delivered at all, so
+  // this also exercises the new byteLength = header + payload formula against the
+  // gate for a binary frame.
+  const { client } = makeMockClient();
+  const sender = await makeConnectedConn(client, { pollingFrequency: 10 });
+  const receiver = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    peerTimeoutMs: 2_000,
+  });
+  // send() needs a committed peerId; the receiver polls for `${peerId}-<n>.json`,
+  // so point it at the sender's id to consume the sender's message.
+  sender.peerId = "sender-peer";
+  receiver.peerId = sender.id;
+
+  // A plain Uint8Array (the binary-frame case send() carries by reference),
+  // larger than one part and with a non-uniform pattern so a reorder or a
+  // truncated tail cannot coincidentally compare equal.
+  const frame = new Uint8Array(500);
+  for (let i = 0; i < frame.length; i += 1) frame[i] = (i * 37 + 5) & 0xff;
+
+  await sender.send(frame);
+
+  const delivered = new Promise<unknown>((resolve) =>
+    receiver.on("data", resolve),
+  );
+  receiver.start();
+  const msg = await Promise.race([
+    delivered,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("no frame within budget")), 2_000),
+    ),
+  ]);
+  receiver.stop();
+
+  expect(msg).toBeInstanceOf(Uint8Array);
+  expect(Buffer.from(msg as Uint8Array).equals(Buffer.from(frame))).toBe(true);
+});
+
 test("send removes the .tmp file in-process when the rename fails", async () => {
   // If the rename throws (e.g. transport failure) the catch block must delete
   // the orphaned .tmp file so it is not left behind for the failed exchange.

@@ -58,7 +58,12 @@ function makeMockClient(): {
       if (Buffer.isBuffer(src)) {
         files.set(dest, src);
       } else if (typeof src === "string") {
-        files.set(dest, Buffer.from(src));
+        // A string src is a local file PATH to a real transport, never an
+        // in-memory body; reject it as the real transports do (and as send()
+        // never produces one) rather than storing it and masking a regression.
+        throw new Error(
+          "put expects a Buffer or chunk-list body, not a string",
+        );
       } else if (Array.isArray(src)) {
         // A [header, payload] chunk list from send(): join the parts into the
         // on-disk bytes a real transport writes back-to-back.
