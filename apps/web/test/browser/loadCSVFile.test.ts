@@ -69,7 +69,7 @@ describe("loadCSVFile multi-chunk parsing", () => {
     }) as unknown as typeof Papa.parse);
 
     const result = await loadCSVFile(file);
-    const rows = result.data as Array<Record<string, string>>;
+    const rows = result.data;
 
     expect(chunkCalls).toBeGreaterThan(1);
     expect(rows.length).toBe(rowCount);
@@ -160,7 +160,7 @@ describe("loadCSVFile bounds an oversized leading line for a browser File", () =
 
     const file = new File([csv], "ok.csv", { type: "text/csv" });
     const result = await loadCSVFile(file, ceiling);
-    const rowsParsed = result.data as Array<Record<string, string>>;
+    const rowsParsed = result.data;
     expect(result.meta.fields).toEqual(["id", "value"]);
     expect(rowsParsed.length).toBe(rowCount);
     expect(rowsParsed[0]).toEqual({ id: "0", value: "vvvvvvvv" });
