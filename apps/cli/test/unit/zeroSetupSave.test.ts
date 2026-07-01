@@ -56,6 +56,68 @@ test("buildSaveSpec carries the connection, terms and metadata, omitting standar
   expect(spec.linkageTerms).toBe(linkageTerms);
   expect(spec.metadata).toBe(metadata);
   expect(spec.standardization).toBeUndefined();
+  // No observation passed: nothing is locked in, the recurring path stays lazy.
+  expect(spec.expectedPayloadColumns).toBeUndefined();
+});
+
+test("buildSaveSpec records a non-empty observed received set as the lock-in", () => {
+  // A zero-setup --save party crystallizes the payload columns it observed in the
+  // first exchange so a later `psilink exchange` fails closed on a divergence.
+  const prepared = {
+    linkageTerms: getDefaultLinkageTerms("Test Party"),
+    metadata: [],
+  } as unknown as PreparedExchange;
+
+  const spec = buildSaveSpec(
+    { channel: "filedrop", path: "/mnt/share" },
+    prepared,
+    ["dob", "zip"],
+  );
+
+  expect(spec.expectedPayloadColumns).toEqual(["dob", "zip"]);
+});
+
+test("buildSaveSpec leaves an empty observation lazy, not a strict receive-nothing", () => {
+  // The partner transmits an empty payload both when it discloses nothing AND on a
+  // zero-match first exchange; the two are indistinguishable here, so persisting []
+  // (strict "receive nothing") would false-abort a later matching run. An empty
+  // observation therefore records no lock-in (absent field, reconciled lazily).
+  const prepared = {
+    linkageTerms: getDefaultLinkageTerms("Test Party"),
+    metadata: [],
+  } as unknown as PreparedExchange;
+
+  const spec = buildSaveSpec(
+    { channel: "filedrop", path: "/mnt/share" },
+    prepared,
+    [],
+  );
+
+  expect(spec.expectedPayloadColumns).toBeUndefined();
+});
+
+test("both-saved persists the observed received set to disk as expected_payload_columns", () => {
+  // End-to-end: the observed set flows through buildSaveSpec -> finalizeBootstrap
+  // -> saveConfig, and is serialized snake_case so a later load reconciles on it.
+  const { log } = capture();
+  const spec = buildSaveSpec(
+    { channel: "filedrop", path: "/mnt/share" },
+    {
+      linkageTerms: getDefaultLinkageTerms("Test Party"),
+      metadata: [],
+    } as unknown as PreparedExchange,
+    ["dob", "zip"],
+  );
+  finalizeBootstrap({
+    save: true,
+    bootstrap: { partnerSaveIntent: true, sharedSecret: SECRET },
+    spec,
+    configFile,
+    keyFile,
+    log,
+  });
+  const written = YAML.parse(fs.readFileSync(configFile, "utf8"));
+  expect(written.expected_payload_columns).toEqual(["dob", "zip"]);
 });
 
 // --- both parties saved ------------------------------------------------------

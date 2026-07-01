@@ -34,6 +34,7 @@ import {
   loadInputRowsForInference,
   logOnlineBootstrapOutcome,
   looksLikeUrl,
+  observedReceivedColumnsForSave,
   parseCommonBootstrapArgs,
   parseLinkageStrategyFlag,
   runOnlineBootstrap,
@@ -1428,6 +1429,111 @@ test("runOnlineBootstrap reports no config-write error on a clean run", async ()
       onlineBootstrapParams(configPath),
     );
     expect(configWriteError).toBeUndefined();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- observedReceivedColumnsForSave ------------------------------------------
+
+test("observedReceivedColumnsForSave keeps a non-empty observation", () => {
+  expect(observedReceivedColumnsForSave(["dob", "zip"])).toEqual([
+    "dob",
+    "zip",
+  ]);
+});
+
+test("observedReceivedColumnsForSave drops an empty or absent observation", () => {
+  // An empty observed set is the ambiguous zero-match / discloses-nothing case, so
+  // it is left absent (lazy) rather than persisted as a strict "receive nothing".
+  expect(observedReceivedColumnsForSave([])).toBeUndefined();
+  expect(observedReceivedColumnsForSave(undefined)).toBeUndefined();
+});
+
+// --- runOnlineBootstrap: observe-then-persist received-payload lock-in --------
+
+/** Mock runProtocol as a successful exchange: invoke the onAuthenticated hook
+ *  (so the config is written at acceptance) and resolve with the given observed
+ *  received-payload columns. */
+function mockSuccessfulExchange(observed: string[] | undefined): void {
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    const onAuthenticated = callArgs.find((a) => typeof a === "function") as
+      | (() => void | Promise<void>)
+      | undefined;
+    await onAuthenticated?.();
+    return { observedReceivedPayloadColumns: observed };
+  }) as never);
+}
+
+test("runOnlineBootstrap crystallizes the observed received set when the inviter opts in", async () => {
+  // The online inviter passes persistObservedReceivedPayload: after the exchange
+  // it re-writes the freshly-saved config with the columns it observed, so a later
+  // `psilink exchange` fails closed on a divergent payload.
+  mockSuccessfulExchange(["dob", "zip"]);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      persistObservedReceivedPayload: true,
+    });
+    const written = YAML.parse(fs.readFileSync(configPath, "utf8"));
+    expect(written.expected_payload_columns).toEqual(["dob", "zip"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap leaves an empty observation lazy even when the inviter opts in", async () => {
+  // An observed-empty payload is an ambiguous zero-match run; persisting [] would
+  // false-abort a later matching exchange, so no lock-in is written.
+  mockSuccessfulExchange([]);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      persistObservedReceivedPayload: true,
+    });
+    const written = YAML.parse(fs.readFileSync(configPath, "utf8"));
+    expect(written.expected_payload_columns).toBeUndefined();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap does not crystallize the observed set without the inviter opt-in", async () => {
+  // The online acceptor learns its received set up front from the token and does
+  // not pass persistObservedReceivedPayload, so its saved config records no
+  // observed lock-in (203798031's in-memory-for-its-single-run design stands).
+  mockSuccessfulExchange(["dob", "zip"]);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    await runOnlineBootstrap(onlineBootstrapParams(configPath));
+    const written = YAML.parse(fs.readFileSync(configPath, "utf8"));
+    expect(written.expected_payload_columns).toBeUndefined();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap does not crystallize onto a reused pre-existing config", async () => {
+  // With reuseExistingConfig the hook keeps the operator's config untouched
+  // (configWritten stays false), so the observe-then-persist second write must not
+  // fire and rewrite it -- even with the inviter opt-in set.
+  mockSuccessfulExchange(["dob", "zip"]);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(configPath, "preexisting: true\n");
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      reuseExistingConfig: true,
+      persistObservedReceivedPayload: true,
+    });
+    // The operator's config is left exactly as it was.
+    expect(fs.readFileSync(configPath, "utf8")).toBe("preexisting: true\n");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
