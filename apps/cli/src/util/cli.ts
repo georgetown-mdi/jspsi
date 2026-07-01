@@ -526,6 +526,24 @@ export function openInputSource(
 }
 
 /**
+ * True when stdout (fd 1) is a redirected regular file -- a `> file` shell
+ * redirect -- as opposed to a TTY, a pipe, or a character device like
+ * `/dev/null`. `fs.fstatSync(1).isFile()` is the distinguishing test:
+ * `process.stdout.isTTY` alone cannot tell a `> file` redirect from a pipe (it
+ * is `undefined` for both), and only the redirect leaves an operator-owned
+ * regular file behind, so the pipe must not be flagged. Best-effort: any stat
+ * failure (a closed or exotic fd 1) yields `false` so a detection fault can never
+ * abort the result write it only annotates.
+ */
+function stdoutIsRedirectedFile(): boolean {
+  try {
+    return fs.fstatSync(1).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Write formatted exchange results to a file or stdout as CSV, resolving once the
  * write is complete. When given an output path, the result CSV -- the most
  * sensitive artifact the tool produces -- is created owner-only (see
@@ -543,14 +561,31 @@ export function openInputSource(
  *
  * The stdout branch (no path given) writes to `process.stdout` -- a long-lived
  * stream the CLI neither owns nor closes, whose write errors stay with Node's
- * default stdout handling -- and resolves immediately, unchanged.
+ * default stdout handling -- and resolves immediately. Before it writes, it checks
+ * whether stdout is a redirected regular file ({@link stdoutIsRedirectedFile}) and,
+ * if so, warns on `log`: a `> file` redirect is created by the shell under its
+ * umask, NOT the owner-only `0600` an OUTPUT_FILE path gets via
+ * {@link createOwnerOnlyWriteStream}, so on a shared host the matched records --
+ * the most sensitive artifact -- can silently land group/world-readable. The
+ * warning goes through `log` (stderr under the default diagnostics sink), never to
+ * stdout, so it cannot corrupt the result CSV. A pipe, a TTY, or `/dev/null` does
+ * not warn -- only a redirect that leaves an under-permissioned file behind.
  */
 export function writeOutput(
   output: string | undefined,
   headers: string[],
   rows: Array<Array<string>>,
+  log: { warn: (message: string) => void },
 ): Promise<void> {
   if (output === undefined) {
+    if (stdoutIsRedirectedFile())
+      log.warn(
+        "result written to redirected stdout: the shell created that file " +
+          "under its umask, not the owner-only 0600 an OUTPUT_FILE path gets, " +
+          "so on a shared host the matched records may be group/world-readable. " +
+          "Pass an OUTPUT_FILE path argument instead of redirecting stdout with " +
+          "`>` to have psilink create the result owner-only.",
+      );
     process.stdout.write(headers.join(",") + "\n");
     for (const row of rows) process.stdout.write(row.join(",") + "\n");
     return Promise.resolve();

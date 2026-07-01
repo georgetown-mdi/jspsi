@@ -130,7 +130,13 @@ symlink-hardened; the owner-only guarantee is the same. Writing the result to
 stdout (no output path given) applies no permission handling -- in particular,
 redirecting stdout to a file with a shell `>` leaves that file at the shell's
 umask, since the shell, not the CLI, creates it; pass an output path to get the
-owner-only treatment.
+owner-only treatment. Because that exposure is silent, the CLI detects the
+redirect at runtime -- `fs.fstatSync(1).isFile()` is true for a `> file`
+redirect but false for a TTY, a pipe, or `/dev/null` -- and emits a one-line
+warning on stderr (through the logger, so it never corrupts the result CSV on
+stdout) naming the umask exposure and pointing at the OUTPUT_FILE-path
+alternative. A TTY, a pipe, and `/dev/null` do not warn; only a redirect that
+leaves an under-permissioned regular file behind.
 
 ## See also
 

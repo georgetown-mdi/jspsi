@@ -511,6 +511,13 @@ test("openInputSource: stdin is disabled by default", () => {
 
 // --- writeOutput -------------------------------------------------------------
 
+// A logger stub that records warn lines; the redirect warning is the only thing
+// writeOutput logs, so an empty array means "no warning fired".
+function warnCollector(): { warnings: string[]; warn: (m: string) => void } {
+  const warnings: string[] = [];
+  return { warnings, warn: (m: string) => warnings.push(m) };
+}
+
 test("writeOutput: writes the result CSV owner-only (0600) on POSIX", async () => {
   // The result CSV is the most sensitive artifact the tool produces, so a file
   // path must be created owner-only rather than inherit a world/group-readable
@@ -530,6 +537,7 @@ test("writeOutput: writes the result CSV owner-only (0600) on POSIX", async () =
         ["1", "2"],
         ["3", "4"],
       ],
+      warnCollector(),
     );
     expect(fs.readFileSync(out, "utf8")).toBe("a,b\n1,2\n3,4\n");
     expect(fs.statSync(out).mode & 0o777).toBe(0o600);
@@ -562,7 +570,12 @@ test("writeOutput: a mid-write stream error rejects rather than crashing", async
       }) as unknown as fs.WriteStream;
     });
     await expect(
-      writeOutput(path.join(dir, "results.csv"), ["a"], [["1"]]),
+      writeOutput(
+        path.join(dir, "results.csv"),
+        ["a"],
+        [["1"]],
+        warnCollector(),
+      ),
     ).rejects.toThrow("disk full");
   } finally {
     vi.restoreAllMocks();
@@ -583,9 +596,110 @@ test("writeOutput: the stdout branch writes to process.stdout unchanged", async 
     return true;
   }) as typeof process.stdout.write);
   try {
-    await writeOutput(undefined, ["a", "b"], [["1", "2"]]);
+    await writeOutput(undefined, ["a", "b"], [["1", "2"]], warnCollector());
   } finally {
     stdoutSpy.mockRestore();
   }
   expect(chunks.join("")).toBe("a,b\n1,2\n");
+});
+
+// --- writeOutput: redirected-stdout permission warning -----------------------
+
+// Drive writeOutput's stdout branch with fd 1's stat forced to a chosen kind, so
+// the redirect detection is exercised deterministically regardless of what the
+// test runner's real stdout is. Returns the stdout the rows were written to and
+// the warnings the logger collected; the stdout spy also proves no warning ever
+// reaches the result stream.
+async function runStdoutBranch(fd1IsFile: boolean): Promise<{
+  stdout: string;
+  warnings: string[];
+}> {
+  const chunks: string[] = [];
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ): boolean => {
+    chunks.push(
+      typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"),
+    );
+    return true;
+  }) as typeof process.stdout.write);
+  // Force only fd 1's stat; a real Stats for its isFile() verdict avoids
+  // reconstructing the class. Other fds fall through to the real fstatSync.
+  const realFstat = fs.fstatSync.bind(fs);
+  const fstatSpy = vi.spyOn(fs, "fstatSync").mockImplementation(((
+    fd: number,
+    ...rest: unknown[]
+  ) => {
+    if (fd === 1) {
+      const stats = Object.create(fs.Stats.prototype) as fs.Stats;
+      stats.isFile = () => fd1IsFile;
+      return stats;
+    }
+    return (realFstat as (...a: unknown[]) => fs.Stats)(fd, ...rest);
+  }) as typeof fs.fstatSync);
+  const log = warnCollector();
+  try {
+    await writeOutput(undefined, ["a", "b"], [["1", "2"]], log);
+  } finally {
+    stdoutSpy.mockRestore();
+    fstatSpy.mockRestore();
+  }
+  return { stdout: chunks.join(""), warnings: log.warnings };
+}
+
+test("writeOutput: a redirected regular-file stdout warns about umask exposure", async () => {
+  // `psilink exchange data.csv > results.csv`: fd 1 is a regular file the shell
+  // created under its umask, not the owner-only 0600 an OUTPUT_FILE path gets, so
+  // the operator is warned about the exposure and pointed at the alternative.
+  const { stdout, warnings } = await runStdoutBranch(true);
+  expect(warnings).toHaveLength(1);
+  // Names the exposure (umask, not owner-only) and the OUTPUT_FILE-path fix.
+  expect(warnings[0]).toMatch(/umask/);
+  expect(warnings[0]).toMatch(/0600/);
+  expect(warnings[0]).toMatch(/OUTPUT_FILE/);
+  // The warning never rides the result stream, so the CSV on stdout is intact.
+  expect(stdout).toBe("a,b\n1,2\n");
+});
+
+test("writeOutput: a pipe, a TTY, or /dev/null stdout does not warn", async () => {
+  // Every non-file stdout (`| cat`, an interactive terminal, `> /dev/null`)
+  // reports isFile() false and leaves no under-permissioned file behind, so none
+  // warn -- including the pipe and TTY a bare `process.stdout.isTTY` check could
+  // not distinguish from a `> file` redirect. All three share the isFile()-false
+  // verdict, so one no-warn assertion per kind covers the contract.
+  for (const kind of ["pipe", "tty", "/dev/null"]) {
+    const { stdout, warnings } = await runStdoutBranch(false);
+    expect(warnings, kind).toHaveLength(0);
+    expect(stdout, kind).toBe("a,b\n1,2\n");
+  }
+});
+
+test("writeOutput: a stat failure on fd 1 suppresses the warning rather than throwing", async () => {
+  // Detection is best-effort: if fstatSync(1) throws (a closed or exotic fd 1),
+  // writeOutput must still write the result and simply not warn, never abort the
+  // output over a failed permission probe.
+  const chunks: string[] = [];
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ): boolean => {
+    chunks.push(String(chunk));
+    return true;
+  }) as typeof process.stdout.write);
+  const realFstat = fs.fstatSync.bind(fs);
+  const fstatSpy = vi.spyOn(fs, "fstatSync").mockImplementation(((
+    fd: number,
+    ...rest: unknown[]
+  ) => {
+    if (fd === 1) throw new Error("EBADF");
+    return (realFstat as (...a: unknown[]) => fs.Stats)(fd, ...rest);
+  }) as typeof fs.fstatSync);
+  const log = warnCollector();
+  try {
+    await writeOutput(undefined, ["a"], [["1"]], log);
+  } finally {
+    stdoutSpy.mockRestore();
+    fstatSpy.mockRestore();
+  }
+  expect(log.warnings).toHaveLength(0);
+  expect(chunks.join("")).toBe("a\n1\n");
 });

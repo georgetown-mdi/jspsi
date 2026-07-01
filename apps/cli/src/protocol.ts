@@ -884,7 +884,7 @@ export async function runProtocol(
         prepared.metadata,
         partnerPayload,
       );
-      await writeOutput(output, headers, rows);
+      await writeOutput(output, headers, rows, log);
     }
 
     // Persist the self-attested record after the results: it is a secondary
