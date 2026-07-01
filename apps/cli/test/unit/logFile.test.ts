@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -183,6 +183,57 @@ test("configureLogFile: after close(), logging detaches from the file and does n
   expect(() => log.info("after close")).not.toThrow();
   // The file did not grow: the post-close log went to the restored sink, not the fd.
   expect(fs.readFileSync(logPath, "utf8")).toBe(afterCloseContents);
+});
+
+test("configureLogFile: diagnostics go to the file, never stdout", () => {
+  // The file sink is a distinct branch from the stderr sink, so pin its stdout
+  // purity directly: a regression that wrote the file sink's line to stdout would
+  // corrupt a piped result exactly as the original interleaving bug did, yet every
+  // other test here only reads the file. Spy stdout, log every level to the file,
+  // and assert stdout stays clean while the file captures the lines.
+  const logPath = path.join(tmpDir, "purity.log");
+  const stdoutWrites: string[] = [];
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    stdoutWrites.push(String(chunk));
+    return true;
+  }) as typeof process.stdout.write);
+  const sink = configureLogFile(logPath);
+  logLibrary.setDefaultLevel(logLibrary.levels.TRACE);
+  try {
+    const log = getLogger("logfile-test-purity");
+    log.info("info to file");
+    log.debug("debug to file");
+    log.warn("warn to file");
+    log.error("error to file");
+  } finally {
+    sink.close();
+    stdoutSpy.mockRestore();
+  }
+  const stdout = stdoutWrites.join("");
+  expect(stdout).not.toMatch(/\[(TRACE|DEBUG|INFO|WARN|ERROR)\]/);
+  expect(stdout).not.toContain("to file");
+  const contents = fs.readFileSync(logPath, "utf8");
+  for (const level of ["INFO", "DEBUG", "WARN", "ERROR"])
+    expect(contents).toContain(`[${level}]`);
+});
+
+test("configureLogFile: reroutes a logger created BEFORE the sink was installed", () => {
+  // The call-time property the stderr sink's twin test pins, here for the file
+  // sink: a logger built before configureLogFile runs -- as core's and the CLI's
+  // import-time loggers (cleaning, file-utils) are -- still writes to the file once
+  // the sink is installed, so --log-file captures them.
+  const logPath = path.join(tmpDir, "precreated.log");
+  logLibrary.setDefaultLevel(logLibrary.levels.INFO);
+  const log = getLogger("logfile-test-precreated"); // created before the sink
+  const sink = configureLogFile(logPath);
+  try {
+    log.info("late-routed to file");
+  } finally {
+    sink.close();
+  }
+  expect(fs.readFileSync(logPath, "utf8")).toContain("late-routed to file");
 });
 
 // --- (b) no file is created when the option is omitted -----------------------

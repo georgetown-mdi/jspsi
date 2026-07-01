@@ -81,7 +81,13 @@ export function installCapturedLogsInterceptor(): void {
  * named logger created before the interceptor is installed binds to the pre-install
  * factory and bypasses capture -- call `installCapturedLogsInterceptor` from test
  * setup, ahead of any logger, to close that creation-order gap (the CLI integration
- * suite does, so its loggers are captured regardless of creation order). */
+ * suite does, so its loggers are captured regardless of creation order). Separately,
+ * a diagnostic sink installed via `setDiagnosticSink` (the CLI's stderr / `--log-file`
+ * routing) is consulted at emit time DOWNSTREAM of this interceptor, so while such a
+ * sink is active `setLogPrefixer` routes to it and never reaches the captured factory
+ * -- output is not captured here. Do not pair `withCapturedLogs` with a command
+ * handler that installs a sink; drive the inner seam directly, as the integration
+ * suite does. */
 export function withCapturedLogs<T>(
   fn: () => Promise<T>,
   levelFilter?: (level: string) => boolean,
