@@ -240,10 +240,12 @@ const MUTED_TEXT = {
 } as const;
 
 /**
- * Accessible text color for the yellow "warning" and red "error" Mantine `light`
- * variant surfaces in the light scheme -- the Alert title and icon, and the
- * yellow constraint-warning Badge label (the StandardizationPreview violation
- * badge). Mantine's default
+ * Accessible text color for the yellow "warning", red "error", and green
+ * "success" Mantine `light` variant surfaces in the light scheme -- the Alert
+ * title and icon, the yellow constraint-warning Badge label (the
+ * StandardizationPreview violation badge), and the green satisfiability surfaces
+ * (the "All keys can match" Alert in PrepareData; the satisfiable key Badges in
+ * ExpertKeyEditor / LinkageTermsEditor). Mantine's default
  * `--mantine-color-{c}-light-color` is the color's shade 9 on its shade-1 tint,
  * which fails WCAG 2.1 AA 1.4.3 for normal-weight text:
  * - yellow-9 (#e67700) on yellow-1 (#fff3bf) = 2.69:1 -- and no yellow/orange
@@ -251,13 +253,18 @@ const MUTED_TEXT = {
  *   leave the yellow ramp entirely.
  * - red-9 (#c92a2a) on red-1 (#ffe3e3) = 4.51:1 -- a hairline pass, fragile to a
  *   future palette nudge.
+ * - green-9 (#2b8a3e) on green-1 (#d3f9d8) = 3.81:1 -- and as plain page text
+ *   (the TermsImportExport import-success message, `c="green"` = green-9) =
+ *   4.37:1 on the white page.
  *
  * Darkened in-hue rather than to plain black so each title still reads as
- * amber/caution and red/error; warning-vs-error no longer rests on the title
- * color alone, because the Alerts now also carry a severity icon (WCAG 1.4.1).
- * Ratios against the real shade-1 tints:
+ * amber/caution, red/error, and green/success; the meaning no longer rests on
+ * the title color alone, because the Alerts also carry a severity icon (WCAG
+ * 1.4.1). Ratios against the real shade-1 tints:
  * - warning #92400e on yellow-1 = 6.36:1.
  * - error #a51111 on red-1 = 6.45:1.
+ * - success #22683a on green-1 = 5.89:1 (and 6.75:1 as page text on white,
+ *   6.41:1 on the gray-0 card -- see the success-text call site below).
  *
  * Only the light scheme is overridden -- it is where these failures are. The
  * dark scheme is left at Mantine's defaults, where the same tokens are a
@@ -268,6 +275,7 @@ const MUTED_TEXT = {
 const STATUS_TEXT = {
   warning: "#92400e",
   error: "#a51111",
+  success: "#22683a",
 } as const;
 
 /**
@@ -285,7 +293,7 @@ const ERROR_TEXT = "#c92a2a";
 
 /**
  * Raises the `dimmed` and input `placeholder` tokens to {@link MUTED_TEXT} in
- * both color schemes, and the yellow/red `light`-variant text tokens to
+ * both color schemes, and the yellow/red/green `light`-variant text tokens to
  * {@link STATUS_TEXT} plus the `error` token to {@link ERROR_TEXT} in the light
  * scheme. Mantine deep-merges this over the default resolver, so only the
  * overridden variables need be returned. Passed to `MantineProvider` in the root
@@ -298,6 +306,7 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
     "--mantine-color-placeholder": MUTED_TEXT.light,
     "--mantine-color-yellow-light-color": STATUS_TEXT.warning,
     "--mantine-color-red-light-color": STATUS_TEXT.error,
+    "--mantine-color-green-light-color": STATUS_TEXT.success,
     "--mantine-color-error": ERROR_TEXT,
   },
   dark: {

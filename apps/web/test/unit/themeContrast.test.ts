@@ -83,6 +83,7 @@ const white = theme.white;
 const gray0 = theme.colors.gray[0];
 const yellow1 = theme.colors.yellow[1];
 const red1 = theme.colors.red[1];
+const green1 = theme.colors.green[1];
 const dark7 = theme.colors.dark[7];
 const dark6 = theme.colors.dark[6];
 
@@ -110,6 +111,7 @@ const dropzoneRejectTintDark = darken(theme.colors.red[9], 0.5);
 
 const warningText = vars.light["--mantine-color-yellow-light-color"];
 const errorText = vars.light["--mantine-color-red-light-color"];
+const successText = vars.light["--mantine-color-green-light-color"];
 const errorToken = vars.light["--mantine-color-error"];
 const dimmedLight = vars.light["--mantine-color-dimmed"];
 const placeholderLight = vars.light["--mantine-color-placeholder"];
@@ -211,6 +213,12 @@ describe("theme colour contrast (WCAG 2.1 AA)", () => {
         name: "error Alert title: deep red on red-1",
         fg: errorText,
         bg: red1,
+        floor: 4.5,
+      },
+      {
+        name: "success Alert title + Badge: deep green on green-1",
+        fg: successText,
+        bg: green1,
         floor: 4.5,
       },
       {
