@@ -35,7 +35,7 @@ const PrimaryCheckbox = Checkbox as unknown as ComponentType<{
   defaultChecked?: boolean;
   "aria-label"?: string;
 }>;
-const DimmedText = Text as unknown as ComponentType<{
+const ColoredText = Text as unknown as ComponentType<{
   c?: string;
   "data-testid"?: string;
   children?: ReactNode;
@@ -75,7 +75,8 @@ const StatusAlert = Alert as unknown as ComponentType<{
 //    literal inline color shared with the unit test through DROPZONE_DRAG_ICON) stay
 //    in the unit test, which checks them by arithmetic.
 //  - Resolver-owned tokens (theme.ts cssVariablesResolver): dimmed, placeholder,
-//    error, and the yellow/red light-variant status text. The harness now mounts under
+//    error, and the yellow/red/green light-variant status text (the last also as the
+//    green import-success page text). The harness now mounts under
 //    the app's real cssVariablesResolver (see mount below), so these are exercised at
 //    the render level for the first time -- previously only the arithmetic unit test
 //    saw them. Each case pins the EXACT resolved token colour (proof the resolver
@@ -96,8 +97,9 @@ const SHARE = {
 
 // Exact computed colours the resolver paints, pinned by the token cases below so a
 // case cannot pass on a coincidental value or a default that happens to clear the
-// floor. Mirror theme.ts: MUTED_TEXT (dimmed + placeholder) per scheme, ERROR_TEXT,
-// and STATUS_TEXT (yellow warning / red error), the last three light-scheme only.
+// floor. Mirror theme.ts: MUTED_TEXT (dimmed + placeholder) applies in both schemes;
+// ERROR_TEXT and STATUS_TEXT (yellow warning / red error / green success) are
+// light-scheme only.
 const MUTED_TEXT = {
   light: "rgb(99, 107, 115)",
   dark: "rgb(146, 150, 155)",
@@ -106,6 +108,7 @@ const ERROR_TEXT = "rgb(201, 42, 42)";
 const STATUS_TEXT = {
   yellow: "rgb(146, 64, 14)",
   red: "rgb(165, 17, 17)",
+  green: "rgb(34, 104, 58)",
 } as const;
 
 function mount(scheme: "light" | "dark", node: ReactNode) {
@@ -320,9 +323,9 @@ describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
 });
 
 describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
-  // dimmed and error text sit on the app body surface; wrap the render in a container
-  // painted with --mantine-color-body so the measured background is the real
-  // per-scheme body (white light / dark-7 dark) rather than a transparent ancestor.
+  // dimmed, error, and green page text sit on the app body surface; wrap the render
+  // in a container painted with --mantine-color-body so the measured background is
+  // the real per-scheme body (white light / dark-7 dark), not a transparent ancestor.
   function bodySurface(node: ReactNode): ReactNode {
     return createElement(
       "div",
@@ -342,7 +345,7 @@ describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
         scheme,
         bodySurface(
           createElement(
-            DimmedText,
+            ColoredText,
             { c: "dimmed", "data-testid": "dimmed" },
             "Secondary supporting text",
           ),
@@ -380,9 +383,10 @@ describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
     });
   }
 
-  // error and the yellow/red light-variant status text are overridden by the resolver
-  // in the LIGHT scheme only (that is where the dark-on-light failures are; the dark
-  // scheme keeps Mantine's inverse near-white-on-tint arrangement, which passes).
+  // error and the yellow/red/green light-variant status text are overridden by the
+  // resolver in the LIGHT scheme only (that is where the dark-on-light failures are;
+  // the dark scheme keeps Mantine's inverse near-white-on-tint arrangement, which
+  // passes).
   test("error validation text is AA-legible (light)", async () => {
     // --mantine-color-error, raised by the resolver in light (Mantine's red-6 default
     // = 3.28:1 on the white page fails the 1.4.3 validation-text floor).
@@ -412,8 +416,39 @@ describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
     expect(contrast(color, bg)).toBeGreaterThanOrEqual(4.5);
   });
 
+  test("green status token is AA-legible as page text (light)", async () => {
+    // The green status token rendered as plain page text -- the surface
+    // TermsImportExport's import-success message uses, a white/body background
+    // distinct from the Alert case's green tint (a bare c="green" = green-9 is only
+    // 4.37:1 here, under the 1.4.3 floor). This pins the TOKEN on a page surface; it
+    // is deliberately a stand-in, not a render of TermsImportExport, so it does not
+    // catch that component reverting its c prop to "green" -- driving the real
+    // component to its imported state would pull its import-validation deps' mocks
+    // into this shared harness. That call-site is guarded by its own comment instead.
+    mount(
+      "light",
+      bodySurface(
+        createElement(
+          ColoredText,
+          {
+            c: "var(--mantine-color-green-light-color)",
+            "data-testid": "success",
+          },
+          "Terms imported",
+        ),
+      ),
+    );
+    const text = await waitForEl('[data-testid="success"]');
+    const surface = await waitForEl('[data-testid="surface"]');
+    const color = getComputedStyle(text).color;
+    const bg = getComputedStyle(surface).backgroundColor;
+    expect(color).toBe(STATUS_TEXT.green);
+    expect(contrast(color, bg)).toBeGreaterThanOrEqual(4.5);
+  });
+
   for (const { color, label } of [
     { color: "yellow", label: "warning" },
+    { color: "green", label: "success" },
     { color: "red", label: "error" },
   ] as const) {
     test(`${label} alert title is AA-legible (light)`, async () => {
