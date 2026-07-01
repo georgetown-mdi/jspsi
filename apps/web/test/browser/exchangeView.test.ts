@@ -247,6 +247,33 @@ describe("ExchangeView Start->run wiring", () => {
     expect(lifecycle.calls[1].signal).not.toBe(firstSignal);
   });
 
+  test("a plain unmount aborts the in-flight run's signal (leaving the screen mid-exchange)", async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    render(inviterConfig("secret-a"));
+
+    // The run auto-starts on mount (no Start press in the current flow), so the
+    // owner's AbortController is armed and its signal is live.
+    await vi.waitFor(() => expect(lifecycle.calls).toHaveLength(1));
+    const { signal } = lifecycle.calls[0];
+    expect(signal.aborted).toBe(false);
+
+    // A plain unmount -- the user navigating away or closing the tab, NOT the
+    // keyed regenerate the remount test above covers -- must run ExchangeView's
+    // useEffect cleanup, which aborts the owner's controller. That abort is the
+    // seam the owner keys teardown off of: the node exchangeLifecycle owner-
+    // contract test asserts abort -> connection close / teardown-once, so this
+    // asserts only the other half, unmount -> abort (the effect-cleanup wiring
+    // that was otherwise left to manual verification). The cleanup is a passive
+    // effect, so wait for the abort to settle. Null the root so afterEach's
+    // unmount does not double-unmount an already-unmounted tree, but leave
+    // container set so afterEach still removes it from the DOM.
+    root.unmount();
+    root = undefined;
+    await vi.waitFor(() => expect(signal.aborted).toBe(true));
+  });
+
   const warning = {
     title: "Partial CSV coverage",
     message: "some keys inactive",
