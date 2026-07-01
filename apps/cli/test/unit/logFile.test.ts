@@ -203,6 +203,7 @@ test("configureLogFile: diagnostics go to the file, never stdout", () => {
   logLibrary.setDefaultLevel(logLibrary.levels.TRACE);
   try {
     const log = getLogger("logfile-test-purity");
+    log.trace("trace to file");
     log.info("info to file");
     log.debug("debug to file");
     log.warn("warn to file");
@@ -215,7 +216,7 @@ test("configureLogFile: diagnostics go to the file, never stdout", () => {
   expect(stdout).not.toMatch(/\[(TRACE|DEBUG|INFO|WARN|ERROR)\]/);
   expect(stdout).not.toContain("to file");
   const contents = fs.readFileSync(logPath, "utf8");
-  for (const level of ["INFO", "DEBUG", "WARN", "ERROR"])
+  for (const level of ["TRACE", "INFO", "DEBUG", "WARN", "ERROR"])
     expect(contents).toContain(`[${level}]`);
 });
 
