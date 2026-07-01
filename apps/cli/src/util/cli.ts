@@ -563,28 +563,38 @@ function stdoutIsRedirectedFile(): boolean {
  * stream the CLI neither owns nor closes, whose write errors stay with Node's
  * default stdout handling -- and resolves immediately. Before it writes, it checks
  * whether stdout is a redirected regular file ({@link stdoutIsRedirectedFile}) and,
- * if so, warns on `log`: a `> file` redirect is created by the shell under its
- * umask, NOT the owner-only `0600` an OUTPUT_FILE path gets via
- * {@link createOwnerOnlyWriteStream}, so on a shared host the matched records --
- * the most sensitive artifact -- can silently land group/world-readable. The
- * warning goes through `log` (stderr under the default diagnostics sink), never to
- * stdout, so it cannot corrupt the result CSV. A pipe, a TTY, or `/dev/null` does
- * not warn -- only a redirect that leaves an under-permissioned file behind.
+ * if so, notifies the operator on `log`: a `> file` redirect is created by the
+ * shell under its umask, NOT the owner-only permissions an OUTPUT_FILE path gets
+ * via {@link createOwnerOnlyWriteStream} (`0600` on Unix, an owner-only ACL on
+ * Windows), so on a shared host the matched records -- the most sensitive artifact
+ * -- can silently land group/world-readable. It is emitted at ERROR level, not
+ * warn: this is an operator-actionable exposure of sensitive data, so a routine
+ * `--log-level error` (which suppresses `warn`) must not hide it -- the same
+ * error-level-for-a-must-stay-visible-advisory choice the exchange recovery hint
+ * in `protocol.ts` makes. It still goes through `log`, so it lands on stderr under
+ * the default sink and is captured by `--log-file`, but never on stdout, so it
+ * cannot corrupt the result CSV. A pipe, a TTY, or `/dev/null` does not fire --
+ * only a redirect that leaves an under-permissioned file behind. Detection is
+ * fd-1-local: a redirect applied outside this process -- e.g. on the host across a
+ * container boundary, where this process's fd 1 is a pipe to the runtime -- is
+ * undetectable and does not fire, so the absence of the notice is not a guarantee
+ * the output is owner-only.
  */
 export function writeOutput(
   output: string | undefined,
   headers: string[],
   rows: Array<Array<string>>,
-  log: { warn: (message: string) => void },
+  log: { error: (message: string) => void },
 ): Promise<void> {
   if (output === undefined) {
     if (stdoutIsRedirectedFile())
-      log.warn(
+      log.error(
         "result written to redirected stdout: the shell created that file " +
-          "under its umask, not the owner-only 0600 an OUTPUT_FILE path gets, " +
-          "so on a shared host the matched records may be group/world-readable. " +
-          "Pass an OUTPUT_FILE path argument instead of redirecting stdout with " +
-          "`>` to have psilink create the result owner-only.",
+          "under its umask, not the owner-only permissions an OUTPUT_FILE path " +
+          "gets, so on a shared host the matched records may be " +
+          "group/world-readable. Pass an OUTPUT_FILE path argument instead of " +
+          "redirecting stdout with `>` to have psilink create the result " +
+          "owner-only.",
       );
     process.stdout.write(headers.join(",") + "\n");
     for (const row of rows) process.stdout.write(row.join(",") + "\n");
