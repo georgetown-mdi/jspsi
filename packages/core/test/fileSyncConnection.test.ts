@@ -41,12 +41,16 @@ import logLibrary from "loglevel";
 // transport in this file agrees on the framing. send() now hands put() a
 // [header, payload] chunk list instead of one pre-concatenated Buffer (the
 // peak-shaving change), so a mock store must JOIN the chunks; a lone Buffer and a
-// drained stream are unchanged. Returns undefined for a string src (a local path,
-// never an in-memory body); callers that must reject a string check for undefined.
+// drained stream are unchanged. A string src is a local file PATH to a real
+// transport (ssh2-sftp-client copies from it; LocalFSClient rejects it), never an
+// in-memory body, so it throws here too -- every mock then rejects a string as the
+// real transports do, rather than silently dropping it and masking a regression
+// that passed one.
 async function putSrcBytes(
   src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
-): Promise<Buffer | undefined> {
-  if (typeof src === "string") return undefined;
+): Promise<Buffer> {
+  if (typeof src === "string")
+    throw new Error("put expects a Buffer or chunk-list body, not a string");
   if (Buffer.isBuffer(src)) return src;
   if (Array.isArray(src)) return Buffer.concat(src);
   const chunks: Buffer[] = [];
@@ -88,9 +92,7 @@ function makeMockClient(): {
       return data as Buffer<ArrayBufferLike>;
     },
     put: async (src, dest) => {
-      const bytes = await putSrcBytes(src);
-      if (bytes === undefined) throw new Error("string src is not supported");
-      files.set(dest, bytes);
+      files.set(dest, await putSrcBytes(src));
     },
     delete: async (path: string) => {
       files.delete(path);
@@ -4325,8 +4327,7 @@ test("synchronize() lockless mode completes rendezvous when createExclusive and 
       src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
       dest: string,
     ) => {
-      const bytes = await putSrcBytes(src);
-      if (bytes !== undefined) sharedFiles.set(dest, bytes);
+      sharedFiles.set(dest, await putSrcBytes(src));
     },
     delete: async () => {
       throw new Error("delete not supported on this transport");
@@ -4406,8 +4407,7 @@ test("synchronize() lockless mode role assignment matches the lexicographic rule
       src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
       dest: string,
     ) => {
-      const bytes = await putSrcBytes(src);
-      if (bytes !== undefined) sharedFiles.set(dest, bytes);
+      sharedFiles.set(dest, await putSrcBytes(src));
     },
     delete: async () => {
       throw new Error("delete not supported");
@@ -4500,8 +4500,7 @@ test("synchronize() lockless mode joiner fast-path is skipped; lockless barrier 
       src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
       dest: string,
     ) => {
-      const bytes = await putSrcBytes(src);
-      if (bytes !== undefined) sharedFiles.set(dest, bytes);
+      sharedFiles.set(dest, await putSrcBytes(src));
     },
     delete: async () => {
       deleteCalled = true;
@@ -5024,8 +5023,7 @@ test("synchronize() lockless mode: round-trip hello body and zero-length ack mar
       src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
       dest: string,
     ) => {
-      const bytes = await putSrcBytes(src);
-      if (bytes !== undefined) sharedFiles.set(dest, bytes);
+      sharedFiles.set(dest, await putSrcBytes(src));
     },
     delete: async (path: string) => {
       sharedFiles.delete(path);
@@ -5183,8 +5181,7 @@ test("synchronize() lockless: rendezvous completes on ack existence; ack body is
       src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
       dest: string,
     ) => {
-      const bytes = await putSrcBytes(src);
-      if (bytes !== undefined) sharedFiles.set(dest, bytes);
+      sharedFiles.set(dest, await putSrcBytes(src));
     },
     delete: async (path: string) => {
       sharedFiles.delete(path);
@@ -6040,8 +6037,7 @@ test("retain mode: multi-message exchange completes when delete() always fails",
       src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
       dest: string,
     ) => {
-      const bytes = await putSrcBytes(src);
-      if (bytes !== undefined) sharedFiles.set(dest, bytes);
+      sharedFiles.set(dest, await putSrcBytes(src));
     },
     delete: async () => {
       throw new Error("delete not supported on this transport");
@@ -6473,8 +6469,7 @@ test("retain mode + lockless rendezvous: multi-message exchange completes end-to
       src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
       dest: string,
     ) => {
-      const bytes = await putSrcBytes(src);
-      if (bytes !== undefined) sharedFiles.set(dest, bytes);
+      sharedFiles.set(dest, await putSrcBytes(src));
     },
     delete: async (path: string) => {
       deleteCalls.push(path);
@@ -8153,8 +8148,7 @@ test.each([
         src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
         dest: string,
       ) => {
-        const bytes = await putSrcBytes(src);
-        if (bytes !== undefined) sharedFiles.set(dest, bytes);
+        sharedFiles.set(dest, await putSrcBytes(src));
       },
       delete: async () => {
         throw new Error("delete not supported on this transport");
@@ -9931,8 +9925,7 @@ test("split directories: a full retain-mode exchange between two bridged parties
       src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
       dest: string,
     ) => {
-      const bytes = await putSrcBytes(src);
-      if (bytes !== undefined) store.set(dest, bytes);
+      store.set(dest, await putSrcBytes(src));
     },
     delete: async (p: string) => {
       store.delete(p);

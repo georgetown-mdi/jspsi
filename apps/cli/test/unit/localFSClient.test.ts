@@ -325,6 +325,30 @@ test("put with a chunk list and flags: 'a' appends the joined parts", async () =
   );
 });
 
+test("chunk-list put surfaces the writev error even when close also fails", async () => {
+  // On the chunk-list path a failing close() must not replace (mask) the writev
+  // failure: the caller should see WHY the write failed, not an incidental close
+  // error, so a best-effort close is swallowed on the already-failed path.
+  const dest = path.join(dir, "writev-and-close-fail.bin");
+  const handle = await fs.open(dest, "w");
+  const writeErr = new Error("ENOSPC: simulated writev failure");
+  const writevSpy = vi.spyOn(handle, "writev").mockRejectedValue(writeErr);
+  const closeSpy = vi
+    .spyOn(handle, "close")
+    .mockRejectedValue(new Error("EIO: simulated close failure"));
+  const openSpy = vi.spyOn(fs, "open").mockResolvedValue(handle);
+  try {
+    await expect(
+      client.put([Buffer.from([0x01]), Buffer.from([0x02])], dest),
+    ).rejects.toBe(writeErr);
+  } finally {
+    openSpy.mockRestore();
+    writevSpy.mockRestore();
+    closeSpy.mockRestore();
+    await handle.close().catch(() => {});
+  }
+});
+
 // --- delete ------------------------------------------------------------------
 
 test("delete removes an existing file", async () => {

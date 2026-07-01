@@ -244,13 +244,24 @@ export class LocalFSClient implements FileTransportClient {
       // concatenating the payload into a fresh buffer (the send-path
       // peak-shaving this mirrors -- for a binary frame the payload is never
       // copied). The resulting on-disk bytes are the parts joined, byte-identical
-      // to writing their concatenation.
+      // to writing their concatenation. writeOptions.encoding does not apply here
+      // and is deliberately not passed: a chunk list is raw bytes, so writev
+      // (unlike fs.writeFile) has no string to decode -- every chunk-list call
+      // site passes encoding: null.
       const handle = await fs.open(dest, writeOptions.flag);
       try {
         await handle.writev(src);
-      } finally {
-        await handle.close();
+      } catch (err) {
+        // Preserve the writev failure: close best-effort so a close error on the
+        // already-failed path cannot replace (mask) why the write failed, the
+        // same reason get() swallows its own close error.
+        await handle.close().catch(() => {});
+        throw err;
       }
+      // Write succeeded: await close and surface its error rather than swallow it
+      // -- on a write handle a failed close can signal the bytes did not durably
+      // land (e.g. a deferred ENOSPC), the same as createExclusive's direct close.
+      await handle.close();
     } else {
       const chunks: Buffer[] = [];
       for await (const chunk of src) {
