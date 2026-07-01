@@ -305,10 +305,13 @@ export async function handler(argv: Arguments): Promise<void> {
   });
   // Install the logging sink before the level is applied and the logger is
   // created, so getLogger("fingerprint") below inherits it: the file sink when
-  // --log-file is given, otherwise the default stderr sink so stdout carries only
-  // the fingerprint summary. singleValue rejects a repeated --log-file and
-  // configureLogFile rejects an unopenable path; both are UsageErrors mapped to
-  // stderr + exit 64 here.
+  // --log-file is given, otherwise the default stderr sink, so the command's
+  // logged diagnostics (e.g. the preflight warnings) stay off stdout. The
+  // fingerprint report itself is printed through console.log; routing its banner
+  // and instructions off stdout -- leaving only the fingerprint value there -- is
+  // a separate follow-up (board item 207023432). singleValue rejects a repeated
+  // --log-file and configureLogFile rejects an unopenable path; both are
+  // UsageErrors mapped to stderr + exit 64 here.
   const logSink = parseOrExit(() => {
     const logFilePath = singleValue(argv, "log-file") as string | undefined;
     return logFilePath !== undefined
