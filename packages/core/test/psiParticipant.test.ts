@@ -16,20 +16,25 @@ import {
 } from "../src/connection/messageConnection";
 import type { MessageConnection } from "../src/connection/messageConnection";
 import { sortAssociationTable } from "./utils/associationTable";
+import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 
 const psiLibrary = await PSI();
 
 const [serverConn, clientConn] = createMessagePipe();
 
-const server = new PSIParticipant("server", psiLibrary, {
-  role: "starter",
-  verbose: 0,
-});
+const server = new PSIParticipant(
+  "server",
+  psiLibrary,
+  { role: "starter", verbose: 0 },
+  UNBOUNDED_PSI_ELEMENTS,
+);
 
-const client = new PSIParticipant("client", psiLibrary, {
-  role: "joiner",
-  verbose: 0,
-});
+const client = new PSIParticipant(
+  "client",
+  psiLibrary,
+  { role: "joiner", verbose: 0 },
+  UNBOUNDED_PSI_ELEMENTS,
+);
 
 const serverData = [
   "Alice",
@@ -145,14 +150,18 @@ function corruptNthReceive(
 
 test("joiner: a pathological-count final frame fails cleanly, not with a bare RangeError", async () => {
   const [serverConn, clientConn] = createMessagePipe();
-  const starter = new PSIParticipant("starter", psiLibrary, {
-    role: "starter",
-    verbose: 0,
-  });
-  const joiner = new PSIParticipant("joiner", psiLibrary, {
-    role: "joiner",
-    verbose: 0,
-  });
+  const starter = new PSIParticipant(
+    "starter",
+    psiLibrary,
+    { role: "starter", verbose: 0 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+  const joiner = new PSIParticipant(
+    "joiner",
+    psiLibrary,
+    { role: "joiner", verbose: 0 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
   // ~4M invalid (non-number) elements, past the ~3.5M `Invalid string length`
   // threshold the unbounded `z.array(z.number())` schema hit (a ~4.5s CPU burn
   // then a bare RangeError). The joiner's 3rd receive is the final original-index
@@ -183,4 +192,137 @@ test("a legitimately large original-index frame parses", () => {
   const n = 200_000;
   const valid = Array.from({ length: n }, (_, i) => i);
   expect(parseOrProtocolError(numberArrayMessage, valid)).toHaveLength(n);
+});
+
+// ─── PSI decode element-count guard: frame-bytes vs element-count amplification ─
+// A malicious partner can pack a PSI setup / request / response with many minimal
+// (~2-byte) repeated encrypted-element entries -- staying within the frame byte
+// cap, yet declaring far more curve points than the cap's ~40-byte-per-value
+// sizing assumes. Each entry becomes a curve point when the message is handed to
+// the library, so the participant validates the declared element count against the
+// authenticated keyCount * recordCount bound at the deserializeBinary seam and
+// aborts BEFORE that materialization. These craft such an over-declared frame (a
+// handful of 2-byte entries, so a ~tens-of-bytes frame -- orders of magnitude
+// under any byte cap) and assert the abort. The bound is tightened to a small
+// value to stand in for a real authenticated count.
+
+// A tiny encrypted-element list whose declared count far exceeds any bound the
+// tests set, in a frame of only a few dozen bytes.
+const OVER_DECLARED_COUNT = 64;
+const tinyElements = () =>
+  Array.from({ length: OVER_DECLARED_COUNT }, () => new Uint8Array([1, 2]));
+
+test("processClientRequest rejects a request declaring more elements than the bound", () => {
+  // Single-pass sender seam: the starter deserializes the receiver's request.
+  const sender = new PSIParticipant(
+    "sender",
+    psiLibrary,
+    { role: "starter", verbose: 0 },
+    { ...UNBOUNDED_PSI_ELEMENTS, request: 4 },
+  );
+  const request = new psiLibrary.request();
+  request.setEncryptedElementsList(tinyElements());
+  const bytes = request.serializeBinary();
+  // The over-declared frame is a few dozen bytes, far within any byte cap, yet
+  // declares 64 elements against a bound of 4.
+  expect(bytes.byteLength).toBeLessThan(1024);
+  expect(() => sender.processClientRequest(bytes)).toThrow(
+    /request declares 64 encrypted element\(s\), exceeding the authenticated bound of 4/,
+  );
+});
+
+test("computeValueMatches rejects a setup declaring more elements than the bound", () => {
+  // Single-pass receiver seam (setup): the joiner deserializes the sender's setup.
+  const receiver = new PSIParticipant(
+    "receiver",
+    psiLibrary,
+    { role: "joiner", verbose: 0 },
+    { ...UNBOUNDED_PSI_ELEMENTS, setup: 4 },
+  );
+  const setup = new psiLibrary.serverSetup();
+  const raw = new psiLibrary.serverSetup.RawInfo();
+  raw.setEncryptedElementsList(tinyElements());
+  setup.setRaw(raw);
+  // The response is never reached (the setup check fires first), so a trivial one
+  // suffices.
+  const response = new psiLibrary.response().serializeBinary();
+  expect(() =>
+    receiver.computeValueMatches(setup.serializeBinary(), response),
+  ).toThrow(/server setup declares 64 encrypted element\(s\)/);
+});
+
+test("computeValueMatches rejects a response declaring more elements than the bound", () => {
+  // Single-pass receiver seam (response): a within-bound setup, an over-declared
+  // response, so the response check is what fires.
+  const receiver = new PSIParticipant(
+    "receiver",
+    psiLibrary,
+    { role: "joiner", verbose: 0 },
+    { ...UNBOUNDED_PSI_ELEMENTS, response: 4 },
+  );
+  const setup = new psiLibrary.serverSetup();
+  const raw = new psiLibrary.serverSetup.RawInfo();
+  raw.setEncryptedElementsList([new Uint8Array([1, 2])]);
+  setup.setRaw(raw);
+  const response = new psiLibrary.response();
+  response.setEncryptedElementsList(tinyElements());
+  expect(() =>
+    receiver.computeValueMatches(
+      setup.serializeBinary(),
+      response.serializeBinary(),
+    ),
+  ).toThrow(/response declares 64 encrypted element\(s\)/);
+});
+
+test("cascade identifyIntersection (starter) rejects an over-declared request frame", async () => {
+  // Cascade decode path shares the same seam: inject an over-declared request as
+  // the frame the starter deserializes (its 1st receive) and assert it aborts
+  // before processing it. The bound stands in for the authenticated
+  // keyCount * receiverRecordCount.
+  const [serverConn, clientConn] = createMessagePipe();
+  const starter = new PSIParticipant(
+    "starter",
+    psiLibrary,
+    { role: "starter", verbose: 0 },
+    { ...UNBOUNDED_PSI_ELEMENTS, request: 4 },
+  );
+  const overDeclared = new psiLibrary.request();
+  overDeclared.setEncryptedElementsList(tinyElements());
+  const run = starter.identifyIntersection(
+    corruptNthReceive(serverConn, 1, overDeclared.serializeBinary()),
+    ["Alice", "Carol"],
+  );
+  // The starter sends its setup, then reads the client request (its 1st receive).
+  // corruptNthReceive still awaits a real frame before substituting, so send any
+  // frame from the peer to unblock it; the over-declared request stands in.
+  await clientConn.send(new Uint8Array([0]));
+  await expect(run).rejects.toThrow(
+    /request declares 64 encrypted element\(s\), exceeding the authenticated bound of 4/,
+  );
+});
+
+test("cascade identifyIntersection (joiner) rejects an over-declared server setup frame", async () => {
+  // The mirror seam: the joiner deserializes the sender's server setup on its 1st
+  // receive. An over-declared setup aborts before curve-point materialization.
+  const [serverConn, clientConn] = createMessagePipe();
+  const joiner = new PSIParticipant(
+    "joiner",
+    psiLibrary,
+    { role: "joiner", verbose: 0 },
+    { ...UNBOUNDED_PSI_ELEMENTS, setup: 4 },
+  );
+  const setup = new psiLibrary.serverSetup();
+  const raw = new psiLibrary.serverSetup.RawInfo();
+  raw.setEncryptedElementsList(tinyElements());
+  setup.setRaw(raw);
+  const run = joiner.identifyIntersection(
+    corruptNthReceive(clientConn, 1, setup.serializeBinary()),
+    ["Carol"],
+  );
+  // The joiner reads the server setup first (its 1st receive); send any frame
+  // from the peer to unblock it, and the over-declared setup stands in.
+  await serverConn.send(new Uint8Array([0]));
+  await expect(run).rejects.toThrow(
+    /server setup declares 64 encrypted element\(s\), exceeding the authenticated bound of 4/,
+  );
 });

@@ -31,20 +31,25 @@ import {
 } from "../src/connection/messageConnection";
 import type { AssociationTable } from "../src/types";
 import { sortAssociationTable } from "./utils/associationTable";
+import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 
 const psiLibrary = await PSI();
 
 const [serverConn, clientConn] = createMessagePipe();
 
-const server = new PSIParticipant("server", psiLibrary, {
-  role: "starter",
-  verbose: -1,
-});
+const server = new PSIParticipant(
+  "server",
+  psiLibrary,
+  { role: "starter", verbose: -1 },
+  UNBOUNDED_PSI_ELEMENTS,
+);
 
-const client = new PSIParticipant("client", psiLibrary, {
-  role: "joiner",
-  verbose: -1,
-});
+const client = new PSIParticipant(
+  "client",
+  psiLibrary,
+  { role: "joiner", verbose: -1 },
+  UNBOUNDED_PSI_ELEMENTS,
+);
 
 const serverData = [
   ["Alice", "Bob", "Carol", "David", "Elizabeth", "Frank", "Greta"],
@@ -97,14 +102,18 @@ test("results are correct", () => {
 // compare against the cascade results computed above.
 test("single-pass yields the byte-identical association table as the cascade", async () => {
   const [spServerConn, spClientConn] = createMessagePipe();
-  const spServer = new PSIParticipant("server", psiLibrary, {
-    role: "starter",
-    verbose: -1,
-  });
-  const spClient = new PSIParticipant("client", psiLibrary, {
-    role: "joiner",
-    verbose: -1,
-  });
+  const spServer = new PSIParticipant(
+    "server",
+    psiLibrary,
+    { role: "starter", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+  const spClient = new PSIParticipant(
+    "client",
+    psiLibrary,
+    { role: "joiner", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
 
   let [spServerResult, spClientResult] = await Promise.all([
     // partnerRecordCount: the server's partner is the client (3 rows) and vice
@@ -168,14 +177,18 @@ test("single-pass reproduces the cascade's survivor-relative uniqueness", async 
     ) => Promise<AssociationTable>,
   ) => {
     const [senderConn, receiverConn] = createMessagePipe();
-    const sender = new PSIParticipant("server", psiLibrary, {
-      role: "starter",
-      verbose: -1,
-    });
-    const receiver = new PSIParticipant("client", psiLibrary, {
-      role: "joiner",
-      verbose: -1,
-    });
+    const sender = new PSIParticipant(
+      "server",
+      psiLibrary,
+      { role: "starter", verbose: -1 },
+      UNBOUNDED_PSI_ELEMENTS,
+    );
+    const receiver = new PSIParticipant(
+      "client",
+      psiLibrary,
+      { role: "joiner", verbose: -1 },
+      UNBOUNDED_PSI_ELEMENTS,
+    );
     const [senderResult, receiverResult] = await Promise.all([
       link({ cardinality: "one-to-one" }, sender, senderConn, senderData),
       link({ cardinality: "one-to-one" }, receiver, receiverConn, receiverData),
@@ -366,10 +379,12 @@ test("the single-pass receiver read gate is bounded to the derived reply cap", a
   // MessageConnection records the cap set/cleared around the reply receive.
   const setCalls: Array<number | undefined> = [];
   let resolveReceive: ((v: unknown) => void) | undefined;
-  const receiver = new PSIParticipant("client", psiLibrary, {
-    role: "joiner",
-    verbose: -1,
-  });
+  const receiver = new PSIParticipant(
+    "client",
+    psiLibrary,
+    { role: "joiner", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
   // One key, three local rows; partner (sender) has two rows.
   const keyCount = 1;
   const localRows = 3;
@@ -415,10 +430,12 @@ test("single-pass receiver rejects a reply whose index table contradicts its rec
   // sender:
   // setup/response are dummies (read but not used before the check).
   const [conn, peer] = createMessagePipe();
-  const receiver = new PSIParticipant("client", psiLibrary, {
-    role: "joiner",
-    verbose: -1,
-  });
+  const receiver = new PSIParticipant(
+    "client",
+    psiLibrary,
+    { role: "joiner", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
   // partnerRecordCount 5 matches the reply's declared sender count, so the
   // count-coherence check passes and the index-table-length check is what fires.
   const run = linkViaSinglePassPSI(
@@ -448,10 +465,12 @@ test("single-pass receiver rejects a reply whose sender count contradicts the ex
   // A reply that declares a different count is a clean protocol abort -- before any
   // allocation -- rather than a trusted-frame read.
   const [conn, peer] = createMessagePipe();
-  const receiver = new PSIParticipant("client", psiLibrary, {
-    role: "joiner",
-    verbose: -1,
-  });
+  const receiver = new PSIParticipant(
+    "client",
+    psiLibrary,
+    { role: "joiner", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
   const run = linkViaSinglePassPSI(
     { cardinality: "one-to-one" },
     receiver,
@@ -480,10 +499,12 @@ test("single-pass aborts symmetrically when the exchange exceeds the ceiling", a
   // which does not recommend cascade. Drive a tiny local dataset whose keyCount *
   // partnerRecordCount exceeds the budget.
   const [conn, peer] = createMessagePipe();
-  const receiver = new PSIParticipant("client", psiLibrary, {
-    role: "joiner",
-    verbose: -1,
-  });
+  const receiver = new PSIParticipant(
+    "client",
+    psiLibrary,
+    { role: "joiner", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
   const run = linkViaSinglePassPSI(
     { cardinality: "one-to-one" },
     receiver,
@@ -506,10 +527,12 @@ test("single-pass aborts symmetrically from the starter side too", async () => {
   // joiner), yet both compute the identical over-cap verdict and abort before any
   // frame moves -- the starter throws before it ever reads the request.
   const [conn, peer] = createMessagePipe();
-  const sender = new PSIParticipant("server", psiLibrary, {
-    role: "starter",
-    verbose: -1,
-  });
+  const sender = new PSIParticipant(
+    "server",
+    psiLibrary,
+    { role: "starter", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
   const run = linkViaSinglePassPSI(
     { cardinality: "one-to-one" },
     sender,

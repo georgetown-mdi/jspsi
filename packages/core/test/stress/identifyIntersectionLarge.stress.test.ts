@@ -4,6 +4,7 @@ import PSI from "@openmined/psi.js";
 
 import { PSIParticipant } from "../../src/participant";
 import { createMessagePipe } from "../../src/connection/messageConnection";
+import { UNBOUNDED_PSI_ELEMENTS } from "../utils/psiElementBounds";
 
 // End-to-end stress: a full identifyIntersection round between two in-memory
 // participants at large N, not just the setup message. This exercises the whole
@@ -33,14 +34,18 @@ test(`identifyIntersection over ${N} elements yields the ${OVERLAP} shared ids`,
   }
 
   const [serverConn, clientConn] = createMessagePipe();
-  const server = new PSIParticipant("server", psi, {
-    role: "starter",
-    verbose: 0,
-  });
-  const client = new PSIParticipant("client", psi, {
-    role: "joiner",
-    verbose: 0,
-  });
+  const server = new PSIParticipant(
+    "server",
+    psi,
+    { role: "starter", verbose: 0 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+  const client = new PSIParticipant(
+    "client",
+    psi,
+    { role: "joiner", verbose: 0 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
 
   const [serverResult, clientResult] = await Promise.all([
     server.identifyIntersection(serverConn, serverData),

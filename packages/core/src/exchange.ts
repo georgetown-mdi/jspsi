@@ -17,7 +17,10 @@ import {
 } from "./protocolSetup.js";
 import { reconcileHostKeyFingerprints } from "./hostKeyReconciliation.js";
 import { linkViaPSI, linkViaSinglePassPSI } from "./link.js";
-import { singlePassDatasetExceedsCap } from "./connection/frameSize.js";
+import {
+  psiElementBounds,
+  singlePassDatasetExceedsCap,
+} from "./connection/frameSize.js";
 import {
   preparePayload,
   exchangePayloads,
@@ -512,6 +515,18 @@ export async function runExchange(
     (key) => new StandardizedKeyIterable(key, dataset, rowCount, isReceiver),
   );
 
+  // Per-message element-count caps for the PSI decode seams, from authenticated
+  // session state only: the agreed key count and the two exchanged record counts.
+  // The receiver (joiner) is the PSI sender's counterpart, so the sender's set is
+  // the partner's when this party receives; both parties compute identical bounds.
+  const senderRecordCount = isReceiver ? partnerRecordCount : rowCount;
+  const receiverRecordCount = isReceiver ? rowCount : partnerRecordCount;
+  const elementBounds = psiElementBounds(
+    linkageTerms.linkageKeys.length,
+    senderRecordCount,
+    receiverRecordCount,
+  );
+
   const participant = new PSIParticipant(
     isReceiver ? "client" : "server",
     psiLibrary,
@@ -519,6 +534,7 @@ export async function runExchange(
       role: isReceiver ? "joiner" : "starter",
       verbose: verbosity,
     },
+    elementBounds,
   );
 
   // Single-pass is allowlisted; any other value (including the default) runs the

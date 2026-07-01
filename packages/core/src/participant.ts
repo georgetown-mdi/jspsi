@@ -6,6 +6,7 @@ import {
   parseOrProtocolError,
   type MessageConnection,
 } from "./connection/messageConnection";
+import type { PsiElementBounds } from "./connection/frameSize";
 import { singleIssueArray } from "./utils/singleIssueArray";
 
 import type { Client as PSIClient } from "@openmined/psi.js/implementation/client.d.ts";
@@ -63,6 +64,22 @@ export const associationTableMessage = z.tuple([
 ]);
 
 const DEFAULT_VERBOSITY = 1;
+
+// The number of encrypted elements a deserialized PSI message declares -- the
+// count that drives per-element curve-point materialization when the message is
+// handed to the library (processRequest / getAssociationTable). deserializeBinary
+// itself only materializes the JS byte-slice list (bounded by the frame bytes),
+// so reading the count here is cheap and precedes the amplifying allocation. A Raw
+// setup exposes the list on its RawInfo (pass `setup.getRaw()`); a Request or
+// Response exposes it directly; a non-Raw setup (GCS/Bloom, which this protocol
+// never produces) has no RawInfo and so declares no per-element list -> 0.
+function declaredEncryptedElementCount(
+  message:
+    | { getEncryptedElementsList(): { readonly length: number } }
+    | undefined,
+): number {
+  return message ? message.getEncryptedElementsList().length : 0;
+}
 
 export enum ProcessState {
   BeforeStart,
@@ -166,6 +183,7 @@ export class PSIParticipant {
     | typeof starterProtocolStages
     | undefined;
   private log: ReturnType<typeof getLoggerForVerbosity>;
+  private elementBounds: PsiElementBounds;
 
   private psi: { server?: PSIServer; client?: PSIClient } = {};
 
@@ -173,11 +191,19 @@ export class PSIParticipant {
     id: string,
     library: PSILibrary,
     config: Config,
+    // Per-message caps on the encrypted-element count each inbound PSI frame may
+    // declare, derived from authenticated session state (the agreed key count and
+    // the two exchanged record counts; see psiElementBounds in frameSize.ts) and
+    // enforced at every deserializeBinary seam below. Required, not defaulted: a
+    // fail-open default would silently drop the amplification guard on a caller
+    // that forgot it.
+    elementBounds: PsiElementBounds,
     setStage?: (id: ProtocolId) => void,
   ) {
     this.id = id;
     this.library = library;
     this.config = config;
+    this.elementBounds = elementBounds;
     this.setStage = setStage ? setStage : () => {};
 
     if (this.config.verbose === undefined) {
@@ -205,6 +231,30 @@ export class PSIParticipant {
 
   getStages() {
     return this.stages;
+  }
+
+  // Reject a deserialized PSI message whose declared encrypted-element count
+  // exceeds what the authenticated key and record counts permit, BEFORE the
+  // element list is handed to the library and each entry becomes a curve point.
+  // Without this a malicious partner could pack a setup / request / response with
+  // many minimal (~2-byte) repeated entries -- within the frame byte cap, yet
+  // declaring far more curve points than the cap's ~40-byte-per-value sizing
+  // assumes -- and force the amplified allocation. The bound reads only
+  // authenticated session state, never the inbound frame's own bytes, so it is
+  // the same on both parties. Aborting here is the same clean protocol-error abort
+  // the sibling count checks in link.ts use (decodeSinglePassReply, the sender
+  // record-count check); it materializes nothing.
+  private assertPsiElementCount(
+    what: string,
+    declared: number,
+    maxElements: number,
+  ): void {
+    if (declared > maxElements) {
+      throw new Error(
+        `${this.id} protocol error: PSI ${what} declares ${declared} encrypted ` +
+          `element(s), exceeding the authenticated bound of ${maxElements}`,
+      );
+    }
   }
 
   // Building-block PSI steps used by the single-pass strategy
@@ -251,6 +301,11 @@ export class PSIParticipant {
         `${this.id}: processClientRequest requires the server role`,
       );
     const request = this.library.request.deserializeBinary(requestBytes);
+    this.assertPsiElementCount(
+      "request",
+      declaredEncryptedElementCount(request),
+      this.elementBounds.request,
+    );
     return server.processRequest(request).serializeBinary();
   }
 
@@ -287,7 +342,17 @@ export class PSIParticipant {
         `${this.id}: computeValueMatches requires the client role`,
       );
     const setup = this.library.serverSetup.deserializeBinary(setupBytes);
+    this.assertPsiElementCount(
+      "server setup",
+      declaredEncryptedElementCount(setup.getRaw()),
+      this.elementBounds.setup,
+    );
     const response = this.library.response.deserializeBinary(responseBytes);
+    this.assertPsiElementCount(
+      "response",
+      declaredEncryptedElementCount(response),
+      this.elementBounds.response,
+    );
     const table = client.getAssociationTable(setup, response);
     return [table[0], table[1]];
   }
@@ -326,6 +391,11 @@ export class PSIParticipant {
 
       const clientRequest = this.library.request.deserializeBinary(
         clientRequestRaw as Uint8Array,
+      );
+      this.assertPsiElementCount(
+        "request",
+        declaredEncryptedElementCount(clientRequest),
+        this.elementBounds.request,
       );
       const serverResponse = this.psi
         .server!.processRequest(clientRequest)
@@ -373,6 +443,11 @@ export class PSIParticipant {
       const serverSetup = this.library.serverSetup.deserializeBinary(
         serverSetupRaw as Uint8Array,
       );
+      this.assertPsiElementCount(
+        "server setup",
+        declaredEncryptedElementCount(serverSetup.getRaw()),
+        this.elementBounds.setup,
+      );
 
       const clientRequest = this.psi.client!.createRequest(set);
 
@@ -392,6 +467,11 @@ export class PSIParticipant {
 
       const serverResponse = this.library.response.deserializeBinary(
         serverResponseRaw as Uint8Array,
+      );
+      this.assertPsiElementCount(
+        "response",
+        declaredEncryptedElementCount(serverResponse),
+        this.elementBounds.response,
       );
       /**
        * Association table is indices into client data mapped to the indices
