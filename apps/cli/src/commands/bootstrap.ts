@@ -17,6 +17,7 @@ import {
   LinkageStrategySchema,
   MAX_ENDPOINT_HOST_LENGTH,
   MAX_ENDPOINT_PATH_LENGTH,
+  MAX_PAYLOAD_ENTRIES,
   normalizeFiledropPath,
   safeParseConnectionConfig,
   sanitizeErrorForDisplay,
@@ -1041,12 +1042,28 @@ export async function prepareForOnlineExchange(
  * receiving is not disclosing). Only a NON-EMPTY observation, an unambiguous
  * agreed set, is crystallized.
  *
+ * An observation of MORE than `MAX_PAYLOAD_ENTRIES` columns is likewise dropped
+ * (stays lazy). The received-payload wire schema bounds each column NAME's length
+ * but not the column COUNT (only the frame size does), whereas the persisted
+ * `expectedPayloadColumns` field is bounded to `MAX_PAYLOAD_ENTRIES` on reload.
+ * Persisting an over-cap observed set would write a config this party can no
+ * longer load (the next `psilink exchange` would reject it, exit 64) -- a
+ * self-inflicted brick a wide (honest or hostile) partner payload could trigger.
+ * Truncating instead is wrong: a persisted subset would then diverge from the
+ * partner's full re-transmitted set and false-abort every recurring run. Staying
+ * lazy keeps the config loadable and degrades to the pre-crystallization behavior
+ * (which never widens disclosure). The offline-accept/token path cannot hit this
+ * because the invitation bounds its disclosed-columns subset to the same cap at
+ * intake; this observe-on-save path is the first writer whose source is unbounded.
+ *
  * @internal exported for testing
  */
 export function observedReceivedColumnsForSave(
   observed: string[] | undefined,
 ): string[] | undefined {
-  return observed !== undefined && observed.length > 0 ? observed : undefined;
+  if (observed === undefined || observed.length === 0) return undefined;
+  if (observed.length > MAX_PAYLOAD_ENTRIES) return undefined;
+  return observed;
 }
 
 // --- Online exchange ---------------------------------------------------------

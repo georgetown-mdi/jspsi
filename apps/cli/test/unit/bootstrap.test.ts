@@ -10,6 +10,7 @@ import {
   getDefaultLinkageTerms,
   getLogger,
   INFER_DATE_SCAN_CAP,
+  MAX_PAYLOAD_ENTRIES,
   MAX_RECONNECT_ATTEMPTS,
   safeParseConnectionConfig,
   SHARED_SECRET_REGEX,
@@ -1450,6 +1451,20 @@ test("observedReceivedColumnsForSave drops an empty or absent observation", () =
   expect(observedReceivedColumnsForSave(undefined)).toBeUndefined();
 });
 
+test("observedReceivedColumnsForSave drops an over-cap observation (stays loadable)", () => {
+  // The wire caps each column NAME's length but not the column COUNT, while the
+  // persisted expected_payload_columns is bounded to MAX_PAYLOAD_ENTRIES on reload.
+  // Persisting an over-cap observed set would write a config this party can no
+  // longer load, so it is dropped (stays lazy) rather than crystallized.
+  const atCap = Array.from({ length: MAX_PAYLOAD_ENTRIES }, (_, i) => `c${i}`);
+  const overCap = Array.from(
+    { length: MAX_PAYLOAD_ENTRIES + 1 },
+    (_, i) => `c${i}`,
+  );
+  expect(observedReceivedColumnsForSave(atCap)).toEqual(atCap);
+  expect(observedReceivedColumnsForSave(overCap)).toBeUndefined();
+});
+
 // --- runOnlineBootstrap: observe-then-persist received-payload lock-in --------
 
 /** Mock runProtocol as a successful exchange: invoke the onAuthenticated hook
@@ -1534,6 +1549,38 @@ test("runOnlineBootstrap does not crystallize onto a reused pre-existing config"
     });
     // The operator's config is left exactly as it was.
     expect(fs.readFileSync(configPath, "utf8")).toBe("preexisting: true\n");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap keeps a failed observed-payload write non-fatal", async () => {
+  // The hook writes the config at acceptance; the observe-then-persist second write
+  // then fails -- here the path is swapped for a directory after the hook runs, so
+  // saveConfig's rename throws. That failure must be non-fatal: the completed
+  // exchange is not undone, nothing rethrows, and the clean hook write is still
+  // reported (configWriteError undefined). getLogger("bootstrap-test") is silenced
+  // above, so the catch's warn does not print.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    const onAuthenticated = callArgs.find((a) => typeof a === "function") as
+      | (() => void | Promise<void>)
+      | undefined;
+    await onAuthenticated?.(); // hook writes configPath as a file
+    fs.rmSync(configPath); // swap it for a directory so the second
+    fs.mkdirSync(configPath); // saveConfig's rename throws (EISDIR)
+    return { observedReceivedPayloadColumns: ["dob", "zip"] };
+  }) as never);
+  try {
+    const { configWriteError } = await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      persistObservedReceivedPayload: true,
+    });
+    expect(configWriteError).toBeUndefined();
+    // The second write genuinely failed (the swapped-in directory is intact),
+    // proving the non-fatal catch fired rather than the write silently succeeding.
+    expect(fs.statSync(configPath).isDirectory()).toBe(true);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
