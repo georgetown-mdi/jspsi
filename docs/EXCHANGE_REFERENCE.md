@@ -903,6 +903,8 @@ standardization:
 
 Each linkage field may have at most one data standardization transformation. Fields not covered by an explicit transformation are given an identity transformation and connected to a linkage field by matching the field's semantic type against the input column's metadata.
 
+When an exchange configuration authors its own `standardization`, that standardization is treated as authoritative: if it contradicts the linkage terms -- a transformation `output` naming no declared linkage field, or a `steps` entry naming an unknown `function` -- the exchange fails closed during data preparation (the CLI exits 64) with a message naming the offending output or function, rather than warning and proceeding past the contradiction. A configuration that authors no `standardization` reconstructs the default per-type cleaning from its metadata and terms, so it is unaffected by this check.
+
 ### Transformation fields
 
 | Field | Type | Required | Description |

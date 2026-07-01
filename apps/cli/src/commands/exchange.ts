@@ -552,13 +552,14 @@ export async function prepareDataset(
 
   // Pre-flight this run's CSV against the committed linkage terms before any
   // exchange work, the same satisfiability gate accept applies. This is the only
-  // place that catches it on the recurring path: prepared.warnings never covers the
-  // adopt-the-inviter's-terms case (prepareForExchange warns only on an explicit
-  // standardization spec), so a run whose CSV no longer satisfies the agreed terms
-  // -- a swapped CSV, or one never checked at an offline accept -- would otherwise
-  // reach a silent empty result indistinguishable from a real non-match. Gated on
-  // explicit linkageTerms only: the guard targets the operator's committed terms,
-  // not the default terms derived from the CSV when none are committed. The config's
+  // place that catches it on the recurring path: prepareForExchange only fails
+  // closed on an explicit standardization that contradicts its terms, never on a
+  // CSV that no longer satisfies the agreed terms, so a run whose CSV no longer
+  // satisfies them -- a swapped CSV, or one never checked at an offline accept --
+  // would otherwise reach a silent empty result indistinguishable from a real
+  // non-match. Gated on explicit linkageTerms only: the guard targets the
+  // operator's committed terms, not the default terms derived from the CSV when
+  // none are committed. The config's
   // standardization and metadata are passed so the verdict matches what
   // prepareForExchange resolves (accept passes neither).
   if (exchangeDataSpec.linkageTerms !== undefined)
@@ -581,8 +582,6 @@ export async function prepareDataset(
     rawRows,
     columns,
   );
-  for (const warning of prepared.warnings)
-    log.warn("cleaning configuration issue:", warning);
   warnOnValueConstraints(prepared, log);
   // Recurring / offline-accept lock-in: a committed config has its received payload
   // verified against the locked-in column set at runtime (see

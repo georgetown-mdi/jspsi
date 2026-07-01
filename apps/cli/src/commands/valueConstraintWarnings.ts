@@ -20,8 +20,7 @@ import type { PreparedExchange } from "@psilink/core";
  *
  * Warn only -- the exchange still proceeds -- matching the LinkageField constraint
  * contract ("the application warns if violated but does not enforce them"). Both the
- * `exchange` and zero-setup prepare paths call this after surfacing
- * {@link PreparedExchange.warnings}.
+ * `exchange` and zero-setup prepare paths call this during data preparation.
  */
 export function warnOnValueConstraints(
   prepared: PreparedExchange,

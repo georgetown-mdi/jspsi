@@ -131,9 +131,9 @@ describe("editing metadata changes the verdict and reaches the run", () => {
     });
     const prepared = prepareForExchange(spec, "Acceptor", rawRows, columns);
     // The edited metadata is used verbatim (not re-inferred), and the explicit
-    // standardization validates cleanly (its outputs are declared linkage fields).
+    // standardization validates cleanly (its outputs are declared linkage fields),
+    // so preparation does not throw.
     expect(prepared.metadata).toEqual(md);
-    expect(prepared.warnings).toEqual([]);
   });
 });
 

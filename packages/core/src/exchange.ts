@@ -31,6 +31,7 @@ import {
 } from "./payloadExchange.js";
 import type { PayloadWireMessage } from "./payloadExchange.js";
 import { buildExchangeRecord } from "./exchangeRecord.js";
+import { UsageError } from "./errors.js";
 
 import type { Metadata } from "./config/metadata.js";
 import type { LinkageTerms } from "./config/linkageTerms.js";
@@ -108,11 +109,6 @@ export interface PreparedExchange {
    */
   rawRows: Array<CSVRow>;
   rowCount: number;
-  /**
-   * Non-fatal issues detected during preparation (e.g. unknown standardization
-   * outputs).
-   */
-  warnings: string[];
 }
 
 /**
@@ -124,8 +120,8 @@ export interface PreparedExchange {
  * - Infers the date-of-birth input format when standardization is absent.
  * - Builds a default standardization pipeline when not provided explicitly.
  * - Constructs a {@link StandardizedDataset} ready for key-iterable creation.
- * - Validates explicit standardization against the linkage terms and collects
- *   any warnings.
+ * - Fails closed when an explicit (authoritative) standardization contradicts
+ *   the linkage terms.
  *
  * Call this before establishing a connection. After the handshake role and PSI
  * role are resolved, {@link runExchange} builds the key iterables and runs
@@ -146,7 +142,6 @@ export function prepareForExchange(
   columnNames: Array<string>,
 ): PreparedExchange {
   const log = getLogger("exchange");
-  const warnings: string[] = [];
 
   const metadata = exchangeDataSpec.metadata ?? inferMetadata(columnNames);
   const linkageTerms =
@@ -210,6 +205,33 @@ export function prepareForExchange(
     exchangeDataSpec.standardization ??
     getDefaultStandardization(metadata, linkageTerms, { dateInputFormat });
 
+  // Fail closed on an authoritative config whose standardization contradicts its
+  // linkage terms. A config that ships its OWN standardization is authoritative:
+  // an internal contradiction between that standardization and the terms is an
+  // operator error, so reject it here rather than run past it. Both classes
+  // validateStandardizationAgainstTerms reports -- a transform output naming no
+  // linkage field, and an unknown standardization function -- are structurally
+  // fatal for an authoritative config; it reports no advisory class a config
+  // might legitimately carry as a note. The terms-only path (standardization
+  // undefined) has no authored standardization to contradict its terms: it
+  // reconstructs to help via getDefaultStandardization above, so it is
+  // deliberately NOT gated here. UsageError so the CLI classifies it as a
+  // configuration error (exit 64), like the assertPayloadSendDisclosed sibling
+  // check above.
+  if (exchangeDataSpec.standardization !== undefined) {
+    const inconsistencies = validateStandardizationAgainstTerms(
+      exchangeDataSpec.standardization,
+      linkageTerms,
+    );
+    if (inconsistencies.length > 0)
+      throw new UsageError(
+        "this configuration's standardization is inconsistent with its linkage " +
+          `terms: ${inconsistencies.join("; ")}. Correct the standardization or ` +
+          "the linkage terms so every transform output names a declared linkage " +
+          "field and every step function is known.",
+      );
+  }
+
   // Sanitize the key names for display: on the accept side these come from the
   // partner's invitation (charset-unconstrained), and the operator already
   // reviewed the same escaped form when agreeing to the terms (displayInvitation).
@@ -224,15 +246,6 @@ export function prepareForExchange(
     metadata,
     linkageTerms,
   );
-
-  if (exchangeDataSpec.standardization !== undefined) {
-    warnings.push(
-      ...validateStandardizationAgainstTerms(
-        exchangeDataSpec.standardization,
-        linkageTerms,
-      ),
-    );
-  }
 
   return {
     metadata,
@@ -251,7 +264,6 @@ export function prepareForExchange(
     dataset,
     rawRows,
     rowCount: rawRows.length,
-    warnings,
   };
 }
 
