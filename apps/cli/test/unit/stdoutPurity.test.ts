@@ -5,6 +5,8 @@ import path from "node:path";
 import logLibrary from "loglevel";
 import type { Arguments } from "yargs";
 import {
+  computeCertificateFingerprint,
+  generateSigningIdentity,
   getDiagnosticSink,
   setDiagnosticSink,
   type DiagnosticSink,
@@ -12,6 +14,11 @@ import {
 
 import { handler as inviteHandler } from "../../src/commands/invite";
 import { handler as initHandler } from "../../src/commands/init";
+import { handler as fingerprintHandler } from "../../src/commands/fingerprint";
+import {
+  loadSigningIdentity,
+  saveSigningIdentity,
+} from "../../src/signingIdentityFile";
 
 // Executable form of the contract issue 206965143 establishes: stdout carries
 // only a command's result data, and every diagnostic goes to stderr. These tests
@@ -19,18 +26,18 @@ import { handler as initHandler } from "../../src/commands/init";
 // property a prose note could only claim, not enforce (CONTRIBUTING: encode a
 // runtime claim as a check). The result reaches stdout by two mechanisms: a
 // direct `process.stdout.write` (the CSV writers) or `console.log` (the invitation
-// token, the fingerprint summary); diagnostics reach stderr through core's
+// token, the fingerprint value); diagnostics reach stderr through core's
 // diagnostic sink, i.e. `process.stderr.write`. So a run's stdout is captured from
 // both `console.log` and `process.stdout.write`, and stderr from
 // `process.stderr.write`.
 //
-// Covered here are the two offline, no-network commands whose stdout shape is
-// unambiguous: `invite` (a single opaque token) and `init` (no stdout result --
-// its result is the written file). The online CSV-result commands route
-// diagnostics through the same sink, pinned at the sink level in
-// stderrLogging.test.ts; `fingerprint` joins this matrix once board item 207023432
-// routes its banner off stdout (today it prints prose to stdout via console.log,
-// outside this change's scope).
+// Covered here are the offline, no-network commands whose stdout shape is
+// unambiguous: `invite` (a single opaque token), `init` (no stdout result -- its
+// result is the written file), and `fingerprint` (the bare fingerprint value;
+// board item 207023432 routed its action banner, bound identity, --force
+// regeneration warning, and out-of-band sharing instructions off stdout and
+// through the logger). The online CSV-result commands route diagnostics through
+// the same sink, pinned at the sink level in stderrLogging.test.ts.
 
 const DIAGNOSTIC_PREFIX = /\[(TRACE|DEBUG|INFO|WARN|ERROR)\]/;
 
@@ -149,6 +156,95 @@ test("init: stdout is empty (its result is the written file), diagnostics on std
     expect(stderr).toContain("wrote a configuration template");
     expect(stderr).toMatch(DIAGNOSTIC_PREFIX);
   } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("fingerprint (created): stdout is the bare fingerprint value, diagnostics on stderr", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-stdout-fp-new-"));
+  const cwd = process.cwd();
+  try {
+    process.chdir(dir); // hermetic: no ambient ./psilink.yaml is consulted
+    const idPath = path.join(dir, "id.json");
+    const { stdout, stderr } = await runCapturing(() =>
+      fingerprintHandler({
+        _: [],
+        $0: "psilink",
+        "identity-file": idPath,
+        identity: "Party A, Agency A",
+        "log-level": "info",
+        force: false,
+      } as unknown as Arguments),
+    );
+
+    // stdout is exactly the fingerprint of the identity just created: the bare
+    // value and a newline, with no diagnostic prefix, no spaces (the value is
+    // base64url), and none of the banner/identity/instruction prose the command
+    // also emits.
+    const created = loadSigningIdentity(idPath);
+    if (created === undefined) throw new Error("identity was not created");
+    const fingerprint = await computeCertificateFingerprint(
+      created.certificate,
+    );
+    expect(stdout).toBe(fingerprint + "\n");
+    expect(stdout).not.toMatch(DIAGNOSTIC_PREFIX);
+    expect(stdout).not.toContain(" ");
+    expect(stdout).not.toContain("signing identity");
+    expect(stdout).not.toContain("Identity:");
+    expect(stdout).not.toContain("Share the fingerprint");
+
+    // The action banner, the bound identity, and the sharing instructions are
+    // diagnostics, so they land on stderr.
+    expect(stderr).toContain("Created signing identity");
+    expect(stderr).toContain("Share the fingerprint");
+    expect(stderr).toMatch(DIAGNOSTIC_PREFIX);
+  } finally {
+    process.chdir(cwd);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("fingerprint (regenerated): stdout is the new bare fingerprint value, the --force warning on stderr", async () => {
+  const dir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "psilink-stdout-fp-regen-"),
+  );
+  const cwd = process.cwd();
+  try {
+    process.chdir(dir); // hermetic: no ambient ./psilink.yaml is consulted
+    const idPath = path.join(dir, "id.json");
+    // Seed an existing identity so the --force run re-keys it (Regenerated).
+    saveSigningIdentity(idPath, generateSigningIdentity("Party A"));
+
+    const { stdout, stderr } = await runCapturing(() =>
+      fingerprintHandler({
+        _: [],
+        $0: "psilink",
+        "identity-file": idPath,
+        "log-level": "info",
+        force: true,
+      } as unknown as Arguments),
+    );
+
+    // stdout is exactly the NEW fingerprint (the re-keyed identity now on disk),
+    // nothing else.
+    const regenerated = loadSigningIdentity(idPath);
+    if (regenerated === undefined)
+      throw new Error("identity was not regenerated");
+    const fingerprint = await computeCertificateFingerprint(
+      regenerated.certificate,
+    );
+    expect(stdout).toBe(fingerprint + "\n");
+    expect(stdout).not.toMatch(DIAGNOSTIC_PREFIX);
+    expect(stdout).not.toContain(" ");
+    expect(stdout).not.toContain("NEW identity");
+
+    // The regeneration warning -- which must stay visible, not be swallowed -- and
+    // the "Regenerated" banner land on stderr.
+    expect(stderr).toContain("Regenerated signing identity");
+    expect(stderr).toContain("NEW identity with a NEW fingerprint");
+    expect(stderr).toMatch(/\[WARN\]/);
+  } finally {
+    process.chdir(cwd);
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
