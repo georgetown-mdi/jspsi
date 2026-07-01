@@ -511,6 +511,28 @@ test("openInputSource: stdin is disabled by default", () => {
 
 // --- writeOutput -------------------------------------------------------------
 
+// A logger stub recording the error and warn channels separately. writeOutput
+// emits its redirect notice at ERROR level (so a routine `--log-level error`,
+// which suppresses warn, cannot hide a sensitive-data exposure), so `errors` is
+// where the notice lands and `warns` must stay empty -- asserting both is the
+// executable form of "emitted at error level, not warn". An all-empty pair means
+// no notice fired at all.
+function logCollector(): {
+  errors: string[];
+  warns: string[];
+  error: (m: string) => void;
+  warn: (m: string) => void;
+} {
+  const errors: string[] = [];
+  const warns: string[] = [];
+  return {
+    errors,
+    warns,
+    error: (m: string) => errors.push(m),
+    warn: (m: string) => warns.push(m),
+  };
+}
+
 test("writeOutput: writes the result CSV owner-only (0600) on POSIX", async () => {
   // The result CSV is the most sensitive artifact the tool produces, so a file
   // path must be created owner-only rather than inherit a world/group-readable
@@ -530,6 +552,7 @@ test("writeOutput: writes the result CSV owner-only (0600) on POSIX", async () =
         ["1", "2"],
         ["3", "4"],
       ],
+      logCollector(),
     );
     expect(fs.readFileSync(out, "utf8")).toBe("a,b\n1,2\n3,4\n");
     expect(fs.statSync(out).mode & 0o777).toBe(0o600);
@@ -562,7 +585,12 @@ test("writeOutput: a mid-write stream error rejects rather than crashing", async
       }) as unknown as fs.WriteStream;
     });
     await expect(
-      writeOutput(path.join(dir, "results.csv"), ["a"], [["1"]]),
+      writeOutput(
+        path.join(dir, "results.csv"),
+        ["a"],
+        [["1"]],
+        logCollector(),
+      ),
     ).rejects.toThrow("disk full");
   } finally {
     vi.restoreAllMocks();
@@ -583,9 +611,139 @@ test("writeOutput: the stdout branch writes to process.stdout unchanged", async 
     return true;
   }) as typeof process.stdout.write);
   try {
-    await writeOutput(undefined, ["a", "b"], [["1", "2"]]);
+    await writeOutput(undefined, ["a", "b"], [["1", "2"]], logCollector());
   } finally {
     stdoutSpy.mockRestore();
   }
   expect(chunks.join("")).toBe("a,b\n1,2\n");
+});
+
+// --- writeOutput: redirected-stdout permission notice ------------------------
+
+// The distinct fd-1 kinds writeOutput's redirect detection must tell apart. Each
+// models a real fstat verdict: a `> file` redirect is the only regular file; a
+// pipe is a FIFO; a TTY and /dev/null are character devices. `stdoutIsRedirectedFile`
+// keys solely on isFile(), so only `regular-file` should fire -- but building each
+// Stats with its own true predicate (not just isFile() flipped) keeps the fixtures
+// honest models of the real fd shapes rather than three copies of one stub.
+const STDOUT_KINDS = {
+  "regular-file": { isFile: true },
+  pipe: { isFIFO: true },
+  tty: { isCharacterDevice: true },
+  "/dev/null": { isCharacterDevice: true },
+} as const;
+
+// Drive writeOutput's stdout branch with fd 1's stat forced to one of the kinds
+// above, so the redirect detection is exercised deterministically regardless of
+// what the test runner's real stdout is. Returns the stdout the rows were written
+// to and both logger channels; the stdout spy also proves no notice ever reaches
+// the result stream.
+async function runStdoutBranch(kind: keyof typeof STDOUT_KINDS): Promise<{
+  stdout: string;
+  errors: string[];
+  warns: string[];
+}> {
+  const shape: {
+    isFile?: boolean;
+    isFIFO?: boolean;
+    isCharacterDevice?: boolean;
+  } = STDOUT_KINDS[kind];
+  const chunks: string[] = [];
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ): boolean => {
+    chunks.push(
+      typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"),
+    );
+    return true;
+  }) as typeof process.stdout.write);
+  // Force only fd 1's stat; a real Stats with the kind's predicate set avoids
+  // reconstructing the class. Other fds fall through to the real fstatSync.
+  const realFstat = fs.fstatSync.bind(fs);
+  const fstatSpy = vi.spyOn(fs, "fstatSync").mockImplementation(((
+    fd: number,
+    ...rest: unknown[]
+  ) => {
+    if (fd === 1) {
+      const stats = Object.create(fs.Stats.prototype) as fs.Stats;
+      stats.isFile = () => shape.isFile === true;
+      stats.isFIFO = () => shape.isFIFO === true;
+      stats.isCharacterDevice = () => shape.isCharacterDevice === true;
+      return stats;
+    }
+    return (realFstat as (...a: unknown[]) => fs.Stats)(fd, ...rest);
+  }) as typeof fs.fstatSync);
+  const log = logCollector();
+  try {
+    await writeOutput(undefined, ["a", "b"], [["1", "2"]], log);
+  } finally {
+    stdoutSpy.mockRestore();
+    fstatSpy.mockRestore();
+  }
+  return { stdout: chunks.join(""), errors: log.errors, warns: log.warns };
+}
+
+test("writeOutput: a redirected regular-file stdout warns at error level about umask exposure", async () => {
+  // `psilink exchange data.csv > results.csv`: fd 1 is a regular file the shell
+  // created under its umask, not the owner-only permissions an OUTPUT_FILE path
+  // gets, so the operator is warned about the exposure and pointed at the
+  // alternative.
+  const { stdout, errors, warns } = await runStdoutBranch("regular-file");
+  expect(errors).toHaveLength(1);
+  // Emitted at error level, not warn, so a routine `--log-level error` (which
+  // suppresses warn) cannot hide this sensitive-data exposure.
+  expect(warns).toHaveLength(0);
+  // Names the exposure (umask, not owner-only) and the OUTPUT_FILE-path fix.
+  expect(errors[0]).toMatch(/umask/);
+  expect(errors[0]).toMatch(/owner-only/);
+  expect(errors[0]).toMatch(/OUTPUT_FILE/);
+  // The notice never rides the result stream, so the CSV on stdout is intact.
+  expect(stdout).toBe("a,b\n1,2\n");
+});
+
+test("writeOutput: a pipe, a TTY, or /dev/null stdout does not warn", async () => {
+  // Every non-file stdout (`| cat`, an interactive terminal, `> /dev/null`)
+  // reports isFile() false and leaves no under-permissioned file behind, so none
+  // fire -- including the pipe and TTY a bare `process.stdout.isTTY` check could
+  // not distinguish from a `> file` redirect. Each kind is a distinct fstat shape
+  // (a FIFO, a character device) rather than the same stub, so the assertion is
+  // that isFile()-false is what suppresses the notice regardless of the concrete
+  // non-file kind.
+  for (const kind of ["pipe", "tty", "/dev/null"] as const) {
+    const { stdout, errors, warns } = await runStdoutBranch(kind);
+    expect(errors, kind).toHaveLength(0);
+    expect(warns, kind).toHaveLength(0);
+    expect(stdout, kind).toBe("a,b\n1,2\n");
+  }
+});
+
+test("writeOutput: a stat failure on fd 1 suppresses the warning rather than throwing", async () => {
+  // Detection is best-effort: if fstatSync(1) throws (a closed or exotic fd 1),
+  // writeOutput must still write the result and simply not fire, never abort the
+  // output over a failed permission probe.
+  const chunks: string[] = [];
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ): boolean => {
+    chunks.push(String(chunk));
+    return true;
+  }) as typeof process.stdout.write);
+  const realFstat = fs.fstatSync.bind(fs);
+  const fstatSpy = vi.spyOn(fs, "fstatSync").mockImplementation(((
+    fd: number,
+    ...rest: unknown[]
+  ) => {
+    if (fd === 1) throw new Error("EBADF");
+    return (realFstat as (...a: unknown[]) => fs.Stats)(fd, ...rest);
+  }) as typeof fs.fstatSync);
+  const log = logCollector();
+  try {
+    await writeOutput(undefined, ["a"], [["1"]], log);
+  } finally {
+    stdoutSpy.mockRestore();
+    fstatSpy.mockRestore();
+  }
+  expect(log.errors).toHaveLength(0);
+  expect(log.warns).toHaveLength(0);
+  expect(chunks.join("")).toBe("a\n1\n");
 });

@@ -130,7 +130,24 @@ symlink-hardened; the owner-only guarantee is the same. Writing the result to
 stdout (no output path given) applies no permission handling -- in particular,
 redirecting stdout to a file with a shell `>` leaves that file at the shell's
 umask, since the shell, not the CLI, creates it; pass an output path to get the
-owner-only treatment.
+owner-only treatment. Because that exposure is silent, the CLI detects the
+redirect at runtime -- `fs.fstatSync(1).isFile()` is true for a `> file`
+redirect but false for a TTY, a pipe, or `/dev/null` -- and emits a one-line
+notice naming the umask exposure and pointing at the OUTPUT_FILE-path
+alternative. The notice goes through the logger, so it lands on stderr under the
+default sink and is captured by `--log-file`, and never corrupts the result CSV
+on stdout; it is emitted at error level rather than warn so a routine
+`--log-level error` (which suppresses warn) does not hide a sensitive-data
+exposure -- the same error-level-for-a-must-stay-visible-advisory choice the
+exchange recovery hint makes. `--log-level silent`, which suppresses every
+level, does suppress it, consistent with that flag meaning emit nothing: an
+operator who silences all diagnostics forgoes this one too. A TTY, a pipe, and
+`/dev/null` do not fire; only a redirect that leaves an under-permissioned
+regular file behind. The check is
+fd-1-local: a redirect applied outside this process -- e.g. on the host across a
+container boundary, where the CLI's own fd 1 is a pipe to the runtime -- is
+undetectable and does not fire, so the absence of the notice is not a guarantee
+the output is owner-only.
 
 ## See also
 
