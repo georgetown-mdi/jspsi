@@ -1,5 +1,4 @@
 import type { Argv, Arguments } from "yargs";
-import logLibrary from "loglevel";
 import { userInfo } from "node:os";
 
 import {
@@ -26,9 +25,7 @@ import { detectFileConflicts } from "../fileUtils";
 import { resolveRecordOutput } from "../recordFile";
 import { DURATION_VALUE_HELP, parseDuration } from "../util/duration";
 import {
-  configureLogFile,
-  configureStderrLogging,
-  type LogSink,
+  configureLogging,
   durationFlagSeconds,
   MAX_TIMEOUT_SECONDS,
   singleValue,
@@ -540,7 +537,7 @@ export async function validateInvite(params: {
 // --- Handler -----------------------------------------------------------------
 
 export async function handler(argv: Arguments): Promise<void> {
-  let logSink: LogSink | undefined;
+  let closeLogging: (() => void) | undefined;
   try {
     await runOrExit("invite", async () => {
       // Parse and apply the log level before creating the logger, so the
@@ -549,17 +546,18 @@ export async function handler(argv: Arguments): Promise<void> {
       // (e.g. an unrecognized --log-level) through the same error->exit path as
       // everything else, rather than yargs's noisier top-level catch.
       const options = parseCommonBootstrapArgs(argv);
-      // Install the logging sink before the level is applied and any logger is
-      // created, so getLogger("invite") below inherits it: the file sink when
-      // --log-file is given, otherwise the default stderr sink so stdout carries
-      // only the invitation token. A missing parent directory is a UsageError ->
-      // exit 64 here.
-      logSink =
-        options.logFile !== undefined
-          ? configureLogFile(options.logFile)
-          : configureStderrLogging();
-      logLibrary.setDefaultLevel(options.logLevel);
-      const log = getLogger("invite");
+      // Install the sink, apply the level, and build getLogger("invite") through
+      // the shared configureLogging helper (in that order, so the logger inherits
+      // the sink): the file sink when --log-file is given, otherwise the default
+      // stderr sink so stdout carries only the invitation token. A missing parent
+      // directory is a UsageError -> exit 64, mapped here by the enclosing
+      // runOrExit.
+      const { log, close } = configureLogging({
+        logLevel: options.logLevel,
+        logFile: options.logFile,
+        name: "invite",
+      });
+      closeLogging = close;
       // accept-timeout is parsed to seconds here (not in validateInvite) so a
       // malformed or bare-integer value is a clean usage error (exit 64) before any
       // side effect; durationFlagSeconds also rejects a repeat (via singleValue)
@@ -674,7 +672,7 @@ export async function handler(argv: Arguments): Promise<void> {
     // file sink) on the normal exit path. Writes are synchronous and already
     // durable, so the error path's process.exit (which bypasses this finally)
     // loses nothing -- this is only factory/descriptor cleanup.
-    logSink?.close();
+    closeLogging?.();
   }
 }
 

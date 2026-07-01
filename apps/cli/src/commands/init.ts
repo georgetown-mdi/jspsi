@@ -1,5 +1,4 @@
 import type { Argv, Arguments } from "yargs";
-import logLibrary from "loglevel";
 
 import { getDefaultLinkageTerms, getLogger, UsageError } from "@psilink/core";
 
@@ -13,9 +12,7 @@ import {
 import { renderConfigTemplate } from "../configTemplate";
 import type { TemplateDataSpec } from "../configTemplate";
 import {
-  configureLogFile,
-  configureStderrLogging,
-  type LogSink,
+  configureLogging,
   LOG_LEVELS,
   promptConfirm,
   singleValue,
@@ -76,7 +73,7 @@ export function builder(cmd: Argv): Argv {
 }
 
 export async function handler(argv: Arguments): Promise<void> {
-  let logSink: LogSink | undefined;
+  let closeLogging: (() => void) | undefined;
   try {
     await runOrExit("init", async () => {
       // Resolve the log level before creating the logger (loglevel binds a
@@ -89,18 +86,18 @@ export async function handler(argv: Arguments): Promise<void> {
       const logLevel = LOG_LEVELS[rawLogLevel];
       if (logLevel === undefined)
         throw new UsageError(`unrecognized log-level: ${argv["log-level"]}`);
-      // Install the logging sink before the level is applied and any logger is
-      // created, so getLogger("init") below inherits it: the file sink when
-      // --log-file is given, otherwise the default stderr sink so stdout carries
-      // only result data. A missing parent directory is a UsageError -> exit 64
-      // here.
-      const logFile = singleValue(argv, "log-file") as string | undefined;
-      logSink =
-        logFile !== undefined
-          ? configureLogFile(logFile)
-          : configureStderrLogging();
-      logLibrary.setDefaultLevel(logLevel);
-      const log = getLogger("init");
+      // Install the sink, apply the level, and build getLogger("init") through the
+      // shared configureLogging helper (in that order, so the logger inherits the
+      // sink): the file sink when --log-file is given, otherwise the default stderr
+      // sink so stdout carries only result data. A missing parent directory
+      // (configureLogFile) or a repeated --log-file (singleValue) is a UsageError
+      // -> exit 64, mapped here by the enclosing runOrExit.
+      const { log, close } = configureLogging({
+        logLevel,
+        logFile: singleValue(argv, "log-file") as string | undefined,
+        name: "init",
+      });
+      closeLogging = close;
 
       const configFile =
         expandTilde(singleValue(argv, "config-file") as string | undefined) ??
@@ -165,7 +162,7 @@ export async function handler(argv: Arguments): Promise<void> {
     // file sink) on the normal exit path. Writes are synchronous and already
     // durable, so the error path's process.exit (which bypasses this finally)
     // loses nothing -- this is only factory/descriptor cleanup.
-    logSink?.close();
+    closeLogging?.();
   }
 }
 

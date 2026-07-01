@@ -2,7 +2,6 @@ import fs from "node:fs";
 import { userInfo } from "node:os";
 
 import type { Argv, Arguments } from "yargs";
-import logLibrary from "loglevel";
 
 import {
   describeDecodeError,
@@ -30,12 +29,7 @@ import {
 import { detectFileConflicts } from "../fileUtils";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
-import {
-  configureLogFile,
-  configureStderrLogging,
-  type LogSink,
-  promptConfirm,
-} from "../util/cli";
+import { configureLogging, promptConfirm } from "../util/cli";
 import { resolveRecordOutput } from "../recordFile";
 import {
   checkLinkageSatisfiability,
@@ -615,7 +609,7 @@ const INVITATION_PREFLIGHT_MESSAGING: LinkagePreflightMessaging = {
 // --- Handler -----------------------------------------------------------------
 
 export async function handler(argv: Arguments): Promise<void> {
-  let logSink: LogSink | undefined;
+  let closeLogging: (() => void) | undefined;
   try {
     await runOrExit("accept", async () => {
       // Parse and apply the log level before creating the logger, so the
@@ -624,17 +618,18 @@ export async function handler(argv: Arguments): Promise<void> {
       // (e.g. an unrecognized --log-level) through the same error->exit path as
       // everything else, rather than yargs's noisier top-level catch.
       const options = parseCommonBootstrapArgs(argv);
-      // Install the logging sink before the level is applied and any logger is
-      // created, so getLogger("accept") below inherits it: the file sink when
-      // --log-file is given, otherwise the default stderr sink so stdout carries
-      // only result data (the exchange CSV when no OUTPUT_FILE positional is
-      // given). A missing parent directory is a UsageError -> exit 64 here.
-      logSink =
-        options.logFile !== undefined
-          ? configureLogFile(options.logFile)
-          : configureStderrLogging();
-      logLibrary.setDefaultLevel(options.logLevel);
-      const log = getLogger("accept");
+      // Install the sink, apply the level, and build getLogger("accept") through
+      // the shared configureLogging helper (in that order, so the logger inherits
+      // the sink): the file sink when --log-file is given, otherwise the default
+      // stderr sink so stdout carries only result data (the exchange CSV when no
+      // OUTPUT_FILE positional is given). A missing parent directory is a
+      // UsageError -> exit 64, mapped here by the enclosing runOrExit.
+      const { log, close } = configureLogging({
+        logLevel: options.logLevel,
+        logFile: options.logFile,
+        name: "accept",
+      });
+      closeLogging = close;
       const positionals = (argv["args"] as Array<string> | undefined) ?? [];
       const resolved = resolveAcceptPositionals(positionals);
       // --consent-to-terms records advance consent to the invitation's terms and
@@ -753,6 +748,6 @@ export async function handler(argv: Arguments): Promise<void> {
     // file sink) on the normal exit path. Writes are synchronous and already
     // durable, so the error path's process.exit (which bypasses this finally)
     // loses nothing -- this is only factory/descriptor cleanup.
-    logSink?.close();
+    closeLogging?.();
   }
 }
