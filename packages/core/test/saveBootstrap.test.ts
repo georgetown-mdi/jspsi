@@ -70,6 +70,7 @@ async function runSide(
     conn,
     role,
     terms,
+    0,
     saveIntent,
   );
   const secret =

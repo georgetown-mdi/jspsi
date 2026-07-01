@@ -7,7 +7,7 @@ import {
   psiElementBounds,
 } from "../src/connection/frameSize";
 import { MAX_LINKAGE_ENTRIES } from "../src/config/linkageTerms";
-import { recordCountMessage } from "../src/protocolSetup";
+import { recordCountField } from "../src/protocolSetup";
 
 // ─── MAX_RECORD_COUNT: the cell-count gate's exact-product dependency, as a check ─
 // The cell-count gate (singlePassDatasetExceedsCap) decides keyCount * recordCount
@@ -24,23 +24,18 @@ test("keyCount * recordCount stays an exact integer at the schema maxima", () =>
   expect(Number.isSafeInteger(productAtMaxima)).toBe(true);
 });
 
-test("recordCountMessage rejects a record count above the explicit bound at decode", () => {
+test("recordCountField rejects a record count above the explicit bound at decode", () => {
+  // The field rides the terms-exchange envelope (recordCount on termsMessage /
+  // termsWithDecisionMessage); its bound is what keeps the cell-count gate exact.
   // At the bound: accepted.
-  expect(
-    recordCountMessage.safeParse({ recordCount: MAX_RECORD_COUNT }).success,
-  ).toBe(true);
+  expect(recordCountField.safeParse(MAX_RECORD_COUNT).success).toBe(true);
   // One above the bound: a clean parse failure (a `too_big` issue), not a
   // silent pass that would feed the gate an inexact product. Over the wire this
   // is a `protocol` ConnectionError via receiveParsed.
-  const overBound = recordCountMessage.safeParse({
-    recordCount: MAX_RECORD_COUNT + 1,
-  });
-  expect(overBound.success).toBe(false);
+  expect(recordCountField.safeParse(MAX_RECORD_COUNT + 1).success).toBe(false);
   // The prior `.int().nonnegative()` bounds still hold.
-  expect(recordCountMessage.safeParse({ recordCount: -1 }).success).toBe(false);
-  expect(recordCountMessage.safeParse({ recordCount: 1.5 }).success).toBe(
-    false,
-  );
+  expect(recordCountField.safeParse(-1).success).toBe(false);
+  expect(recordCountField.safeParse(1.5).success).toBe(false);
 });
 
 // ─── psiElementBounds: authenticated per-message decode-seam caps ──────────────

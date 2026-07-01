@@ -107,6 +107,29 @@ const hostKeyField = z
       : { value: undefined, malformed: true };
   });
 
+// Each party's raw dataset record count rides the terms-exchange envelope, beside
+// `linkageTerms` (like `save` and `hostKey`), so both parties learn each other's
+// count on the one bidirectional round-trip they always perform -- there is no
+// separate count exchange. It is per-party, per-run role/bounds metadata, NOT a
+// linkage term: it stays out of the canonicalized terms and the agreed-terms hash
+// (which are built from `linkageTerms` alone). Both counts are consumed by two
+// things on every exchange: the both-output role decision (see resolveRole /
+// pickRole) and the single-pass frame cap and PSI element bounds (frameSize.ts,
+// psiElementBounds), which derive from both counts regardless of output split.
+//
+// The `.max(MAX_RECORD_COUNT)` bound is load-bearing beyond input hygiene: it
+// keeps the decoded count small enough that the cell-count gate's `keyCount *
+// recordCount` product stays exact (below 2^53), rather than resting silently on
+// the `.int()` safe-integer ceiling. A count above the bound is a clean
+// `protocol` ConnectionError at decode. See MAX_RECORD_COUNT in
+// connection/frameSize.ts.
+/** @internal exported for the record-count decode-bound test. */
+export const recordCountField = z
+  .number()
+  .int()
+  .nonnegative()
+  .max(MAX_RECORD_COUNT);
+
 // The optional `save` flag rides the terms exchange so each party advertises
 // its zero-setup `--save` intent to the other on the one round-trip both sides
 // always perform (see exchangeTerms). It is omitted entirely outside the
@@ -114,8 +137,14 @@ const hostKeyField = z
 // their on-wire terms messages are unchanged -- and a peer that omits it is read
 // as `save: false`. It is advisory metadata, not part of terms agreement, so a
 // mismatch never aborts: one party may save while the other does not.
+//
+// `recordCount` is required on message 1: it is always the initiator's opening
+// terms, never an abort, so a conforming initiator always carries the count and a
+// missing one is a clean decode failure at parse (an invariant made a check
+// rather than an unenforced assumption).
 const termsMessage = z.object({
   linkageTerms: z.unknown(),
+  recordCount: recordCountField,
   save: z.boolean().optional(),
   hostKey: hostKeyField,
 });
@@ -126,10 +155,16 @@ const abortReasonsField = boundedArray(
   `abortReasons must not exceed ${MAX_ABORT_REASONS} entries`,
 ).optional();
 
+// `recordCount` is optional here (unlike message 1) because this frame doubles as
+// the responder's abort frame, which carries no role metadata -- the same reason
+// `save` is not spread onto an abort (see sendAbort). On a `proceed` decision the
+// initiator enforces its presence; on an `abort` the exchange ends before the
+// count is ever read.
 const termsWithDecisionMessage = z.object({
   linkageTerms: z.unknown(),
   decision: z.enum(["proceed", "abort"]),
   abortReasons: abortReasonsField,
+  recordCount: recordCountField.optional(),
   save: z.boolean().optional(),
   hostKey: hostKeyField,
 });
@@ -137,17 +172,6 @@ const termsWithDecisionMessage = z.object({
 const decisionMessage = z.object({
   decision: z.enum(["proceed", "abort"]),
   abortReasons: abortReasonsField,
-});
-
-// The `.max(MAX_RECORD_COUNT)` bound is load-bearing beyond input hygiene: it
-// keeps the decoded count small enough that the cell-count gate's `keyCount *
-// recordCount` product stays exact (below 2^53), rather than resting silently on
-// the `.int()` safe-integer ceiling. A count above the bound is a clean
-// `protocol` ConnectionError at decode. See MAX_RECORD_COUNT in
-// connection/frameSize.ts.
-/** @internal exported for the record-count decode-bound test. */
-export const recordCountMessage = z.object({
-  recordCount: z.number().int().nonnegative().max(MAX_RECORD_COUNT),
 });
 
 // The dedicated frame that carries a freshly generated shared secret from the
@@ -165,6 +189,14 @@ const sharedSecretMessage = z.object({
 export interface TermsExchangeResult {
   partnerTerms: LinkageTerms;
   warnings: string[];
+  /**
+   * The partner's raw dataset record count, read off the terms message envelope
+   * (beside its `linkageTerms`, not inside them). Feeds {@link resolveRole} and
+   * the single-pass PSI element bounds; because it rides the terms exchange, no
+   * separate count exchange is needed. Always present on a successful exchange (a
+   * partner that omits it fails the exchange as a non-conforming peer).
+   */
+  partnerRecordCount: number;
   /**
    * Whether the partner advertised zero-setup `--save` intent on this terms
    * exchange. `false` outside the save flow (the partner omitted the field).
@@ -234,14 +266,25 @@ async function sendAbort(
  * proceed.
  *
  * The three-message protocol mirrors the sequencing of the handshake:
- *   1. Initiator  -> Responder : `{ linkageTerms }`
- *   2. Responder  -> Initiator : `{ linkageTerms, decision }`
+ *   1. Initiator  -> Responder : `{ linkageTerms, recordCount }`
+ *   2. Responder  -> Initiator : `{ linkageTerms, recordCount, decision }`
  *   3. Initiator  -> Responder : `{ decision }`
  *
  * If either party finds the terms incompatible, it sends `decision: "abort"`
  * with its reasons and this function throws. On success, returns the partner's
- * validated terms and any non-fatal warnings (e.g. a `date` mismatch). Call
- * {@link resolveRole} afterwards to determine each party's PSI role.
+ * validated terms, its record count, and any non-fatal warnings (e.g. a `date`
+ * mismatch). Call {@link resolveRole} afterwards to determine each party's PSI
+ * role -- it is a local computation over the counts exchanged here, with no
+ * further messages.
+ *
+ * `localRecordCount` (this party's raw dataset row count) rides both terms
+ * messages, and the partner's is read back as
+ * {@link TermsExchangeResult.partnerRecordCount}. It rides the terms exchange
+ * rather than a dedicated round-trip because that is the one bidirectional
+ * exchange both parties always perform; folding it here removes the separate
+ * count send/receive that role resolution used to run. It is per-party role and
+ * element-bounds metadata carried on the envelope beside `linkageTerms`, never
+ * inside them, so it does not enter the canonical/agreed-terms hash.
  *
  * When `localSaveIntent` is set, this party's zero-setup `--save` intent is
  * advertised on its terms message (message 1 for the initiator, message 2 for
@@ -272,6 +315,7 @@ export async function exchangeTerms(
   conn: MessageConnection,
   handshakeRole: HandshakeRole,
   localTerms: LinkageTerms,
+  localRecordCount: number,
   localSaveIntent?: boolean,
   localHostKey?: PresentedHostKey,
 ): Promise<TermsExchangeResult> {
@@ -284,10 +328,11 @@ export async function exchangeTerms(
     localHostKey !== undefined ? { hostKey: localHostKey } : {};
 
   if (handshakeRole === "initiator") {
-    // Message 1: send our terms (carrying our save intent and observed host key
-    // when set).
+    // Message 1: send our terms (carrying our record count, and our save intent
+    // and observed host key when set).
     await conn.send({
       linkageTerms: localTerms,
+      recordCount: localRecordCount,
       ...saveField,
       ...hostKeyField,
     });
@@ -302,6 +347,16 @@ export async function exchangeTerms(
             ? `: ${msg.abortReasons.map((r) => sanitizeForDisplay(r)).join("; ")}`
             : ""),
       );
+    }
+
+    // A `proceed` frame always carries the partner's record count (only the abort
+    // frame omits it; see termsWithDecisionMessage). Its absence here is a
+    // non-conforming or version-mismatched peer -- the count feeds role
+    // resolution and the single-pass element bounds, so a missing one is a
+    // protocol failure, not something to default.
+    if (msg.recordCount === undefined) {
+      await sendAbort(conn, ["partner omitted record count"]);
+      throw new Error("partner omitted record count on terms exchange");
     }
 
     let partnerTerms: LinkageTerms;
@@ -348,6 +403,7 @@ export async function exchangeTerms(
     return {
       partnerTerms,
       warnings,
+      partnerRecordCount: msg.recordCount,
       partnerSaveIntent: msg.save === true,
       partnerHostKey: msg.hostKey.value,
       partnerHostKeyMalformed: msg.hostKey.malformed,
@@ -360,12 +416,17 @@ export async function exchangeTerms(
     const rawData = await conn.receive();
 
     let partnerTerms: LinkageTerms;
+    // Placeholder overwritten by the parse below; only read on the success path,
+    // which requires `recordCount` (message 1's schema makes it mandatory, so a
+    // missing count is caught as a parse error before this value is returned).
+    let partnerRecordCount = 0;
     let partnerSaveIntent = false;
     let partnerHostKey: PresentedHostKey | undefined;
     let partnerHostKeyMalformed = false;
     let parseError: string | undefined;
     try {
       const parsed = termsMessage.parse(rawData);
+      partnerRecordCount = parsed.recordCount;
       partnerSaveIntent = parsed.save === true;
       partnerHostKey = parsed.hostKey.value;
       partnerHostKeyMalformed = parsed.hostKey.malformed;
@@ -391,11 +452,12 @@ export async function exchangeTerms(
       throw new Error(`linkage terms are incompatible: ${errors.join("; ")}`);
     }
 
-    // Message 2: send our terms + proceed decision (carrying our save intent
-    // and observed host key).
+    // Message 2: send our terms + proceed decision (carrying our record count,
+    // and our save intent and observed host key).
     await conn.send({
       linkageTerms: localTerms,
       decision: "proceed",
+      recordCount: localRecordCount,
       ...saveField,
       ...hostKeyField,
     });
@@ -414,6 +476,7 @@ export async function exchangeTerms(
     return {
       partnerTerms: partnerTerms!,
       warnings,
+      partnerRecordCount,
       partnerSaveIntent,
       partnerHostKey,
       partnerHostKeyMalformed,
@@ -434,8 +497,8 @@ export async function exchangeTerms(
  * {@link exchangeTerms}). Both sides learn that fact from the terms exchange, so
  * they agree on whether this single frame is sent without further negotiation;
  * sending it directly after terms means the initiator emits message 3 of the
- * terms exchange and then this frame back-to-back, the same speaker-stutter the
- * record-count step already performs.
+ * terms exchange and then this frame back-to-back -- a brief speaker-stutter, the
+ * only frame that follows the terms exchange now that role resolution is local.
  *
  * The secret is a base64url-encoded 32 random bytes -- the same format as a
  * rotation token (see auth.ts) and {@link SHARED_SECRET_REGEX} -- so it drops
@@ -485,65 +548,40 @@ function pickRole(
 }
 
 /**
- * Determine this party's PSI role after terms have been agreed.
+ * Determine this party's PSI role from the record counts already exchanged.
  *
- * Both parties' record counts (the raw row counts) are exchanged unconditionally
- * at the start -- on every exchange, both- and one-sided-output alike. The
- * exchanged counts feed the role decision below; that is their only current
- * consumer. Making the exchange unconditional is groundwork for the forthcoming
- * data-dependent single-pass frame cap, which will derive a bound from both
- * counts on every exchange; the integer exchanged is the raw row count, the same
- * quantity the single-pass pre-flight already checks locally. The count frame is
- * byte- and order-identical across the two output cases (initiator sends first;
- * responder receives first then sends); only the role decision differs, and the
- * one-sided path drains the count frame rather than skipping it.
+ * This is a pure local computation with no connection I/O: both parties' record
+ * counts ride the terms exchange (see {@link exchangeTerms}), so by the time the
+ * terms are agreed each party holds its own count and the partner's, and the role
+ * follows without a further message. Both output cases resolve locally -- the
+ * separate two-message count round-trip this used to run is gone.
  *
  * When exactly one party has `expectsOutput: true`, that party is the receiver
  * regardless of the counts -- it is the only party that learns the result. When
  * both parties expect output the assignment is free, so it minimizes total work:
  * the smaller-row party becomes the receiver, a tie broken in favour of the
  * initiator (see {@link pickRole} and docs/spec/PROTOCOL.md, Role resolution and
- * work minimization).
+ * work minimization). The counts are still carried on the terms exchange in the
+ * one-sided case too -- the role does not consume them there, but the single-pass
+ * element bounds do (see exchange.ts, psiElementBounds).
  *
- * Call this immediately after a successful {@link exchangeTerms}.
+ * Call this after a successful {@link exchangeTerms}, whose
+ * {@link TermsExchangeResult.partnerRecordCount} supplies `partnerRecordCount`.
  */
-export async function resolveRole(
-  conn: MessageConnection,
+export function resolveRole(
   handshakeRole: HandshakeRole,
   localOutput: Output,
   partnerOutput: Output,
   localRecordCount: number,
-): Promise<{ role: PsiRole; partnerRecordCount: number }> {
-  // Exchange record counts unconditionally. Initiator sends first; responder
-  // receives first then sends -- the same lockstep ordering the both-output path
-  // used before, now run on every exchange so the one-sided case puts an
-  // identical count frame on the wire instead of skipping it.
-  let partnerRecordCount: number;
-  if (handshakeRole === "initiator") {
-    await conn.send({ recordCount: localRecordCount });
-    partnerRecordCount = (await receiveParsed(conn, recordCountMessage))
-      .recordCount;
-  } else {
-    partnerRecordCount = (await receiveParsed(conn, recordCountMessage))
-      .recordCount;
-    await conn.send({ recordCount: localRecordCount });
-  }
+  partnerRecordCount: number,
+): PsiRole {
+  // One-sided output: the party that expects output is the receiver regardless
+  // of the counts -- it is the only party that learns the result.
+  if (localOutput.expectsOutput && !partnerOutput.expectsOutput)
+    return "receiver";
+  if (!localOutput.expectsOutput && partnerOutput.expectsOutput)
+    return "sender";
 
-  // The partner record count is returned alongside the role so the caller can
-  // feed both authenticated counts (and the agreed key count) into the
-  // single-pass frame-cap derivation; it is now consumed there as well as by the
-  // role decision below.
-  const role = ((): PsiRole => {
-    // One-sided output: the party that expects output is the receiver regardless
-    // of the counts just exchanged -- it is the only party that learns the result.
-    if (localOutput.expectsOutput && !partnerOutput.expectsOutput)
-      return "receiver";
-    if (!localOutput.expectsOutput && partnerOutput.expectsOutput)
-      return "sender";
-
-    // Both expect output: the assignment is free, so minimize total work.
-    return pickRole(localRecordCount, partnerRecordCount, handshakeRole);
-  })();
-
-  return { role, partnerRecordCount };
+  // Both expect output: the assignment is free, so minimize total work.
+  return pickRole(localRecordCount, partnerRecordCount, handshakeRole);
 }

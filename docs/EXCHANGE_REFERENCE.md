@@ -105,7 +105,7 @@ If `share_with_partner` is `true`, the other party's terms must also have `expec
 
 `expects_output` must be `true` if this party's `deduplicate` is `true`.
 
-PSI roles (sender / receiver) are derived from `output` after the terms exchange. Both parties exchange their record counts over the established connection at the start of every exchange -- including when only one party has `expects_output: true` -- so each party's row count is put on the wire in every case. If exactly one party has `expects_output: true`, that party becomes the PSI receiver regardless of the counts. If both parties have `expects_output: true`, the party with the smaller dataset becomes the receiver and ties are broken in favour of the initiator -- a work-minimizing assignment derived in [`docs/spec/PROTOCOL.md`](spec/PROTOCOL.md#role-resolution-and-work-minimization).
+PSI roles (sender / receiver) are derived from `output` after the terms exchange. Both parties carry their record counts on the terms exchange -- including when only one party has `expects_output: true` -- so each party's row count is put on the wire in every case, with no separate count round-trip. If exactly one party has `expects_output: true`, that party becomes the PSI receiver regardless of the counts. If both parties have `expects_output: true`, the party with the smaller dataset becomes the receiver and ties are broken in favour of the initiator -- a work-minimizing assignment derived in [`docs/spec/PROTOCOL.md`](spec/PROTOCOL.md#role-resolution-and-work-minimization).
 
 ### `linkage_terms.deduplicate`
 
