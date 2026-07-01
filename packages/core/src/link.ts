@@ -69,28 +69,31 @@ function getUnidentifiedIndices(
 // Maps each value occurring exactly once in valueAt(0..count-1) to its index.
 // The result's insertion order follows the order values appear in valueAt --
 // callers rely on this to build identical outputs. Undefined values are ignored.
+//
+// Keeps one map of first-seen indices plus a set of the values that recur, rather
+// than three maps: in the near-unique case no value recurs, so the set stays empty
+// and the first-index map IS the answer, returned without a copy. When some values
+// recur, the recurring ones are deleted from the map; Map iteration is insertion
+// order and delete preserves the order of the survivors, so the first-appearance
+// order callers depend on is unchanged. This trims psilink's own per-key
+// reconstruction churn (board item 206377899); it is a minor slice of the
+// single-pass receiver's transient peak, which is dominated by the per-element
+// JS<->native boundary marshalling that the GC relief in linkViaSinglePassPSI
+// collects.
 function reduceToSingletons<T>(
   count: number,
   valueAt: (index: number) => T | undefined,
 ): Map<T, number> {
-  const occurrences = new Map<T, number>();
   const firstIndex = new Map<T, number>();
+  const recurring = new Set<T>();
   for (let i = 0; i < count; ++i) {
     const value = valueAt(i);
     if (value === undefined) continue;
-    const seen = occurrences.get(value);
-    if (seen === undefined) {
-      occurrences.set(value, 1);
-      firstIndex.set(value, i);
-    } else {
-      occurrences.set(value, seen + 1);
-    }
+    if (firstIndex.has(value)) recurring.add(value);
+    else firstIndex.set(value, i);
   }
-  const singletons = new Map<T, number>();
-  for (const [value, n] of occurrences) {
-    if (n === 1) singletons.set(value, firstIndex.get(value)!);
-  }
-  return singletons;
+  for (const value of recurring) firstIndex.delete(value);
+  return firstIndex;
 }
 
 // Adapts reduceToSingletons for the cascade: undefined means "no value for this
@@ -316,6 +319,25 @@ function singlePassOverCapMessage(
   );
 }
 
+// Force a major collection to release a phase's transient allocations before the
+// next phase allocates, lowering the lifetime peak RSS that bounds the single-pass
+// dataset ceiling. The single-pass receiver's peak is dominated by GC-collectable
+// V8 garbage from the per-element JS<->native boundary marshalling -- the library
+// binding layer reached through createClientRequest/computeValueMatches/
+// createServerSetup -- not by the WebAssembly linear heap (a flat ~16 MB at
+// D = 14,000) or by retained JS (a ~20 MB live floor); collecting at the phase
+// boundaries recovers it (board item 206377899; the measured sizes, methodology,
+// and breakdown are in docs/spec/PROTOCOL.md). A no-op
+// unless the runtime exposes a global gc: the CLI launches Node with --expose-gc
+// (the Dockerfile entrypoint and the apps/cli dev script), so it gets the relief;
+// a browser never exposes gc, so the web receiver does not, and its ceiling rests
+// on the same conservative cap.
+// Called only at the handful of coarse phase boundaries, never per element or per
+// key, so its pause is negligible beside the curve operations it follows.
+function relieveTransientMemory(): void {
+  (globalThis as typeof globalThis & { gc?: () => void }).gc?.();
+}
+
 /**
  * The single-pass linkage strategy: an alternative to {@link linkViaPSI} that
  * produces the same matched row pairs but uses one network round-trip instead of
@@ -421,6 +443,8 @@ export async function linkViaSinglePassPSI(
       participant.createServerSetup(distinctValues);
 
     const request = (await conn.receive()) as Uint8Array;
+    // Collect the setup-masking transients before the re-encryption masking.
+    relieveTransientMemory();
     stage("doubly-encrypting partner's data");
     const response = participant.processClientRequest(request);
     // createServerSetup sorted distinctValues; remap the index table into that
@@ -462,6 +486,9 @@ export async function linkViaSinglePassPSI(
 
     log.debug(`${participant.id}: sending combined single-pass reply`);
     await conn.send(reply);
+    // Collect the response-masking and reply-build transients before idling on
+    // the partner's table.
+    relieveTransientMemory();
 
     const table = await receiveParsed(conn, associationTableMessage);
     stage("done");
@@ -524,6 +551,8 @@ export async function linkViaSinglePassPSI(
     );
   }
 
+  // Collect the request-masking transients before the match masking.
+  relieveTransientMemory();
   stage("identifying shared elements");
   const [receiverDistinctValueIds, senderDistinctValueIds] =
     participant.computeValueMatches(setupBytes, responseBytes);
@@ -547,6 +576,10 @@ export async function linkViaSinglePassPSI(
       ),
     );
   }
+
+  // Collect the match-masking transients (the library's boundary marshalling and
+  // the consumed id arrays) before replaying the cascade.
+  relieveTransientMemory();
 
   // Replay the cascade.
   const matched: IndexIterationMap = new Array(numRecords).fill(undefined);
@@ -595,6 +628,8 @@ export async function linkViaSinglePassPSI(
     `${participant.id}: ${result[0].length} match(es); returning sender's ` +
       `view`,
   );
+  // Collect the cascade's per-key reconstruction maps before returning.
+  relieveTransientMemory();
   await conn.send(theirResult);
   stage("done");
   return result;

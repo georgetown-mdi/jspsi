@@ -320,7 +320,7 @@ test("singlePassExchangeExceedsCap fires when EITHER party is over the budget", 
   expect(singlePassExchangeExceedsCap(1, 1, fits + 1)).toBe(true);
 });
 
-test("singlePassReplyByteCap weights the sender heavier and stays below the static frame cap at the ceiling", () => {
+test("singlePassReplyByteCap weights the sender heavier and stays below both transport envelopes at the ceiling", () => {
   // The sender contributes a masked value + an index cell per (key, record); the
   // receiver a masked value per (key, record); plus a fixed overhead. Pinning the
   // exact formula is what makes the cap reproducible across implementations.
@@ -336,14 +336,28 @@ test("singlePassReplyByteCap weights the sender heavier and stays below the stat
   expect(singlePassReplyByteCap(3, 100, 200)).not.toBe(
     singlePassReplyByteCap(3, 200, 100),
   );
-  // At the ceiling (both parties' keyCount*rows at the budget) the cap is well
-  // below the static file-sync backstop, so the per-transport clamp does not bind.
+  // At the ceiling (both parties' keyCount*rows at the budget) the derived cap must
+  // stay below both transports' fixed frame envelopes, so the per-transport clamp
+  // does not bind and a legitimate single-pass reply the count budget admits is
+  // never rejected mid-exchange. This guards a future raise of MAX_SINGLE_PASS_CELLS
+  // (or of the per-cell byte weights): prose in frameSize.ts asserts the invariant,
+  // but only a check can keep it true.
   const atCeiling = singlePassReplyByteCap(
     1,
     MAX_SINGLE_PASS_CELLS,
     MAX_SINGLE_PASS_CELLS,
   );
+  // The file-sync backstop, a core constant.
   expect(atCeiling).toBeLessThan(MAX_FRAME_SIZE_BYTES);
+  // The nearer constraint after board item 206377899 raised the cap: the WebRTC
+  // data channel's fixed browser-tab envelope. It is a web constant
+  // (MAX_WEBRTC_FRAME_BYTES in apps/web/src/psi/boundedReassembly.ts), not
+  // importable into core, so it is mirrored here as a literal -- a core-only cap or
+  // byte-weight change must not silently outgrow it. The coupling is bidirectional:
+  // lowering the web constant below this ceiling cap would pass here yet reject
+  // legitimate WebRTC replies, so the two must move together.
+  const MAX_WEBRTC_FRAME_BYTES = 256 * 1024 * 1024;
+  expect(atCeiling).toBeLessThan(MAX_WEBRTC_FRAME_BYTES);
 });
 
 test("the single-pass receiver read gate is bounded to the derived reply cap", async () => {

@@ -59,39 +59,55 @@ export const MAX_FRAME_SIZE_BYTES = 536_870_888;
  * duplication and sparsity structure -- see the role-resolution discussion in
  * docs/spec/PROTOCOL.md), so bounding the cell count is the conservative gate.
  *
- * Single-pass holds both parties' full encrypted value sets resident on the
- * receiver to run the match, so its peak memory is `O(total distinct values)` and
- * cannot stream (docs/spec/PROTOCOL.md, the single-pass dataset ceiling). The
- * binding cost is the receiver's lifetime peak RSS. Live retained memory is small
- * -- on the order of a few hundred B per distinct value: psilink JS, transport
- * wire-buffer copies, and a grow-only WebAssembly heap floor (board item 206377899)
- * -- but the peak RSS climbs ~2-4 KB per distinct value in mostly collectable
- * transient allocation churn the OS allocator does not return; bounding each party's
- * cell count bounds its `D`, and so that peak.
+ * Single-pass holds both parties' full encrypted value sets resident to run the
+ * match and cannot stream, so each party's peak memory is `O(total distinct
+ * values)` (docs/spec/PROTOCOL.md, the single-pass dataset ceiling). The cap gates
+ * both parties (see {@link singlePassExchangeExceedsCap}), so the binding cost is
+ * the heavier party's lifetime peak RSS -- measured to be the SENDER at scale, which
+ * holds its own encrypted setup plus the re-encrypted request resident at once. Live
+ * retained memory is small -- on the order of a few hundred B per distinct value:
+ * psilink JS, transport wire-buffer copies, and a grow-only WebAssembly heap floor
+ * -- while the peak RSS is dominated by mostly collectable transient allocation
+ * churn the OS allocator does not return. Board item 206377899 relieved that churn
+ * (a forced GC at the single-pass phase boundaries, active under the CLI's
+ * --expose-gc) and re-derived this budget from a fresh near-ceiling measurement;
+ * bounding each party's cell count bounds its `D`, and so that peak.
  *
- * Value: 2,000,000 cells per party (so at most 2M distinct values per party). At
- * the ~2-4 KB/value transient peak slope that projects to roughly 6-8 GB peak RSS,
- * which the current value holds headroom against on a 16 GB target; it admits
- * ~143k rows at the ~14-key default template and ~2M rows at a single key. That
- * projection is the transient peak, not live data (the JS-and-wire live term at 2M
- * distinct values is only ~260 MB; the grow-only WASM floor adds to that but stays
- * well under the projected peak), so the budget is conservative against the true
- * memory wall. It is
- * a cell-count budget, not a bare row cap, on purpose: a rows-only cap is off by
- * ~14x between a 1-key and a 14-key linkage at the same memory. The byte cap below
- * is a defense-in-depth tightening derived from the same quantity; this cell-count
- * budget is the real ceiling.
+ * Value: 3,000,000 cells per party (so at most 3M distinct values per party),
+ * raised from 2,000,000 once the churn relief landed. It admits ~214k rows at the
+ * ~14-key default template and ~3M rows at a single key. Methodology: a forked
+ * measurement of the real linkage with the relief active, at D ~= 2M distinct
+ * values near the ceiling (NOT extrapolated from a low-D fit), put the heavier-party
+ * (sender) peak at ~3.0 GB and the receiver at ~2.0 GB, over a directly-measured
+ * grow-only WASM linear-heap floor of ~0.8 GB and ~0.1 GB of retained JS -- a live
+ * floor near 1 GB. Projected to this 3M ceiling the sender peak is ~4.4 GB,
+ * comfortable headroom on a 16 GB target. After the relief the binding constraint is
+ * no longer receiver memory but the WebRTC per-frame envelope: the cap is shared and
+ * transport-agnostic, and the derived reply byte cap at the ceiling (~240 MiB,
+ * {@link singlePassReplyByteCap}) must stay below the 256 MiB MAX_WEBRTC_FRAME_BYTES
+ * so a legitimate single-pass reply is never rejected mid-exchange on the WebRTC
+ * path. 3M is the largest round value that keeps that envelope from binding (a
+ * browser, which never exposes gc, is expected to hit its own unrelieved memory
+ * wall near the same scale -- estimated from the relief factor, not separately
+ * measured), so raising further would help only file-sync and would require
+ * decoupling the cap per transport. It is a cell-count budget, not a bare row cap,
+ * on purpose: a rows-only cap is off by ~14x between a 1-key and a 14-key linkage at
+ * the same memory. The byte cap below is a defense-in-depth tightening derived from
+ * the same quantity; this cell-count budget is the real ceiling.
  *
  * Fixed, NOT operator-configurable: a configurable maximum reintroduces the
- * memory-exhaustion denial of service the bound exists for. It MAY be raised only
- * after board item 206377899 has measurably lowered the transient peak in shipped
- * code and re-derived the budget from a fresh measurement -- never ahead of that,
- * since the transient peak (not the live floor) is what this value bounds. The
- * re-derivation must measure the grow-only WASM linear heap directly at high `D`
- * (it grows super-linearly in chunked steps, so a low-`D` linear fit under-projects
- * it), not extrapolate from the wire figure. Methodology in docs/spec/PROTOCOL.md.
+ * memory-exhaustion denial of service the bound exists for. It MAY be raised again
+ * only after a further measured reduction of the transient peak lands in shipped
+ * code and the budget is re-derived from a fresh measurement -- never ahead of that,
+ * since the transient peak (not the live floor) is what this value bounds -- and any
+ * raise past the point where the derived reply byte cap reaches MAX_WEBRTC_FRAME_BYTES
+ * additionally needs the WebRTC reassembly path reworked so a browser fails closed
+ * rather than mid-frame. The re-derivation must measure the grow-only WASM linear
+ * heap directly at high `D` (it grows super-linearly in chunked steps, so a low-`D`
+ * linear fit under-projects it), not extrapolate from the wire figure. Methodology
+ * in docs/spec/PROTOCOL.md.
  */
-export const MAX_SINGLE_PASS_CELLS = 2_000_000;
+export const MAX_SINGLE_PASS_CELLS = 3_000_000;
 
 // Per-(key, record) byte weights of the single-pass reply frame, used to derive
 // the accepted frame size (singlePassReplyByteCap). Each is a deliberate UPPER
@@ -175,8 +191,9 @@ export function singlePassExchangeExceedsCap(
  * legitimate frame and never rejects one.
  *
  * Call only for an in-cap exchange (guard with {@link singlePassExchangeExceedsCap}
- * first): at the ceiling the cap is about 168 MB, below both transports' fixed
- * envelopes, so the per-transport clamp -- min with {@link MAX_FRAME_SIZE_BYTES}
+ * first): at the ceiling the cap is about 240 MiB, below both transports' fixed
+ * envelopes (the 256 MiB WebRTC envelope is the nearer one), so the per-transport
+ * clamp -- min with {@link MAX_FRAME_SIZE_BYTES}
  * for file-sync, with the web's `MAX_WEBRTC_FRAME_BYTES` for WebRTC -- is applied
  * by the read gate as a backstop and does not bind at the current ceiling. See
  * docs/spec/PROTOCOL.md (the single-pass dataset ceiling) and

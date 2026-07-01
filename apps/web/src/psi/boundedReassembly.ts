@@ -38,11 +38,15 @@ import type { DataConnection } from "peerjs";
  * per-transport clamp, WebRTC keeps THIS fixed browser-tab-safe envelope at the
  * reassembly read gate rather than threading the per-exchange cap into it (the
  * file-sync transport, with no such envelope, threads the derived cap into its
- * `get()` read gate instead). At the single-pass ceiling the derived reply frame
- * is well under 256 MiB, so this envelope never rejects a legitimate single-pass
- * reply the count check already admitted; an over-ceiling single-pass exchange
- * fails closed with the same actionable guidance on both transports, before any
- * reply is read. See docs/spec/CHANNEL_SECURITY.md and docs/spec/PROTOCOL.md (the
+ * `get()` read gate instead). At the single-pass ceiling the derived reply cap is
+ * ~240 MiB -- below this 256 MiB envelope (now the nearer of the two transport
+ * envelopes), so it never rejects a legitimate single-pass reply the count check
+ * already admitted; an over-ceiling single-pass exchange fails closed with the same
+ * actionable guidance on both transports, before any reply is read.
+ * `MAX_SINGLE_PASS_CELLS` is deliberately held below the point where that derived
+ * cap would reach this envelope; raising it past that point would require this path
+ * to gate on a per-exchange cell budget so a browser fails closed rather than
+ * mid-frame. See docs/spec/CHANNEL_SECURITY.md and docs/spec/PROTOCOL.md (the
  * single-pass dataset ceiling).
  */
 export const MAX_WEBRTC_FRAME_BYTES = 256 * 1024 * 1024;

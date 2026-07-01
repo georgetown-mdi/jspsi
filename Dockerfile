@@ -38,4 +38,8 @@ RUN chmod +x ./psi-link
 
 WORKDIR /work
 
-ENTRYPOINT ["/app/psi-link"]
+# --expose-gc lets @psilink/core release the single-pass linkage's transient
+# allocation peak at the phase boundaries (relieveTransientMemory in
+# packages/core/src/link.ts), lowering the receiver's peak RSS; a no-op for every
+# other command. Node consumes the flag, so it does not reach the CLI's argv.
+ENTRYPOINT ["node", "--expose-gc", "/app/psi-link"]
