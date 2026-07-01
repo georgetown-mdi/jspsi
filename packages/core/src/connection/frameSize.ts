@@ -111,8 +111,8 @@ export const MAX_SINGLE_PASS_CELLS = 3_000_000;
 
 /**
  * The explicit upper bound on a decoded record count. It makes the cell-count
- * gate's exact-integer-product dependency a CHECK rather than an implicit rest on
- * the `recordCount` wire schema's `.int()` safe-integer ceiling (2^53).
+ * gate's exact-integer-product dependency a CHECK rather than an implicit reliance
+ * on the `recordCount` wire schema's `.int()` safe-integer ceiling (2^53).
  *
  * The gate {@link singlePassDatasetExceedsCap} decides `keyCount * recordCount >
  * MAX_SINGLE_PASS_CELLS`. Its precision argument holds only while that product is

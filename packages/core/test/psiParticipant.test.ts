@@ -326,3 +326,49 @@ test("cascade identifyIntersection (joiner) rejects an over-declared server setu
     /server setup declares 64 encrypted element\(s\), exceeding the authenticated bound of 4/,
   );
 });
+
+// ─── Non-Raw server setup: the element-count guard cannot be bypassed ──────────
+// This protocol only ever sends a Raw server setup. A setup whose data-structure
+// oneof is anything other than Raw -- or is left unset -- has `getRaw()` undefined,
+// so its declared element count would be a benign 0 that slips past the bound,
+// then hands a non-Raw structure to the reveal-intersection path, which aborts
+// with a cryptic library error. The participant instead rejects a non-Raw setup
+// with a clean protocol abort, so the guard is fail-closed on an unexpected
+// structure regardless of the bound.
+
+// A well-formed server setup with no data structure set: its `getRaw()` is
+// undefined, the generic non-Raw case the guard rejects.
+function nonRawServerSetupBytes(): Uint8Array {
+  return new psiLibrary.serverSetup().serializeBinary();
+}
+
+test("computeValueMatches rejects a non-Raw server setup", () => {
+  // Single-pass receiver seam: UNBOUNDED bounds, so it is the Raw check -- not the
+  // element-count bound -- that fires.
+  const receiver = new PSIParticipant(
+    "receiver",
+    psiLibrary,
+    { role: "joiner", verbose: 0 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+  const response = new psiLibrary.response().serializeBinary();
+  expect(() =>
+    receiver.computeValueMatches(nonRawServerSetupBytes(), response),
+  ).toThrow(/server setup is not a Raw data structure/);
+});
+
+test("cascade identifyIntersection (joiner) rejects a non-Raw server setup frame", async () => {
+  const [serverConn, clientConn] = createMessagePipe();
+  const joiner = new PSIParticipant(
+    "joiner",
+    psiLibrary,
+    { role: "joiner", verbose: 0 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+  const run = joiner.identifyIntersection(
+    corruptNthReceive(clientConn, 1, nonRawServerSetupBytes()),
+    ["Carol"],
+  );
+  await serverConn.send(new Uint8Array([0]));
+  await expect(run).rejects.toThrow(/server setup is not a Raw data structure/);
+});

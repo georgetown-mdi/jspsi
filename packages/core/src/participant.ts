@@ -65,20 +65,22 @@ export const associationTableMessage = z.tuple([
 
 const DEFAULT_VERBOSITY = 1;
 
+// The element-list-bearing shape shared by a deserialized Request, Response, and a
+// Raw server setup's RawInfo.
+type EncryptedElementList = {
+  getEncryptedElementsList(): { readonly length: number };
+};
+
 // The number of encrypted elements a deserialized PSI message declares -- the
 // count that drives per-element curve-point materialization when the message is
 // handed to the library (processRequest / getAssociationTable). deserializeBinary
 // itself only materializes the JS byte-slice list (bounded by the frame bytes),
-// so reading the count here is cheap and precedes the amplifying allocation. A Raw
-// setup exposes the list on its RawInfo (pass `setup.getRaw()`); a Request or
-// Response exposes it directly; a non-Raw setup (GCS/Bloom, which this protocol
-// never produces) has no RawInfo and so declares no per-element list -> 0.
-function declaredEncryptedElementCount(
-  message:
-    | { getEncryptedElementsList(): { readonly length: number } }
-    | undefined,
-): number {
-  return message ? message.getEncryptedElementsList().length : 0;
+// so reading the count here is cheap and precedes the amplifying allocation. A
+// Request or Response exposes the list directly; a Raw server setup exposes it on
+// its RawInfo (extracted by requireRawServerSetup, which rejects a non-Raw setup
+// before this is reached).
+function declaredEncryptedElementCount(message: EncryptedElementList): number {
+  return message.getEncryptedElementsList().length;
 }
 
 export enum ProcessState {
@@ -257,6 +259,25 @@ export class PSIParticipant {
     }
   }
 
+  // The Raw element list of a partner's server setup. This protocol only ever
+  // sends a Raw setup (createSetupMessage with dataStructure.Raw), so a received
+  // setup whose data-structure oneof is anything other than Raw -- or is unset --
+  // is malformed: getRaw() reads `undefined` for it, which the element-count bound
+  // would otherwise treat as a benign zero-element setup and hand on to the
+  // reveal-intersection path (which requires Raw and aborts on it with a cryptic
+  // library error). Reject it here as a clean protocol abort so the element-count
+  // guard cannot be bypassed with a non-Raw structure.
+  private requireRawServerSetup(setup: {
+    getRaw(): EncryptedElementList | undefined;
+  }): EncryptedElementList {
+    const raw = setup.getRaw();
+    if (!raw)
+      throw new Error(
+        `${this.id} protocol error: PSI server setup is not a Raw data structure`,
+      );
+    return raw;
+  }
+
   // Building-block PSI steps used by the single-pass strategy
   // (linkViaSinglePassPSI in link.ts). Unlike identifyIntersection below, which
   // runs the whole back-and-forth itself, single-pass calls these one at a time
@@ -344,7 +365,7 @@ export class PSIParticipant {
     const setup = this.library.serverSetup.deserializeBinary(setupBytes);
     this.assertPsiElementCount(
       "server setup",
-      declaredEncryptedElementCount(setup.getRaw()),
+      declaredEncryptedElementCount(this.requireRawServerSetup(setup)),
       this.elementBounds.setup,
     );
     const response = this.library.response.deserializeBinary(responseBytes);
@@ -445,7 +466,7 @@ export class PSIParticipant {
       );
       this.assertPsiElementCount(
         "server setup",
-        declaredEncryptedElementCount(serverSetup.getRaw()),
+        declaredEncryptedElementCount(this.requireRawServerSetup(serverSetup)),
         this.elementBounds.setup,
       );
 
