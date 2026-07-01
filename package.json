@@ -16,7 +16,8 @@
     "linkcheck": "node scripts/check-doc-links.mjs",
     "typecheck": "tsc -p packages/core/tsconfig.json --noEmit && tsc -p apps/cli/tsconfig.test.json && tsc -p apps/web/tsconfig.json",
     "test": "npm run test -w packages/core -w apps/cli -w apps/web",
-    "test:scripts": "vitest run --project scripts"
+    "test:scripts": "vitest run --project scripts",
+    "coverage": "npm run coverage -w packages/core -w apps/cli -w apps/web"
   },
   "keywords": [
     "private set intersection",
@@ -26,6 +27,7 @@
     "node": ">=26"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.9",
     "eslint": "^10.5.0",
     "prettier": "^3.8.4",
     "typescript": "^6.0.3",
