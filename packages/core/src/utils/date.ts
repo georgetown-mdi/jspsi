@@ -1,5 +1,7 @@
 import { DateTime } from "luxon";
 
+import type { CSVRow } from "../file.js";
+
 // ─── Date format inference ────────────────────────────────────────────────────
 
 /**
@@ -126,7 +128,7 @@ export function inferDateFormat(values: Iterable<string>): string | undefined {
  * `inferDateFormat(columnValues(rows, dobColumn))`.
  */
 export function* columnValues(
-  rows: Iterable<Record<string, string>>,
+  rows: Iterable<CSVRow>,
   column: string,
 ): Generator<string> {
   for (const row of rows) yield row[column] ?? "";

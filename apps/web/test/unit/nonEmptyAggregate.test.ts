@@ -16,7 +16,7 @@ import type {
   AggregateWorker,
 } from "../../src/psi/nonEmptyAggregateController.js";
 
-import type { Standardization } from "@psilink/core";
+import type { CSVRow, Standardization } from "@psilink/core";
 
 describe("computeFieldCoverage: the silent-empty defense", () => {
   test("a transform that collapses every row to null surfaces a 0% coverage alarm", () => {
@@ -193,7 +193,7 @@ class FakeAggregateWorker implements AggregateWorker {
   onerror: ((event: unknown) => void) | null = null;
   readonly received: Array<AggregateRequest> = [];
   terminated = false;
-  private rows: ReadonlyArray<Record<string, string>> = [];
+  private rows: ReadonlyArray<CSVRow> = [];
 
   postMessage(message: AggregateRequest): void {
     this.received.push(message);

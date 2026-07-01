@@ -33,7 +33,12 @@ import { ExchangeView } from "@components/ExchangeView";
 import FileSelect from "@components/FileSelect";
 import { LinkageTermsEditor } from "@components/LinkageTermsEditor";
 
-import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
+import type {
+  CSVRow,
+  LinkageTerms,
+  Metadata,
+  Standardization,
+} from "@psilink/core";
 
 import type { AdvancedInviteSeed } from "@psi/advancedInvite";
 import type { AlertContent } from "@components/FileAcquire";
@@ -65,7 +70,7 @@ type Phase =
       identity: string;
       file: File;
       /** The parsed rows, for the workbench's before/after preview. */
-      rawRows: Array<Record<string, string>>;
+      rawRows: Array<CSVRow>;
     }
   | {
       status: "exchange";
@@ -101,10 +106,10 @@ export function AdvancedInvite() {
     setError(undefined);
     setPhase({ status: "loading" });
     let columns: Array<string>;
-    let rawRows: Array<Record<string, string>>;
+    let rawRows: Array<CSVRow>;
     try {
       const csv = await loadCSVFile(file);
-      rawRows = csv.data as Array<Record<string, string>>;
+      rawRows = csv.data;
       columns = csv.meta.fields ?? [];
     } catch (cause) {
       if (!mountedRef.current) return;

@@ -2,7 +2,7 @@ import { StandardizedField } from "@psilink/core";
 
 import { isStepValid } from "./standardizationAuthoring";
 
-import type { Standardization } from "@psilink/core";
+import type { CSVRow, Standardization } from "@psilink/core";
 
 /**
  * Whole-CSV per-field value coverage: the silent-empty defense.
@@ -63,13 +63,15 @@ export const NON_EMPTY_WORKER_CHAR_THRESHOLD = 2_000_000;
  * column could still sweep inline; that is an out-of-shape, partner-bounded config.
  */
 export function shouldComputeOffThread(
-  rawRows: ReadonlyArray<Record<string, string>>,
+  rawRows: ReadonlyArray<CSVRow>,
 ): boolean {
   if (rawRows.length > NON_EMPTY_WORKER_ROW_THRESHOLD) return true;
   let chars = 0;
   for (const row of rawRows)
+    // A CSVRow's values are `string | undefined` (a short row omits columns), so
+    // an absent cell contributes no characters.
     for (const value of Object.values(row)) {
-      chars += value.length;
+      chars += value?.length ?? 0;
       if (chars > NON_EMPTY_WORKER_CHAR_THRESHOLD) return true;
     }
   return false;
@@ -141,7 +143,7 @@ export interface FieldValueCoverage {
  * caught rather than blanking the aggregate.
  */
 export function computeFieldCoverage(
-  rawRows: ReadonlyArray<Record<string, string>>,
+  rawRows: ReadonlyArray<CSVRow>,
   standardization: Standardization,
 ): Array<FieldValueCoverage> {
   const total = rawRows.length;

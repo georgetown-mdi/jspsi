@@ -8,6 +8,7 @@ import {
 } from "./config/metadata.js";
 import type { Payload } from "./config/linkageTerms.js";
 import { MAX_NAME_LENGTH } from "./config/linkageTerms.js";
+import type { CSVRow } from "./file.js";
 import type { CommittedPayload } from "./exchangeRecord.js";
 import type { MessageConnection } from "./connection/messageConnection.js";
 import {
@@ -137,7 +138,7 @@ export type PayloadWireMessage = z.infer<typeof payloadWireSchema>;
  * dataset has no transmittable payload columns or no matched rows.
  */
 export function preparePayload(
-  rawRows: Array<Record<string, string>>,
+  rawRows: Array<CSVRow>,
   metadata: Metadata,
   associationTable: AssociationTable,
 ): PayloadWireMessage {
@@ -429,7 +430,7 @@ function quoteCsvField(value: string): string {
  */
 export function buildOutputTable(
   associationTable: AssociationTable,
-  rawRows: Array<Record<string, string>>,
+  rawRows: Array<CSVRow>,
   metadata: Metadata,
   partnerPayload: PartnerPayload,
 ): { headers: string[]; rows: Array<Array<string>> } {

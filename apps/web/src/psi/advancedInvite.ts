@@ -21,6 +21,7 @@ import { isStepValid } from "./standardizationAuthoring";
 
 import type {
   Algorithm,
+  CSVRow,
   LinkageField,
   LinkageKey,
   LinkageKeyElement,
@@ -253,7 +254,7 @@ export interface AdvancedValidation {
 export function defaultStandardizationForRows(
   metadata: Metadata,
   terms: LinkageTerms,
-  rawRows: ReadonlyArray<Record<string, string>>,
+  rawRows: ReadonlyArray<CSVRow>,
 ): Standardization {
   const dobColumn = metadata.find(
     (column) => column.type === "date_of_birth" && column.role === "linkage",
@@ -277,7 +278,7 @@ export function defaultStandardizationForRows(
 export function seedAdvancedInvite(
   identity: string,
   columns: Array<string>,
-  rawRows: ReadonlyArray<Record<string, string>> = [],
+  rawRows: ReadonlyArray<CSVRow> = [],
 ): { draft: AdvancedInviteDraft; seed: AdvancedInviteSeed } {
   // Normalized so the collapsed disclosure control opens on a faithful diagonal
   // (an inferred identifier column is not silently disclosed). Normalization only
@@ -328,7 +329,7 @@ export function seedAdvancedInvite(
 export function setDraftMetadata(
   draft: AdvancedInviteDraft,
   metadata: Metadata,
-  rawRows: ReadonlyArray<Record<string, string>> = [],
+  rawRows: ReadonlyArray<CSVRow> = [],
 ): AdvancedInviteDraft {
   const offerable = getDefaultLinkageTerms(
     draft.identity,
@@ -364,7 +365,7 @@ function reconcileStandardization(
   prev: Standardization,
   metadata: Metadata,
   identity: string,
-  rawRows: ReadonlyArray<Record<string, string>>,
+  rawRows: ReadonlyArray<CSVRow>,
 ): Standardization {
   const columnByName = new Map(metadata.map((column) => [column.name, column]));
   const kept = prev.filter((transformation) => {
@@ -1221,7 +1222,7 @@ export function gatedActiveSettingMessage(
 export function importedConstraintDivergenceMessage(
   terms: LinkageTerms,
   seed: AdvancedInviteSeed,
-  rawRows: ReadonlyArray<Record<string, string>> = [],
+  rawRows: ReadonlyArray<CSVRow> = [],
 ): string | undefined {
   const rebuilt = buildAdvancedTerms(
     draftFromTerms(terms, seed, INVITATION_LIFETIME_SECONDS, rawRows),
@@ -1299,7 +1300,7 @@ function standardizationForImportedTerms(
   metadata: Metadata,
   defaultTerms: LinkageTerms,
   terms: LinkageTerms,
-  rawRows: ReadonlyArray<Record<string, string>>,
+  rawRows: ReadonlyArray<CSVRow>,
 ): Standardization {
   const base = defaultStandardizationForRows(metadata, defaultTerms, rawRows);
   // The recommended steps each imported field's type cleans with, keyed by field
@@ -1387,7 +1388,7 @@ export function draftFromTerms(
   terms: LinkageTerms,
   seed: AdvancedInviteSeed,
   lifetimeSeconds: number = INVITATION_LIFETIME_SECONDS,
-  rawRows: ReadonlyArray<Record<string, string>> = [],
+  rawRows: ReadonlyArray<CSVRow> = [],
 ): AdvancedInviteDraft {
   const standardization = standardizationForImportedTerms(
     seed.metadata,

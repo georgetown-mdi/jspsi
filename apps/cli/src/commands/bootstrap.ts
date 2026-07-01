@@ -27,6 +27,7 @@ import {
 import type {
   ConnectionConfig,
   ConnectionEndpoint,
+  CSVRow,
   ExchangeSpec,
   ExchangeDataSpec,
   FileDropConnectionConfig,
@@ -809,10 +810,10 @@ export function expiresFromNow(durationSeconds: number): string {
 export async function loadInputRows(
   input: string,
   { allowStdin = false }: { allowStdin?: boolean } = {},
-): Promise<{ rawRows: Array<Record<string, string>>; columns: string[] }> {
+): Promise<{ rawRows: Array<CSVRow>; columns: string[] }> {
   const csvResult = await loadCSVFile(openInputSource(input, { allowStdin }));
   return {
-    rawRows: csvResult.data as Array<Record<string, string>>,
+    rawRows: csvResult.data,
     columns: csvResult.meta.fields ?? [],
   };
 }
@@ -845,7 +846,7 @@ export async function loadInputRows(
 export async function loadInputRowsForInference(
   input: string,
   { allowStdin = false }: { allowStdin?: boolean } = {},
-): Promise<{ rawRows: Array<Record<string, string>>; columns: string[] }> {
+): Promise<{ rawRows: Array<CSVRow>; columns: string[] }> {
   const { columns, sampledColumn, sample } = await loadCSVColumnSample(
     openInputSource(input, { allowStdin }),
     (cols) => inferMetadata(cols).find((c) => c.type === "date_of_birth")?.name,
@@ -948,7 +949,7 @@ export function singlePassDisclosureNotice(): string {
 export function buildDataSpec(args: {
   terms?: LinkageTerms;
   identity: string;
-  rows?: { rawRows: Array<Record<string, string>>; columns: string[] };
+  rows?: { rawRows: Array<CSVRow>; columns: string[] };
   linkageStrategy?: LinkageStrategy;
 }): { dataSpec: ResolvedDataSpec; warnings: string[] } {
   const { terms, identity, rows, linkageStrategy } = args;
@@ -1004,7 +1005,7 @@ export { unsatisfiedLinkageFields } from "@psilink/core";
 export async function prepareForOnlineExchange(
   dataSpec: ResolvedDataSpec,
   identity: string,
-  rows: { rawRows: Array<Record<string, string>>; columns: string[] },
+  rows: { rawRows: Array<CSVRow>; columns: string[] },
 ): Promise<PreparedExchange> {
   const prepared = prepareForExchange(
     dataSpec as ExchangeDataSpec,

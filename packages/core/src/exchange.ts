@@ -9,6 +9,7 @@ import {
 } from "./standardization.js";
 import { columnValues, inferDateFormat } from "./utils/date.js";
 import { sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
+import type { CSVRow } from "./file.js";
 import { PSIParticipant } from "./participant.js";
 import {
   exchangeTerms,
@@ -105,7 +106,7 @@ export interface PreparedExchange {
    * holding only the standardized dataset. If streaming over input data is
    * ever supported, this field will need to be revisited.
    */
-  rawRows: Array<Record<string, string>>;
+  rawRows: Array<CSVRow>;
   rowCount: number;
   /**
    * Non-fatal issues detected during preparation (e.g. unknown standardization
@@ -141,7 +142,7 @@ export interface PreparedExchange {
 export function prepareForExchange(
   exchangeDataSpec: ExchangeDataSpec,
   identity: string,
-  rawRows: Array<Record<string, string>>,
+  rawRows: Array<CSVRow>,
   columnNames: Array<string>,
 ): PreparedExchange {
   const log = getLogger("exchange");

@@ -15,6 +15,7 @@ import { emptyColumnPositions } from "./columnNames";
 import { payloadSendForMetadata } from "./metadataEditing";
 
 import type {
+  CSVRow,
   InvitationToken,
   LinkageField,
   LinkageTerms,
@@ -120,7 +121,7 @@ export interface GeneratedInvitation {
    * inviter's exchange runs on the exact data with no re-parse and no second file
    * prompt. Local-only: the rows are never encoded into the token or shared.
    */
-  rawRows: Array<Record<string, string>>;
+  rawRows: Array<CSVRow>;
   /** The CSV column names, paired with {@link rawRows} -- the two inputs the
    * inviter's exchange feeds to `prepareForExchange`. Local-only. */
   columns: Array<string>;
@@ -373,11 +374,11 @@ export async function generateInvitation(params: {
   // file aborts with no token. loadCSVFile rejects only on a read/stream error (a
   // malformed-but-readable CSV resolves with rows); wrap that into the typed
   // user-actionable failure.
-  let rawRows: Array<Record<string, string>>;
+  let rawRows: Array<CSVRow>;
   let columns: Array<string>;
   try {
     const csvResult = await loadCSVFile(file);
-    rawRows = csvResult.data as Array<Record<string, string>>;
+    rawRows = csvResult.data;
     columns = csvResult.meta.fields ?? [];
   } catch (cause) {
     throw new InvitationFileError({ kind: "unreadable", cause });

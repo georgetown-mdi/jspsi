@@ -5,6 +5,8 @@ import type {
   AggregateResponse,
 } from "./nonEmptyAggregateController";
 
+import type { CSVRow } from "@psilink/core";
+
 /**
  * The off-main-thread entry for the silent-empty aggregate. Seeded once with the
  * full row set, it recomputes {@link computeFieldCoverage} for each standardization
@@ -22,7 +24,7 @@ interface WorkerScope {
 }
 const scope = globalThis as unknown as WorkerScope;
 
-let rows: ReadonlyArray<Record<string, string>> = [];
+let rows: ReadonlyArray<CSVRow> = [];
 let seeded = false;
 
 scope.onmessage = (event) => {

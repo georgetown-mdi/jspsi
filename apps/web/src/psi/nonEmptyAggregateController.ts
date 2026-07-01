@@ -5,7 +5,7 @@ import {
 
 import type { FieldValueCoverage } from "./nonEmptyAggregate";
 
-import type { Standardization } from "@psilink/core";
+import type { CSVRow, Standardization } from "@psilink/core";
 
 /**
  * Orchestrates the silent-empty aggregate ({@link computeFieldCoverage}) on or off
@@ -37,7 +37,7 @@ export type SpawnAggregateWorker = () => AggregateWorker;
 
 /** Worker request: seed the rows once, then compute per standardization edit. */
 export type AggregateRequest =
-  | { kind: "rows"; rawRows: ReadonlyArray<Record<string, string>> }
+  | { kind: "rows"; rawRows: ReadonlyArray<CSVRow> }
   | { kind: "compute"; token: number; standardization: Standardization };
 
 /** Worker response: the rates for the compute identified by `token`. */
@@ -47,7 +47,7 @@ export interface AggregateResponse {
 }
 
 export class NonEmptyRateController {
-  private readonly rawRows: ReadonlyArray<Record<string, string>>;
+  private readonly rawRows: ReadonlyArray<CSVRow>;
   private readonly worker: AggregateWorker | undefined;
   private nextToken = 0;
   private readonly pending = new Map<
@@ -59,7 +59,7 @@ export class NonEmptyRateController {
   private failed = false;
 
   constructor(
-    rawRows: ReadonlyArray<Record<string, string>>,
+    rawRows: ReadonlyArray<CSVRow>,
     spawnWorker: SpawnAggregateWorker,
   ) {
     this.rawRows = rawRows;

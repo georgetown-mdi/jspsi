@@ -67,6 +67,7 @@ import { useNonEmptyRates } from "@components/useNonEmptyRates";
 
 import type {
   Algorithm,
+  CSVRow,
   LinkageField,
   LinkageTerms,
   Metadata,
@@ -172,7 +173,7 @@ export function LinkageTermsEditor({
     standardization: Standardization,
   ) => void;
   /** The parsed rows, for the data-prep workbench's before/after preview. */
-  rawRows: Array<Record<string, string>>;
+  rawRows: Array<CSVRow>;
   /** Holds Generate disabled while an invitation is being generated. */
   generating?: boolean;
 }) {

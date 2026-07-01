@@ -26,6 +26,7 @@ import {
 } from "./config/linkageTerms.js";
 import { inferMetadata } from "./config/metadata.js";
 import type { ColumnMetadata } from "./config/metadata.js";
+import type { CSVRow } from "./file.js";
 
 const logger = getLogger("cleaning");
 
@@ -1028,14 +1029,14 @@ export class StandardizedField {
   readonly name: string;
   private readonly inputColumn: string;
   private readonly compiledSteps: CompiledStep[];
-  private readonly rawRows: ReadonlyArray<Record<string, string>>;
+  private readonly rawRows: ReadonlyArray<CSVRow>;
   private readonly cache = new Map<number, string[]>();
 
   constructor(
     name: string,
     inputColumn: string,
     steps: StandardizationStep[],
-    rawRows: ReadonlyArray<Record<string, string>>,
+    rawRows: ReadonlyArray<CSVRow>,
   ) {
     this.name = name;
     this.inputColumn = inputColumn;
@@ -1232,7 +1233,7 @@ export function resolveFieldColumns(
  */
 export function buildStandardizedDataset(
   standardization: Standardization | undefined,
-  rawRows: ReadonlyArray<Record<string, string>>,
+  rawRows: ReadonlyArray<CSVRow>,
   metadata: ColumnMetadata[],
   terms: LinkageTerms,
 ): StandardizedDataset {

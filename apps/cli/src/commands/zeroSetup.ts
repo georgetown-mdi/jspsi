@@ -347,7 +347,7 @@ async function prepareDataset(
   const csvResult = await loadCSVFile(
     openInputSource(input, { allowStdin: true }),
   );
-  const rawRows = csvResult.data as Array<Record<string, string>>;
+  const rawRows = csvResult.data;
   const prepared = prepareForExchange(
     {},
     identity,
