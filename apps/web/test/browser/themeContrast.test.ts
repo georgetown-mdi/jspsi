@@ -357,11 +357,16 @@ describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
         }),
       ),
     );
+    // The input references its validation message (the --mantine-color-error text)
+    // through aria-describedby; resolve that element within the container -- scoped
+    // to this mount and polled until present, not a global getElementById that could
+    // race the render or match another test's id. CSS.escape because React's useId
+    // ids contain colons, which are querySelector metacharacters.
     const input = await waitForEl("input");
-    const describedBy = input.getAttribute("aria-describedby");
-    const errorEl = describedBy
-      ? (document.getElementById(describedBy) as HTMLElement)
-      : await waitForEl('[class*="Error"]');
+    const errorId = input.getAttribute("aria-describedby");
+    if (errorId === null)
+      throw new Error("errored input has no aria-describedby message");
+    const errorEl = await waitForEl(`#${CSS.escape(errorId)}`);
     const surface = await waitForEl('[data-testid="surface"]');
     const bg = getComputedStyle(surface).backgroundColor;
     expect(
@@ -387,7 +392,10 @@ describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
         ),
       );
       const alert = await waitForEl('[role="alert"]');
-      const title = alert.querySelector('[class*="title"]') as HTMLElement;
+      // Scope the title lookup to the alert and poll for it, so a Mantine markup
+      // change surfaces as a clear waitForEl timeout rather than a getComputedStyle
+      // TypeError on a null cast.
+      const title = await waitForEl('[role="alert"] [class*="title"]');
       const bg = getComputedStyle(alert).backgroundColor;
       expect(
         contrast(getComputedStyle(title).color, bg),
