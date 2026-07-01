@@ -13,6 +13,7 @@ import {
   prepareForExchange,
   safeParseLinkageTerms,
   validateCompatibility,
+  validateStandardizationAgainstTerms,
 } from "@psilink/core";
 
 import {
@@ -24,6 +25,7 @@ import {
   outputForDirection,
   seedAdvancedInvite,
   setDraftMetadata,
+  standardizationForTerms,
   validateAdvancedInvite,
 } from "../../src/psi/advancedInvite.js";
 import {
@@ -121,6 +123,79 @@ describe("seedAdvancedInvite + buildAdvancedTerms", () => {
     const built = buildAdvancedTerms(withoutSsn4Keys);
     expect(built.linkageKeys.length).toBeGreaterThan(0);
     expect(built.linkageFields.some((f) => f.name === "ssn4")).toBe(false);
+  });
+
+  test("standardizationForTerms drops a disabled key's orphaned transformation", () => {
+    // Regression: disabling every ssn4 key drops the ssn4 field from the emitted
+    // terms (buildAdvancedTerms), but the draft's standardization keeps the ssn4
+    // transformation so re-enabling would restore its cleaning. Feeding that
+    // unfiltered pair into the inviter's own prepareForExchange fails closed on an
+    // authoritative standardization whose output names no linkage field.
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const withoutSsn4Keys = {
+      ...draft,
+      keys: draft.keys.map((entry) => ({
+        ...entry,
+        enabled: !entry.key.elements.some((e) => e.field === "ssn4"),
+      })),
+    };
+    const terms = buildAdvancedTerms(withoutSsn4Keys);
+    // The emitted terms no longer declare ssn4, yet the draft still carries its
+    // (now inert) transformation -- the inconsistency the fix reconciles.
+    expect(terms.linkageFields.some((f) => f.name === "ssn4")).toBe(false);
+    expect(
+      withoutSsn4Keys.standardization.some((t) => t.output === "ssn4"),
+    ).toBe(true);
+    expect(
+      validateStandardizationAgainstTerms(
+        withoutSsn4Keys.standardization,
+        terms,
+      ).length,
+    ).toBeGreaterThan(0);
+
+    // Reconciled to the emitted terms, every remaining output names a declared
+    // field, so the pairing is consistent and the inviter's exchange prepares.
+    const reconciled = standardizationForTerms(
+      withoutSsn4Keys.standardization,
+      terms,
+    );
+    expect(reconciled.some((t) => t.output === "ssn4")).toBe(false);
+    expect(validateStandardizationAgainstTerms(reconciled, terms)).toEqual([]);
+
+    // End to end: the reconciled spec prepares, the raw draft spec fails closed.
+    const rows = [
+      {
+        ssn: "123456789",
+        ssn4: "6789",
+        first_name: "Ada",
+        last_name: "Lovelace",
+        dob: "2000-01-01",
+      },
+    ];
+    expect(() =>
+      prepareForExchange(
+        {
+          linkageTerms: terms,
+          metadata: withoutSsn4Keys.metadata,
+          standardization: reconciled,
+        },
+        "Org",
+        rows,
+        ALL_COLUMNS,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      prepareForExchange(
+        {
+          linkageTerms: terms,
+          metadata: withoutSsn4Keys.metadata,
+          standardization: withoutSsn4Keys.standardization,
+        },
+        "Org",
+        rows,
+        ALL_COLUMNS,
+      ),
+    ).toThrow(/ssn4/);
   });
 
   test("free text in identity and legal agreement is NFC-normalized and trimmed", () => {

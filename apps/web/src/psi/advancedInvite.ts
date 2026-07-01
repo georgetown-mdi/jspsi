@@ -394,6 +394,29 @@ function reconcileStandardization(
   return [...kept, ...additions];
 }
 
+/**
+ * Filter a standardization to the transformations whose `output` names a field the
+ * given terms declare. {@link buildAdvancedTerms} drops a disabled key's
+ * now-unreferenced field from `linkageFields`, but the editable draft keeps that
+ * field's (now inert) transformation so re-enabling the key restores its cleaning.
+ * Committing that transformation into the inviter's own exchange would make
+ * `prepareForExchange` fail closed, rejecting the spec as an authoritative
+ * standardization that contradicts its terms (an output naming no linkage field).
+ * The drop is lossless: a transformation whose output is not a declared linkage
+ * field is never bound, so it cleaned no matched value. Applied at the mint
+ * boundary ({@link generateInvitation}), not in the editor, so the draft retains
+ * the full authored cleaning across a disable/re-enable.
+ */
+export function standardizationForTerms(
+  standardization: Standardization,
+  terms: LinkageTerms,
+): Standardization {
+  const fieldNames = new Set(terms.linkageFields.map((field) => field.name));
+  return standardization.filter((transformation) =>
+    fieldNames.has(transformation.output),
+  );
+}
+
 /** Reconcile the draft's keys against a freshly-derived offerable set: keep the
  * order and enabled flag of keys that remain offerable (replacing the key object
  * with the fresh template), then append any newly-offerable key as enabled. */
