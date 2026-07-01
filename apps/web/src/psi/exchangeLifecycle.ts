@@ -37,15 +37,12 @@ export interface StageDefinition {
  * authenticated key exchange (or, once it is wrapped, the AEAD layer) reported a
  * wrong secret, tamper, or replay, so the user must NOT silently re-run it -- it
  * is surfaced as an authentication failure rather than a retryable transport
- * drop. A `"config"` failure is a {@link UsageError} raised during data
- * preparation -- before any peer connection -- such as an authored standardization
- * that contradicts the linkage terms: not a transport drop, so retrying as-is
- * fails identically; its message is actionable and safe to surface. It is the one
- * category keyed off {@link UsageError}; on the web every reachable `UsageError`
- * is a prepare-time config error (the transport-bound `UsageError` subclasses are
- * SFTP-only, and the web inbound bound raises a `ConnectionError`, not a
- * `UsageError`). `"exchange"` and `"output"` are owner-local discriminants (an
- * output-generation failure is not a connection error). */
+ * drop. A `"config"` failure is a {@link UsageError} raised during the PREPARE
+ * phase (inside `acquire`, before any peer connection) -- such as an authored
+ * standardization that contradicts the linkage terms: not a transport drop, so
+ * retrying as-is fails identically; its message is actionable and safe to surface.
+ * `"exchange"` and `"output"` are owner-local discriminants (an output-generation
+ * failure is not a connection error). */
 export type ExchangeErrorCategory =
   | "exchange"
   | "output"
@@ -53,18 +50,23 @@ export type ExchangeErrorCategory =
   | "config";
 
 /** Maps a lifecycle failure to the alert {@link ExchangeErrorCategory} the UI
- * shows. A `security`-kind {@link ConnectionError} -- the authenticated key
- * exchange failing closed on a wrong secret/tamper/replay -- is a trust failure
- * the user must not silently retry; every other exchange-phase failure is the
- * retryable generic `"exchange"`. (An `"output"` failure is classified at its own
- * call site, since the exchange already succeeded there.) Keying off the
+ * shows, given the `phase` it came from. A `security`-kind {@link ConnectionError}
+ * -- the authenticated key exchange failing closed on a wrong secret/tamper/replay
+ * -- is a trust failure the user must not silently retry; every other failure is
+ * the retryable generic `"exchange"`. (An `"output"` failure is classified at its
+ * own call site, since the exchange already succeeded there.) Keying off the
  * connection-error kind rather than the handshake step means a future
  * `EncryptedMessageConnection` surfacing a `security` failure mid-exchange is
- * routed the same way for free. A `UsageError` -- only ever a prepare-time config
- * error on this path -- is classified `config` so the UI can surface its actionable
- * message rather than the generic transient-failure copy. */
-function classifyExchangeFailure(error: unknown): ExchangeErrorCategory {
-  if (error instanceof UsageError) return "config";
+ * routed the same way for free. A {@link UsageError} is classified `config` ONLY in
+ * the `"prepare"` phase, which runs `prepareForExchange`: the phase is the
+ * discriminant, so a `UsageError` surfacing mid-`"run"` (none does today) is never
+ * mislabeled an actionable config problem -- the guarantee is structural, not a
+ * prose claim about what the run half throws. */
+function classifyExchangeFailure(
+  error: unknown,
+  phase: "prepare" | "run",
+): ExchangeErrorCategory {
+  if (phase === "prepare" && error instanceof UsageError) return "config";
   return error instanceof ConnectionError && error.kind === "security"
     ? "security"
     : "exchange";
@@ -254,12 +256,12 @@ export async function runExchangeLifecycle(
     });
   } catch (error) {
     // acquire is atomic: it has already torn down anything it built, so there is
-    // nothing here for the owner to release. On abort, emitError no-ops. Classify
-    // like the run half: acquire runs prepareForExchange, whose fail-closed config
+    // nothing here for the owner to release. On abort, emitError no-ops. This is
+    // the PREPARE phase: acquire runs prepareForExchange, whose fail-closed config
     // errors (a UsageError, e.g. an authored standardization contradicting the
-    // terms) must surface as an actionable "config" alert rather than the generic
+    // terms) surface as an actionable "config" alert rather than the generic
     // retryable "exchange" one; a plain load/transport failure stays "exchange".
-    emitError({ category: classifyExchangeFailure(error), error });
+    emitError({ category: classifyExchangeFailure(error, "prepare"), error });
     return;
   }
 
@@ -370,7 +372,7 @@ export async function runExchangeLifecycle(
     }
     emitResult(outputs);
   } catch (error) {
-    emitError({ category: classifyExchangeFailure(error), error });
+    emitError({ category: classifyExchangeFailure(error, "run"), error });
   } finally {
     signal.removeEventListener("abort", onAbort);
     await teardown();

@@ -265,6 +265,33 @@ describe("runExchangeLifecycle", () => {
     expect(s.onResult).not.toHaveBeenCalled();
   });
 
+  test("a mid-run UsageError is NOT classified 'config' (phase-scoped)", async () => {
+    // The config category is scoped to the prepare phase. A UsageError surfacing
+    // from the run half (none does today) must stay the generic 'exchange', never
+    // the actionable 'config' meant for a pre-connection data problem -- a
+    // structural guarantee, so a future core change that threw one mid-run cannot
+    // silently mislabel it.
+    const { mc } = makeFakeMc();
+    mockedOpen.mockResolvedValue(mc);
+    mockedRunExchange.mockRejectedValue(new UsageError("mid-run usage error"));
+    const { acquired } = makeResources();
+    const acquire: Acquire = () => Promise.resolve(acquired);
+    const s = seams();
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "initiator",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(s.onError).toHaveBeenCalledWith({
+      category: "exchange",
+      error: expect.any(UsageError),
+    });
+    expect(s.onResult).not.toHaveBeenCalled();
+  });
+
   test("authenticates the peer at the mc seam before runExchange", async () => {
     const { mc } = makeFakeMc();
     mockedOpen.mockResolvedValue(mc);
