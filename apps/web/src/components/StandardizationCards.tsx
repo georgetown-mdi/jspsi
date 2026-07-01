@@ -10,6 +10,7 @@ import { StandardizationPreview } from "@components/StandardizationPreview";
 import { StandardizationStepEditor } from "@components/StandardizationStepEditor";
 
 import type {
+  CSVRow,
   LinkageField,
   Metadata,
   Standardization,
@@ -66,7 +67,7 @@ export function StandardizationCards({
   /** The operator's column metadata, for the per-type input-column options. */
   metadata: Metadata;
   /** The parsed rows the preview samples. */
-  rawRows: Array<Record<string, string>>;
+  rawRows: Array<CSVRow>;
   /** Emit a step edit: `output` names the field, `input` is the transformation's
    * input column AS RENDERED (echoed for the acceptor's stale-override check), and
    * `steps` is the next pipeline. */
@@ -241,7 +242,7 @@ function StandardizationCard({
   field: LinkageField;
   inputColumn: string;
   steps: Array<StandardizationStep>;
-  rawRows: Array<Record<string, string>>;
+  rawRows: Array<CSVRow>;
   inputColumnOptions: Array<string>;
   onInputColumnChange: (column: string) => void;
   onStepsChange: (steps: Array<StandardizationStep>) => void;

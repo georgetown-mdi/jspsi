@@ -6,6 +6,8 @@ import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
 
 import FileSelect from "@components/FileSelect";
 
+import type { CSVRow } from "@psilink/core";
+
 /** A titled alert. The acquire phase emits its read-failure message through this
  * shape; the review screen renders it in the same slot. */
 export interface AlertContent {
@@ -17,7 +19,7 @@ export interface AlertContent {
  * the two inputs `prepareForExchange` (and the "Prepare your data" editor's
  * satisfiability verdict) consume. Nothing here is connection- or role-specific. */
 export interface AcquiredBundle {
-  rawRows: Array<Record<string, string>>;
+  rawRows: Array<CSVRow>;
   columns: Array<string>;
 }
 
@@ -112,7 +114,7 @@ export default function FileAcquire(props: FileAcquireProps) {
       // handing off.
       if (submitSignal.aborted || csvResult === undefined) return;
 
-      const rawRows = csvResult.data as Array<Record<string, string>>;
+      const rawRows = csvResult.data;
       const columns = csvResult.meta.fields ?? [];
 
       // Refuse an unnamed-column header before handing off: the editor seeds its

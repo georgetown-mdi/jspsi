@@ -400,6 +400,39 @@ test("loadCSVFile: a well-formed input under the ceiling reads unchanged", async
   ]);
 });
 
+test("loadCSVFile: normalizes rows to an honest CSVRow shape", async () => {
+  // PapaParse (header:true) gives no per-cell string guarantee: a row longer than
+  // the header attaches a non-string `__parsed_extra` array, and a shorter row omits
+  // its trailing columns. loadCSVFile normalizes both away so every returned cell is
+  // a genuine string (a CSVRow), which the row type states honestly -- the laundering
+  // the by-name-access cleanup targets.
+  const csv =
+    "a,b,c\n" +
+    "1,2,3\n" + // well-formed
+    "4,5\n" + // short: c is absent, not undefined-typed-as-string
+    "6,7,8,9,10\n"; // over-long: 9,10 land in a non-string __parsed_extra
+  const result = await loadCSVFile(streamOf(csv), 256);
+
+  expect(result.data).toEqual([
+    { a: "1", b: "2", c: "3" },
+    { a: "4", b: "5" },
+    { a: "6", b: "7", c: "8" },
+  ]);
+
+  // The over-long row's non-string __parsed_extra is dropped, so a generic value
+  // iteration sees only strings -- never the array the raw cast would have typed as a
+  // string.
+  const overLong = result.data[2];
+  expect("__parsed_extra" in overLong).toBe(false);
+  expect(Object.values(overLong).every((v) => typeof v === "string")).toBe(
+    true,
+  );
+
+  // The short row's missing column reads as undefined, not a mis-typed string.
+  expect(result.data[1].c).toBeUndefined();
+  expect("c" in result.data[1]).toBe(false);
+});
+
 // The non-stream (browser File) bound. loadCSVFile's data-event counter is inert
 // for a File -- PapaParse reads it whole through FileReader, which Node lacks -- so
 // the leading-line pre-read enforces the ceiling there instead. These exercise the

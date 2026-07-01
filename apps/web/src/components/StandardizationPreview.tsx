@@ -19,6 +19,7 @@ import {
 import { isStepValid } from "@psi/standardizationAuthoring";
 
 import type {
+  CSVRow,
   FieldValue,
   LinkageField,
   StandardizationStep,
@@ -39,15 +40,15 @@ export const PREVIEW_SAMPLE_SIZE = 5;
  * whose value is missing or blank after trimming carries no signal for the
  * preview, so it is skipped rather than shown as an empty before->after pair. */
 function sampleInputValues(
-  rawRows: ReadonlyArray<Record<string, string>>,
+  rawRows: ReadonlyArray<CSVRow>,
   inputColumn: string,
   limit: number,
 ): Array<string> {
   const values: Array<string> = [];
   for (const row of rawRows) {
-    // `Record<string, string>` types a missing column as `string`, but a row may
-    // lack the column; widen so the absence check is honest.
-    const raw = row[inputColumn] as string | undefined;
+    // A short row may lack the column, so the read is honestly `string | undefined`
+    // (CSVRow's value type); the absence check below handles it.
+    const raw = row[inputColumn];
     if (raw !== undefined && raw.trim() !== "") {
       values.push(raw);
       if (values.length >= limit) break;
@@ -184,7 +185,7 @@ export function StandardizationPreview({
   /** The current pipeline steps, in order. */
   steps: Array<StandardizationStep>;
   /** The parsed CSV rows the sample is drawn from. */
-  rawRows: ReadonlyArray<Record<string, string>>;
+  rawRows: ReadonlyArray<CSVRow>;
   /** Override the provisional sample size (testing/aesthetics). */
   sampleSize?: number;
 }) {

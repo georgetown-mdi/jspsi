@@ -6,7 +6,7 @@ import { defaultSpawnAggregateWorker } from "@psi/nonEmptyAggregateWorkerClient"
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 import type { SpawnAggregateWorker } from "@psi/nonEmptyAggregateController";
 
-import type { Standardization } from "@psilink/core";
+import type { CSVRow, Standardization } from "@psilink/core";
 
 /** Debounce (ms) before a standardization edit triggers a recompute, so a burst of
  * keystrokes recomputes the full-CSV coverage once rather than per edit. Distinct
@@ -33,7 +33,7 @@ export interface NonEmptyRatesState {
  * `spawnWorker` is injectable for tests; production uses the real worker.
  */
 export function useNonEmptyRates(
-  rawRows: ReadonlyArray<Record<string, string>>,
+  rawRows: ReadonlyArray<CSVRow>,
   standardization: Standardization,
   spawnWorker: SpawnAggregateWorker = defaultSpawnAggregateWorker,
 ): NonEmptyRatesState {

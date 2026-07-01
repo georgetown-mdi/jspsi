@@ -197,6 +197,42 @@ export function guardStreamLineByteCeiling(
 }
 
 /**
+ * A parsed CSV row as {@link loadCSVFile} returns it under PapaParse's
+ * `header: true`: an object keyed by column name. PapaParse gives no per-cell
+ * string guarantee -- a row shorter than the header omits its trailing columns (a
+ * by-name read is then `undefined`), and a row with fields beyond the header
+ * carries a non-string `__parsed_extra` array. {@link loadCSVFile} normalizes that
+ * away -- keeping only the string-valued cells (see {@link normalizeCSVRow}) -- so
+ * a present column is a `string` and a missing one reads as `undefined`, which this
+ * type states honestly: the `| undefined` holds even with `noUncheckedIndexedAccess`
+ * off, and no cell is ever a non-string a generic value iteration could trip over.
+ * Every row consumer -- the exchange pipeline, standardization, payload extraction
+ * -- threads this type rather than the `Record<string, string>` the raw cast once
+ * asserted but could not back.
+ */
+export type CSVRow = Record<string, string | undefined>;
+
+/**
+ * Normalize one raw PapaParse row to a {@link CSVRow}, dropping any non-string
+ * cell -- in practice the `__parsed_extra` array PapaParse attaches to a row longer
+ * than the header -- so every retained value is a genuine string. A row that is
+ * already all-string (the common well-formed row) is returned by reference; only a
+ * row carrying a non-string cell is rebuilt without it.
+ */
+function normalizeCSVRow(row: unknown): CSVRow {
+  const source = row as Record<string, unknown>;
+  const keys = Object.keys(source);
+  if (keys.every((key) => typeof source[key] === "string"))
+    return source as CSVRow;
+  const cleaned: CSVRow = {};
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string") cleaned[key] = value;
+  }
+  return cleaned;
+}
+
+/**
  * Parse a CSV file to its COMPLETE row set. Resolves a {@link Papa.ParseResult}
  * whose `data` and `errors` are accumulated across every PapaParse chunk, so a
  * file larger than one `Papa.LocalChunkSize` chunk is returned whole rather than
@@ -235,7 +271,7 @@ export function guardStreamLineByteCeiling(
 export async function loadCSVFile(
   file: LocalFile,
   byteCeiling: number = CSV_LINE_BYTE_CEILING,
-): Promise<Papa.ParseResult<unknown>> {
+): Promise<Papa.ParseResult<CSVRow>> {
   // Bound the non-stream (browser File) path's leading line before parsing: a File
   // exposes no `data` events for the stream guard below to scan, since PapaParse
   // reads it whole through FileReader. A Node stream or string is a no-op here.
@@ -252,7 +288,7 @@ export async function loadCSVFile(
     // missing `chunk` callback is exactly the silent multi-chunk truncation this
     // accumulation removes (the older single-chunk-only contract); a >1-chunk file
     // therefore parses whole rather than to a truncated subset with no error.
-    const data: Array<unknown> = [];
+    const data: Array<CSVRow> = [];
     const errors: Array<Papa.ParseError> = [];
     let meta: Papa.ParseMeta | undefined;
 
@@ -289,8 +325,10 @@ export async function loadCSVFile(
       chunk: (results) => {
         // Spread-push would pass one argument per row and can overflow the call
         // stack for a chunk holding hundreds of thousands of short rows, so append
-        // in a loop (O(n) total, stack-safe).
-        for (const row of results.data) data.push(row);
+        // in a loop (O(n) total, stack-safe). Normalize each row to a CSVRow at this
+        // single boundary -- dropping PapaParse's non-string __parsed_extra -- so the
+        // honest row type holds for every consumer without a per-site cast.
+        for (const row of results.data) data.push(normalizeCSVRow(row));
         for (const error of results.errors) errors.push(error);
         // Every chunk's meta carries the header field list (the parser's fields
         // persist across chunks), so keep the latest for `complete`, whose own
@@ -474,9 +512,9 @@ export function loadCSVColumnSample(
         // `let` read inside this callback, which TypeScript will not narrow on its
         // own; this guard does the narrowing for the indexing below.
         if (target === undefined) return;
-        for (const row of results.data as Array<Record<string, string>>) {
+        for (const row of results.data as Array<Record<string, unknown>>) {
           const value = row[target];
-          if (value !== undefined && value.trim() !== "") {
+          if (typeof value === "string" && value.trim() !== "") {
             sample.push(value);
             // Enough to reproduce a full scan; stop reading the rest of the file.
             if (sample.length >= sampleLimit) {

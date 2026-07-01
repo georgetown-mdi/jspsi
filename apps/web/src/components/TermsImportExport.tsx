@@ -17,8 +17,8 @@ import {
   importedConstraintDivergenceMessage,
 } from "@psi/advancedInvite";
 
+import type { CSVRow, LinkageTerms } from "@psilink/core";
 import type { AdvancedInviteSeed } from "@psi/advancedInvite";
-import type { LinkageTerms } from "@psilink/core";
 
 /** How long to keep a download's object URL alive after the click before revoking
  * it. The browser may copy the blob asynchronously, so revoking too soon (even on
@@ -82,7 +82,7 @@ export function TermsImportExport({
   /** The inviter's parsed rows, threaded into the same reconstruction (the date
    * format it infers does not affect the constraint comparison, but the rebuild
    * takes them). */
-  rawRows: ReadonlyArray<Record<string, string>>;
+  rawRows: ReadonlyArray<CSVRow>;
   /** Called with validated, non-gated terms to load into the editor. */
   onImport: (terms: LinkageTerms) => void;
 }) {

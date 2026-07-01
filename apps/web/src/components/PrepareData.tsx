@@ -50,6 +50,7 @@ import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 import { useNonEmptyRates } from "@components/useNonEmptyRates";
 
 import type {
+  CSVRow,
   LinkageField,
   LinkageTerms,
   Metadata,
@@ -107,7 +108,7 @@ export function PrepareData({
   /** The acceptor's own CSV column names, from the parsed file. */
   columns: Array<string>;
   /** The parsed CSV rows, the sample source for the before->after preview. */
-  rawRows: Array<Record<string, string>>;
+  rawRows: Array<CSVRow>;
   /** Commit the prepared data and move to the exchange: the edited metadata and
    * standardization, plus an optional partial-coverage advisory to surface through
    * the run. */
