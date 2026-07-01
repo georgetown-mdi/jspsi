@@ -635,11 +635,18 @@ test("handler: zero-setup surfaces the single-pass disclosure note at selection"
   // The selection note is the ONLY single-pass disclosure surface for a
   // zero-setup party (there is no accept-side consent prompt), so pin that it
   // actually fires -- the config-content test above would still pass if the note
-  // emission were deleted. getLogger("psilink").info routes through the prefix
-  // plugin to console.info; setLevel binds that method to the spy so the note is
-  // captured robustly regardless of the level a prior test left behind.
+  // emission were deleted. It is a diagnostic, so getLogger("psilink").info now
+  // routes to stderr (configureStderrLogging keeps stdout for result data); spy
+  // on process.stderr.write to capture it, and setLevel to info so the note is
+  // emitted regardless of the level a prior test left behind.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeronote-"));
-  const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+  const stderrChunks: string[] = [];
+  const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    stderrChunks.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write);
   const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
     code?: number,
   ) => {
@@ -665,11 +672,10 @@ test("handler: zero-setup surfaces the single-pass disclosure note at selection"
       record: false,
       "log-level": "info",
     } as unknown as Arguments);
-    const logged = infoSpy.mock.calls.map((c) => c.join(" ")).join("\n");
-    expect(logged).toContain("consented disclosure tradeoff");
+    expect(stderrChunks.join("")).toContain("consented disclosure tradeoff");
   } finally {
     getLogger("psilink").setLevel("silent");
-    infoSpy.mockRestore();
+    stderrSpy.mockRestore();
     exitSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
   }

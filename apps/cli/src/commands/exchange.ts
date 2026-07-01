@@ -33,6 +33,7 @@ import { parseSensitiveYaml } from "../sensitiveFile";
 import { resolveAtSignRefs, resolveExchangeSpecRefs } from "../util/atSignRefs";
 import {
   configureLogFile,
+  configureStderrLogging,
   exitWithError,
   parseOrExit,
   openInputSource,
@@ -630,10 +631,10 @@ export async function handler(argv: Arguments): Promise<void> {
   // the logger is created, so getLogger("exchange") below inherits the file
   // sink. A missing parent directory is a UsageError reported on stderr (the
   // file is not the sink) and exits 64.
-  const logFileSink =
+  const logSink =
     logFile !== undefined
       ? parseOrExit(() => configureLogFile(logFile))
-      : undefined;
+      : configureStderrLogging();
 
   logLibrary.setDefaultLevel(logLevel);
   const log = getLogger("exchange");
@@ -795,9 +796,10 @@ export async function handler(argv: Arguments): Promise<void> {
         exchangeError instanceof UsageError ? 64 : 69,
       );
   } finally {
-    // Close the log-file descriptor on the normal exit path. Writes are
-    // synchronous and already durable, so exitWithError's process.exit (which
-    // bypasses this finally) loses nothing -- this is only descriptor cleanup.
-    logFileSink?.close();
+    // Restore the loglevel factory (and close the log-file descriptor, for the
+    // file sink) on the normal exit path. Writes are synchronous and already
+    // durable, so exitWithError's process.exit (which bypasses this finally)
+    // loses nothing -- this is only factory/descriptor cleanup.
+    logSink.close();
   }
 }
