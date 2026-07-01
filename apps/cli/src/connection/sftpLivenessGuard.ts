@@ -211,30 +211,54 @@ export interface BoundedPutSource {
  * slow link, so -- exactly as the capped `get` sink bounds its idle gap rather than
  * its total time -- this bounds the gap between upload-progress ticks instead.
  *
- * The source emits `payload` in `chunkBytes`-sized slices (views, not copies).
- * ssh2-sftp-client pipes it into the remote write stream, which pulls under
- * ack-driven backpressure: a withheld write acknowledgement stalls the pipe, so the
- * source stops being pulled. An idle timer, armed before the first chunk and reset
- * on each chunk produced, fires when no chunk has been pulled within
- * `stallDeadlineMs`: it rejects `result` with a {@link TransportOperationStalledError}
- * and destroys the source WITH an error, so ssh2-sftp-client's read-stream `'error'`
- * handler tears the write stream down at the server (a bare destroy would not).
- * Bounding the idle gap rather than the total upload time never false-fails a
- * slow-but-progressing large write, only one that stops making progress. The bound
- * also covers the tail -- the wait for the final ack and close -- since the last
- * chunk's timer is cleared only by `complete()`/`fail()`. Defaults to
- * {@link SFTP_STALL_DEADLINE_MS}.
+ * `payload` is either a single `Buffer` or an ORDERED LIST of `Uint8Array`
+ * chunks (the message send path's `[header, payload]` pair): the source emits the
+ * parts back-to-back in `chunkBytes`-sized slices (views, not copies -- a
+ * non-Buffer part is wrapped as a zero-copy Buffer view, never re-copied), so the
+ * on-disk bytes are the parts concatenated without ever concatenating them in
+ * memory. ssh2-sftp-client pipes the source into the remote write stream, which
+ * pulls under ack-driven backpressure: a withheld write acknowledgement stalls the
+ * pipe, so the source stops being pulled. An idle timer, armed before the first
+ * chunk and reset on each chunk produced, fires when no chunk has been pulled
+ * within `stallDeadlineMs`: it rejects `result` with a
+ * {@link TransportOperationStalledError} and destroys the source WITH an error, so
+ * ssh2-sftp-client's read-stream `'error'` handler tears the write stream down at
+ * the server (a bare destroy would not). Bounding the idle gap rather than the
+ * total upload time never false-fails a slow-but-progressing large write, only one
+ * that stops making progress. The bound also covers the tail -- the wait for the
+ * final ack and close -- since the last chunk's timer is cleared only by
+ * `complete()`/`fail()`. Defaults to {@link SFTP_STALL_DEADLINE_MS}.
  *
  * The source is single-use (a stream cannot be re-read); the caller rebuilds a
- * fresh one from the retained payload Buffer per retry attempt.
+ * fresh one from the retained payload Buffer or chunk list per retry attempt (a
+ * list of `Uint8Array` views is re-iterable, so the retry stays byte-identical).
  */
 export function createBoundedPutSource(
   path: string,
-  payload: Buffer,
+  payload: Buffer | readonly Uint8Array[],
   chunkBytes: number = SFTP_PUT_PROGRESS_CHUNK_BYTES,
   stallDeadlineMs: number = SFTP_STALL_DEADLINE_MS,
 ): BoundedPutSource {
+  // Normalize to an ordered list of parts. A single Buffer is a one-part list;
+  // the two forms then share one slicing loop.
+  const parts: readonly Uint8Array[] = Buffer.isBuffer(payload)
+    ? [payload]
+    : payload;
+  // Zero-copy view of `view` as a Buffer: a Buffer passes through, a plain
+  // Uint8Array is re-viewed over the same backing bytes (Buffer.from(view) would
+  // COPY, defeating the whole point of streaming rather than concatenating). This
+  // keeps every pushed chunk a Buffer -- what ssh2's write stream consumes -- with
+  // no allocation proportional to the payload.
+  const asBuffer = (view: Uint8Array): Buffer =>
+    Buffer.isBuffer(view)
+      ? view
+      : Buffer.from(
+          view.buffer as ArrayBuffer,
+          view.byteOffset,
+          view.byteLength,
+        );
   let settled = false;
+  let partIndex = 0;
   let offset = 0;
   let resolveResult!: (value: unknown) => void;
   let rejectResult!: (err: unknown) => void;
@@ -287,7 +311,13 @@ export function createBoundedPutSource(
       // makes read() a no-op; this also covers any settled-but-not-yet-destroyed
       // window.
       if (settled) return;
-      if (offset >= payload.length) {
+      // Advance past any fully-consumed (or zero-length) parts before the EOF
+      // check, so a list whose only remaining parts are empty still reaches EOF.
+      while (partIndex < parts.length && offset >= parts[partIndex].length) {
+        partIndex += 1;
+        offset = 0;
+      }
+      if (partIndex >= parts.length) {
         // EOF: no more payload. This path does not re-arm the idle window, so the
         // last data chunk's timer stands until complete()/fail() clears it --
         // bounding the tail (the wait for the final ack and the write stream's
@@ -295,8 +325,9 @@ export function createBoundedPutSource(
         this.push(null);
         return;
       }
-      const end = Math.min(offset + chunkBytes, payload.length);
-      const chunk = payload.subarray(offset, end); // view, no copy
+      const part = parts[partIndex];
+      const end = Math.min(offset + chunkBytes, part.length);
+      const chunk = asBuffer(part.subarray(offset, end)); // view, no copy
       offset = end;
       // This chunk is pulled under the write stream's ack-driven backpressure, so a
       // withheld ack stops read() being called; reset the idle window on each

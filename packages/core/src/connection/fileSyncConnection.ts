@@ -692,12 +692,49 @@ export const MESSAGE_HEADER_BYTES = 10;
 const messageTypeLabel = (type: number): string =>
   type === MESSAGE_TYPE_BINARY ? "Uint8Array" : "Object";
 
+// Writes the MESSAGE_HEADER_BYTES-long envelope header (version || type || seq)
+// into the first 10 bytes of `out`. Every byte is assigned, so an allocUnsafe
+// target leaks no uninitialized bytes. Shared by the header-only serializer (the
+// streamed send path) and the whole-message serializer (test message injection)
+// so the byte layout lives in one place.
+const writeMessageHeader = (out: Buffer, type: number, seq: number): void => {
+  out[0] = MESSAGE_ENVELOPE_VERSION;
+  out[1] = type;
+  out.writeBigUInt64BE(BigInt(seq), 2);
+};
+
+/**
+ * Serialize just the {@link MESSAGE_HEADER_BYTES}-byte envelope header
+ * (`version || type || seq`), returning a fresh Buffer holding only those bytes.
+ * The send path streams this header and the payload as two chunks (see
+ * {@link FileSyncConnection.send}) rather than concatenating them into one
+ * buffer: prepending the 10-byte header no longer copies the whole payload, so a
+ * binary frame holds ~1x its size live rather than ~2x. The on-disk bytes are
+ * identical to {@link serializeFileSyncMessage}'s (`header || payload`); the byte
+ * count the filename declares is `MESSAGE_HEADER_BYTES + payload.length`.
+ *
+ * @internal exported for the file-sync transport tests.
+ */
+export function serializeFileSyncMessageHeader(
+  type: number,
+  seq: number,
+): Buffer {
+  const header = Buffer.allocUnsafe(MESSAGE_HEADER_BYTES);
+  writeMessageHeader(header, type, seq);
+  return header;
+}
+
 /**
  * Serialize a data-plane message into its on-disk binary envelope. `payload` is
  * the raw payload bytes (UTF-8 JSON for {@link MESSAGE_TYPE_OBJECT}, the frame
  * itself for {@link MESSAGE_TYPE_BINARY}). The returned Buffer's length is the
  * exact on-disk byte count encoded into the message filename, so the receiver's
  * sync-gate can distinguish a partially-synced file from a complete one.
+ *
+ * The live send path does NOT use this: it streams a
+ * {@link serializeFileSyncMessageHeader} header and the payload as two chunks to
+ * avoid the full-payload copy this makes (`out.set`). This whole-buffer form is
+ * retained for the transport tests, which inject a complete message file's bytes.
  *
  * @internal exported for the file-sync transport tests.
  */
@@ -707,9 +744,7 @@ export function serializeFileSyncMessage(
   payload: Uint8Array,
 ): Buffer {
   const out = Buffer.allocUnsafe(MESSAGE_HEADER_BYTES + payload.length);
-  out[0] = MESSAGE_ENVELOPE_VERSION;
-  out[1] = type;
-  out.writeBigUInt64BE(BigInt(seq), 2);
+  writeMessageHeader(out, type, seq);
   out.set(payload, MESSAGE_HEADER_BYTES);
   return out;
 }
@@ -811,6 +846,21 @@ export interface PutOptions {
   encoding?: null | string;
 }
 
+/**
+ * Body accepted by {@link FileTransportClient.put}. Either a single contiguous
+ * `Buffer` (a hello, a zero-length ack, an abort marker) or an ORDERED LIST of
+ * `Uint8Array` chunks written back-to-back as one file WITHOUT concatenating
+ * them in memory -- the message send path hands `put` its `[header, payload]`
+ * pair this way so a binary frame holds ~1x its size live rather than ~2x (see
+ * {@link FileSyncConnection.send}). A `string` (an SFTP local-file path to copy
+ * from) and a one-shot `NodeJS.ReadableStream` remain in the transport-agnostic
+ * surface but are not produced by this codebase. A `Uint8Array[]` src is
+ * re-iterable, so an adapter that retries a failed upload can rebuild its source
+ * from it per attempt, exactly as it can from a `Buffer` (a one-shot stream
+ * cannot, which is why a stream gets a single attempt).
+ */
+export type PutSource = string | Buffer | Uint8Array[] | NodeJS.ReadableStream;
+
 export interface GetOptions {
   mode?: number | string;
   flags?: "r";
@@ -848,11 +898,7 @@ export interface FileTransportClient {
   end: () => Promise<void>;
   list: (path: string) => Promise<Array<FileInfo>>;
   get: (path: string, options?: GetOptions) => Promise<Buffer<ArrayBufferLike>>;
-  put: (
-    src: string | Buffer | NodeJS.ReadableStream,
-    dest: string,
-    options?: PutOptions,
-  ) => Promise<unknown>;
+  put: (src: PutSource, dest: string, options?: PutOptions) => Promise<unknown>;
   delete: (path: string) => Promise<void>;
   /**
    * Removes `path`, swallowing all errors (file-absent, permission, transport).
@@ -880,10 +926,12 @@ interface AbortWriteInputs {
   finalName: string;
   // A Buffer, NOT a string: FileTransportClient.put treats a string src as a
   // local file PATH to copy from (ssh2-sftp-client semantics; LocalFSClient
-  // rejects it outright), so every body this codebase writes -- hellos via
-  // serializeEnvelope, messages via Buffer.from(JSON...), the zero-length ack --
-  // is a Buffer. The marker body must follow suit or the write throws (and, being
-  // best-effort, is silently swallowed, leaving no marker).
+  // rejects it outright), so every body this codebase writes is a Buffer or a
+  // header+payload chunk list -- hellos via serializeEnvelope, the zero-length
+  // ack, and this single-Buffer abort marker; only a data-plane message uses the
+  // two-chunk [header, payload] list (see send()). The marker body must be one of
+  // those or the write throws (and, being best-effort, is silently swallowed,
+  // leaving no marker); it is a single Buffer.
   body: Buffer;
   client: FileTransportClient;
 }
@@ -4007,20 +4055,28 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // Do not increment this.seq yet: advance only after the durable rename so
       // a failed send does not leave the counter past an unwritten message.
       const seq = this.seq;
-      // Serialize before constructing the filename so the encoded byte count is
-      // the exact on-disk size; the peer waits until the synced file reaches
-      // that many bytes before reading it, so a partial sync delivery is never
-      // read as a complete message.
-      const payload = serializeFileSyncMessage(type, seq, payloadBytes);
-      const outName = this.messageFilename(payload.byteLength, seq, ts);
+      // Build only the 10-byte header and derive the on-disk byte count from it
+      // plus the payload length, so the encoded count is the exact on-disk size;
+      // the peer waits until the synced file reaches that many bytes before
+      // reading it, so a partial sync delivery is never read as a complete
+      // message.
+      const header = serializeFileSyncMessageHeader(type, seq);
+      const byteLength = MESSAGE_HEADER_BYTES + payloadBytes.length;
+      const outName = this.messageFilename(byteLength, seq, ts);
       const outPath = `${outboundPath}/${outName}`;
 
       this.log.trace(
         `[${this.role}] message seq=${seq}, type=${type}, ` +
-          `${payload.byteLength} bytes`,
+          `${byteLength} bytes`,
       );
       this.log.debug(`[${this.role}] writing message ${tempFile}`);
-      await this.client.put(payload, tempPath, {
+      // Hand put() the header and payload as a two-chunk list rather than a
+      // single concatenated buffer: prepending the header no longer copies the
+      // whole payload, so a binary frame holds ~1x its size live rather than ~2x.
+      // The transport writes the chunks back-to-back, producing the identical
+      // on-disk bytes (header || payload). The header is passed first so byte 0
+      // is the version marker the receiver's deserializeFileSyncMessage keys on.
+      await this.client.put([header, payloadBytes], tempPath, {
         flags: "w",
         encoding: null,
       });
