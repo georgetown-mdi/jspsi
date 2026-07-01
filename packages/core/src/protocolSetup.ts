@@ -8,6 +8,7 @@ import {
   validateCompatibility,
 } from "./config/linkageTerms";
 import { SHARED_SECRET_REGEX } from "./config/connection";
+import { MAX_RECORD_COUNT } from "./connection/frameSize";
 import { randomBytes, toBase64Url } from "./utils/crypto";
 import { sanitizeForDisplay } from "./utils/sanitizeForDisplay";
 import { describeDecodeError } from "./utils/describeDecodeError";
@@ -138,8 +139,15 @@ const decisionMessage = z.object({
   abortReasons: abortReasonsField,
 });
 
-const recordCountMessage = z.object({
-  recordCount: z.number().int().nonnegative(),
+// The `.max(MAX_RECORD_COUNT)` bound is load-bearing beyond input hygiene: it
+// keeps the decoded count small enough that the cell-count gate's `keyCount *
+// recordCount` product stays exact (below 2^53), rather than resting silently on
+// the `.int()` safe-integer ceiling. A count above the bound is a clean
+// `protocol` ConnectionError at decode. See MAX_RECORD_COUNT in
+// connection/frameSize.ts.
+/** @internal exported for the record-count decode-bound test. */
+export const recordCountMessage = z.object({
+  recordCount: z.number().int().nonnegative().max(MAX_RECORD_COUNT),
 });
 
 // The dedicated frame that carries a freshly generated shared secret from the

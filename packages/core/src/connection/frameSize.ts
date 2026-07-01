@@ -45,6 +45,41 @@
  */
 export const MAX_FRAME_SIZE_BYTES = 536_870_888;
 
+// A safe lower bound on the on-wire byte footprint of a LEGITIMATE encrypted
+// element: a ~33-byte compressed curve point plus protobuf field framing (~35
+// bytes in practice). 32 is a conservative floor -- below the real ~35 -- so the
+// element ceiling derived from it never under-counts the legitimate maximum and so
+// never rejects a real frame.
+const MIN_ENCODED_ELEMENT_BYTES = 32;
+
+/**
+ * Absolute ceiling on the number of encrypted elements an inbound PSI frame may
+ * DECLARE, enforced by a wire-format scan BEFORE deserialization (see
+ * {@link countDeclaredPsiElements} in connection/psiElementScan.ts, called at the
+ * participant.ts decode seams). It closes a memory-exhaustion amplification the
+ * per-message authenticated bound alone does not: google-protobuf
+ * `deserializeBinary` allocates one heap object -- measured ~211 bytes -- per
+ * declared repeated `bytes` entry, so a frame packed with minimal ~2-byte entries
+ * (within the frame byte cap, yet declaring up to ~frameBytes/2 elements) would
+ * deserialize into tens of GiB before any post-deserialize count could run.
+ *
+ * Value: floor(MAX_FRAME_SIZE_BYTES / MIN_ENCODED_ELEMENT_BYTES) = 16,777,215. No
+ * legitimate frame within the ~512 MiB frame cap can carry more than this many
+ * real (>= ~35-byte) elements, so the ceiling never rejects a legitimate frame; a
+ * frame declaring more is necessarily the amplification attack and is refused
+ * pre-deserialize. It bounds the worst-case deserialize allocation to about
+ * MAX_PSI_DECODE_ELEMENTS * ~211 B ~= 3.3 GiB -- the same order as a legitimate
+ * near-cap cascade frame of real curve points, and comfortably below an OOM on the
+ * 16 GiB target. The tighter authenticated `keyCount * recordCount` bound still
+ * applies where it is smaller (always, for single-pass, via the cell-count gate);
+ * this absolute ceiling is what binds a cascade frame whose partner over-declares
+ * its record count. Fixed, not operator-configurable, for the same reason as the
+ * frame-size bound. See docs/spec/CHANNEL_SECURITY.md.
+ */
+export const MAX_PSI_DECODE_ELEMENTS = Math.floor(
+  MAX_FRAME_SIZE_BYTES / MIN_ENCODED_ELEMENT_BYTES,
+);
+
 /**
  * The single-pass dataset ceiling, expressed as a per-party budget on the
  * (key, record) cell count `keyCount * recordCount` (NOT a bare row count).
@@ -108,6 +143,32 @@ export const MAX_FRAME_SIZE_BYTES = 536_870_888;
  * in docs/spec/PROTOCOL.md.
  */
 export const MAX_SINGLE_PASS_CELLS = 3_000_000;
+
+/**
+ * The explicit upper bound on a decoded record count. It makes the cell-count
+ * gate's exact-integer-product dependency a CHECK rather than an implicit reliance
+ * on the `recordCount` wire schema's `.int()` safe-integer ceiling (2^53).
+ *
+ * The gate {@link singlePassDatasetExceedsCap} decides `keyCount * recordCount >
+ * MAX_SINGLE_PASS_CELLS`. Its precision argument holds only while that product is
+ * exact -- i.e. below `Number.MAX_SAFE_INTEGER` (2^53). Today that is true only
+ * because the schema's `.int()` caps `recordCount` at 2^53 and the key count is
+ * small, a silent dependency that a migration to BigInt or a wider numeric type
+ * could break without touching the gate. Bounding the decoded `recordCount` here
+ * -- enforced at the schema (see `recordCountMessage` in protocolSetup.ts) --
+ * makes the exact-product requirement a value the gate no longer depends on
+ * silently.
+ *
+ * Value: 1,000,000,000,000 (10^12). With the key count bounded at
+ * MAX_LINKAGE_ENTRIES (256, config/linkageTerms.ts), `keyCount * recordCount` at
+ * this ceiling is 2.56 x 10^14, about 35x below 2^53, so the product is always
+ * exact -- a `frameSize.test.ts` invariant pins that headroom against
+ * MAX_LINKAGE_ENTRIES. It is also astronomically above any legitimate
+ * dataset (the static frame cap admits ~15M curve points; the single-pass cell
+ * cap is 3M), so it never rejects a real record count. Defense-in-depth: the same
+ * bound keeps the {@link psiElementBounds} products exact for the same reason.
+ */
+export const MAX_RECORD_COUNT = 1_000_000_000_000;
 
 // Per-(key, record) byte weights of the single-pass reply frame, used to derive
 // the accepted frame size (singlePassReplyByteCap). Each is a deliberate UPPER
@@ -212,4 +273,56 @@ export function singlePassReplyByteCap(
     SINGLE_PASS_BYTES_PER_MASKED_VALUE * receiverCells +
     SINGLE_PASS_REPLY_OVERHEAD_BYTES
   );
+}
+
+/**
+ * Per-message upper bounds on the encrypted-element count a received PSI frame may
+ * declare, one field per message kind a party can receive. Derived only from the
+ * agreed key count and the two authenticated record counts -- never from the
+ * inbound frame's own bytes -- and enforced at the `deserializeBinary` seam in
+ * participant.ts before the element list drives curve-point materialization in the
+ * library. See {@link psiElementBounds}.
+ */
+export interface PsiElementBounds {
+  /** Max elements a received server setup (the sender's masked set) may declare. */
+  readonly setup: number;
+  /** Max elements a received request (the receiver's masked set) may declare. */
+  readonly request: number;
+  /**
+   * Max elements a received response (the sender's re-encryption of the receiver's
+   * request, so it carries the receiver's element count) may declare.
+   */
+  readonly response: number;
+}
+
+/**
+ * Derive the per-message element-count bounds from authenticated session state:
+ * the agreed key count and the two exchanged record counts. Both parties compute
+ * the SAME bounds, and each enforces only the ones for the messages it receives
+ * (the sender checks the request; the receiver checks the setup and response).
+ *
+ * The bound is the same `keyCount * recordCount` cell count the single-pass frame
+ * cap sizes against -- the worst-case upper bound on a party's distinct-value
+ * count, reached only when every cell holds a value seen nowhere else -- so it
+ * upper-bounds any legitimate frame and never rejects one. It applies to both the
+ * single-pass and cascade decode paths: single-pass pools each party's distinct
+ * values across all keys (at most `keyCount * recordCount`), and the cascade sends
+ * one key's values per round (at most `recordCount`, well within the same bound).
+ *
+ * The setup carries the SENDER's masked set; the request carries the RECEIVER's
+ * masked set; the response re-encrypts that request, so it carries the receiver's
+ * count too. Inputs are non-negative integers well below 2^53 (record counts are
+ * bounded by {@link MAX_RECORD_COUNT}, the key count by MAX_LINKAGE_ENTRIES), so
+ * the products are exact.
+ */
+export function psiElementBounds(
+  keyCount: number,
+  senderRecordCount: number,
+  receiverRecordCount: number,
+): PsiElementBounds {
+  return {
+    setup: keyCount * senderRecordCount,
+    request: keyCount * receiverRecordCount,
+    response: keyCount * receiverRecordCount,
+  };
 }

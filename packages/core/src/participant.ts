@@ -6,6 +6,14 @@ import {
   parseOrProtocolError,
   type MessageConnection,
 } from "./connection/messageConnection";
+import {
+  MAX_PSI_DECODE_ELEMENTS,
+  type PsiElementBounds,
+} from "./connection/frameSize";
+import {
+  countDeclaredPsiElements,
+  type PsiMessageKind,
+} from "./connection/psiElementScan";
 import { singleIssueArray } from "./utils/singleIssueArray";
 
 import type { Client as PSIClient } from "@openmined/psi.js/implementation/client.d.ts";
@@ -166,6 +174,7 @@ export class PSIParticipant {
     | typeof starterProtocolStages
     | undefined;
   private log: ReturnType<typeof getLoggerForVerbosity>;
+  private elementBounds: PsiElementBounds;
 
   private psi: { server?: PSIServer; client?: PSIClient } = {};
 
@@ -173,11 +182,19 @@ export class PSIParticipant {
     id: string,
     library: PSILibrary,
     config: Config,
+    // Per-message caps on the encrypted-element count each inbound PSI frame may
+    // declare, derived from authenticated session state (the agreed key count and
+    // the two exchanged record counts; see psiElementBounds in frameSize.ts) and
+    // enforced at every deserializeBinary seam below. Required, not defaulted: a
+    // fail-open default would silently drop the amplification guard on a caller
+    // that forgot it.
+    elementBounds: PsiElementBounds,
     setStage?: (id: ProtocolId) => void,
   ) {
     this.id = id;
     this.library = library;
     this.config = config;
+    this.elementBounds = elementBounds;
     this.setStage = setStage ? setStage : () => {};
 
     if (this.config.verbose === undefined) {
@@ -205,6 +222,58 @@ export class PSIParticipant {
 
   getStages() {
     return this.stages;
+  }
+
+  // Reject a partner-supplied PSI frame that DECLARES more encrypted elements than
+  // allowed, by scanning the protobuf wire format BEFORE handing the bytes to
+  // deserializeBinary -- which allocates one heap object (~211 bytes, measured) per
+  // declared repeated entry. Without a pre-scan a malicious partner could pack a
+  // setup / request / response with many minimal (~2-byte) repeated entries --
+  // within the frame byte cap, yet declaring up to ~frameBytes/2 elements -- and
+  // exhaust memory (tens of GiB) inside deserializeBinary itself, before any
+  // post-deserialize count could read it. The ceiling is the tighter of the
+  // authenticated `keyCount * recordCount` bound (which reads only authenticated
+  // session state, so both parties compute it identically) and the absolute
+  // {@link MAX_PSI_DECODE_ELEMENTS} -- the latter binds a cascade frame whose
+  // partner over-declares its record count, since the authenticated bound alone can
+  // be inflated there. The scan stops as soon as the count exceeds the ceiling, so
+  // an over-declared frame costs O(ceiling), not O(frame). A malformed frame is a
+  // clean protocol abort too. See connection/psiElementScan.ts.
+  private assertInboundElementBound(
+    kind: PsiMessageKind,
+    bytes: Uint8Array,
+    authenticatedBound: number,
+  ): void {
+    const ceiling = Math.min(authenticatedBound, MAX_PSI_DECODE_ELEMENTS);
+    let declared: number;
+    try {
+      declared = countDeclaredPsiElements(bytes, kind, ceiling);
+    } catch {
+      throw new Error(
+        `${this.id} protocol error: malformed inbound PSI ${kind} frame`,
+      );
+    }
+    if (declared > ceiling)
+      throw new Error(
+        `${this.id} protocol error: inbound PSI ${kind} declares more than ` +
+          `${ceiling} encrypted element(s)`,
+      );
+  }
+
+  // This protocol only ever sends a Raw server setup (createSetupMessage with
+  // dataStructure.Raw), so a received setup whose data-structure oneof is anything
+  // other than Raw -- or is unset -- is malformed: getRaw() reads `undefined` for
+  // it, and the reveal-intersection path requires Raw and aborts on it with a
+  // cryptic library error. Reject it here as a clean protocol abort. (The
+  // pre-deserialize element scan already bounded the setup's allocation; a non-Raw
+  // setup carries a single bounded byte blob, not a repeated element list, so it
+  // does not amplify -- this check is a correctness/fail-closed guard, not a memory
+  // bound.)
+  private assertRawServerSetup(setup: { getRaw(): object | undefined }): void {
+    if (!setup.getRaw())
+      throw new Error(
+        `${this.id} protocol error: PSI server setup is not a Raw data structure`,
+      );
   }
 
   // Building-block PSI steps used by the single-pass strategy
@@ -250,6 +319,11 @@ export class PSIParticipant {
       throw new Error(
         `${this.id}: processClientRequest requires the server role`,
       );
+    this.assertInboundElementBound(
+      "request",
+      requestBytes,
+      this.elementBounds.request,
+    );
     const request = this.library.request.deserializeBinary(requestBytes);
     return server.processRequest(request).serializeBinary();
   }
@@ -286,7 +360,18 @@ export class PSIParticipant {
       throw new Error(
         `${this.id}: computeValueMatches requires the client role`,
       );
+    this.assertInboundElementBound(
+      "serverSetup",
+      setupBytes,
+      this.elementBounds.setup,
+    );
     const setup = this.library.serverSetup.deserializeBinary(setupBytes);
+    this.assertRawServerSetup(setup);
+    this.assertInboundElementBound(
+      "response",
+      responseBytes,
+      this.elementBounds.response,
+    );
     const response = this.library.response.deserializeBinary(responseBytes);
     const table = client.getAssociationTable(setup, response);
     return [table[0], table[1]];
@@ -324,6 +409,11 @@ export class PSIParticipant {
       this.log.debug(`${this.id}: received client data encrypted by client`);
       this.setStage("processing client request");
 
+      this.assertInboundElementBound(
+        "request",
+        clientRequestRaw as Uint8Array,
+        this.elementBounds.request,
+      );
       const clientRequest = this.library.request.deserializeBinary(
         clientRequestRaw as Uint8Array,
       );
@@ -370,9 +460,15 @@ export class PSIParticipant {
       this.log.debug(`${this.id}: receiving server data encrypted by server`);
       this.setStage("processing startup message");
 
+      this.assertInboundElementBound(
+        "serverSetup",
+        serverSetupRaw as Uint8Array,
+        this.elementBounds.setup,
+      );
       const serverSetup = this.library.serverSetup.deserializeBinary(
         serverSetupRaw as Uint8Array,
       );
+      this.assertRawServerSetup(serverSetup);
 
       const clientRequest = this.psi.client!.createRequest(set);
 
@@ -390,6 +486,11 @@ export class PSIParticipant {
       );
       this.setStage("creating association table");
 
+      this.assertInboundElementBound(
+        "response",
+        serverResponseRaw as Uint8Array,
+        this.elementBounds.response,
+      );
       const serverResponse = this.library.response.deserializeBinary(
         serverResponseRaw as Uint8Array,
       );

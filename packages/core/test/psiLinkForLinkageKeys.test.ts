@@ -12,6 +12,7 @@ import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { ColumnMetadata } from "../src/config/metadata";
 
 import { createMessagePipe } from "../src/connection/messageConnection";
+import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -91,14 +92,18 @@ const psiLibrary = await PSI();
 
 const [serverConn, clientConn] = createMessagePipe();
 
-const server = new PSIParticipant("server", psiLibrary, {
-  role: "starter",
-  verbose: -1,
-});
-const client = new PSIParticipant("client", psiLibrary, {
-  role: "joiner",
-  verbose: -1,
-});
+const server = new PSIParticipant(
+  "server",
+  psiLibrary,
+  { role: "starter", verbose: -1 },
+  UNBOUNDED_PSI_ELEMENTS,
+);
+const client = new PSIParticipant(
+  "client",
+  psiLibrary,
+  { role: "joiner", verbose: -1 },
+  UNBOUNDED_PSI_ELEMENTS,
+);
 
 log.setLevel("DEBUG");
 

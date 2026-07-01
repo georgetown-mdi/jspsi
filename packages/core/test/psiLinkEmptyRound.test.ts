@@ -7,6 +7,7 @@ import { linkViaPSI } from "../src/link";
 
 import { createMessagePipe } from "../src/connection/messageConnection";
 import { sortAssociationTable } from "./utils/associationTable";
+import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 
 // Regression coverage for the empty-linkage-round desync: a later key round can
 // be empty on one party only (that party's records are all matched in an earlier
@@ -23,14 +24,18 @@ async function runLink(
   clientData: Array<Array<string | undefined>>,
 ) {
   const [serverConn, clientConn] = createMessagePipe();
-  const server = new PSIParticipant("server", psiLibrary, {
-    role: "starter",
-    verbose: -1,
-  });
-  const client = new PSIParticipant("client", psiLibrary, {
-    role: "joiner",
-    verbose: -1,
-  });
+  const server = new PSIParticipant(
+    "server",
+    psiLibrary,
+    { role: "starter", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+  const client = new PSIParticipant(
+    "client",
+    psiLibrary,
+    { role: "joiner", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
 
   const [serverResult, clientResult] = await Promise.all([
     linkViaPSI(

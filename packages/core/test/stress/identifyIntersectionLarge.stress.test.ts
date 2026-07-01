@@ -4,6 +4,7 @@ import PSI from "@openmined/psi.js";
 
 import { PSIParticipant } from "../../src/participant";
 import { createMessagePipe } from "../../src/connection/messageConnection";
+import { psiElementBounds } from "../../src/connection/frameSize";
 
 // End-to-end stress: a full identifyIntersection round between two in-memory
 // participants at large N, not just the setup message. This exercises the whole
@@ -32,15 +33,24 @@ test(`identifyIntersection over ${N} elements yields the ${OVERLAP} shared ids`,
     serverData[i] = clientData[i] = `shared-${i}`;
   }
 
+  // Exercise the element-count guard at scale with the REAL derived bound rather
+  // than disabling it: one PSI round (keyCount 1) over N distinct values per side,
+  // so each masked set carries exactly N elements and the tight bound N admits it
+  // -- proving the guard never rejects a genuinely large legitimate frame.
   const [serverConn, clientConn] = createMessagePipe();
-  const server = new PSIParticipant("server", psi, {
-    role: "starter",
-    verbose: 0,
-  });
-  const client = new PSIParticipant("client", psi, {
-    role: "joiner",
-    verbose: 0,
-  });
+  const bounds = psiElementBounds(1, N, N);
+  const server = new PSIParticipant(
+    "server",
+    psi,
+    { role: "starter", verbose: 0 },
+    bounds,
+  );
+  const client = new PSIParticipant(
+    "client",
+    psi,
+    { role: "joiner", verbose: 0 },
+    bounds,
+  );
 
   const [serverResult, clientResult] = await Promise.all([
     server.identifyIntersection(serverConn, serverData),
