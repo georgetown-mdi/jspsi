@@ -67,6 +67,10 @@ function testOptions(
 
 afterEach(() => {
   vi.useRealTimers();
+  // Reset the shared promptConfirm mock after every test so none inherits a stale
+  // implementation or call count from a prior one -- the guarantee lives here
+  // rather than each handler test having to remember to reset it.
+  promptConfirmMock.mockReset();
 });
 
 function sampleToken(
@@ -1287,9 +1291,8 @@ test("handler: --consent-to-terms skips the confirmation prompt and writes the c
   // called, so stdin is not read for a confirmation) and the offline acceptance
   // proceeds to write both files, on the recorded advance consent.
   const { dir, input, configFile, keyFile } = offlineAcceptFixture();
-  // Reset (not just clear): drop any implementation a prior test left on the
-  // shared mock, so this test's "never called" assertion does not depend on order.
-  promptConfirmMock.mockReset();
+  // afterEach resets the shared mock, so it starts clean here; this test needs no
+  // implementation because it asserts promptConfirm is never called.
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as never);
@@ -1321,9 +1324,7 @@ test("handler: without --consent-to-terms the prompt runs and a decline writes n
   // The unchanged default: the prompt runs, and a "no" (here the mocked decline,
   // which an EOF/non-TTY stdin also produces) leaves both files unwritten.
   const { dir, input, configFile, keyFile } = offlineAcceptFixture();
-  // Reset then set the impl, so the decline behavior is established here
-  // unconditionally rather than relying on what a prior test left behind.
-  promptConfirmMock.mockReset();
+  // afterEach reset the mock to a clean slate; set the decline impl this test needs.
   promptConfirmMock.mockResolvedValue(false);
   const exit = vi
     .spyOn(process, "exit")
