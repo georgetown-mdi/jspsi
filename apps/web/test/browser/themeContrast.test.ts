@@ -174,7 +174,11 @@ function channels(color: string): [number, number, number] {
   return [Number(m[0]), Number(m[1]), Number(m[2])];
 }
 
-/** WCAG 2.1 relative luminance of a computed color string. */
+/** WCAG 2.1 relative luminance of a computed color string. The 0.03928 threshold is
+ * the value printed in the WCAG 2.1 text (and used by Mantine's own luminance()), not
+ * the more precise 0.04045; keep it as-is so this matches the spec and the byte-for-
+ * byte copy in test/unit/themeContrast.test.ts (a naive "correction" would silently
+ * diverge the two harnesses). */
 function relativeLuminance(color: string): number {
   const linear = (v: number) =>
     v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
@@ -194,9 +198,10 @@ describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
   // Black resolves brighter on cyan-6 (7.53) than white does on cyan-9 (5.59), so a
   // single >= 4.5 floor covers both schemes; expectedText pins WHICH text colour
   // renders, the half that regressed before. The background is read through
-  // restingBackground so a stale-pointer hover -- a lighter fill that dips the light
-  // case under the floor (only light: dark's hover fill is darker and raises the
-  // black-on-fill ratio) -- is never sampled in place of the resting fill.
+  // restingBackground so a stale-pointer hover fill -- in the light scheme one shade
+  // lighter (cyan-9 -> cyan-8), which drops white-on-fill under the floor -- is never
+  // sampled in place of the resting fill. Only light is at risk: the dark scheme's
+  // black-on-fill starts at 7.53:1 resting and clears the floor in either state.
   for (const { scheme, expectedText } of [
     { scheme: "light" as const, expectedText: "rgb(255, 255, 255)" },
     { scheme: "dark" as const, expectedText: "rgb(0, 0, 0)" },
@@ -239,8 +244,8 @@ describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
       // Measure the glyph's OWN paint (its SVG stroke), not the ActionIcon root's
       // color. The root always reports --ai-color, but the glyph only wears that by
       // inheriting currentColor; reading the root would stay green if the glyph were
-      // re-wrapped to hardcode its own colour (a Gap A regression this case names).
-      // For the real control the two agree; the stroke is what the checkmark paints.
+      // re-wrapped to hardcode its own colour (the regression this case guards). For
+      // the real control the two agree; the stroke is what the checkmark paints.
       const glyph = await waitForEl(".mantine-ActionIcon-root svg");
       await expect
         .poll(() => getComputedStyle(glyph).stroke)
