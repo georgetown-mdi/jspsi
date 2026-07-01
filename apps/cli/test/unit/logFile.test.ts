@@ -1,31 +1,37 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import logLibrary from "loglevel";
 import type { Arguments } from "yargs";
-import { getLogger, UsageError } from "@psilink/core";
+import {
+  getDiagnosticSink,
+  getLogger,
+  setDiagnosticSink,
+  UsageError,
+  type DiagnosticSink,
+} from "@psilink/core";
 
 import { configureLogFile } from "../../src/util/cli";
 import { parseCommonBootstrapArgs } from "../../src/commands/bootstrap";
 
-// configureLogFile mutates loglevel's global methodFactory (the seam every named
-// logger captures at creation). These tests snapshot and restore that factory --
-// and the level -- around each case, and give every test a uniquely named logger
-// so a cached logger from one test never writes into another's closed descriptor.
+// configureLogFile installs core's process-wide diagnostic sink (the seam every
+// prefixed logger consults at emit time). These tests snapshot and restore that
+// sink -- and the level -- around each case, and give every test a uniquely named
+// logger so state from one test never bleeds into another.
 
 let tmpDir: string;
-let originalFactory: typeof logLibrary.methodFactory;
+let originalSink: DiagnosticSink | undefined;
 let originalLevel: number;
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-logfile-"));
-  originalFactory = logLibrary.methodFactory;
+  originalSink = getDiagnosticSink();
   originalLevel = logLibrary.getLevel();
 });
 
 afterEach(() => {
-  logLibrary.methodFactory = originalFactory;
+  setDiagnosticSink(originalSink);
   logLibrary.setLevel(
     originalLevel as Parameters<typeof logLibrary.setLevel>[0],
   );
@@ -140,14 +146,14 @@ test("configureLogFile: a Windows-style backslash path is normalized before open
   expect(fs.readFileSync(target, "utf8")).toContain("windows path line");
 });
 
-test("configureLogFile: close() restores the methodFactory in place before it", () => {
-  // The install/restore is bracketed, so the global loglevel seam is left as it
-  // was found and a logger created after close() does not bind to the closed fd.
-  const before = logLibrary.methodFactory;
+test("configureLogFile: close() restores the diagnostic sink in place before it", () => {
+  // The install/restore is bracketed, so core's diagnostic sink is left as it was
+  // found and a log emitted after close() routes to the restored sink, not the fd.
+  const before = getDiagnosticSink();
   const sink = configureLogFile(path.join(tmpDir, "restore.log"));
-  expect(logLibrary.methodFactory).not.toBe(before);
+  expect(getDiagnosticSink()).not.toBe(before);
   sink.close();
-  expect(logLibrary.methodFactory).toBe(before);
+  expect(getDiagnosticSink()).toBe(before);
 });
 
 test("configureLogFile: close() is idempotent", () => {
@@ -158,26 +164,25 @@ test("configureLogFile: close() is idempotent", () => {
   expect(() => sink.close()).not.toThrow();
 });
 
-test("configureLogFile: a write to the closed descriptor is caught, not thrown into the log call", () => {
-  // A logger created during the redirect keeps writing to the captured fd; after
-  // close() that fd is gone, so the write fails. The failure must be caught and
-  // surfaced on stderr, never thrown back out of the log call -- the invariant
-  // that keeps a mid-run write failure from crashing an exchange.
-  const sink = configureLogFile(path.join(tmpDir, "closed.log"));
+test("configureLogFile: after close(), logging detaches from the file and does not throw", () => {
+  // close() restores the prior sink and then closes the fd. Because core resolves
+  // the diagnostic sink per log call, a log emitted after close() routes to the
+  // restored sink (the default console routing here), never to the closed
+  // descriptor -- so it neither throws nor appends to the file. This is the
+  // guarantee that replaces the old creation-time hazard, where a logger bound to
+  // the fd could write into it after close().
+  const logPath = path.join(tmpDir, "closed.log");
+  const sink = configureLogFile(logPath);
   logLibrary.setDefaultLevel(logLibrary.levels.INFO);
   const log = getLogger("logfile-test-closed");
   log.info("before close");
   sink.close();
 
-  const stderrSpy = vi
-    .spyOn(process.stderr, "write")
-    .mockImplementation(() => true);
-  try {
-    expect(() => log.info("after close")).not.toThrow();
-    expect(stderrSpy).toHaveBeenCalled();
-  } finally {
-    stderrSpy.mockRestore();
-  }
+  const afterCloseContents = fs.readFileSync(logPath, "utf8");
+  expect(afterCloseContents).toContain("before close");
+  expect(() => log.info("after close")).not.toThrow();
+  // The file did not grow: the post-close log went to the restored sink, not the fd.
+  expect(fs.readFileSync(logPath, "utf8")).toBe(afterCloseContents);
 });
 
 // --- (b) no file is created when the option is omitted -----------------------

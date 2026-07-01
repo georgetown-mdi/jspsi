@@ -1,35 +1,38 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import logLibrary from "loglevel";
-import { getLogger } from "@psilink/core";
+import {
+  getDiagnosticSink,
+  getLogger,
+  setDiagnosticSink,
+  type DiagnosticSink,
+} from "@psilink/core";
 
 import { configureStderrLogging } from "../../src/util/cli";
 
-// configureStderrLogging mutates loglevel's global methodFactory (the seam every
-// named logger captures at creation). These tests snapshot and restore that
-// factory -- and the level -- around each case, and give every test a uniquely
-// named logger created AFTER the sink is installed, so it binds to the sink
-// rather than to whatever factory a cached logger from another test froze in.
+// configureStderrLogging installs core's process-wide diagnostic sink, which core
+// resolves at each log call (not when a logger is built). These tests snapshot and
+// restore that sink -- and the level -- around each case, and give every test a
+// uniquely named logger so state from one test never bleeds into another.
 
-let originalFactory: typeof logLibrary.methodFactory;
+let originalSink: DiagnosticSink | undefined;
 let originalLevel: number;
 let uid = 0;
 
 beforeEach(() => {
-  originalFactory = logLibrary.methodFactory;
+  originalSink = getDiagnosticSink();
   originalLevel = logLibrary.getLevel();
 });
 
 afterEach(() => {
-  logLibrary.methodFactory = originalFactory;
+  setDiagnosticSink(originalSink);
   logLibrary.setLevel(
     originalLevel as Parameters<typeof logLibrary.setLevel>[0],
   );
 });
 
-// Install the stderr sink, then log `message` at `level` through a fresh logger
-// (created after the install so it binds to the sink). Returns what landed on
-// each stream: mocked so the assertions read the captured writes and no line
-// leaks into the test runner's own output.
+// Install the stderr sink, then log `message` at `level` through a fresh logger.
+// Returns what landed on each stream: mocked so the assertions read the captured
+// writes and no line leaks into the test runner's own output.
 function logAt(
   level: "trace" | "debug" | "info" | "warn" | "error",
   message: string,
@@ -116,10 +119,44 @@ test("configureStderrLogging: keeps the [ISO] [LEVEL] [CONTEXT] prefix", () => {
   );
 });
 
-test("configureStderrLogging: close() restores the methodFactory in place before it", () => {
-  const before = logLibrary.methodFactory;
+test("configureStderrLogging: close() restores the diagnostic sink in place before it", () => {
+  const before = getDiagnosticSink();
   const sink = configureStderrLogging();
-  expect(logLibrary.methodFactory).not.toBe(before);
+  expect(getDiagnosticSink()).not.toBe(before);
   sink.close();
-  expect(logLibrary.methodFactory).toBe(before);
+  expect(getDiagnosticSink()).toBe(before);
+});
+
+test("configureStderrLogging: reroutes a logger created BEFORE the sink was installed", () => {
+  // The payoff of resolving the sink per log call: a logger built before the sink
+  // exists -- as core's and the CLI's import-time loggers (cleaning, file-utils)
+  // are -- still routes to stderr once the sink is installed. A creation-time
+  // methodFactory swap could not reach a logger that already existed.
+  const stdoutWrites: string[] = [];
+  const stderrWrites: string[] = [];
+  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    stdoutWrites.push(String(chunk));
+    return true;
+  }) as typeof process.stdout.write);
+  const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    stderrWrites.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write);
+  logLibrary.setDefaultLevel(logLibrary.levels.INFO);
+  // Create the logger FIRST, with no diagnostic sink installed yet.
+  const log = getLogger(`stderr-routing-precreated-${uid++}`);
+  const sink = configureStderrLogging();
+  try {
+    log.info("late-routed diagnostic line");
+  } finally {
+    sink.close();
+    stdoutSpy.mockRestore();
+    stderrSpy.mockRestore();
+  }
+  expect(stderrWrites.join("")).toContain("late-routed diagnostic line");
+  expect(stdoutWrites.join("")).toBe("");
 });
