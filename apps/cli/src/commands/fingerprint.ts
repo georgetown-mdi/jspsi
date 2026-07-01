@@ -257,32 +257,49 @@ export function resolveSigningIdentity(input: ResolveSigningIdentityInput): {
   return { identity, action: "Regenerated" };
 }
 
+// Emit the fingerprint result and its surrounding diagnostics. The fingerprint
+// VALUE is the command's sole result, so it goes to stdout (via console.log,
+// regardless of log level, like invite's token) as a bare line; the action
+// banner, the bound identity, the regeneration warning, and the out-of-band
+// sharing instructions are diagnostics and route through the logger to stderr
+// (or --log-file), so `FP=$(psilink fingerprint)` captures a clean value. This
+// brings fingerprint under the same stdout=result-data-only contract the shared
+// diagnostic sink already gives every other command; its console.log lines were
+// outside that sink's reach, which this closes.
 function report(
+  log: ReturnType<typeof getLogger>,
   action: SigningIdentityAction,
   identityPath: string,
   identity: SigningIdentity,
   fingerprint: string,
 ): void {
   const cert = identity.certificate;
-  console.log(
-    `${action} signing identity (${cert.algorithm}) at ${identityPath}`,
-  );
-  console.log(`  Identity:    ${cert.identity}`);
-  console.log(`  Fingerprint: ${fingerprint}`);
-  console.log("");
-  if (action === "Regenerated") {
-    console.log(
-      "WARNING: this is a NEW identity with a NEW fingerprint. Any partner who " +
-        "pinned the previous fingerprint must re-pin the one above, or " +
-        "verification of your receipts will fail.",
+  log.info(`${action} signing identity (${cert.algorithm}) at ${identityPath}`);
+  log.info(`  Identity: ${cert.identity}`);
+  // The regeneration warning is a diagnostic, so it goes to stderr via log.warn
+  // (not an ungated write): it obeys --log-level like every other warning, so a
+  // re-key at --log-level error/silent shows only the new value with no warning.
+  // That is deliberate -- --force is itself the explicit destructive gesture, and
+  // the resolveSigningIdentity re-key/adopt warnings are likewise log.warn;
+  // singling this one out as un-silenceable would be inconsistent, and an ungated
+  // stderr write would also escape --log-file capture. The stdout-purity contract
+  // requires only that the warning leave stdout (so a captured value stays clean),
+  // which routing it through the logger satisfies at every level.
+  if (action === "Regenerated")
+    log.warn(
+      "this is a NEW identity with a NEW fingerprint. Any partner who pinned " +
+        "the previous fingerprint must re-pin the new one, or verification of " +
+        "your receipts will fail.",
     );
-    console.log("");
-  }
-  console.log(
+  log.info(
     "Share the fingerprint with your partner over a trusted out-of-band " +
       "channel; they pin it as signing.partner_fingerprint. Keep the identity " +
       "file private (it holds your signing private key).",
   );
+  // The result line: the bare fingerprint value on stdout, nothing else, so a
+  // capture or pipe gets exactly the value. Printed last so on an interactive
+  // terminal it follows the "Share the fingerprint" instruction pointing at it.
+  console.log(fingerprint);
 }
 
 export async function handler(argv: Arguments): Promise<void> {
@@ -306,11 +323,11 @@ export async function handler(argv: Arguments): Promise<void> {
   // Install the logging sink before the level is applied and the logger is
   // created, so getLogger("fingerprint") below inherits it: the file sink when
   // --log-file is given, otherwise the default stderr sink, so the command's
-  // logged diagnostics (e.g. the preflight warnings) stay off stdout. The
-  // fingerprint report itself is printed through console.log; routing its banner
-  // and instructions off stdout -- leaving only the fingerprint value there -- is
-  // a separate follow-up (board item 207023432). singleValue rejects a repeated
-  // --log-file and configureLogFile rejects an unopenable path; both are
+  // logged diagnostics (the preflight warnings and the report's banner, bound
+  // identity, regeneration warning, and sharing instructions) stay off stdout.
+  // report() prints only the bare fingerprint value through console.log;
+  // everything else it emits routes through this logger. singleValue rejects a
+  // repeated --log-file and configureLogFile rejects an unopenable path; both are
   // UsageErrors mapped to stderr + exit 64 here.
   const logSink = parseOrExit(() => {
     const logFilePath = singleValue(argv, "log-file") as string | undefined;
@@ -382,7 +399,7 @@ export async function handler(argv: Arguments): Promise<void> {
       }
     }
 
-    report(action, identityPath, identity, fingerprint);
+    report(log, action, identityPath, identity, fingerprint);
   } catch (err) {
     exitWithError(log, err, err instanceof UsageError ? 64 : 69);
   } finally {
