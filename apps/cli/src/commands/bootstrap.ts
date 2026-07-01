@@ -1263,6 +1263,12 @@ export async function runOnlineBootstrap(params: {
     // config the hook actually wrote -- never the reuse path, which keeps the
     // operator's config untouched, nor a hook that failed), and a non-empty
     // observation (observedReceivedColumnsForSave drops the ambiguous empty case).
+    // Unlike the hook's first saveConfig this write is deliberately NOT preceded by
+    // a detectFileConflicts re-gate: it overwrites the config THIS run wrote at
+    // acceptance, so a conflict check would always fire on our own just-written
+    // file. The "do not clobber the operator's config" gate already ran at that
+    // first write -- configWritten is true only if it passed -- so re-gating here
+    // would add nothing but a spurious self-conflict.
     // Non-fatal: the config is already on disk from the hook, so a failure here
     // only leaves the recurring path reconciling lazily -- its prior behavior --
     // and must not fail the already-completed exchange.
