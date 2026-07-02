@@ -443,7 +443,12 @@ describe("summarizeInvitation", () => {
     // constraint-bearing one and the date field stay distinct.
     expect(summary.linkageFields).toEqual([
       { label: "First name", constraints: [] },
-      { label: "First name", constraints: ["characters limited to A-Z "] },
+      {
+        label: "First name",
+        constraints: [
+          "allowed-character pattern (partner-supplied regular expression): A-Z ",
+        ],
+      },
       { label: "Date of birth", constraints: [] },
     ]);
   });
@@ -479,10 +484,35 @@ describe("summarizeInvitation", () => {
     ]);
     expect(firstName.constraints).toEqual([
       "honorifics and suffixes removed",
-      "characters limited to A-Z ",
+      "allowed-character pattern (partner-supplied regular expression): A-Z ",
     ]);
     // A field with no constraints contributes nothing.
     expect(dob.constraints).toEqual([]);
+  });
+
+  test("frames a partner-authored allowedCharacters class as regex, not a plain-language guarantee", () => {
+    // A leading `^` reads to a non-regex-literate operator as "allow caret and
+    // A-Z" but is class negation (admits everything EXCEPT A-Z). The display must
+    // not present this partner-authored, un-vetted regex as a "limited to"
+    // promise; it is labelled as the regular expression it is, with the raw class
+    // still shown so a regex-literate reviewer can inspect it.
+    const summary = summarizeInvitation(
+      makeToken({
+        linkageFields: [
+          {
+            name: "first_name",
+            type: "first_name",
+            constraints: { allowedCharacters: "^A-Z" },
+          },
+        ],
+        linkageKeys: [{ name: "FN", elements: [{ field: "first_name" }] }],
+      }),
+    );
+    const [constraint] = summary.linkageFields[0].constraints;
+    expect(constraint).toBe(
+      "allowed-character pattern (partner-supplied regular expression): ^A-Z",
+    );
+    expect(constraint).not.toContain("limited to");
   });
 
   test("labels every fuzzy-comparison expansion in plain language", () => {
