@@ -239,6 +239,18 @@ export const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to
 # field to accept whatever the partner sends.
 # expected_payload_columns:
 #   - matched_record_id
+
+# disclosed_payload_columns: payload columns (in YOUR OWN namespace) you
+# committed to disclose to the partner when the exchange was established -- the
+# send-side counterpart of expected_payload_columns. 'psilink invite' fills this
+# in automatically from the invitation it published; you rarely set it by hand.
+# Before connecting, an exchange checks that your current metadata still discloses
+# exactly this set and fails (exit 64) otherwise, so a drift is caught locally
+# instead of aborting on the partner's side. To disclose less on purpose, re-invite
+# the partner rather than editing this. An empty list means "disclose nothing";
+# omit the field if you made no such commitment.
+# disclosed_payload_columns:
+#   - matched_record_id
 `;
 
 // The commented metadata + standardization block shown only when no input file

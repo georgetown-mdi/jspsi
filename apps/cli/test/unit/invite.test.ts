@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
 import logLibrary from "loglevel";
+import YAML from "yaml";
 import {
   decodeInvitation,
   disclosedColumnNames,
@@ -313,6 +314,39 @@ test("validateInvite: online carries the disclosed-columns subset from the infer
     ),
   );
   expect(token.disclosedPayloadColumns).toEqual(["notes", "member_id"]);
+  // The same disclosed set is persisted into the saved config's
+  // disclosedPayloadColumns (the send-side commitment), so a later recurring
+  // `psilink exchange` can verify its metadata still discloses it before
+  // connecting -- byte-identical to the token copy.
+  if (ready.mode !== "online") throw new Error("expected online mode");
+  expect(ready.dataSpec.disclosedPayloadColumns).toEqual(
+    token.disclosedPayloadColumns,
+  );
+});
+
+test("validateInvite: offline infer-from-input persists the disclosed subset as the send commitment", async () => {
+  // The offline infer path writes a config, so it persists the disclosed set it
+  // published on the token into disclosedPayloadColumns too -- the send-side
+  // commitment the later recurring `psilink exchange` checks.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-disc-off-"));
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,dob,ssn,notes,member_id\n" +
+      "Alice,Smith,1990-01-02,123456789,vip,M001\n",
+  );
+  const ready = await validateInvite({
+    resolved: { mode: "offline", input },
+    options: testOptions({ configFile: path.join(dir, "psilink.yaml") }),
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.disclosedPayloadColumns).toEqual(["notes", "member_id"]);
+  if (ready.mode !== "offline") throw new Error("expected offline mode");
+  expect(ready.dataSpec.disclosedPayloadColumns).toEqual(
+    token.disclosedPayloadColumns,
+  );
 });
 
 test("validateInvite: an all-linkage input carries an empty disclosed subset", async () => {
@@ -589,6 +623,64 @@ test("validateInvite: derives terms from a config when no input file is given", 
     // The minted invitation carries the config's terms, not inferred ones.
     const token = await decodeInvitation(ready.invitation);
     expect(token.linkageTerms).toEqual(terms);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: config-as-source threads the disclosed subset for the send commitment", async () => {
+  // A config with an explicit metadata block: the disclosed set is derived from
+  // it, carried on the token, AND threaded to the handler so it is persisted into
+  // the reused config's disclosed_payload_columns (closing the init-config gap and
+  // refreshing a stale prior commitment on re-invite).
+  const terms = defaultTerms();
+  const metadata = inferMetadata([
+    "first_name",
+    "last_name",
+    "dob",
+    "ssn",
+    "notes",
+  ]);
+  const { dir, configPath, keyPath } = withConfig(terms, undefined, metadata);
+  try {
+    const ready = await validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      log: silentLog,
+    });
+    expect(ready.mode).toBe("offlineFromConfig");
+    if (ready.mode !== "offlineFromConfig") return;
+    const token = await decodeInvitation(ready.invitation);
+    expect(ready.disclosedPayloadColumns).toEqual(
+      disclosedColumnNames(metadata),
+    );
+    expect(ready.disclosedPayloadColumns).toEqual(
+      token.disclosedPayloadColumns,
+    );
+    expect(ready.disclosedPayloadColumns).toEqual(["notes"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: config-as-source with no metadata block carries no commitment (lazy)", async () => {
+  // Without a metadata block the transmitted set is unknown at mint, so nothing is
+  // committed and the handler removes any stale field rather than freezing one.
+  const terms = defaultTerms();
+  const { dir, configPath, keyPath } = withConfig(terms);
+  try {
+    const ready = await validateInvite({
+      resolved: { mode: "offline" },
+      options: testOptions({ configFile: configPath, keyFile: keyPath }),
+      acceptTimeout: 900,
+      log: silentLog,
+    });
+    expect(ready.mode).toBe("offlineFromConfig");
+    if (ready.mode !== "offlineFromConfig") return;
+    expect(ready.disclosedPayloadColumns).toBeUndefined();
+    const token = await decodeInvitation(ready.invitation);
+    expect(token.disclosedPayloadColumns).toBeUndefined();
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -1241,6 +1333,100 @@ test("handler: an unrecognized --linkage-strategy is rejected (exit 64) before a
     expect(logSpy).not.toHaveBeenCalled();
     expect(fs.existsSync(configFile)).toBe(false);
     expect(fs.existsSync(keyFile)).toBe(false);
+  } finally {
+    logSpy.mockRestore();
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- handler: the send commitment is persisted end-to-end --------------------
+
+test("handler: offline-from-config persists the disclosed subset into the reused config", async () => {
+  // The end-to-end wiring this whole change exists for. `psilink invite` from a
+  // pre-existing config with a metadata block reuses that config (writing only the
+  // key) and refreshes disclosed_payload_columns in place, so the later recurring
+  // exchange has the commitment to check. validateInvite is tested above; this
+  // proves the handler actually calls persistDisclosedPayloadColumns on the reused
+  // config (the offlineFromConfig branch), not merely that the value is threaded.
+  const metadata = inferMetadata([
+    "first_name",
+    "last_name",
+    "dob",
+    "ssn",
+    "notes",
+  ]);
+  const { dir, configPath, keyPath } = withConfig(
+    defaultTerms(),
+    undefined,
+    metadata,
+  );
+  const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: [],
+      "config-file": configPath,
+      "key-file": keyPath,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    // The branch ran to completion: the key was written and no usage-error exit.
+    expect(exit).not.toHaveBeenCalledWith(64);
+    expect(fs.existsSync(keyPath)).toBe(true);
+    // The reused config now carries the send commitment, equal to the disclosed set.
+    const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+      disclosed_payload_columns?: string[];
+    };
+    expect(parsed.disclosed_payload_columns).toEqual(
+      disclosedColumnNames(metadata),
+    );
+    expect(parsed.disclosed_payload_columns).toEqual(["notes"]);
+  } finally {
+    logSpy.mockRestore();
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: offline infer-from-input writes the disclosed subset into the fresh config", async () => {
+  // The fresh-config counterpart: `psilink invite input.csv` infers metadata,
+  // mints, and writes a new config via saveConfig; disclosed_payload_columns must
+  // land in that written file (not just on the token) so the recurring exchange can
+  // enforce it -- proven here on the written file, not only at the validateInvite
+  // return value.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-infer-"));
+  const configFile = path.join(dir, "psilink.yaml");
+  const keyFile = path.join(dir, ".psilink.key");
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,dob,ssn,notes\nAlice,Smith,1990-01-02,123456789,hi\n",
+  );
+  const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: [input],
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).not.toHaveBeenCalledWith(64);
+    expect(fs.existsSync(configFile)).toBe(true);
+    const parsed = YAML.parse(fs.readFileSync(configFile, "utf8")) as {
+      disclosed_payload_columns?: string[];
+    };
+    expect(parsed.disclosed_payload_columns).toEqual(["notes"]);
   } finally {
     logSpy.mockRestore();
     exit.mockRestore();
