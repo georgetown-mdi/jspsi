@@ -15,6 +15,7 @@ import {
   StandardizedDataset,
 } from "../src/standardization";
 import * as linearRegex from "../src/utils/linearRegex";
+import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay";
 import { inferMetadata } from "../src/config/metadata";
 import { getDefaultLinkageTerms } from "../src/defaults/linkageTerms";
 import type {
@@ -1525,6 +1526,36 @@ describe("validateStandardizationAgainstTerms", () => {
     expect(
       validateStandardizationAgainstTerms(standardization, minimalTerms),
     ).toEqual([]);
+  });
+
+  // The output/function names are interpolated into the returned messages, which a
+  // caller may surface directly (the web's config alert renders one). They are
+  // routed through sanitizeForDisplay at interpolation so a caller is safe without
+  // re-sanitizing; a control character in a name must reach the message only in its
+  // escaped form. ASCII-only names (the other cases here) are a no-op for the
+  // sanitizer, so they cannot pin this -- these two do.
+  test("an output name with a control character is escaped in the message", () => {
+    const raw = "last\u0000name"; // a null byte; not a declared field name
+    const errors = validateStandardizationAgainstTerms(
+      [{ output: raw, input: "X" }],
+      minimalTerms,
+    );
+    expect(errors).toHaveLength(1);
+    // The membership test used the raw value (so it was correctly flagged), but the
+    // message carries only the sanitized form, never the raw control character.
+    expect(errors[0]).not.toContain(raw);
+    expect(errors[0]).toContain(sanitizeForDisplay(raw));
+  });
+
+  test("an unknown function name with a control character is escaped in the message", () => {
+    const raw = "bad\u0000fn"; // a null byte; not a known function name
+    const errors = validateStandardizationAgainstTerms(
+      [{ output: "last_name", input: "LN", steps: [{ function: raw }] }],
+      minimalTerms,
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).not.toContain(raw);
+    expect(errors[0]).toContain(sanitizeForDisplay(raw));
   });
 });
 

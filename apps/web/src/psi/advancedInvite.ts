@@ -437,9 +437,8 @@ export interface InviterDataEdits {
  * to core, drops the orphaned-output transformations any inviter flow can produce
  * (a disabled key's now-inert transformation, an import's default per-type seed)
  * before they reach core. It reconciles only that class -- an unknown step
- * function is out of its remit and stays refused by core's throw (the editor's
- * step-validity gate already prevents one), which remains the fail-closed backstop
- * for any contradiction this filter does not cover. See
+ * function is out of its remit and stays refused by core's throw, which remains
+ * the fail-closed backstop for any contradiction this filter does not cover. See
  * {@link standardizationForTerms} for why the drop is lossless. The metadata and
  * standardization are per-party and local; the terms are pinned to the invitation.
  * Each is included only when present, so the quick path (no authored cleaning)
