@@ -272,8 +272,8 @@ export function assertPayloadSendDisclosed(
  * `committed` is the payload column set (in this party's OWN namespace) that it
  * PROMISED to disclose to its partner when the exchange was established -- the
  * invitation's `disclosedPayloadColumns`, persisted locally as the exchange
- * config's `disclosedPayloadColumns` on the mint paths that author no
- * `payload.send`. The partner locked that exact set in as what it will RECEIVE
+ * config's `disclosedPayloadColumns` by every `psilink invite` mint path that
+ * publishes it. The partner locked that exact set in as what it will RECEIVE
  * (its `expectedPayloadColumns`) and enforces it at runtime via
  * {@link reconcileReceivedPayload}. This check runs on the COMMITTING party at
  * prepare time, before connecting, so a drift fails fast and locally instead of

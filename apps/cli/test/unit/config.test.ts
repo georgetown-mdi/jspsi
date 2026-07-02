@@ -1055,9 +1055,67 @@ test("persistDisclosedPayloadColumns throws (not silently) on a malformed config
   try {
     const configPath = path.join(dir, "psilink.yaml");
     fs.writeFileSync(configPath, "connection: [unbalanced\n");
-    expect(() =>
-      persistDisclosedPayloadColumns(configPath, ["notes"]),
-    ).toThrow();
+    // Classified as a local usage error (exit 64), like persistHostKeyFingerprint,
+    // not a bare Error that would fall through to the generic exit code.
+    expect(() => persistDisclosedPayloadColumns(configPath, ["notes"])).toThrow(
+      UsageError,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("persistDisclosedPayloadColumns does not echo an inline credential on a malformed config", () => {
+  // Parity with persistHostKeyFingerprint: a syntax error's message embeds a
+  // snippet of the offending source; the shared path-only guard must not echo it,
+  // or an inline credential near the malformed line leaks into the (logged) error.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  const SECRET = "S3cr3tSFTPPassw0rd";
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      `connection:\n  server:\n\t  password: ${SECRET}\n`,
+    );
+    let caught: unknown;
+    try {
+      persistDisclosedPayloadColumns(configPath, ["notes"]);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UsageError);
+    expect((caught as Error).message).toContain("could not be parsed as YAML");
+    expect((caught as Error).message).not.toContain(SECRET);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("persistDisclosedPayloadColumns does not echo an inline credential via an unresolved alias", () => {
+  // Parity with persistHostKeyFingerprint: an unresolved alias clears doc.errors
+  // and setIn succeeds; the failure surfaces only at doc.toString(), whose message
+  // echoes the alias token. The path-only guard at serialization must not echo it,
+  // and the original file must be left untouched (the throw precedes the write).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  const SECRET = "S3cr3tSFTPPassw0rd";
+  try {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(
+      configPath,
+      `connection:\n  channel: sftp\n  server:\n    password: *${SECRET}\n`,
+    );
+    let caught: unknown;
+    try {
+      persistDisclosedPayloadColumns(configPath, ["notes"]);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UsageError);
+    expect((caught as Error).message).toContain(
+      "could not be serialized as YAML",
+    );
+    expect((caught as Error).message).not.toContain(SECRET);
+    expect(fs.readFileSync(configPath, "utf8")).toContain(`*${SECRET}`);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

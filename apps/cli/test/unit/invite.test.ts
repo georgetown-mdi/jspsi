@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
 import logLibrary from "loglevel";
+import YAML from "yaml";
 import {
   decodeInvitation,
   disclosedColumnNames,
@@ -1332,6 +1333,100 @@ test("handler: an unrecognized --linkage-strategy is rejected (exit 64) before a
     expect(logSpy).not.toHaveBeenCalled();
     expect(fs.existsSync(configFile)).toBe(false);
     expect(fs.existsSync(keyFile)).toBe(false);
+  } finally {
+    logSpy.mockRestore();
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- handler: the send commitment is persisted end-to-end --------------------
+
+test("handler: offline-from-config persists the disclosed subset into the reused config", async () => {
+  // The end-to-end wiring this whole change exists for. `psilink invite` from a
+  // pre-existing config with a metadata block reuses that config (writing only the
+  // key) and refreshes disclosed_payload_columns in place, so the later recurring
+  // exchange has the commitment to check. validateInvite is tested above; this
+  // proves the handler actually calls persistDisclosedPayloadColumns on the reused
+  // config (the offlineFromConfig branch), not merely that the value is threaded.
+  const metadata = inferMetadata([
+    "first_name",
+    "last_name",
+    "dob",
+    "ssn",
+    "notes",
+  ]);
+  const { dir, configPath, keyPath } = withConfig(
+    defaultTerms(),
+    undefined,
+    metadata,
+  );
+  const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: [],
+      "config-file": configPath,
+      "key-file": keyPath,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    // The branch ran to completion: the key was written and no usage-error exit.
+    expect(exit).not.toHaveBeenCalledWith(64);
+    expect(fs.existsSync(keyPath)).toBe(true);
+    // The reused config now carries the send commitment, equal to the disclosed set.
+    const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+      disclosed_payload_columns?: string[];
+    };
+    expect(parsed.disclosed_payload_columns).toEqual(
+      disclosedColumnNames(metadata),
+    );
+    expect(parsed.disclosed_payload_columns).toEqual(["notes"]);
+  } finally {
+    logSpy.mockRestore();
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: offline infer-from-input writes the disclosed subset into the fresh config", async () => {
+  // The fresh-config counterpart: `psilink invite input.csv` infers metadata,
+  // mints, and writes a new config via saveConfig; disclosed_payload_columns must
+  // land in that written file (not just on the token) so the recurring exchange can
+  // enforce it -- proven here on the written file, not only at the validateInvite
+  // return value.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-infer-"));
+  const configFile = path.join(dir, "psilink.yaml");
+  const keyFile = path.join(dir, ".psilink.key");
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,dob,ssn,notes\nAlice,Smith,1990-01-02,123456789,hi\n",
+  );
+  const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: [input],
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).not.toHaveBeenCalledWith(64);
+    expect(fs.existsSync(configFile)).toBe(true);
+    const parsed = YAML.parse(fs.readFileSync(configFile, "utf8")) as {
+      disclosed_payload_columns?: string[];
+    };
+    expect(parsed.disclosed_payload_columns).toEqual(["notes"]);
   } finally {
     logSpy.mockRestore();
     exit.mockRestore();
