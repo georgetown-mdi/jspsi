@@ -161,11 +161,21 @@ and writes a text summary to the terminal plus a browsable HTML report and an
 `lcov.info` (for editors/tooling) under each workspace's `coverage/` directory.
 The denominator is scoped to product source under each `src/` tree, with the
 generated route tree and vendored `apps/web/src/contrib` excluded, so the numbers
-reflect hand-written product code. The report runs the node projects: `core`
-unit, `cli` unit and integration (the SFTP adapter is exercised only by the
-integration suite), and `web` unit. Browser-mode coverage (real Chromium) and the
-web black-box integration suite are not included; browser coverage is a deferred
-follow-up.
+reflect hand-written product code. The report runs `core` unit, `cli`
+unit and integration (the SFTP adapter is exercised only by the integration
+suite), and `web` unit plus `web` browser (real Chromium via Playwright). The web
+unit and browser projects run together and their coverage is merged, so the
+component, live-exchange, and consent-gate paths exercised only in the browser
+are reflected instead of reading as near-zero; running `npm run coverage` for the
+web workspace therefore stands up the dev server and Chromium the same way `npm
+run test:browser` does. The web black-box integration suite is deliberately
+excluded: it fetches a separately-spawned dev-server process and imports no
+`src`, so under `--coverage` it measures the empty runner process, not the
+server. Capturing that server-entry/route-handler code is feasible -- run the
+spawned server under `NODE_V8_COVERAGE` and merge its profile -- but low-value:
+it buys a bespoke merge step outside Vitest's model to cover thin server-entry
+and route glue whose behavior the integration suite already asserts end-to-end,
+so it is out of scope, not a deferred gap.
 
 There is deliberately NO global percentage gate, and adding one is not a missing
 piece to be "fixed": a blanket "N% or the build fails" bar rewards vanity tests

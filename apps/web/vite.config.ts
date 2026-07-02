@@ -88,12 +88,21 @@ export default defineConfig((_configEnv) => {
     test: {
       // Coverage is an informational REPORT, produced on demand by `npm run
       // coverage` (see package.json), never a gate: there is deliberately NO
-      // `thresholds` line (see CONTRIBUTING.md, Coverage). The coverage script
-      // runs the unit project only. The integration project is a black-box HTTP
-      // suite -- it fetches a separate dev-server process and imports no src, so
-      // it adds server-startup cost and flake risk for zero in-process coverage.
-      // The browser project (real Chromium) is a documented follow-up: v8
-      // coverage there needs separate handling and can perturb browser timing.
+      // `thresholds` line (see CONTRIBUTING.md, Coverage). The script runs the
+      // unit (node) and browser (real Chromium) projects together and merges
+      // their results, so the component, live-exchange, and consent-gate paths
+      // exercised only in the browser no longer read as near-zero. Browser
+      // coverage is folded into this default run rather than kept a separate
+      // opt-in because the report is on-demand and never gates: its cost is
+      // paid only when asked for, with no CI stability bar to protect.
+      // The integration project stays out: it is a black-box HTTP suite that
+      // fetches a separately-spawned dev-server process and imports no src, so
+      // under --coverage it measures the empty runner process, not the server.
+      // Capturing that server-entry/route-handler code is feasible -- run the
+      // spawned server under NODE_V8_COVERAGE and merge its profile -- but
+      // low-value: a bespoke merge step outside Vitest's model, to cover thin
+      // server-entry and route glue whose behavior the integration suite
+      // already asserts end-to-end. So it is out of scope, not a deferred gap.
       coverage: {
         provider: "v8",
         // text -> terminal summary; html + lcov -> browsable/tooling report
