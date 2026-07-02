@@ -1668,6 +1668,65 @@ test("runOnlineBootstrap does not inject the token lock-in onto a reused pre-exi
   }
 });
 
+test("the persisted empty online-accept lock-in aborts a later non-empty payload", async () => {
+  // The write-side test above proves an empty token set survives to disk as []; this
+  // closes the loop at ENFORCEMENT time: a recurring exchange reloads that strict
+  // "receive nothing" lock-in and reconcileReceivedPayload aborts if the partner
+  // then transmits any column, while an empty received payload still passes.
+  mockSuccessfulExchange(undefined);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      expectedReceivedPayloadColumns: [],
+    });
+    const reloaded = parseExchangeSpec(
+      YAML.parse(fs.readFileSync(configPath, "utf8")),
+    );
+    const lockIn = reloaded.expectedPayloadColumns;
+    expect(lockIn).toEqual([]);
+    const received = (columns: string[]): PartnerPayload => ({
+      columns,
+      rowIndices: [],
+      rows: [],
+    });
+    // Any transmitted column diverges from the strict empty lock-in and aborts.
+    expect(() =>
+      reconcileReceivedPayload(received(["diagnosis"]), lockIn),
+    ).toThrow(/payload disclosure mismatch/);
+    // An empty received payload matches the empty lock-in and passes.
+    expect(() => reconcileReceivedPayload(received([]), lockIn)).not.toThrow();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap rejects both received-payload persistence inputs at once", async () => {
+  // The acceptor's up-front token set and the inviter's observe-on-save flag are
+  // mutually exclusive; setting both is a caller error caught fail-fast, before any
+  // connection, rather than silently letting the observe write clobber the token
+  // lock-in. runProtocol must never be reached.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  // Call counts accumulate across this file's tests (no shared reset hook), so clear
+  // before asserting the guard short-circuits before runProtocol.
+  vi.mocked(runProtocol).mockClear();
+  try {
+    await expect(
+      runOnlineBootstrap({
+        ...onlineBootstrapParams(configPath),
+        expectedReceivedPayloadColumns: ["diagnosis"],
+        persistObservedReceivedPayload: true,
+      }),
+    ).rejects.toThrow(/mutually exclusive/);
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+    expect(fs.existsSync(configPath)).toBe(false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("the persisted online-accept lock-in drives fail-closed recurring enforcement", async () => {
   // End to end: the online accept writes expected_payload_columns from the token; a
   // later `psilink exchange` reloads that config (parseExchangeSpec) and locks the

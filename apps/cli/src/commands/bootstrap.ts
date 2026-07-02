@@ -1152,6 +1152,24 @@ export async function runOnlineBootstrap(params: {
    */
   expectedReceivedPayloadColumns?: string[];
 }): Promise<{ configWriteError?: unknown }> {
+  // The two received-payload persistence inputs are mutually exclusive by design:
+  // the online ACCEPTOR passes expectedReceivedPayloadColumns (its set is known up
+  // front from the token, folded into the hook's first write), while the online
+  // INVITER and the zero-setup --save party pass persistObservedReceivedPayload
+  // (their set is learned only by observation, crystallized in a second write after
+  // the exchange). No caller sets both; this encodes that invariant as a check
+  // rather than caller discipline, because if both were set the observe-on-save
+  // second write would silently clobber the acceptor's up-front token lock-in.
+  if (
+    params.persistObservedReceivedPayload &&
+    params.expectedReceivedPayloadColumns !== undefined
+  )
+    throw new Error(
+      "runOnlineBootstrap received both expectedReceivedPayloadColumns (the " +
+        "acceptor's up-front token lock-in) and persistObservedReceivedPayload " +
+        "(the inviter's observe-on-save); these are mutually exclusive.",
+    );
+
   // `connection` is already narrowed to the channels runProtocol supports
   // (RunnableConnectionConfig); authentication is passed to runProtocol on its
   // own parameter rather than embedded in the connection config.
