@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 
-import { loadCSVFile, sanitizeErrorForDisplay } from "@psilink/core";
+import { sanitizeErrorForDisplay } from "@psilink/core";
 
 import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
+import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 
 import FileSelect from "@components/FileSelect";
 
@@ -93,7 +94,7 @@ export default function FileAcquire(props: FileAcquireProps) {
     // Load the CSV, then hand off. `submitSignal` guards against a teardown during
     // the read.
     void (async () => {
-      const csvResult = await loadCSVFile(files[0]).catch(
+      const csvResult = await loadCSVFileOffMainThread(files[0]).catch(
         (error: unknown): undefined => {
           if (!submitSignal.aborted) {
             onError({

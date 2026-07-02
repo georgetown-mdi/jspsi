@@ -8,10 +8,10 @@ import {
   generateSharedSecret,
   getDefaultLinkageTerms,
   inferMetadata,
-  loadCSVFile,
 } from "@psilink/core";
 
 import { emptyColumnPositions } from "./columnNames";
+import { loadCSVFileOffMainThread } from "./csvParseController";
 import { payloadSendForMetadata } from "./metadataEditing";
 
 import type {
@@ -25,12 +25,12 @@ import type {
 } from "@psilink/core";
 
 /**
- * The CSV input {@link generateInvitation} parses: exactly what core's
- * {@link loadCSVFile} accepts (a browser `File` in production; a Node readable
- * stream in tests). Derived from `loadCSVFile`'s own signature rather than
- * importing papaparse's `LocalFile` directly, so this module takes on no
- * dependency papaparse beyond the one core already owns. */
-export type InvitationCSVInput = Parameters<typeof loadCSVFile>[0];
+ * The CSV input {@link generateInvitation} parses: exactly what
+ * {@link loadCSVFileOffMainThread} (and core's `loadCSVFile` beneath it) accepts (a
+ * browser `File` in production; a Node readable stream in tests). Derived from that
+ * wrapper's own signature rather than importing papaparse's `LocalFile` directly, so
+ * this module takes on no papaparse dependency beyond the one core already owns. */
+export type InvitationCSVInput = Parameters<typeof loadCSVFileOffMainThread>[0];
 
 /**
  * Path a PeerJS client dials this app's signaling server at. Matches the dial
@@ -258,8 +258,10 @@ function disclosedColumnsForToken(metadata: Metadata): Array<string> {
  * -- a fresh secret means a fresh derived rendezvous id, and there is no
  * expectation that one invitation supports more than one exchange.
  *
- * This is the inviter's CSV-parse boundary: it parses `file` (via core's
- * {@link loadCSVFile}), infers column metadata, and derives the linkage terms
+ * This is the inviter's CSV-parse boundary: it parses `file` (via
+ * {@link loadCSVFileOffMainThread}, which runs core's `loadCSVFile` off the main
+ * thread for a large browser File and inline otherwise), infers column metadata, and
+ * derives the linkage terms
  * from it -- {@link getDefaultLinkageTerms} filtered to the keys the columns can
  * satisfy, plus a `payload.send` declaring the columns the inferred metadata
  * discloses -- then embeds exactly those terms in the token AND returns them with
@@ -371,13 +373,13 @@ export async function generateInvitation(params: {
     );
 
   // Parse the inviter's CSV here, before anything is minted, so an unreadable
-  // file aborts with no token. loadCSVFile rejects only on a read/stream error (a
-  // malformed-but-readable CSV resolves with rows); wrap that into the typed
+  // file aborts with no token. loadCSVFileOffMainThread rejects only on a read/stream
+  // error (a malformed-but-readable CSV resolves with rows); wrap that into the typed
   // user-actionable failure.
   let rawRows: Array<CSVRow>;
   let columns: Array<string>;
   try {
-    const csvResult = await loadCSVFile(file);
+    const csvResult = await loadCSVFileOffMainThread(file);
     rawRows = csvResult.data;
     columns = csvResult.meta.fields ?? [];
   } catch (cause) {

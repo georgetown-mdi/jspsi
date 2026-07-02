@@ -15,7 +15,14 @@
  * ever added, `frame-ancestors 'none'` subsumes `X-Frame-Options: DENY`. Extend
  * this one value to add such a policy rather than setting a second
  * `Content-Security-Policy` header: a browser enforces the intersection of
- * multiple CSP headers, which can silently tighten and break the page.
+ * multiple CSP headers, which can silently tighten and break the page. The app
+ * runs a same-origin module Web Worker (the off-main-thread CSV parse,
+ * `apps/web/src/psi/csvParse.worker.ts`); the current CSP sets no
+ * `default-src`/`script-src`/`child-src`/`worker-src`, so it does not restrict
+ * workers and needs no change to permit it. If a worker-restricting directive is
+ * ever added here, it must include `worker-src 'self'` -- the worker is a bundled
+ * same-origin asset, NOT the `blob:` a PapaParse self-hosted worker would have
+ * needed.
  *
  * `X-Content-Type-Options: nosniff` stops a browser from MIME-sniffing a
  * response away from its declared `Content-Type`, so a response cannot be
