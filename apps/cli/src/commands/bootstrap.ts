@@ -395,6 +395,11 @@ export function diffConnectionAgainstTarget(
       warnings.push("password: differs from the saved value");
     if (want.privateKey !== undefined && want.privateKey !== have.privateKey)
       warnings.push("private key: differs from the saved value");
+    if (
+      want.privateKeyPassphrase !== undefined &&
+      want.privateKeyPassphrase !== have.privateKeyPassphrase
+    )
+      warnings.push("private key passphrase: differs from the saved value");
   } else if (target.channel === "filedrop") {
     // filedrop's only locator is the directory -> conflict. No port/credentials
     // apply. The directory is the single shared `path` or the split

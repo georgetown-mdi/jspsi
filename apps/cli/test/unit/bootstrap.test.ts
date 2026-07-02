@@ -228,6 +228,32 @@ test("connectionFromURL and diffConnectionAgainstTarget agree on an encoded URL"
   expect(warnings).toEqual([]);
 });
 
+test("diffConnectionAgainstTarget: a differing private-key passphrase warns name-only", () => {
+  // The passphrase is a reconcilable override (via connectionOverridesFrom), so
+  // a change against a reused config gets the same name-only advisory as its
+  // sibling credentials -- never echoing the secret value.
+  const target = connectionFromURL(new URL("sftp://host/drop"), {
+    server: { privateKey: "@key.pem", privateKeyPassphrase: "@new-pass.txt" },
+  });
+  const existing: SFTPConnectionConfig = {
+    channel: "sftp",
+    server: {
+      host: "host",
+      path: "/drop",
+      privateKey: "@key.pem",
+      privateKeyPassphrase: "@old-pass.txt",
+    },
+  };
+  const { conflicts, warnings } = diffConnectionAgainstTarget(existing, target);
+  expect(conflicts).toEqual([]);
+  expect(warnings).toContain(
+    "private key passphrase: differs from the saved value",
+  );
+  // The advisory names the field only; neither passphrase reference is echoed.
+  expect(warnings.join("\n")).not.toContain("new-pass.txt");
+  expect(warnings.join("\n")).not.toContain("old-pass.txt");
+});
+
 // --- connectionFromURL + --outbound-path (split directories) -----------------
 
 test("connectionFromURL: --outbound-path splits an sftp URL path into inbound/outbound", () => {
