@@ -62,6 +62,7 @@ export interface CSVParseWorker {
   postMessage: (message: CSVParseRequest) => void;
   onmessage: ((event: { data: CSVParseResponse }) => void) | null;
   onerror: ((event: unknown) => void) | null;
+  onmessageerror: ((event: unknown) => void) | null;
   terminate: () => void;
 }
 
@@ -136,10 +137,11 @@ export async function loadCSVFileOffMainThread(
 /**
  * Drive one parse through `worker` and settle. The worker is one-shot: it is torn
  * down on the FIRST outcome -- a result, a worker-level failure (a module-load error,
- * a non-cloneable message) surfaced through `onerror`, a synchronous `postMessage`
- * failure, or a caller abort -- so nothing lingers past the single parse and a caller
- * never hangs on a worker that cannot answer. A `settled` guard makes every later
- * event a no-op, so a second outcome cannot double-settle or re-terminate.
+ * a non-cloneable message) surfaced through `onerror`, an undeserializable reply
+ * surfaced through `onmessageerror`, a synchronous `postMessage` failure, or a caller
+ * abort -- so nothing lingers past the single parse and a caller never hangs on a
+ * worker that cannot answer. A `settled` guard makes every later event a no-op, so a
+ * second outcome cannot double-settle or re-terminate.
  */
 function parseInWorker(
   worker: CSVParseWorker,
@@ -176,6 +178,15 @@ function parseInWorker(
       );
     };
     worker.onerror = (event) => settle(() => reject(workerFailure(event)));
+    // A reply that fails to deserialize on this thread fires onmessageerror, not
+    // onmessage/onerror; without a handler the promise would hang. Unreachable for the
+    // current all-primitive reply shape (an all-string CSVRow tree), but wired so the
+    // one-shot's never-hang guarantee holds if a future reply ever gains an
+    // uncloneable field.
+    worker.onmessageerror = () =>
+      settle(() =>
+        reject(new Error("CSV parse worker reply could not be deserialized")),
+      );
 
     try {
       worker.postMessage({ file, byteCeiling });

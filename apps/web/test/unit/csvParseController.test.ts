@@ -38,12 +38,20 @@ const OK_RESULT: CSVParseResult = {
 class FakeCSVParseWorker implements CSVParseWorker {
   onmessage: ((event: { data: CSVParseResponse }) => void) | null = null;
   onerror: ((event: unknown) => void) | null = null;
+  onmessageerror: ((event: unknown) => void) | null = null;
   readonly received: Array<CSVParseRequest> = [];
   terminated = false;
 
   // "never" leaves the request unanswered, so a test can drive the abort path (the
-  // parse is torn down by the caller's signal, not by a worker reply).
-  constructor(private readonly reply: CSVParseResponse | "error" | "never") {}
+  // parse is torn down by the caller's signal, not by a worker reply);
+  // "messageerror" fires the undeserializable-reply path.
+  constructor(
+    private readonly reply:
+      | CSVParseResponse
+      | "error"
+      | "never"
+      | "messageerror",
+  ) {}
 
   postMessage(message: CSVParseRequest): void {
     this.received.push(message);
@@ -51,6 +59,7 @@ class FakeCSVParseWorker implements CSVParseWorker {
     const reply = this.reply;
     queueMicrotask(() => {
       if (reply === "error") this.onerror?.({ message: "worker exploded" });
+      else if (reply === "messageerror") this.onmessageerror?.({});
       else this.onmessage?.({ data: reply });
     });
   }
@@ -143,6 +152,19 @@ describe("loadCSVFileOffMainThread: worker dispatch", () => {
     await expect(
       loadCSVFileOffMainThread(file, { spawnWorker: () => fake }),
     ).rejects.toThrow(/worker exploded/);
+    expect(fake.terminated).toBe(true);
+  });
+
+  test("rejects rather than hangs when the worker reply cannot be deserialized", async () => {
+    // A structured-clone failure on the reply fires onmessageerror, not onmessage or
+    // onerror; the controller must settle and terminate rather than hang -- the
+    // never-hang guarantee the one-shot documents. Unreachable for the current
+    // all-string reply shape, so pinned here against a future regression.
+    const fake = new FakeCSVParseWorker("messageerror");
+    const file = new File(["a\n1\n"], "d.csv", { type: "text/csv" });
+    await expect(
+      loadCSVFileOffMainThread(file, { spawnWorker: () => fake }),
+    ).rejects.toThrow(/could not be deserialized/);
     expect(fake.terminated).toBe(true);
   });
 
