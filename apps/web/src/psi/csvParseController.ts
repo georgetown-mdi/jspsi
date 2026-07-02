@@ -71,17 +71,23 @@ export interface CSVParseWorker {
  * {@link loadCSVFileOffMainThread}. */
 export type SpawnCSVParseWorker = () => CSVParseWorker;
 
+/** Whether `file` is a browser File -- the only input a worker can take
+ * (structured-cloneable, and read via FileReader in the worker); a Node stream is
+ * not. Guards the `File` reference so it never throws where `File` is undefined (an
+ * older runtime or SSR). */
+function isBrowserFile(file: CSVParseInput): file is File {
+  return typeof File !== "undefined" && file instanceof File;
+}
+
 /**
- * Whether `file` should be parsed off the main thread: a browser File (the only
- * cloneable, FileReader-readable input) larger than
+ * Whether `file` should be parsed off the main thread: a browser File larger than
  * {@link CSV_WORKER_FILE_BYTE_THRESHOLD}, with `Worker` available (absent under Node
  * and SSR). A Node stream or a small File returns false and is parsed inline.
  */
 export function shouldParseOffThread(file: CSVParseInput): boolean {
   return (
     typeof Worker !== "undefined" &&
-    typeof File !== "undefined" &&
-    file instanceof File &&
+    isBrowserFile(file) &&
     file.size > CSV_WORKER_FILE_BYTE_THRESHOLD
   );
 }
@@ -96,50 +102,101 @@ export function shouldParseOffThread(file: CSVParseInput): boolean {
  * this module stays Node-loadable -- `invitation.ts`, which calls this, is unit-
  * tested under Node with a readable stream (the inline path, which never reaches the
  * import).
+ *
+ * `signal` tears the worker down if the caller aborts mid-parse (a component
+ * unmount), so a discarded parse does not keep a worker running; a caller that never
+ * unmounts mid-parse (the inviter flows) simply omits it.
  */
 export async function loadCSVFileOffMainThread(
   file: CSVParseInput,
   options: {
     byteCeiling?: number;
     spawnWorker?: SpawnCSVParseWorker;
+    signal?: AbortSignal;
   } = {},
 ): Promise<CSVParseResult> {
-  const { byteCeiling, spawnWorker } = options;
-  // Inline unless a worker is warranted (or a test injected one). loadCSVFile
-  // applies its own byteCeiling default when this one is undefined.
-  if (spawnWorker === undefined && !shouldParseOffThread(file))
-    return loadCSVFile(file, byteCeiling);
-  const spawn =
-    spawnWorker ??
-    (await import("./csvParseWorkerClient")).defaultSpawnCSVParseWorker;
-  return parseInWorker(spawn(), file as File, byteCeiling);
+  const { byteCeiling, spawnWorker, signal } = options;
+  // Off-thread only for a browser File: a large one (the routing predicate) or any
+  // File when a test injects a spawner to force the worker path. A Node stream is not
+  // structured-cloneable, so it -- and a small File -- parses inline. loadCSVFile
+  // applies its own byteCeiling default when this one is undefined. The isBrowserFile
+  // guard narrows `file` to File for parseInWorker, so no unchecked cast is needed.
+  if (
+    isBrowserFile(file) &&
+    (spawnWorker !== undefined || shouldParseOffThread(file))
+  ) {
+    const spawn =
+      spawnWorker ??
+      (await import("./csvParseWorkerClient")).defaultSpawnCSVParseWorker;
+    return parseInWorker(spawn(), file, byteCeiling, signal);
+  }
+  return loadCSVFile(file, byteCeiling);
 }
 
 /**
- * Drive one parse through `worker` and settle. The worker is one-shot: it is
- * terminated as soon as it answers (or errors), so nothing lingers past the single
- * parse. A worker-level failure (a module-load error, a non-cloneable message)
- * surfaces through `onerror` and rejects, so a caller never hangs on a worker that
- * cannot answer.
+ * Drive one parse through `worker` and settle. The worker is one-shot: it is torn
+ * down on the FIRST outcome -- a result, a worker-level failure (a module-load error,
+ * a non-cloneable message) surfaced through `onerror`, a synchronous `postMessage`
+ * failure, or a caller abort -- so nothing lingers past the single parse and a caller
+ * never hangs on a worker that cannot answer. A `settled` guard makes every later
+ * event a no-op, so a second outcome cannot double-settle or re-terminate.
  */
 function parseInWorker(
   worker: CSVParseWorker,
   file: File,
   byteCeiling: number | undefined,
+  signal: AbortSignal | undefined,
 ): Promise<CSVParseResult> {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (finish: () => void): void => {
+      if (settled) return;
+      settled = true;
+      worker.terminate();
+      finish();
+    };
+
+    // Abort before we even post (an already-aborted signal, e.g. a torn-down caller):
+    // terminate the just-spawned worker and reject without posting.
+    if (signal?.aborted) {
+      settle(() => reject(abortError()));
+      return;
+    }
+    // The abort listener is left attached rather than removed on settle: the `settled`
+    // guard already makes a late abort a no-op, and the signal is a per-parse
+    // controller the caller discards, so the inert listener costs nothing.
+    signal?.addEventListener("abort", () => settle(() => reject(abortError())));
+
     worker.onmessage = (event) => {
-      worker.terminate();
       const response = event.data;
-      if (response.ok) resolve(response.result);
-      else reject(rebuildWorkerError(response));
+      settle(() =>
+        response.ok
+          ? resolve(response.result)
+          : reject(rebuildWorkerError(response)),
+      );
     };
-    worker.onerror = (event) => {
-      worker.terminate();
-      reject(workerFailure(event));
-    };
-    worker.postMessage({ file, byteCeiling });
+    worker.onerror = (event) => settle(() => reject(workerFailure(event)));
+
+    try {
+      worker.postMessage({ file, byteCeiling });
+    } catch (error) {
+      // A synchronous structured-clone failure never reaches onmessage/onerror, so
+      // tear the worker down here rather than leak it.
+      settle(() =>
+        reject(error instanceof Error ? error : new Error(String(error))),
+      );
+    }
   });
+}
+
+/** The rejection a caller-signalled abort produces. A named Error (not a
+ * `DOMException`) so it is portable to the Node dispatch tests; no consumer inspects
+ * it as a DOMException -- FileAcquire, the only caller that passes a signal, swallows
+ * it via its own `aborted` check. */
+function abortError(): Error {
+  const error = new Error("CSV parse aborted");
+  error.name = "AbortError";
+  return error;
 }
 
 /** Rebuild an Error from the worker's serialized failure, so the consumer's

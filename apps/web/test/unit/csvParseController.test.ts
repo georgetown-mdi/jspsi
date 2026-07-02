@@ -41,14 +41,17 @@ class FakeCSVParseWorker implements CSVParseWorker {
   readonly received: Array<CSVParseRequest> = [];
   terminated = false;
 
-  constructor(private readonly reply: CSVParseResponse | "error") {}
+  // "never" leaves the request unanswered, so a test can drive the abort path (the
+  // parse is torn down by the caller's signal, not by a worker reply).
+  constructor(private readonly reply: CSVParseResponse | "error" | "never") {}
 
   postMessage(message: CSVParseRequest): void {
     this.received.push(message);
+    if (this.reply === "never") return;
+    const reply = this.reply;
     queueMicrotask(() => {
-      if (this.reply === "error")
-        this.onerror?.({ message: "worker exploded" });
-      else this.onmessage?.({ data: this.reply });
+      if (reply === "error") this.onerror?.({ message: "worker exploded" });
+      else this.onmessage?.({ data: reply });
     });
   }
 
@@ -141,5 +144,37 @@ describe("loadCSVFileOffMainThread: worker dispatch", () => {
       loadCSVFileOffMainThread(file, { spawnWorker: () => fake }),
     ).rejects.toThrow(/worker exploded/);
     expect(fake.terminated).toBe(true);
+  });
+
+  test("an abort mid-parse terminates the worker and rejects", async () => {
+    // The worker never replies; the caller aborts (a component unmount). The
+    // controller must tear the worker down and reject rather than let it run to
+    // completion on a discarded parse.
+    const fake = new FakeCSVParseWorker("never");
+    const controller = new AbortController();
+    const file = new File(["a\n1\n"], "d.csv", { type: "text/csv" });
+    const pending = loadCSVFileOffMainThread(file, {
+      spawnWorker: () => fake,
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(pending).rejects.toThrow(/aborted/);
+    expect(fake.terminated).toBe(true);
+  });
+
+  test("an already-aborted signal terminates the worker without posting", async () => {
+    const fake = new FakeCSVParseWorker("never");
+    const controller = new AbortController();
+    controller.abort();
+    const file = new File(["a\n1\n"], "d.csv", { type: "text/csv" });
+    await expect(
+      loadCSVFileOffMainThread(file, {
+        spawnWorker: () => fake,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow(/aborted/);
+    expect(fake.terminated).toBe(true);
+    // Aborted before dispatch, so the parse request is never posted.
+    expect(fake.received).toEqual([]);
   });
 });
