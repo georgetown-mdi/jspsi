@@ -12,29 +12,50 @@ import type {
   CSVParseRequest,
   CSVParseResponse,
   CSVParseResult,
+  CSVParseRows,
   CSVParseWorker,
 } from "../../src/psi/csvParseController.js";
 
-// A well-formed result the fake worker hands back, matching what core's loadCSVFile
-// resolves (data plus meta.fields). The controller only passes it through, so a
-// minimal-but-valid ParseResult is enough to assert the plumbing.
+// The header meta a well-formed reply carries -- what core's loadCSVFile puts in
+// meta.fields. Shared by the result fixtures and the streamed done message.
+const META: CSVParseResult["meta"] = {
+  delimiter: ",",
+  linebreak: "\n",
+  aborted: false,
+  truncated: false,
+  cursor: 8,
+  fields: ["a", "b"],
+};
+
+// A well-formed result, matching what core's loadCSVFile resolves (data plus
+// meta.fields). The worker streams it back as batches + a done message; the controller
+// reassembles it, so a minimal-but-valid ParseResult is enough to assert the plumbing.
 const OK_RESULT: CSVParseResult = {
   data: [{ a: "1", b: "2" }],
   errors: [],
-  meta: {
-    delimiter: ",",
-    linebreak: "\n",
-    aborted: false,
-    truncated: false,
-    cursor: 8,
-    fields: ["a", "b"],
-  },
+  meta: META,
 };
 
+// Split a result into the message sequence the real worker posts: one `done: false`
+// batch per row group, then the terminal `done: true` carrying errors + meta. Used to
+// drive the controller's reassembly with an explicit batch layout.
+function streamedReply(
+  result: CSVParseResult,
+  batches: Array<CSVParseRows>,
+): Array<CSVParseResponse> {
+  return [
+    ...batches.map(
+      (rows): CSVParseResponse => ({ ok: true, done: false, rows }),
+    ),
+    { ok: true, done: true, errors: result.errors, meta: result.meta },
+  ];
+}
+
 // A fake worker mirroring the real one's contract: it records what it was posted and
-// replies asynchronously (a microtask, like a real worker message) with either a
-// response or an onerror event, so the controller's resolve/reject/terminate plumbing
-// is driven without a real Worker (absent under Node).
+// replies asynchronously (each message its own microtask, like a real worker delivering
+// separate messages) so the controller's accumulate/resolve/reject/terminate plumbing
+// is driven without a real Worker (absent under Node). A `CSVParseResponse[]` scripts a
+// streamed reply (batches then a terminal message), delivered in order.
 class FakeCSVParseWorker implements CSVParseWorker {
   onmessage: ((event: { data: CSVParseResponse }) => void) | null = null;
   onerror: ((event: unknown) => void) | null = null;
@@ -47,7 +68,7 @@ class FakeCSVParseWorker implements CSVParseWorker {
   // "messageerror" fires the undeserializable-reply path.
   constructor(
     private readonly reply:
-      | CSVParseResponse
+      | Array<CSVParseResponse>
       | "error"
       | "never"
       | "messageerror",
@@ -57,11 +78,15 @@ class FakeCSVParseWorker implements CSVParseWorker {
     this.received.push(message);
     if (this.reply === "never") return;
     const reply = this.reply;
-    queueMicrotask(() => {
-      if (reply === "error") this.onerror?.({ message: "worker exploded" });
-      else if (reply === "messageerror") this.onmessageerror?.({});
-      else this.onmessage?.({ data: reply });
-    });
+    if (reply === "error") {
+      queueMicrotask(() => this.onerror?.({ message: "worker exploded" }));
+      return;
+    }
+    if (reply === "messageerror") {
+      queueMicrotask(() => this.onmessageerror?.({}));
+      return;
+    }
+    for (const data of reply) queueMicrotask(() => this.onmessage?.({ data }));
   }
 
   terminate(): void {
@@ -110,8 +135,10 @@ describe("shouldParseOffThread: the routing predicate", () => {
 });
 
 describe("loadCSVFileOffMainThread: worker dispatch", () => {
-  test("posts the File and ceiling, resolves the worker's result, and terminates it", async () => {
-    const fake = new FakeCSVParseWorker({ ok: true, result: OK_RESULT });
+  test("posts the File and ceiling, reassembles the streamed reply, and terminates", async () => {
+    const fake = new FakeCSVParseWorker(
+      streamedReply(OK_RESULT, [OK_RESULT.data]),
+    );
     const file = new File(["a,b\n1,2\n"], "d.csv", { type: "text/csv" });
     const out = await loadCSVFileOffMainThread(file, {
       spawnWorker: () => fake,
@@ -119,7 +146,60 @@ describe("loadCSVFileOffMainThread: worker dispatch", () => {
     });
     expect(out).toEqual(OK_RESULT);
     expect(fake.received).toEqual([{ file, byteCeiling: 4096 }]);
-    // One-shot: the worker is torn down as soon as it answers.
+    // One-shot: the worker is torn down as soon as the terminal message arrives.
+    expect(fake.terminated).toBe(true);
+  });
+
+  test("reassembles a multi-batch reply to the same rows and fields as a single batch", async () => {
+    // Acceptance criterion: a reply arriving in multiple batches reassembles to the same
+    // rows (in order) and meta.fields as an equivalent single-batch reply, including a
+    // batch boundary that falls mid-way through the rows.
+    const rows: CSVParseRows = [
+      { a: "1", b: "2" },
+      { a: "3", b: "4" },
+      { a: "5", b: "6" },
+      { a: "7", b: "8" },
+    ];
+    const full: CSVParseResult = { data: rows, errors: [], meta: META };
+    const file = (): File =>
+      new File(["a,b\n1,2\n3,4\n5,6\n7,8\n"], "d.csv", { type: "text/csv" });
+
+    // One batch of all four rows.
+    const single = new FakeCSVParseWorker(streamedReply(full, [rows]));
+    // Uneven batches whose boundaries fall mid-way through the rows (1 | 2 | 1).
+    const multi = new FakeCSVParseWorker(
+      streamedReply(full, [rows.slice(0, 1), rows.slice(1, 3), rows.slice(3)]),
+    );
+
+    const singleOut = await loadCSVFileOffMainThread(file(), {
+      spawnWorker: () => single,
+    });
+    const multiOut = await loadCSVFileOffMainThread(file(), {
+      spawnWorker: () => multi,
+    });
+
+    expect(multiOut.data).toEqual(rows);
+    expect(multiOut.meta.fields).toEqual(["a", "b"]);
+    // Identical to the single-batch reply -- the batch granularity is invisible.
+    expect(multiOut).toEqual(singleOut);
+    expect(single.terminated).toBe(true);
+    expect(multi.terminated).toBe(true);
+  });
+
+  test("reassembles an empty (no-row) parse from a done message with no batches", async () => {
+    // An empty file yields zero batches and only the terminal message; the controller
+    // must still settle with an empty data array and the header meta.
+    const empty: CSVParseResult = {
+      data: [],
+      errors: [],
+      meta: { ...META, fields: [] },
+    };
+    const fake = new FakeCSVParseWorker(streamedReply(empty, []));
+    const file = new File(["\n"], "d.csv", { type: "text/csv" });
+    const out = await loadCSVFileOffMainThread(file, {
+      spawnWorker: () => fake,
+    });
+    expect(out).toEqual(empty);
     expect(fake.terminated).toBe(true);
   });
 
@@ -130,12 +210,14 @@ describe("loadCSVFileOffMainThread: worker dispatch", () => {
     // bundled-worker corruption could), so the guard's own firing is pinned in core's
     // browser suite; here the guard's exact rejection is carried back over the worker
     // boundary and must surface as an ordinary Error, not crash a downstream consumer.
-    const fake = new FakeCSVParseWorker({
-      ok: false,
-      message:
-        "CSV header parsed to a non-string column; the file could not be read correctly",
-      name: "Error",
-    });
+    const fake = new FakeCSVParseWorker([
+      {
+        ok: false,
+        message:
+          "CSV header parsed to a non-string column; the file could not be read correctly",
+        name: "Error",
+      },
+    ]);
     const file = new File(["a\n1\n"], "d.csv", { type: "text/csv" });
     await expect(
       loadCSVFileOffMainThread(file, { spawnWorker: () => fake }),
