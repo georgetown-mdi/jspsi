@@ -434,9 +434,12 @@ export interface InviterDataEdits {
  * enforcement point of the invariant that an authored standardization names only
  * declared linkage fields. `prepareForExchange` fails closed on a violation, so
  * reconciling the standardization to `linkageTerms` HERE, where the spec is handed
- * to core, guarantees the inviter never feeds core a self-contradictory spec no
- * matter how the caller produced the standardization (a disabled key's orphaned
- * transformation, an import's default per-type seed). See
+ * to core, drops the orphaned-output transformations any inviter flow can produce
+ * (a disabled key's now-inert transformation, an import's default per-type seed)
+ * before they reach core. It reconciles only that class -- an unknown step
+ * function is out of its remit and stays refused by core's throw (the editor's
+ * step-validity gate already prevents one), which remains the fail-closed backstop
+ * for any contradiction this filter does not cover. See
  * {@link standardizationForTerms} for why the drop is lossless. The metadata and
  * standardization are per-party and local; the terms are pinned to the invitation.
  * Each is included only when present, so the quick path (no authored cleaning)

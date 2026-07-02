@@ -1,7 +1,7 @@
 import { expect, test, describe } from "vitest";
 
 import { prepareForExchange } from "../src/exchange";
-import { UsageError } from "../src/errors";
+import { StandardizationTermsError, UsageError } from "../src/errors";
 
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { Metadata } from "../src/config/metadata";
@@ -63,7 +63,10 @@ describe("prepareForExchange: authoritative standardization fails closed", () =>
       { output: "not_a_field", input: "first_name" },
     ];
     // Today this string was pushed to `warnings` and the exchange proceeded; the
-    // authoritative config now breaks on it.
+    // authoritative config now breaks on it. The specific type (a UsageError
+    // subclass) is what lets the web surface this value-free message while keeping
+    // the partner-influenceable payload/disclosure UsageErrors swallowed; assert
+    // both the subtype and that it remains a UsageError (the CLI's exit-64 gate).
     expect(() =>
       prepareForExchange(
         { linkageTerms: terms, metadata, standardization },
@@ -71,7 +74,19 @@ describe("prepareForExchange: authoritative standardization fails closed", () =>
         rawRows,
         columns,
       ),
-    ).toThrow(UsageError);
+    ).toThrow(StandardizationTermsError);
+    let thrown: unknown;
+    try {
+      prepareForExchange(
+        { linkageTerms: terms, metadata, standardization },
+        "Tester",
+        rawRows,
+        columns,
+      );
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(UsageError);
     // The failure carries the underlying inconsistency through, so an operator
     // can see which output is wrong.
     expect(() =>
@@ -99,7 +114,7 @@ describe("prepareForExchange: authoritative standardization fails closed", () =>
         rawRows,
         columns,
       ),
-    ).toThrow(UsageError);
+    ).toThrow(StandardizationTermsError);
     expect(() =>
       prepareForExchange(
         { linkageTerms: terms, metadata, standardization },

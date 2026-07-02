@@ -1469,7 +1469,11 @@ export class StandardizedKeyIterable {
  * name is known.
  *
  * Returns a list of error messages; an empty array means the standardization
- * spec is consistent with these terms.
+ * spec is consistent with these terms. The output and function names embedded in
+ * each message are routed through {@link sanitizeForDisplay} at the point of
+ * interpolation -- consistent with the sibling `assertPayloadSendDisclosed` /
+ * `validateCompatibility` guards -- so a caller that surfaces a message is safe
+ * without re-sanitizing, rather than relying on every call site to do so.
  */
 export function validateStandardizationAgainstTerms(
   standardization: Standardization,
@@ -1479,17 +1483,19 @@ export function validateStandardizationAgainstTerms(
   const fieldNames = new Set(terms.linkageFields.map((f) => f.name));
 
   for (const t of standardization) {
+    const output = sanitizeForDisplay(t.output);
     if (!fieldNames.has(t.output)) {
       errors.push(
-        `standardization output "${t.output}" does not match any linkage ` +
+        `standardization output "${output}" does not match any linkage ` +
           "field name",
       );
     }
     for (const step of t.steps ?? []) {
       if (!STANDARDIZATION_FUNCTION_NAMES.includes(step.function)) {
         errors.push(
-          `unknown standardization function "${step.function}" in ` +
-            `transformation for "${t.output}"`,
+          `unknown standardization function ` +
+            `"${sanitizeForDisplay(step.function)}" in transformation for ` +
+            `"${output}"`,
         );
       }
     }

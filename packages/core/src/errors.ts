@@ -27,6 +27,38 @@ export class UsageError extends Error {
 }
 
 /**
+ * A {@link UsageError} subclass marking the one prepare-time config fault whose
+ * message is safe to surface verbatim to the operator: an authored
+ * ("authoritative") standardization that contradicts its own linkage terms -- a
+ * transform output naming no declared linkage field, or an unknown
+ * standardization function (see `validateStandardizationAgainstTerms`). Thrown
+ * only by {@link prepareForExchange}, before any peer connection.
+ *
+ * It is a distinct type, not a plain {@link UsageError}, so the web can classify
+ * exactly this fault into its actionable "config" alert -- which renders the
+ * message -- while every OTHER prepare-time `UsageError` stays in the generic
+ * swallowing alert. That distinction is security-relevant: the sibling payload /
+ * disclosure guards (`assertPayloadSendDisclosed`,
+ * `assertDisclosureMatchesCommitment`) also throw a prepare-time `UsageError`,
+ * but their messages embed column names, and on the accept side those names are
+ * derived from the partner's invitation -- so surfacing them verbatim would echo
+ * partner-influenced text into the operator's own alert. The message THIS class
+ * carries names only the local party's own authored outputs and functions, so it
+ * is value-free; keying the web's surfacing on the TYPE rather than on "any
+ * prepare-phase UsageError" makes that guarantee structural rather than a
+ * reachability argument about which check fired.
+ *
+ * Being a {@link UsageError} subclass, the CLI's `instanceof UsageError` check
+ * still classifies it as a configuration error (exit 64, EX_USAGE), unchanged.
+ */
+export class StandardizationTermsError extends UsageError {
+  constructor(message: string) {
+    super(message);
+    this.name = "StandardizationTermsError";
+  }
+}
+
+/**
  * A {@link UsageError} subclass marking a bilateral-mode mismatch detected at
  * rendezvous: the peer advertised a `lockless_rendezvous` or `retain_files`
  * setting in its hello payload that differs from this party's. These flags are

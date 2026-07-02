@@ -1,6 +1,6 @@
 import {
   ConnectionError,
-  UsageError,
+  StandardizationTermsError,
   getLogger,
   runExchange,
 } from "@psilink/core";
@@ -37,10 +37,15 @@ export interface StageDefinition {
  * authenticated key exchange (or, once it is wrapped, the AEAD layer) reported a
  * wrong secret, tamper, or replay, so the user must NOT silently re-run it -- it
  * is surfaced as an authentication failure rather than a retryable transport
- * drop. A `"config"` failure is a {@link UsageError} raised during the PREPARE
- * phase (inside `acquire`, before any peer connection) -- such as an authored
- * standardization that contradicts the linkage terms: not a transport drop, so
- * retrying as-is fails identically; its message is actionable and safe to surface.
+ * drop. A `"config"` failure is a {@link StandardizationTermsError} raised during
+ * the PREPARE phase (inside `acquire`, before any peer connection): an authored
+ * standardization that contradicts the linkage terms. Not a transport drop, so
+ * retrying as-is fails identically; its message names only this party's own
+ * authored outputs/functions, so it is actionable and safe to surface. It is
+ * scoped to that specific type, NOT to any prepare-phase `UsageError`: the sibling
+ * payload/disclosure guards also throw a prepare-time `UsageError`, but their
+ * messages embed column names that are partner-influenced on the accept side, so
+ * they stay in the generic (message-swallowing) `"exchange"` alert.
  * `"exchange"` and `"output"` are owner-local discriminants (an output-generation
  * failure is not a connection error). */
 export type ExchangeErrorCategory =
@@ -57,16 +62,20 @@ export type ExchangeErrorCategory =
  * own call site, since the exchange already succeeded there.) Keying off the
  * connection-error kind rather than the handshake step means a future
  * `EncryptedMessageConnection` surfacing a `security` failure mid-exchange is
- * routed the same way for free. A {@link UsageError} is classified `config` ONLY in
- * the `"prepare"` phase, which runs `prepareForExchange`: the phase is the
- * discriminant, so a `UsageError` surfacing mid-`"run"` (none does today) is never
- * mislabeled an actionable config problem -- the guarantee is structural, not a
- * prose claim about what the run half throws. */
+ * routed the same way for free. A {@link StandardizationTermsError} is classified
+ * `config` ONLY in the `"prepare"` phase, which runs `prepareForExchange`. Both
+ * discriminants are structural: the TYPE narrows it to the one prepare-phase fault
+ * whose message is value-free (a standardization contradicting its terms),
+ * keeping the partner-influenceable payload/disclosure `UsageError`s out of the
+ * message-surfacing alert; the PHASE keeps a `StandardizationTermsError` surfacing
+ * mid-`"run"` (none does today) from being mislabeled -- neither is a prose claim
+ * about what the other half throws. */
 function classifyExchangeFailure(
   error: unknown,
   phase: "prepare" | "run",
 ): ExchangeErrorCategory {
-  if (phase === "prepare" && error instanceof UsageError) return "config";
+  if (phase === "prepare" && error instanceof StandardizationTermsError)
+    return "config";
   return error instanceof ConnectionError && error.kind === "security"
     ? "security"
     : "exchange";
@@ -257,10 +266,11 @@ export async function runExchangeLifecycle(
   } catch (error) {
     // acquire is atomic: it has already torn down anything it built, so there is
     // nothing here for the owner to release. On abort, emitError no-ops. This is
-    // the PREPARE phase: acquire runs prepareForExchange, whose fail-closed config
-    // errors (a UsageError, e.g. an authored standardization contradicting the
-    // terms) surface as an actionable "config" alert rather than the generic
-    // retryable "exchange" one; a plain load/transport failure stays "exchange".
+    // the PREPARE phase: acquire runs prepareForExchange, whose standardization-
+    // contradicts-terms fault (a StandardizationTermsError) surfaces as an
+    // actionable "config" alert rather than the generic retryable "exchange" one;
+    // a plain load/transport failure -- and every other prepare-phase UsageError
+    // -- stays "exchange".
     emitError({ category: classifyExchangeFailure(error, "prepare"), error });
     return;
   }

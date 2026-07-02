@@ -32,7 +32,7 @@ import {
 } from "./payloadExchange.js";
 import type { PayloadWireMessage } from "./payloadExchange.js";
 import { buildExchangeRecord } from "./exchangeRecord.js";
-import { UsageError } from "./errors.js";
+import { StandardizationTermsError } from "./errors.js";
 
 import type { Metadata } from "./config/metadata.js";
 import type { LinkageTerms } from "./config/linkageTerms.js";
@@ -232,16 +232,19 @@ export function prepareForExchange(
   // might legitimately carry as a note. The terms-only path (standardization
   // undefined) has no authored standardization to contradict its terms: it
   // reconstructs to help via getDefaultStandardization above, so it is
-  // deliberately NOT gated here. UsageError so the CLI classifies it as a
-  // configuration error (exit 64), like the assertPayloadSendDisclosed sibling
-  // check above.
+  // deliberately NOT gated here. StandardizationTermsError (a UsageError
+  // subclass) so the CLI still classifies it as a configuration error (exit 64),
+  // like the assertPayloadSendDisclosed sibling check above; the distinct type
+  // also lets the web surface THIS message verbatim (it names only this party's
+  // own authored outputs/functions, so it is value-free) while keeping the
+  // partner-influenceable payload/disclosure UsageErrors out of that alert.
   if (exchangeDataSpec.standardization !== undefined) {
     const inconsistencies = validateStandardizationAgainstTerms(
       exchangeDataSpec.standardization,
       linkageTerms,
     );
     if (inconsistencies.length > 0)
-      throw new UsageError(
+      throw new StandardizationTermsError(
         "this configuration's standardization is inconsistent with its linkage " +
           `terms: ${inconsistencies.join("; ")}. Correct the standardization or ` +
           "the linkage terms so every transform output names a declared linkage " +

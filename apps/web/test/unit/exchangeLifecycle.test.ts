@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { default as EventEmitter } from "eventemitter3";
 
-import { ConnectionError, UsageError, runExchange } from "@psilink/core";
+import {
+  ConnectionError,
+  StandardizationTermsError,
+  UsageError,
+  runExchange,
+} from "@psilink/core";
 
 import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
 import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
@@ -219,13 +224,15 @@ describe("runExchangeLifecycle", () => {
     expect(mockedOpen).not.toHaveBeenCalled();
   });
 
-  test("a prepare-time UsageError is category 'config', not 'exchange'", async () => {
-    // prepareForExchange fails closed (a UsageError) inside acquire, before any
-    // peer connection -- e.g. an authored standardization that contradicts the
-    // terms. It must surface as an actionable config problem, not the generic
-    // retryable transport failure.
+  test("a prepare-time StandardizationTermsError is category 'config', not 'exchange'", async () => {
+    // prepareForExchange fails closed with a StandardizationTermsError inside
+    // acquire, before any peer connection: an authored standardization that
+    // contradicts the terms. It must surface as an actionable config problem, not
+    // the generic retryable transport failure.
     const acquire: Acquire = () =>
-      Promise.reject(new UsageError("standardization contradicts its terms"));
+      Promise.reject(
+        new StandardizationTermsError("standardization contradicts its terms"),
+      );
     const s = seams();
 
     await runExchangeLifecycle({
@@ -237,6 +244,32 @@ describe("runExchangeLifecycle", () => {
 
     expect(s.onError).toHaveBeenCalledWith({
       category: "config",
+      error: expect.any(StandardizationTermsError),
+    });
+    expect(s.onResult).not.toHaveBeenCalled();
+    expect(mockedOpen).not.toHaveBeenCalled();
+  });
+
+  test("a prepare-time non-standardization UsageError is NOT 'config' (type-scoped)", async () => {
+    // The config category is scoped to StandardizationTermsError specifically, not
+    // to any prepare-phase UsageError. The sibling payload/disclosure guards also
+    // throw a plain UsageError during prepare, but their messages embed
+    // partner-influenced column names on the accept side, so they must stay in the
+    // generic (message-swallowing) 'exchange' alert rather than have their text
+    // surfaced by the actionable 'config' one.
+    const acquire: Acquire = () =>
+      Promise.reject(new UsageError("payload.send does not match metadata"));
+    const s = seams();
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "responder",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(s.onError).toHaveBeenCalledWith({
+      category: "exchange",
       error: expect.any(UsageError),
     });
     expect(s.onResult).not.toHaveBeenCalled();
@@ -265,15 +298,17 @@ describe("runExchangeLifecycle", () => {
     expect(s.onResult).not.toHaveBeenCalled();
   });
 
-  test("a mid-run UsageError is NOT classified 'config' (phase-scoped)", async () => {
-    // The config category is scoped to the prepare phase. A UsageError surfacing
-    // from the run half (none does today) must stay the generic 'exchange', never
-    // the actionable 'config' meant for a pre-connection data problem -- a
-    // structural guarantee, so a future core change that threw one mid-run cannot
-    // silently mislabel it.
+  test("a mid-run StandardizationTermsError is NOT classified 'config' (phase-scoped)", async () => {
+    // The config category is scoped to the prepare phase. Even the config-typed
+    // StandardizationTermsError, were it to surface from the run half (none does
+    // today), must stay the generic 'exchange', never the actionable 'config'
+    // meant for a pre-connection data problem -- a structural guarantee, so a
+    // future core change that threw one mid-run cannot silently mislabel it.
     const { mc } = makeFakeMc();
     mockedOpen.mockResolvedValue(mc);
-    mockedRunExchange.mockRejectedValue(new UsageError("mid-run usage error"));
+    mockedRunExchange.mockRejectedValue(
+      new StandardizationTermsError("mid-run standardization error"),
+    );
     const { acquired } = makeResources();
     const acquire: Acquire = () => Promise.resolve(acquired);
     const s = seams();
@@ -287,7 +322,7 @@ describe("runExchangeLifecycle", () => {
 
     expect(s.onError).toHaveBeenCalledWith({
       category: "exchange",
-      error: expect.any(UsageError),
+      error: expect.any(StandardizationTermsError),
     });
     expect(s.onResult).not.toHaveBeenCalled();
   });

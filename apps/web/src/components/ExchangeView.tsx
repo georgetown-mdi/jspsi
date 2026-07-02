@@ -508,11 +508,14 @@ export function ExchangeView(config: ExchangeConfig) {
               sanitizeForDisplay(errorMessage(error)),
           });
         } else if (category === "config") {
-          // A configuration/usage error (UsageError) raised during data
-          // preparation, before any exchange ran -- e.g. an authored
-          // standardization that contradicts the linkage terms. Not a transport
-          // drop: retrying as-is fails identically, so surface the (sanitized)
-          // message, which is actionable and value-free, rather than the generic
+          // The one prepare-time fault whose message is safe to surface: an
+          // authored standardization that contradicts the linkage terms (a
+          // StandardizationTermsError; classifyExchangeFailure scopes "config" to
+          // that type, so the partner-influenceable payload/disclosure UsageErrors
+          // land in the generic branch below instead). Its message names only this
+          // party's own authored outputs/functions, so it is value-free. Not a
+          // transport drop: retrying as-is fails identically, so surface the
+          // (sanitized) message -- actionable -- rather than the generic
           // transient-failure copy that would wrongly deny a data/config problem.
           setErrorAlert({
             title: "Could not prepare the exchange",
