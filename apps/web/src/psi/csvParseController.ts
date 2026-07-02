@@ -5,25 +5,27 @@ import { loadCSVFile } from "@psilink/core";
  * is parsed in a Web Worker the app owns, so the parse itself (the dominant CPU:
  * tokenizing, splitting, and building the row objects) runs off the main thread and
  * the tab stays interactive WHILE a large intake -- the once-per-exchange invite or
- * accept file -- parses. It is not fully non-blocking: the worker posts the parsed
- * rows back, and receiving them costs the main thread a structured-clone
- * deserialization of the row array proportional to the result size (uninterruptible,
- * on message receipt). So this reduces the intake stall to that hand-off rather than
- * removing it -- the parse-time freeze is gone, a shorter receive-time cost remains.
- * Streaming the reply in chunks (the open question #202522668 left) would spread that
- * cost into smaller stalls but not lower its total. Everything else -- a small File,
- * or the Node readable stream the unit tests feed generateInvitation -- parses
- * inline, where a worker's spawn and structured-clone hand-off buy nothing.
+ * accept file -- parses. The worker does not post the whole parsed row array back in
+ * one message: it STREAMS the rows back in batches (see {@link CSVParseResponse}), so
+ * the main thread pays the receive-time structured-clone deserialization in many
+ * small, interruptible steps rather than one uninterruptible clone proportional to the
+ * full result size. That spreads the receive cost -- it does not lower its total -- so
+ * the tab stays responsive even receiving a near-cap intake, closing the receive-time
+ * stall the single-post hand-off left (the open question #202522668 raised). Everything
+ * else -- a small File, or the Node readable stream the unit tests feed
+ * generateInvitation -- parses inline, where a worker's spawn and the streamed hand-off
+ * buy nothing.
  *
  * The worker WRAPS core's {@link loadCSVFile} rather than reimplementing the parse
  * (see {@link ./csvParse.worker}), so the non-string-header guard and the
  * `data`/`meta.fields` result contract hold identically whether the parse runs on
- * this thread or in the worker. This is the Vite-native replacement for PapaParse's
- * `worker: true` self-hosted worker, which #307 removed because it corrupts the
- * parse once Vite bundles and minifies the app (see the `worker: false` rationale in
- * core's `file.ts`): a worker Vite bundles from `new Worker(new URL(...))` survives a
- * production `vite build`; one PapaParse constructs from the running script's URL
- * does not.
+ * this thread or in the worker -- the streaming only chunks the hand-off of an
+ * already-complete parse, it does not change how the parse itself is run. This is the
+ * Vite-native replacement for PapaParse's `worker: true` self-hosted worker, which
+ * #307 removed because it corrupts the parse once Vite bundles and minifies the app
+ * (see the `worker: false` rationale in core's `file.ts`): a worker Vite bundles from
+ * `new Worker(new URL(...))` survives a production `vite build`; one PapaParse
+ * constructs from the running script's URL does not.
  */
 
 /** The input {@link loadCSVFile} accepts (a browser `File`, or a Node readable
@@ -35,6 +37,11 @@ export type CSVParseInput = Parameters<typeof loadCSVFile>[0];
 /** The result {@link loadCSVFile} resolves -- `data` plus `meta.fields`. Derived
  * from its return type for the same no-papaparse-import reason. */
 export type CSVParseResult = Awaited<ReturnType<typeof loadCSVFile>>;
+
+/** The row array a {@link CSVParseResult} carries -- the part the worker reply streams
+ * in batches and {@link parseInWorker} accumulates back. Derived from
+ * {@link CSVParseResult} for the same no-papaparse-import reason. */
+export type CSVParseRows = CSVParseResult["data"];
 
 /**
  * Byte size above which a browser File's parse moves to the worker. Below it the
@@ -61,12 +68,61 @@ export interface CSVParseRequest {
   byteCeiling: number | undefined;
 }
 
-/** Worker response: the parse result, or a serialized error (message plus name, so
- * it survives structured clone and rebuilds into an Error the consumer can display
- * and the tests can match on). */
+/**
+ * Worker response, delivered as a STREAM rather than a single post: zero or more
+ * `{ ok: true; done: false }` batches, each carrying a slice of the parsed rows in
+ * order, followed by exactly one terminal message. The terminal message is either
+ * `{ ok: true; done: true }` -- carrying the non-row remainder of the result
+ * (`errors` and `meta`), which {@link parseInWorker} pairs with the accumulated rows
+ * to rebuild the full {@link CSVParseResult} -- or `{ ok: false }`, a serialized error
+ * (message plus name, so it survives structured clone and rebuilds into an Error the
+ * consumer can display and the tests can match on). Batching the rows lets the main
+ * thread deserialize the reply in many small, interruptible steps instead of one clone
+ * of the whole array (see the module header). A parse that fails inside the worker
+ * rejects before any batch is posted -- loadCSVFile runs to completion first -- so the
+ * error is the ONLY message and the failure surfaces exactly as it did under the single
+ * post.
+ */
 export type CSVParseResponse =
-  | { ok: true; result: CSVParseResult }
+  | { ok: true; done: false; rows: CSVParseRows }
+  | {
+      ok: true;
+      done: true;
+      errors: CSVParseResult["errors"];
+      meta: CSVParseResult["meta"];
+    }
   | { ok: false; message: string; name: string };
+
+/**
+ * Target source-CSV bytes per streamed reply batch. {@link replyBatchRows} turns this
+ * into a row count from the file's average bytes-per-row, so each batch is a bounded
+ * slice of the FILE regardless of row width -- a few wide rows batch as tightly as many
+ * narrow ones. This bounds a batch's SOURCE bytes, which under-represents the
+ * parsed-object structured-clone cost the main thread actually pays on receipt: a row is
+ * an object of per-cell strings, several times heavier than its source bytes. So the
+ * target is set conservatively -- it keeps each batch's deserialization small relative to
+ * the whole-array clone it replaces, NOT provably under a single animation frame -- and
+ * is a reasoned, tunable default like {@link CSV_WORKER_FILE_BYTE_THRESHOLD}: lower it if
+ * measurement shows a batch's receive step exceeding a frame near the top of the intake
+ * range.
+ */
+export const CSV_WORKER_REPLY_BATCH_BYTES = 1024 * 1024;
+
+/**
+ * Rows per streamed batch for a `rowCount`-row parse of a `fileBytes`-byte File: the
+ * count whose source bytes are about {@link CSV_WORKER_REPLY_BATCH_BYTES}, so batch size
+ * tracks row width (bytes per row) rather than row count -- a bigger file of similar rows
+ * yields more batches, not bigger ones. At least 1 whenever there are rows, so the
+ * worker's batch loop always advances: a very wide row whose own source exceeds the
+ * target still emits one row per batch rather than flooring to 0 and spinning, and
+ * `Math.max(fileBytes, 1)` keeps the division defined for a (degenerate) zero-byte file.
+ * The value is irrelevant when there are no rows, where the loop never runs.
+ */
+export function replyBatchRows(rowCount: number, fileBytes: number): number {
+  if (rowCount === 0) return 1;
+  const bytesPerRow = Math.max(fileBytes, 1) / rowCount;
+  return Math.max(1, Math.floor(CSV_WORKER_REPLY_BATCH_BYTES / bytesPerRow));
+}
 
 /** The slice of the `Worker` API the off-thread parse drives. The real `Worker` is
  * adapted to it in {@link ./csvParseWorkerClient}; a unit test supplies a fake. */
@@ -147,13 +203,17 @@ export async function loadCSVFileOffMainThread(
 }
 
 /**
- * Drive one parse through `worker` and settle. The worker is one-shot: it is torn
- * down on the FIRST outcome -- a result, a worker-level failure (a module-load error,
- * a non-cloneable message) surfaced through `onerror`, an undeserializable reply
- * surfaced through `onmessageerror`, a synchronous `postMessage` failure, or a caller
- * abort -- so nothing lingers past the single parse and a caller never hangs on a
- * worker that cannot answer. A `settled` guard makes every later event a no-op, so a
- * second outcome cannot double-settle or re-terminate.
+ * Drive one parse through `worker` and settle. The reply streams in as a sequence of
+ * row batches this accumulates, terminated by one outcome that settles: a `done`
+ * message (reassembled with the accumulated rows into the result), a worker-level
+ * failure (a module-load error, a non-cloneable message) surfaced through `onerror`,
+ * an undeserializable reply surfaced through `onmessageerror`, a synchronous
+ * `postMessage` failure, or a caller abort. The worker is one-shot: it is torn down on
+ * that outcome, so nothing lingers past the single parse and a caller never hangs on a
+ * worker that cannot answer. A `settled` guard makes every later event -- including a
+ * stray batch arriving after the outcome -- a no-op, so a second outcome cannot
+ * double-settle or re-terminate and a post-settle batch cannot mutate the discarded
+ * accumulator.
  */
 function parseInWorker(
   worker: CSVParseWorker,
@@ -181,12 +241,30 @@ function parseInWorker(
     // controller the caller discards, so the inert listener costs nothing.
     signal?.addEventListener("abort", () => settle(() => reject(abortError())));
 
+    // Accumulate the streamed row batches on this thread; the terminal `done` message
+    // pairs them with the reply's errors/meta into the full result. Rows arrive in
+    // postMessage order, which the worker sends in parse order, so the reassembled
+    // `data` matches the single-post row order exactly.
+    const rows: CSVParseRows = [];
     worker.onmessage = (event) => {
+      // A batch arriving after the parse already settled (a caller abort, or a worker
+      // that kept posting) must not mutate the now-discarded accumulator; the guard
+      // makes it inert -- the never-double-settle invariant extended to the stream.
+      if (settled) return;
       const response = event.data;
+      if (!response.ok) {
+        settle(() => reject(rebuildWorkerError(response)));
+        return;
+      }
+      if (!response.done) {
+        // Append in a loop, not a spread: a batch can hold many rows and a spread-push
+        // passes one argument per row, which can overflow the call stack (core's
+        // loadCSVFile accumulates its chunks the same way for the same reason).
+        for (const row of response.rows) rows.push(row);
+        return;
+      }
       settle(() =>
-        response.ok
-          ? resolve(response.result)
-          : reject(rebuildWorkerError(response)),
+        resolve({ data: rows, errors: response.errors, meta: response.meta }),
       );
     };
     worker.onerror = (event) => settle(() => reject(workerFailure(event)));
