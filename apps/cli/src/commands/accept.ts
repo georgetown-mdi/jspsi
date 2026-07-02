@@ -691,6 +691,15 @@ export async function handler(argv: Arguments): Promise<void> {
             recordFile: options.recordFile,
           }),
           reuseExistingConfig: ready.reuseExistingConfig,
+          // Persist the consented received-column lock-in into the fresh config so
+          // the later `psilink exchange` enforces it, the online sibling of the
+          // offline path's expectedPayloadColumns write below. The set is known up
+          // front from the token (in the inviter's namespace), so it rides the
+          // acceptance hook's first write; reconcileReceivedPayload then fails closed
+          // on a divergent received payload. Absent -- and reconciled lazily -- when
+          // the invitation carried no disclosed subset. No-op on the reuse path,
+          // which keeps the operator's config untouched.
+          expectedReceivedPayloadColumns: ready.token.disclosedPayloadColumns,
         });
         logOnlineBootstrapOutcome(log, {
           configFile: options.configFile,
@@ -705,11 +714,13 @@ export async function handler(argv: Arguments): Promise<void> {
         connection: ready.connection,
         ...ready.dataSpec,
         // Persist the consented received-column lock-in so the later `psilink
-        // exchange` enforces it (online accept holds it in memory for its single
-        // run; offline accept's enforcement happens at a separate invocation, so it
-        // must be written). Carried in the inviter's namespace, distinct from
-        // payload.receive. Omitted -- and reconciled lazily -- when the invitation
-        // carried no disclosed subset (an older or metadata-unknown mint).
+        // exchange` enforces it. Offline accept's enforcement happens at a separate
+        // invocation, so it must be written here; the online path persists the same
+        // set into its own fresh config (via runOnlineBootstrap above) in addition to
+        // enforcing it in memory for its single run. Carried in the inviter's
+        // namespace, distinct from payload.receive. Omitted -- and reconciled lazily
+        // -- when the invitation carried no disclosed subset (an older or
+        // metadata-unknown mint).
         ...(ready.token.disclosedPayloadColumns !== undefined
           ? { expectedPayloadColumns: ready.token.disclosedPayloadColumns }
           : {}),

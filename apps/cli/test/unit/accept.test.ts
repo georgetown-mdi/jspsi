@@ -31,6 +31,18 @@ vi.mock("../../src/util/cli", async () => {
   return { ...actual, promptConfirm: vi.fn() };
 });
 
+// Mock only runOnlineBootstrap, so the online-handler wiring can be asserted
+// without opening a connection or running a real exchange; every other bootstrap
+// export (generateSharedSecret, and the buildDataSpec/connectionFromURL/
+// prepareForOnlineExchange chain validateAccept drives) is the genuine
+// implementation.
+vi.mock("../../src/commands/bootstrap", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../src/commands/bootstrap")
+  >("../../src/commands/bootstrap");
+  return { ...actual, runOnlineBootstrap: vi.fn() };
+});
+
 import {
   decodeAndValidateInvitation,
   displayInvitation,
@@ -38,7 +50,10 @@ import {
   resolveAcceptPositionals,
   validateAccept,
 } from "../../src/commands/accept";
-import { generateSharedSecret } from "../../src/commands/bootstrap";
+import {
+  generateSharedSecret,
+  runOnlineBootstrap,
+} from "../../src/commands/bootstrap";
 import type { CommonBootstrapOptions } from "../../src/commands/bootstrap";
 import { saveConfig } from "../../src/config";
 import { promptConfirm } from "../../src/util/cli";
@@ -1348,6 +1363,52 @@ test("handler: without --consent-to-terms the prompt runs and a decline writes n
     expect(fs.existsSync(keyFile)).toBe(false);
   } finally {
     exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- handler: online accept threads the token lock-in to the persistence layer
+
+test("handler: online accept forwards the token's disclosed set to runOnlineBootstrap", async () => {
+  // The one wiring this task adds on the accept side: the online handler must pass
+  // token.disclosedPayloadColumns to runOnlineBootstrap as
+  // expectedReceivedPayloadColumns, so the fresh config persists the consented
+  // received-column lock-in (runOnlineBootstrap's own tests cover the write). It is
+  // mocked here so no connection is opened; --consent-to-terms skips the prompt.
+  const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+  const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+  runOnlineBootstrapMock.mockResolvedValue({ configWriteError: undefined });
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    const encoded = await encodeInvitation({
+      ...sampleToken(FUTURE()),
+      disclosedPayloadColumns: ["diagnosis", "notes"],
+    });
+    await acceptHandler({
+      _: [],
+      $0: "psilink",
+      args: ["sftp://host/drop", encoded, input],
+      "consent-to-terms": true,
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).not.toHaveBeenCalled();
+    expect(runOnlineBootstrapMock).toHaveBeenCalledTimes(1);
+    const passed = runOnlineBootstrapMock.mock.calls[0][0];
+    expect(passed.expectedReceivedPayloadColumns).toEqual([
+      "diagnosis",
+      "notes",
+    ]);
+    // A fresh (non-reuse) config, so the lock-in is actually written.
+    expect(passed.reuseExistingConfig).toBe(false);
+  } finally {
+    exit.mockRestore();
+    // Module-level mock: reset so no later test inherits this call/impl.
+    runOnlineBootstrapMock.mockReset();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

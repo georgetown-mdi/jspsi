@@ -12,6 +12,8 @@ import {
   INFER_DATE_SCAN_CAP,
   MAX_PAYLOAD_ENTRIES,
   MAX_RECONNECT_ATTEMPTS,
+  parseExchangeSpec,
+  reconcileReceivedPayload,
   safeParseConnectionConfig,
   SHARED_SECRET_REGEX,
   UsageError,
@@ -19,6 +21,7 @@ import {
 import type {
   ConnectionConfig,
   ConnectionEndpoint,
+  PartnerPayload,
   PreparedExchange,
   SFTPConnectionConfig,
 } from "@psilink/core";
@@ -1581,6 +1584,123 @@ test("runOnlineBootstrap keeps a failed observed-payload write non-fatal", async
     // The second write genuinely failed (the swapped-in directory is intact),
     // proving the non-fatal catch fired rather than the write silently succeeding.
     expect(fs.statSync(configPath).isDirectory()).toBe(true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- runOnlineBootstrap: up-front token received-payload lock-in (accept) -----
+
+test("runOnlineBootstrap persists the acceptor's up-front token received set into the fresh config", async () => {
+  // The online ACCEPTOR knows the columns it consented to receive up front from the
+  // token, so the set rides the acceptance hook's FIRST write (no observation
+  // needed, unlike the inviter's observe-then-persist second write above). A later
+  // `psilink exchange` then locks it in and fails closed on a divergent payload.
+  mockSuccessfulExchange(undefined); // acceptor learns nothing by observation
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      expectedReceivedPayloadColumns: ["diagnosis", "notes"],
+    });
+    const written = YAML.parse(fs.readFileSync(configPath, "utf8"));
+    expect(written.expected_payload_columns).toEqual(["diagnosis", "notes"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap persists an empty token set as a strict receive-nothing lock-in", async () => {
+  // Unlike the observe path (which drops an ambiguous empty observation), an empty
+  // DISCLOSED subset carried by the token is a real "receive nothing" lock-in the
+  // operator consented to: a later non-empty payload must abort, so the empty set is
+  // written rather than left lazy.
+  mockSuccessfulExchange(undefined);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      expectedReceivedPayloadColumns: [],
+    });
+    const written = YAML.parse(fs.readFileSync(configPath, "utf8"));
+    expect(written.expected_payload_columns).toEqual([]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap omits the received lock-in when the acceptor passes no token set", async () => {
+  // A subset-less invitation (an older or metadata-unknown mint) carries no disclosed
+  // set, so the acceptor passes undefined and the fresh config records no lock-in --
+  // the recurring exchange reconciles lazily, unchanged from before this task.
+  mockSuccessfulExchange(undefined);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    await runOnlineBootstrap(onlineBootstrapParams(configPath));
+    const written = YAML.parse(fs.readFileSync(configPath, "utf8"));
+    expect(written.expected_payload_columns).toBeUndefined();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap does not inject the token lock-in onto a reused pre-existing config", async () => {
+  // With reuseExistingConfig the hook keeps the operator's config untouched, so even
+  // with the acceptor's token set present no lock-in is written into their config --
+  // the reconcile step already confirmed the pre-existing config agrees.
+  mockSuccessfulExchange(undefined);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(configPath, "preexisting: true\n");
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      reuseExistingConfig: true,
+      expectedReceivedPayloadColumns: ["diagnosis", "notes"],
+    });
+    // The operator's config is left exactly as it was.
+    expect(fs.readFileSync(configPath, "utf8")).toBe("preexisting: true\n");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the persisted online-accept lock-in drives fail-closed recurring enforcement", async () => {
+  // End to end: the online accept writes expected_payload_columns from the token; a
+  // later `psilink exchange` reloads that config (parseExchangeSpec) and locks the
+  // set into reconcileReceivedPayload, which PASSES on a matching received payload
+  // and ABORTS on a divergent one -- the same guarantee the offline-accept and
+  // up-front-locked cases give.
+  mockSuccessfulExchange(undefined);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  try {
+    await runOnlineBootstrap({
+      ...onlineBootstrapParams(configPath),
+      expectedReceivedPayloadColumns: ["diagnosis", "notes"],
+    });
+    // Reload exactly as a recurring `psilink exchange` would, from the on-disk file.
+    const reloaded = parseExchangeSpec(
+      YAML.parse(fs.readFileSync(configPath, "utf8")),
+    );
+    const lockIn = reloaded.expectedPayloadColumns;
+    expect(lockIn).toEqual(["diagnosis", "notes"]);
+    const received = (columns: string[]): PartnerPayload => ({
+      columns,
+      rowIndices: [],
+      rows: [],
+    });
+    // Matching payload (order-insensitive) reconciles cleanly.
+    expect(() =>
+      reconcileReceivedPayload(received(["notes", "diagnosis"]), lockIn),
+    ).not.toThrow();
+    // A divergent payload aborts the exchange, fail-closed.
+    expect(() =>
+      reconcileReceivedPayload(received(["diagnosis", "ssn"]), lockIn),
+    ).toThrow(/payload disclosure mismatch/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
