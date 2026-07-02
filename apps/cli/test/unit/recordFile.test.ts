@@ -28,14 +28,14 @@ vi.mock("@psilink/core", async (importActual) => {
 
 import {
   parseExchangeRecord,
-  parseOpeningData,
+  parseVerificationKeys,
   type ExchangeRecord,
-  type OpeningData,
+  type VerificationKeys,
 } from "@psilink/core";
 
 import {
   defaultRecordPath,
-  openingPathFor,
+  keysPathFor,
   recordPathsFor,
   resolveRecordOutput,
   writeExchangeRecord,
@@ -52,7 +52,7 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-// A minimal but schema-valid record + opening pair to write to disk.
+// A minimal but schema-valid record + verification-keys pair to write to disk.
 const record: ExchangeRecord = {
   version: "psilink-exchange-record/v1",
   createdAt: "2026-01-02T03:04:05.000Z",
@@ -74,17 +74,11 @@ const record: ExchangeRecord = {
   },
 };
 
-const opening: OpeningData = {
-  version: "psilink-exchange-opening/v1",
-  commitments: {
-    localPayloadSent: {
-      salt: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
-      data: { columns: [], rowIndices: [], rows: [] },
-    },
-    partnerPayloadReceived: {
-      salt: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
-      data: { columns: [], rowIndices: [], rows: [] },
-    },
+const keys: VerificationKeys = {
+  version: "psilink-exchange-keys/v1",
+  salts: {
+    localPayloadSent: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+    partnerPayloadReceived: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
   },
 };
 
@@ -95,14 +89,14 @@ test("defaultRecordPath is a filesystem-safe timestamped path in the cwd", () =>
   expect(path.basename(p)).not.toContain(":");
 });
 
-test("openingPathFor swaps a .json suffix for .opening.json", () => {
-  expect(openingPathFor("/tmp/rec.json")).toBe("/tmp/rec.opening.json");
-  // A leading ./ is preserved so the paired record and opening paths match.
-  expect(openingPathFor("./psilink-record-X.json")).toBe(
-    "./psilink-record-X.opening.json",
+test("keysPathFor swaps a .json suffix for .keys.json", () => {
+  expect(keysPathFor("/tmp/rec.json")).toBe("/tmp/rec.keys.json");
+  // A leading ./ is preserved so the paired record and keys paths match.
+  expect(keysPathFor("./psilink-record-X.json")).toBe(
+    "./psilink-record-X.keys.json",
   );
   // No .json suffix: append rather than mangle.
-  expect(openingPathFor("/tmp/rec")).toBe("/tmp/rec.opening.json");
+  expect(keysPathFor("/tmp/rec")).toBe("/tmp/rec.keys.json");
 });
 
 test("resolveRecordOutput returns undefined when disabled", () => {
@@ -126,12 +120,12 @@ test("resolveRecordOutput keeps an explicit record file, else selects the defaul
   });
 });
 
-test("recordPathsFor uses an explicit path verbatim and derives the opening", () => {
+test("recordPathsFor uses an explicit path verbatim and derives the keys path", () => {
   expect(
     recordPathsFor({ recordFile: "/tmp/a.json" }, "2026-01-02T03:04:05.000Z"),
   ).toEqual({
     recordFilePath: "/tmp/a.json",
-    openingFilePath: "/tmp/a.opening.json",
+    keysFilePath: "/tmp/a.keys.json",
   });
 });
 
@@ -140,27 +134,27 @@ test("recordPathsFor stamps the default path with the record's createdAt", () =>
   // clock read, so the filename matches the timestamp recorded inside the file.
   expect(recordPathsFor({}, "2026-06-06T01:02:03.456Z")).toEqual({
     recordFilePath: "./psilink-record-2026-06-06T01-02-03-456Z.json",
-    openingFilePath: "./psilink-record-2026-06-06T01-02-03-456Z.opening.json",
+    keysFilePath: "./psilink-record-2026-06-06T01-02-03-456Z.keys.json",
   });
 });
 
 test("writeExchangeRecord writes both files, parseable and owner-only", () => {
   const recordFilePath = path.join(dir, "rec.json");
-  const openingFilePath = openingPathFor(recordFilePath);
-  writeExchangeRecord({ recordFile: recordFilePath }, record, opening, "test");
+  const keysFilePath = keysPathFor(recordFilePath);
+  writeExchangeRecord({ recordFile: recordFilePath }, record, keys, "test");
 
   // Both files exist and round-trip through the schema parsers.
   expect(
     parseExchangeRecord(JSON.parse(fs.readFileSync(recordFilePath, "utf8"))),
   ).toEqual(record);
   expect(
-    parseOpeningData(JSON.parse(fs.readFileSync(openingFilePath, "utf8"))),
-  ).toEqual(opening);
+    parseVerificationKeys(JSON.parse(fs.readFileSync(keysFilePath, "utf8"))),
+  ).toEqual(keys);
 
   // Owner-only permissions on POSIX (mirrors saveKeyFile).
   if (process.platform !== "win32") {
     expect(fs.statSync(recordFilePath).mode & 0o077).toBe(0);
-    expect(fs.statSync(openingFilePath).mode & 0o077).toBe(0);
+    expect(fs.statSync(keysFilePath).mode & 0o077).toBe(0);
   }
 });
 
@@ -172,12 +166,7 @@ test("writeExchangeRecord is non-fatal when the destination is unwritable", () =
   fs.writeFileSync(blocker, "x");
   const recordFilePath = path.join(blocker, "rec.json"); // parent is a file
   expect(() =>
-    writeExchangeRecord(
-      { recordFile: recordFilePath },
-      record,
-      opening,
-      "test",
-    ),
+    writeExchangeRecord({ recordFile: recordFilePath }, record, keys, "test"),
   ).not.toThrow();
   expect(fs.existsSync(recordFilePath)).toBe(false);
   // The non-fatal failure is surfaced as a WARN (asserting it both proves the

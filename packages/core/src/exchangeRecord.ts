@@ -54,8 +54,8 @@ import type { Algorithm, AssociationTable } from "./types.js";
  */
 export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v1";
 
-/** The one recognized format version for v1 {@link OpeningData}. */
-export const EXCHANGE_OPENING_VERSION = "psilink-exchange-opening/v1";
+/** The one recognized format version for v1 {@link VerificationKeys}. */
+export const EXCHANGE_KEYS_VERSION = "psilink-exchange-keys/v1";
 
 // --- Commitment scheme -------------------------------------------------------
 
@@ -68,8 +68,8 @@ export const SALT_BYTES = 32;
 
 /** The data sets a record commits to. The literal is the domain-separation
  * label folded into the commitment so a commitment of one kind can never verify
- * as another, and the key under which the commitment and its opening are stored
- * in the record and opening files. */
+ * as another, and the key under which the commitment and its salt are stored
+ * in the record and verification-keys files. */
 export type CommitmentName =
   | "associationTable"
   | "localPayloadSent"
@@ -83,8 +83,14 @@ export type CommitmentName =
 // parties' commitments to the same logical payload (a sender's localPayloadSent
 // and the receiver's partnerPayloadReceived) are never equal as strings: the
 // label differs and each uses a fresh per-commitment salt. So a future
-// cross-verification compares the opened data snapshots -- byte-identical by
-// construction, see CommittedPayload -- not the commitment strings.
+// cross-verification re-supplies each party's committed data and recomputes the
+// canonical bytes (byte-identical when both re-canonicalize the same logical data
+// under the fixed RFC 8785 rules; see CommittedPayload) rather than comparing
+// commitment strings. Recomputing the OTHER party's commitment also needs that
+// party's salt -- the label and the salt both differ -- so it is not derivable
+// from one's own record alone. The verification keys carry only the salts, never
+// a data snapshot, so the data is re-supplied at verify time; see
+// VerificationKeys.
 const COMMITMENT_DOMAINS: Record<CommitmentName, string> = {
   associationTable: "psilink-commit-association-table/v1",
   localPayloadSent: "psilink-commit-payload-sent/v1",
@@ -128,27 +134,42 @@ export async function computeCommitment(
 }
 
 /**
- * Verify that `opening` opens `expectedValue` for a commitment of the given
- * kind: recompute the commitment from the opening's salt and data and compare
- * (constant-time) against the stored base64url value. Returns `false` for a
- * tampered data set, a wrong salt, or any other mismatch.
+ * Verify that `salt` and the re-supplied `data` open `expectedValue` for a
+ * commitment of the given kind: recompute the commitment from the salt and data
+ * and compare (constant-time) against the stored base64url value. Returns
+ * `false` for a tampered data set, a wrong salt, or any other mismatch.
+ *
+ * The `data` is re-supplied by the caller (from the holder's own retained input
+ * and result), not read from a stored snapshot -- the verification keys carry
+ * only salts. The caller must reproduce the exact canonical bytes the commitment
+ * was computed over (the record format's `CommittedPayload` / association-table
+ * shape; see docs/spec/CANONICAL_ENCODING.md), or verification fails even for a
+ * genuine opening.
+ *
+ * Fail-safe: the contract is a boolean verdict, never an exception. A malformed
+ * base64url salt/commitment, or re-supplied `data` outside the canonical encoding
+ * domain, is treated as a mismatch (`false`) rather than throwing -- so the
+ * eventual untrusted-record verifier can feed hostile input here and always get a
+ * verdict. It only ever returns `true` on a genuine constant-time HMAC match.
  */
 export async function verifyCommitmentOpening(
   name: CommitmentName,
-  opening: CommitmentOpening,
+  salt: string,
+  data: CanonicalValue,
   expectedValue: string,
 ): Promise<boolean> {
-  let expected: Uint8Array<ArrayBuffer>;
-  let salt: Uint8Array<ArrayBuffer>;
   try {
-    expected = fromBase64Url(expectedValue);
-    salt = fromBase64Url(opening.salt);
+    const expected = fromBase64Url(expectedValue);
+    const saltBytes = fromBase64Url(salt);
+    const actual = await computeCommitment(name, saltBytes, data);
+    return bytesEqual(actual, expected);
   } catch {
-    // A malformed base64url commitment or salt cannot match anything.
+    // A malformed base64url commitment/salt, or re-supplied data outside the
+    // canonical encoding domain, cannot open any commitment: a mismatch, not a
+    // throw. bytesEqual itself does not throw, so a `true` return still means a
+    // genuine match.
     return false;
   }
-  const actual = await computeCommitment(name, salt, opening.data);
-  return bytesEqual(actual, expected);
 }
 
 // --- Agreed-terms hash -------------------------------------------------------
@@ -193,7 +214,7 @@ export async function computeTermsHash(
   return toBase64Url(digest);
 }
 
-// --- Record and opening types ------------------------------------------------
+// --- Record and verification-keys types --------------------------------------
 
 /** Base64url commitment values keyed by {@link CommitmentName}. The local
  * payload sent and the partner payload received are always present (committing
@@ -368,54 +389,37 @@ export interface ExchangeRecord {
   commitments: ExchangeRecordCommitments;
 }
 
-/** The opening of a single commitment: the secret salt plus the exact data the
- * commitment was computed over, which together reveal (and prove) the
- * commitment later. */
-export interface CommitmentOpening {
+/** Per-commitment salts, keyed by {@link CommitmentName}, mirroring the record's
+ * commitments. Each salt is the secret HMAC key for its commitment; the local
+ * payload sent and partner payload received are always present, the association
+ * table only when this party committed it. */
+export interface CommitmentSalts {
   /** Base64url per-commitment salt (>= 128 bits). */
-  salt: string;
-  /** The canonical data set the commitment was computed over. */
-  data: CanonicalValue;
-}
-
-/** Openings keyed by {@link CommitmentName}, mirroring the record's
- * commitments. */
-export interface OpeningDataCommitments {
-  localPayloadSent: CommitmentOpening;
-  partnerPayloadReceived: CommitmentOpening;
-  associationTable?: CommitmentOpening;
+  localPayloadSent: string;
+  partnerPayloadReceived: string;
+  associationTable?: string;
 }
 
 /**
- * The private opening material for an {@link ExchangeRecord}: the per-commitment
- * salts and a snapshot of the committed data. Anyone holding this can recompute
- * the commitments, so it is as sensitive as the matched data itself and must be
- * kept private; the record is the part that is safe to share.
- */
-export interface OpeningData {
-  version: typeof EXCHANGE_OPENING_VERSION;
-  commitments: OpeningDataCommitments;
-}
-
-/**
- * The combined exchange-record file: the shareable {@link ExchangeRecord} under
- * `public` and the private {@link OpeningData} under `private`, in one JSON file.
- * The web app offers this as a single download rather than two separate files --
- * auditing is rare, so two artifacts to track is excessive. Because it embeds the
- * private opening, the whole file is as sensitive as the matched data and must be
- * kept private (it is not the "safe to share" record alone). The CLI still writes
- * the two parts as separate files for now; unifying the two surfaces (and the
- * separate question of stripping the opening's redundant data) is deferred.
+ * The private verification keys for an {@link ExchangeRecord}: the per-commitment
+ * salts and NOTHING ELSE. A salt is a secret HMAC key, not committed data, so --
+ * unlike an earlier self-contained design that also snapshotted the data -- these
+ * keys are NOT a second at-rest copy of the matched data: they carry no payload
+ * values and no matched-record pairing. The matched data lives only in the result
+ * the operator chose to write, never in this file.
  *
- * Write-only for now: there is no `parseExchangeRecordFile`, because nothing reads
- * a combined file back. A reader that ever needs to validate one should parse the
- * untrusted body through `parseBoundedJson` and then validate each part with
- * {@link parseExchangeRecord} (on `public`) and {@link parseOpeningData} (on
- * `private`), rather than feeding the whole file to a single parser.
+ * They are still private, not shareable: a salt together with the record's
+ * commitment can brute-force a low-entropy committed value (notably the
+ * intersection), so anyone holding both the keys and the record could open the
+ * commitments. Verification therefore re-supplies the committed data (from the
+ * holder's own retained input and result) and recomputes the canonical bytes;
+ * see {@link verifyRecordCommitments}. The keys and the record are separate
+ * artifacts on both surfaces (the CLI writes two files; the web offers two
+ * downloads), so the record stays safe to hand an auditor without the keys.
  */
-export interface ExchangeRecordFile {
-  public: ExchangeRecord;
-  private: OpeningData;
+export interface VerificationKeys {
+  version: typeof EXCHANGE_KEYS_VERSION;
+  salts: CommitmentSalts;
 }
 
 // --- Schemas -----------------------------------------------------------------
@@ -426,23 +430,6 @@ export interface ExchangeRecordFile {
 const base64UrlSchema = z
   .string()
   .regex(/^[A-Za-z0-9_-]+$/, "must be an unpadded base64url string");
-
-// Any value inside the canonical encoding domain. Validated by attempting the
-// canonical encoding (which rejects out-of-domain values) rather than by
-// structural shape, so the commitment scheme stays agnostic to the committed
-// data's shape.
-const canonicalValueSchema: z.ZodType<CanonicalValue> =
-  z.custom<CanonicalValue>(
-    (value) => {
-      try {
-        canonicalBytes(value);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    { message: "must be a value within the canonical encoding domain" },
-  );
 
 // Both the intersection size and the records-exposed count are non-negative safe
 // integers; share one constraint so the two count fields validate identically.
@@ -535,21 +522,15 @@ const ExchangeRecordSchema: z.ZodType<ExchangeRecord> = z.object({
   commitments: ExchangeRecordCommitmentsSchema,
 });
 
-const CommitmentOpeningSchema: z.ZodType<CommitmentOpening> = z.object({
-  salt: base64UrlSchema,
-  data: canonicalValueSchema,
+const CommitmentSaltsSchema: z.ZodType<CommitmentSalts> = z.object({
+  localPayloadSent: base64UrlSchema,
+  partnerPayloadReceived: base64UrlSchema,
+  associationTable: base64UrlSchema.optional(),
 });
 
-const OpeningDataCommitmentsSchema: z.ZodType<OpeningDataCommitments> =
-  z.object({
-    localPayloadSent: CommitmentOpeningSchema,
-    partnerPayloadReceived: CommitmentOpeningSchema,
-    associationTable: CommitmentOpeningSchema.optional(),
-  });
-
-const OpeningDataSchema: z.ZodType<OpeningData> = z.object({
-  version: z.literal(EXCHANGE_OPENING_VERSION),
-  commitments: OpeningDataCommitmentsSchema,
+const VerificationKeysSchema: z.ZodType<VerificationKeys> = z.object({
+  version: z.literal(EXCHANGE_KEYS_VERSION),
+  salts: CommitmentSaltsSchema,
 });
 
 // --- Build -------------------------------------------------------------------
@@ -627,10 +608,10 @@ export interface ExchangeRecordRandomness {
 }
 
 /** The two artifacts {@link buildExchangeRecord} produces: the shareable record
- * and its private opening data. */
+ * and its private verification keys. */
 export interface BuiltExchangeRecord {
   record: ExchangeRecord;
-  opening: OpeningData;
+  keys: VerificationKeys;
 }
 
 /**
@@ -734,17 +715,15 @@ function governanceFromTerms(
 }
 
 /**
- * Build the self-attested {@link ExchangeRecord} and its {@link OpeningData}
+ * Build the self-attested {@link ExchangeRecord} and its {@link VerificationKeys}
  * from the end-of-exchange inputs. Generates a fresh binding nonce and a fresh
  * salt per commitment (unless `randomness` injects them), commits to each data
  * set, and hashes the agreed terms. No private key and no network round-trip.
  *
- * The returned opening references each input `data` set directly rather than
- * deep-copying it, so callers must not mutate the inputs after this resolves.
- * The commitment bytes are computed before the opening is assembled, so a later
- * mutation cannot change them: a divergent snapshot would fail commitment
- * verification rather than corrupt the record silently. All current callers pass
- * freshly built, non-mutated payloads.
+ * The returned keys hold only the salts, never the committed `data`, so the
+ * inputs are not retained past this call and neither artifact is a second copy
+ * of the matched data. The commitment bytes are computed here from the inputs;
+ * verification later re-supplies the same data (see {@link verifyRecordCommitments}).
  */
 export async function buildExchangeRecord(
   inputs: ExchangeRecordInputs,
@@ -763,13 +742,12 @@ export async function buildExchangeRecord(
     });
 
   const recordCommitments: Partial<Record<CommitmentName, string>> = {};
-  const openingCommitments: Partial<Record<CommitmentName, CommitmentOpening>> =
-    {};
+  const commitmentSalts: Partial<Record<CommitmentName, string>> = {};
   for (const { name, data } of datasets) {
     const salt = randomness?.salts[name] ?? randomBytes(SALT_BYTES);
     const value = await computeCommitment(name, salt, data);
     recordCommitments[name] = toBase64Url(value);
-    openingCommitments[name] = { salt: toBase64Url(salt), data };
+    commitmentSalts[name] = toBase64Url(salt);
   }
 
   const bindingNonce = randomness?.bindingNonce ?? randomBytes(SALT_BYTES);
@@ -838,11 +816,11 @@ export async function buildExchangeRecord(
     bindingNonce: toBase64Url(bindingNonce),
     commitments: recordCommitments as ExchangeRecordCommitments,
   };
-  const opening: OpeningData = {
-    version: EXCHANGE_OPENING_VERSION,
-    commitments: openingCommitments as OpeningDataCommitments,
+  const keys: VerificationKeys = {
+    version: EXCHANGE_KEYS_VERSION,
+    salts: commitmentSalts as CommitmentSalts,
   };
-  return { record, opening };
+  return { record, keys };
 }
 
 // --- Serialize / parse -------------------------------------------------------
@@ -851,9 +829,7 @@ export async function buildExchangeRecord(
 // ordinary, human-readable JSON file, NOT the canonical encoding (which is only
 // for the bytes that are hashed, committed, or -- in a later phase -- signed).
 // Shared by the CLI and the web app so both write byte-identical files.
-function serialize(
-  value: ExchangeRecord | OpeningData | ExchangeRecordFile,
-): string {
+function serialize(value: ExchangeRecord | VerificationKeys): string {
   return JSON.stringify(value, null, 2) + "\n";
 }
 
@@ -862,15 +838,9 @@ export function serializeExchangeRecord(record: ExchangeRecord): string {
   return serialize(record);
 }
 
-/** Serialize {@link OpeningData} to its on-disk/download string form. */
-export function serializeOpeningData(opening: OpeningData): string {
-  return serialize(opening);
-}
-
-/** Serialize an {@link ExchangeRecordFile} -- the combined public record plus
- * private opening -- to its on-disk/download string form. */
-export function serializeExchangeRecordFile(file: ExchangeRecordFile): string {
-  return serialize(file);
+/** Serialize {@link VerificationKeys} to its on-disk/download string form. */
+export function serializeVerificationKeys(keys: VerificationKeys): string {
+  return serialize(keys);
 }
 
 /**
@@ -884,26 +854,32 @@ export function parseExchangeRecord(raw: unknown): ExchangeRecord {
 }
 
 /**
- * Parse and validate {@link OpeningData} from a raw value.
+ * Parse and validate {@link VerificationKeys} from a raw value.
  *
  * @throws {z.ZodError} if validation fails.
  */
-export function parseOpeningData(raw: unknown): OpeningData {
-  return OpeningDataSchema.parse(raw);
+export function parseVerificationKeys(raw: unknown): VerificationKeys {
+  return VerificationKeysSchema.parse(raw);
 }
 
 // --- Verify ------------------------------------------------------------------
 
 /** Per-commitment verdicts from {@link verifyRecordCommitments}, keyed by
- * {@link CommitmentName}. A commitment is valid when the opening recomputes to
- * the stored value. */
+ * {@link CommitmentName}. A commitment is valid when its salt and the re-supplied
+ * data recompute to the stored value. */
 export type RecordCommitmentVerdicts = Partial<Record<CommitmentName, boolean>>;
 
 /**
- * Verify that every commitment present in `record` has a matching opening in
- * `opening` that recomputes to the stored value. Returns the per-commitment
- * verdicts and an `allValid` flag. A commitment with no opening (or an opening
- * with no commitment) is a mismatch.
+ * Verify that every commitment present in `record` opens against the salt in
+ * `keys` and the re-supplied committed `data`. Returns the per-commitment
+ * verdicts and an `allValid` flag. A commitment with no salt, with no re-supplied
+ * data, or a salt with no commitment, is a mismatch.
+ *
+ * `data` re-supplies the exact committed data sets, keyed by {@link CommitmentName}:
+ * the verification keys hold only salts, not a snapshot, so the caller provides
+ * the data (from its own retained input and result) and must reproduce the exact
+ * canonical bytes the commitment was computed over. An omitted entry leaves that
+ * commitment unverifiable (reported as a mismatch).
  *
  * This does not verify the agreed-terms hash, which requires re-supplying the
  * terms; full record verification is the verification item's concern. Provided
@@ -912,7 +888,8 @@ export type RecordCommitmentVerdicts = Partial<Record<CommitmentName, boolean>>;
  */
 export async function verifyRecordCommitments(
   record: ExchangeRecord,
-  opening: OpeningData,
+  keys: VerificationKeys,
+  data: Partial<Record<CommitmentName, CanonicalValue>>,
 ): Promise<{ verdicts: RecordCommitmentVerdicts; allValid: boolean }> {
   const names: CommitmentName[] = [
     "localPayloadSent",
@@ -921,7 +898,7 @@ export async function verifyRecordCommitments(
   ];
   // localPayloadSent and partnerPayloadReceived are mandatory in a well-formed
   // record (the schema requires them); the association table is optional. This
-  // function accepts any typed ExchangeRecord/OpeningData, so a value built
+  // function accepts any typed ExchangeRecord/VerificationKeys, so a value built
   // without going through parseExchangeRecord could omit a mandatory commitment.
   // Treat a missing mandatory commitment as invalid rather than vacuously
   // skipping it -- otherwise a record with no commitments at all would report
@@ -934,20 +911,23 @@ export async function verifyRecordCommitments(
   let allValid = true;
   for (const name of names) {
     const value = record.commitments[name];
-    const open = opening.commitments[name];
-    if (value === undefined && open === undefined) {
+    const salt = keys.salts[name];
+    const supplied = data[name];
+    if (value === undefined && salt === undefined) {
       if (mandatory.has(name)) {
         verdicts[name] = false;
         allValid = false;
       }
       continue;
     }
-    if (value === undefined || open === undefined) {
+    // A commitment without its salt, a salt without its commitment, or a
+    // commitment whose data was not re-supplied cannot be verified: mismatch.
+    if (value === undefined || salt === undefined || supplied === undefined) {
       verdicts[name] = false;
       allValid = false;
       continue;
     }
-    const ok = await verifyCommitmentOpening(name, open, value);
+    const ok = await verifyCommitmentOpening(name, salt, supplied, value);
     verdicts[name] = ok;
     if (!ok) allValid = false;
   }

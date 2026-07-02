@@ -1588,15 +1588,15 @@ export function addCommonBootstrapOptions(
       default: true,
       describe:
         "after a successful exchange, write a self-attested audit record (a " +
-        "local artifact, not a signed receipt) and its private opening file; " +
-        "use --no-record to skip",
+        "local artifact, not a signed receipt) and its private verification " +
+        "keys; use --no-record to skip",
     })
     .option("record-file", {
       type: "string",
       describe:
         "path for the audit record (default: ./psilink-record-<timestamp>." +
-        "json); the private opening data is written alongside it as " +
-        "<name>.opening.json",
+        "json); the private verification keys are written alongside it as " +
+        "<name>.keys.json",
     })
     .option("lockless-rendezvous", {
       type: "boolean",

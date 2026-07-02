@@ -356,14 +356,16 @@ export interface ExchangeResult {
   bootstrap?: ExchangeBootstrapResult;
   /**
    * The self-attested audit record of this exchange (Phase 1 of exchange
-   * receipts) together with its private opening data, produced as a pair. The
+   * receipts) together with its private verification keys, produced as a pair. The
    * `record` holds commitments to the data exchanged plus a non-secret summary
-   * and is safe to retain or share; the `opening` holds the per-commitment salts
-   * and a snapshot of the committed data and is as sensitive as the matched data
-   * itself. The caller (CLI or web) persists both. See {@link buildExchangeRecord}.
+   * and is safe to retain or share; the `keys` hold only the per-commitment salts
+   * -- not a snapshot of the committed data -- so they are not a second copy of the
+   * matched data, but remain private (a salt plus the record's commitment can open
+   * a low-entropy committed value). The caller (CLI or web) persists both. See
+   * {@link buildExchangeRecord}.
    *
    * A single optional field rather than two independent ones so the record and
-   * its opening can never be present apart. Absent only if building the record
+   * its keys can never be present apart. Absent only if building the record
    * threw after the exchange already succeeded, in which case the caller skips
    * persisting -- the record is a secondary audit artifact, so its failure is
    * non-fatal and never discards the exchange result.

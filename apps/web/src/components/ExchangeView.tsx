@@ -17,7 +17,8 @@ import {
   errorMessage,
   prepareForExchange,
   sanitizeForDisplay,
-  serializeExchangeRecordFile,
+  serializeExchangeRecord,
+  serializeVerificationKeys,
 } from "@psilink/core";
 
 import { dialAsAcceptor, listenAsInviter } from "@psi/rendezvous";
@@ -289,7 +290,7 @@ export function ExchangeView(config: ExchangeConfig) {
 
   // Revoke this exchange's object URLs when the component unmounts (or before a
   // replacement set is stored): createObjectURL keeps each Blob alive until it is
-  // revoked, and the combined record blob holds the matched data, so it should not
+  // revoked, and the verification-keys blob is private material, so it should not
   // outlive the page that backs it.
   useEffect(() => {
     if (outputs === undefined) return;
@@ -298,8 +299,10 @@ export function ExchangeView(config: ExchangeConfig) {
       // non-receiving helper); only revoke a URL that was actually created.
       if (outputs.resultsUrl !== undefined)
         window.URL.revokeObjectURL(outputs.resultsUrl);
-      if (outputs.record !== undefined)
+      if (outputs.record !== undefined) {
         window.URL.revokeObjectURL(outputs.record.recordUrl);
+        window.URL.revokeObjectURL(outputs.record.keysUrl);
+      }
     };
   }, [outputs]);
 
@@ -324,7 +327,7 @@ export function ExchangeView(config: ExchangeConfig) {
     const { rawRows, columns } = bundle;
 
     // Pure output-generation half: build the local results file plus the
-    // self-attested record and its private opening data, returning a download URL
+    // self-attested record and its private verification keys, returning a download URL
     // for each. The object URLs are revoked when the component unmounts or the
     // outputs are replaced (see the cleanup effect above).
     const generateOutput = (
@@ -362,26 +365,23 @@ export function ExchangeView(config: ExchangeConfig) {
                 ),
               };
             })();
-      // The combined record is produced only when the audit pair exists; it is
-      // absent if building the record failed after a successful exchange, in which
-      // case the download is intentionally omitted without a blocking alert. The
-      // filename is timestamped per exchange (the record's own createdAt, made
-      // filesystem-safe) so repeated downloads in one session accumulate rather
-      // than collide.
+      // The record downloads are produced only when the audit pair exists; they
+      // are absent if building the record failed after a successful exchange, in
+      // which case the downloads are intentionally omitted without a blocking
+      // alert. The filenames are timestamped per exchange (the record's own
+      // createdAt, made filesystem-safe) so repeated downloads in one session
+      // accumulate rather than collide.
       if (result.audit !== undefined) {
         const stamp = result.audit.record.createdAt.replace(/[:.]/g, "-");
-        // One download: the public record and the private opening packaged in a
-        // single { public, private } JSON file. Because it embeds the private
-        // opening it is as sensitive as the matched data (Status labels it "keep
-        // private").
+        // Two separate downloads, mirroring the CLI's two-file split: the
+        // shareable record (no matched data -- safe to hand an auditor) and the
+        // private verification keys (per-commitment salts only, still kept
+        // private; Status labels them accordingly).
         generated.record = {
-          recordUrl: jsonUrl(
-            serializeExchangeRecordFile({
-              public: result.audit.record,
-              private: result.audit.opening,
-            }),
-          ),
+          recordUrl: jsonUrl(serializeExchangeRecord(result.audit.record)),
           recordFileName: `psilink-record-${stamp}.json`,
+          keysUrl: jsonUrl(serializeVerificationKeys(result.audit.keys)),
+          keysFileName: `psilink-record-${stamp}.keys.json`,
         };
       }
       return generated;
@@ -613,6 +613,8 @@ export function ExchangeView(config: ExchangeConfig) {
             resultWithheld={outputs?.resultWithheld}
             recordFileURL={outputs?.record?.recordUrl}
             recordFileName={outputs?.record?.recordFileName}
+            keysFileURL={outputs?.record?.keysUrl}
+            keysFileName={outputs?.record?.keysFileName}
           />
         </Grid.Col>
         <Grid.Col span={{ base: 12, md: 7 }}>

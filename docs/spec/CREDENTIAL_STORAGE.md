@@ -35,9 +35,9 @@ cannot surface the rename while losing the file's contents. Because each write
 flushes its own directory entry before returning, two sequential writes are
 crash-ordered -- if the second's rename is durable, the first's is too. This is
 the guarantee the self-attested exchange record relies on (it writes the private
-opening file before the summary record, so a crash between the two preserves the
-proof material; see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)), and the one that
-keeps a freshly rotated token from being lost.
+verification-keys file before the summary record, so a crash between the two
+preserves the salts; see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)), and the one
+that keeps a freshly rotated token from being lost.
 
 ## macOS durability
 

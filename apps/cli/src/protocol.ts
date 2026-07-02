@@ -181,8 +181,8 @@ export interface RunProtocolResult {
  * and both produce one of the two values.
  *
  * When `recordOutput` is provided, the self-attested exchange record and its
- * private opening data are written after the results (non-fatal on failure; see
- * {@link writeExchangeRecord}). Pass `undefined` to skip recording.
+ * private verification keys are written after the results (non-fatal on failure;
+ * see {@link writeExchangeRecord}). Pass `undefined` to skip recording.
  *
  * `saveIntent` carries this party's zero-setup `--save` intent into the
  * exchange's in-band bootstrap (see {@link runExchange}). Pass `undefined`
@@ -912,17 +912,12 @@ export async function runProtocol(
     // record could not be built (runExchange returns audit undefined and has
     // already warned -- the exchange still succeeded). It is likewise not reached
     // if the result-CSV write above failed (that await throws to the catch),
-    // which also avoids orphaning the plaintext-opening file on a disk that just
-    // failed mid-write. A withheld result writes no CSV but still records the
-    // exchange (the record is independent of the returned table). The record and
-    // its opening are a single optional field, so one check covers both.
+    // which also avoids orphaning the private verification-keys file on a disk
+    // that just failed mid-write. A withheld result writes no CSV but still
+    // records the exchange (the record is independent of the returned table). The
+    // record and its keys are a single optional field, so one check covers both.
     if (recordOutput !== undefined && audit !== undefined)
-      writeExchangeRecord(
-        recordOutput,
-        audit.record,
-        audit.opening,
-        loggerName,
-      );
+      writeExchangeRecord(recordOutput, audit.record, audit.keys, loggerName);
 
     // bootstrap is undefined on every authenticated path (saveIntent unset) and
     // populated on the zero-setup --save path; the caller branches on it.

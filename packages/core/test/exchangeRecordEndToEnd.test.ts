@@ -3,7 +3,8 @@ import { expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
 
 import { prepareForExchange, runExchange } from "../src/exchange";
-import { verifyRecordCommitments } from "../src/exchangeRecord";
+import { verifyCommitmentOpening } from "../src/exchangeRecord";
+import { toCommittedPayload } from "../src/payloadExchange";
 import {
   ConnectionError,
   createMessagePipe,
@@ -149,12 +150,48 @@ test("both-output: both records agree on terms and carry the result size", async
   expect(resp.record.governance.payloadSent).toEqual([{ name: "note" }]);
   expect(resp.record.governance.payloadReceived).toEqual([{ name: "note" }]);
 
-  // Each record's commitments verify against its own opening data.
+  // Each party's association-table commitment opens against the live returned
+  // table, re-supplied at verify time (the keys carry only salts, never a data
+  // snapshot).
   expect(
-    (await verifyRecordCommitments(init.record, init.opening)).allValid,
+    await verifyCommitmentOpening(
+      "associationTable",
+      init.keys.salts.associationTable!,
+      initiator.associationTable!,
+      init.record.commitments.associationTable!,
+    ),
   ).toBe(true);
   expect(
-    (await verifyRecordCommitments(resp.record, resp.opening)).allValid,
+    await verifyCommitmentOpening(
+      "associationTable",
+      resp.keys.salts.associationTable!,
+      responder.associationTable!,
+      resp.record.commitments.associationTable!,
+    ),
+  ).toBe(true);
+
+  // The received-payload commitment also opens against the LIVE payload each
+  // party got (re-canonicalized via toCommittedPayload), not a build-time
+  // snapshot. This is the end-to-end guard the dropped snapshot used to give: a
+  // regression that swapped the sent/received payloads or corrupted the committed
+  // rows -- while leaving the column names intact -- would fail here even though
+  // the governance-name assertions above would not. localPayloadSent is not
+  // surfaced on the result, so only the received side is checkable live.
+  expect(
+    await verifyCommitmentOpening(
+      "partnerPayloadReceived",
+      init.keys.salts.partnerPayloadReceived,
+      toCommittedPayload(initiator.partnerPayload),
+      init.record.commitments.partnerPayloadReceived,
+    ),
+  ).toBe(true);
+  expect(
+    await verifyCommitmentOpening(
+      "partnerPayloadReceived",
+      resp.keys.salts.partnerPayloadReceived,
+      toCommittedPayload(responder.partnerPayload),
+      resp.record.commitments.partnerPayloadReceived,
+    ),
   ).toBe(true);
 });
 
@@ -307,11 +344,17 @@ test("single-output: result size omitted, but each party records its own exposur
   // Terms hash still matches across parties.
   expect(init.record.termsHash).toBe(resp.record.termsHash);
 
+  // Only the entitled party (the initiator) commits the association table; its
+  // commitment opens against the live returned table, re-supplied at verify time.
+  // The responder is the sender/helper and binds no table (asserted above), so
+  // there is nothing to open on that side.
   expect(
-    (await verifyRecordCommitments(init.record, init.opening)).allValid,
-  ).toBe(true);
-  expect(
-    (await verifyRecordCommitments(resp.record, resp.opening)).allValid,
+    await verifyCommitmentOpening(
+      "associationTable",
+      init.keys.salts.associationTable!,
+      initiator.associationTable!,
+      init.record.commitments.associationTable!,
+    ),
   ).toBe(true);
 });
 

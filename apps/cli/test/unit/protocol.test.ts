@@ -84,7 +84,7 @@ vi.mock("@psilink/core", async (importActual) => {
 import {
   buildOutputTable,
   parseExchangeRecord,
-  parseOpeningData,
+  parseVerificationKeys,
   runExchange,
   PeerAbortError,
   ConnectionError,
@@ -94,7 +94,7 @@ import {
   MESSAGE_HEADER_BYTES,
   AEAD_ENVELOPE_VERSION,
 } from "@psilink/core";
-import type { ExchangeRecord, OpeningData } from "@psilink/core";
+import type { ExchangeRecord, VerificationKeys } from "@psilink/core";
 import {
   runProtocol,
   PEER_SILENCE_GUIDANCE,
@@ -448,11 +448,11 @@ test("authentication=null runs the exchange without authentication and without e
 
 // --- Self-attested record persistence via runProtocol ------------------------
 
-test("writes the self-attested record and opening when runExchange returns an audit", async () => {
+test("writes the self-attested record and verification keys when runExchange returns an audit", async () => {
   // Covers the record-write wiring in runProtocol (the runExchange audit ->
   // writeExchangeRecord call), which the default mock leaves unexercised by
   // returning no audit. Each party's runExchange returns a built audit and is
-  // given its own record output paths; both the record and its opening must land
+  // given its own record output paths; both the record and its keys must land
   // on disk and round-trip the schema parsers.
   const sampleRecord: ExchangeRecord = {
     version: "psilink-exchange-record/v1",
@@ -473,20 +473,14 @@ test("writes the self-attested record and opening when runExchange returns an au
       partnerPayloadReceived: "IFfNSyYoX8tKe2k-o6TjmrS1sW1ndtpZjexzR-fZa5g",
     },
   };
-  const sampleOpening: OpeningData = {
-    version: "psilink-exchange-opening/v1",
-    commitments: {
-      localPayloadSent: {
-        salt: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
-        data: { columns: [], rowIndices: [], rows: [] },
-      },
-      partnerPayloadReceived: {
-        salt: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
-        data: { columns: [], rowIndices: [], rows: [] },
-      },
+  const sampleKeys: VerificationKeys = {
+    version: "psilink-exchange-keys/v1",
+    salts: {
+      localPayloadSent: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+      partnerPayloadReceived: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
     },
   };
-  const audit = { record: sampleRecord, opening: sampleOpening };
+  const audit = { record: sampleRecord, keys: sampleKeys };
 
   // Drain the drop directory exactly as the default mock does (so neither
   // party's cleanup races the other's poller), then return the audit alongside
@@ -499,8 +493,8 @@ test("writes the self-attested record and opening when runExchange returns an au
 
   const recordA = path.join(tmpDir, "rec-a.json");
   const recordB = path.join(tmpDir, "rec-b.json");
-  const openingA = path.join(tmpDir, "rec-a.opening.json");
-  const openingB = path.join(tmpDir, "rec-b.opening.json");
+  const keysA = path.join(tmpDir, "rec-a.keys.json");
+  const keysB = path.join(tmpDir, "rec-b.keys.json");
 
   await Promise.all([
     runProtocol(
@@ -531,16 +525,16 @@ test("writes the self-attested record and opening when runExchange returns an au
     ),
   ]);
 
-  for (const [rec, open] of [
-    [recordA, openingA],
-    [recordB, openingB],
+  for (const [rec, keyPath] of [
+    [recordA, keysA],
+    [recordB, keysB],
   ] as const) {
     expect(
       parseExchangeRecord(JSON.parse(fs.readFileSync(rec, "utf8"))),
     ).toEqual(sampleRecord);
-    expect(parseOpeningData(JSON.parse(fs.readFileSync(open, "utf8")))).toEqual(
-      sampleOpening,
-    );
+    expect(
+      parseVerificationKeys(JSON.parse(fs.readFileSync(keyPath, "utf8"))),
+    ).toEqual(sampleKeys);
   }
 });
 

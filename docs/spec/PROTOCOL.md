@@ -256,7 +256,7 @@ Two checks gate accepting a certificate-backed receipt, and both must pass befor
 
 At the conclusion of every successful exchange, each party produces a self-attested record of what it disclosed -- a local, unsigned audit artifact that stands on its own as a disclosure-log entry, so an operator can populate a HIPAA accounting of disclosures or a FERPA disclosure record without separately retaining and re-matching the original linkage-terms config. It is built from data both sides already hold, so it needs no private key and adds no protocol round-trip. It is explicitly **not** a signed or non-repudiable receipt and **not** evidence against the partner.
 
-The record format itself -- the record and opening file shapes, the format version, the agreed-terms hash, the HMAC commitment scheme, the readable governance metadata, the result-size and per-direction disclosure framing, and the record's privacy properties -- has its own specification: [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md). The deferred signing work reuses that record's commitment scheme and on-disk format.
+The record format itself -- the record and verification-keys file shapes, the format version, the agreed-terms hash, the HMAC commitment scheme, the readable governance metadata, the result-size and per-direction disclosure framing, and the record's privacy properties -- has its own specification: [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md). The deferred signing work reuses that record's commitment scheme and on-disk format.
 
 ## Output
 
