@@ -59,9 +59,9 @@ export const ExchangeSpecSchema = z.object({
   // linkageTerms.payload.receive (which is the negotiated data dictionary and the
   // validateCompatibility send/receive mirror; reusing it would abort against an
   // inviter that advertised no payload.send). Two kinds of writer set it: a party
-  // that learns the set UP FRONT -- an OFFLINE acceptance writes the invitation's
-  // disclosedPayloadColumns here so a later `psilink exchange` enforces what the
-  // operator consented to at accept time -- and a party that learns it only by
+  // that learns the set UP FRONT -- an OFFLINE or ONLINE acceptance writes the
+  // invitation's disclosedPayloadColumns here so a later `psilink exchange` enforces
+  // what the operator consented to at accept time -- and a party that learns it only by
   // OBSERVING a first exchange -- the online inviter and a zero-setup `--save`
   // party crystallize the received set they observed (see
   // observedReceivedColumnsForSave in the CLI). An empty array is a strict "receive
