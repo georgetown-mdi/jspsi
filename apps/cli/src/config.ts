@@ -51,6 +51,12 @@ export interface ConnectionServerOverrides {
   username?: string;
   password?: string;
   privateKey?: string;
+  /**
+   * Passphrase for an encrypted `privateKey`; a companion credential, invalid
+   * without a private key (from this override or the base config). See
+   * {@link applyConnectionOverrides}, which rejects it standalone.
+   */
+  privateKeyPassphrase?: string;
   port?: number;
   /**
    * Outbound (self-written) directory for a split-directory exchange. When set,
@@ -116,7 +122,25 @@ export function applyConnectionOverrides(
       server.password = serverOverrides.password;
     if (serverOverrides.privateKey !== undefined)
       server.privateKey = serverOverrides.privateKey;
+    if (serverOverrides.privateKeyPassphrase !== undefined)
+      server.privateKeyPassphrase = serverOverrides.privateKeyPassphrase;
     if (serverOverrides.port !== undefined) server.port = serverOverrides.port;
+
+    // A passphrase decrypts an encrypted private key and is meaningless without
+    // one. Reject it up front with a flag-named message rather than deferring to
+    // the core schema's config-field wording (its "privateKeyPassphrase is only
+    // valid with privateKey" refine, which this mirrors). The private key may
+    // arrive from --server-private-key (applied just above) or already sit in the
+    // loaded config; either satisfies the precondition.
+    if (
+      server.privateKeyPassphrase !== undefined &&
+      server.privateKey === undefined
+    )
+      throw new UsageError(
+        "--server-private-key-passphrase requires --server-private-key (or a " +
+          "private_key in the configuration): a passphrase decrypts an " +
+          "encrypted private key and has no effect without one.",
+      );
   }
 
   // Tracks whether any override merged into result.options, so the single

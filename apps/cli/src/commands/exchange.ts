@@ -78,6 +78,9 @@ export function builder(cmd: Argv): Argv {
       "server-private-key":
         "SSH private key; use @path to read from file; overrides " +
         "connection.server.privateKey in config",
+      "server-private-key-passphrase":
+        "passphrase for an encrypted SSH private key; use @path to read from " +
+        "file; overrides connection.server.privateKeyPassphrase in config",
       "peer-id":
         "stable identifier for this party; appears in filenames and logs. " +
         "Overrides connection.options.peer_id in config. Requires " +
@@ -169,7 +172,8 @@ function parseArgs(argv: Arguments): ExchangeArgs {
     // @path credential ref here at parse time: it only ever reads a config,
     // never writes one, so there is no reference to preserve and the resolved
     // value is needed immediately for the connection. (server-password /
-    // -private-key are credential values, not paths to tilde-expand.)
+    // -private-key / -private-key-passphrase are credential values, not paths to
+    // tilde-expand.)
     configFile: expandTilde(common.configFile),
     keyFile: expandTilde(common.keyFile),
     recordFile: expandTilde(common.recordFile),
@@ -179,6 +183,12 @@ function parseArgs(argv: Arguments): ExchangeArgs {
     serverPrivateKey: resolveAtSignRefs(common.serverPrivateKey) as
       | string
       | undefined,
+    // Resolved here for the same reason as the sibling credentials above: the
+    // override is layered on after resolveExchangeSpecRefs, so a @path passphrase
+    // would otherwise reach the live connection unresolved.
+    serverPrivateKeyPassphrase: resolveAtSignRefs(
+      common.serverPrivateKeyPassphrase,
+    ) as string | undefined,
     // exchange-specific positionals; not repeatable flags, so they stay plain.
     input: expandTilde(argv["input"] as string),
     output: expandTilde(argv["output"] as string | undefined),

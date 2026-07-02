@@ -338,6 +338,10 @@ const OFFLINE_IGNORED_OVERRIDES: ReadonlyArray<{
   { flag: "--server-username", option: { serverUsername: "alice" } },
   { flag: "--server-password", option: { serverPassword: "hunter2" } },
   { flag: "--server-private-key", option: { serverPrivateKey: "@key.pem" } },
+  {
+    flag: "--server-private-key-passphrase",
+    option: { serverPrivateKeyPassphrase: "@pass.txt" },
+  },
   { flag: "--server-port", option: { serverPort: 2222 } },
   { flag: "--outbound-path", option: { outboundPath: "/drop/out" } },
 ];
@@ -1812,6 +1816,67 @@ test("runOnlineBootstrap persists an @path credential as the reference while con
       connection: SFTPConnectionConfig;
     };
     expect(parsed.connection.server.password).toBe(`@${pwFile}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap persists an @path private-key passphrase as the reference while connecting with the resolved value", async () => {
+  // The encrypted-key end-to-end path: the connection carries an @path private
+  // key and its @path passphrase. saveConfig (in the hook) must write both @path
+  // references, never the resolved secrets, while runProtocol receives the
+  // resolved passphrase to actually unlock the key.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
+  const keyFile = path.join(dir, "id_ed25519");
+  const passFile = path.join(dir, "passphrase");
+  fs.writeFileSync(keyFile, "KEYDATA\n");
+  fs.writeFileSync(passFile, "unlock-me\n");
+  const configPath = path.join(dir, "psilink.yaml");
+
+  let connectionPassedToRunProtocol: SFTPConnectionConfig | undefined;
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    connectionPassedToRunProtocol = callArgs[0] as SFTPConnectionConfig;
+    const onAuthenticated = callArgs.find((a) => typeof a === "function") as
+      | (() => void | Promise<void>)
+      | undefined;
+    await onAuthenticated?.();
+    return {};
+  }) as never);
+
+  try {
+    const params = onlineBootstrapParams(configPath);
+    const connection: SFTPConnectionConfig = {
+      channel: "sftp",
+      server: {
+        host: "sftp.example.org",
+        privateKey: `@${keyFile}`,
+        privateKeyPassphrase: `@${passFile}`,
+        // Pinned so runOnlineBootstrap's first-use host-key step is a no-op and
+        // this test exercises only the credential-resolution seam.
+        hostKeyFingerprint: "SHA256:" + "A".repeat(43),
+      },
+    };
+    await runOnlineBootstrap({ ...params, connection });
+
+    // runProtocol connected with the resolved secrets.
+    expect(connectionPassedToRunProtocol?.server.privateKey).toBe("KEYDATA");
+    expect(connectionPassedToRunProtocol?.server.privateKeyPassphrase).toBe(
+      "unlock-me",
+    );
+
+    // The persisted config records the @path references, not the secrets. On
+    // disk the key is snake_case (private_key_passphrase), so read it as a raw
+    // record rather than the camelCase SFTPConnectionConfig shape.
+    const written = fs.readFileSync(configPath, "utf8");
+    expect(written).not.toContain("unlock-me");
+    expect(written).not.toContain("KEYDATA");
+    const parsed = YAML.parse(written) as {
+      connection: { server: Record<string, unknown> };
+    };
+    expect(parsed.connection.server.private_key).toBe(`@${keyFile}`);
+    expect(parsed.connection.server.private_key_passphrase).toBe(
+      `@${passFile}`,
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

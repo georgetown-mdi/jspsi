@@ -96,6 +96,43 @@ test("resolveConnectionCredentials resolves an @path password and private key", 
   expect(resolved.server.privateKey).toBe("KEYDATA");
 });
 
+test("resolveConnectionCredentials resolves an @path private-key passphrase", () => {
+  // The save-path resolver reads the passphrase for live use while the caller
+  // persists the original @path (see the no-mutation test below); this closes
+  // the gap where a flag-supplied passphrase would otherwise slip through
+  // unresolved on the URL/flag-based flows.
+  const keyFile = path.join(dir, "id_rsa");
+  const passFile = path.join(dir, "phrase");
+  fs.writeFileSync(keyFile, "KEYDATA\n");
+  fs.writeFileSync(passFile, "PHRASE\n");
+  const resolved = resolveConnectionCredentials(
+    sftpConn({
+      host: "h",
+      privateKey: `@${keyFile}`,
+      privateKeyPassphrase: `@${passFile}`,
+    }),
+  ) as SFTPConnectionConfig;
+  expect(resolved.server.privateKey).toBe("KEYDATA");
+  expect(resolved.server.privateKeyPassphrase).toBe("PHRASE");
+});
+
+test("resolveConnectionCredentials preserves the @path passphrase on its input (survives for persistence)", () => {
+  const keyFile = path.join(dir, "id_rsa2");
+  const passFile = path.join(dir, "phrase2");
+  fs.writeFileSync(keyFile, "KEYDATA\n");
+  fs.writeFileSync(passFile, "PHRASE\n");
+  const original = sftpConn({
+    host: "h",
+    privateKey: `@${keyFile}`,
+    privateKeyPassphrase: `@${passFile}`,
+  });
+  const resolved = resolveConnectionCredentials(
+    original,
+  ) as SFTPConnectionConfig;
+  expect(original.server.privateKeyPassphrase).toBe(`@${passFile}`);
+  expect(resolved.server.privateKeyPassphrase).toBe("PHRASE");
+});
+
 test("resolveConnectionCredentials leaves a literal credential unchanged", () => {
   const resolved = resolveConnectionCredentials(
     sftpConn({ host: "h", password: "literal-pw" }),

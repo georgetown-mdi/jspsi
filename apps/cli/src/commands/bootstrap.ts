@@ -1488,6 +1488,7 @@ export type CommonBootstrapDescribeOverrides = Partial<
     | "server-username"
     | "server-password"
     | "server-private-key"
+    | "server-private-key-passphrase"
     | "peer-id"
     | "timestamp-in-filename"
     | "retain-files"
@@ -1550,6 +1551,13 @@ export function addCommonBootstrapOptions(
       describe:
         describe["server-private-key"] ??
         "SSH private key; use @path to read from file",
+    })
+    .option("server-private-key-passphrase", {
+      type: "string",
+      describe:
+        describe["server-private-key-passphrase"] ??
+        "passphrase for an encrypted SSH private key; use @path to read from " +
+          "file; requires --server-private-key",
     })
     .option("connection-timeout", {
       type: "string",
@@ -1656,6 +1664,7 @@ export interface CommonBootstrapOptions {
   serverUsername?: string;
   serverPassword?: string;
   serverPrivateKey?: string;
+  serverPrivateKeyPassphrase?: string;
   connectionTimeout?: number;
   peerTimeout?: number;
   maxReconnectAttempts?: number;
@@ -1704,6 +1713,10 @@ export function parseCommonBootstrapArgs(
     serverPrivateKey: singleValue(argv, "server-private-key") as
       | string
       | undefined,
+    serverPrivateKeyPassphrase: singleValue(
+      argv,
+      "server-private-key-passphrase",
+    ) as string | undefined,
     connectionTimeout: durationFlagSeconds(
       argv,
       "connection-timeout",
@@ -1744,6 +1757,7 @@ export type ConnectionOverrideOptions = Pick<
   | "serverUsername"
   | "serverPassword"
   | "serverPrivateKey"
+  | "serverPrivateKeyPassphrase"
   | "serverPort"
   | "locklessRendezvous"
   | "peerId"
@@ -1769,6 +1783,7 @@ export function connectionOverridesFrom(
       username: options.serverUsername,
       password: options.serverPassword,
       privateKey: options.serverPrivateKey,
+      privateKeyPassphrase: options.serverPrivateKeyPassphrase,
       port: options.serverPort,
       outboundPath: options.outboundPath,
     },
@@ -1847,13 +1862,15 @@ export type OfflineIgnoredServerOverrides = Pick<
   | "serverUsername"
   | "serverPassword"
   | "serverPrivateKey"
+  | "serverPrivateKeyPassphrase"
   | "serverPort"
   | "outboundPath"
 >;
 
 /**
  * Warn that the server-block overrides (`--server-username`, `--server-password`,
- * `--server-private-key`, `--server-port`, and `--outbound-path`) have no effect
+ * `--server-private-key`, `--server-private-key-passphrase`, `--server-port`, and
+ * `--outbound-path`) have no effect
  * on an OFFLINE invite/accept. Those paths write a placeholder (invite) or
  * invitation-endpoint-seeded (accept) connection block for the operator to edit
  * before `psilink exchange`, rather than building a connection from a URL the way
@@ -1871,15 +1888,17 @@ export function warnServerOverridesIgnoredOffline(
   log: { warn: (message: string) => void },
 ): void {
   // Security invariant: push only the flag NAME, never the override value. A
-  // --server-password / --server-private-key value may be an inline secret (or
-  // an unresolved @path), and this warning reaches the terminal and any
-  // --log-file; interpolating a value here would leak it. Keep the emitted
-  // message static apart from this flag-name list.
+  // --server-password / --server-private-key / --server-private-key-passphrase
+  // value may be an inline secret (or an unresolved @path), and this warning
+  // reaches the terminal and any --log-file; interpolating a value here would
+  // leak it. Keep the emitted message static apart from this flag-name list.
   const ignored: string[] = [];
   if (options.serverUsername !== undefined) ignored.push("--server-username");
   if (options.serverPassword !== undefined) ignored.push("--server-password");
   if (options.serverPrivateKey !== undefined)
     ignored.push("--server-private-key");
+  if (options.serverPrivateKeyPassphrase !== undefined)
+    ignored.push("--server-private-key-passphrase");
   if (options.serverPort !== undefined) ignored.push("--server-port");
   if (options.outboundPath !== undefined) ignored.push("--outbound-path");
   if (ignored.length === 0) return;

@@ -216,20 +216,23 @@ function resolveProviderOptionsAtSignRefs(connection: {
 
 /**
  * Resolve `@path` credential references on a connection for live use, returning
- * a clone with the SFTP `server.password` / `server.privateKey` fields read from
- * their referenced files. The input is NOT mutated, so a caller can connect with
- * the resolved clone while persisting the original -- whose `@path` is still in
- * place -- keeping the secret out of `psilink.yaml`. The preserved `@path` is
- * re-resolved (by {@link resolveExchangeSpecRefs}) at the next exchange's config
- * load.
+ * a clone with the SFTP `server.password` / `server.privateKey` /
+ * `server.privateKeyPassphrase` fields read from their referenced files. The
+ * input is NOT mutated, so a caller can connect with the resolved clone while
+ * persisting the original -- whose `@path` is still in place -- keeping the
+ * secret out of `psilink.yaml`. The preserved `@path` is re-resolved (by
+ * {@link resolveExchangeSpecRefs}) at the next exchange's config load.
  *
- * Only those two fields are resolved: they are the sole credential a CLI flag
- * (`--server-password` / `--server-private-key`) or a connection URL can set on
- * the persistence paths (`--save`, `invite`/`accept`). Other `@`-eligible fields
- * (HTTP `bearer`, `turn.credential`, `providerOptions`, ...) are reachable only
- * from a hand-authored config, which {@link resolveExchangeSpecRefs} resolves at
- * load; a future credential flag that persists must be added here. Non-SFTP
- * channels carry no such credential and pass through unchanged.
+ * Only those three fields are resolved: they are the sole credentials a CLI flag
+ * (`--server-password` / `--server-private-key` /
+ * `--server-private-key-passphrase`) or a connection URL can set on the
+ * persistence paths (`--save`, `invite`/`accept`). The passphrase is a companion
+ * to `privateKey` (an encrypted key needs it to decrypt) and follows the same
+ * @-file-in / @-path-at-rest handling as the key itself. Other `@`-eligible
+ * fields (HTTP `bearer`, `turn.credential`, `providerOptions`, ...) are reachable
+ * only from a hand-authored config, which {@link resolveExchangeSpecRefs}
+ * resolves at load; a future credential flag that persists must be added here.
+ * Non-SFTP channels carry no such credential and pass through unchanged.
  */
 export function resolveConnectionCredentials(
   connection: ConnectionConfig,
@@ -241,5 +244,7 @@ export function resolveConnectionCredentials(
     server.password = resolveAtSignRef(server.password);
   if (server.privateKey !== undefined)
     server.privateKey = resolveAtSignRef(server.privateKey);
+  if (server.privateKeyPassphrase !== undefined)
+    server.privateKeyPassphrase = resolveAtSignRef(server.privateKeyPassphrase);
   return resolved;
 }
