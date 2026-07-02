@@ -2,11 +2,18 @@ import { loadCSVFile } from "@psilink/core";
 
 /**
  * Off-main-thread CSV parse for the web app: a browser File above a size threshold
- * is parsed in a Web Worker the app owns, so a large intake (the once-per-exchange
- * invite or accept parse) does not block input or painting while it parses.
- * Everything else -- a small File, or the Node readable stream the unit tests feed
- * generateInvitation -- parses inline, where a worker's spawn and structured-clone
- * hand-off buy nothing.
+ * is parsed in a Web Worker the app owns, so the parse itself (the dominant CPU:
+ * tokenizing, splitting, and building the row objects) runs off the main thread and
+ * the tab stays interactive WHILE a large intake -- the once-per-exchange invite or
+ * accept file -- parses. It is not fully non-blocking: the worker posts the parsed
+ * rows back, and receiving them costs the main thread a structured-clone
+ * deserialization of the row array proportional to the result size (uninterruptible,
+ * on message receipt). So this reduces the intake stall to that hand-off rather than
+ * removing it -- the parse-time freeze is gone, a shorter receive-time cost remains.
+ * Streaming the reply in chunks (the open question #202522668 left) would spread that
+ * cost into smaller stalls but not lower its total. Everything else -- a small File,
+ * or the Node readable stream the unit tests feed generateInvitation -- parses
+ * inline, where a worker's spawn and structured-clone hand-off buy nothing.
  *
  * The worker WRAPS core's {@link loadCSVFile} rather than reimplementing the parse
  * (see {@link ./csvParse.worker}), so the non-string-header guard and the
@@ -32,11 +39,16 @@ export type CSVParseResult = Awaited<ReturnType<typeof loadCSVFile>>;
 /**
  * Byte size above which a browser File's parse moves to the worker. Below it the
  * inline parse is quick enough not to drop a frame, and the worker's spawn plus the
- * structured-clone hand-off (the File in, the parsed rows back) would cost more than
- * it saves. Sized for the modern-workstation execution target and tunable as that
- * profile is measured, the same way `MAX_CSV_FILE_BYTES` and the nonEmptyAggregate
- * thresholds are; it sits well below the 100 MB intake cap the worst-case parse this
- * offloads is bounded by.
+ * structured-clone hand-off would cost more than it saves. The trade-off above it is
+ * not all upside: the worker path removes the parse CPU from the main thread but adds
+ * a serialize-in-worker plus deserialize-on-main round-trip of the whole row set (and
+ * a transient second copy of it in memory during transfer) that the inline path never
+ * pays, so for mid-sized files the net main-thread saving is smaller than the raw
+ * parse cost and could even be marginal. The 4 MiB line is a reasoned default, not a
+ * measured optimum: it is sized for the modern-workstation execution target and
+ * tunable as that profile is measured, the same way `MAX_CSV_FILE_BYTES` and the
+ * nonEmptyAggregate thresholds are; it sits well below the 100 MB intake cap the
+ * worst-case parse this offloads is bounded by.
  */
 export const CSV_WORKER_FILE_BYTE_THRESHOLD = 4 * 1024 * 1024;
 

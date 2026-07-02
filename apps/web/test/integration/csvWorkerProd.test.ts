@@ -191,11 +191,13 @@ describe.skipIf(!hasBuild)(
         const csvPath = writeLargeCsv(tempDir);
         const page = await browser.newPage();
         try {
-          // Record every Web Worker the page constructs. On the quick invite path the
-          // only worker spawned is the CSV parse worker, so at least one worker is
-          // direct evidence the Vite-native worker ran in the bundled build.
-          const workers: Array<unknown> = [];
-          page.on("worker", (worker) => workers.push(worker));
+          // Record the URL of every Web Worker the page constructs. Asserting on the
+          // CSV parse worker's own bundled-asset URL (not merely that some worker
+          // fired) is what proves the Vite-native worker -- and not the inline
+          // fallback or an unrelated worker -- actually ran in the production build:
+          // Vite emits it as `csvParse.worker-<hash>.js`, so its URL carries that name.
+          const workerUrls: Array<string> = [];
+          page.on("worker", (worker) => workerUrls.push(worker.url()));
 
           await page.goto(`http://127.0.0.1:${port}/`, {
             waitUntil: "domcontentloaded",
@@ -225,7 +227,7 @@ describe.skipIf(!hasBuild)(
             .textContent();
           expect(deepLink).toContain("/accept#");
 
-          expect(workers.length).toBeGreaterThanOrEqual(1);
+          expect(workerUrls.some((url) => url.includes("csvParse"))).toBe(true);
         } finally {
           await page.close();
         }
