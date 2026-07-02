@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { getLogger } from "./utils/logger.js";
+import { StandardizationTermsError } from "./errors.js";
 import { sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
 import {
   compileLinearRegex,
@@ -1502,6 +1503,44 @@ export function validateStandardizationAgainstTerms(
   }
 
   return errors;
+}
+
+/**
+ * Fail closed when an AUTHORED ("authoritative") standardization contradicts its
+ * linkage terms -- the throwing wrapper around
+ * {@link validateStandardizationAgainstTerms}, so the mint boundary
+ * (`psilink invite`) and {@link prepareForExchange} refuse an inconsistent config
+ * with one identical, actionable error rather than each inlining the check. The
+ * standardization sibling of `assertPayloadSendDisclosed`.
+ *
+ * Both classes the validator reports -- a transform output naming no declared
+ * linkage field, and an unknown standardization function -- are structurally fatal
+ * for an authoritative config; it reports no advisory class a config might
+ * legitimately carry as a note. Callers gate this on `standardization !== undefined`:
+ * an absent standardization is the terms-only path, reconstructed FROM the terms
+ * (via `getDefaultStandardization`) and so unable to contradict them, and is
+ * deliberately not gated.
+ *
+ * Throws {@link StandardizationTermsError} (a {@link UsageError} subclass: the CLI
+ * classifies it as a configuration error, exit 64; on the web it is the one
+ * prepare-time fault whose message -- naming only the authoring party's own outputs
+ * and functions -- is safe to surface).
+ */
+export function assertStandardizationMatchesTerms(
+  standardization: Standardization,
+  terms: LinkageTerms,
+): void {
+  const inconsistencies = validateStandardizationAgainstTerms(
+    standardization,
+    terms,
+  );
+  if (inconsistencies.length > 0)
+    throw new StandardizationTermsError(
+      "this configuration's standardization is inconsistent with its linkage " +
+        `terms: ${inconsistencies.join("; ")}. Correct the standardization or ` +
+        "the linkage terms so every transform output names a declared linkage " +
+        "field and every step function is known.",
+    );
 }
 
 /**

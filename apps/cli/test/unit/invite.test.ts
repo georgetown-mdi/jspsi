@@ -12,6 +12,7 @@ import {
   getDefaultLinkageTerms,
   getLogger,
   inferMetadata,
+  StandardizationTermsError,
   UsageError,
 } from "@psilink/core";
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
@@ -797,6 +798,33 @@ test("validateInvite: a config's explicit standardization lets an otherwise-unsa
       log: silentLog,
     });
     expect(ready.mode).toBe("offlineFromConfig");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: offline config-source refuses a standardization that contradicts its terms, before minting", async () => {
+  // The mint-boundary counterpart of the exchange-time fail-closed check: a config
+  // whose authored standardization names an output that is no declared linkage
+  // field must be refused BEFORE the token is disclosed, so `invite` never mints a
+  // token the config's own `psilink exchange` would then reject (exit 64). No input
+  // is passed, so this exercises the check in isolation from the input-satisfiability
+  // gate.
+  const terms = defaultTerms();
+  const { dir, configPath, keyPath } = withConfig(terms, [
+    { output: "definitely_not_a_field_xyz", input: "first_name" },
+  ]);
+  try {
+    const invite = () =>
+      validateInvite({
+        resolved: { mode: "offline" },
+        options: testOptions({ configFile: configPath, keyFile: keyPath }),
+        acceptTimeout: 900,
+        log: silentLog,
+      });
+    await expect(invite()).rejects.toThrow(StandardizationTermsError);
+    // The refusal names the offending output, so the operator can fix the config.
+    await expect(invite()).rejects.toThrow(/definitely_not_a_field_xyz/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

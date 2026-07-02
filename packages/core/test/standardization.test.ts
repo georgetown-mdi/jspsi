@@ -6,6 +6,7 @@ import {
   buildStandardizedDataset,
   buildKeyStrings,
   validateStandardizationAgainstTerms,
+  assertStandardizationMatchesTerms,
   describeTransformCoercions,
   unsatisfiedLinkageFields,
   assessLinkageSatisfiability,
@@ -14,6 +15,7 @@ import {
   StandardizedField,
   StandardizedDataset,
 } from "../src/standardization";
+import { StandardizationTermsError } from "../src/errors";
 import * as linearRegex from "../src/utils/linearRegex";
 import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay";
 import { inferMetadata } from "../src/config/metadata";
@@ -1578,6 +1580,31 @@ describe("validateStandardizationAgainstTerms", () => {
     ];
     const std = getDefaultStandardization(md, hostileTerms);
     expect(validateStandardizationAgainstTerms(std, hostileTerms)).toEqual([]);
+  });
+});
+
+describe("assertStandardizationMatchesTerms", () => {
+  test("throws StandardizationTermsError, carrying the inconsistency, on a contradiction", () => {
+    const standardization = [{ output: "nonexistent_field", input: "X" }];
+    expect(() =>
+      assertStandardizationMatchesTerms(standardization, minimalTerms),
+    ).toThrow(StandardizationTermsError);
+    expect(() =>
+      assertStandardizationMatchesTerms(standardization, minimalTerms),
+    ).toThrow(/nonexistent_field/);
+  });
+
+  test("is a no-op on a standardization consistent with its terms", () => {
+    const standardization = [
+      {
+        output: "last_name",
+        input: "LN",
+        steps: [{ function: "to_upper_case" }],
+      },
+    ];
+    expect(() =>
+      assertStandardizationMatchesTerms(standardization, minimalTerms),
+    ).not.toThrow();
   });
 });
 

@@ -4,7 +4,7 @@ import { getDefaultLinkageTerms } from "./defaults/linkageTerms.js";
 import { getDefaultStandardization } from "./defaults/standardization.js";
 import {
   buildStandardizedDataset,
-  validateStandardizationAgainstTerms,
+  assertStandardizationMatchesTerms,
   StandardizedKeyIterable,
 } from "./standardization.js";
 import { columnValues, inferDateFormat } from "./utils/date.js";
@@ -32,8 +32,6 @@ import {
 } from "./payloadExchange.js";
 import type { PayloadWireMessage } from "./payloadExchange.js";
 import { buildExchangeRecord } from "./exchangeRecord.js";
-import { StandardizationTermsError } from "./errors.js";
-
 import type { Metadata } from "./config/metadata.js";
 import type { LinkageTerms } from "./config/linkageTerms.js";
 import type { StandardizedDataset } from "./standardization.js";
@@ -223,34 +221,17 @@ export function prepareForExchange(
     getDefaultStandardization(metadata, linkageTerms, { dateInputFormat });
 
   // Fail closed on an authoritative config whose standardization contradicts its
-  // linkage terms. A config that ships its OWN standardization is authoritative:
-  // an internal contradiction between that standardization and the terms is an
-  // operator error, so reject it here rather than run past it. Both classes
-  // validateStandardizationAgainstTerms reports -- a transform output naming no
-  // linkage field, and an unknown standardization function -- are structurally
-  // fatal for an authoritative config; it reports no advisory class a config
-  // might legitimately carry as a note. The terms-only path (standardization
-  // undefined) has no authored standardization to contradict its terms: it
-  // reconstructs to help via getDefaultStandardization above, so it is
-  // deliberately NOT gated here. StandardizationTermsError (a UsageError
-  // subclass) so the CLI still classifies it as a configuration error (exit 64),
-  // like the assertPayloadSendDisclosed sibling check above; the distinct type
-  // also lets the web surface THIS message verbatim (it names only this party's
-  // own authored outputs/functions, so it is value-free) while keeping the
-  // partner-influenceable payload/disclosure UsageErrors out of that alert.
-  if (exchangeDataSpec.standardization !== undefined) {
-    const inconsistencies = validateStandardizationAgainstTerms(
+  // linkage terms (see assertStandardizationMatchesTerms for the full rationale
+  // and the exit-64 / web-surfacing contract). Gated on an authored
+  // standardization: the terms-only path (undefined) reconstructs one from the
+  // terms via getDefaultStandardization above and so cannot contradict them, and
+  // is deliberately not gated. The same shared assert runs at the `psilink invite`
+  // mint boundary, so `invite` never discloses a token this exchange would refuse.
+  if (exchangeDataSpec.standardization !== undefined)
+    assertStandardizationMatchesTerms(
       exchangeDataSpec.standardization,
       linkageTerms,
     );
-    if (inconsistencies.length > 0)
-      throw new StandardizationTermsError(
-        "this configuration's standardization is inconsistent with its linkage " +
-          `terms: ${inconsistencies.join("; ")}. Correct the standardization or ` +
-          "the linkage terms so every transform output names a declared linkage " +
-          "field and every step function is known.",
-      );
-  }
 
   // Sanitize the key names for display: on the accept side these come from the
   // partner's invitation (charset-unconstrained), and the operator already
