@@ -182,6 +182,62 @@ test("serverPort overrides the connection port", () => {
   expect(result.server.port).toBe(2222);
 });
 
+test("serverPrivateKeyPassphrase applies alongside a private-key override", () => {
+  const result = applyConnectionOverrides(baseSFTP, {
+    server: { privateKey: "@key.pem", privateKeyPassphrase: "@pass.txt" },
+  });
+  if (result.channel !== "sftp") return;
+  expect(result.server.privateKey).toBe("@key.pem");
+  // The literal @path is carried through verbatim (resolved later, at live use),
+  // just like the sibling credential overrides.
+  expect(result.server.privateKeyPassphrase).toBe("@pass.txt");
+});
+
+test("serverPrivateKeyPassphrase applies when the private key is already in the base config", () => {
+  // The exchange path: the passphrase unlocks a private_key the loaded config
+  // already carries, so --server-private-key need not be re-passed to satisfy
+  // the requires-private-key precondition.
+  const base: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "sftp.example.org", privateKey: "@/keys/id_ed25519" },
+  };
+  const result = applyConnectionOverrides(base, {
+    server: { privateKeyPassphrase: "@pass.txt" },
+  });
+  if (result.channel !== "sftp") return;
+  expect(result.server.privateKeyPassphrase).toBe("@pass.txt");
+});
+
+test("a passphrase override with no private key is rejected with a UsageError", () => {
+  // Mirrors the core schema's "privateKeyPassphrase is only valid with
+  // privateKey" refine at the CLI override layer, with a flag-named message so
+  // the operator sees which flag to pair it with.
+  expect(() =>
+    applyConnectionOverrides(baseSFTP, {
+      server: { privateKeyPassphrase: "@pass.txt" },
+    }),
+  ).toThrow(UsageError);
+  // Assert on the requirement phrase, not a bare "--server-private-key": that
+  // bare substring also matches inside "--server-private-key-passphrase", so it
+  // would pass even if the message dropped the requirement clause.
+  expect(() =>
+    applyConnectionOverrides(baseSFTP, {
+      server: { privateKeyPassphrase: "@pass.txt" },
+    }),
+  ).toThrow("requires --server-private-key");
+});
+
+test("a passphrase override is ignored (not an error) off the sftp channel", () => {
+  // The requires-private-key check is sftp-scoped; like the sibling credential
+  // overrides, a passphrase is silently dropped on a channel that carries no
+  // server credentials (filedrop) rather than triggering the check.
+  const base: ConnectionConfig = { channel: "filedrop", path: "/mnt/share" };
+  const result = applyConnectionOverrides(base, {
+    server: { privateKeyPassphrase: "@pass.txt" },
+  });
+  expect(result).toEqual(base);
+});
+
 // --- immutability ------------------------------------------------------------
 
 test("empty overrides object does not change the connection", () => {

@@ -364,6 +364,30 @@ test("createConnection sftp keeps an @path server-private-key as the reference",
   }
 });
 
+test("createConnection sftp keeps an @path server-private-key-passphrase as the reference", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerocred-"));
+  try {
+    const keyFile = path.join(dir, "id_rsa");
+    const passFile = path.join(dir, "passphrase");
+    fs.writeFileSync(keyFile, "KEYDATA\n");
+    fs.writeFileSync(passFile, "unlock-me\n");
+    // The passphrase requires a private key, so both are supplied; the @path of
+    // each survives verbatim for persistence and is read only at live use.
+    const result = createConnection(new URL("sftp://host/path"), {
+      ...baseOptions,
+      serverPrivateKey: `@${keyFile}`,
+      serverPrivateKeyPassphrase: `@${passFile}`,
+    }) as SFTPConnectionConfig;
+    expect(result.server.privateKey).toBe(`@${keyFile}`);
+    expect(result.server.privateKeyPassphrase).toBe(`@${passFile}`);
+    const live = resolveConnectionCredentials(result) as SFTPConnectionConfig;
+    expect(live.server.privateKey).toBe("KEYDATA");
+    expect(live.server.privateKeyPassphrase).toBe("unlock-me");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("createConnection sftp persists a literal server-password unchanged", () => {
   const result = createConnection(new URL("sftp://host/path"), {
     ...baseOptions,
