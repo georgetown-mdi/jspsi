@@ -18,12 +18,13 @@ import * as linearRegex from "../src/utils/linearRegex";
 import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay";
 import { inferMetadata } from "../src/config/metadata";
 import { getDefaultLinkageTerms } from "../src/defaults/linkageTerms";
+import { getDefaultStandardization } from "../src/defaults/standardization";
 import type {
   LinkageField,
   LinkageKeyElement,
   LinkageTerms,
 } from "../src/config/linkageTerms";
-import type { ColumnMetadata } from "../src/config/metadata";
+import type { ColumnMetadata, Metadata } from "../src/config/metadata";
 import {
   StandardizationSchema,
   type Standardization,
@@ -1556,6 +1557,27 @@ describe("validateStandardizationAgainstTerms", () => {
     expect(errors).toHaveLength(1);
     expect(errors[0]).not.toContain(raw);
     expect(errors[0]).toContain(sanitizeForDisplay(raw));
+  });
+
+  // The reachability the OperatorConfigError doc rests on: the accept side derives
+  // its standardization from the (partner-authored) adopted terms via
+  // getDefaultStandardization, whose outputs are exactly those terms' field names --
+  // so the derived spec is consistent with the terms by construction, and this
+  // fail-closed error (whose message the web surfaces) is unreachable on the accept
+  // side. A partner-chosen field name therefore cannot reach the operator's alert
+  // through it. Pin that with a hostile name that WOULD be alarming if surfaced.
+  test("getDefaultStandardization is consistent with the terms it derives from, even for a hostile field name", () => {
+    const hostileName = "call 1-800-EVIL now";
+    const hostileTerms: LinkageTerms = {
+      ...minimalTerms,
+      linkageFields: [{ name: hostileName, type: "first_name" }],
+      linkageKeys: [{ name: "k", elements: [{ field: hostileName }] }],
+    };
+    const md: Metadata = [
+      { name: "c", type: "first_name", role: "linkage", isPayload: false },
+    ];
+    const std = getDefaultStandardization(md, hostileTerms);
+    expect(validateStandardizationAgainstTerms(std, hostileTerms)).toEqual([]);
   });
 });
 

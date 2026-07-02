@@ -410,14 +410,17 @@ export function ExchangeView(config: ExchangeConfig) {
       // Each party's metadata, standardization, and payloads stay per-party and
       // local -- only the linkage terms are pinned to the invitation. Each role's
       // spec is assembled by its own builder ({@link acceptorExchangeDataSpec} /
-      // {@link inviterExchangeDataSpec}), which is the structural enforcement point
-      // for the "authored standardization names only declared fields" invariant:
-      // both reconcile the standardization to the terms here, at the boundary where
-      // the spec is handed to prepareForExchange, so neither role can feed core a
-      // self-contradictory spec that would fail closed. The acceptor carries the
-      // metadata/standardization it authored in the "Prepare your data" editor; the
-      // inviter carries what it authored in the Advanced editor (both omitted on the
-      // quick path, where prepareForExchange infers them from the CSV).
+      // {@link inviterExchangeDataSpec}), so neither role feeds core a
+      // self-contradictory spec that would fail closed -- by different means. The
+      // inviter's builder RECONCILES its authored standardization to the terms
+      // (standardizationForTerms drops a disabled key's orphaned transform). The
+      // acceptor is safe BY CONSTRUCTION, not by a reconcile: its standardization is
+      // derived from the adopted terms via getDefaultStandardization, so its outputs
+      // are already exactly those terms' declared fields. Core's throw is the
+      // backstop for both. The acceptor carries the metadata/standardization it
+      // authored in the "Prepare your data" editor; the inviter carries what it
+      // authored in the Advanced editor (both omitted on the quick path, where
+      // prepareForExchange infers them from the CSV).
       const dataSpec: ExchangeDataSpec =
         config.role === "acceptor"
           ? acceptorExchangeDataSpec(config.linkageTerms, partyName, {
