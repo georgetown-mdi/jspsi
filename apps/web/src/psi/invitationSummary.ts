@@ -426,13 +426,17 @@ export interface InvitationSummary {
  * admits every character EXCEPT A-Z), and a shorthand or bracket breakout (`\p{L}`,
  * `[:alpha:]`, `]|\w|[`) is opaque to a non-regex-literate operator -- so a
  * "limited to <class>" phrasing would present raw partner regex as a vetted,
- * plain-language promise it is not. It is instead labelled as the partner-supplied
- * regular expression it is, so its surface reading cannot be mistaken for a
- * guarantee; the raw class is still shown (sanitized) so a regex-literate reviewer
- * can inspect the actual pattern. The check that evaluates the class is
- * warn-not-enforce (core's `withinAllowedCharacters`); this is that check's
- * operator-facing display complement. `allowedCharacters` is a short,
- * length-bounded, partner-controlled string, so it is sanitized before display.
+ * plain-language promise it is not. It is instead labelled as the partner-supplied,
+ * unverified regular expression it is, so its surface reading is no longer
+ * presented as a guarantee -- a non-regex-literate operator can still misread a
+ * crafted class, but the copy no longer asserts a promise the value cannot back,
+ * and the "not verified by psilink" clause names the trust boundary (partner-
+ * authored, warn-not-enforce) rather than only the regex syntax family. The raw
+ * class is still shown (sanitized) so a regex-literate reviewer can inspect the
+ * actual pattern. The check that evaluates the class is warn-not-enforce (core's
+ * `withinAllowedCharacters`); this is that check's operator-facing display
+ * complement. `allowedCharacters` is a short, length-bounded, partner-controlled
+ * string, so it is sanitized before display.
  */
 function describeConstraints(field: LinkageField): Array<string> {
   const constraints = field.constraints;
@@ -448,7 +452,7 @@ function describeConstraints(field: LinkageField): Array<string> {
     constraints.allowedCharacters !== undefined
   )
     descriptions.push(
-      `allowed-character pattern (partner-supplied regular expression): ${sanitizeForDisplay(constraints.allowedCharacters)}`,
+      `allowed-character pattern (partner-supplied regular expression, not verified by psilink): ${sanitizeForDisplay(constraints.allowedCharacters)}`,
     );
   const exclude = constraints.exclude ?? [];
   if (exclude.length > 0)

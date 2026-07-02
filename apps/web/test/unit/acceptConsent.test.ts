@@ -446,7 +446,7 @@ describe("summarizeInvitation", () => {
       {
         label: "First name",
         constraints: [
-          "allowed-character pattern (partner-supplied regular expression): A-Z ",
+          "allowed-character pattern (partner-supplied regular expression, not verified by psilink): A-Z ",
         ],
       },
       { label: "Date of birth", constraints: [] },
@@ -484,7 +484,7 @@ describe("summarizeInvitation", () => {
     ]);
     expect(firstName.constraints).toEqual([
       "honorifics and suffixes removed",
-      "allowed-character pattern (partner-supplied regular expression): A-Z ",
+      "allowed-character pattern (partner-supplied regular expression, not verified by psilink): A-Z ",
     ]);
     // A field with no constraints contributes nothing.
     expect(dob.constraints).toEqual([]);
@@ -510,9 +510,12 @@ describe("summarizeInvitation", () => {
     );
     const [constraint] = summary.linkageFields[0].constraints;
     expect(constraint).toBe(
-      "allowed-character pattern (partner-supplied regular expression): ^A-Z",
+      "allowed-character pattern (partner-supplied regular expression, not verified by psilink): ^A-Z",
     );
     expect(constraint).not.toContain("limited to");
+    // The trust boundary is named, not just the regex syntax family, so the
+    // partner's un-vetted value is not read as one the app validated.
+    expect(constraint).toContain("not verified by psilink");
   });
 
   test("labels every fuzzy-comparison expansion in plain language", () => {

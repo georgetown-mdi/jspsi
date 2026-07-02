@@ -308,7 +308,7 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     // in the master disclosure ...
     const panel = await readyPanel("Other details");
     expect(panel.textContent).toContain(
-      "allowed-character pattern (partner-supplied regular expression): A-Z",
+      "allowed-character pattern (partner-supplied regular expression, not verified by psilink): A-Z",
     );
     expect(panel.textContent).toContain("risk_score");
     expect(panel.textContent).toContain("MOU-2025-0042");
