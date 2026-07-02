@@ -93,6 +93,37 @@ export type CSVParseResponse =
     }
   | { ok: false; message: string; name: string };
 
+/**
+ * Target source-CSV bytes per streamed reply batch. {@link replyBatchRows} turns this
+ * into a row count from the file's average bytes-per-row, so each batch is a bounded
+ * slice of the FILE regardless of row width -- a few wide rows batch as tightly as many
+ * narrow ones. This bounds a batch's SOURCE bytes, which under-represents the
+ * parsed-object structured-clone cost the main thread actually pays on receipt: a row is
+ * an object of per-cell strings, several times heavier than its source bytes. So the
+ * target is set conservatively -- it keeps each batch's deserialization small relative to
+ * the whole-array clone it replaces, NOT provably under a single animation frame -- and
+ * is a reasoned, tunable default like {@link CSV_WORKER_FILE_BYTE_THRESHOLD}: lower it if
+ * measurement shows a batch's receive step exceeding a frame near the top of the intake
+ * range.
+ */
+export const CSV_WORKER_REPLY_BATCH_BYTES = 1024 * 1024;
+
+/**
+ * Rows per streamed batch for a `rowCount`-row parse of a `fileBytes`-byte File: the
+ * count whose source bytes are about {@link CSV_WORKER_REPLY_BATCH_BYTES}, so batch size
+ * tracks row width (bytes per row) rather than row count -- a bigger file of similar rows
+ * yields more batches, not bigger ones. At least 1 whenever there are rows, so the
+ * worker's batch loop always advances: a very wide row whose own source exceeds the
+ * target still emits one row per batch rather than flooring to 0 and spinning, and
+ * `Math.max(fileBytes, 1)` keeps the division defined for a (degenerate) zero-byte file.
+ * The value is irrelevant when there are no rows, where the loop never runs.
+ */
+export function replyBatchRows(rowCount: number, fileBytes: number): number {
+  if (rowCount === 0) return 1;
+  const bytesPerRow = Math.max(fileBytes, 1) / rowCount;
+  return Math.max(1, Math.floor(CSV_WORKER_REPLY_BATCH_BYTES / bytesPerRow));
+}
+
 /** The slice of the `Worker` API the off-thread parse drives. The real `Worker` is
  * adapted to it in {@link ./csvParseWorkerClient}; a unit test supplies a fake. */
 export interface CSVParseWorker {

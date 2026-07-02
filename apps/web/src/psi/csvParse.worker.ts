@@ -1,5 +1,7 @@
 import { loadCSVFile } from "@psilink/core";
 
+import { replyBatchRows } from "./csvParseController";
+
 import type { CSVParseRequest, CSVParseResponse } from "./csvParseController";
 
 /**
@@ -22,31 +24,6 @@ interface WorkerScope {
   postMessage: (message: CSVParseResponse) => void;
 }
 const scope = globalThis as unknown as WorkerScope;
-
-/**
- * Target source-CSV bytes per streamed reply batch. The worker turns this into a row
- * count per batch from the file's average bytes-per-row, so each posted batch carries
- * roughly this many of the file's bytes regardless of row width -- a handful of wide
- * rows batch as tightly as many narrow ones, bounding the per-message structured-clone
- * the main thread pays either way rather than a fixed row count a very wide row could
- * blow past. A reasoned, tunable default sized for the modern-workstation target (like
- * CSV_WORKER_FILE_BYTE_THRESHOLD), not a measured optimum: small enough that one batch's
- * deserialization does not itself stall a frame, large enough that a near-cap intake is
- * not split into a wasteful flood of tiny posts.
- */
-const CSV_WORKER_REPLY_BATCH_BYTES = 1024 * 1024;
-
-/**
- * Rows per streamed batch for a `rowCount`-row parse of a `fileBytes`-byte File: the
- * count whose source bytes are about {@link CSV_WORKER_REPLY_BATCH_BYTES}. At least 1
- * whenever there are rows, so the batch loop always advances (a 0 would spin); the
- * value is irrelevant when there are no rows, where the loop never runs.
- */
-function replyBatchRows(rowCount: number, fileBytes: number): number {
-  if (rowCount === 0) return 1;
-  const bytesPerRow = Math.max(fileBytes, 1) / rowCount;
-  return Math.max(1, Math.floor(CSV_WORKER_REPLY_BATCH_BYTES / bytesPerRow));
-}
 
 async function parseAndReply(
   file: File,

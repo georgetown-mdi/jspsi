@@ -4,7 +4,9 @@ import { describe, expect, test, vi } from "vitest";
 
 import {
   CSV_WORKER_FILE_BYTE_THRESHOLD,
+  CSV_WORKER_REPLY_BATCH_BYTES,
   loadCSVFileOffMainThread,
+  replyBatchRows,
   shouldParseOffThread,
 } from "../../src/psi/csvParseController.js";
 
@@ -203,6 +205,52 @@ describe("loadCSVFileOffMainThread: worker dispatch", () => {
     expect(fake.terminated).toBe(true);
   });
 
+  test("ignores a stray batch that arrives after the terminal message", async () => {
+    // The `if (settled) return` guard in onmessage extends the never-double-settle
+    // invariant to the stream: a batch delivered after the terminal `done` (a worker
+    // that kept posting past completion) must not append to the resolved result. This
+    // matters because the resolved `data` is the SAME array the accumulator mutates --
+    // without the guard, a post-done push would corrupt an already-returned result.
+    const rows: CSVParseRows = [{ a: "1", b: "2" }];
+    const full: CSVParseResult = { data: rows, errors: [], meta: META };
+    const fake = new FakeCSVParseWorker([
+      ...streamedReply(full, [rows]),
+      { ok: true, done: false, rows: [{ a: "9", b: "9" }] },
+    ]);
+    const file = new File(["a,b\n1,2\n"], "d.csv", { type: "text/csv" });
+    const out = await loadCSVFileOffMainThread(file, {
+      spawnWorker: () => fake,
+    });
+    // The stray post-`done` batch is gated out: it neither appends nor throws.
+    expect(out.data).toEqual([{ a: "1", b: "2" }]);
+    expect(fake.terminated).toBe(true);
+  });
+
+  test("carries non-empty errors and full meta through the terminal message", async () => {
+    // The terminal message reassembles the non-row remainder of the result. Prior tests
+    // use empty errors and only assert meta.fields; pin that a populated errors list and
+    // a distinguishing meta field round-trip intact, not just `fields`.
+    const result: CSVParseResult = {
+      data: [{ a: "1", b: "2" }],
+      errors: [
+        {
+          type: "FieldMismatch",
+          code: "TooFewFields",
+          message: "Too few fields: expected 2 fields but parsed 1",
+          row: 0,
+        },
+      ],
+      meta: { ...META, truncated: true },
+    };
+    const fake = new FakeCSVParseWorker(streamedReply(result, [result.data]));
+    const file = new File(["a,b\n1,2\n"], "d.csv", { type: "text/csv" });
+    const out = await loadCSVFileOffMainThread(file, {
+      spawnWorker: () => fake,
+    });
+    expect(out).toEqual(result);
+    expect(fake.terminated).toBe(true);
+  });
+
   test("surfaces a worker parse rejection as an Error the consumer can display", async () => {
     // The worker runs core's loadCSVFile verbatim, so its guards -- including the
     // non-string-header guard #307 added -- reject inside the worker exactly as
@@ -280,5 +328,45 @@ describe("loadCSVFileOffMainThread: worker dispatch", () => {
     expect(fake.terminated).toBe(true);
     // Aborted before dispatch, so the parse request is never posted.
     expect(fake.received).toEqual([]);
+  });
+});
+
+describe("replyBatchRows: the worker's batch sizing", () => {
+  test("targets the source-byte budget, so batch size tracks row width not count", () => {
+    // For a fixed bytes-per-row, the rows-per-batch is floor(budget / bytesPerRow) and
+    // is independent of how many rows the file has -- a bigger file of similar rows
+    // yields MORE batches, not bigger ones. This is the property that bounds the
+    // per-message clone regardless of the file's total row count.
+    const bytesPerRow = 100;
+    const expected = Math.floor(CSV_WORKER_REPLY_BATCH_BYTES / bytesPerRow);
+    expect(replyBatchRows(1_000, 1_000 * bytesPerRow)).toBe(expected);
+    expect(replyBatchRows(500_000, 500_000 * bytesPerRow)).toBe(expected);
+  });
+
+  test("gives narrower rows larger batches (monotonic in row width)", () => {
+    // Halving bytes-per-row roughly doubles the rows that fit a batch.
+    const narrow = replyBatchRows(1_000, 1_000 * 50);
+    const wide = replyBatchRows(1_000, 1_000 * 200);
+    expect(narrow).toBeGreaterThan(wide);
+  });
+
+  test("clamps a row wider than the whole budget to one row per batch", () => {
+    // A single row whose own source exceeds the budget would floor to 0 rows/batch and
+    // spin the worker's post loop forever; the Math.max(1, ...) floor emits one row per
+    // batch instead. (2 rows across 4 MiB => 2 MiB/row, well over the 1 MiB budget.)
+    expect(replyBatchRows(2, 4 * 1024 * 1024)).toBe(1);
+  });
+
+  test("returns 1 for a zero-row parse (loop never runs, must not be 0)", () => {
+    expect(replyBatchRows(0, 0)).toBe(1);
+    expect(replyBatchRows(0, 1_000)).toBe(1);
+  });
+
+  test("stays finite and positive for a degenerate zero-byte file with rows", () => {
+    // A File reporting size 0 yet yielding rows cannot occur, but the Math.max(fileBytes,
+    // 1) guard keeps the division defined rather than producing Infinity/NaN.
+    const batch = replyBatchRows(5, 0);
+    expect(Number.isFinite(batch)).toBe(true);
+    expect(batch).toBeGreaterThanOrEqual(1);
   });
 });
