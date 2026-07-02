@@ -128,9 +128,35 @@ test("builder: exchange's command-specific option help reaches the rendered help
 // exchange resolves an @path credential flag eagerly in parseArgs: it never
 // persists a config, so there is no reference to preserve, and the override is
 // layered on AFTER the config-load resolution (resolveExchangeSpecRefs). Without
-// this, an @path passphrase from the flag would reach the live SFTP connection
-// unresolved. This pins that seam for the passphrase (the flag added here)
-// alongside its sibling private key.
+// this, an @path credential from the flag would reach the live SFTP connection
+// unresolved. This pins that seam for each of the three credential siblings the
+// eager resolution covers -- the server password, the SSH private key, and its
+// passphrase -- so a future edit that broke the @path resolution for any one
+// of them is caught.
+
+test("parseArgs resolves an @path server-password to the file contents", () => {
+  const passwordRef = path.join(dir, "sftp-password");
+  fs.writeFileSync(passwordRef, "S3cr3tSFTPPassw0rd\n");
+  const argv = {
+    _: [],
+    $0: "psilink",
+    input: "data.csv",
+    "server-password": `@${passwordRef}`,
+  } as unknown as Arguments;
+  const args = parseArgs(argv);
+  expect(args.serverPassword).toBe("S3cr3tSFTPPassw0rd");
+});
+
+test("parseArgs carries a literal server-password through unchanged", () => {
+  const argv = {
+    _: [],
+    $0: "psilink",
+    input: "data.csv",
+    "server-password": "inline-password",
+  } as unknown as Arguments;
+  const args = parseArgs(argv);
+  expect(args.serverPassword).toBe("inline-password");
+});
 
 test("parseArgs resolves an @path server-private-key-passphrase and private key to the file contents", () => {
   const keyRef = path.join(dir, "id_ed25519");
