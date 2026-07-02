@@ -42,13 +42,20 @@ export interface StatusProps extends PaperProps {
    * stage internally), so a caller may pass this as soon as it is known -- a
    * pre-completion value does not surface a premature message. */
   resultWithheld?: boolean | undefined;
-  /** The combined exchange record (JSON: a `public` record part and a `private`
-   * opening part). Because it embeds the private opening it is as sensitive as the
-   * matched data, so it is offered with a "keep private" label. */
+  /** The shareable exchange record (JSON: commitments + a non-secret governance
+   * summary, never matched data). Safe to hand an auditor, so it is offered with a
+   * "safe to share" label. */
   recordFileURL?: string | undefined;
   /** Download filename for the exchange record (timestamped per exchange by the
    * caller); falls back to a static name when not supplied. */
   recordFileName?: string | undefined;
+  /** The private verification keys (JSON: per-commitment salts only, no matched
+   * data). With the record they can open the commitments, so it is offered with a
+   * "keep private" label. Present exactly when {@link recordFileURL} is. */
+  keysFileURL?: string | undefined;
+  /** Download filename for the verification keys (timestamped per exchange by the
+   * caller); falls back to a static name when not supplied. */
+  keysFileName?: string | undefined;
 }
 
 type ProtocolStageInfo = [
@@ -67,6 +74,8 @@ export function Status(props: StatusProps) {
     resultWithheld,
     recordFileURL,
     recordFileName,
+    keysFileURL,
+    keysFileName,
     ...paperProps
   } = props;
 
@@ -207,11 +216,30 @@ export function Status(props: StatusProps) {
 
           {recordFileURL !== undefined && (
             <Group justify="center" gap="xs" component="span">
-              <Text>Download exchange record (keep private):</Text>
+              <Text>Download record (safe to share):</Text>
               <a
                 href={recordFileURL}
                 download={recordFileName ?? "psilink-record.json"}
-                aria-label="Download exchange record (keep private)"
+                aria-label="Download record (safe to share)"
+              >
+                <ActionIcon
+                  variant="light"
+                  color="blue"
+                  disabled={!isCompleted}
+                >
+                  <IconDownload size={18} aria-hidden />
+                </ActionIcon>
+              </a>
+            </Group>
+          )}
+
+          {keysFileURL !== undefined && (
+            <Group justify="center" gap="xs" component="span">
+              <Text>Download verification keys (keep private):</Text>
+              <a
+                href={keysFileURL}
+                download={keysFileName ?? "psilink-record.keys.json"}
+                aria-label="Download verification keys (keep private)"
               >
                 <ActionIcon
                   variant="light"

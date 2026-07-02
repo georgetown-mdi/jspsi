@@ -18,7 +18,7 @@ import {
 } from "../../src/commands/zeroSetup";
 import { saveConfig } from "../../src/config";
 import { saveKeyFile } from "../../src/keyFile";
-import { DEFAULT_RECORD_BASENAME, openingPathFor } from "../../src/recordFile";
+import { DEFAULT_RECORD_BASENAME, keysPathFor } from "../../src/recordFile";
 
 // Net-new coverage: the per-command-handler wiring that turns the default-on
 // audit record into files on disk. `psilink exchange` and the zero-setup command
@@ -29,7 +29,7 @@ import { DEFAULT_RECORD_BASENAME, openingPathFor } from "../../src/recordFile";
 // onlineInviteAccept.test.ts covers the same default-on assertion for the
 // invite/accept (runOnlineBootstrap) handlers. The remaining gap this file closes
 // is the exchange and zero-setup HANDLERS: that, run with no record-related flags
-// at all, each writes the default record and its private opening file.
+// at all, each writes the default record and its private verification-keys file.
 //
 // Why drive the real yargs builder + handler (not a post-parse seam like
 // onlineInviteAccept's validate* -> runOnlineBootstrap): the thing under test IS
@@ -183,7 +183,7 @@ async function runBoth(argvA: string[], argvB: string[]): Promise<void> {
 
 // Locate the single default-path record the asserted party wrote in `dir`. The
 // default basename is shared by the record (`<base>-<stamp>.json`) and its
-// opening (`<base>-<stamp>.opening.json`), so exclude the opening to find the
+// verification keys (`<base>-<stamp>.keys.json`), so exclude the keys to find the
 // record itself. Exactly one is expected, since only the asserted party records.
 function findDefaultRecord(dir: string): string {
   const matches = fs
@@ -192,7 +192,7 @@ function findDefaultRecord(dir: string): string {
       (name) =>
         name.startsWith(`${DEFAULT_RECORD_BASENAME}-`) &&
         name.endsWith(".json") &&
-        !name.endsWith(".opening.json"),
+        !name.endsWith(".keys.json"),
     );
   // Explicit guard rather than `expect(...).toHaveLength(1)` then `matches[0]`:
   // the throw is what makes the subsequent index access safe, so state it
@@ -207,20 +207,20 @@ function findDefaultRecord(dir: string): string {
 }
 
 // Assert the asserted party's default-on artifacts: the record and its private
-// opening exist, are written owner-only, and the record round-trips as JSON
-// naming this exchange's participants. Contents beyond that are covered by the
-// record unit tests; this confirms only that the handler wired a record for the
-// right exchange.
+// verification keys exist, are written owner-only, and the record round-trips as
+// JSON naming this exchange's participants. Contents beyond that are covered by
+// the record unit tests; this confirms only that the handler wired a record for
+// the right exchange.
 function expectDefaultRecord(
   dir: string,
   local: string,
   partner: string,
 ): void {
   const recordFile = findDefaultRecord(dir);
-  const openingFile = openingPathFor(recordFile);
-  expect(fs.existsSync(openingFile)).toBe(true);
+  const keysFile = keysPathFor(recordFile);
+  expect(fs.existsSync(keysFile)).toBe(true);
   // Both files are written through the command handler's default record path and
-  // must be owner-only (0600): the opening holds the matched data in plaintext
+  // must be owner-only (0600): the verification keys are private commitment salts
   // and the record discloses the exchange's participants and terms in cleartext.
   // Pin it end to end here so a mode-widening regression in that write path is
   // caught at the command layer, not just in the recordFile unit tests. POSIX
@@ -228,7 +228,7 @@ function expectDefaultRecord(
   // reflect it -- the same guard the sibling onlineInviteAccept test uses.
   if (process.platform !== "win32") {
     expect(fs.statSync(recordFile).mode & 0o077).toBe(0);
-    expect(fs.statSync(openingFile).mode & 0o077).toBe(0);
+    expect(fs.statSync(keysFile).mode & 0o077).toBe(0);
   }
   const record = JSON.parse(fs.readFileSync(recordFile, "utf8")) as {
     version?: unknown;
@@ -242,7 +242,7 @@ function expectDefaultRecord(
 
 // --- exchange -----------------------------------------------------------------
 
-test("exchange: a default-flag run writes the default audit record and opening file", async () => {
+test("exchange: a default-flag run writes the default audit record and keys file", async () => {
   const dropDir = fs.mkdtempSync(path.join(work, "drop-"));
   const inputA = path.join(work, "a-input.csv");
   fs.writeFileSync(inputA, PARTY_A_CSV);
@@ -317,7 +317,7 @@ test("exchange: a default-flag run writes the default audit record and opening f
 // --- zero-setup ---------------------------------------------------------------
 
 describe("zero-setup", () => {
-  test("a default-flag run writes the default audit record and opening file", async () => {
+  test("a default-flag run writes the default audit record and keys file", async () => {
     const dropDir = fs.mkdtempSync(path.join(work, "drop-"));
     const url = pathToFileURL(dropDir).href;
     const inputA = path.join(work, "a-input.csv");

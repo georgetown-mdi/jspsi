@@ -6,9 +6,9 @@ import { describe, expect, test } from "vitest";
 import {
   buildExchangeRecord,
   parseExchangeRecord,
-  parseOpeningData,
+  parseVerificationKeys,
   serializeExchangeRecord,
-  serializeOpeningData,
+  serializeVerificationKeys,
   verifyRecordCommitments,
 } from "@psilink/core";
 
@@ -39,7 +39,17 @@ interface RecordVector {
   inputs: ExchangeRecordInputs;
   randomness: { bindingNonce: string; salts: Record<string, string> };
   record: unknown;
-  opening: unknown;
+  keys: unknown;
+}
+
+// The committed data sets re-supplied at verify time (the keys carry only salts,
+// never a snapshot), taken from the vector's own inputs.
+function committedData(vector: RecordVector) {
+  return {
+    localPayloadSent: vector.inputs.localPayloadSent,
+    partnerPayloadReceived: vector.inputs.partnerPayloadReceived,
+    associationTable: vector.inputs.associationTable,
+  };
 }
 
 const vectors = (JSON.parse(vectorsRaw) as { vectors: Array<RecordVector> })
@@ -68,14 +78,18 @@ describe("exchange record in the browser", () => {
   test.each(vectors)(
     "$name: browser build matches the checked-in record vector",
     async (vector) => {
-      const { record, opening } = await buildExchangeRecord(
+      const { record, keys } = await buildExchangeRecord(
         vector.inputs,
         randomnessFromVector(vector),
       );
       expect(record).toEqual(vector.record);
-      expect(opening).toEqual(vector.opening);
+      expect(keys).toEqual(vector.keys);
 
-      const { allValid } = await verifyRecordCommitments(record, opening);
+      const { allValid } = await verifyRecordCommitments(
+        record,
+        keys,
+        committedData(vector),
+      );
       expect(allValid).toBe(true);
     },
   );
@@ -97,19 +111,20 @@ describe("web-produced record: round-trip and cross-verification", () => {
   test.each(vectors)(
     "$name: a web-built record round-trips through serialize -> parse and re-verifies",
     async (vector) => {
-      const { record, opening } = await buildExchangeRecord(vector.inputs);
+      const { record, keys } = await buildExchangeRecord(vector.inputs);
       const parsedRecord = parseExchangeRecord(
         JSON.parse(serializeExchangeRecord(record)),
       );
-      const parsedOpening = parseOpeningData(
-        JSON.parse(serializeOpeningData(opening)),
+      const parsedKeys = parseVerificationKeys(
+        JSON.parse(serializeVerificationKeys(keys)),
       );
       expect(parsedRecord).toEqual(record);
-      expect(parsedOpening).toEqual(opening);
+      expect(parsedKeys).toEqual(keys);
 
       const { allValid } = await verifyRecordCommitments(
         parsedRecord,
-        parsedOpening,
+        parsedKeys,
+        committedData(vector),
       );
       expect(allValid).toBe(true);
     },
@@ -118,19 +133,23 @@ describe("web-produced record: round-trip and cross-verification", () => {
   // Cross-verification across runtimes. The checked-in vectors are the CLI/Node
   // side of the contract -- the Node suite in
   // packages/core/test/exchangeRecord.test.ts builds and verifies them -- so
-  // parsing a vector's record/opening here and verifying its commitments proves
-  // the web build verifies a CLI-produced record. The reverse direction (the CLI
-  // verifies a web-produced record) follows from byte-identity: the vector-replay
-  // suite above asserts the web build reproduces this exact record and opening,
-  // and the Node suite verifies that same pair, so the CLI verifies the
-  // byte-identical web record.
+  // parsing a vector's record/keys here and verifying its commitments (against the
+  // vector's re-supplied committed data) proves the web build verifies a
+  // CLI-produced record. The reverse direction (the CLI verifies a web-produced
+  // record) follows from byte-identity: the vector-replay suite above asserts the
+  // web build reproduces this exact record and keys, and the Node suite verifies
+  // that same pair, so the CLI verifies the byte-identical web record.
   test.each(vectors)(
     "$name: the web build verifies a CLI-produced record",
     async (vector) => {
       const record = parseExchangeRecord(vector.record);
-      const opening = parseOpeningData(vector.opening);
+      const keys = parseVerificationKeys(vector.keys);
 
-      const { allValid } = await verifyRecordCommitments(record, opening);
+      const { allValid } = await verifyRecordCommitments(
+        record,
+        keys,
+        committedData(vector),
+      );
       expect(allValid).toBe(true);
     },
   );

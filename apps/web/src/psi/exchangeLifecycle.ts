@@ -116,27 +116,34 @@ export interface AcquireContext {
  */
 export type Acquire = (context: AcquireContext) => Promise<AcquiredExchange>;
 
-/** The combined exchange-record download: the public record and its private
- * opening packaged in one JSON file (see core's `ExchangeRecordFile`). One object
- * and one download -- auditing is rare, so two files to track is excessive. */
+/** The two exchange-record downloads: the shareable record and its private
+ * verification keys, offered as separate files (mirroring the CLI's two-file
+ * split) so the record can be handed to an auditor without the keys. */
 export interface RecordDownloads {
-  /** The combined exchange record (JSON: a `public` record part and a `private`
-   * opening part). Because it embeds the private opening, the whole file is as
-   * sensitive as the matched data and must be kept private. */
+  /** The shareable record (JSON: commitments + a non-secret governance summary,
+   * never matched data). Safe to share with an auditor; still owner-retained by
+   * default. */
   recordUrl: string;
   /** Download filename for {@link recordUrl}, timestamped per exchange so
    * repeated downloads in one session accumulate an audit trail rather than
    * collide (mirrors the CLI's timestamped default path). */
   recordFileName: string;
+  /** The private verification keys (JSON: per-commitment salts only, no matched
+   * data). Kept private -- with the record they can open the commitments. */
+  keysUrl: string;
+  /** Download filename for {@link keysUrl}, paired with {@link recordFileName}
+   * (same timestamp stem, `.keys.json` suffix). */
+  keysFileName: string;
 }
 
 /** Fields common to both shapes of {@link ExchangeOutputs}. */
 interface ExchangeOutputsBase {
-  /** The combined exchange-record download, present or absent as a whole. Absent
-   * only when building the record failed (the exchange still succeeded and the
-   * result, if any, remains available; see {@link ExchangeResult.audit}). Offered
-   * to a receiver and a helper alike -- the helper's record is produced even though
-   * it does not bind the result table. */
+  /** The exchange-record downloads (the shareable record plus its private
+   * verification keys), present or absent as a whole. Absent only when building
+   * the record failed (the exchange still succeeded and the result, if any,
+   * remains available; see {@link ExchangeResult.audit}). Offered to a receiver
+   * and a helper alike -- the helper's record is produced even though it does not
+   * bind the result table. */
   record?: RecordDownloads;
 }
 
@@ -166,10 +173,10 @@ interface WithheldExchangeOutputs extends ExchangeOutputsBase {
  * withheld", "neither") are unrepresentable. */
 export type ExchangeOutputs = ReceivedExchangeOutputs | WithheldExchangeOutputs;
 
-/** Pure output-generation step: build the local results file plus the combined
- * exchange-record artifact from the exchange result and return their URLs. May
- * throw (classified as `"output"`); runs inside the owner after the exchange and
- * before teardown. */
+/** Pure output-generation step: build the local results file plus the
+ * exchange-record artifacts (record + verification keys) from the exchange result
+ * and return their URLs. May throw (classified as `"output"`); runs inside the
+ * owner after the exchange and before teardown. */
 export type GenerateOutput = (
   result: ExchangeResult,
   prepared: PreparedExchange,

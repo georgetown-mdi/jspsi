@@ -276,7 +276,7 @@ export interface WriteFileOwnerOnlyOptions {
 // data. The data fsync the writers do before the rename is not enough on its
 // own: the entry that names the file is separate directory metadata, which a
 // crash could lose while the data survives (or the reverse), the reordering that
-// defeats the exchange record's opening-before-record crash ordering. POSIX
+// defeats the exchange record's keys-before-record crash ordering. POSIX
 // only -- Node's fs cannot open a directory handle on Windows (openSync on a
 // directory fails), so the entry flush there is left to the OS (NTFS metadata
 // journaling) and the cross-write crash-ordering guarantee is POSIX-only. A
@@ -314,9 +314,9 @@ function fsyncParentDir(filePath: string): void {
  * entry before returning, two sequential calls are crash-ordered: if the second
  * call's rename is durable, the first call's rename and contents are too. That
  * ordering is what the self-attested exchange record relies on -- it writes the
- * opening file before the record (see `recordFile.ts`) so a crash between the two
- * preserves the proof material -- and what keeps a freshly rotated shared-secret
- * token (`saveKeyFile`) from being lost. The data flush runs on every platform
+ * verification-keys file before the record (see `recordFile.ts`) so a crash
+ * between the two preserves the salts -- and what keeps a freshly rotated
+ * shared-secret token (`saveKeyFile`) from being lost. The data flush runs on every platform
  * (the Windows branch reopens the ACL-narrowed placeholder to write and flush
  * through a retained fd, like {@link writeFileAtomic}), but the parent-directory
  * flush is POSIX-only -- Node's `fs` cannot open a directory handle to

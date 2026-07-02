@@ -41,7 +41,7 @@ import {
   type CommonBootstrapOptions,
 } from "../../src/commands/bootstrap";
 import { loadKeyFile } from "../../src/keyFile";
-import { openingPathFor, resolveRecordOutput } from "../../src/recordFile";
+import { keysPathFor, resolveRecordOutput } from "../../src/recordFile";
 import { promptConfirm } from "../../src/util/cli";
 import { selectedBackend } from "../sftpServer";
 import { localPath, remotePath, sftpServer } from "../sftpServer/testContext";
@@ -406,7 +406,7 @@ async function runOnlineRoundTrip(params: {
 
   // -- The default-on audit record lands on disk for both sides. --
   // record defaults to true in the shipped CLI, so a successful online exchange
-  // writes a self-attested record plus its private opening file. This is the only
+  // writes a self-attested record plus its private verification-keys file. This is the only
   // layer of the record path nothing else covers end to end: the helpers and the
   // runProtocol write-wiring are unit-tested, and core tests the record building,
   // but only here does a real two-party PSI exchange produce a real audit that is
@@ -425,7 +425,7 @@ async function runOnlineRoundTrip(params: {
     },
   ]) {
     expect(fs.existsSync(party.recordFile)).toBe(true);
-    expect(fs.existsSync(openingPathFor(party.recordFile))).toBe(true);
+    expect(fs.existsSync(keysPathFor(party.recordFile))).toBe(true);
     const record = JSON.parse(fs.readFileSync(party.recordFile, "utf8")) as {
       version?: unknown;
       localIdentity?: unknown;
@@ -438,8 +438,8 @@ async function runOnlineRoundTrip(params: {
 
   // -- Every secret-bearing artifact is written owner-only (0600). --
   // The key files hold the rotated shared secret, a config may hold inline SFTP
-  // credentials, and the opening file holds the matched data in plaintext -- all
-  // are written via writeFileOwnerOnly / saveKeyFile precisely so group/other
+  // credentials, and the verification-keys file holds private commitment salts --
+  // all are written via writeFileOwnerOnly / saveKeyFile precisely so group/other
   // cannot read them. Assert that end to end here so a regression that widened any
   // of their modes is caught, not just one that changed their contents. POSIX-only:
   // writeFileOwnerOnly uses ACLs on Windows, where the mode bits do not reflect it.
@@ -451,8 +451,8 @@ async function runOnlineRoundTrip(params: {
       acceptOptions.configFile,
       inviteOptions.recordFile!,
       acceptOptions.recordFile!,
-      openingPathFor(inviteOptions.recordFile!),
-      openingPathFor(acceptOptions.recordFile!),
+      keysPathFor(inviteOptions.recordFile!),
+      keysPathFor(acceptOptions.recordFile!),
     ];
     for (const f of ownerOnly) expect(fs.statSync(f).mode & 0o077).toBe(0);
   }
@@ -463,7 +463,7 @@ async function runOnlineRoundTrip(params: {
 // tests turn on: a rejected invitation or handshake must not leave a
 // half-provisioned recurring-exchange setup on disk. The config and key are the
 // artifacts a failure could most plausibly orphan; the audit record and its
-// private opening are written only after a successful exchange, so asserting them
+// private verification keys are written only after a successful exchange, so asserting them
 // absent pins that a failure writes no audit either -- vacuously true on the
 // accept-side rejections (validateAccept writes nothing), but a real check on the
 // mismatch test, where a live handshake aborts with recording enabled.
@@ -471,7 +471,7 @@ function expectNoPersistedFiles(options: CommonBootstrapOptions): void {
   expect(fs.existsSync(options.configFile)).toBe(false);
   expect(fs.existsSync(options.keyFile)).toBe(false);
   expect(fs.existsSync(options.recordFile!)).toBe(false);
-  expect(fs.existsSync(openingPathFor(options.recordFile!))).toBe(false);
+  expect(fs.existsSync(keysPathFor(options.recordFile!))).toBe(false);
 }
 
 // --- Happy path: filedrop -----------------------------------------------------

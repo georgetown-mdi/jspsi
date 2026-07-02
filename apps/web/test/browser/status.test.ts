@@ -78,3 +78,48 @@ describe("Status live region", () => {
     expect(container!.textContent).toContain("Download result");
   });
 });
+
+describe("Status download links", () => {
+  test("offers the shareable record and the private verification keys as two distinct downloads", async () => {
+    // Render with the audit downloads present AND the result withheld -- the state
+    // the review flagged as untested: the record/keys downloads must appear even
+    // when this party received no result table, and the shareable record and the
+    // private keys must always be two separate links, never one.
+    root!.render(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(Status, {
+          stages,
+          stageId: "done",
+          resultsFileURL: undefined,
+          resultWithheld: true,
+          recordFileURL: "blob:record",
+          recordFileName: "psilink-record-2026.json",
+          keysFileURL: "blob:keys",
+          keysFileName: "psilink-record-2026.keys.json",
+        }),
+      ),
+    );
+
+    const recordLink = page.getByRole("link", {
+      name: "Download record (safe to share)",
+    });
+    const keysLink = page.getByRole("link", {
+      name: "Download verification keys (keep private)",
+    });
+    await expect.element(recordLink).toBeInTheDocument();
+    await expect.element(keysLink).toBeInTheDocument();
+
+    // Distinct hrefs and download filenames: the shareable record and the private
+    // keys never collapse into a single link or a shared filename.
+    await expect.element(recordLink).toHaveAttribute("href", "blob:record");
+    await expect
+      .element(recordLink)
+      .toHaveAttribute("download", "psilink-record-2026.json");
+    await expect.element(keysLink).toHaveAttribute("href", "blob:keys");
+    await expect
+      .element(keysLink)
+      .toHaveAttribute("download", "psilink-record-2026.keys.json");
+  });
+});

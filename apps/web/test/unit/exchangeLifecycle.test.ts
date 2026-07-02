@@ -161,6 +161,8 @@ const OUTPUTS = {
   record: {
     recordUrl: "blob:record",
     recordFileName: "psilink-record.json",
+    keysUrl: "blob:keys",
+    keysFileName: "psilink-record.keys.json",
   },
 } satisfies ExchangeOutputs;
 

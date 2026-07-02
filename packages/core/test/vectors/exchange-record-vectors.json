@@ -165,32 +165,12 @@
           "associationTable": "JorLMOtVmyCgZVPcmCinA77lCUh3TXRvjZ8MXQzbTVw"
         }
       },
-      "opening": {
-        "version": "psilink-exchange-opening/v1",
-        "commitments": {
-          "localPayloadSent": {
-            "salt": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
-            "data": {
-              "columns": ["dose"],
-              "rowIndices": [0, 2],
-              "rows": [["10mg"], ["20mg"]]
-            }
-          },
-          "partnerPayloadReceived": {
-            "salt": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
-            "data": {
-              "columns": ["status"],
-              "rowIndices": [1, 0],
-              "rows": [["active"], [null]]
-            }
-          },
-          "associationTable": {
-            "salt": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
-            "data": [
-              [0, 2],
-              [1, 0]
-            ]
-          }
+      "keys": {
+        "version": "psilink-exchange-keys/v1",
+        "salts": {
+          "localPayloadSent": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+          "partnerPayloadReceived": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+          "associationTable": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM"
         }
       }
     },
@@ -303,29 +283,12 @@
           "associationTable": "oirF72JpP_unXJXbGr5jphuX1OtwRssXXckjWt2oFnA"
         }
       },
-      "opening": {
-        "version": "psilink-exchange-opening/v1",
-        "commitments": {
-          "localPayloadSent": {
-            "salt": "ERERERERERERERERERERERERERERERERERERERERERE",
-            "data": {
-              "columns": [],
-              "rowIndices": [],
-              "rows": []
-            }
-          },
-          "partnerPayloadReceived": {
-            "salt": "EhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhI",
-            "data": {
-              "columns": [],
-              "rowIndices": [],
-              "rows": []
-            }
-          },
-          "associationTable": {
-            "salt": "ExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExM",
-            "data": [[0], [0]]
-          }
+      "keys": {
+        "version": "psilink-exchange-keys/v1",
+        "salts": {
+          "localPayloadSent": "ERERERERERERERERERERERERERERERERERERERERERE",
+          "partnerPayloadReceived": "EhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhI",
+          "associationTable": "ExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExM"
         }
       }
     },
@@ -454,25 +417,11 @@
           "partnerPayloadReceived": "T66oHx7GDi-xn-ExGwCwglfMKlmrVRkVwGQWQfWucus"
         }
       },
-      "opening": {
-        "version": "psilink-exchange-opening/v1",
-        "commitments": {
-          "localPayloadSent": {
-            "salt": "ISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISE",
-            "data": {
-              "columns": ["dose"],
-              "rowIndices": [0, 2],
-              "rows": [["10mg"], ["20mg"]]
-            }
-          },
-          "partnerPayloadReceived": {
-            "salt": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI",
-            "data": {
-              "columns": [],
-              "rowIndices": [],
-              "rows": []
-            }
-          }
+      "keys": {
+        "version": "psilink-exchange-keys/v1",
+        "salts": {
+          "localPayloadSent": "ISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISE",
+          "partnerPayloadReceived": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI"
         }
       }
     },
@@ -607,32 +556,12 @@
           "associationTable": "6Y45KiWAHRT1kdgqHdPAmnhYRgUEq5jL2fYfP21yFMI"
         }
       },
-      "opening": {
-        "version": "psilink-exchange-opening/v1",
-        "commitments": {
-          "localPayloadSent": {
-            "salt": "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE",
-            "data": {
-              "columns": [],
-              "rowIndices": [],
-              "rows": []
-            }
-          },
-          "partnerPayloadReceived": {
-            "salt": "MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjI",
-            "data": {
-              "columns": ["dose"],
-              "rowIndices": [0, 2],
-              "rows": [["10mg"], ["20mg"]]
-            }
-          },
-          "associationTable": {
-            "salt": "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM",
-            "data": [
-              [0, 2],
-              [1, 0]
-            ]
-          }
+      "keys": {
+        "version": "psilink-exchange-keys/v1",
+        "salts": {
+          "localPayloadSent": "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE",
+          "partnerPayloadReceived": "MjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjI",
+          "associationTable": "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM"
         }
       }
     },
@@ -801,25 +730,11 @@
           "partnerPayloadReceived": "z_kr5kL0Oi3c1JTwISsJTOKResSXshhimuZ2t_7rsxg"
         }
       },
-      "opening": {
-        "version": "psilink-exchange-opening/v1",
-        "commitments": {
-          "localPayloadSent": {
-            "salt": "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE",
-            "data": {
-              "columns": [],
-              "rowIndices": [],
-              "rows": []
-            }
-          },
-          "partnerPayloadReceived": {
-            "salt": "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI",
-            "data": {
-              "columns": [],
-              "rowIndices": [],
-              "rows": []
-            }
-          }
+      "keys": {
+        "version": "psilink-exchange-keys/v1",
+        "salts": {
+          "localPayloadSent": "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE",
+          "partnerPayloadReceived": "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI"
         }
       }
     },
@@ -988,25 +903,11 @@
           "partnerPayloadReceived": "z_kr5kL0Oi3c1JTwISsJTOKResSXshhimuZ2t_7rsxg"
         }
       },
-      "opening": {
-        "version": "psilink-exchange-opening/v1",
-        "commitments": {
-          "localPayloadSent": {
-            "salt": "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE",
-            "data": {
-              "columns": [],
-              "rowIndices": [],
-              "rows": []
-            }
-          },
-          "partnerPayloadReceived": {
-            "salt": "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI",
-            "data": {
-              "columns": [],
-              "rowIndices": [],
-              "rows": []
-            }
-          }
+      "keys": {
+        "version": "psilink-exchange-keys/v1",
+        "salts": {
+          "localPayloadSent": "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE",
+          "partnerPayloadReceived": "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI"
         }
       }
     },
@@ -1177,32 +1078,12 @@
           "associationTable": "JorLMOtVmyCgZVPcmCinA77lCUh3TXRvjZ8MXQzbTVw"
         }
       },
-      "opening": {
-        "version": "psilink-exchange-opening/v1",
-        "commitments": {
-          "localPayloadSent": {
-            "salt": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
-            "data": {
-              "columns": ["dose"],
-              "rowIndices": [0, 2],
-              "rows": [["10mg"], ["20mg"]]
-            }
-          },
-          "partnerPayloadReceived": {
-            "salt": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
-            "data": {
-              "columns": ["status"],
-              "rowIndices": [1, 0],
-              "rows": [["active"], [null]]
-            }
-          },
-          "associationTable": {
-            "salt": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
-            "data": [
-              [0, 2],
-              [1, 0]
-            ]
-          }
+      "keys": {
+        "version": "psilink-exchange-keys/v1",
+        "salts": {
+          "localPayloadSent": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+          "partnerPayloadReceived": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+          "associationTable": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM"
         }
       }
     }

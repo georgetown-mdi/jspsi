@@ -3,17 +3,16 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 
 import {
-  EXCHANGE_OPENING_VERSION,
+  EXCHANGE_KEYS_VERSION,
   EXCHANGE_RECORD_VERSION,
   SALT_BYTES,
   buildExchangeRecord,
   computeCommitment,
   computeTermsHash,
   parseExchangeRecord,
-  parseOpeningData,
+  parseVerificationKeys,
   serializeExchangeRecord,
-  serializeExchangeRecordFile,
-  serializeOpeningData,
+  serializeVerificationKeys,
   verifyCommitmentOpening,
   verifyRecordCommitments,
 } from "../src/exchangeRecord";
@@ -137,15 +136,17 @@ describe("computeTermsHash", () => {
 // --- Commitment correctness, tamper-resistance, binding ----------------------
 
 describe("commitments", () => {
-  test("every commitment verifies against its opened (salt, data) pair", async () => {
-    const { record, opening } = await buildExchangeRecord(
+  test("every commitment verifies against its salt and the re-supplied data", async () => {
+    const { record, keys } = await buildExchangeRecord(
       baseInputs,
       fixedRandomness,
     );
-    const { verdicts, allValid } = await verifyRecordCommitments(
-      record,
-      opening,
-    );
+    // The keys carry only salts; verification re-supplies the committed data.
+    const { verdicts, allValid } = await verifyRecordCommitments(record, keys, {
+      localPayloadSent,
+      partnerPayloadReceived,
+      associationTable: baseInputs.associationTable,
+    });
     expect(allValid).toBe(true);
     expect(verdicts).toEqual({
       localPayloadSent: true,
@@ -154,45 +155,89 @@ describe("commitments", () => {
     });
   });
 
-  test("a commitment fails to verify against tampered data", async () => {
-    const { record, opening } = await buildExchangeRecord(
+  test("a present commitment whose data is not re-supplied is a mismatch, not a pass", async () => {
+    // The salts-only keys cannot self-open, so a caller that fails to re-supply a
+    // present commitment's data must get a mismatch -- never a silent pass. Guards
+    // the verify branch that treats missing re-supplied data as invalid.
+    const { record, keys } = await buildExchangeRecord(
       baseInputs,
       fixedRandomness,
     );
-    const tampered = {
-      salt: opening.commitments.localPayloadSent.salt,
-      data: { ...localPayloadSent, rows: [["99mg"], ["20mg"]] },
-    };
+    // Nothing re-supplied: every present commitment is unverifiable.
+    const none = await verifyRecordCommitments(record, keys, {});
+    expect(none.allValid).toBe(false);
+    expect(none.verdicts).toEqual({
+      localPayloadSent: false,
+      partnerPayloadReceived: false,
+      associationTable: false,
+    });
+    // Only the association table's data omitted: the two re-supplied commitments
+    // still verify, but the omitted one fails and drags allValid down.
+    const partial = await verifyRecordCommitments(record, keys, {
+      localPayloadSent,
+      partnerPayloadReceived,
+    });
+    expect(partial.allValid).toBe(false);
+    expect(partial.verdicts).toEqual({
+      localPayloadSent: true,
+      partnerPayloadReceived: true,
+      associationTable: false,
+    });
+  });
+
+  test("a commitment fails to verify against tampered data", async () => {
+    const { record, keys } = await buildExchangeRecord(
+      baseInputs,
+      fixedRandomness,
+    );
     expect(
       await verifyCommitmentOpening(
         "localPayloadSent",
-        tampered,
+        keys.salts.localPayloadSent,
+        { ...localPayloadSent, rows: [["99mg"], ["20mg"]] },
         record.commitments.localPayloadSent,
       ),
     ).toBe(false);
   });
 
   test("a commitment cannot be opened to a second dataset (binding)", async () => {
-    const { record, opening } = await buildExchangeRecord(
+    const { record, keys } = await buildExchangeRecord(
       baseInputs,
       fixedRandomness,
     );
     // Reuse the real salt but a different data set: the committer cannot open
     // the same commitment to a second association table.
-    const secondDataset = {
-      salt: opening.commitments.associationTable!.salt,
-      data: [
-        [9, 9],
-        [9, 9],
-      ] as CanonicalValue,
-    };
     expect(
       await verifyCommitmentOpening(
         "associationTable",
-        secondDataset,
+        keys.salts.associationTable!,
+        [
+          [9, 9],
+          [9, 9],
+        ] as CanonicalValue,
         record.commitments.associationTable!,
       ),
     ).toBe(false);
+  });
+
+  test("returns false (never throws) for re-supplied data outside the canonical domain", async () => {
+    // Fail-safe contract: a verifier fed hostile/garbage data must get a mismatch
+    // verdict, not an exception. A bigint is outside the canonical encoding domain,
+    // so computeCommitment's canonicalization would throw -- verifyCommitmentOpening
+    // must map that to `false`.
+    const { record, keys } = await buildExchangeRecord(
+      baseInputs,
+      fixedRandomness,
+    );
+    const outOfDomain = 10n as unknown as CanonicalValue;
+    await expect(
+      verifyCommitmentOpening(
+        "localPayloadSent",
+        keys.salts.localPayloadSent,
+        outOfDomain,
+        record.commitments.localPayloadSent,
+      ),
+    ).resolves.toBe(false);
   });
 
   test("a commitment of one kind does not verify as another (domain separation)", async () => {
@@ -205,7 +250,8 @@ describe("commitments", () => {
     expect(
       await verifyCommitmentOpening(
         "partnerPayloadReceived",
-        { salt: toBase64Url(sharedSalt), data },
+        toBase64Url(sharedSalt),
+        data,
         sentValue,
       ),
     ).toBe(false);
@@ -415,17 +461,17 @@ describe("identities", () => {
 
 describe("association-table commitment", () => {
   test("is present when this party holds the table", async () => {
-    const { record, opening } = await buildExchangeRecord(
+    const { record, keys } = await buildExchangeRecord(
       baseInputs,
       fixedRandomness,
     );
     expect(record.commitments.associationTable).toBeDefined();
-    expect(opening.commitments.associationTable).toBeDefined();
+    expect(keys.salts.associationTable).toBeDefined();
   });
 
   test("is absent when this party does not hold the table", async () => {
     const { associationTable: _omit, ...withoutTable } = baseInputs;
-    const { record, opening } = await buildExchangeRecord(withoutTable, {
+    const { record, keys } = await buildExchangeRecord(withoutTable, {
       bindingNonce: salt(0),
       salts: {
         localPayloadSent: salt(1),
@@ -433,7 +479,7 @@ describe("association-table commitment", () => {
       },
     });
     expect(record.commitments.associationTable).toBeUndefined();
-    expect(opening.commitments.associationTable).toBeUndefined();
+    expect(keys.salts.associationTable).toBeUndefined();
     // Payload commitments are still produced.
     expect(record.commitments.localPayloadSent).toBeDefined();
     expect(record.commitments.partnerPayloadReceived).toBeDefined();
@@ -607,21 +653,14 @@ describe("governance metadata", () => {
   test("payload category names equal the committed columns (cannot drift from the commitment)", async () => {
     // The load-bearing invariant: payloadSent/payloadReceived names ARE the
     // committed columns, so the readable disclosure cannot diverge from the
-    // committed bytes. Pin it as a check against the opening's committed data, not
-    // just prose.
-    const { record, opening } = await buildExchangeRecord(
-      baseInputs,
-      fixedRandomness,
-    );
-    const committedColumns = (
-      name: "localPayloadSent" | "partnerPayloadReceived",
-    ): string[] =>
-      (opening.commitments[name].data as unknown as CommittedPayload).columns;
+    // committed bytes. The keys no longer carry a data snapshot, so pin it
+    // against the committed inputs the record was built from.
+    const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
     expect(record.governance.payloadSent.map((c) => c.name)).toEqual(
-      committedColumns("localPayloadSent"),
+      localPayloadSent.columns,
     );
     expect(record.governance.payloadReceived.map((c) => c.name)).toEqual(
-      committedColumns("partnerPayloadReceived"),
+      partnerPayloadReceived.columns,
     );
   });
 
@@ -779,11 +818,11 @@ describe("binding nonce", () => {
   });
 
   test("is distinct from the per-commitment salts", async () => {
-    const { record, opening } = await buildExchangeRecord(baseInputs);
+    const { record, keys } = await buildExchangeRecord(baseInputs);
     const salts = [
-      opening.commitments.localPayloadSent.salt,
-      opening.commitments.partnerPayloadReceived.salt,
-      opening.commitments.associationTable!.salt,
+      keys.salts.localPayloadSent,
+      keys.salts.partnerPayloadReceived,
+      keys.salts.associationTable!,
     ];
     expect(salts).not.toContain(record.bindingNonce);
     // And the per-commitment salts are independent of one another.
@@ -822,25 +861,35 @@ describe("serialize / parse", () => {
     );
   });
 
-  test("the opening data round-trips through serialize -> parse", async () => {
-    const { opening } = await buildExchangeRecord(baseInputs, fixedRandomness);
-    const parsed = parseOpeningData(JSON.parse(serializeOpeningData(opening)));
-    expect(parsed).toEqual(opening);
-    expect(parsed.version).toBe(EXCHANGE_OPENING_VERSION);
+  test("the verification keys round-trip through serialize -> parse", async () => {
+    const { keys } = await buildExchangeRecord(baseInputs, fixedRandomness);
+    const parsed = parseVerificationKeys(
+      JSON.parse(serializeVerificationKeys(keys)),
+    );
+    expect(parsed).toEqual(keys);
+    expect(parsed.version).toBe(EXCHANGE_KEYS_VERSION);
   });
 
-  test("the combined record file packages the record and opening under public/private", async () => {
-    const { record, opening } = await buildExchangeRecord(
-      baseInputs,
-      fixedRandomness,
-    );
-    const parsed = JSON.parse(
-      serializeExchangeRecordFile({ public: record, private: opening }),
-    ) as { public: unknown; private: unknown };
-    // The `public` part is the shareable record and the `private` part the
-    // opening; each validates through its own parser and round-trips intact.
-    expect(parseExchangeRecord(parsed.public)).toEqual(record);
-    expect(parseOpeningData(parsed.private)).toEqual(opening);
+  test("the verification keys carry only salts -- no committed data snapshot", async () => {
+    // The core privacy property of this format: the keys hold per-commitment
+    // salts and nothing else, so the matched data is never persisted here. Guard
+    // it both structurally (only a version and a salts map) and by asserting no
+    // committed value or data-bearing key survives in the serialized keys.
+    const { keys } = await buildExchangeRecord(baseInputs, fixedRandomness);
+    expect(Object.keys(keys).sort()).toEqual(["salts", "version"]);
+    for (const salt of Object.values(keys.salts))
+      expect(typeof salt).toBe("string");
+    const serialized = serializeVerificationKeys(keys);
+    const committedValues = [
+      ...localPayloadSent.rows.flat(),
+      ...partnerPayloadReceived.rows.flat(),
+    ].filter((cell): cell is string => typeof cell === "string");
+    expect(committedValues.length).toBeGreaterThan(0);
+    for (const value of committedValues)
+      expect(serialized).not.toContain(value);
+    // The snapshot's data-bearing keys must not appear -- only salts remain.
+    for (const key of ['"data"', '"rows"', '"rowIndices"', '"columns"'])
+      expect(serialized).not.toContain(key);
   });
 
   test("parseExchangeRecord rejects an unrecognized version", async () => {
@@ -855,7 +904,7 @@ describe("serialize / parse", () => {
 // The checked-in vectors are the cross-implementation contract: any independent
 // implementation (CLI, web, or a third party) that builds a record from the
 // same `inputs` and `randomness` must reproduce the exact `record` and
-// `opening`. The companion browser suite
+// `keys`. The companion browser suite
 // (apps/web/test/browser/exchangeRecord.test.ts) runs the same vectors so Node
 // and the browser are proven to produce byte-identical output.
 
@@ -865,7 +914,7 @@ interface RecordVector {
   inputs: ExchangeRecordInputs;
   randomness: { bindingNonce: string; salts: Record<string, string> };
   record: unknown;
-  opening: unknown;
+  keys: unknown;
 }
 
 const { vectors } = JSON.parse(
@@ -888,15 +937,20 @@ describe("exchange-record-vectors.json", () => {
   });
 
   test.each(vectors)(
-    "$name: build reproduces the checked-in record and opening",
+    "$name: build reproduces the checked-in record and keys",
     async (vector) => {
-      const { record, opening } = await buildExchangeRecord(
+      const { record, keys } = await buildExchangeRecord(
         vector.inputs,
         randomnessFromVector(vector),
       );
       expect(record).toEqual(vector.record);
-      expect(opening).toEqual(vector.opening);
-      const { allValid } = await verifyRecordCommitments(record, opening);
+      expect(keys).toEqual(vector.keys);
+      // Verification re-supplies the committed data (the vector's own inputs).
+      const { allValid } = await verifyRecordCommitments(record, keys, {
+        localPayloadSent: vector.inputs.localPayloadSent,
+        partnerPayloadReceived: vector.inputs.partnerPayloadReceived,
+        associationTable: vector.inputs.associationTable,
+      });
       expect(allValid).toBe(true);
     },
   );
