@@ -28,7 +28,9 @@
     "pretest": "npm run build",
     "test": "vitest run --project unit",
     "test:unit": "vitest run --project unit",
-    "test:stress": "vitest run --project stress"
+    "test:stress": "vitest run --project stress",
+    "precoverage": "npm run build",
+    "coverage": "vitest run --project unit --coverage"
   },
   "files": [
     "dist"
