@@ -4,6 +4,7 @@ import { default as EventEmitter } from "eventemitter3";
 
 import {
   ConnectionError,
+  OperatorConfigError,
   StandardizationTermsError,
   UsageError,
   runExchange,
@@ -250,13 +251,37 @@ describe("runExchangeLifecycle", () => {
     expect(mockedOpen).not.toHaveBeenCalled();
   });
 
-  test("a prepare-time non-standardization UsageError is NOT 'config' (type-scoped)", async () => {
-    // The config category is scoped to StandardizationTermsError specifically, not
-    // to any prepare-phase UsageError. The sibling payload/disclosure guards also
-    // throw a plain UsageError during prepare, but their messages embed
-    // partner-influenced column names on the accept side, so they must stay in the
-    // generic (message-swallowing) 'exchange' alert rather than have their text
-    // surfaced by the actionable 'config' one.
+  test("'config' is keyed on the OperatorConfigError base, not one subclass", async () => {
+    // The category is the base type, so any future local-config check (e.g. the
+    // disclosure-commitment drift a recurring web exchange reaches) is surfaced by
+    // extending OperatorConfigError at its throw site -- no change to this
+    // classifier. Pin that contract directly with the base type, not a subclass.
+    const acquire: Acquire = () =>
+      Promise.reject(new OperatorConfigError("a local config fault"));
+    const s = seams();
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "responder",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(s.onError).toHaveBeenCalledWith({
+      category: "config",
+      error: expect.any(OperatorConfigError),
+    });
+    expect(s.onResult).not.toHaveBeenCalled();
+    expect(mockedOpen).not.toHaveBeenCalled();
+  });
+
+  test("a prepare-time non-config UsageError is NOT 'config' (type-scoped)", async () => {
+    // The config category is scoped to OperatorConfigError, not to any prepare-phase
+    // UsageError. The payload-send disclosure guard also throws a plain UsageError
+    // during prepare, but on the accept side its column names are adopted from the
+    // partner's invitation, so it must stay in the generic (message-swallowing)
+    // 'exchange' alert rather than have its text surfaced by the actionable 'config'
+    // one.
     const acquire: Acquire = () =>
       Promise.reject(new UsageError("payload.send does not match metadata"));
     const s = seams();

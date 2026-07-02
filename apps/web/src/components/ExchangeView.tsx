@@ -508,15 +508,15 @@ export function ExchangeView(config: ExchangeConfig) {
               sanitizeForDisplay(errorMessage(error)),
           });
         } else if (category === "config") {
-          // The one prepare-time fault whose message is safe to surface: an
-          // authored standardization that contradicts the linkage terms (a
-          // StandardizationTermsError; classifyExchangeFailure scopes "config" to
-          // that type, so the partner-influenceable payload/disclosure UsageErrors
-          // land in the generic branch below instead). Its message names only this
-          // party's own authored outputs/functions, so it is value-free. Not a
-          // transport drop: retrying as-is fails identically, so surface the
-          // (sanitized) message -- actionable -- rather than the generic
-          // transient-failure copy that would wrongly deny a data/config problem.
+          // A prepare-time fault in the operator's OWN config, safe to surface
+          // because its message names only local content (an OperatorConfigError;
+          // classifyExchangeFailure scopes "config" to that base type, so the
+          // partner-influenceable payload-send UsageError lands in the generic
+          // branch below instead). Today that is a standardization contradicting
+          // the linkage terms. Not a transport drop: retrying as-is fails
+          // identically, so surface the (sanitized) message -- actionable -- rather
+          // than the generic transient-failure copy that would wrongly deny a
+          // data/config problem.
           setErrorAlert({
             title: "Could not prepare the exchange",
             message: sanitizeForDisplay(errorMessage(error)),

@@ -27,31 +27,54 @@ export class UsageError extends Error {
 }
 
 /**
- * A {@link UsageError} subclass marking the one prepare-time config fault whose
- * message is safe to surface verbatim to the operator: an authored
- * ("authoritative") standardization that contradicts its own linkage terms -- a
- * transform output naming no declared linkage field, or an unknown
- * standardization function (see `validateStandardizationAgainstTerms`). Thrown
- * only by {@link prepareForExchange}, before any peer connection.
+ * The family of prepare-time configuration faults whose message is composed
+ * SOLELY of the local operator's own content -- so it is both actionable to that
+ * operator and safe to surface to them verbatim. Raised from
+ * {@link prepareForExchange}, before any peer connection, never mid-exchange.
  *
- * It is a distinct type, not a plain {@link UsageError}, so the web can classify
- * exactly this fault into its actionable "config" alert -- which renders the
- * message -- while every OTHER prepare-time `UsageError` stays in the generic
- * swallowing alert. That distinction is security-relevant: the sibling payload /
- * disclosure guards (`assertPayloadSendDisclosed`,
- * `assertDisclosureMatchesCommitment`) also throw a prepare-time `UsageError`,
- * but their messages embed column names, and on the accept side those names are
- * derived from the partner's invitation -- so surfacing them verbatim would echo
- * partner-influenced text into the operator's own alert. The message THIS class
- * carries names only the local party's own authored outputs and functions, so it
- * is value-free; keying the web's surfacing on the TYPE rather than on "any
- * prepare-phase UsageError" makes that guarantee structural rather than a
- * reachability argument about which check fired.
+ * This base type is the membership rule for the web's actionable "config" alert,
+ * which renders the error's message: the web classifies a prepare-phase failure
+ * as `config` when it is an `OperatorConfigError`, NOT when it is merely any
+ * {@link UsageError}. The distinction is security-relevant. A sibling
+ * prepare-time `UsageError` whose message can embed PARTNER-influenced text must
+ * stay a plain `UsageError` so its message is swallowed by the generic alert
+ * rather than echoed into the operator's own UI; keying the surfacing on this
+ * type makes "the message is local and safe" a structural property of the error
+ * rather than a reachability argument about which check happened to fire.
+ *
+ * Extend it from any check that fails closed on the operator's OWN configuration
+ * and whose message names only local content. Today {@link StandardizationTermsError}
+ * is the sole member. When the web gains recurring exchanges (as the CLI has),
+ * the send-side disclosure-COMMITMENT drift check
+ * (`assertDisclosureMatchesCommitment`) becomes reachable there and is a natural
+ * member: it compares this party's own current metadata against its own persisted
+ * commitment, so every name in its message is local. The payload-SEND disclosure
+ * check (`assertPayloadSendDisclosed`) is deliberately NOT a member -- on the
+ * accept side its `payload.send` names are adopted from the partner's invitation,
+ * and the check cannot tell its role at the throw site, so it stays conservatively
+ * out and its message stays swallowed.
  *
  * Being a {@link UsageError} subclass, the CLI's `instanceof UsageError` check
- * still classifies it as a configuration error (exit 64, EX_USAGE), unchanged.
+ * still classifies every member as a configuration error (exit 64, EX_USAGE).
  */
-export class StandardizationTermsError extends UsageError {
+export class OperatorConfigError extends UsageError {
+  constructor(message: string) {
+    super(message);
+    this.name = "OperatorConfigError";
+  }
+}
+
+/**
+ * The specific {@link OperatorConfigError} for an authored ("authoritative")
+ * standardization that contradicts its own linkage terms -- a transform output
+ * naming no declared linkage field, or an unknown standardization function (see
+ * `validateStandardizationAgainstTerms`). Thrown only by
+ * {@link prepareForExchange}. Its message names only this party's own authored
+ * outputs and functions, so it is safe to surface; see {@link OperatorConfigError}
+ * for why the web keys its actionable "config" alert on that base type rather than
+ * on any prepare-phase {@link UsageError}.
+ */
+export class StandardizationTermsError extends OperatorConfigError {
   constructor(message: string) {
     super(message);
     this.name = "StandardizationTermsError";

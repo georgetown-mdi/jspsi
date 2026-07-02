@@ -1,7 +1,11 @@
 import { expect, test, describe } from "vitest";
 
 import { prepareForExchange } from "../src/exchange";
-import { StandardizationTermsError, UsageError } from "../src/errors";
+import {
+  OperatorConfigError,
+  StandardizationTermsError,
+  UsageError,
+} from "../src/errors";
 
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { Metadata } from "../src/config/metadata";
@@ -63,10 +67,11 @@ describe("prepareForExchange: authoritative standardization fails closed", () =>
       { output: "not_a_field", input: "first_name" },
     ];
     // Today this string was pushed to `warnings` and the exchange proceeded; the
-    // authoritative config now breaks on it. The specific type (a UsageError
-    // subclass) is what lets the web surface this value-free message while keeping
-    // the partner-influenceable payload/disclosure UsageErrors swallowed; assert
-    // both the subtype and that it remains a UsageError (the CLI's exit-64 gate).
+    // authoritative config now breaks on it. The specific type is what lets the web
+    // surface this value-free message while keeping the partner-influenceable
+    // payload-send UsageError swallowed; assert the subtype, that it stays in the
+    // surfaced OperatorConfigError family, and that it remains a UsageError (the
+    // CLI's exit-64 gate).
     expect(() =>
       prepareForExchange(
         { linkageTerms: terms, metadata, standardization },
@@ -86,6 +91,7 @@ describe("prepareForExchange: authoritative standardization fails closed", () =>
     } catch (err) {
       thrown = err;
     }
+    expect(thrown).toBeInstanceOf(OperatorConfigError);
     expect(thrown).toBeInstanceOf(UsageError);
     // The failure carries the underlying inconsistency through, so an operator
     // can see which output is wrong.
