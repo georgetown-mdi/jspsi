@@ -5,6 +5,7 @@ import {
   getLogger,
   encodeInvitation,
   assertPayloadSendDisclosed,
+  assertStandardizationMatchesTerms,
   disclosedColumnNames,
   inferMetadata,
   INVITATION_LIFETIME_SECONDS,
@@ -494,6 +495,22 @@ export async function validateInvite(params: {
     // left to the exchange-time check.
     if (configSource.metadata !== undefined)
       assertPayloadSendDisclosed(configTerms.payload, configSource.metadata);
+
+    // Fail closed, before the token is minted, on a config whose authored
+    // standardization contradicts its own linkage terms -- the mint-boundary
+    // counterpart of the exchange-time check in prepareForExchange (the same shared
+    // assert), so this path -- the only offline mint that carries a hand-authored
+    // standardization -- never discloses an invitation the config's own
+    // `psilink exchange` would then refuse (exit 64). Gated on an explicit
+    // standardization: absent, the exchange reconstructs one from the terms (the
+    // terms-only path), which cannot contradict them. Mirrors the
+    // assertPayloadSendDisclosed guard above, which fails closed pre-mint for the
+    // same "never disclose a token the exchange rejects" reason.
+    if (configSource.standardization !== undefined)
+      assertStandardizationMatchesTerms(
+        configSource.standardization,
+        configTerms,
+      );
 
     // Carry the disclosed-columns subset only when the config declares an
     // explicit metadata block: without one the run infers metadata from the

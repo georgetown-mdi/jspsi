@@ -366,8 +366,6 @@ async function prepareDataset(
     linkageStrategy,
   );
   if (linkageStrategy === "single-pass") log.info(singlePassDisclosureNotice());
-  for (const warning of prepared.warnings)
-    log.warn("cleaning configuration issue:", warning);
   warnOnValueConstraints(prepared, log);
   return prepared;
 }

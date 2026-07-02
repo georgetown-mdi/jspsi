@@ -1,4 +1,9 @@
-import { ConnectionError, getLogger, runExchange } from "@psilink/core";
+import {
+  ConnectionError,
+  OperatorConfigError,
+  getLogger,
+  runExchange,
+} from "@psilink/core";
 
 import { authenticateExchange } from "./authenticateExchange";
 import { openPeerMessageConnection } from "./peerMessageConnection";
@@ -32,21 +37,48 @@ export interface StageDefinition {
  * authenticated key exchange (or, once it is wrapped, the AEAD layer) reported a
  * wrong secret, tamper, or replay, so the user must NOT silently re-run it -- it
  * is surfaced as an authentication failure rather than a retryable transport
- * drop. It is the one category keyed off {@link ConnectionError} kind
- * (`"security"`); `"exchange"` and `"output"` are owner-local discriminants (an
- * output-generation failure is not a connection error). */
-export type ExchangeErrorCategory = "exchange" | "output" | "security";
+ * drop. A `"config"` failure is an {@link OperatorConfigError} raised during the
+ * PREPARE phase (inside `acquire`, before any peer connection): a prepare-time
+ * fault whose message names only this party's OWN configuration -- today an
+ * authored standardization that contradicts the linkage terms. Not a transport
+ * drop, so retrying as-is fails identically; the message is actionable and safe to
+ * surface. It is scoped to that base type, NOT to any prepare-phase `UsageError`:
+ * a sibling guard whose message can embed partner-influenced column names (the
+ * accept side's payload-send disclosure check) stays a plain `UsageError` and lands
+ * in the generic (message-swallowing) `"exchange"` alert. Keying on the type lets
+ * a future local-config check -- e.g. the disclosure-commitment drift a recurring
+ * web exchange reaches -- join the `config` alert by extending `OperatorConfigError`
+ * at its throw site, with no change here. `"exchange"` and `"output"` are
+ * owner-local discriminants (an output-generation failure is not a connection
+ * error). */
+export type ExchangeErrorCategory =
+  | "exchange"
+  | "output"
+  | "security"
+  | "config";
 
 /** Maps a lifecycle failure to the alert {@link ExchangeErrorCategory} the UI
- * shows. A `security`-kind {@link ConnectionError} -- the authenticated key
- * exchange failing closed on a wrong secret/tamper/replay -- is a trust failure
- * the user must not silently retry; every other exchange-phase failure is the
- * retryable generic `"exchange"`. (An `"output"` failure is classified at its own
- * call site, since the exchange already succeeded there.) Keying off the
+ * shows, given the `phase` it came from. A `security`-kind {@link ConnectionError}
+ * -- the authenticated key exchange failing closed on a wrong secret/tamper/replay
+ * -- is a trust failure the user must not silently retry; every other failure is
+ * the retryable generic `"exchange"`. (An `"output"` failure is classified at its
+ * own call site, since the exchange already succeeded there.) Keying off the
  * connection-error kind rather than the handshake step means a future
  * `EncryptedMessageConnection` surfacing a `security` failure mid-exchange is
- * routed the same way for free. */
-function classifyExchangeFailure(error: unknown): ExchangeErrorCategory {
+ * routed the same way for free. An {@link OperatorConfigError} is classified
+ * `config` ONLY in the `"prepare"` phase, which runs `prepareForExchange`. Both
+ * discriminants are structural: the TYPE narrows it to a prepare-phase fault whose
+ * message is composed only of local config (see `OperatorConfigError`), keeping
+ * the partner-influenceable payload-send `UsageError` out of the message-surfacing
+ * alert; the PHASE keeps an `OperatorConfigError` surfacing mid-`"run"` (none does
+ * today) from being mislabeled -- neither is a prose claim about what the other
+ * half throws. */
+function classifyExchangeFailure(
+  error: unknown,
+  phase: "prepare" | "run",
+): ExchangeErrorCategory {
+  if (phase === "prepare" && error instanceof OperatorConfigError)
+    return "config";
   return error instanceof ConnectionError && error.kind === "security"
     ? "security"
     : "exchange";
@@ -236,8 +268,13 @@ export async function runExchangeLifecycle(
     });
   } catch (error) {
     // acquire is atomic: it has already torn down anything it built, so there is
-    // nothing here for the owner to release. On abort, emitError no-ops.
-    emitError({ category: "exchange", error });
+    // nothing here for the owner to release. On abort, emitError no-ops. This is
+    // the PREPARE phase: acquire runs prepareForExchange, whose local-config faults
+    // (an OperatorConfigError -- today a standardization contradicting its terms)
+    // surface as an actionable "config" alert rather than the generic retryable
+    // "exchange" one; a plain load/transport failure -- and every other
+    // prepare-phase UsageError -- stays "exchange".
+    emitError({ category: classifyExchangeFailure(error, "prepare"), error });
     return;
   }
 
@@ -348,7 +385,7 @@ export async function runExchangeLifecycle(
     }
     emitResult(outputs);
   } catch (error) {
-    emitError({ category: classifyExchangeFailure(error), error });
+    emitError({ category: classifyExchangeFailure(error, "run"), error });
   } finally {
     signal.removeEventListener("abort", onAbort);
     await teardown();

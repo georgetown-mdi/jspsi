@@ -510,6 +510,10 @@ export async function generateInvitation(params: {
     disclosedPayloadColumns,
   };
 
+  // The authored standardization is returned as-is for the inviter's own exchange;
+  // it is reconciled to the emitted terms downstream by inviterExchangeDataSpec, at
+  // the spec-assembly boundary where the spec is handed to prepareForExchange (so
+  // the invariant is enforced no matter how a spec reaches core, not only here).
   const encoded = await encodeInvitation(token);
   return {
     encoded,

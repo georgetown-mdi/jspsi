@@ -50,7 +50,6 @@ vi.mock("@psilink/core", async (importActual) => {
     // expectedPayloadColumns from a committed payload.receive), so a shared ref
     // would leak that field between tests.
     prepareForExchange: vi.fn(() => ({
-      warnings: [],
       linkageTerms: { linkageFields: [], linkageKeys: [] },
       dataset: { getField: () => undefined },
       rowCount: 0,

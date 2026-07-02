@@ -23,6 +23,7 @@ import {
 import { dialAsAcceptor, listenAsInviter } from "@psi/rendezvous";
 import { acceptorExchangeDataSpec } from "@psi/acceptInvitation";
 import { disclosedColumnNames } from "@psi/metadataEditing";
+import { inviterExchangeDataSpec } from "@psi/advancedInvite";
 import { runExchangeLifecycle } from "@psi/exchangeLifecycle";
 import { waitForIncomingConnection } from "@psi/waitForConnection";
 
@@ -407,30 +408,29 @@ export function ExchangeView(config: ExchangeConfig) {
       // identity is already this party's name), so the two sides carry an
       // identical fields/keys set and the terms-compatibility handshake agrees.
       // Each party's metadata, standardization, and payloads stay per-party and
-      // local -- only the linkage terms are pinned to the invitation. The acceptor
-      // carries the metadata/standardization it authored in the "Prepare your
-      // data" editor (derived from its own CSV, never cross-checked); the inviter
-      // lets prepareForExchange infer them from its CSV.
+      // local -- only the linkage terms are pinned to the invitation. Each role's
+      // spec is assembled by its own builder ({@link acceptorExchangeDataSpec} /
+      // {@link inviterExchangeDataSpec}), so neither role feeds core a
+      // self-contradictory spec that would fail closed -- by different means. The
+      // inviter's builder RECONCILES its authored standardization to the terms
+      // (standardizationForTerms drops a disabled key's orphaned transform). The
+      // acceptor is safe BY CONSTRUCTION, not by a reconcile: its standardization is
+      // derived from the adopted terms via getDefaultStandardization, so its outputs
+      // are already exactly those terms' declared fields. Core's throw is the
+      // backstop for both. The acceptor carries the metadata/standardization it
+      // authored in the "Prepare your data" editor; the inviter carries what it
+      // authored in the Advanced editor (both omitted on the quick path, where
+      // prepareForExchange infers them from the CSV).
       const dataSpec: ExchangeDataSpec =
         config.role === "acceptor"
           ? acceptorExchangeDataSpec(config.linkageTerms, partyName, {
               metadata: config.metadata,
               standardization: config.standardization,
             })
-          : {
-              linkageTerms: config.linkageTerms,
-              // The inviter threads its edited metadata and authored standardization
-              // when it prepared data in the Advanced editor; the quick path omits
-              // both and they are inferred from the columns. Each is included only
-              // when present, so an inviter that edited metadata but authored no
-              // cleaning still falls back to inferred standardization.
-              ...(config.metadata !== undefined && {
-                metadata: config.metadata,
-              }),
-              ...(config.standardization !== undefined && {
-                standardization: config.standardization,
-              }),
-            };
+          : inviterExchangeDataSpec(config.linkageTerms, {
+              metadata: config.metadata,
+              standardization: config.standardization,
+            });
       const prepared = prepareForExchange(
         dataSpec,
         partyName,
@@ -509,6 +509,20 @@ export function ExchangeView(config: ExchangeConfig) {
               // but the alert is operator-facing, so escape it like any other.
               // A single message (not the cause chain) keeps the sentence intact.
               sanitizeForDisplay(errorMessage(error)),
+          });
+        } else if (category === "config") {
+          // A prepare-time fault in the operator's OWN config, safe to surface
+          // because its message names only local content (an OperatorConfigError;
+          // classifyExchangeFailure scopes "config" to that base type, so the
+          // partner-influenceable payload-send UsageError lands in the generic
+          // branch below instead). Today that is a standardization contradicting
+          // the linkage terms. Not a transport drop: retrying as-is fails
+          // identically, so surface the (sanitized) message -- actionable -- rather
+          // than the generic transient-failure copy that would wrongly deny a
+          // data/config problem.
+          setErrorAlert({
+            title: "Could not prepare the exchange",
+            message: sanitizeForDisplay(errorMessage(error)),
           });
         } else if (category === "security") {
           // The authenticated key exchange failed closed: this connection could

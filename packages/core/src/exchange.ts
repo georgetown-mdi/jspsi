@@ -4,7 +4,7 @@ import { getDefaultLinkageTerms } from "./defaults/linkageTerms.js";
 import { getDefaultStandardization } from "./defaults/standardization.js";
 import {
   buildStandardizedDataset,
-  validateStandardizationAgainstTerms,
+  assertStandardizationMatchesTerms,
   StandardizedKeyIterable,
 } from "./standardization.js";
 import { columnValues, inferDateFormat } from "./utils/date.js";
@@ -32,7 +32,6 @@ import {
 } from "./payloadExchange.js";
 import type { PayloadWireMessage } from "./payloadExchange.js";
 import { buildExchangeRecord } from "./exchangeRecord.js";
-
 import type { Metadata } from "./config/metadata.js";
 import type { LinkageTerms } from "./config/linkageTerms.js";
 import type { StandardizedDataset } from "./standardization.js";
@@ -109,11 +108,6 @@ export interface PreparedExchange {
    */
   rawRows: Array<CSVRow>;
   rowCount: number;
-  /**
-   * Non-fatal issues detected during preparation (e.g. unknown standardization
-   * outputs).
-   */
-  warnings: string[];
 }
 
 /**
@@ -125,8 +119,8 @@ export interface PreparedExchange {
  * - Infers the date-of-birth input format when standardization is absent.
  * - Builds a default standardization pipeline when not provided explicitly.
  * - Constructs a {@link StandardizedDataset} ready for key-iterable creation.
- * - Validates explicit standardization against the linkage terms and collects
- *   any warnings.
+ * - Fails closed when an explicit (authoritative) standardization contradicts
+ *   the linkage terms.
  *
  * Call this before establishing a connection. After the handshake role and PSI
  * role are resolved, {@link runExchange} builds the key iterables and runs
@@ -147,7 +141,6 @@ export function prepareForExchange(
   columnNames: Array<string>,
 ): PreparedExchange {
   const log = getLogger("exchange");
-  const warnings: string[] = [];
 
   const metadata = exchangeDataSpec.metadata ?? inferMetadata(columnNames);
   const linkageTerms =
@@ -227,6 +220,19 @@ export function prepareForExchange(
     exchangeDataSpec.standardization ??
     getDefaultStandardization(metadata, linkageTerms, { dateInputFormat });
 
+  // Fail closed on an authoritative config whose standardization contradicts its
+  // linkage terms (see assertStandardizationMatchesTerms for the full rationale
+  // and the exit-64 / web-surfacing contract). Gated on an authored
+  // standardization: the terms-only path (undefined) reconstructs one from the
+  // terms via getDefaultStandardization above and so cannot contradict them, and
+  // is deliberately not gated. The same shared assert runs at the `psilink invite`
+  // mint boundary, so `invite` never discloses a token this exchange would refuse.
+  if (exchangeDataSpec.standardization !== undefined)
+    assertStandardizationMatchesTerms(
+      exchangeDataSpec.standardization,
+      linkageTerms,
+    );
+
   // Sanitize the key names for display: on the accept side these come from the
   // partner's invitation (charset-unconstrained), and the operator already
   // reviewed the same escaped form when agreeing to the terms (displayInvitation).
@@ -241,15 +247,6 @@ export function prepareForExchange(
     metadata,
     linkageTerms,
   );
-
-  if (exchangeDataSpec.standardization !== undefined) {
-    warnings.push(
-      ...validateStandardizationAgainstTerms(
-        exchangeDataSpec.standardization,
-        linkageTerms,
-      ),
-    );
-  }
 
   return {
     metadata,
@@ -268,7 +265,6 @@ export function prepareForExchange(
     dataset,
     rawRows,
     rowCount: rawRows.length,
-    warnings,
   };
 }
 

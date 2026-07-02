@@ -27,6 +27,70 @@ export class UsageError extends Error {
 }
 
 /**
+ * The family of prepare-time configuration faults whose message is composed
+ * SOLELY of the local operator's own content -- so it is both actionable to that
+ * operator and safe to surface to them verbatim. Raised from
+ * {@link prepareForExchange}, before any peer connection, never mid-exchange.
+ *
+ * This base type is the membership rule for the web's actionable "config" alert,
+ * which renders the error's message: the web classifies a prepare-phase failure
+ * as `config` when it is an `OperatorConfigError`, NOT when it is merely any
+ * {@link UsageError}. The distinction is security-relevant. A sibling
+ * prepare-time `UsageError` whose message can embed PARTNER-influenced text must
+ * stay a plain `UsageError` so its message is swallowed by the generic alert
+ * rather than echoed into the operator's own UI. Keying the surfacing on this type
+ * makes MEMBERSHIP a structural property (a check either is or is not a member)
+ * rather than a reachability argument about which check happened to fire; each
+ * member is in turn responsible for carrying only local content in its message
+ * (see {@link StandardizationTermsError} for the basis of its guarantee).
+ *
+ * Extend it from any check that fails closed on the operator's OWN configuration
+ * and whose message names only local content. Today {@link StandardizationTermsError}
+ * is the sole member. When the web gains recurring exchanges (as the CLI has),
+ * the send-side disclosure-COMMITMENT drift check
+ * (`assertDisclosureMatchesCommitment`) becomes reachable there and is a natural
+ * member: it compares this party's own current metadata against its own persisted
+ * commitment, so every name in its message is local. The payload-SEND disclosure
+ * check (`assertPayloadSendDisclosed`) is deliberately NOT a member -- on the
+ * accept side its `payload.send` names are adopted from the partner's invitation,
+ * and the check cannot tell its role at the throw site, so it stays conservatively
+ * out and its message stays swallowed.
+ *
+ * Being a {@link UsageError} subclass, the CLI's `instanceof UsageError` check
+ * still classifies every member as a configuration error (exit 64, EX_USAGE).
+ */
+export class OperatorConfigError extends UsageError {
+  constructor(message: string) {
+    super(message);
+    this.name = "OperatorConfigError";
+  }
+}
+
+/**
+ * The specific {@link OperatorConfigError} for an authored ("authoritative")
+ * standardization that contradicts its own linkage terms -- a transform output
+ * naming no declared linkage field, or an unknown standardization function (see
+ * `validateStandardizationAgainstTerms`). Thrown only by
+ * {@link prepareForExchange}, and only for an AUTHORED standardization; its message
+ * interpolates that standardization's transform outputs and step functions. On the
+ * web the only party that reaches this throw is the inviter, with its own authored
+ * standardization (local content): the acceptor's standardization is derived from
+ * its adopted terms via `getDefaultStandardization`, whose outputs are exactly
+ * those terms' field names, so it is consistent with them by construction and does
+ * not reach this throw (pinned in standardization.test.ts). Adopted, partner-origin
+ * field names therefore never surface here -- every message this type carries is
+ * the authoring party's own local content. See {@link OperatorConfigError} for why
+ * the web keys its actionable "config" alert on that base type rather than on any
+ * prepare-phase {@link UsageError}.
+ */
+export class StandardizationTermsError extends OperatorConfigError {
+  constructor(message: string) {
+    super(message);
+    this.name = "StandardizationTermsError";
+  }
+}
+
+/**
  * A {@link UsageError} subclass marking a bilateral-mode mismatch detected at
  * rendezvous: the peer advertised a `lockless_rendezvous` or `retain_files`
  * setting in its hello payload that differs from this party's. These flags are

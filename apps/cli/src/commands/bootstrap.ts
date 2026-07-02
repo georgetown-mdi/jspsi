@@ -1013,9 +1013,6 @@ export async function prepareForOnlineExchange(
     rows.rawRows,
     rows.columns,
   );
-  const log = getLogger("psilink");
-  for (const warning of prepared.warnings)
-    log.warn("cleaning configuration issue:", warning);
   return prepared;
 }
 

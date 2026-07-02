@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { default as EventEmitter } from "eventemitter3";
 
-import { ConnectionError, runExchange } from "@psilink/core";
+import {
+  ConnectionError,
+  OperatorConfigError,
+  StandardizationTermsError,
+  UsageError,
+  runExchange,
+} from "@psilink/core";
 
 import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
 import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
@@ -219,6 +225,82 @@ describe("runExchangeLifecycle", () => {
     expect(mockedOpen).not.toHaveBeenCalled();
   });
 
+  test("a prepare-time StandardizationTermsError is category 'config', not 'exchange'", async () => {
+    // prepareForExchange fails closed with a StandardizationTermsError inside
+    // acquire, before any peer connection: an authored standardization that
+    // contradicts the terms. It must surface as an actionable config problem, not
+    // the generic retryable transport failure.
+    const acquire: Acquire = () =>
+      Promise.reject(
+        new StandardizationTermsError("standardization contradicts its terms"),
+      );
+    const s = seams();
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "responder",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(s.onError).toHaveBeenCalledWith({
+      category: "config",
+      error: expect.any(StandardizationTermsError),
+    });
+    expect(s.onResult).not.toHaveBeenCalled();
+    expect(mockedOpen).not.toHaveBeenCalled();
+  });
+
+  test("'config' is keyed on the OperatorConfigError base, not one subclass", async () => {
+    // The category is the base type, so any future local-config check (e.g. the
+    // disclosure-commitment drift a recurring web exchange reaches) is surfaced by
+    // extending OperatorConfigError at its throw site -- no change to this
+    // classifier. Pin that contract directly with the base type, not a subclass.
+    const acquire: Acquire = () =>
+      Promise.reject(new OperatorConfigError("a local config fault"));
+    const s = seams();
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "responder",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(s.onError).toHaveBeenCalledWith({
+      category: "config",
+      error: expect.any(OperatorConfigError),
+    });
+    expect(s.onResult).not.toHaveBeenCalled();
+    expect(mockedOpen).not.toHaveBeenCalled();
+  });
+
+  test("a prepare-time non-config UsageError is NOT 'config' (type-scoped)", async () => {
+    // The config category is scoped to OperatorConfigError, not to any prepare-phase
+    // UsageError. The payload-send disclosure guard also throws a plain UsageError
+    // during prepare, but on the accept side its column names are adopted from the
+    // partner's invitation, so it must stay in the generic (message-swallowing)
+    // 'exchange' alert rather than have its text surfaced by the actionable 'config'
+    // one.
+    const acquire: Acquire = () =>
+      Promise.reject(new UsageError("payload.send does not match metadata"));
+    const s = seams();
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "responder",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(s.onError).toHaveBeenCalledWith({
+      category: "exchange",
+      error: expect.any(UsageError),
+    });
+    expect(s.onResult).not.toHaveBeenCalled();
+    expect(mockedOpen).not.toHaveBeenCalled();
+  });
+
   test("a runExchange failure is classified as category 'exchange'", async () => {
     const { mc } = makeFakeMc();
     mockedOpen.mockResolvedValue(mc);
@@ -237,6 +319,35 @@ describe("runExchangeLifecycle", () => {
     expect(s.onError).toHaveBeenCalledWith({
       category: "exchange",
       error: expect.any(Error),
+    });
+    expect(s.onResult).not.toHaveBeenCalled();
+  });
+
+  test("a mid-run StandardizationTermsError is NOT classified 'config' (phase-scoped)", async () => {
+    // The config category is scoped to the prepare phase. Even the config-typed
+    // StandardizationTermsError, were it to surface from the run half (none does
+    // today), must stay the generic 'exchange', never the actionable 'config'
+    // meant for a pre-connection data problem -- a structural guarantee, so a
+    // future core change that threw one mid-run cannot silently mislabel it.
+    const { mc } = makeFakeMc();
+    mockedOpen.mockResolvedValue(mc);
+    mockedRunExchange.mockRejectedValue(
+      new StandardizationTermsError("mid-run standardization error"),
+    );
+    const { acquired } = makeResources();
+    const acquire: Acquire = () => Promise.resolve(acquired);
+    const s = seams();
+
+    await runExchangeLifecycle({
+      acquire,
+      exchangeRole: "initiator",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(s.onError).toHaveBeenCalledWith({
+      category: "exchange",
+      error: expect.any(StandardizationTermsError),
     });
     expect(s.onResult).not.toHaveBeenCalled();
   });

@@ -6,6 +6,7 @@ import {
   buildStandardizedDataset,
   buildKeyStrings,
   validateStandardizationAgainstTerms,
+  assertStandardizationMatchesTerms,
   describeTransformCoercions,
   unsatisfiedLinkageFields,
   assessLinkageSatisfiability,
@@ -14,15 +15,18 @@ import {
   StandardizedField,
   StandardizedDataset,
 } from "../src/standardization";
+import { StandardizationTermsError } from "../src/errors";
 import * as linearRegex from "../src/utils/linearRegex";
+import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay";
 import { inferMetadata } from "../src/config/metadata";
 import { getDefaultLinkageTerms } from "../src/defaults/linkageTerms";
+import { getDefaultStandardization } from "../src/defaults/standardization";
 import type {
   LinkageField,
   LinkageKeyElement,
   LinkageTerms,
 } from "../src/config/linkageTerms";
-import type { ColumnMetadata } from "../src/config/metadata";
+import type { ColumnMetadata, Metadata } from "../src/config/metadata";
 import {
   StandardizationSchema,
   type Standardization,
@@ -1525,6 +1529,82 @@ describe("validateStandardizationAgainstTerms", () => {
     expect(
       validateStandardizationAgainstTerms(standardization, minimalTerms),
     ).toEqual([]);
+  });
+
+  // The output/function names are interpolated into the returned messages, which a
+  // caller may surface directly (the web's config alert renders one). They are
+  // routed through sanitizeForDisplay at interpolation so a caller is safe without
+  // re-sanitizing; a control character in a name must reach the message only in its
+  // escaped form. ASCII-only names (the other cases here) are a no-op for the
+  // sanitizer, so they cannot pin this -- these two do.
+  test("an output name with a control character is escaped in the message", () => {
+    const raw = "last\u0000name"; // a null byte; not a declared field name
+    const errors = validateStandardizationAgainstTerms(
+      [{ output: raw, input: "X" }],
+      minimalTerms,
+    );
+    expect(errors).toHaveLength(1);
+    // The membership test used the raw value (so it was correctly flagged), but the
+    // message carries only the sanitized form, never the raw control character.
+    expect(errors[0]).not.toContain(raw);
+    expect(errors[0]).toContain(sanitizeForDisplay(raw));
+  });
+
+  test("an unknown function name with a control character is escaped in the message", () => {
+    const raw = "bad\u0000fn"; // a null byte; not a known function name
+    const errors = validateStandardizationAgainstTerms(
+      [{ output: "last_name", input: "LN", steps: [{ function: raw }] }],
+      minimalTerms,
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).not.toContain(raw);
+    expect(errors[0]).toContain(sanitizeForDisplay(raw));
+  });
+
+  // The reachability the OperatorConfigError doc rests on: the accept side derives
+  // its standardization from the (partner-authored) adopted terms via
+  // getDefaultStandardization, whose outputs are exactly those terms' field names --
+  // so the derived spec is consistent with the terms by construction, and this
+  // fail-closed error (whose message the web surfaces) is unreachable on the accept
+  // side. A partner-chosen field name therefore cannot reach the operator's alert
+  // through it. Pin that with a hostile name that WOULD be alarming if surfaced.
+  test("getDefaultStandardization is consistent with the terms it derives from, even for a hostile field name", () => {
+    const hostileName = "call 1-800-EVIL now";
+    const hostileTerms: LinkageTerms = {
+      ...minimalTerms,
+      linkageFields: [{ name: hostileName, type: "first_name" }],
+      linkageKeys: [{ name: "k", elements: [{ field: hostileName }] }],
+    };
+    const md: Metadata = [
+      { name: "c", type: "first_name", role: "linkage", isPayload: false },
+    ];
+    const std = getDefaultStandardization(md, hostileTerms);
+    expect(validateStandardizationAgainstTerms(std, hostileTerms)).toEqual([]);
+  });
+});
+
+describe("assertStandardizationMatchesTerms", () => {
+  test("throws StandardizationTermsError, carrying the inconsistency, on a contradiction", () => {
+    const standardization = [{ output: "nonexistent_field", input: "X" }];
+    expect(() =>
+      assertStandardizationMatchesTerms(standardization, minimalTerms),
+    ).toThrow(StandardizationTermsError);
+    expect(() =>
+      assertStandardizationMatchesTerms(standardization, minimalTerms),
+    ).toThrow(/nonexistent_field/);
+  });
+
+  test("is a no-op on a standardization consistent with its terms", () => {
+    const standardization = [
+      {
+        output: "last_name",
+        input: "LN",
+        steps: [{ function: "to_upper_case" }],
+      },
+    ];
+    expect(() =>
+      assertStandardizationMatchesTerms(standardization, minimalTerms),
+    ).not.toThrow();
   });
 });
 
