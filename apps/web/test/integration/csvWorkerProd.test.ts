@@ -38,6 +38,11 @@ const hasBuild = existsSync(prodEntry);
 
 const READY_TIMEOUT_MS = 30_000;
 const GENERATE_TIMEOUT_MS = 30_000;
+// Budget for the app to hydrate before the invite interactions "stick". The page is
+// server-rendered and hydrates asynchronously; an interaction landing before React
+// attaches its handlers is lost, so the invite flow re-applies its inputs until the
+// Generate button reflects them within this window.
+const HYDRATION_TIMEOUT_MS = 20_000;
 const STOP_TIMEOUT_MS = 5_000;
 
 function sleep(ms: number): Promise<void> {
@@ -200,17 +205,52 @@ describe.skipIf(!hasBuild)(
           page.on("worker", (worker) => workerUrls.push(worker.url()));
 
           await page.goto(`http://127.0.0.1:${port}/`, {
-            waitUntil: "domcontentloaded",
+            waitUntil: "load",
+            timeout: GENERATE_TIMEOUT_MS,
           });
 
-          await page.getByLabel("Your name").fill("Prod Worker Test");
-          await page
-            .locator('input[type="file"]')
-            .first()
-            .setInputFiles(csvPath);
-          await page
-            .getByRole("button", { name: "Generate invitation" })
-            .click();
+          // Re-apply the name and file until Generate enables, then click. The page is
+          // server-rendered and hydrates asynchronously; an interaction that lands
+          // before React attaches its handlers is lost -- a controlled field re-renders
+          // from empty state and the file input's change event is dropped -- leaving
+          // Generate disabled. That is the race that flaked this deploy under CI load.
+          // `load` only guarantees the bundle fetched, not that hydration ran, so the
+          // real fix is to re-apply both inputs until the button reflects them: an
+          // enabled button IS the hydration signal. Each action is short-bounded so one
+          // stuck call cannot overrun the loop's own deadline (its 30s default would).
+          const ACTION_TIMEOUT_MS = 5_000;
+          const nameField = page.getByLabel("Your name");
+          const fileInput = page.locator('input[type="file"]').first();
+          const generate = page.getByRole("button", {
+            name: "Generate invitation",
+          });
+          const enableDeadline = Date.now() + HYDRATION_TIMEOUT_MS;
+          for (;;) {
+            await nameField.fill("Prod Worker Test", {
+              timeout: ACTION_TIMEOUT_MS,
+            });
+            await fileInput.setInputFiles(csvPath, {
+              timeout: ACTION_TIMEOUT_MS,
+            });
+            if (await generate.isEnabled({ timeout: ACTION_TIMEOUT_MS })) break;
+            if (Date.now() >= enableDeadline) {
+              // Distinguish a hydration stall from a real rejection (the accept filter,
+              // the 100 MB cap, or a broken name/file binding) so the failure is
+              // diagnosable rather than a bare "still disabled": report whether the file
+              // registered in the dropzone and the button's disabled attribute.
+              const fileShown =
+                (await page.getByText("large.csv", { exact: false }).count()) >
+                0;
+              const disabledAttr = await generate.getAttribute("disabled");
+              throw new Error(
+                `Generate invitation stayed disabled after ${HYDRATION_TIMEOUT_MS}ms ` +
+                  `(file shown in dropzone: ${fileShown}, disabled attr: ${disabledAttr}); ` +
+                  "the invite interactions may not have hydrated, or the file was rejected",
+              );
+            }
+            await sleep(200);
+          }
+          await generate.click();
 
           // The share block appears only after generateInvitation resolves, which
           // requires a clean parse (a corrupted header crashes generation). Its
@@ -232,7 +272,11 @@ describe.skipIf(!hasBuild)(
           await page.close();
         }
       },
-      GENERATE_TIMEOUT_MS + 20_000,
+      // Cover the three bounded phases serially -- goto (<= GENERATE_TIMEOUT_MS),
+      // the enable loop (<= HYDRATION_TIMEOUT_MS), and the share-block wait
+      // (<= GENERATE_TIMEOUT_MS) -- plus margin, so a slow phase surfaces its own
+      // error rather than a bare per-test timeout.
+      GENERATE_TIMEOUT_MS * 2 + HYDRATION_TIMEOUT_MS + 20_000,
     );
   },
 );
