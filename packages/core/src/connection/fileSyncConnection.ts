@@ -263,8 +263,16 @@ export const TERMINAL_FRAME_DRAIN_TIMEOUT_MS = 1000 * 60;
  * connection options do not set `pollIntervalMs`. Exported so the CLI's
  * configuration-template emitter pre-fills the same value it documents as the
  * default, instead of a literal that could drift from this one.
+ *
+ * Deliberately conservative, NOT a sub-second value: the per-round PSI encryption
+ * dominates an exchange's wall-clock time, so poll latency is negligible for a
+ * real dataset, whereas a sub-second interval hammers the server with directory
+ * listings and can trip an SFTP server's anti-flood/DoS protection and drop the
+ * connection (observed in a partner deployment at 100 ms). A demo that wants a
+ * snappier, WebRTC-like poll should set `pollIntervalMs` explicitly rather than
+ * lowering this default.
  */
-export const DEFAULT_POLLING_FREQUENCY_MS = 100;
+export const DEFAULT_POLLING_FREQUENCY_MS = 5000;
 /**
  * Default number of reconnect attempts after a transient connection failure when
  * the connection options do not set `maxReconnectAttempts`. Exported for the same
