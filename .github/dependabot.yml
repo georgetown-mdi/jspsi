@@ -75,7 +75,7 @@ updates:
       default-days: 7
 
   # GitHub Actions used by the workflows in .github/workflows. Every action is
-  # tag-pinned (e.g. actions/checkout@v6), so this tracks those tags for new
+  # tag-pinned (e.g. actions/checkout@v7), so this tracks those tags for new
   # releases and security advisories.
   - package-ecosystem: github-actions
     directory: "/"
@@ -88,3 +88,25 @@ updates:
       # Only default-days is valid for the docker and github-actions
       # ecosystems; the semver-*-days keys are supported for npm only.
       default-days: 7
+    ignore:
+      # Every action from these orgs is pinned to a floating major tag (e.g.
+      # actions/checkout@v7), which already tracks the latest release within that
+      # major at runtime. A minor/patch bump PR would only re-pin us to a
+      # specific, frozen version (dropping later fixes) and add churn -- so we
+      # ignore within-major bumps and let the major tags float. Major bumps
+      # (e.g. checkout v6 -> v7) are NOT ignored and still surface for review.
+      #
+      # sigstore/cosign-installer is intentionally NOT listed: it publishes no
+      # floating major tag, so it stays exact-pinned (@v4.1.2) and its patch
+      # bumps are legitimate, reviewable updates to the release-signing tool.
+      #
+      # A new floating-major action from another org should be added here.
+      - dependency-name: "actions/*"
+        update-types:
+          ["version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "docker/*"
+        update-types:
+          ["version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "aws-actions/*"
+        update-types:
+          ["version-update:semver-minor", "version-update:semver-patch"]
