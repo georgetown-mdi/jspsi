@@ -57,8 +57,9 @@ const PRIVATE_KEY_DANGLING = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*/g;
 /**
  * Last-resort redaction backstop applied to each error-message link before it is
  * shown. This is NOT the primary defense: secret-bearing files are parsed
- * through the sensitive-file chokepoint (CLI `sensitiveFile.ts`) so a parse error
- * never carries source, and that prevention is what callers must rely on. This
+ * through the sensitive-file chokepoint (shared in `@psilink/core`, re-exported by
+ * the CLI) so a parse error never carries source, and that prevention is what
+ * callers must rely on. This
  * only contains an UNANTICIPATED sink -- some future code path that interpolates
  * key material into an error -- by stripping PEM / OpenSSH private-key blocks,
  * which are unambiguous and never a legitimate part of error output.
