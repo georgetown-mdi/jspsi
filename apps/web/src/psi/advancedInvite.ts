@@ -22,6 +22,7 @@ import { isStepValid } from "./standardizationAuthoring";
 import type {
   Algorithm,
   CSVRow,
+  ExchangeDataSpec,
   LinkageField,
   LinkageKey,
   LinkageKeyElement,
@@ -403,9 +404,10 @@ function reconcileStandardization(
  * `prepareForExchange` fail closed, rejecting the spec as an authoritative
  * standardization that contradicts its terms (an output naming no linkage field).
  * The drop is lossless: a transformation whose output is not a declared linkage
- * field is never bound, so it cleaned no matched value. Applied at the mint
- * boundary ({@link generateInvitation}), not in the editor, so the draft retains
- * the full authored cleaning across a disable/re-enable.
+ * field is never bound, so it cleaned no matched value. Applied by
+ * {@link inviterExchangeDataSpec} at the spec-assembly boundary, not in the
+ * editor, so the draft retains the full authored cleaning across a
+ * disable/re-enable.
  */
 export function standardizationForTerms(
   standardization: Standardization,
@@ -415,6 +417,45 @@ export function standardizationForTerms(
   return standardization.filter((transformation) =>
     fieldNames.has(transformation.output),
   );
+}
+
+/** The inviter's edited per-party data settings, threaded into its own exchange
+ * spec: the metadata and standardization it authored in the Advanced editor. Both
+ * are absent on the quick (name-only) path, where they are inferred downstream.
+ * The inviter analogue of `AcceptorDataEdits`. */
+export interface InviterDataEdits {
+  metadata?: Metadata;
+  standardization?: Standardization;
+}
+
+/**
+ * Assemble the inviter's {@link ExchangeDataSpec} for its own half of the exchange
+ * -- the inviter analogue of `acceptorExchangeDataSpec`, and the structural
+ * enforcement point of the invariant that an authored standardization names only
+ * declared linkage fields. `prepareForExchange` fails closed on a violation, so
+ * reconciling the standardization to `linkageTerms` HERE, where the spec is handed
+ * to core, guarantees the inviter never feeds core a self-contradictory spec no
+ * matter how the caller produced the standardization (a disabled key's orphaned
+ * transformation, an import's default per-type seed). See
+ * {@link standardizationForTerms} for why the drop is lossless. The metadata and
+ * standardization are per-party and local; the terms are pinned to the invitation.
+ * Each is included only when present, so the quick path (no authored cleaning)
+ * leaves core to infer them.
+ */
+export function inviterExchangeDataSpec(
+  linkageTerms: LinkageTerms,
+  edits?: InviterDataEdits,
+): ExchangeDataSpec {
+  return {
+    linkageTerms,
+    ...(edits?.metadata !== undefined && { metadata: edits.metadata }),
+    ...(edits?.standardization !== undefined && {
+      standardization: standardizationForTerms(
+        edits.standardization,
+        linkageTerms,
+      ),
+    }),
+  };
 }
 
 /** Reconcile the draft's keys against a freshly-derived offerable set: keep the

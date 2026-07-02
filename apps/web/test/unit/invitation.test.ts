@@ -25,8 +25,6 @@ import { summarizeInvitation } from "../../src/psi/invitationSummary.js";
 
 import type { InvitationLocation } from "../../src/psi/invitation.js";
 
-import type { LinkageTerms, Standardization } from "@psilink/core";
-
 const location: InvitationLocation = {
   origin: "https://example.org:8443",
   hostname: "example.org",
@@ -227,63 +225,6 @@ describe("generateInvitation", () => {
     );
     // inviterName is not consulted for the identity when terms are authored.
     expect(token.linkageTerms.identity).toBe("Authored Org");
-  });
-
-  test("filters the returned standardization to the emitted terms' fields", async () => {
-    // Regression wiring: the Advanced editor can author cleaning for a field the
-    // emitted terms no longer declare (a disabled key's field, or an import that
-    // seeds a default per-type cleaning). generateInvitation must drop such an
-    // orphaned transformation from the standardization it returns for the inviter's
-    // own exchange, so prepareForExchange does not fail closed on an authored
-    // standardization whose output names no linkage field. Asserting on the RETURN
-    // pins the wiring (that generateInvitation applies the reconcile), which a
-    // helper-only test would not.
-    const base = getDefaultLinkageTerms(
-      "Org",
-      inferMetadata(["ssn", "ssn4", "first_name", "last_name", "dob"]),
-    );
-    // Narrow the emitted terms to a single name key and its two fields; ssn4 is no
-    // longer a declared linkage field.
-    const authored: LinkageTerms = {
-      ...base,
-      linkageFields: base.linkageFields.filter(
-        (f) => f.name === "first_name" || f.name === "last_name",
-      ),
-      linkageKeys: [
-        {
-          name: "NAME",
-          elements: [{ field: "first_name" }, { field: "last_name" }],
-        },
-      ],
-    };
-    const standardization: Standardization = [
-      {
-        output: "first_name",
-        input: "first_name",
-        steps: [{ function: "to_upper_case" }],
-      },
-      {
-        output: "last_name",
-        input: "last_name",
-        steps: [{ function: "to_upper_case" }],
-      },
-      // Orphan: ssn4 is not a declared field in `authored`.
-      { output: "ssn4", input: "ssn4", steps: [{ function: "to_upper_case" }] },
-    ];
-
-    const result = await generateInvitation({
-      inviterName: "Org",
-      file: csvStream(ALL_COLUMNS_CSV),
-      location,
-      linkageTerms: authored,
-      standardization,
-    });
-
-    // The orphaned ssn4 transformation is dropped; the declared-field ones stay.
-    expect(result.standardization?.map((t) => t.output).sort()).toEqual([
-      "first_name",
-      "last_name",
-    ]);
   });
 
   test("fails closed when authored terms no column can satisfy reach the mint", async () => {

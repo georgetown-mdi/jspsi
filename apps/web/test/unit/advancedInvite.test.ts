@@ -22,6 +22,7 @@ import {
   draftFromTerms,
   gatedActiveSettingMessage,
   importedConstraintDivergenceMessage,
+  inviterExchangeDataSpec,
   outputForDirection,
   seedAdvancedInvite,
   setDraftMetadata,
@@ -215,6 +216,67 @@ describe("seedAdvancedInvite + buildAdvancedTerms", () => {
     expect(built.identity).toBe("Café Org");
     expect(built.legalAgreement?.reference).toBe("MOU-1");
     expect(built.legalAgreement?.purpose).toBe("Audit");
+  });
+});
+
+describe("inviterExchangeDataSpec", () => {
+  test("reconciles the authored standardization to the emitted terms", () => {
+    // The structural enforcement point: disabling every ssn4 key drops ssn4 from
+    // the emitted terms while the draft keeps its (now orphaned) transformation.
+    // The spec builder reconciles at assembly, so the spec handed to
+    // prepareForExchange is self-consistent regardless of how the caller produced
+    // the standardization.
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const withoutSsn4Keys = {
+      ...draft,
+      keys: draft.keys.map((entry) => ({
+        ...entry,
+        enabled: !entry.key.elements.some((e) => e.field === "ssn4"),
+      })),
+    };
+    const terms = buildAdvancedTerms(withoutSsn4Keys);
+    expect(
+      withoutSsn4Keys.standardization.some((t) => t.output === "ssn4"),
+    ).toBe(true);
+    expect(terms.linkageFields.some((f) => f.name === "ssn4")).toBe(false);
+
+    const spec = inviterExchangeDataSpec(terms, {
+      metadata: withoutSsn4Keys.metadata,
+      standardization: withoutSsn4Keys.standardization,
+    });
+
+    // The orphan is dropped, so the assembled spec passes the same consistency
+    // check prepareForExchange fails closed on.
+    expect(spec.standardization?.some((t) => t.output === "ssn4")).toBe(false);
+    expect(
+      validateStandardizationAgainstTerms(spec.standardization ?? [], terms),
+    ).toEqual([]);
+    expect(spec.metadata).toBe(withoutSsn4Keys.metadata);
+    expect(spec.linkageTerms).toBe(terms);
+
+    // End to end: prepareForExchange accepts the assembled spec (it would have
+    // thrown on the raw draft standardization).
+    const rows = [
+      {
+        ssn: "123456789",
+        ssn4: "6789",
+        first_name: "Ada",
+        last_name: "Lovelace",
+        dob: "2000-01-01",
+      },
+    ];
+    expect(() =>
+      prepareForExchange(spec, "Org", rows, ALL_COLUMNS),
+    ).not.toThrow();
+  });
+
+  test("omits metadata and standardization on the quick path (none authored)", () => {
+    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const terms = buildAdvancedTerms(draft);
+    const spec = inviterExchangeDataSpec(terms);
+    expect("metadata" in spec).toBe(false);
+    expect("standardization" in spec).toBe(false);
+    expect(spec.linkageTerms).toBe(terms);
   });
 });
 

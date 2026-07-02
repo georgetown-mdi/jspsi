@@ -13,7 +13,6 @@ import {
 
 import { emptyColumnPositions } from "./columnNames";
 import { payloadSendForMetadata } from "./metadataEditing";
-import { standardizationForTerms } from "./advancedInvite";
 
 import type {
   CSVRow,
@@ -511,20 +510,10 @@ export async function generateInvitation(params: {
     disclosedPayloadColumns,
   };
 
-  // Reconcile the returned per-party standardization to the emitted terms. The
-  // Advanced editor authors a per-field standardization independent of which keys
-  // are enabled; buildAdvancedTerms then drops a disabled key's now-unreferenced
-  // field from linkageFields, leaving the draft's transformation for that field an
-  // orphan the inviter's own prepareForExchange would fail closed on (an
-  // authoritative standardization whose output names no linkage field). Filtering
-  // to the emitted fields keeps the inviter's spec self-consistent; the drop is
-  // lossless (an unbound transformation cleaned no matched value). Undefined on the
-  // quick path, which authors no standardization.
-  const standardization =
-    params.standardization === undefined
-      ? undefined
-      : standardizationForTerms(params.standardization, linkageTerms);
-
+  // The authored standardization is returned as-is for the inviter's own exchange;
+  // it is reconciled to the emitted terms downstream by inviterExchangeDataSpec, at
+  // the spec-assembly boundary where the spec is handed to prepareForExchange (so
+  // the invariant is enforced no matter how a spec reaches core, not only here).
   const encoded = await encodeInvitation(token);
   return {
     encoded,
@@ -535,6 +524,6 @@ export async function generateInvitation(params: {
     rawRows,
     columns,
     metadata: params.metadata,
-    standardization,
+    standardization: params.standardization,
   };
 }

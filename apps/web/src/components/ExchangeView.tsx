@@ -23,6 +23,7 @@ import {
 import { dialAsAcceptor, listenAsInviter } from "@psi/rendezvous";
 import { acceptorExchangeDataSpec } from "@psi/acceptInvitation";
 import { disclosedColumnNames } from "@psi/metadataEditing";
+import { inviterExchangeDataSpec } from "@psi/advancedInvite";
 import { runExchangeLifecycle } from "@psi/exchangeLifecycle";
 import { waitForIncomingConnection } from "@psi/waitForConnection";
 
@@ -407,30 +408,26 @@ export function ExchangeView(config: ExchangeConfig) {
       // identity is already this party's name), so the two sides carry an
       // identical fields/keys set and the terms-compatibility handshake agrees.
       // Each party's metadata, standardization, and payloads stay per-party and
-      // local -- only the linkage terms are pinned to the invitation. The acceptor
-      // carries the metadata/standardization it authored in the "Prepare your
-      // data" editor (derived from its own CSV, never cross-checked); the inviter
-      // lets prepareForExchange infer them from its CSV.
+      // local -- only the linkage terms are pinned to the invitation. Each role's
+      // spec is assembled by its own builder ({@link acceptorExchangeDataSpec} /
+      // {@link inviterExchangeDataSpec}), which is the structural enforcement point
+      // for the "authored standardization names only declared fields" invariant:
+      // both reconcile the standardization to the terms here, at the boundary where
+      // the spec is handed to prepareForExchange, so neither role can feed core a
+      // self-contradictory spec that would fail closed. The acceptor carries the
+      // metadata/standardization it authored in the "Prepare your data" editor; the
+      // inviter carries what it authored in the Advanced editor (both omitted on the
+      // quick path, where prepareForExchange infers them from the CSV).
       const dataSpec: ExchangeDataSpec =
         config.role === "acceptor"
           ? acceptorExchangeDataSpec(config.linkageTerms, partyName, {
               metadata: config.metadata,
               standardization: config.standardization,
             })
-          : {
-              linkageTerms: config.linkageTerms,
-              // The inviter threads its edited metadata and authored standardization
-              // when it prepared data in the Advanced editor; the quick path omits
-              // both and they are inferred from the columns. Each is included only
-              // when present, so an inviter that edited metadata but authored no
-              // cleaning still falls back to inferred standardization.
-              ...(config.metadata !== undefined && {
-                metadata: config.metadata,
-              }),
-              ...(config.standardization !== undefined && {
-                standardization: config.standardization,
-              }),
-            };
+          : inviterExchangeDataSpec(config.linkageTerms, {
+              metadata: config.metadata,
+              standardization: config.standardization,
+            });
       const prepared = prepareForExchange(
         dataSpec,
         partyName,
