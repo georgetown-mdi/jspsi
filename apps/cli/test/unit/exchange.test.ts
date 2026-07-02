@@ -13,6 +13,7 @@ import {
   builder,
   handler,
   loadConfig,
+  parseArgs,
   prepareDataset,
   warnAndStripInjectedAuthFields,
   shouldWarnTokenExpiring,
@@ -121,6 +122,43 @@ test("builder: exchange's command-specific option help reaches the rendered help
   // has no URL, so their presence would mean an override was dropped.
   expect(help).not.toContain("overrides the port in URL");
   expect(help).not.toContain("where to write psilink.yaml");
+});
+
+// --- parseArgs: CLI credential overrides resolved at parse time --------------
+// exchange resolves an @path credential flag eagerly in parseArgs: it never
+// persists a config, so there is no reference to preserve, and the override is
+// layered on AFTER the config-load resolution (resolveExchangeSpecRefs). Without
+// this, an @path passphrase from the flag would reach the live SFTP connection
+// unresolved. This pins that seam for the passphrase (the flag added here)
+// alongside its sibling private key.
+
+test("parseArgs resolves an @path server-private-key-passphrase and private key to the file contents", () => {
+  const keyRef = path.join(dir, "id_ed25519");
+  const passRef = path.join(dir, "passphrase");
+  fs.writeFileSync(keyRef, "KEYDATA\n");
+  fs.writeFileSync(passRef, "unlock-me\n");
+  const argv = {
+    _: [],
+    $0: "psilink",
+    input: "data.csv",
+    "server-private-key": `@${keyRef}`,
+    "server-private-key-passphrase": `@${passRef}`,
+  } as unknown as Arguments;
+  const args = parseArgs(argv);
+  expect(args.serverPrivateKey).toBe("KEYDATA");
+  expect(args.serverPrivateKeyPassphrase).toBe("unlock-me");
+});
+
+test("parseArgs carries a literal passphrase through unchanged", () => {
+  const argv = {
+    _: [],
+    $0: "psilink",
+    input: "data.csv",
+    "server-private-key": "inline-key",
+    "server-private-key-passphrase": "inline-pass",
+  } as unknown as Arguments;
+  const args = parseArgs(argv);
+  expect(args.serverPrivateKeyPassphrase).toBe("inline-pass");
 });
 
 // --- happy path --------------------------------------------------------------

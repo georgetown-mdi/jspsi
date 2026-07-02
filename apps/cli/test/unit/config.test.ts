@@ -217,11 +217,14 @@ test("a passphrase override with no private key is rejected with a UsageError", 
       server: { privateKeyPassphrase: "@pass.txt" },
     }),
   ).toThrow(UsageError);
+  // Assert on the requirement phrase, not a bare "--server-private-key": that
+  // bare substring also matches inside "--server-private-key-passphrase", so it
+  // would pass even if the message dropped the requirement clause.
   expect(() =>
     applyConnectionOverrides(baseSFTP, {
       server: { privateKeyPassphrase: "@pass.txt" },
     }),
-  ).toThrow("--server-private-key");
+  ).toThrow("requires --server-private-key");
 });
 
 test("a passphrase override is ignored (not an error) off the sftp channel", () => {

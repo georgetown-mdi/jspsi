@@ -159,7 +159,8 @@ type ExchangeOptions = Omit<
   | "recordFile"
 >;
 
-function parseArgs(argv: Arguments): ExchangeArgs {
+/** @internal exported for testing */
+export function parseArgs(argv: Arguments): ExchangeArgs {
   // Parse the common options through the shared parser (the same singleValue
   // repeat-rejection and log-level validation invite/accept use), then layer the
   // exchange-specific handling on top.
