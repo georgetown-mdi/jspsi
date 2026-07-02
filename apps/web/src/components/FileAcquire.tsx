@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 
-import { loadCSVFile, sanitizeErrorForDisplay } from "@psilink/core";
+import { sanitizeErrorForDisplay } from "@psilink/core";
 
 import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
+import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 
 import FileSelect from "@components/FileSelect";
 
@@ -93,23 +94,25 @@ export default function FileAcquire(props: FileAcquireProps) {
     // Load the CSV, then hand off. `submitSignal` guards against a teardown during
     // the read.
     void (async () => {
-      const csvResult = await loadCSVFile(files[0]).catch(
-        (error: unknown): undefined => {
-          if (!submitSignal.aborted) {
-            onError({
-              title: "Could not read your file",
-              message: sanitizeErrorForDisplay(error),
-            });
-            // The read failed before any handoff: abort and release the controller
-            // (keeping the unmount-cleanup invariant that the stored controller is
-            // the live one) and re-enable submit.
-            controller.abort();
-            abortRef.current = undefined;
-            setSubmitted(false);
-          }
-          return undefined;
-        },
-      );
+      const csvResult = await loadCSVFileOffMainThread(files[0], {
+        // Tear down the parse worker if this phase unmounts mid-read, so a discarded
+        // parse does not keep a worker running to completion.
+        signal: submitSignal,
+      }).catch((error: unknown): undefined => {
+        if (!submitSignal.aborted) {
+          onError({
+            title: "Could not read your file",
+            message: sanitizeErrorForDisplay(error),
+          });
+          // The read failed before any handoff: abort and release the controller
+          // (keeping the unmount-cleanup invariant that the stored controller is
+          // the live one) and re-enable submit.
+          controller.abort();
+          abortRef.current = undefined;
+          setSubmitted(false);
+        }
+        return undefined;
+      });
       // Aborted mid-read, or the read failed (handled above): stop without
       // handing off.
       if (submitSignal.aborted || csvResult === undefined) return;

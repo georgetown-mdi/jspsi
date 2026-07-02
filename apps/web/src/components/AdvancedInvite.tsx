@@ -14,7 +14,6 @@ import { IconAlertCircle } from "@tabler/icons-react";
 import {
   assessLinkageSatisfiability,
   getDefaultLinkageTerms,
-  loadCSVFile,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
 } from "@psilink/core";
@@ -22,6 +21,7 @@ import {
 import { InvitationFileError, generateInvitation } from "@psi/invitation";
 import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
 import { invitationLocation } from "@psi/invitationLocation";
+import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 import { seedAdvancedInvite } from "@psi/advancedInvite";
 
 import {
@@ -48,7 +48,7 @@ import type { GeneratedInvitation } from "@psi/invitation";
  * The Advanced-options invite flow's container (the `/advanced` route's
  * component). It acquires the inviter's CSV -- either handed over from the compose
  * screen's "Advanced options" click or chosen here on a cold load -- parses it in
- * full (see {@link loadCSVFile}), seeds the {@link LinkageTermsEditor} from its
+ * full (see {@link loadCSVFileOffMainThread}), seeds the {@link LinkageTermsEditor} from its
  * columns, and on Generate mints the invitation from
  * the authored terms and transitions in place to the shared {@link ExchangeView},
  * mirroring the quick compose screen's session -> exchange handoff.
@@ -89,8 +89,14 @@ export function AdvancedInvite() {
   const [generating, setGenerating] = useState(false);
   const [files, setFiles] = useState<Array<File>>([]);
 
-  // Guards setState against a teardown mid-read/mid-generate (both are short async
-  // hops with no abort signal of their own).
+  // Guards setState against a teardown mid-read/mid-generate. The off-thread parse is
+  // deliberately NOT given an AbortSignal here -- FileAcquire's is, but its parse is
+  // user-initiated, while enterEditor's warm start runs from a mount effect. Aborting
+  // on unmount would also fire on StrictMode's throwaway cleanup and, with the
+  // run-once warm-start latch below, tear the parse down and never restart it in dev.
+  // The worker is one-shot and self-terminates when the parse completes, and mountedRef
+  // suppresses the stale setState, so skipping abort costs only a bounded parse
+  // continuing briefly after a real unmount.
   const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;
@@ -108,7 +114,7 @@ export function AdvancedInvite() {
     let columns: Array<string>;
     let rawRows: Array<CSVRow>;
     try {
-      const csv = await loadCSVFile(file);
+      const csv = await loadCSVFileOffMainThread(file);
       rawRows = csv.data;
       columns = csv.meta.fields ?? [];
     } catch (cause) {
@@ -128,7 +134,7 @@ export function AdvancedInvite() {
     // navigation to /advanced -- which does not pass through the compose screen's
     // Advanced click -- falls back to the picker rather than re-seeding from this
     // now-stale file. Safe under React StrictMode: this runs only after
-    // loadCSVFile resolves, i.e. after the double-invoked render initializer and
+    // the parse resolves, i.e. after the double-invoked render initializer and
     // the setup/cleanup/setup effect cycle have already read the hand-off
     // synchronously, so neither mount loses it.
     clearAdvancedHandoff();
