@@ -155,9 +155,9 @@ export const MAX_SINGLE_PASS_CELLS = 3_000_000;
  * because the schema's `.int()` caps `recordCount` at 2^53 and the key count is
  * small, a silent dependency that a migration to BigInt or a wider numeric type
  * could break without touching the gate. Bounding the decoded `recordCount` here
- * -- enforced at the schema (see `recordCountMessage` in protocolSetup.ts) --
- * makes the exact-product requirement a value the gate no longer depends on
- * silently.
+ * -- enforced at the schema (see `recordCountField` on the terms-exchange
+ * envelope in protocolSetup.ts) -- makes the exact-product requirement a value
+ * the gate no longer depends on silently.
  *
  * Value: 1,000,000,000,000 (10^12). With the key count bounded at
  * MAX_LINKAGE_ENTRIES (256, config/linkageTerms.ts), `keyCount * recordCount` at

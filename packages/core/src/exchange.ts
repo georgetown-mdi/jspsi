@@ -27,6 +27,7 @@ import {
   exchangePayloads,
   toCommittedPayload,
   assertPayloadSendDisclosed,
+  assertDisclosureMatchesCommitment,
   reconcileReceivedPayload,
 } from "./payloadExchange.js";
 import type { PayloadWireMessage } from "./payloadExchange.js";
@@ -155,6 +156,22 @@ export function prepareForExchange(
   // inherit the same fail-closed check; it is a no-op on the default and guided
   // paths, which author no payload block. See assertPayloadSendDisclosed.
   assertPayloadSendDisclosed(linkageTerms.payload, metadata);
+
+  // Fail fast when this party can no longer produce a payload disclosure it
+  // committed to on a prior invitation. disclosedPayloadColumns is the send-side
+  // commitment persisted by every `psilink invite` mint path (the online
+  // invite/bootstrap, offline infer, and offline invite-from-config paths); the
+  // partner locked that exact set
+  // in as what it will receive, so a metadata drift here would otherwise
+  // under- or over-deliver and make the PARTNER abort mid-exchange
+  // (reconcileReceivedPayload), a partner-attributed failure. This is the
+  // send-side, prior-promise counterpart of assertPayloadSendDisclosed above and
+  // is a no-op when no commitment is on record (absent field). See
+  // assertDisclosureMatchesCommitment.
+  assertDisclosureMatchesCommitment(
+    exchangeDataSpec.disclosedPayloadColumns,
+    metadata,
+  );
 
   // Pre-flight the single-pass dataset ceiling, before connecting. This is a
   // coarse, ONE-PARTY lower-bound gate: it can only see this party's own row
@@ -467,6 +484,7 @@ export async function runExchange(
   const {
     partnerTerms,
     warnings,
+    partnerRecordCount,
     partnerSaveIntent,
     partnerHostKey,
     partnerHostKeyMalformed,
@@ -474,6 +492,7 @@ export async function runExchange(
     conn,
     handshakeRole,
     linkageTerms,
+    rowCount,
     options.saveIntent,
     options.observedHostKey,
   );
@@ -514,12 +533,15 @@ export async function runExchange(
     bootstrap = { partnerSaveIntent, sharedSecret };
   }
 
-  const { role: resolvedRole, partnerRecordCount } = await resolveRole(
-    conn,
+  // Local computation: both parties' record counts were carried on the terms
+  // exchange above (partnerRecordCount), so the role follows without a further
+  // message.
+  const resolvedRole = resolveRole(
     handshakeRole,
     linkageTerms.output,
     partnerTerms.output,
     rowCount,
+    partnerRecordCount,
   );
   onProtocolConfirmed(partnerTerms, resolvedRole);
 
@@ -622,9 +644,9 @@ export async function runExchange(
   //   is stored only when both sides are entitled to the result. A single-output
   //   helper can observe its match count during the clean cascade, but the record
   //   deliberately does not surface it: privacy here is enforced by what the tool
-  //   writes down, not by what is theoretically discoverable. (resolveRole's
-  //   exchanged record counts are total dataset sizes, not the intersection, and
-  //   are not used here.)
+  //   writes down, not by what is theoretically discoverable. (The record counts
+  //   carried on the terms exchange are total dataset sizes, not the
+  //   intersection, and are not used here.)
   //
   // The association table is committed only when this party is entitled to the
   // result (expectsOutput) -- both parties in a both-output exchange, only the

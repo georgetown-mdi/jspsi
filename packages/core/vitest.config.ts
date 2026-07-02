@@ -2,6 +2,21 @@ import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    // Coverage is an informational REPORT, produced on demand by `npm run
+    // coverage` (see package.json), never a gate: there is deliberately NO
+    // `thresholds` line. A blanket "N% or the build fails" bar rewards vanity
+    // tests that raise the number without raising confidence; any future gating
+    // stays diff-scoped to this package (see CONTRIBUTING.md, Coverage).
+    coverage: {
+      provider: "v8",
+      // text -> terminal summary; html + lcov -> browsable/tooling report
+      // under coverage/.
+      reporter: ["text", "html", "lcov"],
+      // Confine the denominator to product source: the test/ suite, fixtures,
+      // and this config are all siblings of src/, so scoping include here keeps
+      // them out of the report without a per-file exclude list.
+      include: ["src/**"],
+    },
     projects: [
       {
         test: {

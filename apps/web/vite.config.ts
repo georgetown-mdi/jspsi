@@ -86,6 +86,33 @@ export default defineConfig((_configEnv) => {
       port: config.PORT,
     },
     test: {
+      // Coverage is an informational REPORT, produced on demand by `npm run
+      // coverage` (see package.json), never a gate: there is deliberately NO
+      // `thresholds` line (see CONTRIBUTING.md, Coverage). The coverage script
+      // runs the unit project only. The integration project is a black-box HTTP
+      // suite -- it fetches a separate dev-server process and imports no src, so
+      // it adds server-startup cost and flake risk for zero in-process coverage.
+      // The browser project (real Chromium) is a documented follow-up: v8
+      // coverage there needs separate handling and can perturb browser timing.
+      coverage: {
+        provider: "v8",
+        // text -> terminal summary; html + lcov -> browsable/tooling report
+        // under coverage/.
+        reporter: ["text", "html", "lcov"],
+        // Confine the denominator to product source: the test/ suite, fixtures,
+        // and this config are all siblings of src/, so scoping include here
+        // keeps them out of the report.
+        include: ["src/**"],
+        // vitest applies its own default excludes (node_modules, the config,
+        // test files) on top of these, so list only the code that lives inside
+        // src/ but is not hand-written product code.
+        exclude: [
+          // Vendored PeerJS signaling server (third-party, also eslint-ignored).
+          "src/contrib/**",
+          // TanStack Router codegen (routeTree.gen.ts).
+          "**/*.gen.ts",
+        ],
+      },
       projects: [
         {
           test: {

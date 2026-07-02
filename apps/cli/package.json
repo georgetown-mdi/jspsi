@@ -11,7 +11,8 @@
     "test": "vitest run --project unit",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
-    "test:integration:native-chroot": "node test/sftpServer/runChrootProfile.mjs"
+    "test:integration:native-chroot": "node test/sftpServer/runChrootProfile.mjs",
+    "coverage": "vitest run --project unit --project integration --coverage"
   },
   "dependencies": {
     "@openmined/psi.js": "file:../../lib/openmined-psi.js-2.0.6-seclink.1.tgz",

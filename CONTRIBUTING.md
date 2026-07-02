@@ -145,6 +145,36 @@ which provisions Chromium on the runner; run it locally too when changing the we
 PSI exchange, the cross-implementation vectors, or a web UI component it covers
 (such as the accept consent gate).
 
+### Coverage
+
+Coverage is an informational REPORT to help you and reviewers see which product
+paths a change leaves unexercised. It is produced on demand -- it is not part of
+`npm test` and does not run in CI.
+
+```sh
+npm run coverage                    # all workspaces; writes a report per workspace
+npm run coverage -w packages/core   # a single workspace
+```
+
+It uses `@vitest/coverage-v8` (first-party Vitest tooling, so no second runner)
+and writes a text summary to the terminal plus a browsable HTML report and an
+`lcov.info` (for editors/tooling) under each workspace's `coverage/` directory.
+The denominator is scoped to product source under each `src/` tree, with the
+generated route tree and vendored `apps/web/src/contrib` excluded, so the numbers
+reflect hand-written product code. The report runs the node projects: `core`
+unit, `cli` unit and integration (the SFTP adapter is exercised only by the
+integration suite), and `web` unit. Browser-mode coverage (real Chromium) and the
+web black-box integration suite are not included; browser coverage is a deferred
+follow-up.
+
+There is deliberately NO global percentage gate, and adding one is not a missing
+piece to be "fixed": a blanket "N% or the build fails" bar rewards vanity tests
+that raise the number without raising confidence, so the report informs review
+rather than blocking merges. Do not add a `thresholds` line to the Vitest
+coverage config. If coverage gating is ever wanted, it is scoped to
+`packages/core` and expressed as diff/patch coverage (coverage of the lines a PR
+changes), never an absolute whole-repo percentage -- and even that stays opt-in.
+
 ## Code Conventions
 
 - **TypeScript** with strict mode throughout. Avoid `any`; if you must use it, add a comment explaining why.

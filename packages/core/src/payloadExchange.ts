@@ -267,6 +267,111 @@ export function assertPayloadSendDisclosed(
 }
 
 /**
+ * Reject a persisted send-side disclosure COMMITMENT that this party's current
+ * metadata can no longer produce.
+ *
+ * `committed` is the payload column set (in this party's OWN namespace) that it
+ * PROMISED to disclose to its partner when the exchange was established -- the
+ * invitation's `disclosedPayloadColumns`, persisted locally as the exchange
+ * config's `disclosedPayloadColumns` by every `psilink invite` mint path that
+ * publishes it. The partner locked that exact set in as what it will RECEIVE
+ * (its `expectedPayloadColumns`) and enforces it at runtime via
+ * {@link reconcileReceivedPayload}. This check runs on the COMMITTING party at
+ * prepare time, before connecting, so a drift fails fast and locally instead of
+ * surfacing later as the partner's mid-exchange abort.
+ *
+ * Distinct from the two adjacent guards, and complementary to both:
+ * - {@link assertPayloadSendDisclosed} compares a present `payload.send`
+ *   dictionary against this party's CURRENT metadata (an internal-consistency
+ *   equality). This check instead compares CURRENT metadata against an EARLIER
+ *   persisted promise -- a set frozen when the data may have differed -- which
+ *   neither `payload.send` (held equal to current metadata by that guard) nor the
+ *   metadata itself (the thing that drifts) can serve as. A config can pass
+ *   `assertPayloadSendDisclosed` while still having drifted from what it promised
+ *   a partner on a prior invitation; that is the gap this closes.
+ * - {@link reconcileReceivedPayload} is the receive-side runtime lock-in; this is
+ *   the proactive send-side counterpart that prevents the situation triggering it.
+ *
+ * The comparison is exact (both directions): the partner locked in the committed
+ * set, so UNDER-delivery (a promised column no longer transmittable) AND
+ * OVER-delivery (a column now transmitted that was not promised) each abort that
+ * partner. Each direction is reported with a DUAL remedy so the check never
+ * pressures the operator toward WIDER disclosure: narrowing one's own disclosure
+ * is always legitimate, so re-establishing the exchange is offered beside
+ * restoring the column, not as an afterthought.
+ *
+ * An ABSENT (undefined) `committed` is the lazy path: no commitment on record (a
+ * first-contact party, a config predating this field, or a mint path that did not
+ * know its metadata), so nothing is checked -- transmission stays governed by
+ * metadata alone. An EMPTY committed set is NOT absent: it is a strict "disclose
+ * nothing," so any currently-disclosed column fails. Mirrors the absent/empty
+ * semantics of `expectedPayloadColumns` and the token's `disclosedPayloadColumns`.
+ *
+ * The names are this party's own (metadata- and config-derived) but are routed
+ * through {@link sanitizeForDisplay} for consistency with the sibling send-side
+ * guard.
+ *
+ * @throws {UsageError} when a present `committed` set is not exactly the columns
+ *   this party's metadata currently discloses. A {@link UsageError} so the CLI
+ *   classifies it as a local configuration error (exit 64) -- self-attributed and
+ *   pre-connection -- distinct from {@link reconcileReceivedPayload}'s
+ *   partner-attributed protocol abort (exit 69).
+ */
+export function assertDisclosureMatchesCommitment(
+  committed: string[] | undefined,
+  metadata: Metadata,
+): void {
+  if (committed === undefined) return;
+  const disclosed = disclosedColumnNames(metadata);
+  const disclosedSet = new Set(disclosed);
+  const committedSet = new Set(committed);
+  const noLongerDisclosed = committed.filter((name) => !disclosedSet.has(name));
+  const newlyDisclosed = disclosed.filter((name) => !committedSet.has(name));
+  if (noLongerDisclosed.length === 0 && newlyDisclosed.length === 0) return;
+  const problems: string[] = [];
+  const remedies: string[] = [];
+  if (noLongerDisclosed.length > 0) {
+    const shown = noLongerDisclosed
+      .map((name) => sanitizeForDisplay(name))
+      .join(", ");
+    const plural = noLongerDisclosed.length > 1;
+    problems.push(
+      `no longer discloses ${plural ? "columns" : "a column"} it committed ` +
+        `to send ([${shown}])`,
+    );
+    remedies.push(
+      `To honor the commitment, set the metadata for [${shown}] to transmit ` +
+        `(is_payload: true and role not ignored). To narrow the disclosure on ` +
+        `purpose, re-establish the exchange (re-invite the partner) so it ` +
+        `expects the smaller set.`,
+    );
+  }
+  if (newlyDisclosed.length > 0) {
+    const shown = newlyDisclosed
+      .map((name) => sanitizeForDisplay(name))
+      .join(", ");
+    const plural = newlyDisclosed.length > 1;
+    problems.push(
+      `now discloses ${plural ? "columns" : "a column"} it did not commit ` +
+        `to send ([${shown}])`,
+    );
+    remedies.push(
+      `To match the commitment, set the metadata for [${shown}] not to ` +
+        `transmit (is_payload: false or role ignored). To widen the disclosure ` +
+        `on purpose, re-establish the exchange (re-invite the partner) so it ` +
+        `expects [${shown}].`,
+    );
+  }
+  throw new UsageError(
+    `this party can no longer honor the payload disclosure it committed to when ` +
+      `this exchange was established: it ${problems.join(" and ")}. The partner ` +
+      `locked in the committed columns, so proceeding would make its exchange ` +
+      `abort as a payload disclosure mismatch (a failure attributed to the ` +
+      `partner) after data has begun moving. ${remedies.join(" ")}`,
+  );
+}
+
+/**
  * Enforce, at runtime, that a received payload discloses no column the receiving
  * party did not consent to receive.
  *

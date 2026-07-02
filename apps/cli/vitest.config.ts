@@ -2,6 +2,22 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    // Coverage is an informational REPORT, produced on demand by `npm run
+    // coverage` (see package.json), never a gate: there is deliberately NO
+    // `thresholds` line (see CONTRIBUTING.md, Coverage). The coverage script
+    // runs the unit AND integration projects here, because the SFTP adapter
+    // runs in-process and is exercised only by the integration suite -- a
+    // unit-only report would misleadingly show it near-uncovered.
+    coverage: {
+      provider: "v8",
+      // text -> terminal summary; html + lcov -> browsable/tooling report
+      // under coverage/.
+      reporter: ["text", "html", "lcov"],
+      // Confine the denominator to product source: the test/ suite, fixtures,
+      // and this config are all siblings of src/, so scoping include here keeps
+      // them out of the report without a per-file exclude list.
+      include: ["src/**"],
+    },
     projects: [
       {
         test: {

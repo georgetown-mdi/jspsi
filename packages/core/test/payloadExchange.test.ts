@@ -5,6 +5,7 @@ import {
   exchangePayloads,
   buildOutputTable,
   assertPayloadSendDisclosed,
+  assertDisclosureMatchesCommitment,
   reconcileReceivedPayload,
 } from "../src/payloadExchange";
 import { prepareForExchange } from "../src/exchange";
@@ -442,6 +443,210 @@ test("disclosedColumnNames excludes a role: ignored column even with isPayload:t
     { name: "county", type: "other", role: "ignored", isPayload: true },
   ];
   expect(disclosedColumnNames(metaWithIgnored)).toEqual(["diagnosis"]);
+});
+
+// --- assertDisclosureMatchesCommitment (send-side prior-promise check) --------
+
+// The persisted send-side commitment (the config's disclosedPayloadColumns, in
+// this party's OWN namespace) is compared against what current metadata discloses
+// (disclosedColumnNames). A drift in EITHER direction is rejected (UsageError ->
+// CLI exit 64), naming the offending column(s): a promised column no longer
+// transmittable (under-delivery), or a newly-transmitted column not promised
+// (over-delivery). An absent commitment is a no-op (lazy); an empty commitment is
+// strict "disclose nothing". Distinct from assertPayloadSendDisclosed: this
+// compares CURRENT metadata against an EARLIER persisted promise, not a present
+// payload.send dictionary against current metadata.
+
+// metaWithId discloses [patient_id, diagnosis]. This variant has drifted so
+// diagnosis is no longer transmitted (isPayload:false) -- it discloses only
+// [patient_id].
+const metaDiagDropped: Metadata = [
+  { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+  {
+    name: "patient_id",
+    type: "identifier",
+    role: "identifier",
+    isPayload: true,
+  },
+  { name: "diagnosis", type: "other", role: "payload", isPayload: false },
+];
+
+test("assertDisclosureMatchesCommitment: an absent commitment is a no-op (lazy)", () => {
+  expect(() =>
+    assertDisclosureMatchesCommitment(undefined, metaWithId),
+  ).not.toThrow();
+  // Even against metadata that discloses nothing.
+  expect(() =>
+    assertDisclosureMatchesCommitment(undefined, metaLinkageOnly),
+  ).not.toThrow();
+});
+
+test("assertDisclosureMatchesCommitment: a still-honorable commitment is accepted (any order)", () => {
+  expect(() =>
+    assertDisclosureMatchesCommitment(["patient_id", "diagnosis"], metaWithId),
+  ).not.toThrow();
+  expect(() =>
+    assertDisclosureMatchesCommitment(["diagnosis", "patient_id"], metaWithId),
+  ).not.toThrow();
+});
+
+test("assertDisclosureMatchesCommitment: a committed column no longer disclosed is rejected (under-delivery), naming it", () => {
+  // Promised diagnosis, but metadata no longer transmits it. This is the drift
+  // that would otherwise make the partner abort mid-exchange.
+  expect(() =>
+    assertDisclosureMatchesCommitment(
+      ["patient_id", "diagnosis"],
+      metaDiagDropped,
+    ),
+  ).toThrow(UsageError);
+  expect(() =>
+    assertDisclosureMatchesCommitment(
+      ["patient_id", "diagnosis"],
+      metaDiagDropped,
+    ),
+  ).toThrow(/diagnosis/);
+});
+
+test("assertDisclosureMatchesCommitment: a column now disclosed but not committed is rejected (over-delivery), naming it", () => {
+  // Committed only patient_id, but metadata now also discloses diagnosis -- the
+  // partner locked in {patient_id} and would abort on the extra column.
+  expect(() =>
+    assertDisclosureMatchesCommitment(["patient_id"], metaWithId),
+  ).toThrow(UsageError);
+  expect(() =>
+    assertDisclosureMatchesCommitment(["patient_id"], metaWithId),
+  ).toThrow(/diagnosis/);
+});
+
+test("assertDisclosureMatchesCommitment: an empty commitment is strict 'disclose nothing'", () => {
+  // Committed [] but metadata discloses columns -> rejected.
+  expect(() => assertDisclosureMatchesCommitment([], metaWithId)).toThrow(
+    UsageError,
+  );
+  // Committed [] and metadata discloses nothing -> accepted.
+  expect(() =>
+    assertDisclosureMatchesCommitment([], metaLinkageOnly),
+  ).not.toThrow();
+});
+
+test("assertDisclosureMatchesCommitment: both drift directions are named at once", () => {
+  // Committed [patient_id, note]; metadata discloses [patient_id, diagnosis].
+  // note is no longer disclosed (under), diagnosis is newly disclosed (over).
+  let message = "";
+  try {
+    assertDisclosureMatchesCommitment(["patient_id", "note"], metaWithId);
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err);
+  }
+  expect(message).toMatch(/note/);
+  expect(message).toMatch(/diagnosis/);
+});
+
+test("assertDisclosureMatchesCommitment: the error offers a dual remedy (restore or re-establish), never only re-widening", () => {
+  // The re-widening-safe wording: narrowing is legitimate, so the message must
+  // present re-establishing the exchange beside restoring the column.
+  let message = "";
+  try {
+    assertDisclosureMatchesCommitment(
+      ["patient_id", "diagnosis"],
+      metaDiagDropped,
+    );
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err);
+  }
+  expect(message).toMatch(/re-establish the exchange|re-invite/);
+  expect(message).toMatch(/is_payload/);
+});
+
+test("assertDisclosureMatchesCommitment: over-delivery's remedy points at narrowing, not the under-delivery wording", () => {
+  // The over-delivery direction (a newly disclosed, uncommitted column) must tell
+  // the operator to STOP transmitting it (is_payload:false / role ignored), with
+  // re-inviting only as the deliberate way to widen -- it must NOT reuse the
+  // under-delivery remedy ("set the metadata to transmit"), which would pressure
+  // the operator toward WIDER disclosure to resolve an over-disclosure.
+  let message = "";
+  try {
+    assertDisclosureMatchesCommitment(["patient_id"], metaWithId);
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err);
+  }
+  expect(message).toMatch(/not to transmit|is_payload: false or role ignored/);
+  expect(message).toMatch(/re-establish the exchange|re-invite/);
+});
+
+test("prepareForExchange: rejects a config whose disclosed_payload_columns commitment can no longer be met, before connecting", () => {
+  // No payload.send here (so assertPayloadSendDisclosed is a no-op) -- the drift is
+  // caught solely by the persisted disclosed-columns commitment, the second of the
+  // two commitment sources. The check fires during preparation, before any
+  // connection or dataset build.
+  const metadata: Metadata = [
+    {
+      name: "first_name",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+    // Promised "note" on a prior invitation, but its metadata no longer transmits
+    // it (isPayload:false), so the current disclosure discloses nothing.
+    { name: "note", type: "other", role: "payload", isPayload: false },
+  ];
+  const linkageTerms = {
+    version: "1.0.0",
+    identity: "Tester",
+    date: "2026-01-01",
+    algorithm: "psi" as const,
+    linkageStrategy: "cascade" as const,
+    output: { expectsOutput: true, shareWithPartner: true },
+    deduplicate: false,
+    linkageFields: [{ name: "first_name", type: "first_name" as const }],
+    linkageKeys: [{ name: "FN", elements: [{ field: "first_name" }] }],
+  };
+  expect(() =>
+    prepareForExchange(
+      { linkageTerms, metadata, disclosedPayloadColumns: ["note"] },
+      "Tester",
+      [{ first_name: "Alice", note: "x" }],
+      ["first_name", "note"],
+    ),
+  ).toThrow(/note/);
+});
+
+test("prepareForExchange: accepts a commitment its current metadata still meets (positive wiring, no false-fire)", () => {
+  // The positive counterpart of the rejection above: a present, non-empty
+  // commitment that current metadata discloses EXACTLY must pass the prepare-time
+  // check and let preparation complete. This pins the wiring against an
+  // over-aggressive regression (e.g. comparing the commitment to the wrong
+  // metadata) that would false-fire on an honest run.
+  const metadata: Metadata = [
+    {
+      name: "first_name",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+    // Still transmits "note" (isPayload:true), so the disclosed set is exactly the
+    // committed {note}.
+    { name: "note", type: "other", role: "payload", isPayload: true },
+  ];
+  const linkageTerms = {
+    version: "1.0.0",
+    identity: "Tester",
+    date: "2026-01-01",
+    algorithm: "psi" as const,
+    linkageStrategy: "cascade" as const,
+    output: { expectsOutput: true, shareWithPartner: true },
+    deduplicate: false,
+    linkageFields: [{ name: "first_name", type: "first_name" as const }],
+    linkageKeys: [{ name: "FN", elements: [{ field: "first_name" }] }],
+  };
+  expect(() =>
+    prepareForExchange(
+      { linkageTerms, metadata, disclosedPayloadColumns: ["note"] },
+      "Tester",
+      [{ first_name: "Alice", note: "x" }],
+      ["first_name", "note"],
+    ),
+  ).not.toThrow();
 });
 
 // --- reconcileReceivedPayload (runtime lock-in) ------------------------------

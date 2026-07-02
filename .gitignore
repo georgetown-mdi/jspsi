@@ -2,6 +2,7 @@ node_modules
 .DS_Store
 .worktrees
 dist
+coverage
 *.local*
 count.txt
 .env

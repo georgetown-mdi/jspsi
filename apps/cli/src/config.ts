@@ -761,6 +761,64 @@ export function persistHostKeyFingerprint(
   writeFileOwnerOnly(configPath, serialized);
 }
 
+/**
+ * Write, overwrite, or remove the top-level `disclosed_payload_columns` in an
+ * existing `psilink.yaml`. This is the SEND-side disclosure commitment (this
+ * party's own column namespace): the set it published on the invitation it just
+ * (re-)minted, which a later recurring `psilink exchange` verifies its current
+ * metadata still discloses ({@link assertDisclosureMatchesCommitment} in core).
+ *
+ * Used by the offline invite-from-config / re-invite path, which reuses the
+ * operator's existing config rather than rewriting it. Like
+ * {@link persistHostKeyFingerprint} -- and unlike {@link saveConfig}, which
+ * re-serializes the whole spec and would strip comments -- this edits the file in
+ * place through the YAML document model so the operator's comments, key order, and
+ * formatting survive: the commitment is one machine-managed field, not operator
+ * prose. Binding this write to every (re-)mint is what keeps the commitment from
+ * going stale relative to the token the partner locked in (a re-invite over
+ * drifted metadata refreshes it here; an exchange with no re-invite keeps the
+ * prior commitment and fails fast on drift).
+ *
+ * `columns === undefined` REMOVES the field (deleteIn), never leaves a stale value:
+ * a config whose metadata is unknown at mint publishes no disclosed subset (the
+ * acceptor reconciles lazily), so any commitment previously recorded must be
+ * cleared rather than silently retained. An empty array is written verbatim -- a
+ * strict "disclose nothing" commitment, distinct from absent.
+ *
+ * The columns are this party's own (metadata-derived), non-secret, but the file is
+ * rewritten with the same owner-only permissions {@link saveConfig} uses (a config
+ * may carry an SFTP credential). The key is written snake_case to match the
+ * on-disk convention. Throws if the file cannot be read or parsed -- the caller
+ * has just read the same file, so a failure here is unexpected and must not be
+ * silently swallowed (it would leave the operator believing the commitment was
+ * recorded).
+ */
+export function persistDisclosedPayloadColumns(
+  configPath: string,
+  columns: string[] | undefined,
+): void {
+  // Parse, edit, and re-serialize through the sensitive-file chokepoint (see
+  // persistHostKeyFingerprint), preserving the operator's comments and key order
+  // on this surgical one-field write.
+  const serialized = editSensitiveYamlDocument(
+    fs.readFileSync(configPath, "utf8"),
+    `config file ${configPath}`,
+    (doc) => {
+      if (columns === undefined) {
+        // No commitment on record for this mint: remove any stale field rather
+        // than leave a value the current metadata no longer backs.
+        doc.deleteIn(["disclosed_payload_columns"]);
+        return;
+      }
+      // createNode turns the JS array into a proper YAML sequence node (a bare
+      // value is not reliably wrapped by setIn across versions); setIn creates or
+      // overwrites the single top-level key, leaving everything else untouched.
+      doc.setIn(["disclosed_payload_columns"], doc.createNode(columns));
+    },
+  );
+  writeFileOwnerOnly(configPath, serialized);
+}
+
 // --- Config reader -----------------------------------------------------------
 
 /**

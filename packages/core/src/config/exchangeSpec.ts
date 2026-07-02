@@ -74,6 +74,32 @@ export const ExchangeSpecSchema = z.object({
     MAX_PAYLOAD_ENTRIES,
     `expectedPayloadColumns must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
   ).optional(),
+  // Optional local SEND-side commitment: the payload columns (in THIS party's OWN
+  // namespace) it promised to disclose to its partner when the exchange was
+  // established -- exactly the set carried on the invitation's
+  // disclosedPayloadColumns and locked in by the partner as its
+  // expectedPayloadColumns. The send-side mirror of expectedPayloadColumns above
+  // (the partner-namespace RECEIVE lock-in): both are per-party and local -- NOT
+  // negotiated, swapped, cross-validated, or folded into the agreed-terms hash, and
+  // deliberately distinct from linkageTerms.payload.send (the negotiated dictionary).
+  // Persisted by EVERY `psilink invite` mint path that publishes a disclosed set:
+  // the online invite/bootstrap and offline infer-from-input paths write it into a
+  // fresh config, and the offline invite-from-config / re-invite path refreshes it in
+  // place (persistDisclosedPayloadColumns) so it can never lag the token the partner
+  // locks in. A later recurring `psilink exchange` verifies its current metadata still
+  // discloses exactly this set before connecting (assertDisclosureMatchesCommitment);
+  // a drift would otherwise silently under- or over-deliver and make the partner --
+  // which locked this set in -- abort mid-exchange (reconcileReceivedPayload), a
+  // failure attributed to the partner. The acceptor does not set this: it carries its
+  // commitment as payload.send (checked by assertPayloadSendDisclosed) instead. An empty array is a strict
+  // "disclose nothing" (a later metadata that discloses any column then fails); an
+  // absent field reconciles lazily (no prior commitment on record, so no check).
+  // Bounded like a payload list; the names are this party's own column names.
+  disclosedPayloadColumns: boundedArray(
+    z.string().min(1).max(MAX_NAME_LENGTH),
+    MAX_PAYLOAD_ENTRIES,
+    `disclosedPayloadColumns must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
+  ).optional(),
 });
 
 export type ExchangeSpec = z.infer<typeof ExchangeSpecSchema>;
