@@ -1130,7 +1130,43 @@ export async function runOnlineBootstrap(params: {
    * post-exchange second write below and {@link observedReceivedColumnsForSave}.
    */
   persistObservedReceivedPayload?: boolean;
+  /**
+   * The received-payload column set the online ACCEPTOR consented to UP FRONT from
+   * the invitation token (`token.disclosedPayloadColumns`), to persist into the
+   * freshly-written config's `expectedPayloadColumns` so a later recurring `psilink
+   * exchange` fails closed on a divergent received payload (reconcileReceivedPayload)
+   * -- the online sibling of the offline-accept persistence. Unlike
+   * `persistObservedReceivedPayload` (the inviter's
+   * observe-then-persist, which learns its set only AFTER the exchange and writes it
+   * in a SECOND post-exchange write), this set is known BEFORE the exchange, so it
+   * rides the acceptance hook's FIRST write. An empty array is a real "receive
+   * nothing" lock-in (a later non-empty payload aborts), mirroring the offline path
+   * -- distinct from the observe path, which drops an ambiguous empty observation;
+   * `undefined` persists no field, leaving the recurring path to reconcile lazily.
+   * No-op on the reuse path, which writes no fresh config. The invitation bounds this
+   * set to `MAX_PAYLOAD_ENTRIES` at intake, so it needs no cap check here (unlike the
+   * observe path's unbounded source).
+   */
+  expectedReceivedPayloadColumns?: string[];
 }): Promise<{ configWriteError?: unknown }> {
+  // The two received-payload persistence inputs are mutually exclusive by design:
+  // the online ACCEPTOR passes expectedReceivedPayloadColumns (its set is known up
+  // front from the token, folded into the hook's first write), while the online
+  // INVITER and the zero-setup --save party pass persistObservedReceivedPayload
+  // (their set is learned only by observation, crystallized in a second write after
+  // the exchange). No caller sets both; this encodes that invariant as a check
+  // rather than caller discipline, because if both were set the observe-on-save
+  // second write would silently clobber the acceptor's up-front token lock-in.
+  if (
+    params.persistObservedReceivedPayload &&
+    params.expectedReceivedPayloadColumns !== undefined
+  )
+    throw new Error(
+      "runOnlineBootstrap received both expectedReceivedPayloadColumns (the " +
+        "acceptor's up-front token lock-in) and persistObservedReceivedPayload " +
+        "(the inviter's observe-on-save); these are mutually exclusive.",
+    );
+
   // `connection` is already narrowed to the channels runProtocol supports
   // (RunnableConnectionConfig); authentication is passed to runProtocol on its
   // own parameter rather than embedded in the connection config.
@@ -1255,6 +1291,14 @@ export async function runOnlineBootstrap(params: {
         saveConfig(params.configPath, {
           connection: params.connection,
           ...params.dataSpec,
+          // The online ACCEPTOR's up-front token lock-in rides this first write:
+          // the set is known before the exchange (unlike the inviter's observed set,
+          // written in the second write below). Folded with the same `!== undefined`
+          // discriminant the offline-accept path uses -- an empty array is a real
+          // "receive nothing" lock-in, only an absent set stays lazy.
+          ...(params.expectedReceivedPayloadColumns !== undefined
+            ? { expectedPayloadColumns: params.expectedReceivedPayloadColumns }
+            : {}),
         });
         configWritten = true;
       },
