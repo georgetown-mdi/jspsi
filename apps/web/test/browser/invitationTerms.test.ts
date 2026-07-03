@@ -1156,3 +1156,133 @@ describe("InvitationTerms: the linkage strategy is surfaced at the consent point
     );
   });
 });
+
+describe("InvitationTerms: proposed-but-not-applied caveats sit at their headline's visibility level", () => {
+  // The consent-integrity invariant this locks in: a "proposed but not yet applied"
+  // caveat renders at the SAME visibility level as the headline it contradicts,
+  // never one expand down, so a reader can never see a headline setting as in force
+  // while its caveat is hidden. Which level that is follows the setting's disclosure
+  // weight -- psi-c states a disclosure GUARANTEE (count only, no identifiers), so
+  // its headline and caveat are always-visible in the core; deduplicate and fuzzy
+  // change match behavior/breadth, not what is disclosed, so their headlines and
+  // caveats sit one expand down together. These assert placement against the
+  // accessibility tree (which panel the text lives in), not styling.
+  function renderCaveatTerms(overrides?: Partial<LinkageTerms>) {
+    root!.render(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(InvitationTerms, {
+          linkageTerms: { ...terms, ...overrides },
+        }),
+      ),
+    );
+  }
+
+  // psi-c- and deduplicate-specific caveat tails: both caveats share the "does not
+  // yet apply it" lead, so each assertion keys on the distinguishing clause.
+  const psiCCaveat = "matched records are still revealed";
+  const deduplicateCaveat = "each record still matches at most one";
+
+  test("the psi-c count-only caveat is always-visible in the core, not one expand down", async () => {
+    // psi-c proposed, not applied (APPLIED_SETTINGS.psiC is false), so the count-only
+    // guarantee carries its caveat. deduplicate is proposed too (the module terms),
+    // so BOTH caveats render -- the psi-c one in the core, the deduplicate one in
+    // "Other details" -- exactly the differentiated-but-consistent rule.
+    renderCaveatTerms({ algorithm: "psi-c" });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+
+    // Both disclosures start collapsed, yet the psi-c caveat is legible: it is in the
+    // always-visible core, so the acceptor cannot read the count-only guarantee as in
+    // force without also seeing that the run does not yet honor it.
+    expect(
+      toggle("Other details").element().getAttribute("aria-expanded"),
+    ).toBe("false");
+    expect(
+      toggle("Matching strategies").element().getAttribute("aria-expanded"),
+    ).toBe("false");
+    expect(container!.textContent).toContain(psiCCaveat);
+
+    // Structurally in the core, not inside either disclosure (accessibility tree,
+    // not styling): the caveat is within neither the "Other details" panel nor the
+    // "Matching strategies" panel, both of which carry their collapsed content even
+    // while hidden.
+    expect((await readyPanel("Other details")).textContent).not.toContain(
+      psiCCaveat,
+    );
+    expect((await readyPanel("Matching strategies")).textContent).not.toContain(
+      psiCCaveat,
+    );
+  });
+
+  test("the deduplicate caveat sits with its headline inside 'Other details', co-hidden", async () => {
+    // deduplicate proposed, not applied (module terms). By the rule it sits one
+    // expand down WITH its headline: both are inside the collapsed "Other details"
+    // panel, so a reader who does not expand it sees neither -- the headline is never
+    // visible as in force while its caveat is hidden.
+    renderCaveatTerms();
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+
+    // The collapse hides its content from assistive tech while closed ...
+    const collapse = await readyCollapse("Other details");
+    expect(collapse.getAttribute("aria-hidden")).toBe("true");
+    // ... and BOTH the headline and its contradicting caveat live inside it, so
+    // neither leaks into the always-visible core ahead of the other.
+    expect(collapse.textContent).toContain("may match more than one");
+    expect(collapse.textContent).toContain(deduplicateCaveat);
+  });
+
+  test("the fuzzy caveat sits with its annotation inside the key's own detail, behind the matching disclosure", async () => {
+    // A key element carrying a proposed (not-applied) fuzzy comparison. By the rule
+    // the caveat stays in the key's collapsed detail alongside the annotation it
+    // qualifies -- the two are one sentence, so they cannot separate -- and the whole
+    // key detail is behind the default-collapsed "Matching strategies" disclosure,
+    // not in the always-visible core.
+    renderCaveatTerms({
+      linkageFields: [{ name: "dob", type: "date_of_birth" }],
+      linkageKeys: [
+        {
+          name: "DOB",
+          elements: [
+            { field: "dob", generateFuzzyComparisons: "adjacent_years" },
+          ],
+        },
+      ],
+    });
+    await expect.element(toggle("Matching strategies")).toBeInTheDocument();
+
+    // Behind the matching disclosure, not in the core: the caveat is within the
+    // collapsed "Matching strategies" panel (which carries the nested key detail even
+    // while hidden), so it is never surfaced always-visible like the psi-c caveat.
+    expect((await readyPanel("Matching strategies")).textContent).toContain(
+      "(proposed; not yet applied)",
+    );
+
+    // Open the matching list, then the key: the annotation and its not-yet-applied
+    // caveat are together in that key's own detail.
+    await userEvent.click(toggle("Matching strategies"));
+    const panel = await readyPanel("DOB");
+    expect(panel.textContent).toContain("adjacent years");
+    expect(panel.textContent).toContain("(proposed; not yet applied)");
+  });
+
+  test("a setting that matches the run carries no not-yet-applied caveat", async () => {
+    // psi (identifiers revealed -- the run's actual behavior), deduplicate off (the
+    // run is one-to-one), and no fuzzy: every displayed setting equals what the run
+    // does, so none is flagged. This is the realizable stand-in for the applied case,
+    // since the APPLIED_SETTINGS flags are all false today; the flag gating itself is
+    // asserted in the summarizeInvitation unit tests.
+    renderCaveatTerms({
+      algorithm: "psi",
+      deduplicate: false,
+      linkageFields: [{ name: "dob", type: "date_of_birth" }],
+      linkageKeys: [{ name: "DOB", elements: [{ field: "dob" }] }],
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    // None of the three caveats renders anywhere on the screen. container includes
+    // the collapsed panels' mounted content, so this also covers the detail levels,
+    // not just the core.
+    expect(container!.textContent).not.toContain("does not yet apply it");
+    expect(container!.textContent).not.toContain("(proposed; not yet applied)");
+  });
+});

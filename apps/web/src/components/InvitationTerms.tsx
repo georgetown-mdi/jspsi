@@ -138,9 +138,13 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
                   {" "}
                   - also matches approximate variants ({element.fuzzyComparison}
                   )
-                  {/* Flag a proposed expansion the run does not yet perform, so
-                      the acceptor is not told a looser match occurs when it
-                      does not. */}
+                  {/* Fuzzy changes match breadth, not the disclosure guarantee, so
+                      by the caveat-placement rule on {@link InvitationTerms} its
+                      caveat stays here in the key's detail with the annotation it
+                      qualifies -- flagging a proposed expansion the run does not yet
+                      perform, so the acceptor is not told a looser match occurs when
+                      it does not. Not-applied narrows the match (fewer candidates),
+                      the safe disclosure direction, so it needs no core prominence. */}
                   {!element.fuzzyComparisonApplied &&
                     " (proposed; not yet applied)"}
                 </Text>
@@ -243,6 +247,26 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
  * default-collapsed "Other details" disclosure; the legal agreement is not among
  * it -- it is promoted whole into the always-visible core (see below). The
  * matching method and result sharing stay always-visible.
+ *
+ * Every "proposed but not yet applied" caveat (psi-c count-only, deduplicate, and
+ * per-element fuzzy comparison) follows ONE placement rule, so the flagging is
+ * uniform rather than decided per setting: a setting's caveat renders at the SAME
+ * visibility level as the headline it contradicts, never one expand down, so a
+ * reader can never see a headline setting as in force while its caveat is hidden.
+ * Which level that is follows the setting's disclosure weight. psi-c states a
+ * disclosure GUARANTEE -- only the match count is revealed, no identifiers -- so
+ * its headline is always-visible in the core and its caveat sits with it there;
+ * deduplicate and fuzzy change match multiplicity/breadth, not what is disclosed,
+ * so their headlines sit in a disclosure rather than the core (deduplicate in
+ * "Other details", fuzzy in each key's detail, itself behind the matching
+ * disclosure) and their caveats sit with those headlines, co-hidden with them. The asymmetry is deliberate and safe in the disclosure direction: psi-c
+ * not-applied makes the run disclose MORE than its count-only headline promises
+ * (identifiers revealed) -- the disclosure-critical direction that demands core
+ * prominence -- while deduplicate/fuzzy not-applied make the run match LESS than
+ * proposed, disclosing no more than the acceptor consented to. All caveat copy is
+ * fixed (gated on the schema enum and the APPLIED_SETTINGS flags), so no partner
+ * text enters a caveat, and render tests pin each caveat at its headline's level
+ * against the accessibility tree.
  *
  * Two payload facts whose detail lives in that disclosure carry an always-visible
  * PRESENCE hint in the core, since each would otherwise be invisible until the
@@ -477,9 +501,13 @@ export function InvitationTerms({
               </>
             )}
           </Text>
-          {/* psi-c is a disclosure guarantee: flag a proposed count-only setting
-              the run does not yet honor, so the line above cannot read as in
-              force while the exchange still reveals matched identifiers. */}
+          {/* psi-c states a disclosure guarantee, so by the caveat-placement rule
+              above its caveat is always-visible here with its headline: flag a
+              proposed count-only setting the run does not yet honor, so the line
+              above cannot read as in force while the exchange still reveals matched
+              identifiers. This is the disclosure-critical case -- not-applied means
+              the run reveals MORE than the count-only headline promises, so the
+              caveat may never be demoted below this always-visible headline. */}
           {summary.algorithm === "psi-c" && !summary.psiCApplied && (
             <Text size="xs" c="dimmed">
               Your partner proposes this, but this version of the exchange does
@@ -916,8 +944,13 @@ export function InvitationTerms({
                   ? "A record may match more than one of the partner's records."
                   : "Each record matches at most one of the partner's records."}
               </Text>
-              {/* A proposed looser setting the run does not yet honor: flag it
-                rather than let the line above read as the behavior in force. */}
+              {/* Deduplicate changes match multiplicity, not what is disclosed, so
+                by the caveat-placement rule on {@link InvitationTerms} its caveat
+                sits here with its headline one expand down -- co-hidden with it, so
+                the line above never reads as in force while the caveat is hidden.
+                Not-applied is safe in the disclosure direction: the run matches at
+                most one, fewer matches than proposed, so no more is disclosed than
+                consented. */}
               {summary.deduplicate && !summary.deduplicateApplied && (
                 <Text size="xs" c="dimmed">
                   Your partner proposes this, but this version of the exchange
