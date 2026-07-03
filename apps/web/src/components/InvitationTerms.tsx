@@ -432,34 +432,23 @@ export function InvitationTerms({
           ? "Exchange proposal"
           : `Invitation from ${summary.invitingParty}`}
       </Title>
-      {/* At the consent point the displayed identity is an unauthenticated claim:
-          the heading's name is summary.invitingParty -- sanitizeForDisplay(
-          terms.identity) -- carried in an invitation accepted on a 4-byte
-          transcription checksum that "detects transcription errors only and is
-          computable by anyone" (docs/SECURITY_DESIGN.md), so nothing has
-          authenticated the name here. Mutual cryptographic authentication happens
-          only later, at the X25519 key exchange the web exchange runs before any PSI
-          frame -- AFTER this review screen, where the acceptor consents to disclose
-          PII. Flag that timing gap right at the identity so the acceptor does not
-          read the name as an authenticated fact when deciding to proceed. Fixed copy,
-          never partner-controlled text; worded to neither overclaim a verification
-          that has not happened nor imply the exchange is unauthenticated end to end
-          -- it IS authenticated at key exchange; the only gap is that authentication
-          is later than consent. The note informs, it does not gate. Review-only: the
-          "accepted" during-run view is post-authentication, where the identity is by
-          then confirmed and the caveat would be stale, and the inviter's "proposing"
-          preview shows its OWN identity, which needs no such note. Given a medium
-          weight (fw 500) so it reads as a trust callout rather than filler between
-          the heading and the intro -- matching the legal-agreement flag and the
-          presence-hint lines -- and associated with the heading via aria-describedby
-          (see identityNoteId), so assistive tech carries it into the heading's
-          announcement. Pinned by render tests. */}
+      {/* The heading name is summary.invitingParty -- sanitizeForDisplay(
+          terms.identity) -- a free-text field the sender typed, carried in an
+          invitation accepted on a transcription checksum, so psilink has not
+          authenticated it. A terse marker keeps the acceptor from reading it as a
+          psilink-verified fact. Deliberately one line: parties normally coordinate
+          the first exchange out of band (a video call, say), so the acceptor already
+          knows the counterparty -- this is a small honesty marker on a self-asserted
+          field, not a directive to reassess trust, and it informs rather than gates.
+          It states nothing about the exchange's own authentication, so it cannot read
+          as claiming the exchange is unauthenticated. Fixed copy, never
+          partner-controlled. Review-only: the "accepted" view is post-authentication
+          (stale there) and "proposing" shows the viewer's own name. Associated with
+          the heading via aria-describedby (identityNoteId) so assistive tech carries
+          it into the heading's announcement; pinned by render tests. */}
       {perspective === "review" && (
         <Text id={identityNoteId} size="sm" fw={500}>
-          This name is your partner&rsquo;s own claim, which psilink has not
-          verified. Your partner is cryptographically authenticated when the
-          exchange begins -- after this step -- so treat the name as unverified
-          while you decide whether to share your data.
+          Your partner entered this name; psilink has not verified it.
         </Text>
       )}
       <Text size="sm" c="dimmed">

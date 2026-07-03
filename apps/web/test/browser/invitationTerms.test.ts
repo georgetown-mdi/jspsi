@@ -414,14 +414,14 @@ describe("InvitationTerms: a key disclosure stays mounted but hidden under a red
 
 describe("InvitationTerms: the counterparty identity is flagged unverified at consent", () => {
   // At the pre-consent review screen the displayed "Invitation from <name>" is a
-  // self-asserted, unauthenticated claim: the invitation is accepted on a 4-byte
-  // transcription checksum "computable by anyone" (docs/SECURITY_DESIGN.md), and
-  // mutual cryptographic authentication happens only later, at the key-exchange
-  // handshake AFTER this screen. A fixed-copy note flags that timing gap right at
-  // the identity so the acceptor does not read the name as an authenticated fact
-  // when deciding to disclose PII. Review-only: the during-run "accepted" view is
-  // post-authentication (the caveat would be stale), and the inviter's "proposing"
-  // preview shows its OWN identity (which needs no such note).
+  // free-text field the sender typed, carried in an invitation accepted on a
+  // transcription checksum -- so psilink has not authenticated it. A terse marker
+  // keeps the acceptor from reading it as a psilink-verified fact; it is a small
+  // honesty marker on a self-asserted field, not a directive (parties normally
+  // coordinate the first exchange out of band, so they already know the
+  // counterparty). Review-only: the during-run "accepted" view is post-authentication
+  // (the caveat would be stale), and the inviter's "proposing" preview shows its OWN
+  // identity (which needs no such note).
   function render(perspective?: "review" | "accepted" | "proposing") {
     root!.render(
       createElement(
@@ -435,28 +435,19 @@ describe("InvitationTerms: the counterparty identity is flagged unverified at co
     );
   }
 
-  // Substrings chosen to avoid the note's typographic apostrophe (rendered from
-  // &rsquo;) so a straight-quote assertion cannot silently miss.
-  const boundaryClaim = "psilink has not verified";
-  const laterAuthentication =
-    "cryptographically authenticated when the exchange begins";
+  const noteText =
+    "Your partner entered this name; psilink has not verified it.";
 
   test("the unverified-identity note appears on the acceptor review screen", async () => {
     render("review");
     await expect
       .element(page.getByText("Invitation from County Health Department"))
       .toBeInTheDocument();
-    // The note qualifies the self-asserted name (states psilink has not verified
-    // it) ...
-    expect(container!.textContent).toContain(boundaryClaim);
-    // ... and states the authentication IS performed, only later, so it neither
-    // overclaims a verification that has not happened nor implies the exchange is
-    // unauthenticated end to end.
-    expect(container!.textContent).toContain(laterAuthentication);
-    // Always-visible at the consent point, not tucked inside the "Other details"
-    // disclosure.
+    // The self-asserted name is marked unverified, in the always-visible core ...
+    expect(container!.textContent).toContain(noteText);
+    // ... not tucked inside the "Other details" disclosure.
     expect((await readyPanel("Other details")).textContent).not.toContain(
-      boundaryClaim,
+      noteText,
     );
   });
 
@@ -474,17 +465,16 @@ describe("InvitationTerms: the counterparty identity is flagged unverified at co
     const describedById = heading.element().getAttribute("aria-describedby");
     expect(describedById).toBeTruthy();
     const note = document.getElementById(describedById!);
-    expect(note?.textContent).toContain(boundaryClaim);
+    expect(note?.textContent).toContain(noteText);
   });
 
   test("the note is absent from the inviter's own proposing preview", async () => {
-    // Under "proposing" the identity shown is the viewer's own, so the "your
-    // partner's claim" caveat would be wrong; the heading is "Exchange proposal",
-    // not "Invitation from <self>".
+    // Under "proposing" the identity shown is the viewer's own, so a "not verified"
+    // caveat would be wrong; the heading is "Exchange proposal", not "Invitation
+    // from <self>".
     render("proposing");
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).not.toContain(boundaryClaim);
-    expect(container!.textContent).not.toContain(laterAuthentication);
+    expect(container!.textContent).not.toContain(noteText);
   });
 
   test("the note is absent from the during-run accepted view, where the identity is by then authenticated", async () => {
@@ -492,8 +482,7 @@ describe("InvitationTerms: the counterparty identity is flagged unverified at co
     // identity is no longer unverified and the review-only note would be stale.
     render("accepted");
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).not.toContain(boundaryClaim);
-    expect(container!.textContent).not.toContain(laterAuthentication);
+    expect(container!.textContent).not.toContain(noteText);
     // The note is absent here, so the identity heading must not carry a dangling
     // aria-describedby pointing at a note that no longer renders.
     expect(
