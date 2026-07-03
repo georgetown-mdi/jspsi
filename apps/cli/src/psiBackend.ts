@@ -22,9 +22,33 @@ async function loadNativePsiAddon(): Promise<PSILibrary | null> {
     const { default: loadNativeLibrary } =
       await import("@openmined/psi.js/psi_native_node.js");
     return await loadNativeLibrary();
-  } catch {
-    return null;
+  } catch (error) {
+    // Expected when no prebuild ships for this platform (node-gyp-build) or the
+    // native entry is absent from an older vendored package (module not found):
+    // fall back to WASM quietly. Anything else -- a corrupt or ABI-mismatched
+    // .node -- is a genuine failure, so re-throw and let the selector surface it
+    // through onNativeUnavailable rather than mislabel it as "no prebuild". The
+    // selector falls back to WASM either way, so correctness is unaffected.
+    if (isNativeUnavailable(error)) {
+      return null;
+    }
+    throw error;
   }
+}
+
+/**
+ * Whether a native-addon load error is the ordinary "no native build for this
+ * platform / package" case (quiet fallback) rather than a genuinely broken load
+ * worth surfacing.
+ */
+function isNativeUnavailable(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === "ERR_MODULE_NOT_FOUND" || code === "MODULE_NOT_FOUND") {
+    return true;
+  }
+  return (
+    error instanceof Error && /No native build was found/i.test(error.message)
+  );
 }
 
 /**
