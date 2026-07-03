@@ -1441,3 +1441,65 @@ describe("InvitationTerms: proposed-but-not-applied caveats sit at their headlin
     expect(container!.textContent).not.toContain("(proposed; not yet applied)");
   });
 });
+
+describe("InvitationTerms: the send-columns chip list is named by its visible caption, not a duplicate aria-label", () => {
+  // The always-visible send-columns disclosure renders a visible bold caption (the
+  // Term) above a ColumnChips list. The list derives its accessible name from that
+  // caption via aria-labelledby rather than carrying a second, separately-authored
+  // aria-label with the same text -- so the visible caption is the single source of
+  // the list's name and the two cannot drift. (This does not change how often a screen
+  // reader speaks the caption: a named list is still announced by name at its boundary,
+  // as any labelled region is.) Both same-string call sites are pinned -- the inviter's
+  // "proposing" send and the acceptor's own outbound send -- so a fix cannot correct
+  // one and leave the twin on a duplicate aria-label.
+  function render(options: {
+    perspective?: "review" | "accepted" | "proposing";
+    outboundColumns?: Array<string>;
+  }) {
+    root!.render(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(InvitationTerms, {
+          linkageTerms: terms,
+          ...(options.perspective ? { perspective: options.perspective } : {}),
+          ...(options.outboundColumns !== undefined
+            ? { outboundColumns: options.outboundColumns }
+            : {}),
+        }),
+      ),
+    );
+  }
+
+  // The list resolves by role + accessible name (so the caption still names it), AND
+  // carries no aria-label of its own (the name is not duplicated) but an
+  // aria-labelledby resolving to the visible caption text (its single source).
+  async function expectNamedByVisibleCaptionOnly(caption: string) {
+    const list = page.getByRole("list", { name: caption });
+    await expect.element(list).toBeInTheDocument();
+    const el = list.element();
+    // No second, identical name carried on the list itself.
+    expect(el.getAttribute("aria-label")).toBeNull();
+    // Named via the visible caption instead: aria-labelledby -> the caption node,
+    // whose text is exactly the caption the list's accessible name derives from.
+    const labelledBy = el.getAttribute("aria-labelledby");
+    expect(labelledBy).toBeTruthy();
+    expect(document.getElementById(labelledBy!)?.textContent).toBe(caption);
+  }
+
+  test("the inviter's proposing send list is named by its visible caption, not a duplicate aria-label", async () => {
+    // proposing + a non-empty send (the module terms send risk_score): the chips
+    // render under the "Columns sent to your partner" caption.
+    render({ perspective: "proposing" });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    await expectNamedByVisibleCaptionOnly("Columns sent to your partner");
+  });
+
+  test("the acceptor's outbound send list is named by its visible caption, not a duplicate aria-label", async () => {
+    // A chosen file supplies outboundColumns: the acceptor's own send renders as
+    // chips under the "What you will send to your partner" caption.
+    render({ perspective: "accepted", outboundColumns: ["risk_score"] });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    await expectNamedByVisibleCaptionOnly("What you will send to your partner");
+  });
+});
