@@ -7706,13 +7706,16 @@ test("poll() terminal: the unparseable-body error neutralizes deceptive Unicode 
   expect(err.message).toContain("\\u202e");
 });
 
-test("poll() terminal: a fully-synced message with an unrecognized envelope stops the poller", async () => {
+test("poll() terminal: an old-format JSON message surfaces a likely-incompatible-version hint", async () => {
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
-  // An old-format JSON message body: its first byte is `{` (0x7b), not the binary
-  // envelope's version marker, so the envelope parse rejects it -- the clean
-  // break with the pre-binary format surfaces as a terminal malformed-envelope
-  // failure rather than a silent misparse.
+  // An old-format JSON message body from a peer that predates the binary envelope
+  // (#318): its first byte is `{` (0x7b), not the envelope's version marker, so
+  // the reader keys on that foreign version byte and names the real cause -- a
+  // version-mismatched partner (208014743) -- rather than the raw "malformed
+  // envelope" text. This is the retroactive half: a current-or-newer reader
+  // translates a JSON-text-where-a-binary-envelope-was-expected frame into the
+  // actionable hint.
   const body = Buffer.from(JSON.stringify({ not: "a message" }));
   files.set(`/shared/${peerId}-20260101T000000-000-${body.length}.json`, body);
   const conn = makeRetainConn(client, "receiver-me", peerId);
@@ -7740,12 +7743,61 @@ test("poll() terminal: a fully-synced message with an unrecognized envelope stop
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
-  expect((errors[0] as Error).message).toContain("malformed envelope");
+  const message = (errors[0] as Error).message;
+  expect(message).toContain("incompatible psilink version");
+  expect(message).toContain("both parties must run the same version");
+  // The reframed message replaces the raw envelope-corruption text, not appends.
+  expect(message).not.toContain("malformed envelope");
   expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
     false,
   );
   expect(received).toHaveLength(0);
   expect([...files.keys()].some((p) => p.endsWith("-ack.json"))).toBe(false);
+});
+
+test("poll() terminal: a foreign envelope version byte surfaces the same version hint", async () => {
+  const { client, files } = makeMockClient();
+  const peerId = "peer-sender";
+  // The forward-looking half of the same reader hint: a future build that raises
+  // MESSAGE_ENVELOPE_VERSION writes a byte-0 our reader does not recognize. Take a
+  // well-formed message and flip byte 0 to a foreign version (2) so only the
+  // version marker differs -- the reader still names the likely-incompatible
+  // partner rather than "malformed envelope".
+  const body = serializeFileSyncMessage(
+    MESSAGE_TYPE_OBJECT,
+    0,
+    Buffer.from(JSON.stringify({ v: 1 })),
+  );
+  body[0] = 2;
+  files.set(`/shared/${peerId}-20260101T000000-000-${body.length}.json`, body);
+  const conn = makeRetainConn(client, "receiver-me", peerId);
+
+  const errors: unknown[] = [];
+  let notifyError!: () => void;
+  const errorArrived = new Promise<void>((r) => (notifyError = r));
+  conn.on("error", (err) => {
+    errors.push(err);
+    notifyError();
+  });
+
+  conn.start();
+  await Promise.race([
+    errorArrived,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("timed out waiting for poll error")),
+        2_000,
+      ),
+    ),
+  ]);
+  conn.stop();
+
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(UsageError);
+  const message = (errors[0] as Error).message;
+  expect(message).toContain("incompatible psilink version");
+  // The offending byte and this build's expected version are both named.
+  expect(message).toContain("envelope version byte 2");
 });
 
 test("poll() retryable: a transient list() failure reschedules and the message is delivered on a later cycle", async () => {

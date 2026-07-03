@@ -1,6 +1,11 @@
 import { expect, test } from "vitest";
 
-import { exchangeTerms, resolveRole } from "../src/protocolSetup";
+import {
+  exchangeTerms,
+  resolveRole,
+  PROTOCOL_VERSION,
+  PROTOCOL_VERSION_MISMATCH_MESSAGE,
+} from "../src/protocolSetup";
 import { MAX_NAME_LENGTH } from "../src/config/linkageTerms";
 import type { LinkageTerms, Output } from "../src/config/linkageTerms";
 import type { PresentedHostKey } from "../src/connection/fileSyncConnection";
@@ -216,6 +221,100 @@ test("initiator flags a present-but-malformed partner hostKey without aborting",
   const result = await initiator;
   expect(result.partnerHostKey).toBeUndefined();
   expect(result.partnerHostKeyMalformed).toBe(true);
+});
+
+// --- Protocol-version reconcile (208014743) ----------------------------------
+
+test("both parties advertise the protocol version on their terms messages", async () => {
+  // The forward-looking clean check: both terms messages carry this build's
+  // PROTOCOL_VERSION so a future wire-format boundary fails cleanly the moment
+  // the two versions differ. Message 3 (the bare final decision) does not carry
+  // it -- each party already read the other's version off message 1 / message 2.
+  const [connA, connB] = makeConnections();
+  const wrap = (
+    conn: MessageConnection,
+    sink: Array<Record<string, unknown>>,
+  ): MessageConnection => ({
+    send: (m: unknown) => {
+      sink.push(m as Record<string, unknown>);
+      return conn.send(m);
+    },
+    receive: (t?: number) => conn.receive(t),
+    close: () => conn.close(),
+  });
+  const initiatorSent: Array<Record<string, unknown>> = [];
+  const responderSent: Array<Record<string, unknown>> = [];
+  const [a, b] = await Promise.all([
+    exchangeTerms(wrap(connA, initiatorSent), "initiator", termsA, 100),
+    exchangeTerms(wrap(connB, responderSent), "responder", termsB, 200),
+  ]);
+  // Same-version parties are unaffected: the exchange completes.
+  expect(a.partnerTerms.identity).toBe("Party B");
+  expect(b.partnerTerms.identity).toBe("Party A");
+  // The initiator's opening terms (message 1) and the responder's terms +
+  // decision (message 2) both carry the version.
+  expect(initiatorSent[0]).toMatchObject({ protocolVersion: PROTOCOL_VERSION });
+  expect(responderSent[0]).toMatchObject({ protocolVersion: PROTOCOL_VERSION });
+  // Message 3 is a bare decision -- no version rides it.
+  expect("protocolVersion" in initiatorSent[1]).toBe(false);
+});
+
+test("responder fails fast when message 1 advertises a different protocol version", async () => {
+  // Fail-closed reconcile: a partner on a different PROTOCOL_VERSION is an
+  // incompatible build, so the responder aborts with the actionable "run the
+  // same version" diagnosis before it ever weighs the (here identical) terms --
+  // turning a later cryptic frame-parse failure into one obvious line. Drive the
+  // initiator by hand to inject a foreign version on message 1.
+  const [connA, connB] = makeConnections();
+  const responder = exchangeTerms(connB, "responder", termsB, 200);
+  await connA.send({
+    linkageTerms: termsA,
+    recordCount: 100,
+    protocolVersion: PROTOCOL_VERSION + 1,
+  });
+  // The responder relays the mismatch as its abort reason (message 2) so the
+  // initiator learns the real cause too; drain it and confirm.
+  const abort = await connA.receive();
+  expect(abort).toMatchObject({
+    decision: "abort",
+    abortReasons: [PROTOCOL_VERSION_MISMATCH_MESSAGE],
+  });
+  await expect(responder).rejects.toThrow(PROTOCOL_VERSION_MISMATCH_MESSAGE);
+});
+
+test("initiator fails fast when message 2 advertises a different protocol version", async () => {
+  // The mirror of the responder case: a foreign version on the responder's
+  // message 2 is caught by the initiator, which aborts (message 3, decision-only)
+  // with the same diagnosis. Drive the responder by hand to inject it.
+  const [connA, connB] = makeConnections();
+  const initiator = exchangeTerms(connA, "initiator", termsA, 100);
+  await connB.receive(); // msg 1: initiator's terms
+  await connB.send({
+    linkageTerms: termsB,
+    decision: "proceed",
+    recordCount: 200,
+    protocolVersion: PROTOCOL_VERSION + 1,
+  });
+  const abort = await connB.receive(); // msg 3: initiator's abort
+  expect(abort).toMatchObject({
+    decision: "abort",
+    abortReasons: [PROTOCOL_VERSION_MISMATCH_MESSAGE],
+  });
+  await expect(initiator).rejects.toThrow(PROTOCOL_VERSION_MISMATCH_MESSAGE);
+});
+
+test("a partner that omits the protocol version (legacy build) still proceeds", async () => {
+  // Adding the field is itself wire-compatible: a build predating it strips the
+  // unknown key and advertises none, so an absent version is treated as legacy
+  // and allowed to proceed rather than aborted. The fail-closed guarantee is for
+  // two builds that BOTH carry the field. Drive the initiator by hand to omit it.
+  const [connA, connB] = makeConnections();
+  const responder = exchangeTerms(connB, "responder", termsB, 200);
+  await connA.send({ linkageTerms: termsA, recordCount: 100 }); // no version
+  await connA.receive(); // drain the responder's terms + proceed (msg 2)
+  await connA.send({ decision: "proceed" }); // msg 3
+  const result = await responder;
+  expect(result.partnerTerms.identity).toBe("Party A");
 });
 
 // --- Role determination ------------------------------------------------------

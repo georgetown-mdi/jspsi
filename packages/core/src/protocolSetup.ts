@@ -130,6 +130,43 @@ export const recordCountField = z
   .nonnegative()
   .max(MAX_RECORD_COUNT);
 
+// The psilink exchange-protocol version, advertised by both parties on the terms
+// exchange and reconciled fail-closed: a partner that advertises a DIFFERENT
+// version is on an incompatible build, so the exchange aborts with an actionable
+// "run the same version" diagnosis BEFORE any data-plane frame is parsed, rather
+// than failing later with a cryptic frame-parse error (208014743). It rides the
+// terms exchange -- the one bidirectional round-trip both parties always perform,
+// carrying `linkageTerms`, `recordCount`, `save`, and `hostKey` beside it -- so
+// the check adds no new round-trip; on the authenticated path it rides the AEAD
+// channel and cannot be forged.
+//
+// This is a build-level WIRE/PROTOCOL compatibility marker, bumped only on a
+// wire-incompatible protocol change -- distinct from the operator-authored
+// linkage-terms `version` (compared for equality between the parties' authored
+// values, see docs/spec/PROTOCOL.md) and from the file-sync MESSAGE_ENVELOPE_VERSION
+// byte (the transport frame format, see fileSyncConnection.ts). The reconcile is
+// fail-closed on a PRESENT mismatch (matching the mode-flag fast-fail precedent,
+// 193901017), NOT fail-soft like the host-key advisory. A partner that advertises
+// NO version (undefined) is a build that predates this field: adding the field is
+// itself wire-compatible (an older peer strips the unknown key and this build
+// treats an absent advertisement as legacy), so such a partner is allowed to
+// proceed. The durable, forward-looking guarantee is that any two builds that
+// both carry the field fail cleanly the moment their versions differ.
+/** @internal exported for the protocol-version reconcile tests. */
+export const PROTOCOL_VERSION = 1;
+
+/**
+ * The operator-facing diagnosis surfaced -- and sent to the partner as the abort
+ * reason -- when the two parties advertise different {@link PROTOCOL_VERSION}s.
+ * It reads correctly from either side: each party names the other as the one on
+ * the incompatible version, and both conclude they must run the same build.
+ *
+ * @internal exported for the protocol-version reconcile tests.
+ */
+export const PROTOCOL_VERSION_MISMATCH_MESSAGE =
+  "the partner is running an incompatible psilink version; both parties must " +
+  "run the same version";
+
 // The optional `save` flag rides the terms exchange so each party advertises
 // its zero-setup `--save` intent to the other on the one round-trip both sides
 // always perform (see exchangeTerms). It is omitted entirely outside the
@@ -145,6 +182,7 @@ export const recordCountField = z
 const termsMessage = z.object({
   linkageTerms: z.unknown(),
   recordCount: recordCountField,
+  protocolVersion: z.number().int().optional(),
   save: z.boolean().optional(),
   hostKey: hostKeyField,
 });
@@ -165,6 +203,7 @@ const termsWithDecisionMessage = z.object({
   decision: z.enum(["proceed", "abort"]),
   abortReasons: abortReasonsField,
   recordCount: recordCountField.optional(),
+  protocolVersion: z.number().int().optional(),
   save: z.boolean().optional(),
   hostKey: hostKeyField,
 });
@@ -261,13 +300,35 @@ async function sendAbort(
 }
 
 /**
+ * Fail-closed reconcile of the partner's advertised {@link PROTOCOL_VERSION}. A
+ * partner that advertised a version DIFFERENT from ours is on an incompatible
+ * build: best-effort send it the abort (so it too fails with the named cause,
+ * not a receive timeout) and throw {@link PROTOCOL_VERSION_MISMATCH_MESSAGE}. A
+ * partner that advertised NONE (`undefined`) predates this field and is
+ * wire-compatible with this build, so it is treated as legacy and allowed to
+ * proceed (a no-op return). Pass `localTerms` when reconciling from the
+ * responder's message-2 slot, whose abort frame carries `linkageTerms`; omit it
+ * for the initiator's decision-only abort. See {@link PROTOCOL_VERSION}.
+ */
+async function reconcileProtocolVersion(
+  conn: MessageConnection,
+  partnerVersion: number | undefined,
+  localTerms?: LinkageTerms,
+): Promise<void> {
+  if (partnerVersion === undefined || partnerVersion === PROTOCOL_VERSION)
+    return;
+  await sendAbort(conn, [PROTOCOL_VERSION_MISMATCH_MESSAGE], localTerms);
+  throw new Error(PROTOCOL_VERSION_MISMATCH_MESSAGE);
+}
+
+/**
  * Exchange {@link LinkageTerms} with a partner over an established
  * connection, validate compatibility, and obtain agreement from both parties to
  * proceed.
  *
  * The three-message protocol mirrors the sequencing of the handshake:
- *   1. Initiator  -> Responder : `{ linkageTerms, recordCount }`
- *   2. Responder  -> Initiator : `{ linkageTerms, recordCount, decision }`
+ *   1. Initiator  -> Responder : `{ linkageTerms, recordCount, protocolVersion }`
+ *   2. Responder  -> Initiator : `{ linkageTerms, recordCount, decision, protocolVersion }`
  *   3. Initiator  -> Responder : `{ decision }`
  *
  * If either party finds the terms incompatible, it sends `decision: "abort"`
@@ -276,6 +337,14 @@ async function sendAbort(
  * mismatch). Call {@link resolveRole} afterwards to determine each party's PSI
  * role -- it is a local computation over the counts exchanged here, with no
  * further messages.
+ *
+ * Both parties advertise this build's {@link PROTOCOL_VERSION} on their terms
+ * message (message 1 for the initiator, message 2 for the responder) and check
+ * the partner's before weighing the terms. A DIFFERENT advertised version
+ * fail-closes with {@link PROTOCOL_VERSION_MISMATCH_MESSAGE} (both sides learn
+ * the real cause instead of a later cryptic frame-parse error; 208014743); an
+ * ABSENT one is a legacy build wire-compatible with this one and proceeds. See
+ * {@link reconcileProtocolVersion}.
  *
  * `localRecordCount` (this party's raw dataset row count) rides both terms
  * messages, and the partner's is read back as
@@ -328,11 +397,12 @@ export async function exchangeTerms(
     localHostKey !== undefined ? { hostKey: localHostKey } : {};
 
   if (handshakeRole === "initiator") {
-    // Message 1: send our terms (carrying our record count, and our save intent
-    // and observed host key when set).
+    // Message 1: send our terms (carrying our record count and protocol version,
+    // and our save intent and observed host key when set).
     await conn.send({
       linkageTerms: localTerms,
       recordCount: localRecordCount,
+      protocolVersion: PROTOCOL_VERSION,
       ...saveField,
       ...hostKeyField,
     });
@@ -348,6 +418,11 @@ export async function exchangeTerms(
             : ""),
       );
     }
+
+    // Fail-closed protocol-version check before any terms are weighed: a version
+    // skew is the root cause, so its actionable diagnosis wins over a record-
+    // count or terms difference the mismatch might also produce (208014743).
+    await reconcileProtocolVersion(conn, msg.protocolVersion);
 
     // A `proceed` frame always carries the partner's record count (only the abort
     // frame omits it; see termsWithDecisionMessage). Its absence here is a
@@ -423,9 +498,16 @@ export async function exchangeTerms(
     let partnerSaveIntent = false;
     let partnerHostKey: PresentedHostKey | undefined;
     let partnerHostKeyMalformed = false;
+    // Captured before parseLinkageTerms (which may throw): a version skew is the
+    // likely reason the terms fail to parse, so the version reconcile below must
+    // run even when the linkage-terms parse threw, as long as the envelope itself
+    // parsed. It stays undefined if `termsMessage.parse` itself throws (a wholly
+    // malformed frame carries no readable version).
+    let partnerProtocolVersion: number | undefined;
     let parseError: string | undefined;
     try {
       const parsed = termsMessage.parse(rawData);
+      partnerProtocolVersion = parsed.protocolVersion;
       partnerRecordCount = parsed.recordCount;
       partnerSaveIntent = parsed.save === true;
       partnerHostKey = parsed.hostKey.value;
@@ -438,6 +520,12 @@ export async function exchangeTerms(
       // initiator branch above.
       parseError = describeDecodeError(parseErr);
     }
+
+    // Fail-closed protocol-version check first: a version skew is the root cause,
+    // so its actionable diagnosis wins over a terms parse/compat error the same
+    // mismatch would otherwise surface (208014743). The abort carries localTerms
+    // (the responder's message-2 slot always does).
+    await reconcileProtocolVersion(conn, partnerProtocolVersion, localTerms);
 
     const { errors, warnings } =
       parseError !== undefined
@@ -452,12 +540,13 @@ export async function exchangeTerms(
       throw new Error(`linkage terms are incompatible: ${errors.join("; ")}`);
     }
 
-    // Message 2: send our terms + proceed decision (carrying our record count,
-    // and our save intent and observed host key).
+    // Message 2: send our terms + proceed decision (carrying our record count
+    // and protocol version, and our save intent and observed host key).
     await conn.send({
       linkageTerms: localTerms,
       decision: "proceed",
       recordCount: localRecordCount,
+      protocolVersion: PROTOCOL_VERSION,
       ...saveField,
       ...hostKeyField,
     });

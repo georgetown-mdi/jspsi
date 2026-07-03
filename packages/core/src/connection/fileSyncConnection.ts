@@ -766,6 +766,26 @@ interface DeserializedMessage {
   payload: Uint8Array;
 }
 
+// Thrown by deserializeFileSyncMessage when byte 0 -- the cleartext envelope
+// version marker -- is not this build's MESSAGE_ENVELOPE_VERSION. That byte is
+// the one signal that separates a same-version peer's (possibly corrupt) frame
+// from a foreign wire format: a JSON-text control message from a peer that
+// predates the binary envelope (#318) begins with '{' (0x7B), and any future
+// envelope-version bump raises the byte, so an unrecognized value most likely
+// means the partner is on an incompatible psilink version rather than that a
+// same-version frame corrupted. The read path translates this into an
+// operator-facing "likely incompatible partner version" hint instead of the raw
+// "malformed envelope" text (a version skew was a multi-hour debugging session
+// in production; 208014743). It cannot be perfectly precise -- a foreign format
+// that happens to reuse byte 0 == 1 would still fall through to the generic
+// checks -- so the message is a "likely" hint, not a certain diagnosis.
+class IncompatibleEnvelopeVersionError extends Error {
+  constructor(readonly foundVersion: number) {
+    super(`unsupported message envelope version ${foundVersion}`);
+    this.name = "IncompatibleEnvelopeVersionError";
+  }
+}
+
 /**
  * Parse a message file's bytes back into its envelope fields, validating the
  * version marker, the type discriminator, and the minimum length. Throws a plain
@@ -777,7 +797,7 @@ function deserializeFileSyncMessage(raw: Uint8Array): DeserializedMessage {
   if (raw.length < MESSAGE_HEADER_BYTES)
     throw new Error("message envelope is shorter than its header");
   if (raw[0] !== MESSAGE_ENVELOPE_VERSION)
-    throw new Error(`unsupported message envelope version ${raw[0]}`);
+    throw new IncompatibleEnvelopeVersionError(raw[0]);
   const type = raw[1];
   if (type !== MESSAGE_TYPE_OBJECT && type !== MESSAGE_TYPE_BINARY)
     throw new Error(`unknown message payload type ${type}`);
@@ -4691,9 +4711,28 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             try {
               envelope = deserializeFileSyncMessage(message);
             } catch (parseErr: unknown) {
-              // The envelope error carries only fixed text and small header
-              // numbers, but route it through the same escape as the sibling
-              // throws below for uniformity.
+              // An unrecognized envelope version byte is the file-sync signature
+              // of a version-mismatched partner (a JSON-text message from a
+              // pre-#318 peer leads with '{', and a future envelope bump raises
+              // the byte), so name that real cause instead of the raw "malformed
+              // envelope" text -- turning a cryptic frame-parse failure into one
+              // obvious log line (208014743). foundVersion and
+              // MESSAGE_ENVELOPE_VERSION are small header numbers, not partner
+              // text; name and peerId stay sanitized as before.
+              if (parseErr instanceof IncompatibleEnvelopeVersionError)
+                throw new UsageError(
+                  `message file ${sanitizeForDisplay(messageFile.name)} from ` +
+                    `${sanitizeForDisplay(peerId)} has an unrecognized wire ` +
+                    `format (envelope version byte ${parseErr.foundVersion}, ` +
+                    `not this build's ${MESSAGE_ENVELOPE_VERSION}); the partner ` +
+                    `is likely running an incompatible psilink version, and ` +
+                    `both parties must run the same version`,
+                );
+              // Any other envelope failure (truncation, unknown type, out-of-
+              // range seq) is genuine corruption from a same-version peer. The
+              // error carries only fixed text and small header numbers, but route
+              // it through the same escape as the sibling throws below for
+              // uniformity.
               throw new UsageError(
                 `message file ${sanitizeForDisplay(messageFile.name)} from ` +
                   `${sanitizeForDisplay(peerId)} is fully synced but has a ` +
