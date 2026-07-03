@@ -1,5 +1,6 @@
 export * from "./errors";
 export * from "./participant";
+export * from "./psiBackend";
 export * from "./link";
 export * from "./protocolSetup";
 export * from "./types";

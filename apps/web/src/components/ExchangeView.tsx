@@ -15,6 +15,7 @@ import {
   buildOutputTable,
   describeExchangeStages,
   errorMessage,
+  loadPsiBackend,
   prepareForExchange,
   sanitizeForDisplay,
   serializeExchangeRecord,
@@ -393,7 +394,13 @@ export function ExchangeView(config: ExchangeConfig) {
     // owner awaits it late (after the message connection is open). The acceptor
     // is the initiator: it awaits `psi` early, to fail before dialing.
     const acquire: Acquire = async ({ signal, onStage, onStages }) => {
-      const psi = PSI() as Promise<PSILibrary>;
+      // Route the browser through the shared PSI backend selector; off Node it
+      // always resolves WASM. `psi` stays a pending Promise<PSILibrary>, so the
+      // late-await and void-catch handling below are unchanged from a bare PSI().
+      const psi = loadPsiBackend(
+        { loadWasm: () => PSI() as Promise<PSILibrary> },
+        { isNode: false },
+      ).then((selection) => selection.library);
       // The responder (inviter) returns `psi` unresolved and the owner awaits
       // it late; if the connection setup fails or the signal aborts first, that
       // await is never reached. Attach a fire-and-forget handler so a rejecting
