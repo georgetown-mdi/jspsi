@@ -416,8 +416,27 @@ export interface InvitationSummary {
 /**
  * Plain-language descriptions of a field's declared constraints, in a stable
  * order. The `exclude` denylist is reported as a count, not its values: it is
- * advisory and may hold hundreds of entries. `allowedCharacters` is a short,
- * length-bounded, partner-controlled string, so it is sanitized before display.
+ * advisory and may hold hundreds of entries.
+ *
+ * `allowedCharacters` is deliberately NOT rendered as "characters limited to X".
+ * The value is a partner-authored regular-expression character class: it arrives
+ * in the invitation token, accepted on a transcription checksum -- not an
+ * authenticity guarantee -- and is never vetted, so a crafted class reads very
+ * differently to a human than the set it admits. A leading `^` negates it (`^A-Z`
+ * admits every character EXCEPT A-Z), and a shorthand or bracket breakout (`\p{L}`,
+ * `[:alpha:]`, `]|\w|[`) is opaque to a non-regex-literate operator -- so a
+ * "limited to <class>" phrasing would present raw partner regex as a vetted,
+ * plain-language promise it is not. It is instead labelled as the partner-supplied,
+ * unverified regular expression it is, so its surface reading is no longer
+ * presented as a guarantee -- a non-regex-literate operator can still misread a
+ * crafted class, but the copy no longer asserts a promise the value cannot back,
+ * and the "not verified by psilink" clause names the trust boundary (partner-
+ * authored, warn-not-enforce) rather than only the regex syntax family. The raw
+ * class is still shown (sanitized) so a regex-literate reviewer can inspect the
+ * actual pattern. The check that evaluates the class is warn-not-enforce (core's
+ * `withinAllowedCharacters`); this is that check's operator-facing display
+ * complement. `allowedCharacters` is a short, length-bounded, partner-controlled
+ * string, so it is sanitized before display.
  */
 function describeConstraints(field: LinkageField): Array<string> {
   const constraints = field.constraints;
@@ -433,7 +452,7 @@ function describeConstraints(field: LinkageField): Array<string> {
     constraints.allowedCharacters !== undefined
   )
     descriptions.push(
-      `characters limited to ${sanitizeForDisplay(constraints.allowedCharacters)}`,
+      `allowed-character pattern (partner-supplied regular expression, not verified by psilink): ${sanitizeForDisplay(constraints.allowedCharacters)}`,
     );
   const exclude = constraints.exclude ?? [];
   if (exclude.length > 0)
@@ -939,8 +958,9 @@ export function summarizeInvitation(
   // text then distinguishes them. The dedupe key is the JSON encoding of the
   // (label, constraints) pair, which is injective over that displayed content:
   // a plain join would not be, since a constraint phrase can itself contain the
-  // separator (`characters limited to <chars>` carries partner-controlled
-  // spaces). The key is built from the already-sanitized display strings, so two
+  // separator (the allowed-character pattern phrase embeds the partner-controlled
+  // regex class, which carries spaces). The key is built from the already-sanitized
+  // display strings, so two
   // fields whose `allowedCharacters` differ only in characters sanitizeForDisplay
   // folds together collapse -- correctly, since they render identically and
   // nothing the acceptor could distinguish is lost.

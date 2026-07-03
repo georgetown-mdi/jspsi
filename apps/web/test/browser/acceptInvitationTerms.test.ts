@@ -255,8 +255,12 @@ describe("accept screen: terms render from a decoded token", () => {
     expect(html).toContain(
       "Last name and First name may be matched in either order",
     );
-    // The field constraint surfaces under the data used.
-    expect(html).toContain("characters limited to A-Z");
+    // The field constraint surfaces under the data used, labelled as the
+    // partner-supplied, unverified regular expression it is rather than a vetted
+    // allow-list.
+    expect(html).toContain(
+      "allowed-character pattern (partner-supplied regular expression, not verified by psilink): A-Z",
+    );
   });
 
   test("renders a generic swap note when the swapped fields share a label", async () => {

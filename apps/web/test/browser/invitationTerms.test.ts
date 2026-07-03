@@ -307,7 +307,9 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     // The non-key blocks (field constraints, payload, legal agreement, dedup) are
     // in the master disclosure ...
     const panel = await readyPanel("Other details");
-    expect(panel.textContent).toContain("characters limited to A-Z");
+    expect(panel.textContent).toContain(
+      "allowed-character pattern (partner-supplied regular expression, not verified by psilink): A-Z",
+    );
     expect(panel.textContent).toContain("risk_score");
     expect(panel.textContent).toContain("MOU-2025-0042");
     expect(panel.textContent).toContain("may match more than one");
