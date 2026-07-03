@@ -524,19 +524,37 @@ function quoteCsvField(value: string): string {
     : value;
 }
 
+// Pick a column name not already taken, starting from `base` and falling back to
+// a `their_`-prefixed (then numbered) variant. Used for the partner row-index
+// column so it never collides with our identifier column or a partner payload
+// column, mirroring the their_-prefix disambiguation the payload columns use.
+function uniqueColumnName(base: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(base)) return base;
+  const prefixed = `their_${base}`;
+  if (!taken.has(prefixed)) return prefixed;
+  let n = 2;
+  while (taken.has(`${prefixed}_${n}`)) n++;
+  return `${prefixed}_${n}`;
+}
+
 /**
  * Formats an exchange result into header and row arrays suitable for CSV
  * output.
  *
- * The first column identifies our matched records and is headed by our
- * identifier column name, or `row_id` when no identifier column exists. The
- * remaining columns are the partner's payload columns, each using their
- * original name, prefixed with `their_` only when a name collides with our
- * local identifier column. When the partner sent no payload data a single
- * `row_id` fallback column (or `their_row_id` on collision) contains the
- * partner's 0-based row index. All values are RFC 4180 escaped. Null cells in
- * the partner's payload (columns present in the schema but absent from a row)
- * are emitted as empty strings.
+ * The first column identifies our matched records, headed by our identifier
+ * column name (or `row_id` when no identifier column exists). The second column
+ * carries the partner's 0-based row index for each matched record, headed
+ * `row_id` (disambiguated to `their_row_id`, then `their_row_id_2`, ... on
+ * collision with our column or a partner payload column). The partner row index
+ * is emitted in every result -- not only when the partner sent no payload -- so
+ * the result stays self-sufficient for later verification: it is the partner side
+ * of the association table the record's commitments bind, and (once the payload
+ * commitment stopped binding the partner's row indices) it is not otherwise
+ * recoverable from the payload values. The remaining columns are the partner's
+ * payload columns, each using its original name, prefixed with `their_` only when
+ * it collides with our identifier column. All values are RFC 4180 escaped. Null
+ * cells in the partner's payload (columns present in the schema but absent from a
+ * row) are emitted as empty strings.
  */
 export function buildOutputTable(
   associationTable: AssociationTable,
@@ -563,12 +581,23 @@ export function buildOutputTable(
   const hasPartnerCols = partnerPayload.columns.length > 0;
   const ourBaseName = ourIdCol ? ourIdCol.name : "row_id";
 
-  const ourHeader = quoteCsvField(ourBaseName);
-  const theirHeaders = (
-    hasPartnerCols ? partnerPayload.columns : ["row_id"]
-  ).map((c) => quoteCsvField(c !== ourBaseName ? c : `their_${c}`));
+  // Partner payload columns keep their original names, prefixed with their_ only
+  // on collision with our identifier column.
+  const valueHeaders = partnerPayload.columns.map((c) =>
+    c !== ourBaseName ? c : `their_${c}`,
+  );
+  // The partner row-index column sits between our column and the payload columns,
+  // made unique against both.
+  const partnerIndexHeader = uniqueColumnName(
+    "row_id",
+    new Set([ourBaseName, ...valueHeaders]),
+  );
 
-  const headers = [ourHeader, ...theirHeaders];
+  const headers = [
+    quoteCsvField(ourBaseName),
+    quoteCsvField(partnerIndexHeader),
+    ...valueHeaders.map(quoteCsvField),
+  ];
 
   const theirIdxToPayloadPos = new Map(
     partnerPayload.rowIndices.map((rowIdx, pos) => [rowIdx, pos]),
@@ -597,9 +626,10 @@ export function buildOutputTable(
         ? (rawRows[ourIdx]?.[ourIdCol.name] ?? String(ourIdx))
         : String(ourIdx),
     );
+    const partnerIndexCell = quoteCsvField(String(theirIdx));
 
     if (!hasPartnerCols) {
-      return [ourId, quoteCsvField(String(theirIdx))];
+      return [ourId, partnerIndexCell];
     }
 
     const partnerRow = partnerPayload.rows[theirIdxToPayloadPos.get(theirIdx)!];
@@ -607,7 +637,7 @@ export function buildOutputTable(
       quoteCsvField(partnerRow[colIdx] ?? ""),
     );
 
-    return [ourId, ...theirValues];
+    return [ourId, partnerIndexCell, ...theirValues];
   });
 
   return { headers, rows };
