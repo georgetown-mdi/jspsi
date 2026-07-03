@@ -327,7 +327,16 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
  * is a hard fact. The PARTNER's non-receipt is COOPERATIVE: keeping the result from
  * the partner rests on the agreed terms being honored, not on a guarantee this side
  * can impose (a documented property of one-sided PSI, docs/notes/one-sided-
- * disclosure.md). Each "No" carries the caveat for its register. The viewer's own
+ * disclosure.md). Each "No" carries the caveat for its register. The partner's "No"
+ * additionally carries the honest-helper disclosure: even a fully honest partner
+ * that helps compute the match learns which of ITS OWN records are in the viewer's
+ * data (membership) -- distinct from, and deliberately not conflated with, the
+ * cooperative caveat about a dishonest partner keeping the result table. It is
+ * stated as an accepted, documented property (it holds under both linkage
+ * strategies: intrinsic to the cascade, and to any exchange where the helper
+ * discloses payload for the overlap), bounded so it does not overstate -- the helper
+ * learns membership of its own records, never which of the viewer's records they
+ * matched, nor anything about the rest of the set beyond its size. The viewer's own
  * "Yes" is left unqualified; the partner's "Yes" -- the accountable disclosure of
  * the result to them -- carries a brief pointer that the agreement, not this tool,
  * governs its use once the result is out.
@@ -796,11 +805,35 @@ export function InvitationTerms({
               tool.
             </Text>
           ) : (
-            <Text size="xs" c="dimmed">
-              By agreement, not enforced: keeping the result from your partner
-              rests on the agreed terms being honored, not on anything this tool
-              can enforce.
-            </Text>
+            <>
+              <Text size="xs" c="dimmed">
+                By agreement, not enforced: keeping the result from your partner
+                rests on the agreed terms being honored, not on anything this
+                tool can enforce.
+              </Text>
+              {/* The honest-helper membership disclosure, kept DISTINCT from the
+                  cooperative caveat above: that caveat is about a dishonest
+                  partner KEEPING the result table; this states what an HONEST
+                  partner learns intrinsically. To help compute the match, a
+                  non-receiving partner (the helper) learns which of ITS OWN
+                  records are in the viewer's data -- membership -- and this holds
+                  whenever the partner does not receive the result, under both
+                  linkage strategies (intrinsic to the cascade; and to any
+                  exchange where the helper discloses payload for the overlap,
+                  which it needs its own matched rows to build). Stated as an
+                  accepted, documented property (docs/notes/one-sided-
+                  disclosure.md), not a warning of misbehaviour, and bounded so it
+                  cannot overstate: the helper learns membership of its OWN
+                  records, never which of the viewer's records they matched, nor
+                  anything about the rest of the set beyond its size. Fixed copy,
+                  so no partner text enters it; strategy-neutral, since it is true
+                  for every one-sided configuration. */}
+              <Text size="xs" c="dimmed">
+                Even when honored, your partner learns which of its own records
+                are in your data (not which of yours). This is inherent to the
+                match, not a breach.
+              </Text>
+            </>
           )}
         </Term>
       </Stack>

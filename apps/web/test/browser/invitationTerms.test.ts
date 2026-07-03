@@ -547,6 +547,11 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
     expect(container!.textContent).toContain(
       "Once received, its use is governed by your agreement, not this tool.",
     );
+    // The partner receives the result here, so the honest-helper membership line
+    // does not apply -- it is scoped to the "partner does not receive" case.
+    expect(container!.textContent).not.toContain(
+      "learns which of its own records are in your data",
+    );
   });
 
   test("an acceptor of a partner-only invitation is told plainly it receives the result", async () => {
@@ -563,6 +568,17 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
     // from an enforced one, and the acceptor's own "Yes" carries no enforced caveat.
     expect(container!.textContent).toContain("By agreement, not enforced");
     expect(container!.textContent).not.toContain("Enforced: you are sent no");
+    // Partner does not receive: the honest-helper membership line appears, DISTINCT
+    // from the cooperative caveat above (it is about what an honest partner learns,
+    // not about a dishonest one keeping the table), and lands in the "What the
+    // exchange produces" tier where result sharing lives -- not merely somewhere in
+    // the panel -- preserving the labelled-group contract item 208072217 pinned.
+    expect(container!.textContent).toContain(
+      "learns which of its own records are in your data",
+    );
+    await expect
+      .element(group("What the exchange produces"))
+      .toHaveTextContent("learns which of its own records are in your data");
   });
 
   test("the inviter's own preview frames the outcome for the proposer", async () => {
@@ -581,6 +597,13 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
     // by-agreement caveat and the proposer's own "Yes" carries none.
     expect(container!.textContent).toContain("By agreement, not enforced");
     expect(container!.textContent).not.toContain("Enforced: you are sent no");
+    // The honest-helper membership line is viewer-relative like the rest of Result
+    // sharing: under "proposing" it reads against the inviter's own data, so the
+    // proposer sees that its (non-receiving) partner still learns which of its own
+    // records are in the proposer's data.
+    expect(container!.textContent).toContain(
+      "learns which of its own records are in your data",
+    );
   });
 
   test("a symmetric both-receive exchange marks only the partner's disclosure", async () => {
