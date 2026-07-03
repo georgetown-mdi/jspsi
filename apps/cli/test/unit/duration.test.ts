@@ -148,6 +148,15 @@ test("parseFineDuration: rejects a zero millisecond duration", () => {
   expect(() => parseFineDuration("0ms")).toThrow(UsageError);
 });
 
+test("parseFineDuration: the safe-integer guard holds at the ms boundary", () => {
+  // The ms unit has a multiplier of 1, the loosest scale, so it is the case most
+  // able to slip a too-large magnitude past the Number.isSafeInteger guard. The
+  // largest safe integer parses; one past it is rejected as too large rather than
+  // silently rounded.
+  expect(parseFineDuration("9007199254740991ms")).toBe(9_007_199_254_740_991);
+  expect(() => parseFineDuration("9007199254740992ms")).toThrow(UsageError);
+});
+
 test("the sub-second grammar is scoped: coarse parseDuration still rejects ms", () => {
   // The `ms` extension lives only in parseFineDuration, so --peer-timeout and the
   // other coarse flags (which use parseDuration) do not silently gain it.
