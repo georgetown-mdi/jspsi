@@ -112,6 +112,26 @@ describe("formatVerificationReport", () => {
     ]);
     expect(lines.join("\n")).toContain("note: a duplicate identifier value");
   });
+
+  test("a warning with control bytes is sanitized before display", () => {
+    // A reconstruction warning interpolates a column name drawn from the
+    // supplied files; a crafted name carrying an ANSI/control sequence must be
+    // neutralized at the display boundary, not echoed to the terminal raw.
+    const esc = String.fromCharCode(0x1b);
+    const bel = String.fromCharCode(0x07);
+    const { lines } = formatVerificationReport(report("incomplete"), [
+      'the identifier column "a' +
+        esc +
+        "[31m" +
+        bel +
+        '" has duplicate values',
+    ]);
+    const out = lines.join("\n");
+    // The raw ESC and BEL bytes are replaced with visible escapes, never emitted.
+    expect(out).not.toContain(esc);
+    expect(out).not.toContain(bel);
+    expect(out).toContain("note:");
+  });
 });
 
 describe("deriveOurIdColumn", () => {

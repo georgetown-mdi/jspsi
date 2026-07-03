@@ -9,6 +9,7 @@ import {
   parseExchangeRecord,
   parseVerificationKeys,
   reconstructCommittedData,
+  sanitizeForDisplay,
   UsageError,
   verifyExchangeRecord,
 } from "@psilink/core";
@@ -263,7 +264,12 @@ export function formatVerificationReport(
   >)
     lines.push(`  commitment ${name}: ${COMMITMENT_WORD[status]}`);
   lines.push(`  agreed-terms hash: ${TERMS_WORD[report.termsHash]}`);
-  for (const warning of warnings) lines.push(`  note: ${warning}`);
+  // A reconstruction warning interpolates a column name drawn from the supplied
+  // files, so route it through the display-boundary sanitizer (as every sibling
+  // command does for partner- or file-controlled text) before it reaches the
+  // terminal -- the commitment/terms lines above are fixed strings and need none.
+  for (const warning of warnings)
+    lines.push(`  note: ${sanitizeForDisplay(warning)}`);
   lines.push(
     "  partner receipt signatures are not verified (deferred: signed evidence " +
       "bundles).",
