@@ -3,6 +3,8 @@
 //
 //   npm run build -w packages/core
 //   node packages/core/test/vectors/generate-exchange-record-vectors.mjs
+//   npm run format            # this script emits one array element per line;
+//                             # format applies the repo's compact JSON layout
 //
 // Unlike an independent-oracle KAT (e.g. generate-aead-envelope-vectors.mjs),
 // these vectors ARE the deterministic output of buildExchangeRecord; the
@@ -29,13 +31,6 @@ const path = fileURLToPath(
 const data = JSON.parse(readFileSync(path, "utf8"));
 
 for (const vector of data.vectors) {
-  // The committed payload binds column names and row VALUES only; drop any
-  // stale `rowIndices` an earlier format carried so the recomputed commitment
-  // covers the current shape.
-  for (const key of ["localPayloadSent", "partnerPayloadReceived"]) {
-    const payload = vector.inputs[key];
-    if (payload && "rowIndices" in payload) delete payload.rowIndices;
-  }
   const randomness = {
     bindingNonce: fromBase64Url(vector.randomness.bindingNonce),
     salts: Object.fromEntries(

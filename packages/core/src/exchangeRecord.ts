@@ -455,8 +455,10 @@ const MAX_BASE64URL_LENGTH = 256;
 
 // Base64url without padding (the binary encoding used throughout receipts; see
 // docs/spec/CANONICAL_ENCODING.md). Length-CAPPED (not length-locked): the `.max`
-// precedes the regex so an oversized hostile value is rejected before the pattern
-// scan, while the exact byte length stays unpinned.
+// bounds how much an oversized hostile value can retain, while the exact byte
+// length stays unpinned. Zod runs both the length and the regex check (the cap
+// does not short-circuit the pattern scan), but the alphabet regex is
+// linear-time, so a capped value stays cheap to scan regardless.
 const base64UrlSchema = z
   .string()
   .max(MAX_BASE64URL_LENGTH)

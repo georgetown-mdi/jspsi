@@ -855,7 +855,9 @@ describe("parse input bounds (untrusted read path)", () => {
       }),
     ).toThrow();
     // A base64url crypto field (the terms hash) past its length cap is rejected
-    // even though it is otherwise well-formed base64url.
+    // even though it is otherwise well-formed base64url. 257 is one past the
+    // 256-char base64url cap (MAX_BASE64URL_LENGTH, not exported, so pinned here
+    // by value).
     expect(() =>
       parseExchangeRecord({ ...record, termsHash: "a".repeat(257) }),
     ).toThrow();

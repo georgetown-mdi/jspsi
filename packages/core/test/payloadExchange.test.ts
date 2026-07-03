@@ -1172,6 +1172,34 @@ test("buildOutputTable: their_ prefix disambiguates same-named columns", () => {
   expect(headers).toEqual(["patient_id", "row_id", "their_patient_id"]);
 });
 
+test("buildOutputTable: partner row-index header falls back past colliding partner columns", () => {
+  // Adversarial header collision: the partner sends columns literally named
+  // "row_id" and "their_row_id", both of which the partner row-index column would
+  // otherwise take. uniqueColumnName walks past them to their_row_id_2, so every
+  // header stays distinct rather than silently duplicating.
+  const partnerPayload: PartnerPayload = {
+    columns: ["row_id", "their_row_id"],
+    rowIndices: [3],
+    rows: [["A", "B"]],
+  };
+  const { headers, rows } = buildOutputTable(
+    [[0], [3]],
+    rawRows,
+    metaWithId,
+    partnerPayload,
+  );
+  // ourBaseName is patient_id, so the partner value columns keep their names; the
+  // partner-index column becomes their_row_id_2 (row_id and their_row_id taken).
+  expect(headers).toEqual([
+    "patient_id",
+    "their_row_id_2",
+    "row_id",
+    "their_row_id",
+  ]);
+  expect(new Set(headers).size).toBe(headers.length); // all distinct
+  expect(rows[0]).toEqual(["P0", "3", "A", "B"]); // partner index in column 2
+});
+
 test("buildOutputTable: maps partner rows correctly when their indices are not in pairing order", () => {
   // Our rows 0, 2, 4 matched with their rows 3, 1, 2 respectively.
   // Partner's payload includes rowIndices so the join does not depend on
