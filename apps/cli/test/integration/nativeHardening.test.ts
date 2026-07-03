@@ -42,6 +42,7 @@ allowlistOnly(
     const intruder = `${srv.usera.username}-intruder`;
     const conn = new FileSyncConnection(new SSH2SFTPClientAdapter(), {
       verbose: -1,
+      pollingFrequency: 10,
     });
     // A failed connect surfaces from open()'s rejection; swallow any connection
     // 'error' event so it does not crash the worker as an unhandled emit.

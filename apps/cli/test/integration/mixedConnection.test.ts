@@ -46,8 +46,14 @@ function desynchronize(conn: FileSyncConnection) {
 }
 
 const sftpAdapter = new SSH2SFTPClientAdapter();
-const sftpConn = new FileSyncConnection(sftpAdapter, { verbose: -1 });
-const localConn = new FileSyncConnection(new LocalFSClient(), { verbose: -1 });
+const sftpConn = new FileSyncConnection(sftpAdapter, {
+  verbose: -1,
+  pollingFrequency: 10,
+});
+const localConn = new FileSyncConnection(new LocalFSClient(), {
+  verbose: -1,
+  pollingFrequency: 10,
+});
 
 sftpConn.on("error", (err: unknown) => {
   throw new Error(String(err));

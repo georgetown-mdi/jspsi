@@ -129,9 +129,15 @@ afterAll(async () => {
 });
 
 const serverSFTP = new SSH2SFTPClientAdapter();
-const serverConn = new FileSyncConnection(serverSFTP, { verbose: -1 });
+const serverConn = new FileSyncConnection(serverSFTP, {
+  verbose: -1,
+  pollingFrequency: 10,
+});
 const clientSFTP = new SSH2SFTPClientAdapter();
-const clientConn = new FileSyncConnection(clientSFTP, { verbose: -1 });
+const clientConn = new FileSyncConnection(clientSFTP, {
+  verbose: -1,
+  pollingFrequency: 10,
+});
 
 serverConn.on("error", (err: unknown) => {
   throw new Error(String(err));
@@ -269,9 +275,13 @@ test("public-key authentication connects and runs a rendezvous", async () => {
   // transfers, which the password-driven tests above never exercise. Both
   // backends surface a per-party private key, so this leg runs on either.
   const keyServerSFTP = new SSH2SFTPClientAdapter();
-  const keyServerConn = new FileSyncConnection(keyServerSFTP, { verbose: -1 });
+  const keyServerConn = new FileSyncConnection(keyServerSFTP, {
+    verbose: -1,
+    pollingFrequency: 10,
+  });
   const keyClientConn = new FileSyncConnection(new SSH2SFTPClientAdapter(), {
     verbose: -1,
+    pollingFrequency: 10,
   });
   keyServerConn.on("error", (err: unknown) => {
     throw new Error(String(err));
@@ -332,9 +342,15 @@ test("terminal frame is received when sender closes before receiver polls", asyn
   // the message is lost.
 
   const senderSFTP = new SSH2SFTPClientAdapter();
-  const senderConn = new FileSyncConnection(senderSFTP, { verbose: -1 });
+  const senderConn = new FileSyncConnection(senderSFTP, {
+    verbose: -1,
+    pollingFrequency: 10,
+  });
   const receiverSFTP = new SSH2SFTPClientAdapter();
-  const receiverConn = new FileSyncConnection(receiverSFTP, { verbose: -1 });
+  const receiverConn = new FileSyncConnection(receiverSFTP, {
+    verbose: -1,
+    pollingFrequency: 10,
+  });
 
   const remote = await freshRendezvous();
   const base = {
@@ -399,6 +415,7 @@ test("lock starter aborts on a stuck mid-arrival joiner over real SFTP", async (
   const abortConn = new FileSyncConnection(abortSFTP, {
     verbose: -1,
     joinerRecoveryMs: 400,
+    pollingFrequency: 10,
   });
   await abortConn.open({
     channel: "sftp",
@@ -662,6 +679,7 @@ inProcessOnly(
 test("an unpinned connection fails closed over real SFTP (the no-pin default)", async () => {
   const conn = new FileSyncConnection(new SSH2SFTPClientAdapter(), {
     verbose: -1,
+    pollingFrequency: 10,
   });
   conn.on("error", () => {});
   // Spell out the credentials and OMIT the host-key pin (serverAuth would add
@@ -691,6 +709,7 @@ test("an unpinned connection fails closed over real SFTP (the no-pin default)", 
 test("probeHostKeyFingerprint returns the server's real fingerprint without authenticating", async () => {
   const conn = new FileSyncConnection(new SSH2SFTPClientAdapter(), {
     verbose: -1,
+    pollingFrequency: 10,
   });
   // Credentials are present (as in production: first-use establishes the host
   // key, not the credentials) but never used -- the probe refuses at host-key
@@ -747,6 +766,7 @@ test("a wrong pinned host-key fingerprint is rejected before auth over real SFTP
   // therefore attributable to the host-key check, not to credentials.
   const conn = new FileSyncConnection(new SSH2SFTPClientAdapter(), {
     verbose: -1,
+    pollingFrequency: 10,
   });
   conn.on("error", () => {});
   const auth = serverAuth(srv.usera);
@@ -836,7 +856,10 @@ inProcessOnly(
     // installs its own capture verifier and always refuses); the teardown rides the
     // host-denied connect rejection plus the explicit end().
     const probeAdapter = new SSH2SFTPClientAdapter();
-    const probeConn = new FileSyncConnection(probeAdapter, { verbose: -1 });
+    const probeConn = new FileSyncConnection(probeAdapter, {
+      verbose: -1,
+      pollingFrequency: 10,
+    });
     await probeConn.probeHostKeyFingerprint({
       channel: "sftp",
       server: { host: srv.host, port: srv.port, ...auth },
@@ -847,7 +870,10 @@ inProcessOnly(
     // verifier refuse, so open() rejects before reaching a session and -- unlike the
     // probe -- without an explicit end(). It must still strand no listener.
     const openAdapter = new SSH2SFTPClientAdapter();
-    const openConn = new FileSyncConnection(openAdapter, { verbose: -1 });
+    const openConn = new FileSyncConnection(openAdapter, {
+      verbose: -1,
+      pollingFrequency: 10,
+    });
     openConn.on("error", () => {});
     await expect(
       openConn.open({
@@ -876,7 +902,10 @@ inProcessOnly(
         ? { password: srv.usera.password }
         : { privateKey: srv.usera.privateKey };
     const noPinAdapter = new SSH2SFTPClientAdapter();
-    const noPinConn = new FileSyncConnection(noPinAdapter, { verbose: -1 });
+    const noPinConn = new FileSyncConnection(noPinAdapter, {
+      verbose: -1,
+      pollingFrequency: 10,
+    });
     noPinConn.on("error", () => {});
     await expect(
       noPinConn.open({
@@ -903,6 +932,7 @@ test("the server's real pinned fingerprint connects over real SFTP", async () =>
   // srv.hostKeyFingerprint, the real value the suite computed for this server.
   const conn = new FileSyncConnection(new SSH2SFTPClientAdapter(), {
     verbose: -1,
+    pollingFrequency: 10,
   });
   conn.on("error", () => {});
   const remote = await freshRendezvous();
