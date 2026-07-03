@@ -526,6 +526,41 @@ test("send: a concurrent transport fail rejects an in-flight hand-off", async ()
   expect((err as ConnectionError).message).toContain("dropped mid-send");
 });
 
+test("send: a half-close (finish) draining a buffered frame rejects an in-flight hand-off", async () => {
+  const { conn, controls, send } = makeQueued({ inactivityTimeoutMs: 10_000 });
+  send.mockReturnValue(new Promise(() => {})); // hand-off orphans, never settles
+  // A buffered inbound frame makes finish() take its draining branch (not the
+  // empty-queue delegation to fail()), so this exercises the failSends() call on
+  // that distinct path specifically.
+  controls.deliver("buffered");
+  const sending = conn.send("x").catch((e: unknown) => e);
+  controls.finish(new ConnectionError("peer closed mid-send", "transport"));
+  // The in-flight send rejects with the deferred error rather than hanging: the
+  // peer has gone, so the write can never complete.
+  const err = await sending;
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+  expect((err as ConnectionError).message).toContain("peer closed mid-send");
+  // Half-close semantics are preserved: the buffered frame still drains before
+  // the deferred error surfaces to receive().
+  expect(await conn.receive()).toBe("buffered");
+});
+
+test("send: with no inactivity budget arms no liveness guard", async () => {
+  vi.useFakeTimers();
+  try {
+    // No inactivityTimeoutMs (the low-level QueuedMessageConnection, as
+    // createMessagePipe builds): the hand-off is returned directly with no guard
+    // timer, the send-side parity of a parked receive() getting no bound there.
+    const { conn, send } = makeQueued();
+    send.mockResolvedValue(undefined);
+    await conn.send("x");
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 // --- per-receive timeout -----------------------------------------------------
 
 test("receive(timeoutMs) shorter than the connection default fires and latches", async () => {
