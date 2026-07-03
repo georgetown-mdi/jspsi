@@ -247,14 +247,17 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
  * Renders the inviter's linkage terms decoded from an invitation for review. The
  * always-visible core is organized by disclosure DIRECTION rather than as one flat
  * list, so a reader can tell what each fact is about, and ordered by how much the
- * consent decision turns on it: an attached legal agreement leads as a cross-cutting
- * governance frame, then four labelled tiers -- "What you disclose" (the viewer's own
- * outbound send and the egress request for its data -- led ahead of the rest because
+ * consent decision turns on it: four labelled tiers -- "What you disclose" (the
+ * viewer's own outbound send and the egress request for its data -- led first because
  * the acceptor's own disclosure is its hardest-to-undo fact), "What the exchange
  * produces" (the matching method and result sharing -- what is revealed and to whom),
  * "What you receive" (the inbound partner data), and "How records are matched" (the
  * linkage strategy and matching keys -- mechanics the diligent open, kept below the
- * outcome). Each tier is a role="group" whose caption is a heading, so assistive tech
+ * outcome) -- then an attached legal agreement as a cross-cutting governance frame,
+ * placed last in the always-visible core as a pre-consent checkpoint (still legible,
+ * never demoted into "Other details", but framing the decision rather than leading
+ * ahead of what the acceptor discloses). Each tier is a role="group" whose caption is
+ * a heading, so assistive tech
  * both lets a screen-reader user jump between tiers and announces each as one related
  * set. The matching list itself sits behind a default-collapsed "Matching strategies"
  * disclosure inside the "How records are matched" tier; inside it each linkage key is
@@ -312,8 +315,10 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
  * is a hard fact. The PARTNER's non-receipt is COOPERATIVE: keeping the result from
  * the partner rests on the agreed terms being honored, not on a guarantee this side
  * can impose (a documented property of one-sided PSI, docs/notes/one-sided-
- * disclosure.md). Each "No" carries the caveat for its register; a "Yes" is a plain
- * disclosure and is left unqualified.
+ * disclosure.md). Each "No" carries the caveat for its register. The viewer's own
+ * "Yes" is left unqualified; the partner's "Yes" -- the accountable disclosure of
+ * the result to them -- carries a brief pointer that the agreement, not this tool,
+ * governs its use once the result is out.
  *
  * `perspective` selects the heading and intro copy for the three contexts this
  * renders in -- the acceptor `review`ing a partner's proposal (pre-consent), the
@@ -577,41 +582,6 @@ export function InvitationTerms({
             : "These are the details your partner proposes for linking your records."}
       </Text>
 
-      {/* The legal agreement is a cross-cutting GOVERNANCE frame, not a disclosure
-          direction, so it carries its own labelled group. Its purpose is the field a
-          45 CFR 164.528 accounting / FERPA studies / audit-evaluation exception turns
-          on (docs/COMPLIANCE.md), so it must be legible at the consent point rather
-          than demoted below the fold. Its substance is promoted whole -- reference,
-          PURPOSE, and expiry -- so it has no "Other details" entry. All three values
-          are pre-sanitized by summarizeInvitation, and the group's accessible name is
-          the fixed "Legal agreement" aria-label, so no raw partner text enters the
-          name. (Its position -- currently leading the core -- is a deliberate prior
-          decision; whether it should sit lower, below what the acceptor discloses, is
-          an open product question flagged for the owner.) */}
-      {summary.legalAgreement !== undefined && (
-        <Stack role="group" aria-label="Legal agreement" gap={2}>
-          <Title order={tierHeadingOrder} fz="sm" fw={600}>
-            This invitation attaches a legal agreement.
-          </Title>
-          <Text size="sm">Reference: {summary.legalAgreement.reference}</Text>
-          {/* "Stated purpose", not "Purpose": the value is partner-authored free
-              text, sanitized but never vetted by psilink (only byte-compared against
-              the partner's own copy at exchange time), so the label marks it as
-              partner-attested rather than an authorization psilink endorses -- the
-              same provenance-marking the allowed-character constraint uses. */}
-          <Text size="sm">
-            Stated purpose: {summary.legalAgreement.purpose}
-          </Text>
-          {/* Name the subject ("Agreement valid through ...") rather than a bare
-              "Valid through <date>": it sits on the same screen as the separate
-              invitation-expiry line below, and at a glance the two same-weight dates
-              are otherwise easy to conflate. */}
-          <Text size="xs" c="dimmed">
-            Agreement valid through {summary.legalAgreement.expirationDate}
-          </Text>
-        </Stack>
-      )}
-
       {/* Direction tier -- WHAT YOU DISCLOSE: the viewer's own data leaving. Led
           ahead of the other direction tiers because the acceptor's own outbound
           disclosure is its hardest-to-undo fact, and it must not be skimmed past
@@ -770,8 +740,10 @@ export function InvitationTerms({
             partner's receipt) is COOPERATIVE, resting on the agreed terms being
             honored rather than on a guarantee this side can impose (a documented
             property of one-sided PSI, docs/notes/one-sided-disclosure.md). Each "No"
-            carries the caveat for its register; a "Yes" is a plain disclosure with no
-            false-guarantee risk, so it is left unqualified. */}
+            carries the caveat for its register. The viewer's own "Yes" is left
+            unqualified (receiving your own result needs no note); the partner's "Yes"
+            -- the accountable disclosure of your result to them -- carries a brief
+            pointer that the agreement, not this tool, governs its use once out. */}
         <Term label="Result sharing">
           <Text size="sm">
             You will receive the matched result: {yesNo(viewerReceivesResult)}
@@ -785,11 +757,21 @@ export function InvitationTerms({
           <Text size="sm">
             {partnerReceiptLabel}: {yesNo(partnerReceivesResult)}
           </Text>
-          {!partnerReceivesResult && (
+          {partnerReceivesResult ? (
+            // The partner DOES receive: the accountable disclosure (the 164.528
+            // event). A "Yes" carries no false-guarantee risk, so it stays a plain
+            // disclosure, but a brief pointer marks that once the result is out, the
+            // agreement -- not this tool -- governs its use, mirroring the cooperative
+            // caveat's "the tool is not the control here" frame.
+            <Text size="xs" c="dimmed">
+              Once received, its use is governed by your agreement, not this
+              tool.
+            </Text>
+          ) : (
             <Text size="xs" c="dimmed">
               By agreement, not enforced: keeping the result from your partner
-              rests on the agreed terms being honored, not on a guarantee this
-              tool imposes.
+              rests on the agreed terms being honored, not on anything this tool
+              can enforce.
             </Text>
           )}
         </Term>
@@ -925,6 +907,42 @@ export function InvitationTerms({
           </div>
         </Stack>
       </Stack>
+
+      {/* The legal agreement -- a cross-cutting GOVERNANCE frame, not a disclosure
+          direction, so it carries its own labelled group. Placed last in the
+          always-visible core, below the disclosure/result/mechanics tiers, as a
+          pre-consent governance checkpoint: it must stay legible at the consent point
+          (never demoted below the fold into "Other details"), but it frames the
+          decision rather than leading ahead of what the acceptor actually discloses.
+          Its purpose is the field a 45 CFR 164.528 accounting / FERPA studies /
+          audit-evaluation exception turns on (docs/COMPLIANCE.md), so it is surfaced
+          whole -- reference, PURPOSE, and expiry -- and has no "Other details" entry.
+          All three values are pre-sanitized by summarizeInvitation, and the group's
+          accessible name is the fixed "Legal agreement" aria-label, so no raw partner
+          text enters the name. */}
+      {summary.legalAgreement !== undefined && (
+        <Stack role="group" aria-label="Legal agreement" gap={2}>
+          <Title order={tierHeadingOrder} fz="sm" fw={600}>
+            This invitation attaches a legal agreement.
+          </Title>
+          <Text size="sm">Reference: {summary.legalAgreement.reference}</Text>
+          {/* "Stated purpose", not "Purpose": the value is partner-authored free
+              text, sanitized but never vetted by psilink (only byte-compared against
+              the partner's own copy at exchange time), so the label marks it as
+              partner-attested rather than an authorization psilink endorses -- the
+              same provenance-marking the allowed-character constraint uses. */}
+          <Text size="sm">
+            Stated purpose: {summary.legalAgreement.purpose}
+          </Text>
+          {/* Name the subject ("Agreement valid through ...") rather than a bare
+              "Valid through <date>": it sits on the same screen as the separate
+              invitation-expiry line below, and at a glance the two same-weight dates
+              are otherwise easy to conflate. */}
+          <Text size="xs" c="dimmed">
+            Agreement valid through {summary.legalAgreement.expirationDate}
+          </Text>
+        </Stack>
+      )}
 
       {/* A real disclosure: the toggle carries aria-expanded and aria-controls,
           and while closed Mantine's Collapse hides the panel from assistive tech

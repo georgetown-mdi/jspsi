@@ -541,8 +541,12 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
     expect(container!.textContent).toContain(
       "Enforced: you are sent no result",
     );
-    // The partner receives here (Yes), so no cooperative caveat renders.
+    // The partner receives here (Yes): no cooperative caveat, but the partner "Yes"
+    // is the accountable disclosure, so it carries the brief governance pointer.
     expect(container!.textContent).not.toContain("By agreement, not enforced");
+    expect(container!.textContent).toContain(
+      "Once received, its use is governed by your agreement, not this tool.",
+    );
   });
 
   test("an acceptor of a partner-only invitation is told plainly it receives the result", async () => {
@@ -579,9 +583,11 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
     expect(container!.textContent).not.toContain("Enforced: you are sent no");
   });
 
-  test("a symmetric both-receive exchange qualifies neither result line", async () => {
-    // Both parties receive: two "Yes" lines, so neither the enforced nor the
-    // cooperative caveat renders -- the registers are marked only on a withholding.
+  test("a symmetric both-receive exchange marks only the partner's disclosure", async () => {
+    // Both parties receive: no withholding, so neither the enforced nor the
+    // cooperative caveat renders. The viewer's own "Yes" (receiving your own result)
+    // stays unqualified; the partner's "Yes" carries the brief governance pointer,
+    // since it is the accountable disclosure of your result to them.
     renderOutput({ expectsOutput: true, shareWithPartner: true });
     await expect.element(page.getByText("Result sharing")).toBeInTheDocument();
     expect(container!.textContent).toContain(
@@ -592,6 +598,14 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
     );
     expect(container!.textContent).not.toContain("Enforced: you are sent no");
     expect(container!.textContent).not.toContain("By agreement, not enforced");
+    // Exactly one governance pointer -- on the partner's "Yes", not the viewer's own.
+    expect(
+      (
+        container!.textContent.match(
+          /its use is governed by your agreement/g,
+        ) ?? []
+      ).length,
+    ).toBe(1);
   });
 });
 
