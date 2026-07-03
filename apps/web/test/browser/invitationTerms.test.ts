@@ -704,6 +704,88 @@ describe("InvitationTerms: always-visible ingress presence hint", () => {
   });
 });
 
+describe("InvitationTerms: the acceptor's outbound-disclosure forward-reference", () => {
+  // On the pre-consent review screen the acceptor's own send list is not yet known
+  // (outboundColumns undefined, before a file is chosen), yet what it discloses is
+  // its highest-stakes payload fact and consent is given on this screen. A fixed-copy
+  // forward-reference stands in the send list's slot until a file is chosen, so the
+  // acceptor knows at the decision point that an outbound disclosure is coming and
+  // that it confirms the exact columns after choosing its file. It must not co-exist
+  // with the actual send list (the acceptor is not told "confirm later" once it has
+  // the list), and is absent from the inviter's own preview.
+  function render(options?: {
+    perspective?: "review" | "accepted" | "proposing";
+    outboundColumns?: Array<string>;
+  }) {
+    root!.render(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(InvitationTerms, {
+          linkageTerms: terms,
+          ...(options?.perspective ? { perspective: options.perspective } : {}),
+          ...(options?.outboundColumns !== undefined
+            ? { outboundColumns: options.outboundColumns }
+            : {}),
+        }),
+      ),
+    );
+  }
+
+  // The full fixed sentence, so a copy edit that drops the "confirm ... after
+  // choosing your file" forward-reference fails this assertion.
+  const forwardReference =
+    "After you choose your file, you will confirm exactly which of its columns " +
+    "are sent to your partner for matched records.";
+
+  test("appears on the review screen when the outbound columns are not yet known", async () => {
+    // perspective review, outboundColumns undefined (no file chosen yet).
+    render({ perspective: "review" });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).toContain(forwardReference);
+    // In the always-visible core, not the collapsed detail: it must be legible at
+    // the consent point without expanding "Other details". (Its fixed copy naming no
+    // count or names is pinned by the exact-sentence match above -- a copy edit that
+    // injected either would change the string and fail it.)
+    expect((await readyPanel("Other details")).textContent).not.toContain(
+      forwardReference,
+    );
+  });
+
+  test("gives way to the actual send list once the outbound columns are known", async () => {
+    // A chosen file supplies outboundColumns: the real send list renders (the
+    // acceptor's own header, sanitized as chips) and the forward-reference must not
+    // also show.
+    render({ perspective: "accepted", outboundColumns: ["risk_score"] });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).not.toContain(forwardReference);
+    expect(container!.textContent).toContain("risk_score");
+  });
+
+  test("gives way even to an empty (chosen-file, nothing-sent) send confirmation", async () => {
+    // outboundColumns [] is a chosen file that sends nothing: the explicit "no
+    // columns are sent" confirmation renders, so the forward-reference must not --
+    // the set IS known (to be empty), the decision no longer pending.
+    render({ perspective: "accepted", outboundColumns: [] });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).not.toContain(forwardReference);
+    expect(container!.textContent).toContain(
+      "No columns are sent to your partner",
+    );
+  });
+
+  test("is absent under the inviter's own proposing preview", async () => {
+    // The inviter's send already renders as chips ("Columns sent to your partner");
+    // the acceptor-framed forward-reference would be wrong for it. outboundColumns is
+    // undefined here too, so the review-only gate -- not merely the undefined check
+    // -- is what suppresses it.
+    render({ perspective: "proposing" });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).not.toContain(forwardReference);
+    expect(container!.textContent).toContain("Columns sent to your partner");
+  });
+});
+
 describe("InvitationTerms: the presence hints form a labelled, disclosure-linked group", () => {
   // The a11y contract for the presence-hint block: it is one named group (so a
   // screen reader announces the flagged facts as a related set, not disconnected

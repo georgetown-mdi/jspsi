@@ -303,8 +303,11 @@ export function InvitationTerms({
    * uses -- so the disclosure sits with the agreed terms rather than after the
    * whole panel. The acceptor passes its live metadata disclosure here; the inviter
    * does not (its own send already renders from `payload.send` under "proposing").
-   * `[]` renders the explicit "no columns are sent" line; undefined renders nothing
-   * (the set is not yet known -- e.g. the review screen before a file is chosen). */
+   * `[]` renders the explicit "no columns are sent" line; undefined renders no send
+   * list because the set is not yet known -- e.g. the review screen before a file is
+   * chosen, where the `review` perspective instead surfaces a fixed-copy
+   * forward-reference that the acceptor confirms its exact send after choosing a
+   * file. */
   outboundColumns?: Array<string>;
   /** Which context this renders in. Drives the heading and intro copy and the
    * viewer-centric blocks (Result sharing, the payload send/receive framing, and
@@ -663,6 +666,29 @@ export function InvitationTerms({
                 (which of your rows matched) is produced.
               </Text>
             )}
+          </Term>
+        )}
+
+        {/* The review-screen forward-reference to that same outbound disclosure,
+            occupying the slot the actual send list takes once a file is chosen.
+            Before a file is chosen outboundColumns is undefined -- the set is not
+            yet known -- so the block above cannot render, yet what the acceptor
+            discloses is its highest-stakes payload fact and the consent checkbox
+            sits on this very screen. Surface a forward-reference so the acceptor
+            knows at the decision point that an outbound disclosure is coming and
+            that it confirms the exact columns after choosing its file (in "Prepare
+            your data"). Gated to perspective === "review" AND outboundColumns ===
+            undefined: mutually exclusive with the block above (which needs
+            outboundColumns !== undefined), so the two never both show, and off under
+            "proposing" (whose send already renders as chips). Fixed copy, not
+            partner-controlled text, so it needs no per-render sanitization; it names
+            no column count or names, which are not yet known here. */}
+        {perspective === "review" && outboundColumns === undefined && (
+          <Term label="Columns you will send to your partner">
+            <Text size="sm" c="dimmed">
+              After you choose your file, you will confirm exactly which of its
+              columns are sent to your partner for matched records.
+            </Text>
           </Term>
         )}
       </Stack>
