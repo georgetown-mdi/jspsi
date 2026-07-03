@@ -262,6 +262,13 @@ export class QueuedMessageConnection implements MessageConnection {
   // Armed while a receive() is parked with an empty queue; fires a terminal
   // transport failure if the peer stays silent past inactivityTimeoutMs.
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
+  // Ref'd timers held while a send()'s transport hand-off is outstanding. The
+  // idle timer above covers only a parked receive(); this covers the sender's
+  // encrypt-then-send window, where no receive() is parked, so a mid-exchange
+  // drop in that window cannot let the event loop silently drain to exit 0. See
+  // sendWithLiveness. A set (not a single handle) so a terminal path clears
+  // every armed guard, even though lockstep parks at most one send at a time.
+  private readonly sendTimers = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(
     connect: TransportConnect,
@@ -322,6 +329,72 @@ export class QueuedMessageConnection implements MessageConnection {
     }
   }
 
+  // Races the transport hand-off against the same inactivity budget that bounds
+  // a parked receive(), so a mid-exchange drop in the sender's encrypt-then-send
+  // window is surfaced as a terminal transport error rather than a silent exit
+  // 0. The parked-receive idle timer does not cover this window: nothing is
+  // parked while a send is in flight, so `armIdle` early-returns and no ref'd
+  // handle holds the event loop open. The per-operation transport deadlines that
+  // WOULD reject an orphaned write (the CLI SFTP adapter's 60 s bounds, the
+  // core whole-exchange budget) are all `.unref()`'d by design, so with nothing
+  // else ref'd the loop drains before any of them can fire and the process
+  // exits 0 (see docs/spec/CHANNEL_SECURITY.md, "Whole-exchange budget").
+  //
+  // The fix is one ref'd timer held only while the hand-off is outstanding. It
+  // holds the loop open, which lets a lower, faster `.unref()`'d per-operation
+  // deadline fire first and reject the write with its transport-specific cause;
+  // and it stands as the transport-agnostic backstop for any transport that has
+  // no such per-op bound, rejecting the send itself on expiry so the awaited
+  // call returns instead of orphaning. It is cleared the instant the hand-off
+  // settles, and by every terminal path (fail/finish/close via clearSendTimers),
+  // so -- unlike a bare un-`unref`'d per-op timer -- it can never become the
+  // thing that keeps a healthy process alive at teardown. No inactivityHint is
+  // appended: that guidance is written for the receive-side peer-silence case
+  // ("has sent nothing since"), which misdescribes a stalled outbound write.
+  private sendWithLiveness(data: unknown): Promise<void> {
+    const handoff = Promise.resolve(this.hooks.send(data));
+    const ms = this.inactivityTimeoutMs;
+    // No configured budget (the low-level QueuedMessageConnection used without a
+    // deadline, e.g. createMessagePipe): no liveness bound, exactly as a parked
+    // receive() gets none there.
+    if (ms === undefined) return handoff;
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.sendTimers.delete(timer);
+        reject(
+          new ConnectionError(
+            `the transport did not accept an outbound message within ${ms}ms; ` +
+              "the connection to the peer appears to have been lost during the " +
+              "exchange",
+            "transport",
+          ),
+        );
+      }, ms);
+      this.sendTimers.add(timer);
+      handoff.then(
+        (value) => {
+          this.clearSendTimer(timer);
+          resolve(value);
+        },
+        (err: unknown) => {
+          this.clearSendTimer(timer);
+          reject(err);
+        },
+      );
+    });
+  }
+
+  private clearSendTimer(timer: ReturnType<typeof setTimeout>): void {
+    // delete() returning false means the timer already fired (and removed
+    // itself) or a terminal path already swept it, so there is nothing to clear.
+    if (this.sendTimers.delete(timer)) clearTimeout(timer);
+  }
+
+  private clearSendTimers(): void {
+    for (const timer of this.sendTimers) clearTimeout(timer);
+    this.sendTimers.clear();
+  }
+
   private rejectWaiters(error: ConnectionError): void {
     const pending = this.waiters.splice(0, this.waiters.length);
     for (const waiter of pending) waiter.reject(error);
@@ -368,6 +441,7 @@ export class QueuedMessageConnection implements MessageConnection {
     if (this.state !== undefined) return;
     this.state = { kind: "failed", error };
     this.disarmIdle();
+    this.clearSendTimers();
     this.rejectWaiters(error);
     // Best-effort teardown; we are already failing, so swallow its outcome. No
     // flush: an error means the link is already unusable.
@@ -398,8 +472,11 @@ export class QueuedMessageConnection implements MessageConnection {
     this.state = { kind: "draining", error };
     // A defensive no-op here (a non-empty queue implies no parked waiter, so the
     // idle timer cannot be armed), kept so every terminal transition uniformly
-    // disarms idle and a future reachable-with-timer path stays correct.
+    // disarms idle and a future reachable-with-timer path stays correct. Clearing
+    // the send-liveness guards is not defensive: a peer half-close can land while
+    // this side still has a send in flight, and that guard must release too.
     this.disarmIdle();
+    this.clearSendTimers();
     // No flush: a half-close means the peer has gone, so there is nothing to
     // drain outbound to (matching the no-flush teardown the former
     // promote-via-fail path ran).
@@ -453,7 +530,7 @@ export class QueuedMessageConnection implements MessageConnection {
       throw this.state.error;
     }
     try {
-      await this.hooks.send(data);
+      await this.sendWithLiveness(data);
     } catch (err) {
       const error = asConnectionError(err, "transport");
       this.fail(error);
@@ -471,6 +548,10 @@ export class QueuedMessageConnection implements MessageConnection {
     if (this.state !== undefined) return;
     this.state = { kind: "closed" };
     this.disarmIdle();
+    // Release any send-liveness guard held across an in-flight hand-off (e.g. a
+    // signal-driven close arriving mid-send), so a deliberately cancelled
+    // exchange leaves no ref'd timer holding the event loop open at teardown.
+    this.clearSendTimers();
     // A waiter parked before this deliberate close did nothing wrong, so reject
     // it as "closed" (a cancelled operation), not "usage" (caller misuse).
     this.rejectWaiters(new ConnectionError("connection closed", "closed"));
