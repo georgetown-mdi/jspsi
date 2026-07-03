@@ -198,6 +198,24 @@ describe("verifyExchangeRecord", () => {
     expect(report.outcome).toBe("verified");
   });
 
+  test("a mandatory commitment absent from the record is a failure, not incomplete", async () => {
+    const { record, keys } = await buildExchangeRecord(baseInputs);
+    // Strip a mandatory commitment from the record but leave its (now orphaned)
+    // salt in the keys. A parsed record can never reach this -- the schema
+    // requires the mandatory pair -- but a hand-built one could; the verifier
+    // must treat it as a definite failure, matching verifyRecordCommitments,
+    // rather than downgrading it to incomplete because a salt happens to remain.
+    const commitments = { ...record.commitments };
+    delete (commitments as { localPayloadSent?: string }).localPayloadSent;
+    const report = await verifyExchangeRecord(
+      { ...record, commitments },
+      keys,
+      { data: fullData, localTerms: termsA, partnerTerms: termsB },
+    );
+    expect(report.commitments.localPayloadSent).toBe("unopenable");
+    expect(report.outcome).toBe("failed");
+  });
+
   test("a malformed commitment value yields a verdict, not a crash (fail-safe)", async () => {
     const { record, keys } = await buildExchangeRecord(baseInputs);
     // A base64url-invalid commitment cannot be decoded; verification must report a

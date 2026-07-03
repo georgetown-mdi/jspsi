@@ -148,16 +148,21 @@ export async function verifyExchangeRecord(
     const supplied = inputs.data?.[name];
 
     if (commitment === undefined) {
-      if (salt !== undefined) {
-        // Orphaned salt: the keys carry material the record does not -- a
-        // keys/record mismatch (or a hand-built pair). Nothing to open.
-        commitments[name] = "unopenable";
-        anyUnverified = true;
-      } else if (MANDATORY.has(name)) {
-        // A parsed record always carries the mandatory commitments; a hand-built
-        // one missing one is structurally invalid.
+      if (MANDATORY.has(name)) {
+        // A parsed record always carries the mandatory commitments, so a missing
+        // one means a hand-built (unparsed) record: structurally invalid, a
+        // definite failure -- whether or not the keys still carry an (orphaned)
+        // salt for it. Checked before the orphaned-salt case below so a leftover
+        // salt cannot downgrade the failure to `incomplete`; matches the sibling
+        // verifyRecordCommitments, which also fails this case.
         commitments[name] = "unopenable";
         anyMismatch = true;
+      } else if (salt !== undefined) {
+        // Orphaned salt on an OPTIONAL commitment: the keys carry material the
+        // record does not (a keys/record mismatch, or a hand-built pair). Nothing
+        // to open, so unverifiable rather than a definite failure.
+        commitments[name] = "unopenable";
+        anyUnverified = true;
       }
       // An optional commitment legitimately absent (this party held no
       // association table) is not reported.
