@@ -456,7 +456,13 @@ function toPartnerPayload(msg: PayloadWireMessage): PartnerPayload {
  * `localPayloadSent` commitment and the receiver's `partnerPayloadReceived`
  * commitment cover byte-identical data for the same logical payload: the
  * transport-only `hasData` discriminant is dropped, and the no-data case maps to
- * empty arrays on both sides. The committed shape is owned by the record module
+ * empty arrays on both sides. The wire `rowIndices` are dropped too -- the
+ * committed payload binds the column names and the row VALUES only, not the
+ * sender's row numbers, so a receiver (which retains the received values but not
+ * the partner's row numbers) can reopen its own `partnerPayloadReceived`
+ * commitment from its retained result; the pairing is bound separately by the
+ * association-table commitment (see {@link CommittedPayload} and
+ * docs/spec/EXCHANGE_RECORD.md). The committed shape is owned by the record module
  * (`CommittedPayload`), not by this wire/transport layer; the explicit
  * field-by-field construction here means a future change to `PartnerPayload` or
  * the wire schema cannot silently alter the on-disk record format.
@@ -465,10 +471,9 @@ export function toCommittedPayload(
   payload: PayloadWireMessage | PartnerPayload,
 ): CommittedPayload {
   if ("hasData" in payload && !payload.hasData)
-    return { columns: [], rowIndices: [], rows: [] };
+    return { columns: [], rows: [] };
   return {
     columns: payload.columns,
-    rowIndices: payload.rowIndices,
     rows: payload.rows,
   };
 }

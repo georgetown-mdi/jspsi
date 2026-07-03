@@ -586,23 +586,34 @@ const VerificationKeysSchema: z.ZodType<VerificationKeys> = z.object({
 // --- Build -------------------------------------------------------------------
 
 /**
- * The canonical representation a payload is committed in. Owned by the record
- * format on purpose -- deliberately NOT the PSI wire message and NOT the
- * consumed `PartnerPayload`, so a change to either of those (for transport or
- * output reasons) cannot silently move this on-disk, version-frozen format.
+ * The canonical representation a payload is committed in: the disclosed column
+ * names and the row VALUES, in matched-row order. Owned by the record format on
+ * purpose -- deliberately NOT the PSI wire message and NOT the consumed
+ * `PartnerPayload`, so a change to either of those (for transport or output
+ * reasons) cannot silently move this on-disk, version-frozen format.
+ *
+ * It binds the column names and the values, NOT any party's internal row
+ * indices. The received payload's rows carry the PARTNER's row indices on the
+ * wire (see `PartnerPayload`), which the holder does not retain in a reproducible
+ * form -- the human result file records the received values, not the partner's
+ * row numbers -- so committing them would leave a holder unable to reopen its own
+ * commitment from its retained input and result. The payload commitment therefore
+ * binds only what the holder keeps (the columns and the values); WHICH records
+ * matched is bound separately by the association-table commitment (an index pair),
+ * which the result file does retain. See docs/spec/EXCHANGE_RECORD.md, "No data
+ * snapshot in the keys".
  *
  * Both the payload a party sent and the payload it received are mapped into this
  * one shape before committing (see `toCommittedPayload` in payloadExchange), so
  * for the same logical payload a sender and receiver commit over byte-identical
  * data. The transport-only `hasData` discriminant is not part of it; a no-data
- * payload is the empty-arrays value `{ columns: [], rowIndices: [], rows: [] }`.
+ * payload is the empty-arrays value `{ columns: [], rows: [] }`.
  *
  * Declared as a `type` (not an `interface`) so it carries an implicit index
  * signature and is assignable to {@link CanonicalValue} without a cast.
  */
 export type CommittedPayload = {
   columns: string[];
-  rowIndices: number[];
   rows: Array<Array<string | null>>;
 };
 

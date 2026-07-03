@@ -105,12 +105,10 @@
         ],
         "localPayloadSent": {
           "columns": ["dose"],
-          "rowIndices": [0, 2],
           "rows": [["10mg"], ["20mg"]]
         },
         "partnerPayloadReceived": {
           "columns": ["status"],
-          "rowIndices": [1, 0],
           "rows": [["active"], [null]]
         },
         "createdAt": "2026-01-02T03:04:05.000Z",
@@ -160,8 +158,8 @@
         "resultSize": 2,
         "bindingNonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "commitments": {
-          "localPayloadSent": "q0KQEdxUTLl82wK4N3MYGg8VeoitYa8C04KR8mqGZJA",
-          "partnerPayloadReceived": "IFfNSyYoX8tKe2k-o6TjmrS1sW1ndtpZjexzR-fZa5g",
+          "localPayloadSent": "5DIqg3FyqiU2oxNIYdWkMDGRvu8qzBJJoAvwDTyC55Q",
+          "partnerPayloadReceived": "4yBUQu5WM_InXqX-6onNlNpYxmPjh-nJG1qr-3y_6kc",
           "associationTable": "JorLMOtVmyCgZVPcmCinA77lCUh3TXRvjZ8MXQzbTVw"
         }
       },
@@ -238,12 +236,10 @@
         "associationTable": [[0], [0]],
         "localPayloadSent": {
           "columns": [],
-          "rowIndices": [],
           "rows": []
         },
         "partnerPayloadReceived": {
           "columns": [],
-          "rowIndices": [],
           "rows": []
         },
         "createdAt": "2026-01-02T03:04:05.000Z",
@@ -278,8 +274,8 @@
         "resultSize": 1,
         "bindingNonce": "EBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBA",
         "commitments": {
-          "localPayloadSent": "e-xzi-Xnd7SbVAPImfIfFza9RTRxcbHHhDuawJhsAXU",
-          "partnerPayloadReceived": "QwVMSBXXesHI1MlLhj2IkONqN3onexDaVYAOwkladgs",
+          "localPayloadSent": "1LBK7YAcsGFRwNKQmttYlR8TKflLWURuZtyceyKRA8c",
+          "partnerPayloadReceived": "UhPE2RdR8nkWr0SgqBfQJtxrd7yjcP9NJYZxUtVw9Dw",
           "associationTable": "oirF72JpP_unXJXbGr5jphuX1OtwRssXXckjWt2oFnA"
         }
       },
@@ -370,12 +366,10 @@
         },
         "localPayloadSent": {
           "columns": ["dose"],
-          "rowIndices": [0, 2],
           "rows": [["10mg"], ["20mg"]]
         },
         "partnerPayloadReceived": {
           "columns": [],
-          "rowIndices": [],
           "rows": []
         },
         "createdAt": "2026-01-02T03:04:05.000Z",
@@ -413,8 +407,8 @@
         "recordsExposed": 4,
         "bindingNonce": "ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA",
         "commitments": {
-          "localPayloadSent": "VvZx4jpnLTBMz5saojCMNCuxb1nRhefvMDstxr5T34Y",
-          "partnerPayloadReceived": "T66oHx7GDi-xn-ExGwCwglfMKlmrVRkVwGQWQfWucus"
+          "localPayloadSent": "FbNMuRg-H09pUVqFwtHUciu_8MVD-3bcmOnWfURjn_4",
+          "partnerPayloadReceived": "6H0aJP3KiyYEZ810pzBFrN8R6mhwk2hky5b91guSK1s"
         }
       },
       "keys": {
@@ -507,12 +501,10 @@
         ],
         "localPayloadSent": {
           "columns": [],
-          "rowIndices": [],
           "rows": []
         },
         "partnerPayloadReceived": {
           "columns": ["dose"],
-          "rowIndices": [0, 2],
           "rows": [["10mg"], ["20mg"]]
         },
         "createdAt": "2026-01-02T03:04:05.000Z",
@@ -551,8 +543,8 @@
         "recordsExposed": 6,
         "bindingNonce": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA",
         "commitments": {
-          "localPayloadSent": "xNLnO6uv5Pc5Im2d1iiDEo5rwKcr01KZavRuNe7f1eA",
-          "partnerPayloadReceived": "vbdVyB9JFv6_Z7Psyu5mnlN6PSGV1UBN1bfxPvY5eIg",
+          "localPayloadSent": "BWH-xoJGeTE7Mxyu8Iv4Zrq5tFgJ4Vh8CxP34kLZU4k",
+          "partnerPayloadReceived": "PMj4YS6-65VUFVu1ahmDftGz5lv6LpNIpnQdGaSbuS0",
           "associationTable": "6Y45KiWAHRT1kdgqHdPAmnhYRgUEq5jL2fYfP21yFMI"
         }
       },
@@ -674,12 +666,10 @@
         "resultSize": 3,
         "localPayloadSent": {
           "columns": [],
-          "rowIndices": [],
           "rows": []
         },
         "partnerPayloadReceived": {
           "columns": [],
-          "rowIndices": [],
           "rows": []
         },
         "createdAt": "2026-01-02T03:04:05.000Z",
@@ -726,8 +716,8 @@
         "resultSize": 3,
         "bindingNonce": "QEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEA",
         "commitments": {
-          "localPayloadSent": "xmH11zKpm1R3YGUsm9InrUnigoDTx3kXj6kuzpwPzh8",
-          "partnerPayloadReceived": "z_kr5kL0Oi3c1JTwISsJTOKResSXshhimuZ2t_7rsxg"
+          "localPayloadSent": "BiPQsNU7z2weWjVDd9lFvgSNrynv1noC55GwqK0iS94",
+          "partnerPayloadReceived": "UR2CX3VQoE4gCU1-0AQwjTrghVgs3l8qsE2yj2Qrr_A"
         }
       },
       "keys": {
@@ -847,12 +837,10 @@
         "resultSize": 3,
         "localPayloadSent": {
           "columns": [],
-          "rowIndices": [],
           "rows": []
         },
         "partnerPayloadReceived": {
           "columns": [],
-          "rowIndices": [],
           "rows": []
         },
         "createdAt": "2026-01-02T03:04:05.000Z",
@@ -899,8 +887,8 @@
         "resultSize": 3,
         "bindingNonce": "QEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEA",
         "commitments": {
-          "localPayloadSent": "xmH11zKpm1R3YGUsm9InrUnigoDTx3kXj6kuzpwPzh8",
-          "partnerPayloadReceived": "z_kr5kL0Oi3c1JTwISsJTOKResSXshhimuZ2t_7rsxg"
+          "localPayloadSent": "BiPQsNU7z2weWjVDd9lFvgSNrynv1noC55GwqK0iS94",
+          "partnerPayloadReceived": "UR2CX3VQoE4gCU1-0AQwjTrghVgs3l8qsE2yj2Qrr_A"
         }
       },
       "keys": {
@@ -1016,12 +1004,10 @@
         ],
         "localPayloadSent": {
           "columns": ["dose"],
-          "rowIndices": [0, 2],
           "rows": [["10mg"], ["20mg"]]
         },
         "partnerPayloadReceived": {
           "columns": ["status"],
-          "rowIndices": [1, 0],
           "rows": [["active"], [null]]
         },
         "createdAt": "2026-01-02T03:04:05.000Z",
@@ -1073,8 +1059,8 @@
         "retentionDisposition": "Result filed in Agency A association table links.prod; held 6 years per records schedule RM-7, then disposed.",
         "bindingNonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "commitments": {
-          "localPayloadSent": "q0KQEdxUTLl82wK4N3MYGg8VeoitYa8C04KR8mqGZJA",
-          "partnerPayloadReceived": "IFfNSyYoX8tKe2k-o6TjmrS1sW1ndtpZjexzR-fZa5g",
+          "localPayloadSent": "5DIqg3FyqiU2oxNIYdWkMDGRvu8qzBJJoAvwDTyC55Q",
+          "partnerPayloadReceived": "4yBUQu5WM_InXqX-6onNlNpYxmPjh-nJG1qr-3y_6kc",
           "associationTable": "JorLMOtVmyCgZVPcmCinA77lCUh3TXRvjZ8MXQzbTVw"
         }
       },

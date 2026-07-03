@@ -66,12 +66,10 @@ const fixedRandomness: ExchangeRecordRandomness = {
 // same logical payload.
 const localPayloadSent: CommittedPayload = {
   columns: ["dose"],
-  rowIndices: [0, 2],
   rows: [["10mg"], ["20mg"]],
 };
 const partnerPayloadReceived: CommittedPayload = {
   columns: ["status"],
-  rowIndices: [1, 0],
   rows: [["active"], [null]],
 };
 
@@ -564,7 +562,6 @@ describe("governance metadata", () => {
     // sets, so they are empty too.
     const noPayload: CommittedPayload = {
       columns: [],
-      rowIndices: [],
       rows: [],
     };
     const { record } = await buildExchangeRecord(
@@ -602,12 +599,10 @@ describe("governance metadata", () => {
     // of disclosures under-reports what was sent and received.
     const sent: CommittedPayload = {
       columns: ["dose", "visit_date"],
-      rowIndices: [0],
       rows: [["10mg", "2025-02-01"]],
     };
     const received: CommittedPayload = {
       columns: ["status"],
-      rowIndices: [0],
       rows: [["active"]],
     };
     const { record } = await buildExchangeRecord(
@@ -634,7 +629,6 @@ describe("governance metadata", () => {
     // is the committed order.
     const sent: CommittedPayload = {
       columns: ["dose", "extra"],
-      rowIndices: [0],
       rows: [["10mg", "x"]],
     };
     const underDeclared: LinkageTerms = {
@@ -677,7 +671,6 @@ describe("governance metadata", () => {
     // than a silently unparseable audit artifact.
     const badReceived: CommittedPayload = {
       columns: [""],
-      rowIndices: [0],
       rows: [["x"]],
     };
     await expect(
@@ -695,7 +688,6 @@ describe("governance metadata", () => {
     // path. A name one character over MAX_NAME_LENGTH is rejected on build.
     const longReceived: CommittedPayload = {
       columns: ["a".repeat(MAX_NAME_LENGTH + 1)],
-      rowIndices: [0],
       rows: [["x"]],
     };
     await expect(
@@ -715,7 +707,6 @@ describe("governance metadata", () => {
         ...baseInputs,
         partnerPayloadReceived: {
           columns: ["a".repeat(MAX_NAME_LENGTH)],
-          rowIndices: [0],
           rows: [["x"]],
         },
       },
