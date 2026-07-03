@@ -243,12 +243,16 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
  * single default-collapsed "Other details" disclosure. The matching method and
  * result sharing stay always-visible.
  *
- * Two facts whose detail lives in that disclosure also carry an always-visible
- * PRESENCE hint in the core, since either would otherwise be invisible until the
+ * Three facts whose detail lives in that disclosure also carry an always-visible
+ * PRESENCE hint in the core, since each would otherwise be invisible until the
  * acceptor expands Details: an extra-payload-egress request (a count of the columns
- * the inviter requests FROM the acceptor) and an attached legal agreement (a
- * fixed-copy flag). Only the presence is surfaced -- the column list and the
- * agreement text stay in Details, not duplicated into the core.
+ * the inviter requests FROM the acceptor), the inbound partner data the invitation
+ * will send the acceptor (a count of the columns it will receive -- its ingress),
+ * and an attached legal agreement (a fixed-copy flag). Only the presence is
+ * surfaced -- the column lists and the agreement text stay in Details, not
+ * duplicated into the core. The ingress hint is the weaker payload signal
+ * (receiving partner data is not a disclosure by the acceptor) and is omitted from
+ * the inviter's "proposing" preview, which already shows its send as chips.
  *
  * `perspective` selects the heading and intro copy for the three contexts this
  * renders in -- the acceptor `review`ing a partner's proposal (pre-consent), the
@@ -331,6 +335,26 @@ export function InvitationTerms({
       ? `This invitation requests ${receiveCount} additional data ` +
         `${receiveCount === 1 ? "column" : "columns"} ` +
         `${perspective === "proposing" ? "from your partner" : "from you"}.`
+      : undefined;
+  // Always-visible ingress notice: the count of columns the inviter will SEND the
+  // acceptor for matched records (summary.payload.send) -- inbound partner data the
+  // acceptor is put on notice of before it expands Details. A count, not the names:
+  // the send set is bounded at decode (MAX_PAYLOAD_ENTRIES) and its names are
+  // already sanitized in summarizeInvitation, so the length carries no partner free
+  // text into the core; the names stay in Details. Weaker than the egress notice --
+  // receiving partner data is not a disclosure BY the acceptor -- so it is an
+  // informational presence signal, not a consent-integrity one. Absent under
+  // "proposing": the inviter's own send is already surfaced as chips in the core
+  // there (see below), so its detail is not hidden in Details and the presence-hint
+  // precondition is not met (and an acceptor-framed "will send you" line would be
+  // wrong-pronoun there). The declared-empty "receive nothing" lock-in has an empty
+  // send (shown "(none)" in Details), so sendCount is 0 and the notice is absent --
+  // there is no incoming data to flag; only a non-empty send raises it.
+  const sendCount = summary.payload?.send.length ?? 0;
+  const ingressNotice =
+    perspective !== "proposing" && sendCount > 0
+      ? `This invitation will send you ${sendCount} data ` +
+        `${sendCount === 1 ? "column" : "columns"}.`
       : undefined;
   const [detailsOpen, setDetailsOpen] = useState(false);
   // Stable id linking the disclosure toggle (aria-controls) to its panel; useId
@@ -504,20 +528,30 @@ export function InvitationTerms({
 
         {/* Always-visible presence hints, kept OUTSIDE the "Other details"
             disclosure (the same out-of-disclosure pattern the per-key breadth
-            markers follow): an extra-payload-egress request and an attached legal
-            agreement otherwise have NO surfaced signal that they exist at all --
-            both sit only inside the default-collapsed Details, unlike the matching
-            breadth, which is always visible in each key's header. This surfaces
-            only the PRESENCE (a count, or a fixed-copy flag), never the detail: the
-            column list and the agreement text stay one expand down, so the acceptor
+            markers follow): an extra-payload-egress request, the inbound partner
+            data the invitation will send (the acceptor's ingress), and an attached
+            legal agreement otherwise have NO surfaced signal that they exist at all
+            -- all sit only inside the default-collapsed Details, unlike the matching
+            breadth, which is always visible in each key's header. This surfaces only
+            the PRESENCE (a count, or a fixed-copy flag), never the detail: the
+            column lists and the agreement text stay one expand down, so the acceptor
             is on notice to open Details before consenting without the dense detail
-            being duplicated into the core. */}
+            being duplicated into the core. The ingress hint is the weaker of the two
+            payload signals -- receiving partner data is not a disclosure by the
+            acceptor -- and is absent under the inviter's own "proposing" preview,
+            which already surfaces its send as chips in the core. */}
         {(egressNotice !== undefined ||
+          ingressNotice !== undefined ||
           summary.legalAgreement !== undefined) && (
           <Stack gap={4}>
             {egressNotice !== undefined && (
               <Text size="sm" fw={500}>
                 {egressNotice}
+              </Text>
+            )}
+            {ingressNotice !== undefined && (
+              <Text size="sm" fw={500}>
+                {ingressNotice}
               </Text>
             )}
             {summary.legalAgreement !== undefined && (

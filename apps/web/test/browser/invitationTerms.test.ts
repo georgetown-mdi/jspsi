@@ -561,6 +561,126 @@ describe("InvitationTerms: always-visible egress and legal-agreement presence hi
   });
 });
 
+describe("InvitationTerms: always-visible ingress presence hint", () => {
+  // The ingress companion to the egress hint: an always-visible count of the
+  // columns the invitation will SEND the acceptor for matched records (inbound
+  // partner data), surfaced in the core so the acceptor is on notice before
+  // expanding "Other details". Weaker than the egress hint -- receiving is not a
+  // disclosure by the acceptor -- so it fires only on a non-empty send and never in
+  // the inviter's own "proposing" preview (which shows its send as chips instead).
+  function render(
+    linkageTerms: LinkageTerms,
+    options?: {
+      perspective?: "review" | "accepted" | "proposing";
+      disclosedPayloadColumns?: Array<string>;
+    },
+  ) {
+    root!.render(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(InvitationTerms, {
+          linkageTerms,
+          ...(options?.perspective ? { perspective: options.perspective } : {}),
+          ...(options?.disclosedPayloadColumns !== undefined
+            ? { disclosedPayloadColumns: options.disclosedPayloadColumns }
+            : {}),
+        }),
+      ),
+    );
+  }
+
+  test("the ingress hint surfaces a column count in the always-visible core, outside the 'Other details' disclosure", async () => {
+    // Two columns the inviter will send the acceptor for matched records.
+    render({
+      ...terms,
+      payload: {
+        send: [{ name: "risk_score" }, { name: "diagnosis" }],
+        receive: [],
+      },
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+
+    // The presence/count hint is on screen ... (the trailing period pins the exact
+    // rendered copy: a presence assertion of the full sentence).
+    expect(container!.textContent).toContain(
+      "This invitation will send you 2 data columns.",
+    );
+    // ... and OUTSIDE the disclosure (structure, not styling): the hint text is not
+    // inside the "Other details" panel, which carries the collapsed detail even
+    // while hidden.
+    const panel = await readyPanel("Other details");
+    expect(panel.textContent).not.toContain(
+      "This invitation will send you 2 data columns",
+    );
+    // The column NAMES themselves stay one expand down in the disclosure -- the hint
+    // surfaces only the count, not the detail.
+    expect(panel.textContent).toContain("diagnosis");
+  });
+
+  test("the ingress hint reads singular for a single sent column", async () => {
+    // The module terms send a single column (risk_score).
+    render(terms);
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).toContain(
+      "This invitation will send you 1 data column.",
+    );
+  });
+
+  test("the count derives from the actually-transmitted set carried on the token", async () => {
+    // disclosedPayloadColumns is the inviter's own disclosure predicate output --
+    // exactly the set that flows -- so the hint counts it, not the authored
+    // payload.send (a single column here). Three transmitted columns => count 3.
+    render(terms, {
+      disclosedPayloadColumns: ["ssn", "zip_code", "phone_number"],
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).toContain(
+      "This invitation will send you 3 data columns.",
+    );
+  });
+
+  test("the declared-empty 'receive nothing' lock-in raises no ingress hint", async () => {
+    // A carried-but-empty disclosed set is the strict "(none)" lock-in: there is no
+    // incoming data to flag, so the hint is absent even though the send is DECLARED.
+    render(terms, { disclosedPayloadColumns: [] });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).not.toContain(
+      "This invitation will send you",
+    );
+    // ... yet the declared-empty send still shows "(none)" in the detail, confirming
+    // this is the lock-in case (distinct from lazy, which omits the send line).
+    const panel = await readyPanel("Other details");
+    expect(panel.textContent).toContain("Your partner will send:");
+    expect(panel.textContent).toContain("(none)");
+  });
+
+  test("a lazy (undeclared) send raises no ingress hint", async () => {
+    // No send authored and no disclosed set carried: the inviter sends whatever its
+    // own metadata discloses (lazy), nothing declared up front, so nothing to flag.
+    render({ ...terms, payload: { receive: [] } });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).not.toContain(
+      "This invitation will send you",
+    );
+  });
+
+  test("the inviter's own proposing preview shows no ingress hint (its send is already chips)", async () => {
+    // Receiving-partner framing is acceptor-only. The inviter's preview surfaces its
+    // send as chips in the core already, so the presence is not hidden in Details and
+    // the hint is omitted -- an acceptor-framed "will send you" line would be
+    // wrong-pronoun there.
+    render(terms, { perspective: "proposing" });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).not.toContain(
+      "This invitation will send you",
+    );
+    // The send presence is instead surfaced as the proposing chips, so it is not
+    // lost -- just carried differently for the inviter's own view.
+    expect(container!.textContent).toContain("Columns sent to your partner");
+  });
+});
+
 describe("InvitationTerms: a declared-empty receive is surfaced, not collapsed with lazy", () => {
   // Mirror of the send-side "(none)" treatment: an authored empty payload.receive
   // is the strict "the acceptor sends nothing" assertion, which the consent screen
