@@ -1,5 +1,3 @@
-import PSI from "@openmined/psi.js";
-
 import {
   FileSyncConnection,
   fromEventConnection,
@@ -27,6 +25,7 @@ import { LocalFSClient } from "./connection/localFSClient";
 import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
 import { buildRotatedKeyFile, saveKeyFile } from "./keyFile";
 import { preflightKeyFilePath } from "./keyFilePreflight";
+import { loadCliPsiBackend } from "./psiBackend";
 import { writeExchangeRecord, type RecordOutput } from "./recordFile";
 import { writeOutput } from "./util/cli";
 import { logRuntimeEnv } from "./util/runtimeEnv";
@@ -805,6 +804,21 @@ export async function runProtocol(
       conn.armAbort(selfAbortToken, peerAbortToken);
     }
 
+    // Select the PSI crypto backend: the CLI runs under Node, so it prefers the
+    // native addon and falls back to WASM when no prebuild is present for this
+    // platform (currently always, until the addon ships -- board item 199653275).
+    const { library: psiLibrary, backend: psiBackend } =
+      await loadCliPsiBackend({
+        onNativeUnavailable: ({ error }) =>
+          log.debug(
+            "native PSI addon unavailable, using WASM:",
+            error
+              ? sanitizeErrorForDisplay(error)
+              : "no prebuild for this platform",
+          ),
+      });
+    log.debug(`PSI crypto backend: ${psiBackend}`);
+
     const stageLabels = Object.fromEntries(
       describeExchangeStages(prepared).map(({ id, label }) => [id, label]),
     );
@@ -820,7 +834,7 @@ export async function runProtocol(
         role,
         prepared,
         {
-          psiLibrary: await PSI(),
+          psiLibrary,
           verbosity,
           saveIntent,
           // Advertise the observed SFTP host key for cross-party reconciliation

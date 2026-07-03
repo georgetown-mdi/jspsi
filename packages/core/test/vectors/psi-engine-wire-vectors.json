@@ -1,0 +1,30 @@
+{
+  "description": "Byte-for-byte known-answer vectors for the four @openmined/psi.js engine operations (createSetupMessage, createRequest, processRequest, getAssociationTable) over NIST P-256 with reveal-intersection and the Raw data structure. Each output is the exact serialized wire bytes the vendored WASM engine emits for the fixed server/client keys and inputs below. This is the interop anchor for the native N-API addon (board item 199653275): a native operation must reproduce these bytes to be byte-for-byte interoperable with the WASM build. Distinct from the resolved-projection KAT of item 207302520. Regenerate with generate-psi-engine-wire-vectors.mjs in this directory.",
+  "curve": "NIST P-256",
+  "revealIntersection": true,
+  "dataStructure": "Raw",
+  "createSetupMessage": {
+    "fpr": 0,
+    "numClientInputs": -1
+  },
+  "serverKeyHex": "0011111111111111111111111111111111111111111111111111111111111111",
+  "clientKeyHex": "0022222222222222222222222222222222222222222222222222222222222222",
+  "serverInputs": [
+    "Alice",
+    "Bob",
+    "Carol",
+    "David",
+    "Elizabeth",
+    "Frank",
+    "Greta"
+  ],
+  "clientInputs": ["Carol", "Elizabeth", "Henry"],
+  "setupMessageHex": "0af5010a210227111f6aafe384e6d54eea208bfcfa2c7bea806d779edd568a59c892b6af8d820a21024f2a0581aa414cde7abc67bd4dbc4a34668bc797afeb01d613093f244fce6d2e0a21025d749a95778b0f46640d8f1fad573e97151013ef418b8f4f3801eb874b7c1eb30a21026a1a9e765beea400690aec06f5b53a0c50b0a9c19e73d0c49c25416c058b67470a210291e1df63061f812139a71e9cf78a42a7429de49014d7efdbe702a5c6a32051640a2102a17e1093759f6a4dcd13bf4d091ec11aa618b1e045527f9d01f62d9d7a5a9b9b0a2102bf8080cc898044257a78d8289ca2625467fe5ba04ff8c94b45e0e3a5d7352abf",
+  "sortingPermutation": [6, 3, 2, 1, 5, 0, 4],
+  "requestHex": "0801122102dcd3678a729b0df04d5b6c345401acca533c2eed2c0d5b1c4f63b6628a0b9e03122103dd35f8b12f008a336bfdd91d1c623e97fdafde8ad605b7ea0af21718200d3180122103ba7f435e04eb7cd3999a6b9fdb4174df2fe0e7212280bb54a7a6813820f43e1f",
+  "responseHex": "0a2103dcd6d0982f7a8c46cd6c538d75deb81a8835ece24f38873058141585308e55bd0a210255c3b5a40f81417e14b4cf7aa94a74fdb2ce5d6254d0291d9ba47891a60bcbfc0a21029b15fbb09ce2bf00b0118a6403059dcdec18c97fb972558c853b8c577a2afa0c",
+  "associationTable": [
+    [0, 1],
+    [2, 6]
+  ]
+}
