@@ -24,6 +24,14 @@
  * source of truth; typed `boolean` (not the literal `false`) so a consumer's gate
  * reads as a genuine runtime branch, not provably dead code lint would flag the
  * moment a flag is meant to flip.
+ *
+ * For `psiC` specifically, flipping this flag is NOT sufficient on its own: core
+ * independently refuses a `psi-c` run at the exchange boundary
+ * (`assertAlgorithmImplemented` in `@psilink/core`), so a web operator who reached
+ * a `psi-c` exchange would have the run aborted regardless of this flag. That
+ * refusal must be replaced by the real count-only run path in the same change. The
+ * full ungate checklist across web, CLI, and core is tracked on the product board
+ * (item 208371871, "Implement count-only PSI").
  */
 export const APPLIED_SETTINGS: {
   readonly psiC: boolean;

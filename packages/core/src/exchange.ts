@@ -32,6 +32,7 @@ import {
 } from "./payloadExchange.js";
 import type { PayloadWireMessage } from "./payloadExchange.js";
 import { buildExchangeRecord } from "./exchangeRecord.js";
+import { UsageError } from "./errors.js";
 import type { Metadata } from "./config/metadata.js";
 import type { LinkageTerms } from "./config/linkageTerms.js";
 import type { StandardizedDataset } from "./standardization.js";
@@ -40,6 +41,7 @@ import type {
   AssociationTable,
   PsiRole,
   Prettify,
+  Algorithm,
 } from "./types.js";
 import type { MessageConnection } from "./connection/messageConnection.js";
 import type { PresentedHostKey } from "./connection/fileSyncConnection.js";
@@ -111,6 +113,48 @@ export interface PreparedExchange {
 }
 
 /**
+ * Refuse a linkage-terms `algorithm` the run cannot actually honor, before any
+ * matched identifier is revealed.
+ *
+ * Only `psi` is implemented: the run reveals matched identifiers unconditionally
+ * (`linkViaPSI` / `linkViaSinglePassPSI`), with no count-only code path. `psi-c`
+ * (count-only) is advertised by `AlgorithmSchema` and the consent copy but has no
+ * run path, so a `psi-c` run would reveal matched identifiers while its
+ * self-attested exchange record asserts count-only disclosure -- an integrity gap
+ * in the compliance accounting (HIPAA 45 CFR 164.528 and FERPA disclosure
+ * accounting turn on what was ACTUALLY disclosed). Fail closed here so the record
+ * can never diverge from the run: a `psi-c` terms value reaching core through ANY
+ * mint or accept path -- a hand-crafted token, a CLI-authored config, a non-web
+ * mint -- is refused, not left to each client to clamp. This is the run-side half
+ * the record-integrity guarantee rests on; a pure record-side clamp would keep the
+ * record honest but silently ignore an operator's stated intent to disclose only a
+ * count, so the run refuses instead (item 208363104).
+ *
+ * When a real count-only run path lands, REPLACE this refusal with it and ungate
+ * the client-side gates in the same change -- flipping `APPLIED_SETTINGS.psiC`
+ * alone is not sufficient while this refusal stands. The full ungate checklist is
+ * tracked on the product board (item 208371871, "Implement count-only PSI").
+ *
+ * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`: on the
+ * accept side the algorithm is adopted verbatim from the partner's invitation
+ * (see `acceptedLinkageTerms`), so -- like `assertPayloadSendDisclosed` -- it is
+ * not unconditionally this operator's own content, and its message stays swallowed
+ * by the web's generic alert rather than surfaced. The message names only the
+ * fixed enum literals, never partner-controlled free text; the CLI classifies it
+ * as a usage error (exit 64).
+ */
+export function assertAlgorithmImplemented(algorithm: Algorithm): void {
+  if (algorithm === "psi-c") {
+    throw new UsageError(
+      'count-only linkage (algorithm "psi-c") is not yet implemented: the run ' +
+        "reveals matched identifiers, so it cannot honor a count-only " +
+        'disclosure. Set the linkage-terms algorithm to "psi", or wait for ' +
+        "count-only support before running.",
+    );
+  }
+}
+
+/**
  * Prepare a local dataset for a PSI exchange.
  *
  * Given raw CSV rows and exchange parameters, this function:
@@ -145,6 +189,14 @@ export function prepareForExchange(
   const metadata = exchangeDataSpec.metadata ?? inferMetadata(columnNames);
   const linkageTerms =
     exchangeDataSpec.linkageTerms ?? getDefaultLinkageTerms(identity, metadata);
+
+  // Fail closed on a count-only (`psi-c`) algorithm before connecting: no
+  // count-only run path exists, so a `psi-c` run would reveal matched identifiers
+  // under a self-attested record asserting only a count. Refuse here (friendly,
+  // pre-connection, revealing nothing) and again at the run boundary (runExchange)
+  // so the refusal holds even for a PreparedExchange built without going through
+  // this function. See assertAlgorithmImplemented.
+  assertAlgorithmImplemented(linkageTerms.algorithm);
 
   // Reject a payload data dictionary that does not match what metadata transmits.
   // `payload.send` is exchanged, consented to, written into the exchange record,
@@ -460,6 +512,16 @@ export async function runExchange(
   options: RunExchangeOptions,
 ): Promise<ExchangeResult> {
   const { dataset, linkageTerms, rowCount, retentionDisposition } = prepared;
+
+  // Last line of defense for the disclosure-integrity guarantee: refuse a
+  // count-only (`psi-c`) algorithm before any matched identifier is revealed, so
+  // the self-attested record can never attest count-only over an
+  // identifier-revealing run. prepareForExchange refuses it pre-connection; this
+  // holds even for a PreparedExchange constructed without going through it, and
+  // fires before the terms exchange puts anything on the wire. See
+  // assertAlgorithmImplemented.
+  assertAlgorithmImplemented(linkageTerms.algorithm);
+
   const { psiLibrary } = options;
   const onStage = options.onStage ?? (() => {});
   const onWarning = options.onWarning ?? (() => {});
