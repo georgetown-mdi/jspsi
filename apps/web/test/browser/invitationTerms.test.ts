@@ -754,7 +754,7 @@ describe("InvitationTerms: the presence hints form a labelled, disclosure-linked
     );
   });
 
-  test("the 'Other details' toggle is described by the hint group", async () => {
+  test("the 'Other details' toggle is described by the hint group's caption", async () => {
     render({
       ...terms,
       payload: { send: [{ name: "risk_score" }], receive: [] },
@@ -764,10 +764,10 @@ describe("InvitationTerms: the presence hints form a labelled, disclosure-linked
     const describedById = button.getAttribute("aria-describedby");
     expect(describedById).toBeTruthy();
     const region = document.getElementById(describedById!);
-    // Reaching the toggle announces the flagged facts that expand there.
-    expect(region?.textContent).toContain(
-      "You will receive 1 data column from your partner.",
-    );
+    // A concise one-phrase pointer, not a re-read of every hint line onto the
+    // toggle: the description is the group's caption alone. Pinning `toBe` guards
+    // against the aria-describedby being re-broadened to the whole group.
+    expect(region?.textContent).toBe("Before you consent");
   });
 
   test("the toggle carries no dangling describedby when no hint fires", async () => {

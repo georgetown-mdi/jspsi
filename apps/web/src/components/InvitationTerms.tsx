@@ -251,9 +251,9 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
  * and an attached legal agreement (a fixed-copy flag). Only the presence is
  * surfaced -- the column lists and the agreement text stay in Details, not
  * duplicated into the core. The hints render as one labelled "Before you consent"
- * group (role=group), and the "Other details" toggle references that group as its
- * accessible description, so a screen-reader user hears the flagged facts as a
- * related set and is pointed at the disclosure that expands them. The ingress hint
+ * group (role=group), and the "Other details" toggle references that group's
+ * caption as its accessible description, so a screen-reader user is pointed at the
+ * disclosure that expands them without re-reading every hint. The ingress hint
  * is the weaker payload signal (receiving partner data is not a disclosure by the
  * acceptor) and is omitted from the inviter's "proposing" preview, which already
  * shows its send as chips.
@@ -383,13 +383,12 @@ export function InvitationTerms({
   // Stable id linking the disclosure toggle (aria-controls) to its panel; useId
   // keeps it consistent across SSR and hydration.
   const detailsId = useId();
-  // The "before you consent" presence-hint region: presenceHintsLabelId names it
-  // (aria-labelledby -> its caption) so assistive tech announces the hints as one
-  // group, and presenceHintsId is the region the "Other details" toggle references
-  // via aria-describedby, so a non-visual user reaching that toggle hears the
-  // flagged facts it expands (the same companion-text-to-disclosure association the
-  // matching toggle uses).
-  const presenceHintsId = useId();
+  // The "before you consent" presence-hint region is a role="group" named by its
+  // caption (presenceHintsLabelId via aria-labelledby), so assistive tech announces
+  // the hints as one group. The "Other details" toggle references that same caption
+  // as its aria-describedby -- a concise one-phrase pointer ("Before you consent")
+  // to the section whose detail it expands, matching the short-subline describedby
+  // the matching toggle uses rather than re-reading every hint line onto the toggle.
   const presenceHintsLabelId = useId();
   // The whole matching list is itself a default-collapsed "Matching strategies"
   // disclosure; this is its toggle state, the id its aria-controls points at, and
@@ -571,10 +570,11 @@ export function InvitationTerms({
             The region is a role="group" named by its caption (aria-labelledby), so
             assistive tech announces the hints as one related set rather than three
             disconnected sentences, and the "Other details" toggle points its
-            aria-describedby back at this region (when present), so a non-visual user
-            reaching that toggle hears the flagged facts that expand there -- the same
-            always-visible-companion-to-disclosure association the matching toggle
-            uses. Both invariants are pinned by render tests.
+            aria-describedby at that caption (when present), so a non-visual user
+            reaching that toggle hears a concise "Before you consent" pointer to the
+            section it expands -- the short-subline association the matching toggle
+            uses, rather than re-reading every hint line. Both invariants are pinned
+            by render tests.
 
             The two payload lines lead with WHO does WHAT so their opposite
             directions are not confusable: the egress line is a conditional REQUEST
@@ -585,12 +585,7 @@ export function InvitationTerms({
             under the inviter's own "proposing" preview, which surfaces its send as
             chips in the core instead. */}
         {hasPresenceHints && (
-          <Stack
-            id={presenceHintsId}
-            role="group"
-            aria-labelledby={presenceHintsLabelId}
-            gap={4}
-          >
+          <Stack role="group" aria-labelledby={presenceHintsLabelId} gap={4}>
             <Text id={presenceHintsLabelId} size="sm" fw={600}>
               {perspective === "proposing"
                 ? "Before your partner consents"
@@ -685,7 +680,7 @@ export function InvitationTerms({
         onClick={() => setDetailsOpen((open) => !open)}
         aria-expanded={detailsOpen}
         aria-controls={detailsId}
-        aria-describedby={hasPresenceHints ? presenceHintsId : undefined}
+        aria-describedby={hasPresenceHints ? presenceHintsLabelId : undefined}
       >
         <Group gap={4}>
           <IconChevronRight
