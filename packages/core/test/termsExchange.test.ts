@@ -317,6 +317,73 @@ test("a partner that omits the protocol version (legacy build) still proceeds", 
   expect(result.partnerTerms.identity).toBe("Party A");
 });
 
+test("responder fails fast when message 1 advertises a malformed protocol version", async () => {
+  // A PRESENT-but-garbled version value (wrong type, non-integer) is not the same
+  // as an absent one: it is read as `unknown` and reconciled to a mismatch, so the
+  // operator still gets the actionable version diagnosis rather than a generic
+  // "failed to parse" that buries the real cause (or a silent legacy pass-through).
+  // Each of these is schema-invalid as a version yet must still fail closed.
+  for (const bad of ["1", 1.5, null, true] as const) {
+    const [connA, connB] = makeConnections();
+    const responder = exchangeTerms(connB, "responder", termsB, 200);
+    await connA.send({
+      linkageTerms: termsA,
+      recordCount: 100,
+      protocolVersion: bad,
+    });
+    const abort = await connA.receive();
+    expect(abort).toMatchObject({
+      decision: "abort",
+      abortReasons: [PROTOCOL_VERSION_MISMATCH_MESSAGE],
+    });
+    await expect(responder).rejects.toThrow(PROTOCOL_VERSION_MISMATCH_MESSAGE);
+  }
+});
+
+test("initiator fails fast (and sends an abort) on a malformed message-2 version", async () => {
+  // The mirror of the responder case AND a no-hang guard: a garbled version on
+  // message 2 must reconcile to a mismatch and, critically, the initiator must
+  // still SEND an abort (message 3) so the responder fails with the named cause
+  // rather than stranding on its receive timeout. Drive the responder by hand.
+  const [connA, connB] = makeConnections();
+  const initiator = exchangeTerms(connA, "initiator", termsA, 100);
+  await connB.receive(); // msg 1: initiator's terms
+  await connB.send({
+    linkageTerms: termsB,
+    decision: "proceed",
+    recordCount: 200,
+    protocolVersion: "2", // present but garbled
+  });
+  const abort = await connB.receive(); // msg 3: initiator's abort -- must arrive
+  expect(abort).toMatchObject({
+    decision: "abort",
+    abortReasons: [PROTOCOL_VERSION_MISMATCH_MESSAGE],
+  });
+  await expect(initiator).rejects.toThrow(PROTOCOL_VERSION_MISMATCH_MESSAGE);
+});
+
+test("a version mismatch is diagnosed ahead of a simultaneous terms mismatch", async () => {
+  // When the partner differs on BOTH the protocol version AND the linkage terms,
+  // the version skew is the root cause, so its diagnosis wins: the abort names the
+  // version, not the terms. Pins the "reconcile before validateCompatibility"
+  // ordering the branch comments assert (a check, not just prose). The injected
+  // terms still parse (psi-c is a valid algorithm), so the responder would reach
+  // the algorithm-incompatibility abort if the version check did not run first.
+  const [connA, connB] = makeConnections();
+  const responder = exchangeTerms(connB, "responder", termsB, 200);
+  await connA.send({
+    linkageTerms: { ...termsA, algorithm: "psi-c" },
+    recordCount: 100,
+    protocolVersion: PROTOCOL_VERSION + 1,
+  });
+  const abort = await connA.receive();
+  expect(abort).toMatchObject({
+    decision: "abort",
+    abortReasons: [PROTOCOL_VERSION_MISMATCH_MESSAGE],
+  });
+  await expect(responder).rejects.toThrow(PROTOCOL_VERSION_MISMATCH_MESSAGE);
+});
+
 // --- Role determination ------------------------------------------------------
 
 test("only initiator expects output -> initiator is receiver", () => {

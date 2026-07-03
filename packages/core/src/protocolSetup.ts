@@ -131,27 +131,33 @@ export const recordCountField = z
   .max(MAX_RECORD_COUNT);
 
 // The psilink exchange-protocol version, advertised by both parties on the terms
-// exchange and reconciled fail-closed: a partner that advertises a DIFFERENT
-// version is on an incompatible build, so the exchange aborts with an actionable
-// "run the same version" diagnosis BEFORE any data-plane frame is parsed, rather
-// than failing later with a cryptic frame-parse error (208014743). It rides the
-// terms exchange -- the one bidirectional round-trip both parties always perform,
-// carrying `linkageTerms`, `recordCount`, `save`, and `hostKey` beside it -- so
-// the check adds no new round-trip; on the authenticated path it rides the AEAD
-// channel and cannot be forged.
+// exchange and reconciled fail-closed: a partner that advertises anything other
+// than this build's exact version is on an incompatible build, so the exchange
+// aborts with an actionable "run the same version" diagnosis before the linkage
+// rounds begin, rather than failing later with a cryptic frame-parse error
+// (208014743). It rides the terms exchange -- the one bidirectional round-trip
+// both parties always perform, carrying `linkageTerms`, `recordCount`, `save`,
+// and `hostKey` beside it -- so the check adds no new round-trip; on the
+// authenticated path it rides the AEAD channel and cannot be forged.
 //
 // This is a build-level WIRE/PROTOCOL compatibility marker, bumped only on a
 // wire-incompatible protocol change -- distinct from the operator-authored
 // linkage-terms `version` (compared for equality between the parties' authored
 // values, see docs/spec/PROTOCOL.md) and from the file-sync MESSAGE_ENVELOPE_VERSION
 // byte (the transport frame format, see fileSyncConnection.ts). The reconcile is
-// fail-closed on a PRESENT mismatch (matching the mode-flag fast-fail precedent,
-// 193901017), NOT fail-soft like the host-key advisory. A partner that advertises
-// NO version (undefined) is a build that predates this field: adding the field is
+// fail-closed (matching the mode-flag fast-fail precedent, 193901017), NOT
+// fail-soft like the host-key advisory: any PRESENT value that is not our exact
+// version aborts -- a different integer, or a garbled/wrong-typed value from a
+// non-conforming or corrupted peer, which is why the field is read as `unknown`
+// rather than a typed number (a typed schema would bury such a value in a generic
+// parse error instead of naming the version skew). A partner that advertises NO
+// version (undefined) is a build that predates this field: adding the field is
 // itself wire-compatible (an older peer strips the unknown key and this build
 // treats an absent advertisement as legacy), so such a partner is allowed to
 // proceed. The durable, forward-looking guarantee is that any two builds that
-// both carry the field fail cleanly the moment their versions differ.
+// both carry the field fail cleanly the moment their versions differ -- provided
+// a future bump keeps the terms envelope's other required fields backward-
+// parseable, since the version can only be read out of an envelope that parses.
 /** @internal exported for the protocol-version reconcile tests. */
 export const PROTOCOL_VERSION = 1;
 
@@ -182,7 +188,12 @@ export const PROTOCOL_VERSION_MISMATCH_MESSAGE =
 const termsMessage = z.object({
   linkageTerms: z.unknown(),
   recordCount: recordCountField,
-  protocolVersion: z.number().int().optional(),
+  // Read as `unknown`, not a typed number, so a PRESENT-but-non-matching value
+  // (a foreign integer, or a garbled/wrong-typed value from a non-conforming or
+  // corrupted peer) reconciles to the actionable version mismatch rather than
+  // throwing a generic parse error that buries the real cause; absent stays
+  // legacy. See PROTOCOL_VERSION and reconcileProtocolVersion.
+  protocolVersion: z.unknown().optional(),
   save: z.boolean().optional(),
   hostKey: hostKeyField,
 });
@@ -203,7 +214,7 @@ const termsWithDecisionMessage = z.object({
   decision: z.enum(["proceed", "abort"]),
   abortReasons: abortReasonsField,
   recordCount: recordCountField.optional(),
-  protocolVersion: z.number().int().optional(),
+  protocolVersion: z.unknown().optional(), // read as unknown; see termsMessage
   save: z.boolean().optional(),
   hostKey: hostKeyField,
 });
@@ -301,18 +312,21 @@ async function sendAbort(
 
 /**
  * Fail-closed reconcile of the partner's advertised {@link PROTOCOL_VERSION}. A
- * partner that advertised a version DIFFERENT from ours is on an incompatible
- * build: best-effort send it the abort (so it too fails with the named cause,
- * not a receive timeout) and throw {@link PROTOCOL_VERSION_MISMATCH_MESSAGE}. A
- * partner that advertised NONE (`undefined`) predates this field and is
- * wire-compatible with this build, so it is treated as legacy and allowed to
- * proceed (a no-op return). Pass `localTerms` when reconciling from the
- * responder's message-2 slot, whose abort frame carries `linkageTerms`; omit it
- * for the initiator's decision-only abort. See {@link PROTOCOL_VERSION}.
+ * partner that advertised anything OTHER than our exact version -- a different
+ * integer, or a present-but-garbled/wrong-typed value (the field is read as
+ * `unknown` precisely so such a value reaches here rather than throwing a generic
+ * parse error) -- is on an incompatible build: best-effort send it the abort (so
+ * it too fails with the named cause, not a receive timeout) and throw
+ * {@link PROTOCOL_VERSION_MISMATCH_MESSAGE}. A partner that advertised NONE
+ * (`undefined`) predates this field and is wire-compatible with this build, so it
+ * is treated as legacy and allowed to proceed (a no-op return). Pass `localTerms`
+ * when reconciling from the responder's message-2 slot, whose abort frame carries
+ * `linkageTerms`; omit it for the initiator's decision-only abort. See
+ * {@link PROTOCOL_VERSION}.
  */
 async function reconcileProtocolVersion(
   conn: MessageConnection,
-  partnerVersion: number | undefined,
+  partnerVersion: unknown,
   localTerms?: LinkageTerms,
 ): Promise<void> {
   if (partnerVersion === undefined || partnerVersion === PROTOCOL_VERSION)
@@ -340,10 +354,11 @@ async function reconcileProtocolVersion(
  *
  * Both parties advertise this build's {@link PROTOCOL_VERSION} on their terms
  * message (message 1 for the initiator, message 2 for the responder) and check
- * the partner's before weighing the terms. A DIFFERENT advertised version
- * fail-closes with {@link PROTOCOL_VERSION_MISMATCH_MESSAGE} (both sides learn
- * the real cause instead of a later cryptic frame-parse error; 208014743); an
- * ABSENT one is a legacy build wire-compatible with this one and proceeds. See
+ * the partner's before weighing the terms. Any advertised version other than
+ * this build's -- a different integer, or a present-but-garbled value -- fail-
+ * closes with {@link PROTOCOL_VERSION_MISMATCH_MESSAGE} (both sides learn the
+ * real cause instead of a later cryptic frame-parse error; 208014743); an ABSENT
+ * one is a legacy build wire-compatible with this one and proceeds. See
  * {@link reconcileProtocolVersion}.
  *
  * `localRecordCount` (this party's raw dataset row count) rides both terms
@@ -501,9 +516,11 @@ export async function exchangeTerms(
     // Captured before parseLinkageTerms (which may throw): a version skew is the
     // likely reason the terms fail to parse, so the version reconcile below must
     // run even when the linkage-terms parse threw, as long as the envelope itself
-    // parsed. It stays undefined if `termsMessage.parse` itself throws (a wholly
-    // malformed frame carries no readable version).
-    let partnerProtocolVersion: number | undefined;
+    // parsed. A malformed version VALUE no longer forces that throw (the field is
+    // `unknown`, so it is captured and reconciled to a mismatch); this stays
+    // undefined only when `termsMessage.parse` throws on some OTHER required field
+    // (a wholly malformed frame carries no readable version).
+    let partnerProtocolVersion: unknown;
     let parseError: string | undefined;
     try {
       const parsed = termsMessage.parse(rawData);
