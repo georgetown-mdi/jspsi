@@ -474,11 +474,13 @@ export function InvitationTerms({
   // as one related set rather than as disconnected sentences -- the same labelled-
   // group semantics the former single "Before you consent" region carried, now split
   // by disclosure direction. An attached legal agreement is a cross-cutting
-  // governance frame (not a direction), so it carries its own labelled group.
+  // governance frame (not a direction), so it carries its own group -- named by a
+  // fixed "Legal agreement" aria-label (a short noun phrase distinct from its lead
+  // sentence), so a screen reader does not announce that full sentence twice, once as
+  // the group name and again as the group's first line.
   const produceGroupLabelId = useId();
   const discloseGroupLabelId = useId();
   const receiveGroupLabelId = useId();
-  const legalGroupLabelId = useId();
   // The "Other details" toggle is self-describing: a one-line summary of the
   // disclosure's contents renders beneath it and is associated as the toggle's
   // aria-describedby (detailsSummaryId), so a reader -- sighted or not -- knows what
@@ -571,11 +573,11 @@ export function InvitationTerms({
           legible at the consent point rather than demoted below the fold. Its
           substance is promoted whole -- reference, PURPOSE, and expiry -- so it has
           no "Other details" entry. All three values are pre-sanitized by
-          summarizeInvitation, and none is folded into the group's accessible name
-          (the fixed flag line), so no raw partner text enters the name. */}
+          summarizeInvitation, and the group's accessible name is the fixed
+          "Legal agreement" aria-label, so no raw partner text enters the name. */}
       {summary.legalAgreement !== undefined && (
-        <Stack role="group" aria-labelledby={legalGroupLabelId} gap={2}>
-          <Text id={legalGroupLabelId} size="sm" fw={600}>
+        <Stack role="group" aria-label="Legal agreement" gap={2}>
+          <Text size="sm" fw={600}>
             This invitation attaches a legal agreement.
           </Text>
           <Text size="sm">Reference: {summary.legalAgreement.reference}</Text>

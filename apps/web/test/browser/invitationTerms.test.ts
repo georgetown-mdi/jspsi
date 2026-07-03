@@ -690,15 +690,20 @@ describe("InvitationTerms: always-visible egress and legal-agreement facts, tier
   test("the legal agreement is promoted whole into its own governance group, outside the 'Other details' disclosure", async () => {
     // The module terms attach a legal agreement. Its governance-load-bearing substance
     // -- reference, PURPOSE, and expiry -- is surfaced in the core as its own labelled
-    // group (named by the flag line), not a bare "attaches an agreement" flag, since
-    // the purpose is the field a 164.528 accounting / FERPA exception turns on
-    // (docs/COMPLIANCE.md) and must be legible at the consent point.
+    // group (named by a short fixed "Legal agreement" aria-label, distinct from its
+    // lead sentence so a screen reader does not read that sentence twice), not a bare
+    // "attaches an agreement" flag, since the purpose is the field a 164.528 accounting
+    // / FERPA exception turns on (docs/COMPLIANCE.md) and must be legible at the
+    // consent point.
     render(terms);
     await expect.element(toggle("Other details")).toBeInTheDocument();
 
-    const agreement = group("This invitation attaches a legal agreement.");
+    const agreement = group("Legal agreement");
     await expect.element(agreement).toBeInTheDocument();
     const el = agreement.element();
+    expect(el.textContent).toContain(
+      "This invitation attaches a legal agreement.",
+    );
     expect(el.textContent).toContain("Reference: MOU-2025-0042");
     expect(el.textContent).toContain("Stated purpose: Audit and evaluation");
     expect(el.textContent).toContain("Agreement valid through 2027-12-31");
@@ -1042,10 +1047,14 @@ describe("InvitationTerms: the always-visible facts are tiered into labelled dir
     expect(receive.element().textContent).toContain(
       "You will receive 1 data column from your partner.",
     );
-    // The legal agreement is a governance frame -> its own labelled group. Its flag
-    // lead, reference, and purpose are all under that single accessible name.
-    const agreement = group("This invitation attaches a legal agreement.");
+    // The legal agreement is a governance frame -> its own labelled group ("Legal
+    // agreement" aria-label). Its flag lead, reference, and purpose are all under that
+    // single accessible name.
+    const agreement = group("Legal agreement");
     await expect.element(agreement).toBeInTheDocument();
+    expect(agreement.element().textContent).toContain(
+      "This invitation attaches a legal agreement.",
+    );
     expect(agreement.element().textContent).toContain(
       "Reference: MOU-2025-0042",
     );
