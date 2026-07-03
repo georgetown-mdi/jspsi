@@ -45,7 +45,7 @@ export function ExchangeSummary({
    * to {@link InvitationTerms}. */
   disclosedPayloadColumns?: Array<string>;
   headingRef?: Ref<HTMLHeadingElement>;
-  /** This party's own disclosed columns ("Columns you will send to your
+  /** This party's own disclosed columns ("What you will send to your
    * partner"), forwarded to {@link InvitationTerms} as `outboundColumns` and
    * rendered as chips just above "Other details". Omit where the set is not yet
    * known (the acceptor review screen) or already shown inside the terms (the

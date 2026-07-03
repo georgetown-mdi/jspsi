@@ -47,7 +47,7 @@ const SINGLE_IDENTIFIER_MESSAGE =
  * the edit means.
  *
  * The grid does not paint the disclosed-columns list itself: each host already
- * shows it visibly as the "Columns you will send to your partner" chips beside the
+ * shows it visibly as the "What you will send to your partner" chips beside the
  * agreed terms, so a second text copy here would be a same-screen duplicate. What
  * the grid keeps is the aria-live ANNOUNCEMENT of that list -- computed
  * synchronously from {@link disclosedColumnNames}, the same predicate
@@ -198,7 +198,7 @@ export function MetadataGrid({
       )}
 
       {/* The disclosure readout is shown VISIBLY by the host's column chips
-          (the "Columns you will send to your partner" list beside the agreed
+          (the "What you will send to your partner" list beside the agreed
           terms), so the grid no longer repeats it as text -- that was a
           duplicate on the same screen. What stays here is the announcement: a
           screen-reader user toggling a disclosure Select above gets no spoken
