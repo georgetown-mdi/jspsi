@@ -1067,9 +1067,12 @@ describe("InvitationTerms: the always-visible facts are tiered into labelled dir
     expect(receive.element().textContent).not.toContain("requests");
   });
 
-  test("the produce tier groups the matching method and result sharing", async () => {
+  test("the produce tier groups the matching method and result sharing, and only those", async () => {
     // "What the exchange produces" carries the matching method and result sharing --
-    // the AC's two named produce facts -- so they are announced as one related set.
+    // what is revealed and to whom -- announced as one related set. It is slimmed to
+    // that pair: the matching mechanics (the field summary, the "Matching strategies"
+    // disclosure) moved to their own "How records are matched" tier, so this group is
+    // no longer overloaded with three unlike concerns.
     render(terms);
     await expect.element(toggle("Other details")).toBeInTheDocument();
     const produce = group("What the exchange produces");
@@ -1077,6 +1080,41 @@ describe("InvitationTerms: the always-visible facts are tiered into labelled dir
     const el = produce.element();
     expect(el.textContent).toContain("shared identifiers");
     expect(el.textContent).toContain("You will receive the matched result:");
+    // The matching mechanics are NOT in the produce tier anymore.
+    expect(el.textContent).not.toContain("Matching on SSN");
+    expect(el.textContent).not.toContain("Matching strategies");
+  });
+
+  test("the matching mechanics live in a 'How records are matched' tier", async () => {
+    // The field summary and the "Matching strategies" disclosure are split out of the
+    // produce tier into their own mechanics tier, kept below the disclosure/result
+    // outcome. The always-visible field summary and the disclosure toggle are both
+    // under that group.
+    render(terms);
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const mechanics = group("How records are matched");
+    await expect.element(mechanics).toBeInTheDocument();
+    const el = mechanics.element();
+    expect(el.textContent).toContain(
+      "Matching on SSN, last name, date of birth, first name.",
+    );
+    expect(el.textContent).toContain("Matching strategies");
+  });
+
+  test("each tier caption is a heading, so a screen-reader user can jump between tiers", async () => {
+    // The direction/mechanics tier captions are headings (not bold text), so a
+    // non-visual user can navigate tier-to-tier by heading on a long consent screen.
+    render(terms);
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    for (const name of [
+      "What you disclose",
+      "What the exchange produces",
+      "What you receive",
+      "How records are matched",
+    ])
+      await expect
+        .element(page.getByRole("heading", { name }))
+        .toBeInTheDocument();
   });
 
   test("the 'Other details' toggle is self-describing: its describedby names the contents", async () => {
