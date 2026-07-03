@@ -14,17 +14,37 @@ import { Badge, Group } from "@mantine/core";
  * so assistive tech reads it as a list of names. Keyed by index -- a sanitized
  * name is not guaranteed unique -- and tt="none" keeps each name verbatim rather
  * than upper-casing it into a system-looking token.
+ *
+ * The list's accessible name comes from exactly one of two mutually exclusive
+ * props: `label` sets it directly as the group's aria-label, for a caller with no
+ * visible caption naming the list; `labelledBy` points aria-labelledby at an
+ * existing visible caption's id, for a caller whose caption already names the list
+ * -- so the list's name derives from that one visible caption rather than a second,
+ * separately-authored aria-label string that could drift from it. This does not
+ * reduce how often a screen reader speaks the caption: a named list is still
+ * announced by name at its boundary, as any labelled region is (cf. a fieldset's
+ * legend); labelledby only makes the visible caption the single source of that name.
  */
 export function ColumnChips({
   columns,
   label,
+  labelledBy,
 }: {
   columns: Array<string>;
-  /** The list's accessible name (aria-label on the role=list group). */
-  label: string;
-}) {
+} & (
+  | {
+      /** The list's accessible name, set directly as aria-label. */
+      label: string;
+      labelledBy?: never;
+    }
+  | {
+      /** Id of a visible caption that names the list via aria-labelledby. */
+      labelledBy: string;
+      label?: never;
+    }
+)) {
   return (
-    <Group gap="xs" role="list" aria-label={label}>
+    <Group gap="xs" role="list" aria-label={label} aria-labelledby={labelledBy}>
       {columns.map((name, index) => (
         <Badge
           key={index}

@@ -38,11 +38,23 @@ function joinList(items: Array<string>): string {
   return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }
 
-/** A labelled block: a bold caption above its value(s). */
-function Term({ label, children }: { label: string; children: ReactNode }) {
+/** A labelled block: a bold caption above its value(s). When `captionId` is set it
+ * is put on the caption, so a child that is itself a labelled region (a
+ * {@link ColumnChips} list) can name itself from the visible caption via
+ * aria-labelledby rather than carrying a second, separately-authored aria-label that
+ * could drift from the caption. */
+function Term({
+  label,
+  captionId,
+  children,
+}: {
+  label: string;
+  captionId?: string;
+  children: ReactNode;
+}) {
   return (
     <Stack gap={2}>
-      <Text size="sm" fw={600}>
+      <Text size="sm" fw={600} id={captionId}>
         {label}
       </Text>
       {children}
@@ -530,6 +542,16 @@ export function InvitationTerms({
   // this heading when the terms appear (headingRef + tabIndex), so this association
   // is what carries the caveat into that announcement.
   const identityNoteId = useId();
+  // The visible send-columns captions name their chip list via aria-labelledby (the
+  // ColumnChips below each references its Term's caption), so the list's accessible
+  // name derives from the one visible caption rather than a second, separately-
+  // authored aria-label that could drift from it. Two ids because the inviter's
+  // "proposing" send and the acceptor's own outbound send are distinct captions
+  // (mutually exclusive by perspective, but each names its own list). The pre-file
+  // forward-reference reuses the outbound caption text but wraps no list, so it needs
+  // no id.
+  const proposingSendCaptionId = useId();
+  const outboundSendCaptionId = useId();
   const reduceMotion = useReducedMotion();
   // Tier captions are headings one level below the terms heading, so a screen reader
   // can jump between tiers by heading and the outline nests under the page's own
@@ -609,12 +631,15 @@ export function InvitationTerms({
               declaration under "proposing", so an empty set reads as a positive "no
               columns" confirmation rather than an unknown. */}
           {perspective === "proposing" && (
-            <Term label="Columns sent to your partner">
+            <Term
+              label="Columns sent to your partner"
+              captionId={proposingSendCaptionId}
+            >
               {summary.payload !== undefined &&
               summary.payload.send.length > 0 ? (
                 <ColumnChips
                   columns={summary.payload.send}
-                  label="Columns sent to your partner"
+                  labelledBy={proposingSendCaptionId}
                 />
               ) : (
                 <Text size="sm" c="dimmed">
@@ -630,7 +655,10 @@ export function InvitationTerms({
               outboundSendListRenders boolean, which the group-render check also uses)
               so TypeScript narrows outboundColumns to defined inside. */}
           {perspective !== "proposing" && outboundColumns !== undefined && (
-            <Term label="What you will send to your partner">
+            <Term
+              label="What you will send to your partner"
+              captionId={outboundSendCaptionId}
+            >
               {outboundColumns.length > 0 ? (
                 // These are the operator's OWN CSV headers (from the live metadata
                 // disclosure), not a sanitized summary value, so sanitize them for
@@ -641,7 +669,7 @@ export function InvitationTerms({
                   columns={outboundColumns.map((name) =>
                     sanitizeForDisplay(name),
                   )}
-                  label="What you will send to your partner"
+                  labelledBy={outboundSendCaptionId}
                 />
               ) : (
                 <Text size="sm" c="dimmed">
