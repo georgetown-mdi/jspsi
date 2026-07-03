@@ -30,6 +30,14 @@ function yesNo(value: boolean): string {
   return value ? "Yes" : "No";
 }
 
+/** Join phrases into an Oxford-comma English list ("a", "a and b", "a, b, and c"),
+ * for the self-describing "Other details" summary. */
+function joinList(items: Array<string>): string {
+  if (items.length <= 1) return items[0] ?? "";
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+}
+
 /** A labelled block: a bold caption above its value(s). */
 function Term({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -237,16 +245,24 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
 
 /**
  * Renders the inviter's linkage terms decoded from an invitation for review. The
- * matching list sits behind a default-collapsed "Matching strategies" disclosure;
- * inside it each linkage key is its own further default-collapsed disclosure, whose
- * header is the key name and a short derived one-liner of the fields it matches on
- * (each carrying a terse breadth marker -- "(partial)", "(fuzzy)" -- when its
- * element loosens matching), and whose expanded body holds the per-element
- * transform/swap/fuzzy detail. The remaining dense detail (personal-data
- * constraints, payload columns, and dedup notes) sits behind a single
- * default-collapsed "Other details" disclosure; the legal agreement is not among
- * it -- it is promoted whole into the always-visible core (see below). The
- * matching method and result sharing stay always-visible.
+ * always-visible core is organized by disclosure DIRECTION rather than as one flat
+ * list, so a reader can tell what each fact is about: an attached legal agreement
+ * leads as a cross-cutting governance frame, then three labelled direction tiers --
+ * "What the exchange produces" (matching method, linkage strategy, the matching
+ * keys, and result sharing), "What you disclose" (the viewer's outbound send and the
+ * egress request for its data), and "What you receive" (the inbound partner data).
+ * Each tier is a role="group" named by its caption, so assistive tech announces it
+ * as one related set. The matching list itself sits behind a default-collapsed
+ * "Matching strategies" disclosure inside the produce tier; inside it each linkage
+ * key is its own further default-collapsed disclosure, whose header is the key name
+ * and a short derived one-liner of the fields it matches on (each carrying a terse
+ * breadth marker -- "(partial)", "(fuzzy)" -- when its element loosens matching),
+ * and whose expanded body holds the per-element transform/swap/fuzzy detail. The
+ * remaining dense detail (personal-data constraints, payload columns, and dedup
+ * notes) sits behind a single default-collapsed "Other details" disclosure, whose
+ * toggle is self-describing -- a one-line summary of its contents, associated as the
+ * toggle's accessible description. The legal agreement is not among that detail -- it
+ * is promoted whole into the always-visible core.
  *
  * Every "proposed but not yet applied" caveat (psi-c count-only, deduplicate, and
  * per-element fuzzy comparison) follows ONE placement rule, so the flagging is
@@ -268,38 +284,44 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
  * text enters a caveat, and render tests pin each caveat at its headline's level
  * against the accessibility tree.
  *
- * Two payload facts whose detail lives in that disclosure carry an always-visible
- * PRESENCE hint in the core, since each would otherwise be invisible until the
- * acceptor expands Details: an extra-payload-egress request (a count of the columns
- * the inviter requests FROM the acceptor) and the inbound partner data the
- * invitation will send the acceptor (a count of the columns it will receive -- its
- * ingress). Only their presence is surfaced -- the column lists stay in Details,
- * not duplicated into the core. An attached legal agreement is instead promoted in
- * full: its reference, PURPOSE, and expiry render in the core (not a bare flag),
+ * Two payload facts whose detail lives in the "Other details" disclosure carry an
+ * always-visible count in a direction tier, since each would otherwise be invisible
+ * until the acceptor expands Details: the extra-payload-egress request (a count of
+ * the columns the inviter requests FROM the acceptor) lands in "What you disclose",
+ * and the inbound partner data the invitation will send (a count of the columns the
+ * acceptor will receive -- its ingress) lands in "What you receive". Only the counts
+ * are surfaced -- the column lists stay in Details, not duplicated into the core.
+ * The direction of each is viewer-relative: under the inviter's "proposing" preview
+ * the same egress count is the inviter's own inbound, so it lands in "What you
+ * receive" there, and the inviter's own send is shown as chips under "What you
+ * disclose" rather than as an ingress line. An attached legal agreement is promoted
+ * in full -- its reference, PURPOSE, and expiry render in the core (not a bare flag),
  * because the purpose is the compliance-pivotal field a 45 CFR 164.528 accounting
- * and FERPA's studies / audit-evaluation exceptions turn on (docs/COMPLIANCE.md)
- * and so must be legible at the consent point; the promoted block IS the whole of
- * the agreement, which then has no separate "Other details" entry. The hints render
- * as one labelled "Before you consent" group (role=group), and the "Other details"
- * toggle references that group's caption as its accessible description, so a
- * screen-reader user is pointed at the disclosure that expands them without
- * re-reading every hint. The ingress hint is the weaker payload signal (receiving
- * partner data is not a disclosure by the acceptor) and is omitted from the
- * inviter's "proposing" preview, which already shows its send as chips.
+ * and FERPA's studies / audit-evaluation exceptions turn on (docs/COMPLIANCE.md) and
+ * so must be legible at the consent point; the promoted block IS the whole of the
+ * agreement, which then has no separate "Other details" entry.
+ *
+ * Result sharing's two lines are NOT equally enforced, and the copy marks the
+ * difference so a cooperative withholding is not read as a cryptographic guarantee.
+ * The viewer's OWN non-receipt is enforced -- a party set to receive no result is
+ * sent none and its receive check fails closed on any it is sent -- so a "No" there
+ * is a hard fact. The PARTNER's non-receipt is COOPERATIVE: keeping the result from
+ * the partner rests on the agreed terms being honored, not on a guarantee this side
+ * can impose (a documented property of one-sided PSI, docs/notes/one-sided-
+ * disclosure.md). Each "No" carries the caveat for its register; a "Yes" is a plain
+ * disclosure and is left unqualified.
  *
  * `perspective` selects the heading and intro copy for the three contexts this
  * renders in -- the acceptor `review`ing a partner's proposal (pre-consent), the
  * acceptor viewing the terms it has `accepted` (during the run, so the copy is
  * past-tense rather than "proposes"), and the inviter looking at the terms it is
  * `proposing` (its own identity, so it is not labelled "Invitation from <self>")
- * -- plus the few viewer-centric blocks whose framing depends on who is reading:
- * Result sharing and the payload send/receive copy read first-person for each
- * party, and the inviter's `proposing` preview surfaces its sent columns as chips
- * above "Other details" (so they are not also repeated inside it). The matching
- * keys and the rest of the body are identical across all three. `headingOrder`
- * sets only the heading's semantic level (its visual size is fixed), so the
- * outline nests correctly under the page's `h1` (acceptor) or section `h2`
- * (inviter).
+ * -- plus the viewer-centric blocks whose framing depends on who is reading: Result
+ * sharing and the payload send/receive copy read first-person for each party, so the
+ * direction tiers place each fact by the viewer's own direction. The matching keys
+ * and the rest of the body are identical across all three. `headingOrder` sets only
+ * the heading's semantic level (its visual size is fixed), so the outline nests
+ * correctly under the page's `h1` (acceptor) or section `h2` (inviter).
  *
  * All partner-controlled free text is sanitized for display by
  * {@link summarizeInvitation}, mirroring the CLI's `displayInvitation`: the
@@ -356,21 +378,22 @@ export function InvitationTerms({
     expires,
     disclosedPayloadColumns,
   });
-  // Always-visible egress notice: the count of columns the inviter requests FROM
-  // the acceptor (summary.payload.receive) -- the acceptor's own data egress.
-  // A count, not the column names: the length is a bounded integer (the column
-  // count is capped at decode, MAX_PAYLOAD_ENTRIES), so it carries no partner
-  // free text into the always-visible core regardless of what the names contain;
-  // the names themselves stay sanitized in Details. The columns the inviter SENDS
-  // are data the acceptor receives, not an egress, so they do not trip this
-  // notice. Undefined when nothing is requested, so the notice is absent rather
-  // than reading "0 columns".
+  // A count of the columns the inviter requests FROM the acceptor
+  // (summary.payload.receive) -- the acceptor's own data egress. A count, not the
+  // column names: the length is a bounded integer (the column count is capped at
+  // decode, MAX_PAYLOAD_ENTRIES), so it carries no partner free text into the
+  // always-visible core regardless of what the names contain; the names themselves
+  // stay sanitized in Details. The columns the inviter SENDS are data the acceptor
+  // receives, not an egress, so they do not trip this line. Undefined when nothing
+  // is requested, so the line is absent rather than reading "0 columns". It lands in
+  // the acceptor's "what you disclose" group (its own data leaving) and, mirrored,
+  // in the inviter's "what you receive" group (the partner's data arriving).
   const receiveCount = summary.payload?.receive.length ?? 0;
   // Direction-first, and a REQUEST (conditional): the inviter asks for the
   // acceptor's own columns, which the acceptor may or may not supply -- so the copy
   // says "requests ... from you", never the definite "you will send", and pairs
-  // with the ingress line's opposite "you will receive ... from your partner" below
-  // so the two adjacent count lines are not confusable at a glance.
+  // with the ingress line's opposite "you will receive ... from your partner" so the
+  // two count lines are not confusable at a glance.
   const egressNotice =
     receiveCount > 0
       ? perspective === "proposing"
@@ -379,49 +402,101 @@ export function InvitationTerms({
         : `Your partner requests ${receiveCount} data ` +
           `${receiveCount === 1 ? "column" : "columns"} from you.`
       : undefined;
-  // Always-visible ingress notice: the count of columns the inviter will SEND the
-  // acceptor for matched records (summary.payload.send) -- inbound partner data the
-  // acceptor is put on notice of before it expands Details. A count, not the names:
-  // the send set is bounded at decode (MAX_PAYLOAD_ENTRIES) and its names are
-  // already sanitized in summarizeInvitation, so the length carries no partner free
-  // text into the core; the names stay in Details. Weaker than the egress notice --
-  // receiving partner data is not a disclosure BY the acceptor -- so it is an
-  // informational presence signal, not a consent-integrity one. Absent under
-  // "proposing": the inviter's own send is already surfaced as chips in the core
-  // there (see below), so its detail is not hidden in Details and the presence-hint
-  // precondition is not met (and an acceptor-framed "you will receive" line would be
-  // wrong for the inviter there). The declared-empty "receive nothing" lock-in has
-  // an empty send (shown "(none)" in Details), so sendCount is 0 and the notice is
-  // absent -- there is no incoming data to flag; only a non-empty send raises it.
+  // A count of the columns the inviter will SEND the acceptor for matched records
+  // (summary.payload.send) -- inbound partner data the acceptor receives. A count,
+  // not the names: the send set is bounded at decode (MAX_PAYLOAD_ENTRIES) and its
+  // names are already sanitized in summarizeInvitation, so the length carries no
+  // partner free text into the core; the names stay in Details. It lands in the
+  // acceptor's "what you receive" group. Absent under "proposing": the inviter's own
+  // send is surfaced as chips in its "what you disclose" group there (see below), so
+  // an acceptor-framed "you will receive" line would be wrong for the inviter. The
+  // declared-empty "receive nothing" lock-in has an empty send (shown "(none)" in
+  // Details), so sendCount is 0 and the line is absent -- there is no incoming data
+  // to flag; only a non-empty send raises it.
   const sendCount = summary.payload?.send.length ?? 0;
   // Direction-first, and a DECLARATION (definite): summary.payload.send is the
   // disclosed set the exchange transmits for matched records, so the copy states
   // "you will receive", the certain counterpart to the egress line's conditional
-  // "requests". Mirrors the always-visible "Result sharing" block's "You will
-  // receive ..." framing directly above.
+  // "requests". Mirrors the "Result sharing" block's "You will receive ..." framing.
   const ingressNotice =
     perspective !== "proposing" && sendCount > 0
       ? `You will receive ${sendCount} data ` +
         `${sendCount === 1 ? "column" : "columns"} from your partner.`
       : undefined;
-  // The presence-hint region renders when any of its three flags fires; the "Other
-  // details" toggle's aria-describedby is gated on the same condition, so it never
-  // dangles at an absent region.
-  const hasPresenceHints =
-    egressNotice !== undefined ||
-    ingressNotice !== undefined ||
-    summary.legalAgreement !== undefined;
+  // Result sharing is stated viewer-relative: LINE A is the viewer's OWN receipt,
+  // LINE B the partner's. This split -- not the raw inviter fields -- is what the
+  // enforced-vs-cooperative caveats key on (see the block below), so it is computed
+  // once here. Under "proposing" the viewer is the inviter; otherwise the acceptor,
+  // whose terms mirror the inviter's (its receipt is the inviter's shareWithPartner
+  // and vice versa), so the two fields swap by perspective.
+  const viewerReceivesResult =
+    perspective === "proposing"
+      ? summary.inviterReceivesOutput
+      : summary.inviterSharesResult;
+  const partnerReceivesResult =
+    perspective === "proposing"
+      ? summary.inviterSharesResult
+      : summary.inviterReceivesOutput;
+  const partnerReceiptLabel =
+    perspective === "proposing"
+      ? "Your partner will receive the result"
+      : "Your partner (the inviter) will receive the result";
+  // The acceptor's own outbound disclosure block renders as either the actual send
+  // list (a chosen file supplies outboundColumns) or, on the pre-file review screen,
+  // the fixed-copy forward-reference. Both are the acceptor's data leaving, so they
+  // sit in the "what you disclose" group with the egress request; the inviter's own
+  // send renders there as chips under "proposing" instead.
+  const outboundSendListRenders =
+    perspective !== "proposing" && outboundColumns !== undefined;
+  const outboundForwardRefRenders =
+    perspective === "review" && outboundColumns === undefined;
+  // The "what you disclose" group renders when this viewer discloses anything: the
+  // inviter always shows its send chips under "proposing"; the acceptor shows its
+  // outbound block and/or the egress request.
+  const showsDiscloseGroup =
+    perspective === "proposing" ||
+    outboundSendListRenders ||
+    outboundForwardRefRenders ||
+    egressNotice !== undefined;
+  // The "what you receive" group renders when this viewer receives partner data: the
+  // acceptor's ingress line, or -- mirrored -- the inviter's own request of its
+  // partner under "proposing" (the same egressNotice, which is the inviter's inbound
+  // there).
+  const showsReceiveGroup =
+    (perspective !== "proposing" && ingressNotice !== undefined) ||
+    (perspective === "proposing" && egressNotice !== undefined);
   const [detailsOpen, setDetailsOpen] = useState(false);
   // Stable id linking the disclosure toggle (aria-controls) to its panel; useId
   // keeps it consistent across SSR and hydration.
   const detailsId = useId();
-  // The "before you consent" presence-hint region is a role="group" named by its
-  // caption (presenceHintsLabelId via aria-labelledby), so assistive tech announces
-  // the hints as one group. The "Other details" toggle references that same caption
-  // as its aria-describedby -- a concise one-phrase pointer ("Before you consent")
-  // to the section whose detail it expands, matching the short-subline describedby
-  // the matching toggle uses rather than re-reading every hint line onto the toggle.
-  const presenceHintsLabelId = useId();
+  // The direction tiers of the always-visible core are each a role="group" named by
+  // its caption (via aria-labelledby), so assistive tech announces each tier's facts
+  // as one related set rather than as disconnected sentences -- the same labelled-
+  // group semantics the former single "Before you consent" region carried, now split
+  // by disclosure direction. An attached legal agreement is a cross-cutting
+  // governance frame (not a direction), so it carries its own labelled group.
+  const produceGroupLabelId = useId();
+  const discloseGroupLabelId = useId();
+  const receiveGroupLabelId = useId();
+  const legalGroupLabelId = useId();
+  // The "Other details" toggle is self-describing: a one-line summary of the
+  // disclosure's contents renders beneath it and is associated as the toggle's
+  // aria-describedby (detailsSummaryId), so a reader -- sighted or not -- knows what
+  // expanding it reveals rather than reading a bare "Other details" label. Other
+  // details always holds the personal-data and duplicate-match blocks, so the summary
+  // (and the association) is always present and never dangles.
+  const detailsSummaryId = useId();
+  // Whether the "Additional data for matched records" block renders in Details --
+  // reused to name it in the self-describing summary, so the summary lists exactly
+  // the sections the disclosure actually contains.
+  const showsPayloadDetail =
+    summary.payload !== undefined &&
+    ((summary.payload.sendDeclared && perspective !== "proposing") ||
+      summary.payload.receiveDeclared);
+  const otherDetailsContents = ["the personal data used"];
+  if (showsPayloadDetail)
+    otherDetailsContents.push("the columns exchanged for matched records");
+  otherDetailsContents.push("the duplicate-match setting");
   // The whole matching list is itself a default-collapsed "Matching strategies"
   // disclosure; this is its toggle state, the id its aria-controls points at, and
   // the id of the always-visible field summary associated as the toggle's
@@ -488,7 +563,48 @@ export function InvitationTerms({
             : "These are the details your partner proposes for linking your records."}
       </Text>
 
-      <Stack gap="xs">
+      {/* The legal agreement is a cross-cutting GOVERNANCE frame, not a disclosure
+          direction, so it leads the core as its own labelled group ahead of the
+          direction tiers -- it is the authority the whole exchange rests on, and its
+          purpose is the field a 45 CFR 164.528 accounting / FERPA studies /
+          audit-evaluation exception turns on (docs/COMPLIANCE.md), so it must be
+          legible at the consent point rather than demoted below the fold. Its
+          substance is promoted whole -- reference, PURPOSE, and expiry -- so it has
+          no "Other details" entry. All three values are pre-sanitized by
+          summarizeInvitation, and none is folded into the group's accessible name
+          (the fixed flag line), so no raw partner text enters the name. */}
+      {summary.legalAgreement !== undefined && (
+        <Stack role="group" aria-labelledby={legalGroupLabelId} gap={2}>
+          <Text id={legalGroupLabelId} size="sm" fw={600}>
+            This invitation attaches a legal agreement.
+          </Text>
+          <Text size="sm">Reference: {summary.legalAgreement.reference}</Text>
+          {/* "Stated purpose", not "Purpose": the value is partner-authored free
+              text, sanitized but never vetted by psilink (only byte-compared against
+              the partner's own copy at exchange time), so the label marks it as
+              partner-attested rather than an authorization psilink endorses -- the
+              same provenance-marking the allowed-character constraint uses. */}
+          <Text size="sm">
+            Stated purpose: {summary.legalAgreement.purpose}
+          </Text>
+          {/* Name the subject ("Agreement valid through ...") rather than a bare
+              "Valid through <date>": it sits on the same screen as the separate
+              invitation-expiry line below, and at a glance the two same-weight dates
+              are otherwise easy to conflate. */}
+          <Text size="xs" c="dimmed">
+            Agreement valid through {summary.legalAgreement.expirationDate}
+          </Text>
+        </Stack>
+      )}
+
+      {/* Direction tier -- WHAT THE EXCHANGE PRODUCES: the matching method (what the
+          result reveals), the linkage strategy and matching keys (how records are
+          compared), and result sharing (who receives the result). One labelled
+          role="group" so assistive tech announces the tier as one related set. */}
+      <Stack role="group" aria-labelledby={produceGroupLabelId} gap="xs">
+        <Text id={produceGroupLabelId} size="sm" fw={600}>
+          What the exchange produces
+        </Text>
         <Term label="Matching method">
           <Text size="sm">
             {summary.algorithm === "psi-c" ? (
@@ -599,212 +715,156 @@ export function InvitationTerms({
           </div>
         </Stack>
 
-        {/* Viewer-centric, so each party reads its OWN outcome first-person rather
-            than inferring it from the inviter's perspective: this is the consent-
-            legible form for a one-sided exchange, where the acceptor must know plainly
-            whether IT receives a result. The viewer is the inviter under
-            "proposing" (its preview) and the acceptor under "review"/"accepted"; the
-            acceptor receives iff the inviter shares (and shares iff the inviter
-            receives), the mirror the exchange derives. */}
+        {/* Result sharing, stated viewer-relative so each party reads its OWN
+            outcome first-person (the consent-legible form for a one-sided exchange).
+            The two lines are NOT equally enforced, and the copy must not present a
+            trust-contingent "No" as a cryptographic guarantee: Line A (the viewer's
+            own receipt) is enforced -- a party set to receive no result is sent none
+            and its receive check fails closed on any it is sent -- while Line B (the
+            partner's receipt) is COOPERATIVE, resting on the agreed terms being
+            honored rather than on a guarantee this side can impose (a documented
+            property of one-sided PSI, docs/notes/one-sided-disclosure.md). Each "No"
+            carries the caveat for its register; a "Yes" is a plain disclosure with no
+            false-guarantee risk, so it is left unqualified. */}
         <Term label="Result sharing">
-          {perspective === "proposing" ? (
-            <>
-              <Text size="sm">
-                You will receive the matched result:{" "}
-                {yesNo(summary.inviterReceivesOutput)}
-              </Text>
-              <Text size="sm">
-                Your partner will receive the result:{" "}
-                {yesNo(summary.inviterSharesResult)}
-              </Text>
-            </>
-          ) : (
-            <>
-              <Text size="sm">
-                You will receive the matched result:{" "}
-                {yesNo(summary.inviterSharesResult)}
-              </Text>
-              <Text size="sm">
-                Your partner (the inviter) will receive the result:{" "}
-                {yesNo(summary.inviterReceivesOutput)}
-              </Text>
-            </>
+          <Text size="sm">
+            You will receive the matched result: {yesNo(viewerReceivesResult)}
+          </Text>
+          {!viewerReceivesResult && (
+            <Text size="xs" c="dimmed">
+              Enforced: you are sent no result, and any result sent to you is
+              rejected.
+            </Text>
+          )}
+          <Text size="sm">
+            {partnerReceiptLabel}: {yesNo(partnerReceivesResult)}
+          </Text>
+          {!partnerReceivesResult && (
+            <Text size="xs" c="dimmed">
+              By agreement, not enforced: keeping the result from your partner
+              rests on the agreed terms being honored, not on a guarantee this
+              tool imposes.
+            </Text>
           )}
         </Term>
-
-        {/* Always-visible "Before you consent" region, grouped under a labelled
-            caption and kept OUTSIDE the "Other details" disclosure (the same
-            out-of-disclosure pattern the per-key breadth markers follow): the legal
-            agreement, an extra-payload-egress request, and the inbound partner data
-            the invitation will send (the acceptor's ingress) otherwise have NO
-            surfaced signal in the core -- all sit only inside the default-collapsed
-            Details, unlike the matching breadth, which is always visible in each
-            key's header.
-
-            The two PAYLOAD lines surface only PRESENCE (a count), never the detail:
-            the column lists stay one expand down. The legal agreement instead
-            promotes its governance-load-bearing substance -- reference, PURPOSE, and
-            expiry -- into the core ahead of the payload lines, since the purpose is
-            the field a 45 CFR 164.528 accounting / FERPA studies / audit-evaluation
-            exception turns on (docs/COMPLIANCE.md); the promoted block is the whole
-            of the agreement, so it has no "Other details" entry. Its three values
-            are sanitized by summarizeInvitation, and none is folded into an
-            accessible name (the group's own name stays the fixed "Before you
-            consent" caption), so no raw partner text is rendered.
-
-            The region is a role="group" named by its caption (aria-labelledby), so
-            assistive tech announces the flagged facts as one related set rather than
-            disconnected sentences, and the "Other details" toggle points its
-            aria-describedby at that caption (when present), so a non-visual user
-            reaching that toggle hears a concise "Before you consent" pointer to the
-            section it expands -- the short-subline association the matching toggle
-            uses, rather than re-reading every hint line. Both invariants are pinned
-            by render tests.
-
-            The two payload lines lead with WHO does WHAT so their opposite
-            directions are not confusable: the egress line is a conditional REQUEST
-            for the acceptor's own data ("requests ... from you"), the ingress line
-            the inviter's definite DECLARATION of what it will send ("you will
-            receive ... from your partner"). The ingress line is the weaker signal
-            (receiving partner data is not a disclosure by the acceptor) and is absent
-            under the inviter's own "proposing" preview, which surfaces its send as
-            chips in the core instead. */}
-        {hasPresenceHints && (
-          <Stack role="group" aria-labelledby={presenceHintsLabelId} gap={4}>
-            <Text id={presenceHintsLabelId} size="sm" fw={600}>
-              {perspective === "proposing"
-                ? "Before your partner consents"
-                : "Before you consent"}
-            </Text>
-            {/* The legal agreement, promoted ahead of the payload-column hints as
-                its own tight sub-block: a bold lead flag, then the reference,
-                purpose, and expiry. Grouped in one Stack (gap 2, tighter than the
-                region's gap 4) so the core surfaces a single governance block, not a
-                flat accreting list of loose sibling lines. All three values come
-                pre-sanitized from summarizeInvitation. This block is the whole of
-                the agreement now -- it has no counterpart inside "Other details". */}
-            {summary.legalAgreement !== undefined && (
-              <Stack gap={2}>
-                <Text size="sm" fw={500}>
-                  This invitation attaches a legal agreement.
-                </Text>
-                <Text size="sm">
-                  Reference: {summary.legalAgreement.reference}
-                </Text>
-                {/* "Stated purpose", not "Purpose": the value is partner-authored
-                    free text, sanitized but never vetted by psilink (only
-                    byte-compared against the partner's own copy at exchange time),
-                    so once promoted into the prominent core the label marks it as
-                    partner-attested rather than an authorization psilink endorses --
-                    the same provenance-marking the allowed-character constraint uses
-                    ("partner-supplied ... not verified by psilink"). */}
-                <Text size="sm">
-                  Stated purpose: {summary.legalAgreement.purpose}
-                </Text>
-                {/* Name the subject ("Agreement valid through ...") rather than a
-                    bare "Valid through <date>": promoting the agreement's expiry
-                    into the always-visible core puts it on the same screen as the
-                    separate invitation-expiry line below, and at a glance the two
-                    same-weight dates are otherwise easy to conflate. */}
-                <Text size="xs" c="dimmed">
-                  Agreement valid through{" "}
-                  {summary.legalAgreement.expirationDate}
-                </Text>
-              </Stack>
-            )}
-            {egressNotice !== undefined && (
-              <Text size="sm" fw={500}>
-                {egressNotice}
-              </Text>
-            )}
-            {ingressNotice !== undefined && (
-              <Text size="sm" fw={500}>
-                {ingressNotice}
-              </Text>
-            )}
-          </Stack>
-        )}
-
-        {/* The columns this party sends to its partner for matched records,
-            surfaced as chips in the always-visible core -- right above the "Other
-            details" disclosure -- rather than only inside it, reusing the same chip
-            visual ({@link ColumnChips}) the home page's default-exchange-columns
-            surface uses. Only the inviter's own "proposing" preview shows it here;
-            the acceptor's review/accepted views keep the send list inline under
-            "Other details". Driven by summary.payload.send (already sanitized by
-            summarizeInvitation), so it cannot drift from what the invitation
-            declares. The send is an eager, definite declaration under "proposing"
-            (the editor preview derives it from the disclosure grid, and both web
-            mint paths author it to the disclosed set), so an empty set reads as a
-            positive "no columns" confirmation rather than an unknown. */}
-        {perspective === "proposing" && (
-          <Term label="Columns sent to your partner">
-            {summary.payload !== undefined &&
-            summary.payload.send.length > 0 ? (
-              <ColumnChips
-                columns={summary.payload.send}
-                label="Columns sent to your partner"
-              />
-            ) : (
-              <Text size="sm" c="dimmed">
-                No columns are sent to your partner; your file is used only to
-                find matches.
-              </Text>
-            )}
-          </Term>
-        )}
-
-        {/* The acceptor's OWN outbound disclosure, in the same always-visible slot
-            as the inviter's proposing block above, so "What you will send" sits
-            with the agreed terms and ABOVE "Other details" rather than after the
-            whole panel. Only the acceptor passes outboundColumns; the inviter's own
-            send already renders from its proposing block. */}
-        {perspective !== "proposing" && outboundColumns !== undefined && (
-          <Term label="What you will send to your partner">
-            {outboundColumns.length > 0 ? (
-              // These are the operator's OWN CSV headers (from the live metadata
-              // disclosure), not a sanitized summary value, so sanitize them for
-              // display like every other column-name surface (ColumnChips renders
-              // verbatim) -- a header carrying bidi/zero-width/homoglyph characters
-              // must not misrepresent to the operator what leaves their machine.
-              <ColumnChips
-                columns={outboundColumns.map((name) =>
-                  sanitizeForDisplay(name),
-                )}
-                label="What you will send to your partner"
-              />
-            ) : (
-              <Text size="sm" c="dimmed">
-                No columns are sent to your partner; only the linkage result
-                (which of your rows matched) is produced.
-              </Text>
-            )}
-          </Term>
-        )}
-
-        {/* The review-screen forward-reference to that same outbound disclosure,
-            occupying the slot the actual send list takes once a file is chosen.
-            Before a file is chosen outboundColumns is undefined -- the set is not
-            yet known -- so the block above cannot render, yet what the acceptor
-            discloses is its highest-stakes payload fact and the consent checkbox
-            sits on this very screen. Surface a forward-reference so the acceptor
-            knows at the decision point that an outbound disclosure is coming and
-            that it confirms the exact columns after choosing its file (in "Prepare
-            your data"). Gated to perspective === "review" AND outboundColumns ===
-            undefined: mutually exclusive with the block above (which needs
-            outboundColumns !== undefined), so the two never both show, and off under
-            "proposing" (whose send already renders as chips). Fixed copy, not
-            partner-controlled text, so it needs no per-render sanitization; it names
-            no column count or names, which are not yet known here. */}
-        {perspective === "review" && outboundColumns === undefined && (
-          <Term label="What you will send to your partner">
-            <Text size="sm" c="dimmed">
-              After you choose your file, you will confirm exactly which of its
-              columns are sent to your partner for matched records.
-            </Text>
-          </Term>
-        )}
       </Stack>
+
+      {/* Direction tier -- WHAT YOU DISCLOSE: the viewer's own data leaving. The
+          acceptor's outbound send (the columns it will send, or the pre-file
+          forward-reference) plus the egress request for its data; the inviter's own
+          send chips under "proposing". A labelled role="group", rendered only when
+          this viewer discloses something. */}
+      {showsDiscloseGroup && (
+        <Stack role="group" aria-labelledby={discloseGroupLabelId} gap="xs">
+          <Text id={discloseGroupLabelId} size="sm" fw={600}>
+            What you disclose
+          </Text>
+
+          {/* The inviter's own send, surfaced as chips (reusing {@link ColumnChips},
+              the home page's default-exchange-columns visual). Only the inviter's
+              "proposing" preview shows it here; the acceptor's send renders below.
+              Driven by summary.payload.send (already sanitized), so it cannot drift
+              from what the invitation declares. The send is an eager, definite
+              declaration under "proposing", so an empty set reads as a positive "no
+              columns" confirmation rather than an unknown. */}
+          {perspective === "proposing" && (
+            <Term label="Columns sent to your partner">
+              {summary.payload !== undefined &&
+              summary.payload.send.length > 0 ? (
+                <ColumnChips
+                  columns={summary.payload.send}
+                  label="Columns sent to your partner"
+                />
+              ) : (
+                <Text size="sm" c="dimmed">
+                  No columns are sent to your partner; your file is used only to
+                  find matches.
+                </Text>
+              )}
+            </Term>
+          )}
+
+          {/* The acceptor's OWN outbound disclosure once a file is chosen (its live
+              metadata disclosure). Condition inlined (rather than the
+              outboundSendListRenders boolean, which the group-render check also uses)
+              so TypeScript narrows outboundColumns to defined inside. */}
+          {perspective !== "proposing" && outboundColumns !== undefined && (
+            <Term label="What you will send to your partner">
+              {outboundColumns.length > 0 ? (
+                // These are the operator's OWN CSV headers (from the live metadata
+                // disclosure), not a sanitized summary value, so sanitize them for
+                // display like every other column-name surface (ColumnChips renders
+                // verbatim) -- a header carrying bidi/zero-width/homoglyph characters
+                // must not misrepresent to the operator what leaves their machine.
+                <ColumnChips
+                  columns={outboundColumns.map((name) =>
+                    sanitizeForDisplay(name),
+                  )}
+                  label="What you will send to your partner"
+                />
+              ) : (
+                <Text size="sm" c="dimmed">
+                  No columns are sent to your partner; only the linkage result
+                  (which of your rows matched) is produced.
+                </Text>
+              )}
+            </Term>
+          )}
+
+          {/* The review-screen forward-reference to that same outbound disclosure,
+              occupying the slot the actual send list takes once a file is chosen.
+              Before a file is chosen outboundColumns is undefined -- the set is not
+              yet known -- so the block above cannot render, yet what the acceptor
+              discloses is its highest-stakes payload fact and the consent checkbox
+              sits on this very screen. Gated to review AND outboundColumns undefined,
+              so it is mutually exclusive with the block above. Fixed copy, so no
+              per-render sanitization; it names no count or names, not yet known. */}
+          {outboundForwardRefRenders && (
+            <Term label="What you will send to your partner">
+              <Text size="sm" c="dimmed">
+                After you choose your file, you will confirm exactly which of
+                its columns are sent to your partner for matched records.
+              </Text>
+            </Term>
+          )}
+
+          {/* The egress request: a count of the acceptor's own columns the inviter
+              asks for. A conditional REQUEST ("requests ... from you"), leading with
+              WHO does WHAT so it is not confused with the ingress line's opposite
+              direction. Absent under "proposing", where this same count is the
+              inviter's inbound and lands in "what you receive" instead. */}
+          {perspective !== "proposing" && egressNotice !== undefined && (
+            <Text size="sm" fw={500}>
+              {egressNotice}
+            </Text>
+          )}
+        </Stack>
+      )}
+
+      {/* Direction tier -- WHAT YOU RECEIVE: partner data arriving to this viewer.
+          The acceptor's ingress (a count of the columns the invitation will send it
+          for matched records) -- the weaker signal, since receiving is not a
+          disclosure BY the acceptor -- or, mirrored, the inviter's own request of its
+          partner under "proposing" (that request is the inviter's inbound). A
+          labelled role="group", rendered only when this viewer receives partner
+          data. */}
+      {showsReceiveGroup && (
+        <Stack role="group" aria-labelledby={receiveGroupLabelId} gap="xs">
+          <Text id={receiveGroupLabelId} size="sm" fw={600}>
+            What you receive
+          </Text>
+          {ingressNotice !== undefined && (
+            <Text size="sm" fw={500}>
+              {ingressNotice}
+            </Text>
+          )}
+          {perspective === "proposing" && egressNotice !== undefined && (
+            <Text size="sm" fw={500}>
+              {egressNotice}
+            </Text>
+          )}
+        </Stack>
+      )}
 
       {/* A real disclosure: the toggle carries aria-expanded and aria-controls,
           and while closed Mantine's Collapse hides the panel from assistive tech
@@ -814,12 +874,19 @@ export function InvitationTerms({
           wrapper below, not the Collapse panel, so the reference resolves to a
           present element however Mantine mounts or hides the panel across motion
           preferences. A render test pins this against the accessibility tree, so
-          the wrapper is not safe to inline back onto the panel. */}
+          the wrapper is not safe to inline back onto the panel.
+
+          The toggle is self-describing: its aria-describedby points at the
+          one-line contents summary below (detailsSummaryId), so a reader -- sighted
+          or not -- knows what expanding it reveals rather than a bare "Other
+          details" label. Other details always holds the personal-data and
+          duplicate-match blocks, so the summary always renders and the reference
+          never dangles. */}
       <UnstyledButton
         onClick={() => setDetailsOpen((open) => !open)}
         aria-expanded={detailsOpen}
         aria-controls={detailsId}
-        aria-describedby={hasPresenceHints ? presenceHintsLabelId : undefined}
+        aria-describedby={detailsSummaryId}
       >
         <Group gap={4}>
           <IconChevronRight
@@ -835,6 +902,14 @@ export function InvitationTerms({
           </Text>
         </Group>
       </UnstyledButton>
+      {/* The self-describing summary: a fixed-copy, one-line enumeration of the
+          sections the disclosure contains, derived from what actually renders
+          (otherDetailsContents). No partner text enters it -- the section names are
+          fixed, and the payload-detail phrase is gated on showsPayloadDetail, the
+          same predicate that renders the block. */}
+      <Text id={detailsSummaryId} size="xs" c="dimmed">
+        Contains {joinList(otherDetailsContents)}.
+      </Text>
 
       <div id={detailsId}>
         <Collapse expanded={detailsOpen}>
@@ -871,60 +946,33 @@ export function InvitationTerms({
 
             {/* Renders only when it has content: the acceptor's send list (hidden
                 in the inviter's "proposing" preview, which shows its send as chips
-                above) or a declared receive (present even when empty). The guard
-                mirrors the two inner conditions below so the Term never renders an
-                empty label -- which it would in the inviter's preview, where the
-                send block is suppressed and receive is usually undeclared. */}
-            {summary.payload !== undefined &&
-              ((summary.payload.sendDeclared && perspective !== "proposing") ||
-                summary.payload.receiveDeclared) && (
-                <Term label="Additional data for matched records">
-                  {/* Viewer-centric, like Result sharing: the acceptor reads the
+                above) or a declared receive (present even when empty). The guard is
+                showsPayloadDetail -- the same predicate the self-describing "Other
+                details" summary names this block by, so the summary lists exactly the
+                sections that actually render. */}
+            {showsPayloadDetail && summary.payload !== undefined && (
+              <Term label="Additional data for matched records">
+                {/* Viewer-centric, like Result sharing: the acceptor reads the
                     inviter's send as the partner's ("Your partner will send"). The
                     inviter's own send is surfaced as chips above "Other details"
                     instead, so it is suppressed here under "proposing". */}
-                  {/* Shown whenever the send set is a definite declaration --
+                {/* Shown whenever the send set is a definite declaration --
                     including the empty set, rendered "(none)" so the strict
                     "receive nothing" lock-in is visible rather than inferred from a
                     missing line (the CLI's displayInvitation shows the same). A
                     lazy send (not declared) is omitted instead. */}
-                  {summary.payload.sendDeclared &&
-                    perspective !== "proposing" && (
-                      <Stack gap={2}>
-                        <Text size="sm">Your partner will send:</Text>
-                        {summary.payload.send.length > 0 ? (
-                          // One column per item rather than a joined string: a
-                          // partner-controlled column name may contain the separator,
-                          // which joined text would render as spurious extra columns.
-                          // Keyed by index -- column order is fixed and a sanitized
-                          // name is not unique.
-                          <List size="sm" withPadding listStyleType="circle">
-                            {summary.payload.send.map((column, index) => (
-                              <List.Item key={index}>{column}</List.Item>
-                            ))}
-                          </List>
-                        ) : (
-                          <Text size="sm" c="dimmed">
-                            (none) -- any payload column would abort the
-                            exchange
-                          </Text>
-                        )}
-                      </Stack>
-                    )}
-                  {/* Mirror of the send block: a declared receive is shown even
-                      when empty, rendered "(none)" so the strict "the acceptor
-                      sends nothing" assertion is visible rather than inferred from
-                      a missing line. A lazy (undeclared) receive is omitted. */}
-                  {summary.payload.receiveDeclared && (
+                {summary.payload.sendDeclared &&
+                  perspective !== "proposing" && (
                     <Stack gap={2}>
-                      <Text size="sm">
-                        {perspective === "proposing"
-                          ? "You request from your partner:"
-                          : "Your partner requests from you:"}
-                      </Text>
-                      {summary.payload.receive.length > 0 ? (
+                      <Text size="sm">Your partner will send:</Text>
+                      {summary.payload.send.length > 0 ? (
+                        // One column per item rather than a joined string: a
+                        // partner-controlled column name may contain the separator,
+                        // which joined text would render as spurious extra columns.
+                        // Keyed by index -- column order is fixed and a sanitized
+                        // name is not unique.
                         <List size="sm" withPadding listStyleType="circle">
-                          {summary.payload.receive.map((column, index) => (
+                          {summary.payload.send.map((column, index) => (
                             <List.Item key={index}>{column}</List.Item>
                           ))}
                         </List>
@@ -935,8 +983,32 @@ export function InvitationTerms({
                       )}
                     </Stack>
                   )}
-                </Term>
-              )}
+                {/* Mirror of the send block: a declared receive is shown even
+                      when empty, rendered "(none)" so the strict "the acceptor
+                      sends nothing" assertion is visible rather than inferred from
+                      a missing line. A lazy (undeclared) receive is omitted. */}
+                {summary.payload.receiveDeclared && (
+                  <Stack gap={2}>
+                    <Text size="sm">
+                      {perspective === "proposing"
+                        ? "You request from your partner:"
+                        : "Your partner requests from you:"}
+                    </Text>
+                    {summary.payload.receive.length > 0 ? (
+                      <List size="sm" withPadding listStyleType="circle">
+                        {summary.payload.receive.map((column, index) => (
+                          <List.Item key={index}>{column}</List.Item>
+                        ))}
+                      </List>
+                    ) : (
+                      <Text size="sm" c="dimmed">
+                        (none) -- any payload column would abort the exchange
+                      </Text>
+                    )}
+                  </Stack>
+                )}
+              </Term>
+            )}
 
             <Term label="Duplicate matches">
               <Text size="sm">

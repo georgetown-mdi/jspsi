@@ -118,14 +118,17 @@ function collapseFor(name: string): HTMLElement {
   return panel;
 }
 
-// The "Before you consent" presence-hint region (role=group), or null when no hint
-// fires and the region is not rendered. Scoping an absence assertion to this region
-// avoids false matches against the similarly-worded lines elsewhere on the screen:
-// the "You will receive the matched result" line in Result sharing, and the "Your
-// partner will send:" / "Your partner requests from you:" detail lines inside "Other
-// details". It is the only role=group carrying aria-labelledby on the screen.
-function hintGroup(): HTMLElement | null {
-  return document.querySelector<HTMLElement>('[role="group"][aria-labelledby]');
+// A named direction/governance group in the always-visible core. The core is tiered
+// into labelled groups (role=group + aria-labelledby) -- "What you disclose", "What
+// you receive", "What the exchange produces", and the legal-agreement governance
+// group -- so a fact is asserted against the tier it belongs to rather than against
+// the whole container. Locating by role+name (not a bare [role=group] querySelector)
+// keeps an absence assertion from false-matching the similarly-worded lines elsewhere
+// on the screen: the "You will receive the matched result" line in Result sharing,
+// and the "Your partner will send:" / "Your partner requests from you:" detail lines
+// inside "Other details".
+function group(name: string) {
+  return page.getByRole("group", { name });
 }
 
 // Mantine 9's Collapse keeps a collapsed panel's content mounted inside a React
@@ -533,6 +536,13 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
     expect(container!.textContent).toContain(
       "Your partner (the inviter) will receive the result: Yes",
     );
+    // The acceptor's OWN non-receipt is a hard fact -- enforced by this tool, not a
+    // matter of trusting the partner -- so its "No" carries the enforced caveat.
+    expect(container!.textContent).toContain(
+      "Enforced: you are sent no result",
+    );
+    // The partner receives here (Yes), so no cooperative caveat renders.
+    expect(container!.textContent).not.toContain("By agreement, not enforced");
   });
 
   test("an acceptor of a partner-only invitation is told plainly it receives the result", async () => {
@@ -544,6 +554,11 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
     expect(container!.textContent).toContain(
       "Your partner (the inviter) will receive the result: No",
     );
+    // The PARTNER's non-receipt is cooperative -- it rests on the terms being
+    // honored, not a guarantee this side imposes -- so its "No" is marked distinctly
+    // from an enforced one, and the acceptor's own "Yes" carries no enforced caveat.
+    expect(container!.textContent).toContain("By agreement, not enforced");
+    expect(container!.textContent).not.toContain("Enforced: you are sent no");
   });
 
   test("the inviter's own preview frames the outcome for the proposer", async () => {
@@ -558,13 +573,32 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
     expect(container!.textContent).toContain(
       "Your partner will receive the result: No",
     );
+    // The proposer's partner does not receive: a cooperative "No", so it carries the
+    // by-agreement caveat and the proposer's own "Yes" carries none.
+    expect(container!.textContent).toContain("By agreement, not enforced");
+    expect(container!.textContent).not.toContain("Enforced: you are sent no");
+  });
+
+  test("a symmetric both-receive exchange qualifies neither result line", async () => {
+    // Both parties receive: two "Yes" lines, so neither the enforced nor the
+    // cooperative caveat renders -- the registers are marked only on a withholding.
+    renderOutput({ expectsOutput: true, shareWithPartner: true });
+    await expect.element(page.getByText("Result sharing")).toBeInTheDocument();
+    expect(container!.textContent).toContain(
+      "You will receive the matched result: Yes",
+    );
+    expect(container!.textContent).toContain(
+      "Your partner (the inviter) will receive the result: Yes",
+    );
+    expect(container!.textContent).not.toContain("Enforced: you are sent no");
+    expect(container!.textContent).not.toContain("By agreement, not enforced");
   });
 });
 
-describe("InvitationTerms: always-visible egress and legal-agreement presence hints", () => {
-  // Render a chosen terms object under the given perspective. The presence hints
-  // live in the always-visible core; the detail they point at stays in the "Other
-  // details" disclosure.
+describe("InvitationTerms: always-visible egress and legal-agreement facts, tiered by direction", () => {
+  // Render a chosen terms object under the given perspective. These facts live in the
+  // always-visible core, each under the direction tier it belongs to; the detail they
+  // count stays in the "Other details" disclosure.
   function render(
     linkageTerms: LinkageTerms,
     perspective?: "review" | "accepted" | "proposing",
@@ -581,34 +615,36 @@ describe("InvitationTerms: always-visible egress and legal-agreement presence hi
     );
   }
 
-  test("the egress hint surfaces a column count in the always-visible core, outside the 'Other details' disclosure", async () => {
-    // Two columns the inviter requests FROM the acceptor: the acceptor's egress.
+  test("the egress count lands in the 'What you disclose' tier, outside the 'Other details' disclosure", async () => {
+    // Two columns the inviter requests FROM the acceptor: the acceptor's egress -- its
+    // own data leaving, so it belongs to the "what you disclose" direction.
     render({
       ...terms,
       payload: { send: [], receive: [{ name: "ssn" }, { name: "zip_code" }] },
     });
     await expect.element(toggle("Other details")).toBeInTheDocument();
 
-    // The presence/count hint is on screen ... (the trailing period pins the
-    // exact rendered copy: a presence assertion of the full sentence). The line
-    // leads with the actor and direction ("Your partner requests ... from you"), so
-    // it is not confusable with the opposite-direction ingress line.
-    expect(container!.textContent).toContain(
+    // The count is under the "What you disclose" group (accessibility tree, not
+    // styling): the trailing period pins the exact rendered copy, and the line leads
+    // with the actor and direction ("Your partner requests ... from you") so it is
+    // not confusable with the opposite-direction ingress line.
+    const disclose = group("What you disclose");
+    await expect.element(disclose).toBeInTheDocument();
+    expect(disclose.element().textContent).toContain(
       "Your partner requests 2 data columns from you.",
     );
-    // ... and OUTSIDE the disclosure (structure, not styling): the hint text is
-    // not inside the "Other details" panel, which carries the collapsed detail
-    // even while hidden.
+    // ... and OUTSIDE the disclosure: the count is not inside the "Other details"
+    // panel, which carries the collapsed detail even while hidden.
     const panel = await readyPanel("Other details");
     expect(panel.textContent).not.toContain(
       "Your partner requests 2 data columns from you",
     );
-    // The column NAMES themselves stay one expand down in the disclosure -- the
-    // hint surfaces only the count, not the detail.
+    // The column NAMES themselves stay one expand down in the disclosure -- the tier
+    // surfaces only the count, not the detail.
     expect(panel.textContent).toContain("zip_code");
   });
 
-  test("the egress hint reads singular for a single requested column", async () => {
+  test("the egress count reads singular for a single requested column", async () => {
     render({
       ...terms,
       payload: { send: [], receive: [{ name: "ssn" }] },
@@ -619,9 +655,10 @@ describe("InvitationTerms: always-visible egress and legal-agreement presence hi
     );
   });
 
-  test("the egress hint reads first-person in the inviter's own preview", async () => {
-    // Under "proposing" the viewer is the inviter, so the egress reads as its own
-    // request of its partner ("You request ... from your partner").
+  test("the egress count is the inviter's OWN inbound under 'proposing', so it lands in 'What you receive'", async () => {
+    // Under "proposing" the viewer is the inviter: the same request is its own inbound
+    // ("You request ... from your partner"), so it belongs to the inviter's "what you
+    // receive" direction, not "what you disclose".
     render(
       {
         ...terms,
@@ -630,43 +667,41 @@ describe("InvitationTerms: always-visible egress and legal-agreement presence hi
       "proposing",
     );
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(container!.textContent).toContain(
+    const receive = group("What you receive");
+    await expect.element(receive).toBeInTheDocument();
+    expect(receive.element().textContent).toContain(
       "You request 2 data columns from your partner.",
     );
   });
 
-  test("no egress hint when the inviter requests no columns from the acceptor", async () => {
+  test("no egress count when the inviter requests no columns from the acceptor", async () => {
     // The module terms request nothing from the acceptor (receive: []), though they
-    // do send a column and attach an agreement -- so the hint group renders, without
-    // the egress line. Scope the absence to the group so the Details "Your partner
-    // requests from you:" line (a declared-empty receive) is not mistaken for it.
+    // do send a column -- so the "What you disclose" tier still renders (the acceptor's
+    // own outbound forward-reference), without any egress-request line. Scope the
+    // absence to that tier so the Details "Your partner requests from you:" line (a
+    // declared-empty receive) is not mistaken for it.
     render(terms);
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    const group = hintGroup();
-    expect(group).not.toBeNull();
-    expect(group!.textContent).not.toContain("requests");
+    const disclose = group("What you disclose");
+    await expect.element(disclose).toBeInTheDocument();
+    expect(disclose.element().textContent).not.toContain("requests");
   });
 
-  test("the legal agreement is promoted whole -- reference, purpose, and expiry -- into the always-visible core, outside the 'Other details' disclosure", async () => {
-    // The module terms attach a legal agreement (the agreement block shows alongside
-    // the ingress hint the module's single sent column raises). Its governance-
-    // load-bearing substance -- reference, PURPOSE, and expiry -- is surfaced in the
-    // core, not a bare "attaches an agreement" flag, since the purpose is the field
-    // a 164.528 accounting / FERPA exception turns on (docs/COMPLIANCE.md) and must
-    // be legible at the consent point.
+  test("the legal agreement is promoted whole into its own governance group, outside the 'Other details' disclosure", async () => {
+    // The module terms attach a legal agreement. Its governance-load-bearing substance
+    // -- reference, PURPOSE, and expiry -- is surfaced in the core as its own labelled
+    // group (named by the flag line), not a bare "attaches an agreement" flag, since
+    // the purpose is the field a 164.528 accounting / FERPA exception turns on
+    // (docs/COMPLIANCE.md) and must be legible at the consent point.
     render(terms);
     await expect.element(toggle("Other details")).toBeInTheDocument();
 
-    expect(container!.textContent).toContain(
-      "This invitation attaches a legal agreement.",
-    );
-    expect(container!.textContent).toContain("Reference: MOU-2025-0042");
-    expect(container!.textContent).toContain(
-      "Stated purpose: Audit and evaluation",
-    );
-    expect(container!.textContent).toContain(
-      "Agreement valid through 2027-12-31",
-    );
+    const agreement = group("This invitation attaches a legal agreement.");
+    await expect.element(agreement).toBeInTheDocument();
+    const el = agreement.element();
+    expect(el.textContent).toContain("Reference: MOU-2025-0042");
+    expect(el.textContent).toContain("Stated purpose: Audit and evaluation");
+    expect(el.textContent).toContain("Agreement valid through 2027-12-31");
 
     // The promoted block IS the whole of the agreement: it is not also duplicated
     // inside the "Other details" disclosure (structure, not styling). The reference
@@ -688,13 +723,14 @@ describe("InvitationTerms: always-visible egress and legal-agreement presence hi
   });
 });
 
-describe("InvitationTerms: always-visible ingress presence hint", () => {
-  // The ingress companion to the egress hint: an always-visible count of the
+describe("InvitationTerms: always-visible ingress count in the 'What you receive' tier", () => {
+  // The ingress companion to the egress count: an always-visible count of the
   // columns the invitation will SEND the acceptor for matched records (inbound
-  // partner data), surfaced in the core so the acceptor is on notice before
-  // expanding "Other details". Weaker than the egress hint -- receiving is not a
-  // disclosure by the acceptor -- so it fires only on a non-empty send and never in
-  // the inviter's own "proposing" preview (which shows its send as chips instead).
+  // partner data), surfaced in the "What you receive" tier so the acceptor is on
+  // notice before expanding "Other details". Weaker than the egress count -- receiving
+  // is not a disclosure by the acceptor -- so it fires only on a non-empty send and
+  // never in the inviter's own "proposing" preview (which shows its send as chips in
+  // "What you disclose" instead).
   function render(
     linkageTerms: LinkageTerms,
     options?: {
@@ -717,7 +753,7 @@ describe("InvitationTerms: always-visible ingress presence hint", () => {
     );
   }
 
-  test("the ingress hint surfaces a column count in the always-visible core, outside the 'Other details' disclosure", async () => {
+  test("the ingress count lands in the 'What you receive' tier, outside the 'Other details' disclosure", async () => {
     // Two columns the inviter will send the acceptor for matched records.
     render({
       ...terms,
@@ -728,16 +764,17 @@ describe("InvitationTerms: always-visible ingress presence hint", () => {
     });
     await expect.element(toggle("Other details")).toBeInTheDocument();
 
-    // The presence/count hint is on screen ... (the trailing period pins the exact
-    // rendered copy: a presence assertion of the full sentence). It leads with "You
-    // will receive ... from your partner", the opposite direction from the egress
-    // line, so the two adjacent count lines are not confusable.
-    expect(container!.textContent).toContain(
+    // The count is under the "What you receive" group (accessibility tree, not
+    // styling): the trailing period pins the exact rendered copy, and it leads with
+    // "You will receive ... from your partner", the opposite direction from the egress
+    // line, so the two count lines are not confusable.
+    const receive = group("What you receive");
+    await expect.element(receive).toBeInTheDocument();
+    expect(receive.element().textContent).toContain(
       "You will receive 2 data columns from your partner.",
     );
-    // ... and OUTSIDE the disclosure (structure, not styling): the hint text is not
-    // inside the "Other details" panel, which carries the collapsed detail even
-    // while hidden.
+    // ... and OUTSIDE the disclosure: the count is not inside the "Other details"
+    // panel, which carries the collapsed detail even while hidden.
     const panel = await readyPanel("Other details");
     expect(panel.textContent).not.toContain(
       "You will receive 2 data columns from your partner",
@@ -769,16 +806,15 @@ describe("InvitationTerms: always-visible ingress presence hint", () => {
     );
   });
 
-  test("the declared-empty 'receive nothing' lock-in raises no ingress hint", async () => {
+  test("the declared-empty 'receive nothing' lock-in raises no ingress count and no receive tier", async () => {
     // A carried-but-empty disclosed set is the strict "(none)" lock-in: there is no
-    // incoming data to flag, so the hint is absent even though the send is DECLARED.
-    // Scope the absence to the hint group -- Result sharing's "You will receive the
-    // matched result" line would false-match a whole-container search.
+    // incoming data to flag, so the count is absent even though the send is DECLARED.
+    // With no ingress (and no request under review), the "What you receive" tier does
+    // not render at all -- distinct from Result sharing's "You will receive the
+    // matched result" line, which lives in the produce tier.
     render(terms, { disclosedPayloadColumns: [] });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    const group = hintGroup();
-    expect(group).not.toBeNull();
-    expect(group!.textContent).not.toContain("You will receive");
+    expect(group("What you receive").query()).toBeNull();
     // ... yet the declared-empty send still shows "(none)" in the detail, confirming
     // this is the lock-in case (distinct from lazy, which omits the send line).
     const panel = await readyPanel("Other details");
@@ -786,29 +822,31 @@ describe("InvitationTerms: always-visible ingress presence hint", () => {
     expect(panel.textContent).toContain("(none)");
   });
 
-  test("a lazy (undeclared) send raises no ingress hint", async () => {
+  test("a lazy (undeclared) send raises no ingress count and no receive tier", async () => {
     // No send authored and no disclosed set carried: the inviter sends whatever its
-    // own metadata discloses (lazy), nothing declared up front, so nothing to flag.
+    // own metadata discloses (lazy), nothing declared up front, so nothing to flag and
+    // no "What you receive" tier.
     render({ ...terms, payload: { receive: [] } });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    const group = hintGroup();
-    expect(group).not.toBeNull();
-    expect(group!.textContent).not.toContain("You will receive");
+    expect(group("What you receive").query()).toBeNull();
   });
 
-  test("the inviter's own proposing preview shows no ingress hint (its send is already chips)", async () => {
+  test("the inviter's own proposing preview shows no ingress count (its send is chips in 'What you disclose')", async () => {
     // Receiving-partner framing is acceptor-only. The inviter's preview surfaces its
-    // send as chips in the core already, so the presence is not hidden in Details and
-    // the hint is omitted -- an acceptor-framed "you will receive" line would be
-    // wrong for the inviter there.
+    // send as chips in "What you disclose" already, so the presence is not hidden in
+    // Details and the acceptor-framed "you will receive" line is omitted (it would be
+    // wrong for the inviter). The module terms request nothing (receive: []), so the
+    // inviter has no inbound either and the "What you receive" tier does not render.
     render(terms, { perspective: "proposing" });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    const group = hintGroup();
-    expect(group).not.toBeNull();
-    expect(group!.textContent).not.toContain("You will receive");
+    expect(group("What you receive").query()).toBeNull();
     // The send presence is instead surfaced as the proposing chips, so it is not
-    // lost -- just carried differently for the inviter's own view.
-    expect(container!.textContent).toContain("Columns sent to your partner");
+    // lost -- just carried under "What you disclose" for the inviter's own view.
+    const disclose = group("What you disclose");
+    await expect.element(disclose).toBeInTheDocument();
+    expect(disclose.element().textContent).toContain(
+      "Columns sent to your partner",
+    );
   });
 });
 
@@ -951,12 +989,15 @@ describe("InvitationTerms: the outbound-send caption does not presuppose a non-e
   });
 });
 
-describe("InvitationTerms: the presence hints form a labelled, disclosure-linked group", () => {
-  // The a11y contract for the presence-hint block: it is one named group (so a
-  // screen reader announces the flagged facts as a related set, not disconnected
-  // sentences), and the "Other details" toggle is described by it (so a non-visual
-  // user reaching that toggle hears what expands there). Pinning both so the block
-  // cannot regress to bare, unassociated sibling text.
+describe("InvitationTerms: the always-visible facts are tiered into labelled direction groups", () => {
+  // The a11y contract for the re-tiered core: each disclosure-relevant fact sits in a
+  // labelled group (role=group + aria-labelledby) named for its disclosure direction
+  // -- "What you disclose", "What you receive", "What the exchange produces" -- or, for
+  // the cross-cutting legal agreement, its own governance group. A screen reader then
+  // announces each fact under the tier it belongs to rather than as a flat run of
+  // sibling sentences. The "Other details" toggle is separately self-describing (its
+  // own summary), asserted below. Pinning the grouping so the core cannot regress to
+  // one undifferentiated list.
   function render(
     linkageTerms: LinkageTerms,
     options?: {
@@ -979,34 +1020,57 @@ describe("InvitationTerms: the presence hints form a labelled, disclosure-linked
     );
   }
 
-  test("the hints are one group named 'Before you consent' carrying all flagged facts", async () => {
-    // Egress, ingress, and legal all present: the group holds the three lines under
-    // a single accessible name.
+  test("egress, ingress, and legal each land in the correct labelled group", async () => {
+    // Egress (the acceptor's own data leaving), ingress (partner data arriving), and
+    // the legal agreement all present: each is announced under the tier it belongs to,
+    // not one flat "before you consent" list.
     render({
       ...terms,
       payload: { send: [{ name: "risk_score" }], receive: [{ name: "ssn" }] },
     });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    const group = page.getByRole("group", { name: "Before you consent" });
-    await expect.element(group).toBeInTheDocument();
-    const el = group.element();
-    expect(el.textContent).toContain(
+
+    // The egress request is the acceptor's own data leaving -> "What you disclose".
+    const disclose = group("What you disclose");
+    await expect.element(disclose).toBeInTheDocument();
+    expect(disclose.element().textContent).toContain(
       "Your partner requests 1 data column from you.",
     );
-    expect(el.textContent).toContain(
+    // The ingress is partner data arriving -> "What you receive".
+    const receive = group("What you receive");
+    await expect.element(receive).toBeInTheDocument();
+    expect(receive.element().textContent).toContain(
       "You will receive 1 data column from your partner.",
     );
-    // The legal agreement is promoted whole into this same group: its flag lead and
-    // its reference/purpose (the compliance-load-bearing fields) are all carried
-    // under the single "Before you consent" accessible name.
-    expect(el.textContent).toContain(
-      "This invitation attaches a legal agreement.",
+    // The legal agreement is a governance frame -> its own labelled group. Its flag
+    // lead, reference, and purpose are all under that single accessible name.
+    const agreement = group("This invitation attaches a legal agreement.");
+    await expect.element(agreement).toBeInTheDocument();
+    expect(agreement.element().textContent).toContain(
+      "Reference: MOU-2025-0042",
     );
-    expect(el.textContent).toContain("Reference: MOU-2025-0042");
-    expect(el.textContent).toContain("Stated purpose: Audit and evaluation");
+    expect(agreement.element().textContent).toContain(
+      "Stated purpose: Audit and evaluation",
+    );
+    // The tiers are distinct groups: the ingress does not bleed into the disclose
+    // tier, nor the egress into the receive tier.
+    expect(disclose.element().textContent).not.toContain("You will receive");
+    expect(receive.element().textContent).not.toContain("requests");
   });
 
-  test("the 'Other details' toggle is described by the hint group's caption", async () => {
+  test("the produce tier groups the matching method and result sharing", async () => {
+    // "What the exchange produces" carries the matching method and result sharing --
+    // the AC's two named produce facts -- so they are announced as one related set.
+    render(terms);
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const produce = group("What the exchange produces");
+    await expect.element(produce).toBeInTheDocument();
+    const el = produce.element();
+    expect(el.textContent).toContain("shared identifiers");
+    expect(el.textContent).toContain("You will receive the matched result:");
+  });
+
+  test("the 'Other details' toggle is self-describing: its describedby names the contents", async () => {
     render({
       ...terms,
       payload: { send: [{ name: "risk_score" }], receive: [] },
@@ -1015,36 +1079,66 @@ describe("InvitationTerms: the presence hints form a labelled, disclosure-linked
     const button = toggle("Other details").element();
     const describedById = button.getAttribute("aria-describedby");
     expect(describedById).toBeTruthy();
-    const region = document.getElementById(describedById!);
-    // A concise one-phrase pointer, not a re-read of every hint line onto the
-    // toggle: the description is the group's caption alone. Pinning `toBe` guards
-    // against the aria-describedby being re-broadened to the whole group.
-    expect(region?.textContent).toBe("Before you consent");
+    const summary = document.getElementById(describedById!);
+    // A one-line summary of what expanding reveals -- the personal data, the payload
+    // columns (this send is a declared column, so the payload block renders), and the
+    // duplicate-match setting -- not the bare "Other details" label.
+    expect(summary?.textContent).toBe(
+      "Contains the personal data used, the columns exchanged for matched " +
+        "records, and the duplicate-match setting.",
+    );
   });
 
-  test("the toggle carries no dangling describedby when no hint fires", async () => {
-    // No payload and no legal agreement: the group is not rendered, so the toggle
-    // must not reference an absent region.
+  test("the self-describing summary drops the payload phrase when no payload block renders", async () => {
+    // No payload declared: "Other details" holds only the personal-data and
+    // duplicate-match blocks, so the summary names exactly those two.
+    render({ ...terms, payload: undefined });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const describedById = toggle("Other details")
+      .element()
+      .getAttribute("aria-describedby");
+    const summary = document.getElementById(describedById!);
+    expect(summary?.textContent).toBe(
+      "Contains the personal data used and the duplicate-match setting.",
+    );
+  });
+
+  test("the 'Other details' describedby always resolves, even with no payload or legal agreement", async () => {
+    // The self-describing summary is always present (Other details always holds the
+    // personal-data and duplicate-match blocks), so the describedby never dangles --
+    // the invariant that replaced the former "no hint -> no describedby" case.
     render({ ...terms, payload: undefined, legalAgreement: undefined });
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(hintGroup()).toBeNull();
-    expect(
-      toggle("Other details").element().getAttribute("aria-describedby"),
-    ).toBeNull();
+    const describedById = toggle("Other details")
+      .element()
+      .getAttribute("aria-describedby");
+    expect(describedById).toBeTruthy();
+    expect(document.getElementById(describedById!)).not.toBeNull();
   });
 
-  test("the group caption frames the inviter's own proposing preview", async () => {
-    // Under "proposing" the caption addresses the inviter about its partner.
+  test("the direction tiers frame the inviter's own proposing preview first-person", async () => {
+    // Under "proposing" the viewer is the inviter, so "you" is the inviter: its send
+    // is announced under "What you disclose" and its request of the partner under
+    // "What you receive" (the same first-person tier labels, now addressing the
+    // inviter).
     render(
-      { ...terms, payload: { send: [], receive: [{ name: "ssn" }] } },
+      {
+        ...terms,
+        payload: { send: [{ name: "risk_score" }], receive: [{ name: "ssn" }] },
+      },
       { perspective: "proposing" },
     );
     await expect.element(toggle("Other details")).toBeInTheDocument();
-    await expect
-      .element(
-        page.getByRole("group", { name: "Before your partner consents" }),
-      )
-      .toBeInTheDocument();
+    const disclose = group("What you disclose");
+    await expect.element(disclose).toBeInTheDocument();
+    expect(disclose.element().textContent).toContain(
+      "Columns sent to your partner",
+    );
+    const receive = group("What you receive");
+    await expect.element(receive).toBeInTheDocument();
+    expect(receive.element().textContent).toContain(
+      "You request 1 data column from your partner.",
+    );
   });
 });
 
@@ -1147,8 +1241,8 @@ describe("InvitationTerms: the linkage strategy is surfaced at the consent point
     // The note is viewer-neutral and not perspective-gated, so the inviter's editor
     // preview (proposing) shows the same note the acceptor will read -- the editor's
     // "author against what the partner sees" intent, and consistent with how the
-    // egress/legal presence hints also render across perspectives. Pinned so the
-    // note is not later narrowed to the acceptor perspectives only.
+    // egress/legal facts also render across perspectives. Pinned so the note is not
+    // later narrowed to the acceptor perspectives only.
     render("single-pass", "proposing");
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(container!.textContent).toContain(
