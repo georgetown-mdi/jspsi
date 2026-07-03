@@ -61,7 +61,7 @@ Taking heavyweight secure computation as a known backstop (described below), the
 | Approach | What the sender learns | The receiver's extra disclosure | Cost / trust |
 |---|---|---|---|
 | Clean cascade | membership + rough tier | none (minimised) | cheap |
-| Send-everything | dataset size only | fuller match structure in the overlap | high bandwidth |
+| Send-everything | dataset size only in the ideal; the shipped `single-pass` returns the sender its table (see the correction above) | fuller match structure in the overlap | high bandwidth |
 | Send-everything + receiver self-censor\* | dataset size only | contention only | medium bandwidth |
 | Batched / coarsened drops | membership + coarse tier | none | cheap |
 | Both-sided + enforced discard | the result, then discards it | none | cheapest; trust is policy |
