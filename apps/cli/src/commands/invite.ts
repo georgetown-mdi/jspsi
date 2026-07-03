@@ -4,6 +4,7 @@ import { userInfo } from "node:os";
 import {
   getLogger,
   encodeInvitation,
+  assertAlgorithmImplemented,
   assertPayloadSendDisclosed,
   assertStandardizationMatchesTerms,
   disclosedColumnNames,
@@ -522,6 +523,16 @@ export async function validateInvite(params: {
         configSource.standardization,
         configTerms,
       );
+
+    // Fail closed, before the token is minted, on a config whose `algorithm` the
+    // run cannot honor -- the mint-boundary counterpart of the same shared
+    // exchange-time check, so this hand-authored offline mint never discloses an
+    // invitation the config's own `psilink exchange` would then refuse (exit 64).
+    // Unconditional, unlike the two guards above: `algorithm` is always present,
+    // and only this config-as-source path can carry a hand-authored `psi-c` (the
+    // online and infer paths build terms from columns via getDefaultLinkageTerms,
+    // which is always `psi`). See assertAlgorithmImplemented.
+    assertAlgorithmImplemented(configTerms.algorithm);
 
     // Carry the disclosed-columns subset only when the config declares an
     // explicit metadata block: without one the run infers metadata from the

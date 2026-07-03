@@ -830,6 +830,30 @@ test("validateInvite: offline config-source refuses a standardization that contr
   }
 });
 
+test("validateInvite: offline config-source refuses a psi-c algorithm before minting", async () => {
+  // The mint-boundary counterpart of the run-side count-only refusal: a config
+  // whose `algorithm` is `psi-c` (advertised but not yet runnable) must be refused
+  // BEFORE the token is disclosed, so `invite` never mints an invitation the
+  // config's own `psilink exchange` would then reject (exit 64) -- the same
+  // fail-fast, mint-mirrors-run posture as the payload and standardization guards
+  // above. No input is passed, so it exercises the check in isolation.
+  const terms: LinkageTerms = { ...defaultTerms(), algorithm: "psi-c" };
+  const { dir, configPath, keyPath } = withConfig(terms);
+  try {
+    const invite = () =>
+      validateInvite({
+        resolved: { mode: "offline" },
+        options: testOptions({ configFile: configPath, keyFile: keyPath }),
+        acceptTimeout: 900,
+        log: silentLog,
+      });
+    await expect(invite()).rejects.toBeInstanceOf(UsageError);
+    await expect(invite()).rejects.toThrow(/psi-c/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("validateInvite: a config's explicit metadata lets an otherwise-unsatisfying input pass", async () => {
   const terms = defaultTerms();
   // The config's metadata types tax_id as ssn; the input carries tax_id, which
