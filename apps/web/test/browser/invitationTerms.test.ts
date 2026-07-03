@@ -460,6 +460,23 @@ describe("InvitationTerms: the counterparty identity is flagged unverified at co
     );
   });
 
+  test("the note is associated with the identity heading for assistive tech", async () => {
+    // The screen moves focus to the identity heading when the terms appear, and a
+    // screen-reader user may also jump straight to it by heading -- so the caveat is
+    // wired as the heading's aria-describedby (the same subline-to-target idiom the
+    // disclosure toggles use) rather than left as a loose sibling paragraph that the
+    // announcement would not carry.
+    render("review");
+    const heading = page.getByRole("heading", {
+      name: "Invitation from County Health Department",
+    });
+    await expect.element(heading).toBeInTheDocument();
+    const describedById = heading.element().getAttribute("aria-describedby");
+    expect(describedById).toBeTruthy();
+    const note = document.getElementById(describedById!);
+    expect(note?.textContent).toContain(boundaryClaim);
+  });
+
   test("the note is absent from the inviter's own proposing preview", async () => {
     // Under "proposing" the identity shown is the viewer's own, so the "your
     // partner's claim" caveat would be wrong; the heading is "Exchange proposal",
@@ -477,6 +494,16 @@ describe("InvitationTerms: the counterparty identity is flagged unverified at co
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(container!.textContent).not.toContain(boundaryClaim);
     expect(container!.textContent).not.toContain(laterAuthentication);
+    // The note is absent here, so the identity heading must not carry a dangling
+    // aria-describedby pointing at a note that no longer renders.
+    expect(
+      page
+        .getByRole("heading", {
+          name: "Invitation from County Health Department",
+        })
+        .element()
+        .getAttribute("aria-describedby"),
+    ).toBeNull();
   });
 });
 

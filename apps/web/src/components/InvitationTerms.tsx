@@ -408,10 +408,26 @@ export function InvitationTerms({
   // Associates the per-key disclosure list with its "Matching strategies" caption,
   // so assistive tech announces the keys as a named group.
   const matchedOnLabelId = useId();
+  // Associates the review-only unverified-identity note with the identity heading
+  // (Title aria-describedby -> this id), so a screen reader that lands on or jumps
+  // to "Invitation from <name>" hears the not-yet-verified caveat as the heading's
+  // description -- the same subline-to-target idiom the matching/details toggles use
+  // -- rather than a loose sibling paragraph it may skip. The screen moves focus to
+  // this heading when the terms appear (headingRef + tabIndex), so this association
+  // is what carries the caveat into that announcement.
+  const identityNoteId = useId();
   const reduceMotion = useReducedMotion();
   return (
     <Stack gap="sm">
-      <Title order={headingOrder} size="h2" ref={headingRef} tabIndex={-1}>
+      <Title
+        order={headingOrder}
+        size="h2"
+        ref={headingRef}
+        tabIndex={-1}
+        // Gated to review: the note (and so its id) renders only there, so pointing
+        // at it under "proposing"/"accepted" would dangle at an absent element.
+        aria-describedby={perspective === "review" ? identityNoteId : undefined}
+      >
         {perspective === "proposing"
           ? "Exchange proposal"
           : `Invitation from ${summary.invitingParty}`}
@@ -432,10 +448,14 @@ export function InvitationTerms({
           is later than consent. The note informs, it does not gate. Review-only: the
           "accepted" during-run view is post-authentication, where the identity is by
           then confirmed and the caveat would be stale, and the inviter's "proposing"
-          preview shows its OWN identity, which needs no such note. Pinned by render
-          tests. */}
+          preview shows its OWN identity, which needs no such note. Given a medium
+          weight (fw 500) so it reads as a trust callout rather than filler between
+          the heading and the intro -- matching the legal-agreement flag and the
+          presence-hint lines -- and associated with the heading via aria-describedby
+          (see identityNoteId), so assistive tech carries it into the heading's
+          announcement. Pinned by render tests. */}
       {perspective === "review" && (
-        <Text size="sm">
+        <Text id={identityNoteId} size="sm" fw={500}>
           This name is your partner&rsquo;s own claim, which psilink has not
           verified. Your partner is cryptographically authenticated when the
           exchange begins -- after this step -- so treat the name as unverified
