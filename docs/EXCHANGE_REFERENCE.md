@@ -73,7 +73,7 @@ Date these linkage terms were last modified. A mismatch produces a warning indic
 - `psi` -- reveals the intersection (matched records and their identifiers). Intended for operational data exchange.
 - `psi-c` -- reveals only the cardinality of the intersection (how many records match). Intended for research and program planning.
 
-> **Not yet implemented:** the `psi-c` algorithm is not yet fully implemented. It is targeted for a release after 1.0; see [ROADMAP.md](ROADMAP.md). Use `psi` for now.
+> **Not yet implemented:** the `psi-c` algorithm has no count-only run path yet, so it is refused before the exchange runs. An exchange whose linkage terms set `psi-c` aborts with a usage error rather than revealing matched identifiers under an exchange record that would assert only a count was disclosed. It is targeted for a release after 1.0; see [ROADMAP.md](ROADMAP.md). Use `psi` for now.
 
 ### `linkage_terms.linkage_strategy`
 

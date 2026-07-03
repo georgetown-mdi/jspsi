@@ -620,6 +620,13 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   // is the half that holds even if one of those is bypassed. psi-c is the privacy
   // footgun (a count-only claim while identifiers are revealed); deduplicate's
   // worst case is a silent no-op, but the same clamp applies.
+  //
+  // Core independently refuses a `psi-c` run at the exchange boundary
+  // (assertAlgorithmImplemented in @psilink/core), the authoritative backstop for
+  // any mint or accept path; this clamp is the web-mint front line that keeps a
+  // web-minted invitation from ever proposing a setting the run will refuse, so a
+  // web operator is never taken through consent for terms the exchange then
+  // aborts. Both are ungated together when count-only lands (board item 208371871).
   const algorithm: Algorithm = APPLIED_SETTINGS.psiC ? draft.algorithm : "psi";
   const deduplicate = APPLIED_SETTINGS.deduplicate ? draft.deduplicate : false;
   const enabledKeys = draft.keys

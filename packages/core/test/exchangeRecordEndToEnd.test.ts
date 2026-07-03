@@ -9,6 +9,7 @@ import {
   ConnectionError,
   createMessagePipe,
 } from "../src/connection/messageConnection";
+import { UsageError } from "../src/errors";
 
 import type { BuiltExchangeRecord } from "../src/exchangeRecord";
 import type { Output } from "../src/config/linkageTerms";
@@ -90,6 +91,26 @@ function built(result: ExchangeResult): BuiltExchangeRecord {
   expect(result.audit).toBeDefined();
   return result.audit!;
 }
+
+test("run boundary: a psi-c terms value is refused before any identifier is revealed", async () => {
+  // The last line of the disclosure-integrity guarantee: even a PreparedExchange
+  // carrying psi-c -- constructed here by overriding the prepared terms, the way a
+  // caller that skipped prepareForExchange could -- is refused at the run boundary,
+  // before the terms exchange puts anything on the wire, so no linkage runs and no
+  // record asserting count-only over an identifier-revealing run is ever produced.
+  // The guard fires before the first await, so runExchange rejects without a
+  // partner on the pipe.
+  const both: Output = { expectsOutput: true, shareWithPartner: true };
+  const psiCPrepared = prepared("Initiator Co", both, clientRows);
+  psiCPrepared.linkageTerms = {
+    ...psiCPrepared.linkageTerms,
+    algorithm: "psi-c",
+  };
+  const [conn] = createMessagePipe();
+  await expect(
+    runExchange(conn, "initiator", psiCPrepared, { psiLibrary }),
+  ).rejects.toThrow(UsageError);
+});
 
 test("both-output: both records agree on terms and carry the result size", async () => {
   const both: Output = { expectsOutput: true, shareWithPartner: true };

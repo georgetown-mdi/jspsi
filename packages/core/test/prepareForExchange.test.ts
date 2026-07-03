@@ -1,6 +1,9 @@
 import { expect, test, describe } from "vitest";
 
-import { prepareForExchange } from "../src/exchange";
+import {
+  prepareForExchange,
+  assertAlgorithmImplemented,
+} from "../src/exchange";
 import {
   OperatorConfigError,
   StandardizationTermsError,
@@ -162,5 +165,58 @@ describe("prepareForExchange: consistent and terms-only configs proceed", () => 
     );
     expect(prepared.rowCount).toBe(1);
     expect(prepared.linkageTerms).toBe(terms);
+  });
+});
+
+// --- Count-only (psi-c) fails closed before connecting -----------------------
+
+describe("prepareForExchange: count-only (psi-c) is refused", () => {
+  const psiCTerms: LinkageTerms = { ...terms, algorithm: "psi-c" };
+
+  test("a psi-c algorithm is refused before connecting", () => {
+    // No count-only run path exists, so a psi-c run would reveal matched
+    // identifiers under a self-attested record asserting only a count. Refuse it
+    // before any connection, on every mint/accept path -- not only in the web
+    // inviter clamp. It is a UsageError (CLI exit 64) whose message names the
+    // fixed enum literal, so an operator sees which value to change.
+    expect(() =>
+      prepareForExchange(
+        { linkageTerms: psiCTerms, metadata },
+        "Tester",
+        rawRows,
+        columns,
+      ),
+    ).toThrow(UsageError);
+    expect(() =>
+      prepareForExchange(
+        { linkageTerms: psiCTerms, metadata },
+        "Tester",
+        rawRows,
+        columns,
+      ),
+    ).toThrow(/psi-c/);
+  });
+
+  test("a psi algorithm prepares normally", () => {
+    // The sibling of the refusal: the implemented algorithm is unaffected.
+    const prepared = prepareForExchange(
+      { linkageTerms: terms, metadata },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    expect(prepared.linkageTerms.algorithm).toBe("psi");
+  });
+});
+
+// --- assertAlgorithmImplemented (the shared guard) ---------------------------
+
+describe("assertAlgorithmImplemented", () => {
+  test("refuses psi-c", () => {
+    expect(() => assertAlgorithmImplemented("psi-c")).toThrow(UsageError);
+  });
+
+  test("passes psi", () => {
+    expect(() => assertAlgorithmImplemented("psi")).not.toThrow();
   });
 });
