@@ -52,6 +52,7 @@ import {
   runOnlineBootstrap,
   runOrExit,
   singlePassDisclosureNotice,
+  warnLowPollingFrequency,
   warnOptionsOverridesIgnoredOffline,
   warnServerOverridesIgnoredOffline,
   type CommonBootstrapOptions,
@@ -387,6 +388,10 @@ export async function validateAccept(params: {
           "supplies the host, port, and credentials. Pass --outbound-path to " +
           "override.",
       );
+    // Warn when the --polling-frequency override (now merged into `connection`)
+    // is set aggressively low; no-op when the flag was not passed. Only on this
+    // online path -- the offline path reports it ignored (see below).
+    warnLowPollingFrequency(options.pollingFrequencyMs, log);
     // Reconcile a pre-existing config against the invitation AND the connection
     // the exchange will actually use (the built `connection`, now possibly
     // endpoint-influenced) before the input is read and before any network

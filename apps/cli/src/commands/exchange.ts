@@ -40,6 +40,7 @@ import {
   addCommonBootstrapOptions,
   connectionOverridesFrom,
   parseCommonBootstrapArgs,
+  warnLowPollingFrequency,
   warnUnsupportedFileSyncFlags,
   type CommonBootstrapOptions,
 } from "./bootstrap";
@@ -358,6 +359,9 @@ export function loadConfig(options: ExchangeOptions): {
     },
     log,
   );
+  // Warn when the --polling-frequency override (now merged into the connection's
+  // pollIntervalMs) is set aggressively low; no-op when the flag was not passed.
+  warnLowPollingFrequency(options.pollingFrequencyMs, log);
 
   if (connection.channel !== "sftp" && connection.channel !== "filedrop")
     // An unsupported channel in the config is invalid caller configuration

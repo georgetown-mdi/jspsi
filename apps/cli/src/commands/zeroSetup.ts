@@ -44,6 +44,7 @@ import {
   parseCommonBootstrapArgs,
   parseLinkageStrategyFlag,
   singlePassDisclosureNotice,
+  warnLowPollingFrequency,
   warnUnsupportedFileSyncFlags,
   withLinkageStrategy,
   type CommonBootstrapOptions,
@@ -575,6 +576,11 @@ export async function handler(argv: Arguments): Promise<void> {
         },
         log,
       );
+    // Warn when the --polling-frequency override is set aggressively low (a
+    // sub-second poll can trip an SFTP server's anti-flood protection); no-op
+    // when the flag was not passed. Zero-setup always runs the connection here,
+    // so the override always takes effect.
+    warnLowPollingFrequency(options.pollingFrequencyMs, log);
 
     // Detect a pre-existing config/key before any network activity. With --save,
     // a target that already exists is an error -- a half-finished bootstrap must

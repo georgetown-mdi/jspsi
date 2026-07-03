@@ -31,6 +31,7 @@ import {
   buildDataSpec,
   connectionFromEndpoint,
   connectionFromURL,
+  connectionOverridesFrom,
   diffConnectionAgainstTarget,
   endpointFromConnection,
   generateSharedSecret,
@@ -44,6 +45,7 @@ import {
   runOnlineBootstrap,
   runOrExit,
   singlePassDisclosureNotice,
+  warnLowPollingFrequency,
   warnOptionsOverridesIgnoredOffline,
   warnServerOverridesIgnoredOffline,
   warnUnsupportedFileSyncFlags,
@@ -416,6 +418,7 @@ const OFFLINE_IGNORED_OPTIONS_OVERRIDES: ReadonlyArray<{
 }> = [
   { flag: "--connection-timeout", option: { connectionTimeout: 30 } },
   { flag: "--peer-timeout", option: { peerTimeout: 60 } },
+  { flag: "--polling-frequency", option: { pollingFrequencyMs: 100 } },
   { flag: "--max-reconnect-attempts", option: { maxReconnectAttempts: 5 } },
   { flag: "--lockless-rendezvous", option: { locklessRendezvous: true } },
   { flag: "--peer-id", option: { peerId: "party-a" } },
@@ -473,6 +476,47 @@ test("warnOptionsOverridesIgnoredOffline: a negated boolean toggle (--no-*) does
     },
     { warn: (m) => warnings.push(m) },
   );
+  expect(warnings).toEqual([]);
+});
+
+// --- connectionOverridesFrom (--polling-frequency) ---------------------------
+
+test("connectionOverridesFrom: maps pollingFrequencyMs to the pollIntervalMs override verbatim", () => {
+  // The parsed field is already in milliseconds, so it feeds the connection's
+  // pollIntervalMs with no scaling (unlike peerTimeout, which is seconds * 1000).
+  const overrides = connectionOverridesFrom({ pollingFrequencyMs: 100 });
+  expect(overrides.options?.pollIntervalMs).toBe(100);
+});
+
+test("connectionOverridesFrom: an absent --polling-frequency leaves pollIntervalMs unset", () => {
+  const overrides = connectionOverridesFrom({});
+  expect(overrides.options?.pollIntervalMs).toBeUndefined();
+});
+
+// --- warnLowPollingFrequency -------------------------------------------------
+
+test("warnLowPollingFrequency: warns below the 1s threshold", () => {
+  const warnings: string[] = [];
+  warnLowPollingFrequency(100, { warn: (m) => warnings.push(m) });
+  expect(warnings).toHaveLength(1);
+  // Names the flag, echoes the operator's own value, and states the anti-flood risk.
+  expect(warnings[0]).toContain("--polling-frequency");
+  expect(warnings[0]).toContain("100ms");
+  expect(warnings[0]).toContain("anti-flood");
+});
+
+test("warnLowPollingFrequency: silent at exactly the 1s threshold", () => {
+  // The threshold is inclusive of "safe": exactly 1000ms does not warn, so a
+  // conservative value emits nothing.
+  const warnings: string[] = [];
+  warnLowPollingFrequency(1000, { warn: (m) => warnings.push(m) });
+  expect(warnings).toEqual([]);
+});
+
+test("warnLowPollingFrequency: silent above the threshold and when the flag is absent", () => {
+  const warnings: string[] = [];
+  warnLowPollingFrequency(5000, { warn: (m) => warnings.push(m) });
+  warnLowPollingFrequency(undefined, { warn: (m) => warnings.push(m) });
   expect(warnings).toEqual([]);
 });
 

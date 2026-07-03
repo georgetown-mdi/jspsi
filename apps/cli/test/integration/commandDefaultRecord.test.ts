@@ -331,6 +331,10 @@ describe("zero-setup", () => {
     // URL with terms inferred from their inputs. No --save, so nothing is
     // provisioned -- the only artifact is the asserted party's default audit
     // record. The peer runs --no-record so only the asserted party records.
+    // --polling-frequency 100ms keeps the local filedrop round trip fast: unlike
+    // the exchange: sibling above (which sets config pollIntervalMs:1), zero-setup
+    // has no config, so this flag is its only way to override the conservative
+    // 5s default that would otherwise blow the 90s timeout.
     await runBoth(
       [
         url,
@@ -338,6 +342,8 @@ describe("zero-setup", () => {
         outA,
         "--identity",
         "party-a",
+        "--polling-frequency",
+        "100ms",
         "--peer-timeout",
         `${PEER_TIMEOUT_SECONDS}s`,
         "--log-level",
@@ -350,6 +356,8 @@ describe("zero-setup", () => {
         "--identity",
         "party-b",
         "--no-record",
+        "--polling-frequency",
+        "100ms",
         "--peer-timeout",
         `${PEER_TIMEOUT_SECONDS}s`,
         "--log-level",

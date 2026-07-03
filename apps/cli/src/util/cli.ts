@@ -13,7 +13,7 @@ import {
 } from "@psilink/core";
 
 import { createOwnerOnlyWriteStream } from "../fileUtils";
-import { parseDurationFlag } from "./duration";
+import { parseDurationFlag, parseFineDurationFlag } from "./duration";
 
 /**
  * Read a single-value CLI option from parsed yargs `Arguments`, rejecting a flag
@@ -96,6 +96,40 @@ export function durationFlagSeconds(
       `--${name} must not exceed ${maxSeconds / 86_400}d; got ${String(raw)}`,
     );
   return seconds;
+}
+
+/**
+ * Read a duration-valued CLI option and return it as a whole number of
+ * MILLISECONDS (or `undefined` when the flag is absent), preserving sub-second
+ * precision. The millisecond counterpart of {@link durationFlagSeconds}: it reads
+ * through {@link parseFineDurationFlag} rather than the coarse
+ * {@link parseDurationFlag}, so the flag also accepts a `100ms`-style value, and
+ * it returns the parser's millisecond offset directly instead of dividing to
+ * seconds (which would floor a sub-second value to zero).
+ *
+ * The sole caller is `--polling-frequency`, whose downstream consumer -- the
+ * connection's `pollIntervalMs` / the runtime `pollingFrequency` -- is itself in
+ * milliseconds, so no scaling is applied. It takes no product ceiling: unlike the
+ * timeout flags (a coordination window that a week-plus value is a mistake for),
+ * a large poll interval is merely slow, and the schema field (`pollIntervalMs`)
+ * imposes no maximum either; {@link parseFineDurationFlag} still rejects a value
+ * large enough to overflow a safe integer.
+ *
+ * A repeat (via {@link singleValue}) and a malformed or bare-integer value (via
+ * {@link parseFineDurationFlag}) are rejected with a flag-named {@link UsageError}
+ * (exit 64), exactly as {@link durationFlagSeconds} rejects them.
+ */
+export function durationFlagMs(
+  argv: Arguments,
+  name: string,
+): number | undefined {
+  const raw = singleValue(argv, name);
+  if (raw === undefined) return undefined;
+  // singleValue returns unknown; the flag routed here is declared type:"string"
+  // so yargs always yields a string, but coerce defensively so a contract
+  // violation surfaces as parseFineDurationFlag's flag-named UsageError rather
+  // than a raw TypeError from .trim() on a non-string (mirroring durationFlagSeconds).
+  return parseFineDurationFlag(`--${name}`, String(raw));
 }
 
 /**

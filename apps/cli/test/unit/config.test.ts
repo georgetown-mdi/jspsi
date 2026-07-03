@@ -24,6 +24,7 @@ import {
 import type {
   ConnectionConfig,
   ExchangeSpec,
+  FileDropConnectionConfig,
   LinkageTerms,
   SFTPConnectionConfig,
 } from "@psilink/core";
@@ -85,6 +86,50 @@ test("existing options are preserved when adding timeout overrides", () => {
   }) as SFTPConnectionConfig;
   expect(result.options?.pollIntervalMs).toBe(5000);
   expect(result.options?.peerTimeoutMs).toBe(20_000);
+});
+
+// --- pollIntervalMs override (--polling-frequency) ---------------------------
+
+test("pollIntervalMs override is applied verbatim (already milliseconds, no scaling)", () => {
+  // Unlike peerTimeout (seconds -> ms), the poll interval override is already in
+  // milliseconds, so a 100 override lands as pollIntervalMs 100 unchanged.
+  const result = applyConnectionOverrides(baseSFTP, {
+    options: { pollIntervalMs: 100 },
+  }) as SFTPConnectionConfig;
+  expect(result.options?.pollIntervalMs).toBe(100);
+});
+
+test("pollIntervalMs override applies on the filedrop channel too", () => {
+  const base: ConnectionConfig = { channel: "filedrop", path: "/mnt/drop" };
+  const result = applyConnectionOverrides(base, {
+    options: { pollIntervalMs: 250 },
+  }) as FileDropConnectionConfig;
+  expect(result.options?.pollIntervalMs).toBe(250);
+});
+
+test("pollIntervalMs override is dropped on webrtc (a FileSyncOptions-only field)", () => {
+  // pollIntervalMs is a FileSyncOptions field, so the file-sync-gated block skips
+  // it on webrtc rather than writing an option the webrtc schema does not carry.
+  // webrtc's options type is SharedOptions (no pollIntervalMs), so read it through
+  // a record cast to assert the field is absent.
+  const result = applyConnectionOverrides(baseWebRTC, {
+    options: { pollIntervalMs: 100 },
+  });
+  expect(
+    (result.options as Record<string, unknown> | undefined)?.["pollIntervalMs"],
+  ).toBeUndefined();
+});
+
+test("an existing pollIntervalMs in the config is overridden by --polling-frequency", () => {
+  const base: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+    options: { pollIntervalMs: 5000 },
+  };
+  const result = applyConnectionOverrides(base, {
+    options: { pollIntervalMs: 100 },
+  }) as SFTPConnectionConfig;
+  expect(result.options?.pollIntervalMs).toBe(100);
 });
 
 // --- timeout override re-validation ------------------------------------------

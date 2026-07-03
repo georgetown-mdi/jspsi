@@ -572,8 +572,10 @@ const SharedOptionsSchema: z.ZodType<SharedOptions> =
 /** Tuning parameters shared by file-based channels (`sftp` and `filedrop`). */
 export interface FileSyncOptions extends SharedOptions {
   /**
-   * Milliseconds between checks for the partner's uploaded file; default:
-   * 100.
+   * Milliseconds between checks for the partner's uploaded file. When unset, the
+   * connection applies `DEFAULT_POLLING_FREQUENCY_MS` (5000) -- a conservative
+   * default that stays within SFTP servers' anti-flood limits; see that constant
+   * in `fileSyncConnection.ts` for the rationale.
    */
   pollIntervalMs?: number;
   /**
