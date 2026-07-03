@@ -412,6 +412,94 @@ describe("InvitationTerms: a key disclosure stays mounted but hidden under a red
   });
 });
 
+describe("InvitationTerms: the counterparty identity is flagged unverified at consent", () => {
+  // At the pre-consent review screen the displayed "Invitation from <name>" is a
+  // free-text field the sender typed, carried in an invitation accepted on a
+  // transcription checksum -- so psilink has not authenticated it. A terse marker
+  // keeps the acceptor from reading it as a psilink-verified fact; it is a small
+  // honesty marker on a self-asserted field, not a directive (parties normally
+  // coordinate the first exchange out of band, so they already know the
+  // counterparty). Review-only: the note is a pre-consent decision-point marker, so it
+  // is dropped on the during-run "accepted" view once consent is committed (the run's
+  // handshake authenticates the peer's secret, not that the name is true), and the
+  // inviter's "proposing" preview shows its OWN identity (which needs no such note).
+  function render(perspective?: "review" | "accepted" | "proposing") {
+    root!.render(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(InvitationTerms, {
+          linkageTerms: terms,
+          ...(perspective ? { perspective } : {}),
+        }),
+      ),
+    );
+  }
+
+  const noteText =
+    "Your partner entered this name; psilink has not verified it.";
+
+  test("the unverified-identity note appears on the acceptor review screen", async () => {
+    render("review");
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+    // The self-asserted name is marked unverified, in the always-visible core ...
+    expect(container!.textContent).toContain(noteText);
+    // ... not tucked inside the "Other details" disclosure.
+    expect((await readyPanel("Other details")).textContent).not.toContain(
+      noteText,
+    );
+  });
+
+  test("the note is associated with the identity heading for assistive tech", async () => {
+    // The screen moves focus to the identity heading when the terms appear, and a
+    // screen-reader user may also jump straight to it by heading -- so the caveat is
+    // wired as the heading's aria-describedby (the same subline-to-target idiom the
+    // disclosure toggles use) rather than left as a loose sibling paragraph that the
+    // announcement would not carry.
+    render("review");
+    const heading = page.getByRole("heading", {
+      name: "Invitation from County Health Department",
+    });
+    await expect.element(heading).toBeInTheDocument();
+    const describedById = heading.element().getAttribute("aria-describedby");
+    expect(describedById).toBeTruthy();
+    const note = document.getElementById(describedById!);
+    expect(note?.textContent).toContain(noteText);
+  });
+
+  test("the note is absent from the inviter's own proposing preview", async () => {
+    // Under "proposing" the identity shown is the viewer's own, so a "not verified"
+    // caveat would be wrong; the heading is "Exchange proposal", not "Invitation
+    // from <self>".
+    render("proposing");
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).not.toContain(noteText);
+  });
+
+  test("the note is absent from the during-run accepted view, after consent is committed", async () => {
+    // The "accepted" view is the during-run view, after the acceptor has already
+    // consented; the note is scoped to the pre-consent decision point, so it is
+    // dropped there. Not because the name becomes verified -- the run's handshake
+    // authenticates the peer's secret, not that the name is true -- but because the
+    // decision the note informs is past.
+    render("accepted");
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).not.toContain(noteText);
+    // The note is absent here, so the identity heading must not carry a dangling
+    // aria-describedby pointing at a note that no longer renders.
+    expect(
+      page
+        .getByRole("heading", {
+          name: "Invitation from County Health Department",
+        })
+        .element()
+        .getAttribute("aria-describedby"),
+    ).toBeNull();
+  });
+});
+
 describe("InvitationTerms: result sharing is stated from the viewer's perspective", () => {
   // Render the same terms with a chosen output direction and perspective. The
   // viewer is the inviter under "proposing" (its own preview) and the acceptor

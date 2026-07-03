@@ -119,7 +119,8 @@ export function AcceptInvitationPanel({
             <Stack>
               <Text size="sm" c="dimmed">
                 To accept your partner's proposed terms, confirm your consent,
-                enter your name, and choose your data file. Your browser
+                enter your name, and choose your data file. This invitation
+                should have reached you over a trusted channel. Your browser
                 connects directly to your partner.
               </Text>
               <Checkbox

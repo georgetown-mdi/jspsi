@@ -408,14 +408,54 @@ export function InvitationTerms({
   // Associates the per-key disclosure list with its "Matching strategies" caption,
   // so assistive tech announces the keys as a named group.
   const matchedOnLabelId = useId();
+  // Associates the review-only unverified-identity note with the identity heading
+  // (Title aria-describedby -> this id), so a screen reader that lands on or jumps
+  // to "Invitation from <name>" hears the not-yet-verified caveat as the heading's
+  // description -- the same subline-to-target idiom the matching/details toggles use
+  // -- rather than a loose sibling paragraph it may skip. The screen moves focus to
+  // this heading when the terms appear (headingRef + tabIndex), so this association
+  // is what carries the caveat into that announcement.
+  const identityNoteId = useId();
   const reduceMotion = useReducedMotion();
   return (
     <Stack gap="sm">
-      <Title order={headingOrder} size="h2" ref={headingRef} tabIndex={-1}>
+      <Title
+        order={headingOrder}
+        size="h2"
+        ref={headingRef}
+        tabIndex={-1}
+        // Gated to review: the note (and so its id) renders only there, so pointing
+        // at it under "proposing"/"accepted" would dangle at an absent element.
+        aria-describedby={perspective === "review" ? identityNoteId : undefined}
+      >
         {perspective === "proposing"
           ? "Exchange proposal"
           : `Invitation from ${summary.invitingParty}`}
       </Title>
+      {/* The heading name is summary.invitingParty -- sanitizeForDisplay(
+          terms.identity) -- a free-text field the sender typed, carried in an
+          invitation accepted on a transcription checksum, so psilink has not
+          authenticated it. A terse marker keeps the acceptor from reading it as a
+          psilink-verified fact. Deliberately one line: parties normally coordinate
+          the first exchange out of band (a video call, say), so the acceptor already
+          knows the counterparty -- this is a small honesty marker on a self-asserted
+          field, not a directive to reassess trust, and it informs rather than gates.
+          It states nothing about the exchange's own authentication, so it cannot read
+          as claiming the exchange is unauthenticated. Fixed copy, never
+          partner-controlled. Review-only: the note is a pre-consent decision-point
+          marker, so it drops off the during-run "accepted" view once consent is
+          committed -- not because the name becomes verified there (the run's key
+          exchange authenticates that the peer holds the invitation secret, not that
+          the name is true, so the name is never psilink-verified), but because the
+          decision it informs is past; "proposing" shows the viewer's own name.
+          Associated with
+          the heading via aria-describedby (identityNoteId) so assistive tech carries
+          it into the heading's announcement; pinned by render tests. */}
+      {perspective === "review" && (
+        <Text id={identityNoteId} size="sm" fw={500}>
+          Your partner entered this name; psilink has not verified it.
+        </Text>
+      )}
       <Text size="sm" c="dimmed">
         {perspective === "proposing"
           ? "Your partner must review and consent to these details before any data is exchanged."
