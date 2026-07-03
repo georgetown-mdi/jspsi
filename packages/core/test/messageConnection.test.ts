@@ -432,6 +432,135 @@ test("data consumer (deliver): a frame after a terminal latch is a non-throwing 
   expect((err as ConnectionError).kind).toBe("transport");
 });
 
+// --- send-liveness (the encrypt-then-send window) ----------------------------
+// A parked receive() keeps the ref'd idle timer armed, so a silent peer is
+// caught. The sender's encrypt-then-send window parks no receive(), so before
+// this guard a transport hand-off that orphaned (its callback never firing, all
+// lower per-op deadlines `.unref()`'d) let the event loop drain to a silent
+// exit 0. These pin that a send now holds a ref'd guard across the hand-off and
+// clears it on every settlement/terminal path.
+
+test("send: an orphaned hand-off with no parked receive fails terminally, not silently", async () => {
+  const { conn, send } = makeQueued({ inactivityTimeoutMs: 20 });
+  // The transport accepts the write but never resolves -- a mid-exchange drop in
+  // the encrypt-then-send window, where no receive() is parked to keep the idle
+  // timer armed. Before the guard this call would hang and the loop drain to
+  // exit 0; now it must reject terminally.
+  send.mockReturnValue(new Promise(() => {}));
+  const err = await conn.send("x").catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+  expect((err as ConnectionError).message).toContain(
+    "lost during the exchange",
+  );
+  // The failure latches terminal: later calls fail fast on the same state.
+  await expect(conn.receive()).rejects.toBeInstanceOf(ConnectionError);
+  await expect(conn.send("y")).rejects.toBeInstanceOf(ConnectionError);
+});
+
+test("send: a transport rejection surfaces its own cause, not the liveness backstop", async () => {
+  const { conn, send } = makeQueued({ inactivityTimeoutMs: 10_000 });
+  // The guard holds the loop open so a lower, faster per-operation deadline (or a
+  // socket error) rejects the hand-off first with its transport-specific cause,
+  // well before the coarse core backstop would; that specific cause must win.
+  send.mockRejectedValue(new Error("SFTP file write of /x stalled"));
+  const err = await conn.send("x").catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+  expect((err as ConnectionError).message).toContain(
+    "SFTP file write of /x stalled",
+  );
+});
+
+test("send: a completed hand-off leaves no liveness guard armed", async () => {
+  vi.useFakeTimers();
+  try {
+    const { conn, send } = makeQueued({ inactivityTimeoutMs: 20 });
+    send.mockResolvedValue(undefined);
+    await conn.send("x");
+    // Cleared the instant the hand-off settles: a healthy send leaves no ref'd
+    // timer to hold the event loop open at teardown.
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("send: a close during an in-flight hand-off rejects the send and clears the guard", async () => {
+  vi.useFakeTimers();
+  try {
+    const { conn, send } = makeQueued({ inactivityTimeoutMs: 20 });
+    send.mockReturnValue(new Promise(() => {})); // hand-off never settles
+    // Attach the handler synchronously so the pending rejection is never briefly
+    // unhandled once close() settles it.
+    const sending = conn.send("x").catch((e: unknown) => e);
+    // Armed while the hand-off is outstanding...
+    expect(vi.getTimerCount()).toBe(1);
+    await conn.close();
+    // ...and the explicit (cancelled-exchange) close SETTLES the awaited send --
+    // rejecting it as a cancelled "closed" operation rather than leaving it to
+    // hang on the orphaned hand-off -- and leaves no ref'd handle to hold the
+    // loop open. Clearing the guard timer without rejecting here would reinstate
+    // the very silent-hang this guard exists to prevent.
+    const err = await sending;
+    expect(err).toBeInstanceOf(ConnectionError);
+    expect((err as ConnectionError).kind).toBe("closed");
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("send: a concurrent transport fail rejects an in-flight hand-off", async () => {
+  const { conn, controls, send } = makeQueued({ inactivityTimeoutMs: 10_000 });
+  send.mockReturnValue(new Promise(() => {})); // hand-off orphans, never settles
+  const sending = conn.send("x").catch((e: unknown) => e);
+  // A terminal transition (an inbound-overflow fail(), a transport error, or a
+  // peer half-close) fires while the hand-off is still outstanding. The send
+  // must be rejected here with the terminal cause, not left hanging with its
+  // guard swept -- the racing-teardown gap the guard would otherwise reopen.
+  controls.fail(new ConnectionError("dropped mid-send", "transport"));
+  const err = await sending;
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+  expect((err as ConnectionError).message).toContain("dropped mid-send");
+});
+
+test("send: a half-close (finish) draining a buffered frame rejects an in-flight hand-off", async () => {
+  const { conn, controls, send } = makeQueued({ inactivityTimeoutMs: 10_000 });
+  send.mockReturnValue(new Promise(() => {})); // hand-off orphans, never settles
+  // A buffered inbound frame makes finish() take its draining branch (not the
+  // empty-queue delegation to fail()), so this exercises the failSends() call on
+  // that distinct path specifically.
+  controls.deliver("buffered");
+  const sending = conn.send("x").catch((e: unknown) => e);
+  controls.finish(new ConnectionError("peer closed mid-send", "transport"));
+  // The in-flight send rejects with the deferred error rather than hanging: the
+  // peer has gone, so the write can never complete.
+  const err = await sending;
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+  expect((err as ConnectionError).message).toContain("peer closed mid-send");
+  // Half-close semantics are preserved: the buffered frame still drains before
+  // the deferred error surfaces to receive().
+  expect(await conn.receive()).toBe("buffered");
+});
+
+test("send: with no inactivity budget arms no liveness guard", async () => {
+  vi.useFakeTimers();
+  try {
+    // No inactivityTimeoutMs (the low-level QueuedMessageConnection, as
+    // createMessagePipe builds): the hand-off is returned directly with no guard
+    // timer, the send-side parity of a parked receive() getting no bound there.
+    const { conn, send } = makeQueued();
+    send.mockResolvedValue(undefined);
+    await conn.send("x");
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 // --- per-receive timeout -----------------------------------------------------
 
 test("receive(timeoutMs) shorter than the connection default fires and latches", async () => {
