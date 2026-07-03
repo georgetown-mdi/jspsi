@@ -642,12 +642,12 @@ export function InvitationTerms({
         )}
 
         {/* The acceptor's OWN outbound disclosure, in the same always-visible slot
-            as the inviter's proposing block above, so "Columns you will send" sits
+            as the inviter's proposing block above, so "What you will send" sits
             with the agreed terms and ABOVE "Other details" rather than after the
             whole panel. Only the acceptor passes outboundColumns; the inviter's own
             send already renders from its proposing block. */}
         {perspective !== "proposing" && outboundColumns !== undefined && (
-          <Term label="Columns you will send to your partner">
+          <Term label="What you will send to your partner">
             {outboundColumns.length > 0 ? (
               // These are the operator's OWN CSV headers (from the live metadata
               // disclosure), not a sanitized summary value, so sanitize them for
@@ -658,7 +658,7 @@ export function InvitationTerms({
                 columns={outboundColumns.map((name) =>
                   sanitizeForDisplay(name),
                 )}
-                label="Columns you will send to your partner"
+                label="What you will send to your partner"
               />
             ) : (
               <Text size="sm" c="dimmed">
@@ -684,7 +684,7 @@ export function InvitationTerms({
             partner-controlled text, so it needs no per-render sanitization; it names
             no column count or names, which are not yet known here. */}
         {perspective === "review" && outboundColumns === undefined && (
-          <Term label="Columns you will send to your partner">
+          <Term label="What you will send to your partner">
             <Text size="sm" c="dimmed">
               After you choose your file, you will confirm exactly which of its
               columns are sent to your partner for matched records.

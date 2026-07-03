@@ -641,7 +641,7 @@ export function PrepareData({
 
       {/* Sticky footer for the commit, mirroring the inviter's. Bottom padding on
           the page keeps it from occluding the last card. There is no confirm modal:
-          consent is already given on the review screen, and the live "Columns you
+          consent is already given on the review screen, and the live "What you
           will send" chips in the summary column are the standing last-look. */}
       <Box
         style={{

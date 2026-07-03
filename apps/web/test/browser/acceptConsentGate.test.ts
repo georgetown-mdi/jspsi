@@ -335,7 +335,7 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
     // The columns this party will send are surfaced there as a chip list (named for
     // assistive tech), with `notes` among the chips.
     const sendChips = page.getByRole("list", {
-      name: "Columns you will send to your partner",
+      name: "What you will send to your partner",
     });
     await expect.element(sendChips).toBeInTheDocument();
     await expect.element(sendChips.getByText("notes")).toBeInTheDocument();
@@ -355,7 +355,7 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
     await expect
       .element(
         page
-          .getByRole("list", { name: "Columns you will send to your partner" })
+          .getByRole("list", { name: "What you will send to your partner" })
           .getByText("notes"),
       )
       .toBeInTheDocument();
@@ -442,7 +442,7 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
     await expect
       .element(
         page
-          .getByRole("list", { name: "Columns you will send to your partner" })
+          .getByRole("list", { name: "What you will send to your partner" })
           .getByText("comment"),
       )
       .toBeInTheDocument();
@@ -470,7 +470,7 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
     await expect
       .element(
         page
-          .getByRole("list", { name: "Columns you will send to your partner" })
+          .getByRole("list", { name: "What you will send to your partner" })
           .getByText("notes"),
       )
       .toBeInTheDocument();

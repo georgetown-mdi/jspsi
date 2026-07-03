@@ -786,6 +786,63 @@ describe("InvitationTerms: the acceptor's outbound-disclosure forward-reference"
   });
 });
 
+describe("InvitationTerms: the outbound-send caption does not presuppose a non-empty send", () => {
+  // The caption above the acceptor's own outbound disclosure is a topic phrase
+  // ("What you will send to your partner"), not the declarative "Columns you will
+  // send ..." it replaced: that presupposed a non-empty send, so it contradicted its
+  // own empty-send body ("No columns are sent ...") and over-asserted a definite send
+  // on the pre-file review screen, where the set is not yet known. These pin that the
+  // caption reads truthfully over both branches -- and that the presupposing phrasing
+  // does not creep back at either call site.
+  function render(options: {
+    perspective: "review" | "accepted";
+    outboundColumns?: Array<string>;
+  }) {
+    root!.render(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(InvitationTerms, {
+          linkageTerms: terms,
+          perspective: options.perspective,
+          ...(options.outboundColumns !== undefined
+            ? { outboundColumns: options.outboundColumns }
+            : {}),
+        }),
+      ),
+    );
+  }
+
+  const caption = "What you will send to your partner";
+  // The declarative phrasing this reword removed. Asserted absent so a revert that
+  // reintroduces the presupposition fails, rather than passing on the "send to your
+  // partner" tail both phrasings share.
+  const presupposingCaption = "Columns you will send to your partner";
+
+  test("reads as a topic phrase, not a definite send, above the empty-send confirmation", async () => {
+    // A chosen file that sends nothing (outboundColumns []): the caption sits above
+    // the explicit "No columns are sent ..." body. The topic phrasing no longer
+    // contradicts that body the way the old declarative caption did.
+    render({ perspective: "accepted", outboundColumns: [] });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).toContain(caption);
+    expect(container!.textContent).toContain(
+      "No columns are sent to your partner",
+    );
+    expect(container!.textContent).not.toContain(presupposingCaption);
+  });
+
+  test("stays truthful on the pre-file review screen, where the send set is not yet known", async () => {
+    // perspective review, outboundColumns undefined: the forward-reference stands in
+    // for the not-yet-known send, and the caption above it must not assert a definite
+    // send at the consent decision point.
+    render({ perspective: "review" });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(container!.textContent).toContain(caption);
+    expect(container!.textContent).not.toContain(presupposingCaption);
+  });
+});
+
 describe("InvitationTerms: the presence hints form a labelled, disclosure-linked group", () => {
   // The a11y contract for the presence-hint block: it is one named group (so a
   // screen reader announces the flagged facts as a related set, not disconnected
