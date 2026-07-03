@@ -146,6 +146,15 @@ function testOptions(label: string): CommonBootstrapOptions {
     keyFile: path.join(work, `${label}.key`),
     identity: label,
     peerTimeout: PEER_TIMEOUT_SECONDS,
+    // Poll fast so the online round-trip completes well within the per-test
+    // vitest timeouts: the DoS-safe 5s default (DEFAULT_POLLING_FREQUENCY_MS)
+    // paces a multi-file rendezvous+exchange too slowly for a CI clock. This is
+    // the --polling-frequency override threaded through connectionOverridesFrom
+    // as pollIntervalMs, the CLI counterpart of the raw pollingFrequency the
+    // other file-sync integration tests set on the connection directly. The
+    // warnLowPollingFrequency this trips inside validate* routes to the silenced
+    // `log` below, so it emits no console output.
+    pollingFrequencyMs: 10,
     record: true,
     recordFile: path.join(work, `${label}-record.json`),
     logLevel: logLibrary.levels.SILENT,

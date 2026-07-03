@@ -73,16 +73,25 @@ export interface ConnectionServerOverrides {
  * The tuning/toggle overrides {@link applyConnectionOverrides} writes into a
  * connection's `connection.options` block: the SharedOptions timeouts/reconnect
  * bound applied on every channel (`connectionTimeout`, `peerTimeout`,
- * `maxReconnectAttempts`) and the FileSyncOptions toggles gated to the file-sync
- * channels (`locklessRendezvous`, `peerId`, `retainFiles`,
- * `timestampInFilename`). `connectionTimeout`/`peerTimeout` are in seconds here;
- * the apply step scales them to the schema's milliseconds. This is the
- * `connection.options` half of the {@link ConnectionOverrides} seam, as distinct
- * from the server/credential {@link ConnectionServerOverrides}.
+ * `maxReconnectAttempts`) and the FileSyncOptions poll interval / toggles gated
+ * to the file-sync channels (`pollIntervalMs`, `locklessRendezvous`, `peerId`,
+ * `retainFiles`, `timestampInFilename`). `connectionTimeout`/`peerTimeout` are in
+ * seconds here and the apply step scales them to the schema's milliseconds;
+ * `pollIntervalMs` is already in milliseconds (the poll interval is sub-second
+ * capable, so it is not routed through a lossy seconds scale) and is applied
+ * verbatim. This is the `connection.options` half of the
+ * {@link ConnectionOverrides} seam, as distinct from the server/credential
+ * {@link ConnectionServerOverrides}.
  */
 export interface ConnectionOptionsOverrides {
   connectionTimeout?: number;
   peerTimeout?: number;
+  /**
+   * The `--polling-frequency` override, already in milliseconds, feeding the
+   * connection's `pollIntervalMs`. A FileSyncOptions field, so it is applied only
+   * on the file-sync channels (see {@link applyConnectionOverrides}).
+   */
+  pollIntervalMs?: number;
   maxReconnectAttempts?: number;
   locklessRendezvous?: boolean;
   peerId?: string;
@@ -168,19 +177,25 @@ export function applyConnectionOverrides(
     optionsModified = true;
   }
 
-  // locklessRendezvous, peerId, retainFiles, and timestampInFilename are
-  // FileSyncOptions fields; only apply them on channels that use
-  // FileSyncConnection. The other overrides above (peerTimeout etc.) are
-  // SharedOptions that apply to all channels including webrtc.
+  // pollIntervalMs, locklessRendezvous, peerId, retainFiles, and
+  // timestampInFilename are FileSyncOptions fields; only apply them on channels
+  // that use FileSyncConnection. The other overrides above (peerTimeout etc.) are
+  // SharedOptions that apply to all channels including webrtc. pollIntervalMs is
+  // applied verbatim -- it is already in milliseconds (see
+  // ConnectionOptionsOverrides), unlike the seconds-scaled timeout fields.
   if (
     (result.channel === "sftp" || result.channel === "filedrop") &&
-    (optionsOverrides.locklessRendezvous !== undefined ||
+    (optionsOverrides.pollIntervalMs !== undefined ||
+      optionsOverrides.locklessRendezvous !== undefined ||
       optionsOverrides.peerId !== undefined ||
       optionsOverrides.retainFiles !== undefined ||
       optionsOverrides.timestampInFilename !== undefined)
   ) {
     result.options = {
       ...result.options,
+      ...(optionsOverrides.pollIntervalMs !== undefined && {
+        pollIntervalMs: optionsOverrides.pollIntervalMs,
+      }),
       ...(optionsOverrides.locklessRendezvous !== undefined && {
         locklessRendezvous: optionsOverrides.locklessRendezvous,
       }),

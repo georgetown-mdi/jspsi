@@ -1,7 +1,12 @@
 import { expect, test } from "vitest";
 import { UsageError } from "@psilink/core";
 
-import { parseDuration, parseDurationFlag } from "../../src/util/duration";
+import {
+  parseDuration,
+  parseDurationFlag,
+  parseFineDuration,
+  parseFineDurationFlag,
+} from "../../src/util/duration";
 
 test("parses each unit suffix into milliseconds", () => {
   expect(parseDuration("45s")).toBe(45_000);
@@ -103,4 +108,91 @@ test("parseDurationFlag: a malformed value yields parseDuration's message prefix
   expect(() => parseDurationFlag("--peer-timeout", "0")).toThrow(
     "--peer-timeout",
   );
+});
+
+// --- parseFineDuration (the sub-second grammar for --polling-frequency) -------
+
+test("parseFineDuration: accepts a millisecond unit", () => {
+  expect(parseFineDuration("100ms")).toBe(100);
+  expect(parseFineDuration("1ms")).toBe(1);
+  // The `ms` alternative wins over `m`, so `100ms` is not read as 100 minutes.
+  expect(parseFineDuration("100ms")).not.toBe(100 * 60_000);
+});
+
+test("parseFineDuration: still accepts the coarse units, unchanged", () => {
+  // Extending the grammar with `ms` does not change how the existing units parse.
+  expect(parseFineDuration("5s")).toBe(5_000);
+  expect(parseFineDuration("2m")).toBe(120_000);
+  expect(parseFineDuration("1h")).toBe(3_600_000);
+  expect(parseFineDuration("1d")).toBe(86_400_000);
+});
+
+test("parseFineDuration: tolerates surrounding whitespace", () => {
+  expect(parseFineDuration("  250ms ")).toBe(250);
+});
+
+test.each([
+  "", // empty
+  "100", // no unit (bare integer still rejected)
+  "ms", // no magnitude
+  "1.5ms", // non-integer magnitude
+  "-5ms", // negative magnitude
+  "100 ms", // internal whitespace
+  "100MS", // units are lowercase
+  "1w", // unsupported unit
+])("parseFineDuration: rejects malformed value %j", (input) => {
+  expect(() => parseFineDuration(input)).toThrow(UsageError);
+});
+
+test("parseFineDuration: rejects a zero millisecond duration", () => {
+  expect(() => parseFineDuration("0ms")).toThrow(UsageError);
+});
+
+test("parseFineDuration: the safe-integer guard holds at the ms boundary", () => {
+  // The ms unit has a multiplier of 1, the loosest scale, so it is the case most
+  // able to slip a too-large magnitude past the Number.isSafeInteger guard. The
+  // largest safe integer parses; one past it is rejected as too large rather than
+  // silently rounded.
+  expect(parseFineDuration("9007199254740991ms")).toBe(9_007_199_254_740_991);
+  expect(() => parseFineDuration("9007199254740992ms")).toThrow(UsageError);
+});
+
+test("the sub-second grammar is scoped: coarse parseDuration still rejects ms", () => {
+  // The `ms` extension lives only in parseFineDuration, so --peer-timeout and the
+  // other coarse flags (which use parseDuration) do not silently gain it.
+  expect(() => parseDuration("100ms")).toThrow(UsageError);
+});
+
+// --- parseFineDurationFlag ---------------------------------------------------
+
+test("parseFineDurationFlag: a valid value parses to the same ms offset as parseFineDuration", () => {
+  expect(parseFineDurationFlag("--polling-frequency", "100ms")).toBe(100);
+  expect(parseFineDurationFlag("--polling-frequency", "2s")).toBe(2_000);
+});
+
+test("parseFineDurationFlag: a bare integer is rejected with the same migration hint", () => {
+  // The bare-integer rejection is identical to the coarse flag's: it names the
+  // flag, the required-suffix rule, and the suffixed value to use.
+  let message = "";
+  try {
+    parseFineDurationFlag("--polling-frequency", "100");
+  } catch (err) {
+    expect(err).toBeInstanceOf(UsageError);
+    message = (err as UsageError).message;
+  }
+  expect(message).toContain("--polling-frequency");
+  expect(message).toContain("100s");
+  expect(message).toContain("unit suffix");
+});
+
+test("parseFineDurationFlag: a malformed value yields a flag-named usage error naming the ms unit", () => {
+  let message = "";
+  try {
+    parseFineDurationFlag("--polling-frequency", "1w");
+  } catch (err) {
+    message = (err as UsageError).message;
+  }
+  expect(message).toContain("--polling-frequency");
+  // The error names the sub-second unit set, so the ms option is discoverable.
+  expect(message).toContain("ms");
 });

@@ -8,6 +8,7 @@ import type { Arguments } from "yargs";
 import { loadCSVFile, MAX_RECONNECT_ATTEMPTS, UsageError } from "@psilink/core";
 
 import {
+  durationFlagMs,
   durationFlagSeconds,
   exitWithError,
   MAX_TIMEOUT_SECONDS,
@@ -183,6 +184,41 @@ test("durationFlagSeconds: the existing rejections precede the ceiling check", (
       MAX_TIMEOUT_SECONDS,
     ),
   ).toThrow(/greater than zero/);
+});
+
+// --- durationFlagMs (sub-second, milliseconds) -------------------------------
+
+test("durationFlagMs: a sub-second value is returned in milliseconds", () => {
+  // Unlike durationFlagSeconds (which divides to whole seconds), this preserves
+  // the millisecond magnitude a sub-second poll interval needs.
+  expect(
+    durationFlagMs(argv({ "polling-frequency": "100ms" }), "polling-frequency"),
+  ).toBe(100);
+  expect(
+    durationFlagMs(argv({ "polling-frequency": "2s" }), "polling-frequency"),
+  ).toBe(2_000);
+});
+
+test("durationFlagMs: an absent flag is undefined", () => {
+  expect(durationFlagMs(argv({}), "polling-frequency")).toBeUndefined();
+});
+
+test("durationFlagMs: a bare integer is rejected naming the flag and suffixed value", () => {
+  expect(() =>
+    durationFlagMs(argv({ "polling-frequency": "100" }), "polling-frequency"),
+  ).toThrow(UsageError);
+  expect(() =>
+    durationFlagMs(argv({ "polling-frequency": "100" }), "polling-frequency"),
+  ).toThrow("100s");
+});
+
+test("durationFlagMs: a repeated flag is rejected before parsing", () => {
+  expect(() =>
+    durationFlagMs(
+      argv({ "polling-frequency": ["100ms", "200ms"] }),
+      "polling-frequency",
+    ),
+  ).toThrow("--polling-frequency may be given only once");
 });
 
 // --- nonNegativeIntFlag ------------------------------------------------------

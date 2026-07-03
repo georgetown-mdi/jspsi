@@ -572,8 +572,13 @@ const SharedOptionsSchema: z.ZodType<SharedOptions> =
 /** Tuning parameters shared by file-based channels (`sftp` and `filedrop`). */
 export interface FileSyncOptions extends SharedOptions {
   /**
-   * Milliseconds between checks for the partner's uploaded file; default:
-   * 100.
+   * Milliseconds between checks for the partner's uploaded file. Must be a
+   * positive integer: `0` is not "as fast as possible" but a `setTimeout(0)` hot
+   * poll that busy-loops directory listings against the server (a self-inflicted
+   * flood), so the schema rejects it. When unset, the connection applies
+   * `DEFAULT_POLLING_FREQUENCY_MS` (5000) -- a conservative default that stays
+   * within SFTP servers' anti-flood limits; see that constant in
+   * `fileSyncConnection.ts` for the rationale.
    */
   pollIntervalMs?: number;
   /**
@@ -691,7 +696,9 @@ export interface FileSyncOptions extends SharedOptions {
 const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z
   .object({
     ...sharedOptionsFields,
-    pollIntervalMs: z.int().nonnegative().optional(),
+    // positive, NOT nonnegative: 0 is a setTimeout(0) hot poll that busy-loops
+    // directory listings (a self-inflicted flood), never a meaningful "no delay".
+    pollIntervalMs: z.int().positive().optional(),
     timestampInFilename: z.boolean().optional(),
     locklessRendezvous: z.boolean().optional(),
     peerId: z.string().min(1).optional(),

@@ -55,6 +55,7 @@ import {
   type HostKeyPersistence,
 } from "../hostKeyTrust";
 import {
+  durationFlagMs,
   durationFlagSeconds,
   LOG_LEVELS,
   MAX_TIMEOUT_SECONDS,
@@ -62,7 +63,10 @@ import {
   singleValue,
   openInputSource,
 } from "../util/cli";
-import { DURATION_VALUE_HELP } from "../util/duration";
+import {
+  DURATION_VALUE_HELP,
+  FINE_DURATION_VALUE_HELP,
+} from "../util/duration";
 import { runProtocol, type AuthPersist } from "../protocol";
 import {
   decodeUrlComponent,
@@ -1579,6 +1583,15 @@ export function addCommonBootstrapOptions(
         `(maximum: ${MAX_TIMEOUT_SECONDS / 86_400}d). ` +
         DURATION_VALUE_HELP,
     })
+    .option("polling-frequency", {
+      type: "string",
+      describe:
+        "how often to poll the shared directory for the partner's files on " +
+        "the sftp/filedrop channels (default: 5s). A conservative default " +
+        "keeps within SFTP servers' anti-flood limits; a sub-second value is " +
+        "accepted for a demo against a controlled server but warns. " +
+        FINE_DURATION_VALUE_HELP,
+    })
     .option("max-reconnect-attempts", {
       type: "number",
       describe: "maximum reconnection attempts before giving up; default: 3",
@@ -1672,6 +1685,11 @@ export interface CommonBootstrapOptions {
   serverPrivateKeyPassphrase?: string;
   connectionTimeout?: number;
   peerTimeout?: number;
+  // The --polling-frequency override, in MILLISECONDS (not seconds like the two
+  // timeout fields above): the poll interval is millisecond-scaled and accepts a
+  // sub-second value, so it carries its native unit through to the connection's
+  // pollIntervalMs without a lossy seconds round-trip.
+  pollingFrequencyMs?: number;
   maxReconnectAttempts?: number;
   locklessRendezvous?: boolean;
   peerId?: string;
@@ -1728,6 +1746,10 @@ export function parseCommonBootstrapArgs(
       MAX_TIMEOUT_SECONDS,
     ),
     peerTimeout: durationFlagSeconds(argv, "peer-timeout", MAX_TIMEOUT_SECONDS),
+    // Read in milliseconds (durationFlagMs, not durationFlagSeconds) so a
+    // sub-second demo value survives; no product ceiling -- a large poll interval
+    // is only slow, and the schema field imposes no maximum (see durationFlagMs).
+    pollingFrequencyMs: durationFlagMs(argv, "polling-frequency"),
     maxReconnectAttempts: nonNegativeIntFlag(
       argv,
       "max-reconnect-attempts",
@@ -1758,6 +1780,7 @@ export type ConnectionOverrideOptions = Pick<
   CommonBootstrapOptions,
   | "connectionTimeout"
   | "peerTimeout"
+  | "pollingFrequencyMs"
   | "maxReconnectAttempts"
   | "serverUsername"
   | "serverPassword"
@@ -1795,6 +1818,9 @@ export function connectionOverridesFrom(
     options: {
       connectionTimeout: options.connectionTimeout,
       peerTimeout: extra.peerTimeout ?? options.peerTimeout,
+      // Already in milliseconds -- fed straight into the connection's
+      // pollIntervalMs by applyConnectionOverrides, with no seconds scaling.
+      pollIntervalMs: options.pollingFrequencyMs,
       maxReconnectAttempts: options.maxReconnectAttempts,
       locklessRendezvous: options.locklessRendezvous,
       peerId: options.peerId,
@@ -1805,13 +1831,20 @@ export function connectionOverridesFrom(
 }
 
 /**
- * Warn that the file-sync-only flags (`--lockless-rendezvous`, `--retain-files`)
- * have no effect on a channel that is not `sftp` or `filedrop`, naming whichever
- * flags the caller actually set. The channel is taken as input so the one helper
- * serves both call sites: `exchange` derives it from the loaded connection
- * (post-override), `zero-setup` from the server URL (pre-connection). A file-sync
- * channel warns for neither flag. Shared so the wording cannot drift between the
- * two commands.
+ * Warn that the file-sync-only flags (`--lockless-rendezvous`, `--retain-files`,
+ * `--polling-frequency`) have no effect on a channel that is not `sftp` or
+ * `filedrop`, naming whichever flags the caller actually set. The channel is
+ * taken as input so the one helper serves both call sites: `exchange` derives it
+ * from the loaded connection (post-override), `zero-setup` from the server URL
+ * (pre-connection). A file-sync channel warns for none of them. Shared so the
+ * wording cannot drift between the two commands.
+ *
+ * `--polling-frequency` belongs here because `pollIntervalMs` is a FileSyncOptions
+ * field {@link applyConnectionOverrides} applies only on `sftp`/`filedrop`, so on
+ * a non-file-sync channel the override is dropped exactly as the two toggles are;
+ * this is where its ignored-flag warning lives, and {@link warnLowPollingFrequency}
+ * (the aggressively-low advisory) is correspondingly a no-op off those channels so
+ * the two never both fire.
  *
  * `--outbound-path` is deliberately NOT one of these flags: unlike the silently-
  * ignored options above, it is a hard error on a non-file-sync channel (the
@@ -1821,7 +1854,11 @@ export function connectionOverridesFrom(
  */
 export function warnUnsupportedFileSyncFlags(
   channel: ConnectionConfig["channel"],
-  flags: { locklessRendezvous?: boolean; retainFiles?: boolean },
+  flags: {
+    locklessRendezvous?: boolean;
+    retainFiles?: boolean;
+    pollingFrequencyMs?: number;
+  },
   log: { warn: (message: string) => void },
 ): void {
   if (channel === "sftp" || channel === "filedrop") return;
@@ -1835,6 +1872,68 @@ export function warnUnsupportedFileSyncFlags(
       `--retain-files has no effect on the ${channel} channel and will be ` +
         "ignored; it is only supported on sftp and filedrop",
     );
+  // A number gate (not `=== true`): pollingFrequencyMs is set or unset, with no
+  // negated CLI form to fold to a default the way the boolean toggles have.
+  if (flags.pollingFrequencyMs !== undefined)
+    log.warn(
+      `--polling-frequency has no effect on the ${channel} channel and will be ` +
+        "ignored; it is only supported on sftp and filedrop",
+    );
+}
+
+/**
+ * Millisecond threshold below which a `--polling-frequency` override draws the
+ * anti-flood warning ({@link warnLowPollingFrequency}). One second: at or above
+ * it a poll cadence stays within the anti-flood budgets commercial SFTP servers
+ * enforce, so it is silent; below it the operator is warned but not blocked (a
+ * demo against a controlled server legitimately wants a sub-second poll).
+ */
+export const LOW_POLLING_FREQUENCY_WARN_MS = 1000;
+
+/**
+ * Warn -- but do not block -- when a `--polling-frequency` override is set
+ * aggressively low (below {@link LOW_POLLING_FREQUENCY_WARN_MS}), because a
+ * sub-second poll hammers the shared directory with listings and can trip a
+ * commercial SFTP server's anti-flood/DoS protection and drop the connection (the
+ * partner-deployment failure that motivated the conservative default). There is
+ * deliberately no hard floor: a demo against a controlled server may want ~100ms.
+ * A no-op when the flag is absent or at/above the threshold, so a conservative
+ * value emits nothing.
+ *
+ * A no-op on a non-file-sync `channel`: `pollIntervalMs` is applied only on
+ * `sftp`/`filedrop` (see {@link applyConnectionOverrides}), so on any other
+ * channel the override is dropped and its ignored-flag warning is emitted by
+ * {@link warnUnsupportedFileSyncFlags} instead -- the aggressively-low advisory
+ * here would be misleading, since no poll ever runs at that rate. `channel` is
+ * `undefined` when the command could not resolve one (an unknown URL scheme in
+ * zero-setup), which is likewise not a file-sync channel, so it no-ops too.
+ *
+ * Scoped to the CLI override value (the parsed `pollingFrequencyMs`), not the
+ * effective merged interval: a low value already sitting in a loaded config's
+ * `pollIntervalMs` is the operator's committed choice and is not re-litigated on
+ * every run. The interpolated value is the operator's own numeric flag argument
+ * (non-secret), so echoing it is safe. Called on the paths where the override
+ * actually takes effect (zero-setup, `exchange`, and the ONLINE invite/accept);
+ * the offline paths route `--polling-frequency` through
+ * {@link warnOptionsOverridesIgnoredOffline} instead, since it is dropped there.
+ */
+export function warnLowPollingFrequency(
+  channel: ConnectionConfig["channel"] | undefined,
+  pollingFrequencyMs: number | undefined,
+  log: { warn: (message: string) => void },
+): void {
+  if (channel !== "sftp" && channel !== "filedrop") return;
+  if (
+    pollingFrequencyMs === undefined ||
+    pollingFrequencyMs >= LOW_POLLING_FREQUENCY_WARN_MS
+  )
+    return;
+  log.warn(
+    `--polling-frequency ${pollingFrequencyMs}ms is below ` +
+      `${LOW_POLLING_FREQUENCY_WARN_MS}ms; polling this aggressively may trip ` +
+      "an SFTP server's anti-flood/DoS protection and drop the connection. Use " +
+      "a sub-second interval only against a controlled server (for example a demo).",
+  );
 }
 
 /**
@@ -1924,8 +2023,9 @@ export function warnServerOverridesIgnoredOffline(
  * subset of {@link CommonBootstrapOptions} (assignable to it) holding the
  * tuning/toggle flags {@link applyConnectionOverrides} writes into
  * `connection.options`: the SharedOptions timeouts/reconnect bound
- * (`--connection-timeout`, `--peer-timeout`, `--max-reconnect-attempts`) and the
- * file-sync toggles (`--lockless-rendezvous`, `--peer-id`, `--retain-files`,
+ * (`--connection-timeout`, `--peer-timeout`, `--max-reconnect-attempts`), the
+ * file-sync poll interval (`--polling-frequency`), and the file-sync toggles
+ * (`--lockless-rendezvous`, `--peer-id`, `--retain-files`,
  * `--timestamp-in-filename`) -- HOW the exchange behaves, as opposed to the
  * server block's WHERE/credentials that {@link OfflineIgnoredServerOverrides}
  * covers.
@@ -1949,6 +2049,7 @@ export type OfflineIgnoredOptionsOverrides = Pick<
   CommonBootstrapOptions,
   | "connectionTimeout"
   | "peerTimeout"
+  | "pollingFrequencyMs"
   | "maxReconnectAttempts"
   | "locklessRendezvous"
   | "peerId"
@@ -1958,8 +2059,9 @@ export type OfflineIgnoredOptionsOverrides = Pick<
 
 /**
  * Warn that the connection-OPTIONS overrides (`--connection-timeout`,
- * `--peer-timeout`, `--max-reconnect-attempts`, `--lockless-rendezvous`,
- * `--peer-id`, `--timestamp-in-filename`, `--retain-files`) have no effect on an
+ * `--peer-timeout`, `--polling-frequency`, `--max-reconnect-attempts`,
+ * `--lockless-rendezvous`, `--peer-id`, `--timestamp-in-filename`,
+ * `--retain-files`) have no effect on an
  * OFFLINE invite/accept. Like the server-block overrides those paths go through
  * {@link connectionFromEndpoint}, which applies no connection overrides, but
  * these target `connection.options` -- a block the offline placeholder does not
@@ -1986,6 +2088,8 @@ export function warnOptionsOverridesIgnoredOffline(
   if (options.connectionTimeout !== undefined)
     ignored.push("--connection-timeout");
   if (options.peerTimeout !== undefined) ignored.push("--peer-timeout");
+  if (options.pollingFrequencyMs !== undefined)
+    ignored.push("--polling-frequency");
   if (options.maxReconnectAttempts !== undefined)
     ignored.push("--max-reconnect-attempts");
   // The three toggles gate on `=== true`, not presence: yargs sets the negated

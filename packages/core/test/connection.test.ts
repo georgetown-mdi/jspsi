@@ -360,6 +360,33 @@ test("peer_timeout_ms of zero is rejected", () => {
   expect(result.success).toBe(false);
 });
 
+test("poll_interval_ms of zero is rejected", () => {
+  // pollIntervalMs is positive, not nonnegative: a zero is not "as fast as
+  // possible" but a setTimeout(0) hot poll that busy-loops directory listings
+  // against the server (a self-inflicted flood), so the schema rejects it. The
+  // CLI's --polling-frequency already rejects zero; this closes the same hole on
+  // the config/programmatic path (snake_case, as read from disk).
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { poll_interval_ms: 0 },
+  });
+  expect(result.success).toBe(false);
+});
+
+test("a positive poll_interval_ms is still accepted", () => {
+  // Teeth for the zero-rejection above: the positivity floor rejects only zero (and
+  // negatives), so the smallest valid interval, 1 ms, still passes.
+  const result = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { poll_interval_ms: 1 },
+  });
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  // pollIntervalMs is a FileSyncOptions field; narrow off the union by channel.
+  if (result.data.channel !== "sftp") return;
+  expect(result.data.options?.pollIntervalMs).toBe(1);
+});
+
 test("server_connect_timeout_ms of zero is rejected", () => {
   // A zero serverConnectTimeoutMs is not a meaningful "no timeout": it times out
   // the filedrop local-FS connect probe immediately and disables ssh2's connect
