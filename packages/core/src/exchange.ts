@@ -137,7 +137,7 @@ export interface PreparedExchange {
  *
  * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`: on the
  * accept side the algorithm is adopted verbatim from the partner's invitation
- * (see `acceptedLinkageTerms`), so -- like `assertPayloadSendDisclosed` -- it is
+ * (see `deriveAcceptedLinkageTerms`), so -- like `assertPayloadSendDisclosed` -- it is
  * not unconditionally this operator's own content, and its message stays swallowed
  * by the web's generic alert rather than surfaced. The message names only the
  * fixed enum literals, never partner-controlled free text; the CLI classifies it
