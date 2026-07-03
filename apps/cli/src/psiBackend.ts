@@ -8,16 +8,23 @@ import type { PsiBackendOptions, PsiBackendSelection } from "@psilink/core";
  * Loads the native N-API PSI addon when a prebuild is available for this
  * platform, or resolves `null` so the CLI falls back to the WASM engine.
  *
- * SEAM (board item 199653275, "Build the native N-API PSI addon and
- * cross-platform prebuilds"): the addon is not built yet, so this resolves
- * `null` and the CLI runs on WASM exactly as before. The agent building the
- * addon replaces this body with the real prebuild resolution (a require of the
- * chosen addon package, e.g. via node-gyp-build), keeping the null-on-absent
- * contract so an unbuilt platform still falls back. The addon's byte output must
- * match the psi-engine-wire-vectors.json interop fixture in @psilink/core.
+ * The `@openmined/psi.js/psi_native_node.js` entry loads the prebuilt `.node`
+ * addon (via node-gyp-build, resolving prebuilds/<platform>-<arch>/) and wraps
+ * it in the same PSILibrary shape as the WASM build. It rejects when no prebuild
+ * exists for the running platform -- or the entry is absent from an older
+ * vendored package -- and we resolve `null` so the selector falls back to WASM.
+ * The addon is a performance accelerator; correctness never depends on it, and
+ * its wire output matches the psi-engine-wire-vectors.json interop fixture in
+ * @psilink/core byte-for-byte.
  */
 async function loadNativePsiAddon(): Promise<PSILibrary | null> {
-  return null;
+  try {
+    const { default: loadNativeLibrary } =
+      await import("@openmined/psi.js/psi_native_node.js");
+    return await loadNativeLibrary();
+  } catch {
+    return null;
+  }
 }
 
 /**

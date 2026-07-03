@@ -17,7 +17,14 @@ export default defineConfig({
     banner: "#!/usr/bin/env node", // shebang for execution
   },
   //external: ['ssh2'],
-  external: Object.keys(pkg.dependencies),
+  // Keep every dependency external -- and any subpath of one, so the native PSI
+  // addon entry (@openmined/psi.js/psi_native_node.js) is resolved at runtime
+  // rather than bundled (its prebuilds/ are located relative to the installed
+  // package, which bundling would break).
+  external: (id: string) =>
+    Object.keys(pkg.dependencies).some(
+      (dep) => id === dep || id.startsWith(`${dep}/`),
+    ),
   plugins: [
     resolve({
       preferBuiltins: true, // let Node built-ins (fs, path, etc.) be external

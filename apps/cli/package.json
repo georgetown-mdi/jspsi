@@ -15,7 +15,7 @@
     "coverage": "vitest run --project unit --project integration --coverage"
   },
   "dependencies": {
-    "@openmined/psi.js": "file:../../lib/openmined-psi.js-2.0.6-seclink.1.tgz",
+    "@openmined/psi.js": "file:../../lib/openmined-psi.js-2.0.6-seclink.2.tgz",
     "@psilink/core": "file:../../packages/core",
     "loglevel": "^1.9.2",
     "ssh2": "1.17.0",
