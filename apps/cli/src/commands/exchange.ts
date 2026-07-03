@@ -356,12 +356,15 @@ export function loadConfig(options: ExchangeOptions): {
     {
       locklessRendezvous: options.locklessRendezvous,
       retainFiles: options.retainFiles,
+      pollingFrequencyMs: options.pollingFrequencyMs,
     },
     log,
   );
   // Warn when the --polling-frequency override (now merged into the connection's
-  // pollIntervalMs) is set aggressively low; no-op when the flag was not passed.
-  warnLowPollingFrequency(options.pollingFrequencyMs, log);
+  // pollIntervalMs) is set aggressively low; no-op when the flag was not passed or
+  // the channel is not file-sync (where warnUnsupportedFileSyncFlags reports it
+  // ignored instead). The unsupported-channel throw below is not yet reached.
+  warnLowPollingFrequency(connection.channel, options.pollingFrequencyMs, log);
 
   if (connection.channel !== "sftp" && connection.channel !== "filedrop")
     // An unsupported channel in the config is invalid caller configuration

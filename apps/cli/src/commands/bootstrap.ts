@@ -1831,13 +1831,20 @@ export function connectionOverridesFrom(
 }
 
 /**
- * Warn that the file-sync-only flags (`--lockless-rendezvous`, `--retain-files`)
- * have no effect on a channel that is not `sftp` or `filedrop`, naming whichever
- * flags the caller actually set. The channel is taken as input so the one helper
- * serves both call sites: `exchange` derives it from the loaded connection
- * (post-override), `zero-setup` from the server URL (pre-connection). A file-sync
- * channel warns for neither flag. Shared so the wording cannot drift between the
- * two commands.
+ * Warn that the file-sync-only flags (`--lockless-rendezvous`, `--retain-files`,
+ * `--polling-frequency`) have no effect on a channel that is not `sftp` or
+ * `filedrop`, naming whichever flags the caller actually set. The channel is
+ * taken as input so the one helper serves both call sites: `exchange` derives it
+ * from the loaded connection (post-override), `zero-setup` from the server URL
+ * (pre-connection). A file-sync channel warns for none of them. Shared so the
+ * wording cannot drift between the two commands.
+ *
+ * `--polling-frequency` belongs here because `pollIntervalMs` is a FileSyncOptions
+ * field {@link applyConnectionOverrides} applies only on `sftp`/`filedrop`, so on
+ * a non-file-sync channel the override is dropped exactly as the two toggles are;
+ * this is where its ignored-flag warning lives, and {@link warnLowPollingFrequency}
+ * (the aggressively-low advisory) is correspondingly a no-op off those channels so
+ * the two never both fire.
  *
  * `--outbound-path` is deliberately NOT one of these flags: unlike the silently-
  * ignored options above, it is a hard error on a non-file-sync channel (the
@@ -1847,7 +1854,11 @@ export function connectionOverridesFrom(
  */
 export function warnUnsupportedFileSyncFlags(
   channel: ConnectionConfig["channel"],
-  flags: { locklessRendezvous?: boolean; retainFiles?: boolean },
+  flags: {
+    locklessRendezvous?: boolean;
+    retainFiles?: boolean;
+    pollingFrequencyMs?: number;
+  },
   log: { warn: (message: string) => void },
 ): void {
   if (channel === "sftp" || channel === "filedrop") return;
@@ -1859,6 +1870,13 @@ export function warnUnsupportedFileSyncFlags(
   if (flags.retainFiles === true)
     log.warn(
       `--retain-files has no effect on the ${channel} channel and will be ` +
+        "ignored; it is only supported on sftp and filedrop",
+    );
+  // A number gate (not `=== true`): pollingFrequencyMs is set or unset, with no
+  // negated CLI form to fold to a default the way the boolean toggles have.
+  if (flags.pollingFrequencyMs !== undefined)
+    log.warn(
+      `--polling-frequency has no effect on the ${channel} channel and will be ` +
         "ignored; it is only supported on sftp and filedrop",
     );
 }
@@ -1882,6 +1900,14 @@ export const LOW_POLLING_FREQUENCY_WARN_MS = 1000;
  * A no-op when the flag is absent or at/above the threshold, so a conservative
  * value emits nothing.
  *
+ * A no-op on a non-file-sync `channel`: `pollIntervalMs` is applied only on
+ * `sftp`/`filedrop` (see {@link applyConnectionOverrides}), so on any other
+ * channel the override is dropped and its ignored-flag warning is emitted by
+ * {@link warnUnsupportedFileSyncFlags} instead -- the aggressively-low advisory
+ * here would be misleading, since no poll ever runs at that rate. `channel` is
+ * `undefined` when the command could not resolve one (an unknown URL scheme in
+ * zero-setup), which is likewise not a file-sync channel, so it no-ops too.
+ *
  * Scoped to the CLI override value (the parsed `pollingFrequencyMs`), not the
  * effective merged interval: a low value already sitting in a loaded config's
  * `pollIntervalMs` is the operator's committed choice and is not re-litigated on
@@ -1892,9 +1918,11 @@ export const LOW_POLLING_FREQUENCY_WARN_MS = 1000;
  * {@link warnOptionsOverridesIgnoredOffline} instead, since it is dropped there.
  */
 export function warnLowPollingFrequency(
+  channel: ConnectionConfig["channel"] | undefined,
   pollingFrequencyMs: number | undefined,
   log: { warn: (message: string) => void },
 ): void {
+  if (channel !== "sftp" && channel !== "filedrop") return;
   if (
     pollingFrequencyMs === undefined ||
     pollingFrequencyMs >= LOW_POLLING_FREQUENCY_WARN_MS

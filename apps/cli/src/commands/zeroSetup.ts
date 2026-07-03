@@ -573,14 +573,16 @@ export async function handler(argv: Arguments): Promise<void> {
         {
           locklessRendezvous: options.locklessRendezvous,
           retainFiles: options.retainFiles,
+          pollingFrequencyMs: options.pollingFrequencyMs,
         },
         log,
       );
     // Warn when the --polling-frequency override is set aggressively low (a
-    // sub-second poll can trip an SFTP server's anti-flood protection); no-op
-    // when the flag was not passed. Zero-setup always runs the connection here,
-    // so the override always takes effect.
-    warnLowPollingFrequency(options.pollingFrequencyMs, log);
+    // sub-second poll can trip an SFTP server's anti-flood protection); no-op when
+    // the flag was not passed. Pass the resolved channel so this is silent on a
+    // non-file-sync (or unresolved) channel, where the override is dropped and
+    // warnUnsupportedFileSyncFlags above emits the ignored-flag warning instead.
+    warnLowPollingFrequency(channel, options.pollingFrequencyMs, log);
 
     // Detect a pre-existing config/key before any network activity. With --save,
     // a target that already exists is an error -- a half-finished bootstrap must

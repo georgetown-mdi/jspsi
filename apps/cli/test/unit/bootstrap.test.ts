@@ -495,28 +495,44 @@ test("connectionOverridesFrom: an absent --polling-frequency leaves pollInterval
 
 // --- warnLowPollingFrequency -------------------------------------------------
 
-test("warnLowPollingFrequency: warns below the 1s threshold", () => {
+test("warnLowPollingFrequency: warns below the 1s threshold on a file-sync channel", () => {
   const warnings: string[] = [];
-  warnLowPollingFrequency(100, { warn: (m) => warnings.push(m) });
+  warnLowPollingFrequency("sftp", 100, { warn: (m) => warnings.push(m) });
   expect(warnings).toHaveLength(1);
   // Names the flag, echoes the operator's own value, and states the anti-flood risk.
   expect(warnings[0]).toContain("--polling-frequency");
   expect(warnings[0]).toContain("100ms");
   expect(warnings[0]).toContain("anti-flood");
+  // Applies on filedrop too, not just sftp.
+  const filedropWarnings: string[] = [];
+  warnLowPollingFrequency("filedrop", 100, {
+    warn: (m) => filedropWarnings.push(m),
+  });
+  expect(filedropWarnings).toHaveLength(1);
 });
 
 test("warnLowPollingFrequency: silent at exactly the 1s threshold", () => {
   // The threshold is inclusive of "safe": exactly 1000ms does not warn, so a
   // conservative value emits nothing.
   const warnings: string[] = [];
-  warnLowPollingFrequency(1000, { warn: (m) => warnings.push(m) });
+  warnLowPollingFrequency("sftp", 1000, { warn: (m) => warnings.push(m) });
   expect(warnings).toEqual([]);
 });
 
 test("warnLowPollingFrequency: silent above the threshold and when the flag is absent", () => {
   const warnings: string[] = [];
-  warnLowPollingFrequency(5000, { warn: (m) => warnings.push(m) });
-  warnLowPollingFrequency(undefined, { warn: (m) => warnings.push(m) });
+  warnLowPollingFrequency("sftp", 5000, { warn: (m) => warnings.push(m) });
+  warnLowPollingFrequency("sftp", undefined, { warn: (m) => warnings.push(m) });
+  expect(warnings).toEqual([]);
+});
+
+test("warnLowPollingFrequency: silent on a non-file-sync (or unresolved) channel even with a low value", () => {
+  // The poll override is dropped off the file-sync channels, so the anti-flood
+  // advisory would be misleading; warnUnsupportedFileSyncFlags reports it ignored
+  // there instead. An undefined channel (unresolved URL scheme) no-ops the same way.
+  const warnings: string[] = [];
+  warnLowPollingFrequency("webrtc", 100, { warn: (m) => warnings.push(m) });
+  warnLowPollingFrequency(undefined, 100, { warn: (m) => warnings.push(m) });
   expect(warnings).toEqual([]);
 });
 
@@ -785,13 +801,13 @@ function collectWarnings(): { warn: (m: string) => void; messages: string[] } {
 }
 
 test("warnUnsupportedFileSyncFlags: file-sync channels never warn", () => {
-  // sftp and filedrop support both flags, so neither warns even when both are
-  // set -- the predicate is the channel.
+  // sftp and filedrop support every flag, so none warns even when all are set --
+  // the predicate is the channel.
   for (const channel of ["sftp", "filedrop"] as const) {
     const log = collectWarnings();
     warnUnsupportedFileSyncFlags(
       channel,
-      { locklessRendezvous: true, retainFiles: true },
+      { locklessRendezvous: true, retainFiles: true, pollingFrequencyMs: 100 },
       log,
     );
     expect(log.messages).toHaveLength(0);
@@ -817,13 +833,26 @@ test("warnUnsupportedFileSyncFlags: a non-file-sync channel warns only for the f
       "it is only supported on sftp and filedrop",
   ]);
 
-  const both = collectWarnings();
+  // --polling-frequency is a number override (gated on presence, not `=== true`),
+  // reported ignored on a non-file-sync channel like its sibling toggles.
+  const onlyPolling = collectWarnings();
   warnUnsupportedFileSyncFlags(
     "webrtc",
-    { locklessRendezvous: true, retainFiles: true },
-    both,
+    { pollingFrequencyMs: 100 },
+    onlyPolling,
   );
-  expect(both.messages).toHaveLength(2);
+  expect(onlyPolling.messages).toEqual([
+    "--polling-frequency has no effect on the webrtc channel and will be " +
+      "ignored; it is only supported on sftp and filedrop",
+  ]);
+
+  const all = collectWarnings();
+  warnUnsupportedFileSyncFlags(
+    "webrtc",
+    { locklessRendezvous: true, retainFiles: true, pollingFrequencyMs: 100 },
+    all,
+  );
+  expect(all.messages).toHaveLength(3);
 
   const neither = collectWarnings();
   warnUnsupportedFileSyncFlags("webrtc", {}, neither);

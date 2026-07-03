@@ -391,7 +391,13 @@ export async function validateAccept(params: {
     // Warn when the --polling-frequency override (now merged into `connection`)
     // is set aggressively low; no-op when the flag was not passed. Only on this
     // online path -- the offline path reports it ignored (see below).
-    warnLowPollingFrequency(options.pollingFrequencyMs, log);
+    // connectionFromURL has already rejected a webrtc URL, so `connection` is a
+    // file-sync channel here and the channel gate always passes.
+    warnLowPollingFrequency(
+      connection.channel,
+      options.pollingFrequencyMs,
+      log,
+    );
     // Reconcile a pre-existing config against the invitation AND the connection
     // the exchange will actually use (the built `connection`, now possibly
     // endpoint-influenced) before the input is read and before any network

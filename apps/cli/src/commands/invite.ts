@@ -327,7 +327,13 @@ export async function validateInvite(params: {
     // Warn when the --polling-frequency override (now merged into `connection`)
     // is set aggressively low; no-op when the flag was not passed. Only on this
     // online path -- the offline path reports it ignored (see below).
-    warnLowPollingFrequency(options.pollingFrequencyMs, log);
+    // connectionFromURL has already rejected a webrtc URL, so `connection` is a
+    // file-sync channel here and the channel gate always passes.
+    warnLowPollingFrequency(
+      connection.channel,
+      options.pollingFrequencyMs,
+      log,
+    );
 
     // An accept-timeout longer than the token's lifetime would keep waiting at
     // the rendezvous past the point the token can be honored. Compare against
