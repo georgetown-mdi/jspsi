@@ -206,6 +206,22 @@ Every command that opens an SFTP connection -- `psilink exchange`, an online `ps
 - A run with no terminal -- an automated or scheduled run, or one piping its input CSV through stdin -- does not prompt and does not silently accept: it fails closed with an error telling you to run once interactively to pin the key, or to set `host_key_fingerprint` yourself. So pin the key (out-of-band or via one interactive run) before scheduling unattended exchanges.
 - If the server legitimately rotates its host key, a later run fails with a mismatch error rather than silently trusting the new key. Verify the new fingerprint out-of-band, then re-pin deliberately: set `host_key_fingerprint` to the new value, or remove it from `psilink.yaml` and run once interactively to confirm and re-pin (the same as removing a changed host from `~/.ssh/known_hosts`).
 
+## Verifying a receipt
+
+```sh
+psilink verify-receipt RECORD [INPUT_FILE] [RESULT_FILE]
+```
+
+Read a stored exchange record and report whether it is internally consistent. It is read-only: it never modifies or re-signs the record. `RECORD` is the record file written at the end of an exchange (`psilink-record-<stamp>.json`); its verification keys are read from the record path with a `.keys.json` suffix by default, or from `--keys`. An unrecognized record or keys `version` is rejected with a clear error (exit 64) rather than mis-parsed.
+
+The record holds no matched data -- only salted commitments to it -- so verification **re-supplies** the committed data from your own retained files: pass the `INPUT_FILE` you contributed and the `RESULT_FILE` you kept, and the command reconstructs the committed data and opens every commitment (the sent payload, the received payload, and the record's pairing). Reproduction is byte-exact only from **unmodified** retained files -- a results file re-sorted or re-exported in a spreadsheet will not reproduce -- and a duplicate value in an identifier column, or a genuinely empty received cell, is reported as a note rather than silently mis-opened.
+
+With `--config-file` (your exchange config, for your linkage terms) and `--partner-terms` (the partner's terms), it also re-derives the agreed-terms hash. The partner's terms are not retained by default, so this check is optional; without both, the terms hash is reported as not checked. `--config-file` is never auto-loaded -- name it explicitly, since a stray config in the working directory may belong to a different exchange.
+
+With neither `INPUT_FILE` nor `RESULT_FILE`, the command still runs -- the third-party-auditor case: it checks the record's structure and version and reports each commitment as not opened (an auditor without your retained data cannot open the commitments, by design), rather than failing.
+
+The verdict distinguishes a commitment that **opened and matches**, one that was **not opened** (its data was not re-supplied), and one that **does not match**, and rolls up to `VERIFIED` (everything checked and passed), `INCOMPLETE` (nothing contradicted, but not everything could be checked), or `VERIFICATION FAILED` (a check did not match). The command exits nonzero (1) only on a definite failure; a failed opening is reported as "the record may have been altered, or a re-supplied input/result/terms does not match this exchange", never asserted as tampering, since the two are indistinguishable. Partner receipt **signatures** are not verified yet -- signed evidence bundles are deferred work -- and the command says so rather than implying it checked them.
+
 ## Recovery
 
 ### Key lifecycle
@@ -242,9 +258,9 @@ See [Compromise response](SECURITY_DESIGN.md#compromise-response) for the full p
 
 ## Logging
 
-Every command that produces diagnostic output - `init`, `invite`, `accept`, `exchange`, the zero-setup form, and `fingerprint` - accepts `--log-level` and `--log-file`.
+Every command that produces diagnostic output - `init`, `invite`, `accept`, `exchange`, the zero-setup form, `fingerprint`, and `verify-receipt` - accepts `--log-level` and `--log-file`.
 
-psilink follows the standard stream convention: a command's result data goes to `stdout`, and all diagnostic output - every log line, `info` and `debug` included, together with the interactive confirmation prompt - goes to `stderr`. This keeps a piped or redirected result clean. `psilink accept URL INVITATION 2>/dev/null > matched.csv` writes only the matched-records CSV to `matched.csv`, with the invitation-terms display, the "wrote key file" line, the runtime banner, and every other diagnostic sent to `stderr`, where the same run without the redirect still shows them on the terminal. The result on `stdout` is an exchange's CSV output (when no `OUTPUT_FILE` positional is given), the invitation token printed by `invite`, and the fingerprint value printed by `fingerprint` -- whose action banner, bound identity, `--force` regeneration warning, and out-of-band sharing instructions are diagnostics on `stderr`, so `FP=$(psilink fingerprint)` captures just the value.
+psilink follows the standard stream convention: a command's result data goes to `stdout`, and all diagnostic output - every log line, `info` and `debug` included, together with the interactive confirmation prompt - goes to `stderr`. This keeps a piped or redirected result clean. `psilink accept URL INVITATION 2>/dev/null > matched.csv` writes only the matched-records CSV to `matched.csv`, with the invitation-terms display, the "wrote key file" line, the runtime banner, and every other diagnostic sent to `stderr`, where the same run without the redirect still shows them on the terminal. The result on `stdout` is an exchange's CSV output (when no `OUTPUT_FILE` positional is given), the invitation token printed by `invite`, the fingerprint value printed by `fingerprint` -- whose action banner, bound identity, `--force` regeneration warning, and out-of-band sharing instructions are diagnostics on `stderr`, so `FP=$(psilink fingerprint)` captures just the value -- and the verification verdict printed by `verify-receipt` (its exit code, nonzero only on a definite failure, carries the same result for scripts).
 
 `--log-level <level>` selects the verbosity: `silent`, `error`, `warn`, `info` (the default), `debug`, or `trace`. `silent` suppresses all log output.
 
