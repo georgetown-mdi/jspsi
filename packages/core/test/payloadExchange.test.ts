@@ -1150,7 +1150,9 @@ test("buildOutputTable: partner columns use plain names when no collision", () =
     metaWithId,
     partnerPayload,
   );
-  expect(headers).toEqual(["patient_id", "partner_id", "notes"]);
+  // The partner row-index column (row_id) sits between our column and the
+  // partner payload columns.
+  expect(headers).toEqual(["patient_id", "row_id", "partner_id", "notes"]);
 });
 
 test("buildOutputTable: their_ prefix disambiguates same-named columns", () => {
@@ -1167,7 +1169,35 @@ test("buildOutputTable: their_ prefix disambiguates same-named columns", () => {
     metaWithId,
     partnerPayload,
   );
-  expect(headers).toEqual(["patient_id", "their_patient_id"]);
+  expect(headers).toEqual(["patient_id", "row_id", "their_patient_id"]);
+});
+
+test("buildOutputTable: partner row-index header falls back past colliding partner columns", () => {
+  // Adversarial header collision: the partner sends columns literally named
+  // "row_id" and "their_row_id", both of which the partner row-index column would
+  // otherwise take. uniqueColumnName walks past them to their_row_id_2, so every
+  // header stays distinct rather than silently duplicating.
+  const partnerPayload: PartnerPayload = {
+    columns: ["row_id", "their_row_id"],
+    rowIndices: [3],
+    rows: [["A", "B"]],
+  };
+  const { headers, rows } = buildOutputTable(
+    [[0], [3]],
+    rawRows,
+    metaWithId,
+    partnerPayload,
+  );
+  // ourBaseName is patient_id, so the partner value columns keep their names; the
+  // partner-index column becomes their_row_id_2 (row_id and their_row_id taken).
+  expect(headers).toEqual([
+    "patient_id",
+    "their_row_id_2",
+    "row_id",
+    "their_row_id",
+  ]);
+  expect(new Set(headers).size).toBe(headers.length); // all distinct
+  expect(rows[0]).toEqual(["P0", "3", "A", "B"]); // partner index in column 2
 });
 
 test("buildOutputTable: maps partner rows correctly when their indices are not in pairing order", () => {
@@ -1188,10 +1218,12 @@ test("buildOutputTable: maps partner rows correctly when their indices are not i
     metaWithId,
     partnerPayload,
   );
+  // Column 2 is the partner row index (their side of the pairing); the payload
+  // value follows.
   expect(rows).toEqual([
-    ["P0", "Q3"], // our row 0 → their row 3 → payload index 2
-    ["P2", "Q1"], // our row 2 → their row 1 → payload index 0
-    ["P4", "Q2"], // our row 4 → their row 2 → payload index 1
+    ["P0", "3", "Q3"], // our row 0 → their row 3 → payload index 2
+    ["P2", "1", "Q1"], // our row 2 → their row 1 → payload index 0
+    ["P4", "2", "Q2"], // our row 4 → their row 2 → payload index 1
   ]);
 });
 
@@ -1341,8 +1373,9 @@ test("buildOutputTable: null partner payload cells are emitted as empty strings"
     metaWithId,
     partnerPayload,
   );
-  expect(rows[0][1]).toBe(""); // null -> ""
-  expect(rows[0][2]).toBe("note0");
+  expect(rows[0][1]).toBe("0"); // partner row index column
+  expect(rows[0][2]).toBe(""); // null partner_id -> ""
+  expect(rows[0][3]).toBe("note0");
 });
 
 test("buildOutputTable: throws when partner payload rowIndices and rows have different lengths", () => {

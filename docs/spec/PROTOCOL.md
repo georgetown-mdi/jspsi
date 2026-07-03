@@ -272,7 +272,9 @@ The record format itself -- the record and verification-keys file shapes, the fo
 
 The basic output is an association table between each party's element. As noted above, if parties supplied identifier columns with their inputs and flagged them in their metadata, the association table will be between each party's identifiers. Otherwise, the table references the row indices of each dataset.
 
-If parties elected to transmit payload data, the relevant columns for the appropriate rows will be transmitted in-band over the secure connection and appended to the output in-the-clear.
+The result file identifies our matched record in its first column (the identifier value, or the local row index when no identifier column exists), followed by a `row_id` column carrying the partner's 0-based row index for that match. This partner row-index column is written for every match, not only for identifier-free exchanges, because it is the partner side of the association-table pairing the exchange-record commitment binds -- writing it keeps the result sufficient to reproduce (and so verify) that commitment from the holder's own retained files (see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md#commitment-scheme)). The column is headed `row_id`, disambiguated to `their_row_id` (then `their_row_id_2`, ...) if that name collides with the local column or a partner payload column.
+
+If parties elected to transmit payload data, the relevant columns for the appropriate rows will be transmitted in-band over the secure connection and appended to the output in-the-clear, after the partner row-index column.
 
 # X25519 authenticated key exchange
 

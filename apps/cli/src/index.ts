@@ -27,6 +27,10 @@ import {
   builder as initBuilder,
   handler as initHandler,
 } from "./commands/init";
+import {
+  builder as verifyReceiptBuilder,
+  handler as verifyReceiptHandler,
+} from "./commands/verifyReceipt";
 
 yargs(hideBin(process.argv))
   .scriptName("psilink")
@@ -65,6 +69,12 @@ yargs(hideBin(process.argv))
     "Show (and lazily create) this party's signing certificate fingerprint",
     fingerprintBuilder,
     fingerprintHandler,
+  )
+  .command(
+    "verify-receipt <record> [input-file] [result-file]",
+    "Verify a stored exchange record and open its commitments (read-only)",
+    verifyReceiptBuilder,
+    verifyReceiptHandler,
   )
   .usage("$0 [command] [options]")
   .help("h")

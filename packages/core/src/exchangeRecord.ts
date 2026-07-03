@@ -14,7 +14,13 @@ import {
   toBase64Url,
 } from "./utils/crypto.js";
 import { AlgorithmSchema } from "./types.js";
-import { MAX_NAME_LENGTH } from "./config/linkageTerms.js";
+import {
+  MAX_LINKAGE_ENTRIES,
+  MAX_NAME_LENGTH,
+  MAX_PAYLOAD_ENTRIES,
+  MAX_TEXT_LENGTH,
+} from "./config/linkageTerms.js";
+import { boundedArray } from "./utils/boundedArray.js";
 
 import type { CanonicalValue } from "./utils/canonical.js";
 import type { LinkageTerms } from "./config/linkageTerms.js";
@@ -424,11 +430,38 @@ export interface VerificationKeys {
 
 // --- Schemas -----------------------------------------------------------------
 
+// Untrusted-input bounds. parseExchangeRecord's first production caller is the
+// verification reader, which ingests a record file supplied by another party --
+// the first untrusted caller of this parser (records were previously only written
+// to disk / offered as downloads, never parsed back from an untrusted source). So
+// every partner-controlled string and array below carries a generous length /
+// element-count cap -- the same caps the linkage-terms producers imply
+// (MAX_NAME_LENGTH, MAX_TEXT_LENGTH, MAX_LINKAGE_ENTRIES, MAX_PAYLOAD_ENTRIES) so a
+// record this module produces always parses back -- applied so an oversized
+// hostile record is rejected at parse rather than forcing proportional
+// allocation. Array counts use boundedArray (a count refine BEFORE per-element
+// validation) for the same Zod issue-accumulation reason the linkage-terms bounds
+// document. The bounds reject; they do not reshape a valid record. These are
+// defense-in-depth ceilings, not semantic limits.
+
+// Length cap for the fixed-size base64url crypto values a record and its keys
+// carry (termsHash, bindingNonce, each commitment, each salt): every one is a
+// 32-byte value -- 43 unpadded base64url characters -- so 256 is far above any
+// legitimate value yet refuses a megabyte-scale hostile string. Bounds the field
+// for the untrusted reader without length-locking the exact byte count (a reader
+// still verifies by recomputing the commitment, so the exact length is not
+// pinned).
+const MAX_BASE64URL_LENGTH = 256;
+
 // Base64url without padding (the binary encoding used throughout receipts; see
-// docs/spec/CANONICAL_ENCODING.md). Not length-locked: a reader verifies by
-// recomputing the commitment, so the exact byte length need not be pinned here.
+// docs/spec/CANONICAL_ENCODING.md). Length-CAPPED (not length-locked): the `.max`
+// bounds how much an oversized hostile value can retain, while the exact byte
+// length stays unpinned. Zod runs both the length and the regex check (the cap
+// does not short-circuit the pattern scan), but the alphabet regex is
+// linear-time, so a capped value stays cheap to scan regardless.
 const base64UrlSchema = z
   .string()
+  .max(MAX_BASE64URL_LENGTH)
   .regex(/^[A-Za-z0-9_-]+$/, "must be an unpadded base64url string");
 
 // Both the intersection size and the records-exposed count are non-negative safe
@@ -443,7 +476,7 @@ const recordsExposedSchema = nonNegativeCountSchema("records exposed");
 // The retention/disposition pointer is a non-empty free-text note. An absent
 // pointer is the omitted key, never an empty string, so reject "" here: the
 // builder validates with this same schema, keeping the absence explicit.
-const retentionDispositionSchema = z.string().min(1);
+const retentionDispositionSchema = z.string().min(1).max(MAX_TEXT_LENGTH);
 
 // Shared by the parser and the builder so both agree on what `createdAt` may be:
 // an ISO 8601 datetime in UTC (ending in `Z`). `z.iso.datetime()` rejects
@@ -457,7 +490,7 @@ const createdAtSchema = z.iso.datetime();
 
 // Shared by the parser and the builder so both agree the identities are
 // non-empty strings; validated at build time alongside createdAt and resultSize.
-const identitySchema = z.string().min(1);
+const identitySchema = z.string().min(1).max(MAX_TEXT_LENGTH);
 
 const ExchangeRecordCommitmentsSchema: z.ZodType<ExchangeRecordCommitments> =
   z.object({
@@ -473,21 +506,22 @@ const RecordPayloadColumnSchema: z.ZodType<RecordPayloadColumn> = z.object({
   // any path. MAX_NAME_LENGTH matches both the wire predicate and the operator's
   // own `terms.payload.send`/`receive` names.
   name: z.string().min(1).max(MAX_NAME_LENGTH),
-  description: z.string().optional(),
+  description: z.string().max(MAX_TEXT_LENGTH).optional(),
 });
 
 const RecordLegalAgreementSchema: z.ZodType<RecordLegalAgreement> = z.object({
-  reference: z.string().min(1),
-  purpose: z.string().min(1),
+  reference: z.string().min(1).max(MAX_NAME_LENGTH),
+  purpose: z.string().min(1).max(MAX_TEXT_LENGTH),
   expirationDate: z.iso.date(),
 });
 
 const RecordLinkageFieldSchema: z.ZodType<RecordLinkageField> = z.object({
-  name: z.string().min(1),
+  name: z.string().min(1).max(MAX_NAME_LENGTH),
   // `type` is not pinned to the current LinkageField type enum: the record is a
   // frozen log, so a reader accepts whatever category a (possibly newer) writer
-  // recorded rather than rejecting an unrecognized type.
-  type: z.string().min(1),
+  // recorded rather than rejecting an unrecognized type. It carries the same
+  // length cap as a name -- a semantic category is a short label, not prose.
+  type: z.string().min(1).max(MAX_NAME_LENGTH),
 });
 
 const ExchangeRecordGovernanceSchema: z.ZodType<ExchangeRecordGovernance> =
@@ -503,9 +537,27 @@ const ExchangeRecordGovernanceSchema: z.ZodType<ExchangeRecordGovernance> =
     // rather than admit semantics a v1 reader cannot interpret.
     algorithm: AlgorithmSchema,
     legalAgreement: RecordLegalAgreementSchema.optional(),
-    matchingBasis: z.array(RecordLinkageFieldSchema),
-    payloadSent: z.array(RecordPayloadColumnSchema),
-    payloadReceived: z.array(RecordPayloadColumnSchema),
+    // Count-bounded (boundedArray: a count refine before per-element validation)
+    // so a hostile record padded with millions of fields/columns is rejected with
+    // one clean issue rather than accumulating one Zod issue per element. The
+    // matching basis is a set of linkage fields (MAX_LINKAGE_ENTRIES); the payload
+    // column sets share the same cap the payload producers imply
+    // (MAX_PAYLOAD_ENTRIES).
+    matchingBasis: boundedArray(
+      RecordLinkageFieldSchema,
+      MAX_LINKAGE_ENTRIES,
+      `matchingBasis must not exceed ${MAX_LINKAGE_ENTRIES} entries`,
+    ),
+    payloadSent: boundedArray(
+      RecordPayloadColumnSchema,
+      MAX_PAYLOAD_ENTRIES,
+      `payloadSent must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
+    ),
+    payloadReceived: boundedArray(
+      RecordPayloadColumnSchema,
+      MAX_PAYLOAD_ENTRIES,
+      `payloadReceived must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
+    ),
   });
 
 const ExchangeRecordSchema: z.ZodType<ExchangeRecord> = z.object({
@@ -536,23 +588,34 @@ const VerificationKeysSchema: z.ZodType<VerificationKeys> = z.object({
 // --- Build -------------------------------------------------------------------
 
 /**
- * The canonical representation a payload is committed in. Owned by the record
- * format on purpose -- deliberately NOT the PSI wire message and NOT the
- * consumed `PartnerPayload`, so a change to either of those (for transport or
- * output reasons) cannot silently move this on-disk, version-frozen format.
+ * The canonical representation a payload is committed in: the disclosed column
+ * names and the row VALUES, in matched-row order. Owned by the record format on
+ * purpose -- deliberately NOT the PSI wire message and NOT the consumed
+ * `PartnerPayload`, so a change to either of those (for transport or output
+ * reasons) cannot silently move this on-disk, version-frozen format.
+ *
+ * It binds the column names and the values, NOT any party's internal row
+ * indices. The received payload's rows carry the PARTNER's row indices on the
+ * wire (see `PartnerPayload`), which the holder does not retain in a reproducible
+ * form -- the human result file records the received values, not the partner's
+ * row numbers -- so committing them would leave a holder unable to reopen its own
+ * commitment from its retained input and result. The payload commitment therefore
+ * binds only what the holder keeps (the columns and the values); WHICH records
+ * matched is bound separately by the association-table commitment (an index pair),
+ * which the result file does retain. See docs/spec/EXCHANGE_RECORD.md, "No data
+ * snapshot in the keys".
  *
  * Both the payload a party sent and the payload it received are mapped into this
  * one shape before committing (see `toCommittedPayload` in payloadExchange), so
  * for the same logical payload a sender and receiver commit over byte-identical
  * data. The transport-only `hasData` discriminant is not part of it; a no-data
- * payload is the empty-arrays value `{ columns: [], rowIndices: [], rows: [] }`.
+ * payload is the empty-arrays value `{ columns: [], rows: [] }`.
  *
  * Declared as a `type` (not an `interface`) so it carries an implicit index
  * signature and is assignable to {@link CanonicalValue} without a cast.
  */
 export type CommittedPayload = {
   columns: string[];
-  rowIndices: number[];
   rows: Array<Array<string | null>>;
 };
 

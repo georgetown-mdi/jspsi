@@ -25,7 +25,12 @@ import type {
 } from "../src/exchangeRecord";
 import type { CanonicalValue } from "../src/utils/canonical";
 import type { LinkageTerms } from "../src/config/linkageTerms";
-import { MAX_NAME_LENGTH } from "../src/config/linkageTerms";
+import {
+  MAX_LINKAGE_ENTRIES,
+  MAX_NAME_LENGTH,
+  MAX_PAYLOAD_ENTRIES,
+  MAX_TEXT_LENGTH,
+} from "../src/config/linkageTerms";
 
 // --- Fixtures ----------------------------------------------------------------
 
@@ -61,12 +66,10 @@ const fixedRandomness: ExchangeRecordRandomness = {
 // same logical payload.
 const localPayloadSent: CommittedPayload = {
   columns: ["dose"],
-  rowIndices: [0, 2],
   rows: [["10mg"], ["20mg"]],
 };
 const partnerPayloadReceived: CommittedPayload = {
   columns: ["status"],
-  rowIndices: [1, 0],
   rows: [["active"], [null]],
 };
 
@@ -559,7 +562,6 @@ describe("governance metadata", () => {
     // sets, so they are empty too.
     const noPayload: CommittedPayload = {
       columns: [],
-      rowIndices: [],
       rows: [],
     };
     const { record } = await buildExchangeRecord(
@@ -597,12 +599,10 @@ describe("governance metadata", () => {
     // of disclosures under-reports what was sent and received.
     const sent: CommittedPayload = {
       columns: ["dose", "visit_date"],
-      rowIndices: [0],
       rows: [["10mg", "2025-02-01"]],
     };
     const received: CommittedPayload = {
       columns: ["status"],
-      rowIndices: [0],
       rows: [["active"]],
     };
     const { record } = await buildExchangeRecord(
@@ -629,7 +629,6 @@ describe("governance metadata", () => {
     // is the committed order.
     const sent: CommittedPayload = {
       columns: ["dose", "extra"],
-      rowIndices: [0],
       rows: [["10mg", "x"]],
     };
     const underDeclared: LinkageTerms = {
@@ -672,7 +671,6 @@ describe("governance metadata", () => {
     // than a silently unparseable audit artifact.
     const badReceived: CommittedPayload = {
       columns: [""],
-      rowIndices: [0],
       rows: [["x"]],
     };
     await expect(
@@ -690,7 +688,6 @@ describe("governance metadata", () => {
     // path. A name one character over MAX_NAME_LENGTH is rejected on build.
     const longReceived: CommittedPayload = {
       columns: ["a".repeat(MAX_NAME_LENGTH + 1)],
-      rowIndices: [0],
       rows: [["x"]],
     };
     await expect(
@@ -710,7 +707,6 @@ describe("governance metadata", () => {
         ...baseInputs,
         partnerPayloadReceived: {
           columns: ["a".repeat(MAX_NAME_LENGTH)],
-          rowIndices: [0],
           rows: [["x"]],
         },
       },
@@ -827,6 +823,75 @@ describe("binding nonce", () => {
     expect(salts).not.toContain(record.bindingNonce);
     // And the per-commitment salts are independent of one another.
     expect(new Set(salts).size).toBe(salts.length);
+  });
+});
+
+// --- Untrusted read-path bounds ----------------------------------------------
+
+describe("parse input bounds (untrusted read path)", () => {
+  // parseExchangeRecord's first production caller ingests a record supplied by
+  // another party, so every partner-controlled string and array carries a
+  // generous length / element-count cap. These reject an oversized hostile record
+  // at parse -- a string field and an array field each pushed one past its cap --
+  // without changing what a legitimate record parses to.
+  const governanceInputs: ExchangeRecordInputs = {
+    ...baseInputs,
+    localTerms: termsWithGovernance,
+    partnerTerms: { ...termsWithGovernance, identity: "Party B" },
+  };
+
+  test("rejects a record whose string field exceeds its length cap", async () => {
+    const { record } = await buildExchangeRecord(
+      governanceInputs,
+      fixedRandomness,
+    );
+    // A valid record parses.
+    expect(() => parseExchangeRecord(record)).not.toThrow();
+    // A free-text field one character past MAX_TEXT_LENGTH is rejected.
+    expect(() =>
+      parseExchangeRecord({
+        ...record,
+        localIdentity: "a".repeat(MAX_TEXT_LENGTH + 1),
+      }),
+    ).toThrow();
+    // A base64url crypto field (the terms hash) past its length cap is rejected
+    // even though it is otherwise well-formed base64url. 257 is one past the
+    // 256-char base64url cap (MAX_BASE64URL_LENGTH, not exported, so pinned here
+    // by value).
+    expect(() =>
+      parseExchangeRecord({ ...record, termsHash: "a".repeat(257) }),
+    ).toThrow();
+  });
+
+  test("rejects a record whose array field exceeds its element-count cap", async () => {
+    const { record } = await buildExchangeRecord(
+      governanceInputs,
+      fixedRandomness,
+    );
+    // payloadSent padded one past MAX_PAYLOAD_ENTRIES is rejected before
+    // per-element validation (boundedArray), so a hostile record cannot force
+    // proportional allocation.
+    const overCountPayload = Array.from(
+      { length: MAX_PAYLOAD_ENTRIES + 1 },
+      (_, i) => ({ name: `c${i}` }),
+    );
+    expect(() =>
+      parseExchangeRecord({
+        ...record,
+        governance: { ...record.governance, payloadSent: overCountPayload },
+      }),
+    ).toThrow();
+    // matchingBasis padded one past MAX_LINKAGE_ENTRIES is likewise rejected.
+    const overCountBasis = Array.from(
+      { length: MAX_LINKAGE_ENTRIES + 1 },
+      (_, i) => ({ name: `f${i}`, type: "t" }),
+    );
+    expect(() =>
+      parseExchangeRecord({
+        ...record,
+        governance: { ...record.governance, matchingBasis: overCountBasis },
+      }),
+    ).toThrow();
   });
 });
 
