@@ -332,9 +332,12 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
  * that helps compute the match learns which of ITS OWN records are in the viewer's
  * data (membership) -- distinct from, and deliberately not conflated with, the
  * cooperative caveat about a dishonest partner keeping the result table. It is
- * stated as an accepted, documented property (it holds under both linkage
- * strategies: intrinsic to the cascade, and to any exchange where the helper
- * discloses payload for the overlap), bounded so it does not overstate -- the helper
+ * stated as an accepted, documented property -- a non-receiving partner learns its
+ * own membership in every one-sided exchange today: intrinsically under the cascade,
+ * and under single-pass because the receiver currently returns it its matched rows
+ * (which it needs whenever it discloses payload for the overlap, and which are
+ * returned even when it does not, pending the hardening task in
+ * docs/notes/one-sided-disclosure.md) -- bounded so it does not overstate: the helper
  * learns membership of its own records, never which of the viewer's records they
  * matched, nor anything about the rest of the set beyond its size. The viewer's own
  * "Yes" is left unqualified; the partner's "Yes" -- the accountable disclosure of
@@ -818,9 +821,11 @@ export function InvitationTerms({
                   non-receiving partner (the helper) learns which of ITS OWN
                   records are in the viewer's data -- membership -- and this holds
                   whenever the partner does not receive the result, under both
-                  linkage strategies (intrinsic to the cascade; and to any
-                  exchange where the helper discloses payload for the overlap,
-                  which it needs its own matched rows to build). Stated as an
+                  linkage strategies: intrinsically under the cascade, and under
+                  single-pass because the receiver currently returns the helper its
+                  matched rows (needed whenever it discloses payload for the overlap,
+                  and returned even when it does not, pending the hardening task in
+                  docs/notes/one-sided-disclosure.md). Stated as an
                   accepted, documented property (docs/notes/one-sided-
                   disclosure.md), not a warning of misbehaviour, and bounded so it
                   cannot overstate: the helper learns membership of its OWN
