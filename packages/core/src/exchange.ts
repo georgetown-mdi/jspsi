@@ -130,6 +130,15 @@ export interface PreparedExchange {
  * record honest but silently ignore an operator's stated intent to disclose only a
  * count, so the run refuses instead (item 208363104).
  *
+ * The guard ALLOWLISTS `psi` rather than denylisting `psi-c`: only the one
+ * implemented, identifier-revealing algorithm proceeds, so any algorithm later
+ * added to `AlgorithmSchema` is refused by default until it too is explicitly
+ * implemented and allowed here. This follows the repo's allowlist-over-blocklist
+ * rule (CONTRIBUTING.md, Code Conventions) and keeps enum growth fail-closed --
+ * `buildExchangeRecord` copies `algorithm` verbatim with no guard of its own, so a
+ * new unimplemented member slipping past this run-side gate is exactly what the
+ * allowlist prevents.
+ *
  * When a real count-only run path lands, REPLACE this refusal with it and ungate
  * the client-side gates in the same change -- flipping `APPLIED_SETTINGS.psiC`
  * alone is not sufficient while this refusal stands. The full ungate checklist is
@@ -144,14 +153,18 @@ export interface PreparedExchange {
  * as a usage error (exit 64).
  */
 export function assertAlgorithmImplemented(algorithm: Algorithm): void {
-  if (algorithm === "psi-c") {
-    throw new UsageError(
-      'count-only linkage (algorithm "psi-c") is not yet implemented: the run ' +
-        "reveals matched identifiers, so it cannot honor a count-only " +
-        'disclosure. Set the linkage-terms algorithm to "psi", or wait for ' +
-        "count-only support before running.",
-    );
-  }
+  // Allowlist the one implemented algorithm rather than denylisting the known
+  // unimplemented one, so a future AlgorithmSchema member is refused by default
+  // (see the JSDoc above).
+  if (algorithm === "psi") return;
+  throw new UsageError(
+    'this linkage-terms algorithm is not yet implemented: only "psi" is ' +
+      "supported, and it reveals matched identifiers. A count-only " +
+      '("psi-c"), or any other non-psi algorithm, would disclose differently ' +
+      "than its exchange record could attest, so it is refused before any " +
+      'identifier is revealed. Set the linkage-terms algorithm to "psi", or ' +
+      "wait for support before running.",
+  );
 }
 
 /**
