@@ -86,6 +86,7 @@ export {
 } from "./utils/sshHostKey.js";
 export * from "./exchange";
 export * from "./exchangeRecord";
+export * from "./recordVerification";
 export * from "./payloadExchange";
 export {
   authenticateConnection,
