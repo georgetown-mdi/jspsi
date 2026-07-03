@@ -239,24 +239,29 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
  * (each carrying a terse breadth marker -- "(partial)", "(fuzzy)" -- when its
  * element loosens matching), and whose expanded body holds the per-element
  * transform/swap/fuzzy detail. The remaining dense detail (personal-data
- * constraints, payload columns, legal agreement, and dedup notes) sits behind a
- * single default-collapsed "Other details" disclosure. The matching method and
- * result sharing stay always-visible.
+ * constraints, payload columns, and dedup notes) sits behind a single
+ * default-collapsed "Other details" disclosure; the legal agreement is not among
+ * it -- it is promoted whole into the always-visible core (see below). The
+ * matching method and result sharing stay always-visible.
  *
- * Three facts whose detail lives in that disclosure also carry an always-visible
+ * Two payload facts whose detail lives in that disclosure carry an always-visible
  * PRESENCE hint in the core, since each would otherwise be invisible until the
  * acceptor expands Details: an extra-payload-egress request (a count of the columns
- * the inviter requests FROM the acceptor), the inbound partner data the invitation
- * will send the acceptor (a count of the columns it will receive -- its ingress),
- * and an attached legal agreement (a fixed-copy flag). Only the presence is
- * surfaced -- the column lists and the agreement text stay in Details, not
- * duplicated into the core. The hints render as one labelled "Before you consent"
- * group (role=group), and the "Other details" toggle references that group's
- * caption as its accessible description, so a screen-reader user is pointed at the
- * disclosure that expands them without re-reading every hint. The ingress hint
- * is the weaker payload signal (receiving partner data is not a disclosure by the
- * acceptor) and is omitted from the inviter's "proposing" preview, which already
- * shows its send as chips.
+ * the inviter requests FROM the acceptor) and the inbound partner data the
+ * invitation will send the acceptor (a count of the columns it will receive -- its
+ * ingress). Only their presence is surfaced -- the column lists stay in Details,
+ * not duplicated into the core. An attached legal agreement is instead promoted in
+ * full: its reference, PURPOSE, and expiry render in the core (not a bare flag),
+ * because the purpose is the compliance-pivotal field a 45 CFR 164.528 accounting
+ * and FERPA's studies / audit-evaluation exceptions turn on (docs/COMPLIANCE.md)
+ * and so must be legible at the consent point; the promoted block IS the whole of
+ * the agreement, which then has no separate "Other details" entry. The hints render
+ * as one labelled "Before you consent" group (role=group), and the "Other details"
+ * toggle references that group's caption as its accessible description, so a
+ * screen-reader user is pointed at the disclosure that expands them without
+ * re-reading every hint. The ingress hint is the weaker payload signal (receiving
+ * partner data is not a disclosure by the acceptor) and is omitted from the
+ * inviter's "proposing" preview, which already shows its send as chips.
  *
  * `perspective` selects the heading and intro copy for the three contexts this
  * renders in -- the acceptor `review`ing a partner's proposal (pre-consent), the
@@ -559,19 +564,28 @@ export function InvitationTerms({
           )}
         </Term>
 
-        {/* Always-visible presence hints, grouped in a labelled "Before you
-            consent" region and kept OUTSIDE the "Other details" disclosure (the same
-            out-of-disclosure pattern the per-key breadth markers follow): an
-            extra-payload-egress request, the inbound partner data the invitation
-            will send (the acceptor's ingress), and an attached legal agreement
-            otherwise have NO surfaced signal that they exist at all -- all sit only
-            inside the default-collapsed Details, unlike the matching breadth, which
-            is always visible in each key's header. This surfaces only the PRESENCE
-            (a count, or a fixed-copy flag), never the detail: the column lists and
-            the agreement text stay one expand down.
+        {/* Always-visible "Before you consent" region, grouped under a labelled
+            caption and kept OUTSIDE the "Other details" disclosure (the same
+            out-of-disclosure pattern the per-key breadth markers follow): the legal
+            agreement, an extra-payload-egress request, and the inbound partner data
+            the invitation will send (the acceptor's ingress) otherwise have NO
+            surfaced signal in the core -- all sit only inside the default-collapsed
+            Details, unlike the matching breadth, which is always visible in each
+            key's header.
+
+            The two PAYLOAD lines surface only PRESENCE (a count), never the detail:
+            the column lists stay one expand down. The legal agreement instead
+            promotes its governance-load-bearing substance -- reference, PURPOSE, and
+            expiry -- into the core ahead of the payload lines, since the purpose is
+            the field a 45 CFR 164.528 accounting / FERPA studies / audit-evaluation
+            exception turns on (docs/COMPLIANCE.md); the promoted block is the whole
+            of the agreement, so it has no "Other details" entry. Its three values
+            are sanitized by summarizeInvitation, and none is folded into an
+            accessible name (the group's own name stays the fixed "Before you
+            consent" caption), so no raw partner text is rendered.
 
             The region is a role="group" named by its caption (aria-labelledby), so
-            assistive tech announces the hints as one related set rather than three
+            assistive tech announces the flagged facts as one related set rather than
             disconnected sentences, and the "Other details" toggle points its
             aria-describedby at that caption (when present), so a non-visual user
             reaching that toggle hears a concise "Before you consent" pointer to the
@@ -594,6 +608,42 @@ export function InvitationTerms({
                 ? "Before your partner consents"
                 : "Before you consent"}
             </Text>
+            {/* The legal agreement, promoted ahead of the payload-column hints as
+                its own tight sub-block: a bold lead flag, then the reference,
+                purpose, and expiry. Grouped in one Stack (gap 2, tighter than the
+                region's gap 4) so the core surfaces a single governance block, not a
+                flat accreting list of loose sibling lines. All three values come
+                pre-sanitized from summarizeInvitation. This block is the whole of
+                the agreement now -- it has no counterpart inside "Other details". */}
+            {summary.legalAgreement !== undefined && (
+              <Stack gap={2}>
+                <Text size="sm" fw={500}>
+                  This invitation attaches a legal agreement.
+                </Text>
+                <Text size="sm">
+                  Reference: {summary.legalAgreement.reference}
+                </Text>
+                {/* "Stated purpose", not "Purpose": the value is partner-authored
+                    free text, sanitized but never vetted by psilink (only
+                    byte-compared against the partner's own copy at exchange time),
+                    so once promoted into the prominent core the label marks it as
+                    partner-attested rather than an authorization psilink endorses --
+                    the same provenance-marking the allowed-character constraint uses
+                    ("partner-supplied ... not verified by psilink"). */}
+                <Text size="sm">
+                  Stated purpose: {summary.legalAgreement.purpose}
+                </Text>
+                {/* Name the subject ("Agreement valid through ...") rather than a
+                    bare "Valid through <date>": promoting the agreement's expiry
+                    into the always-visible core puts it on the same screen as the
+                    separate invitation-expiry line below, and at a glance the two
+                    same-weight dates are otherwise easy to conflate. */}
+                <Text size="xs" c="dimmed">
+                  Agreement valid through{" "}
+                  {summary.legalAgreement.expirationDate}
+                </Text>
+              </Stack>
+            )}
             {egressNotice !== undefined && (
               <Text size="sm" fw={500}>
                 {egressNotice}
@@ -602,11 +652,6 @@ export function InvitationTerms({
             {ingressNotice !== undefined && (
               <Text size="sm" fw={500}>
                 {ingressNotice}
-              </Text>
-            )}
-            {summary.legalAgreement !== undefined && (
-              <Text size="sm" fw={500}>
-                This invitation attaches a legal agreement.
               </Text>
             )}
           </Stack>
@@ -824,16 +869,6 @@ export function InvitationTerms({
                   )}
                 </Term>
               )}
-
-            {summary.legalAgreement !== undefined && (
-              <Term label="Legal agreement">
-                <Text size="sm">{summary.legalAgreement.reference}</Text>
-                <Text size="sm">{summary.legalAgreement.purpose}</Text>
-                <Text size="xs" c="dimmed">
-                  Valid through {summary.legalAgreement.expirationDate}
-                </Text>
-              </Term>
-            )}
 
             <Term label="Duplicate matches">
               <Text size="sm">

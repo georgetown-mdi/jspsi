@@ -314,16 +314,18 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     expect(masterCollapse.getAttribute("aria-hidden")).toBe("true");
     expect(masterCollapse.hasAttribute("inert")).toBe(true);
 
-    // The non-key blocks (field constraints, payload, legal agreement, dedup) are
-    // in the master disclosure ...
+    // The non-key blocks (field constraints, payload, dedup) are in the master
+    // disclosure ...
     const panel = await readyPanel("Other details");
     expect(panel.textContent).toContain(
       "allowed-character pattern (partner-supplied regular expression, not verified by psilink): A-Z",
     );
     expect(panel.textContent).toContain("risk_score");
-    expect(panel.textContent).toContain("MOU-2025-0042");
     expect(panel.textContent).toContain("may match more than one");
-    // ... but the per-key matching detail moved out, into the key's own
+    // ... the legal agreement is NOT among them: it is promoted whole into the
+    // always-visible core, so its reference no longer sits in the disclosure ...
+    expect(panel.textContent).not.toContain("MOU-2025-0042");
+    // ... and the per-key matching detail moved out, into the key's own
     // disclosure.
     expect(panel.textContent).not.toContain("Matches on the first character");
   });
@@ -557,26 +559,44 @@ describe("InvitationTerms: always-visible egress and legal-agreement presence hi
     expect(group!.textContent).not.toContain("requests");
   });
 
-  test("the legal-agreement hint surfaces presence in the always-visible core, outside the 'Other details' disclosure", async () => {
-    // The module terms attach a legal agreement (the legal hint shows alongside the
-    // ingress hint the module's single sent column raises).
+  test("the legal agreement is promoted whole -- reference, purpose, and expiry -- into the always-visible core, outside the 'Other details' disclosure", async () => {
+    // The module terms attach a legal agreement (the agreement block shows alongside
+    // the ingress hint the module's single sent column raises). Its governance-
+    // load-bearing substance -- reference, PURPOSE, and expiry -- is surfaced in the
+    // core, not a bare "attaches an agreement" flag, since the purpose is the field
+    // a 164.528 accounting / FERPA exception turns on (docs/COMPLIANCE.md) and must
+    // be legible at the consent point.
     render(terms);
     await expect.element(toggle("Other details")).toBeInTheDocument();
 
     expect(container!.textContent).toContain(
       "This invitation attaches a legal agreement.",
     );
-    // Outside the disclosure, by structure ...
+    expect(container!.textContent).toContain("Reference: MOU-2025-0042");
+    expect(container!.textContent).toContain(
+      "Stated purpose: Audit and evaluation",
+    );
+    expect(container!.textContent).toContain(
+      "Agreement valid through 2027-12-31",
+    );
+
+    // The promoted block IS the whole of the agreement: it is not also duplicated
+    // inside the "Other details" disclosure (structure, not styling). The reference
+    // -- which formerly lived only in that disclosure -- is now absent from it.
     const panel = await readyPanel("Other details");
     expect(panel.textContent).not.toContain("attaches a legal agreement");
-    // ... while the agreement detail (its reference) stays inside it.
-    expect(panel.textContent).toContain("MOU-2025-0042");
+    expect(panel.textContent).not.toContain("MOU-2025-0042");
+    expect(panel.textContent).not.toContain("Audit and evaluation");
   });
 
-  test("no legal-agreement hint when the invitation attaches none", async () => {
+  test("no legal-agreement block when the invitation attaches none", async () => {
     render({ ...terms, legalAgreement: undefined });
     await expect.element(toggle("Other details")).toBeInTheDocument();
+    // Neither the flag lead nor any promoted field renders when there is no
+    // agreement -- the whole block is gated on its presence.
     expect(container!.textContent).not.toContain("attaches a legal agreement");
+    expect(container!.textContent).not.toContain("MOU-2025-0042");
+    expect(container!.textContent).not.toContain("Audit and evaluation");
   });
 });
 
@@ -888,9 +908,14 @@ describe("InvitationTerms: the presence hints form a labelled, disclosure-linked
     expect(el.textContent).toContain(
       "You will receive 1 data column from your partner.",
     );
+    // The legal agreement is promoted whole into this same group: its flag lead and
+    // its reference/purpose (the compliance-load-bearing fields) are all carried
+    // under the single "Before you consent" accessible name.
     expect(el.textContent).toContain(
       "This invitation attaches a legal agreement.",
     );
+    expect(el.textContent).toContain("Reference: MOU-2025-0042");
+    expect(el.textContent).toContain("Stated purpose: Audit and evaluation");
   });
 
   test("the 'Other details' toggle is described by the hint group's caption", async () => {

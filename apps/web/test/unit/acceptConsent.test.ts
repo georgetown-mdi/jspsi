@@ -232,6 +232,30 @@ describe("summarizeInvitation", () => {
     expect(summary.linkageKeys[0].name).toContain("\\x07");
   });
 
+  test("sanitizes the legal-agreement reference and purpose", () => {
+    // reference and purpose are partner-controlled free text now promoted into the
+    // always-visible consent core, so the sanitization boundary is load-bearing
+    // here: raw control/bidi bytes must be neutralized in the summary the renderer
+    // consumes, since none of the promoted fields reach the DOM except through it.
+    // expirationDate is a schema-validated ISO date that cannot carry these bytes,
+    // so it is not exercised.
+    const summary = summarizeInvitation(
+      makeToken({
+        legalAgreement: {
+          reference: `MOU${ESC}[31m${RLO}0042`,
+          purpose: `Audit${BEL} and evaluation`,
+          expirationDate: "2027-12-31",
+        },
+      }),
+    );
+    expect(summary.legalAgreement?.reference).not.toContain(ESC);
+    expect(summary.legalAgreement?.reference).not.toContain(RLO);
+    expect(summary.legalAgreement?.reference).toContain("\\x1b");
+    expect(summary.legalAgreement?.reference).toContain("\\u202e");
+    expect(summary.legalAgreement?.purpose).not.toContain(BEL);
+    expect(summary.legalAgreement?.purpose).toContain("\\x07");
+  });
+
   test("sanitizes partner-controlled transform and constraint text", () => {
     const summary = summarizeInvitation(
       makeToken({
