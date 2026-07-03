@@ -486,21 +486,44 @@ test("send: a completed hand-off leaves no liveness guard armed", async () => {
   }
 });
 
-test("send: a close during an in-flight hand-off clears the liveness guard", async () => {
+test("send: a close during an in-flight hand-off rejects the send and clears the guard", async () => {
   vi.useFakeTimers();
   try {
     const { conn, send } = makeQueued({ inactivityTimeoutMs: 20 });
     send.mockReturnValue(new Promise(() => {})); // hand-off never settles
-    void conn.send("x").catch(() => {});
+    // Attach the handler synchronously so the pending rejection is never briefly
+    // unhandled once close() settles it.
+    const sending = conn.send("x").catch((e: unknown) => e);
     // Armed while the hand-off is outstanding...
     expect(vi.getTimerCount()).toBe(1);
     await conn.close();
-    // ...and released by the explicit (cancelled-exchange) close, so no ref'd
-    // handle survives to hold the loop open.
+    // ...and the explicit (cancelled-exchange) close SETTLES the awaited send --
+    // rejecting it as a cancelled "closed" operation rather than leaving it to
+    // hang on the orphaned hand-off -- and leaves no ref'd handle to hold the
+    // loop open. Clearing the guard timer without rejecting here would reinstate
+    // the very silent-hang this guard exists to prevent.
+    const err = await sending;
+    expect(err).toBeInstanceOf(ConnectionError);
+    expect((err as ConnectionError).kind).toBe("closed");
     expect(vi.getTimerCount()).toBe(0);
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("send: a concurrent transport fail rejects an in-flight hand-off", async () => {
+  const { conn, controls, send } = makeQueued({ inactivityTimeoutMs: 10_000 });
+  send.mockReturnValue(new Promise(() => {})); // hand-off orphans, never settles
+  const sending = conn.send("x").catch((e: unknown) => e);
+  // A terminal transition (an inbound-overflow fail(), a transport error, or a
+  // peer half-close) fires while the hand-off is still outstanding. The send
+  // must be rejected here with the terminal cause, not left hanging with its
+  // guard swept -- the racing-teardown gap the guard would otherwise reopen.
+  controls.fail(new ConnectionError("dropped mid-send", "transport"));
+  const err = await sending;
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+  expect((err as ConnectionError).message).toContain("dropped mid-send");
 });
 
 // --- per-receive timeout -----------------------------------------------------
