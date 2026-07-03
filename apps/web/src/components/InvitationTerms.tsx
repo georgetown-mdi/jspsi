@@ -416,6 +416,32 @@ export function InvitationTerms({
           ? "Exchange proposal"
           : `Invitation from ${summary.invitingParty}`}
       </Title>
+      {/* At the consent point the displayed identity is an unauthenticated claim:
+          the heading's name is summary.invitingParty -- sanitizeForDisplay(
+          terms.identity) -- carried in an invitation accepted on a 4-byte
+          transcription checksum that "detects transcription errors only and is
+          computable by anyone" (docs/SECURITY_DESIGN.md), so nothing has
+          authenticated the name here. Mutual cryptographic authentication happens
+          only later, at the X25519 key exchange the web exchange runs before any PSI
+          frame -- AFTER this review screen, where the acceptor consents to disclose
+          PII. Flag that timing gap right at the identity so the acceptor does not
+          read the name as an authenticated fact when deciding to proceed. Fixed copy,
+          never partner-controlled text; worded to neither overclaim a verification
+          that has not happened nor imply the exchange is unauthenticated end to end
+          -- it IS authenticated at key exchange; the only gap is that authentication
+          is later than consent. The note informs, it does not gate. Review-only: the
+          "accepted" during-run view is post-authentication, where the identity is by
+          then confirmed and the caveat would be stale, and the inviter's "proposing"
+          preview shows its OWN identity, which needs no such note. Pinned by render
+          tests. */}
+      {perspective === "review" && (
+        <Text size="sm">
+          This name is your partner&rsquo;s own claim, which psilink has not
+          verified. Your partner is cryptographically authenticated when the
+          exchange begins -- after this step -- so treat the name as unverified
+          while you decide whether to share your data.
+        </Text>
+      )}
       <Text size="sm" c="dimmed">
         {perspective === "proposing"
           ? "Your partner must review and consent to these details before any data is exchanged."
