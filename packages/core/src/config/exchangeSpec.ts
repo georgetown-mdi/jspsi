@@ -5,6 +5,7 @@ import {
   LinkageTermsSchema,
   MAX_NAME_LENGTH,
   MAX_PAYLOAD_ENTRIES,
+  MAX_TEXT_LENGTH,
 } from "./linkageTerms.js";
 import { AuthenticationSchema, ConnectionConfigSchema } from "./connection.js";
 import { StandardizationSchema } from "./standardization.js";
@@ -49,9 +50,12 @@ export const ExchangeSpecSchema = z.object({
   // only, never swapped with the partner, cross-validated, or folded into the
   // agreed-terms hash (unlike linkageTerms). Metadata only: it must carry no
   // protected, linkage-field, or payload value. Non-empty when present (an absent
-  // pointer is the omitted key, not an empty string). See EXCHANGE_REFERENCE.md and
-  // EXCHANGE_RECORD.md.
-  retentionDisposition: z.string().min(1).optional(),
+  // pointer is the omitted key, not an empty string). Length-capped to match the
+  // record schema's retentionDisposition bound (MAX_TEXT_LENGTH): the record is
+  // built from this value, so an over-long note would otherwise pass config
+  // validation only to fail the record build and drop the audit record. See
+  // EXCHANGE_REFERENCE.md and EXCHANGE_RECORD.md.
+  retentionDisposition: z.string().min(1).max(MAX_TEXT_LENGTH).optional(),
   // Optional local lock-in: the payload columns (in the PARTNER's namespace) this
   // party will enforce it receives at runtime (reconcileReceivedPayload). Per-party
   // and local like retentionDisposition -- NOT negotiated, swapped, cross-validated,

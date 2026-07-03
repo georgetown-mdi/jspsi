@@ -5,6 +5,7 @@ import {
   parseExchangeSpec,
   safeParseExchangeSpec,
 } from "../src/config/exchangeSpec";
+import { MAX_TEXT_LENGTH } from "../src/config/linkageTerms";
 
 // Minimal valid components used as a base.
 const minimalLinkageTerms = {
@@ -84,6 +85,37 @@ test("parses an ExchangeSpec with an SFTP connection", () => {
     },
   });
   expect(result.connection.channel).toBe("sftp");
+});
+
+// --- retentionDisposition (self-facing audit pointer) ------------------------
+
+test("retentionDisposition: a note up to MAX_TEXT_LENGTH round-trips", () => {
+  const note = "x".repeat(MAX_TEXT_LENGTH);
+  const result = parseExchangeSpec({
+    ...minimalSpec,
+    retention_disposition: note,
+  });
+  expect(result.retentionDisposition).toBe(note);
+});
+
+test("retentionDisposition: a note over MAX_TEXT_LENGTH is rejected", () => {
+  // The record schema caps this field at MAX_TEXT_LENGTH; the producer schema
+  // matches so an over-long note is rejected here at config time rather than
+  // passing config validation only to fail the record build and drop the audit
+  // record.
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    retention_disposition: "x".repeat(MAX_TEXT_LENGTH + 1),
+  });
+  expect(result.success).toBe(false);
+});
+
+test("retentionDisposition: an empty note is rejected (absence is the omitted key)", () => {
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    retention_disposition: "",
+  });
+  expect(result.success).toBe(false);
 });
 
 // --- Required fields ---------------------------------------------------------
