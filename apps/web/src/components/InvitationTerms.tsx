@@ -243,12 +243,20 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
  * single default-collapsed "Other details" disclosure. The matching method and
  * result sharing stay always-visible.
  *
- * Two facts whose detail lives in that disclosure also carry an always-visible
- * PRESENCE hint in the core, since either would otherwise be invisible until the
+ * Three facts whose detail lives in that disclosure also carry an always-visible
+ * PRESENCE hint in the core, since each would otherwise be invisible until the
  * acceptor expands Details: an extra-payload-egress request (a count of the columns
- * the inviter requests FROM the acceptor) and an attached legal agreement (a
- * fixed-copy flag). Only the presence is surfaced -- the column list and the
- * agreement text stay in Details, not duplicated into the core.
+ * the inviter requests FROM the acceptor), the inbound partner data the invitation
+ * will send the acceptor (a count of the columns it will receive -- its ingress),
+ * and an attached legal agreement (a fixed-copy flag). Only the presence is
+ * surfaced -- the column lists and the agreement text stay in Details, not
+ * duplicated into the core. The hints render as one labelled "Before you consent"
+ * group (role=group), and the "Other details" toggle references that group's
+ * caption as its accessible description, so a screen-reader user is pointed at the
+ * disclosure that expands them without re-reading every hint. The ingress hint
+ * is the weaker payload signal (receiving partner data is not a disclosure by the
+ * acceptor) and is omitted from the inviter's "proposing" preview, which already
+ * shows its send as chips.
  *
  * `perspective` selects the heading and intro copy for the three contexts this
  * renders in -- the acceptor `review`ing a partner's proposal (pre-consent), the
@@ -326,16 +334,62 @@ export function InvitationTerms({
   // notice. Undefined when nothing is requested, so the notice is absent rather
   // than reading "0 columns".
   const receiveCount = summary.payload?.receive.length ?? 0;
+  // Direction-first, and a REQUEST (conditional): the inviter asks for the
+  // acceptor's own columns, which the acceptor may or may not supply -- so the copy
+  // says "requests ... from you", never the definite "you will send", and pairs
+  // with the ingress line's opposite "you will receive ... from your partner" below
+  // so the two adjacent count lines are not confusable at a glance.
   const egressNotice =
     receiveCount > 0
-      ? `This invitation requests ${receiveCount} additional data ` +
-        `${receiveCount === 1 ? "column" : "columns"} ` +
-        `${perspective === "proposing" ? "from your partner" : "from you"}.`
+      ? perspective === "proposing"
+        ? `You request ${receiveCount} data ` +
+          `${receiveCount === 1 ? "column" : "columns"} from your partner.`
+        : `Your partner requests ${receiveCount} data ` +
+          `${receiveCount === 1 ? "column" : "columns"} from you.`
       : undefined;
+  // Always-visible ingress notice: the count of columns the inviter will SEND the
+  // acceptor for matched records (summary.payload.send) -- inbound partner data the
+  // acceptor is put on notice of before it expands Details. A count, not the names:
+  // the send set is bounded at decode (MAX_PAYLOAD_ENTRIES) and its names are
+  // already sanitized in summarizeInvitation, so the length carries no partner free
+  // text into the core; the names stay in Details. Weaker than the egress notice --
+  // receiving partner data is not a disclosure BY the acceptor -- so it is an
+  // informational presence signal, not a consent-integrity one. Absent under
+  // "proposing": the inviter's own send is already surfaced as chips in the core
+  // there (see below), so its detail is not hidden in Details and the presence-hint
+  // precondition is not met (and an acceptor-framed "you will receive" line would be
+  // wrong for the inviter there). The declared-empty "receive nothing" lock-in has
+  // an empty send (shown "(none)" in Details), so sendCount is 0 and the notice is
+  // absent -- there is no incoming data to flag; only a non-empty send raises it.
+  const sendCount = summary.payload?.send.length ?? 0;
+  // Direction-first, and a DECLARATION (definite): summary.payload.send is the
+  // disclosed set the exchange transmits for matched records, so the copy states
+  // "you will receive", the certain counterpart to the egress line's conditional
+  // "requests". Mirrors the always-visible "Result sharing" block's "You will
+  // receive ..." framing directly above.
+  const ingressNotice =
+    perspective !== "proposing" && sendCount > 0
+      ? `You will receive ${sendCount} data ` +
+        `${sendCount === 1 ? "column" : "columns"} from your partner.`
+      : undefined;
+  // The presence-hint region renders when any of its three flags fires; the "Other
+  // details" toggle's aria-describedby is gated on the same condition, so it never
+  // dangles at an absent region.
+  const hasPresenceHints =
+    egressNotice !== undefined ||
+    ingressNotice !== undefined ||
+    summary.legalAgreement !== undefined;
   const [detailsOpen, setDetailsOpen] = useState(false);
   // Stable id linking the disclosure toggle (aria-controls) to its panel; useId
   // keeps it consistent across SSR and hydration.
   const detailsId = useId();
+  // The "before you consent" presence-hint region is a role="group" named by its
+  // caption (presenceHintsLabelId via aria-labelledby), so assistive tech announces
+  // the hints as one group. The "Other details" toggle references that same caption
+  // as its aria-describedby -- a concise one-phrase pointer ("Before you consent")
+  // to the section whose detail it expands, matching the short-subline describedby
+  // the matching toggle uses rather than re-reading every hint line onto the toggle.
+  const presenceHintsLabelId = useId();
   // The whole matching list is itself a default-collapsed "Matching strategies"
   // disclosure; this is its toggle state, the id its aria-controls points at, and
   // the id of the always-visible field summary associated as the toggle's
@@ -502,22 +556,49 @@ export function InvitationTerms({
           )}
         </Term>
 
-        {/* Always-visible presence hints, kept OUTSIDE the "Other details"
-            disclosure (the same out-of-disclosure pattern the per-key breadth
-            markers follow): an extra-payload-egress request and an attached legal
-            agreement otherwise have NO surfaced signal that they exist at all --
-            both sit only inside the default-collapsed Details, unlike the matching
-            breadth, which is always visible in each key's header. This surfaces
-            only the PRESENCE (a count, or a fixed-copy flag), never the detail: the
-            column list and the agreement text stay one expand down, so the acceptor
-            is on notice to open Details before consenting without the dense detail
-            being duplicated into the core. */}
-        {(egressNotice !== undefined ||
-          summary.legalAgreement !== undefined) && (
-          <Stack gap={4}>
+        {/* Always-visible presence hints, grouped in a labelled "Before you
+            consent" region and kept OUTSIDE the "Other details" disclosure (the same
+            out-of-disclosure pattern the per-key breadth markers follow): an
+            extra-payload-egress request, the inbound partner data the invitation
+            will send (the acceptor's ingress), and an attached legal agreement
+            otherwise have NO surfaced signal that they exist at all -- all sit only
+            inside the default-collapsed Details, unlike the matching breadth, which
+            is always visible in each key's header. This surfaces only the PRESENCE
+            (a count, or a fixed-copy flag), never the detail: the column lists and
+            the agreement text stay one expand down.
+
+            The region is a role="group" named by its caption (aria-labelledby), so
+            assistive tech announces the hints as one related set rather than three
+            disconnected sentences, and the "Other details" toggle points its
+            aria-describedby at that caption (when present), so a non-visual user
+            reaching that toggle hears a concise "Before you consent" pointer to the
+            section it expands -- the short-subline association the matching toggle
+            uses, rather than re-reading every hint line. Both invariants are pinned
+            by render tests.
+
+            The two payload lines lead with WHO does WHAT so their opposite
+            directions are not confusable: the egress line is a conditional REQUEST
+            for the acceptor's own data ("requests ... from you"), the ingress line
+            the inviter's definite DECLARATION of what it will send ("you will
+            receive ... from your partner"). The ingress line is the weaker signal
+            (receiving partner data is not a disclosure by the acceptor) and is absent
+            under the inviter's own "proposing" preview, which surfaces its send as
+            chips in the core instead. */}
+        {hasPresenceHints && (
+          <Stack role="group" aria-labelledby={presenceHintsLabelId} gap={4}>
+            <Text id={presenceHintsLabelId} size="sm" fw={600}>
+              {perspective === "proposing"
+                ? "Before your partner consents"
+                : "Before you consent"}
+            </Text>
             {egressNotice !== undefined && (
               <Text size="sm" fw={500}>
                 {egressNotice}
+              </Text>
+            )}
+            {ingressNotice !== undefined && (
+              <Text size="sm" fw={500}>
+                {ingressNotice}
               </Text>
             )}
             {summary.legalAgreement !== undefined && (
@@ -599,6 +680,7 @@ export function InvitationTerms({
         onClick={() => setDetailsOpen((open) => !open)}
         aria-expanded={detailsOpen}
         aria-controls={detailsId}
+        aria-describedby={hasPresenceHints ? presenceHintsLabelId : undefined}
       >
         <Group gap={4}>
           <IconChevronRight
