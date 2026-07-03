@@ -419,9 +419,10 @@ describe("InvitationTerms: the counterparty identity is flagged unverified at co
   // keeps the acceptor from reading it as a psilink-verified fact; it is a small
   // honesty marker on a self-asserted field, not a directive (parties normally
   // coordinate the first exchange out of band, so they already know the
-  // counterparty). Review-only: the during-run "accepted" view is post-authentication
-  // (the caveat would be stale), and the inviter's "proposing" preview shows its OWN
-  // identity (which needs no such note).
+  // counterparty). Review-only: the note is a pre-consent decision-point marker, so it
+  // is dropped on the during-run "accepted" view once consent is committed (the run's
+  // handshake authenticates the peer's secret, not that the name is true), and the
+  // inviter's "proposing" preview shows its OWN identity (which needs no such note).
   function render(perspective?: "review" | "accepted" | "proposing") {
     root!.render(
       createElement(
@@ -477,9 +478,12 @@ describe("InvitationTerms: the counterparty identity is flagged unverified at co
     expect(container!.textContent).not.toContain(noteText);
   });
 
-  test("the note is absent from the during-run accepted view, where the identity is by then authenticated", async () => {
-    // The "accepted" view renders after the key-exchange handshake has run, so the
-    // identity is no longer unverified and the review-only note would be stale.
+  test("the note is absent from the during-run accepted view, after consent is committed", async () => {
+    // The "accepted" view is the during-run view, after the acceptor has already
+    // consented; the note is scoped to the pre-consent decision point, so it is
+    // dropped there. Not because the name becomes verified -- the run's handshake
+    // authenticates the peer's secret, not that the name is true -- but because the
+    // decision the note informs is past.
     render("accepted");
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(container!.textContent).not.toContain(noteText);

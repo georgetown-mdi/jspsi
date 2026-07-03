@@ -442,8 +442,13 @@ export function InvitationTerms({
           field, not a directive to reassess trust, and it informs rather than gates.
           It states nothing about the exchange's own authentication, so it cannot read
           as claiming the exchange is unauthenticated. Fixed copy, never
-          partner-controlled. Review-only: the "accepted" view is post-authentication
-          (stale there) and "proposing" shows the viewer's own name. Associated with
+          partner-controlled. Review-only: the note is a pre-consent decision-point
+          marker, so it drops off the during-run "accepted" view once consent is
+          committed -- not because the name becomes verified there (the run's key
+          exchange authenticates that the peer holds the invitation secret, not that
+          the name is true, so the name is never psilink-verified), but because the
+          decision it informs is past; "proposing" shows the viewer's own name.
+          Associated with
           the heading via aria-describedby (identityNoteId) so assistive tech carries
           it into the heading's announcement; pinned by render tests. */}
       {perspective === "review" && (
