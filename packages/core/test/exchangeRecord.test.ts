@@ -25,7 +25,12 @@ import type {
 } from "../src/exchangeRecord";
 import type { CanonicalValue } from "../src/utils/canonical";
 import type { LinkageTerms } from "../src/config/linkageTerms";
-import { MAX_NAME_LENGTH } from "../src/config/linkageTerms";
+import {
+  MAX_LINKAGE_ENTRIES,
+  MAX_NAME_LENGTH,
+  MAX_PAYLOAD_ENTRIES,
+  MAX_TEXT_LENGTH,
+} from "../src/config/linkageTerms";
 
 // --- Fixtures ----------------------------------------------------------------
 
@@ -827,6 +832,73 @@ describe("binding nonce", () => {
     expect(salts).not.toContain(record.bindingNonce);
     // And the per-commitment salts are independent of one another.
     expect(new Set(salts).size).toBe(salts.length);
+  });
+});
+
+// --- Untrusted read-path bounds ----------------------------------------------
+
+describe("parse input bounds (untrusted read path)", () => {
+  // parseExchangeRecord's first production caller ingests a record supplied by
+  // another party, so every partner-controlled string and array carries a
+  // generous length / element-count cap. These reject an oversized hostile record
+  // at parse -- a string field and an array field each pushed one past its cap --
+  // without changing what a legitimate record parses to.
+  const governanceInputs: ExchangeRecordInputs = {
+    ...baseInputs,
+    localTerms: termsWithGovernance,
+    partnerTerms: { ...termsWithGovernance, identity: "Party B" },
+  };
+
+  test("rejects a record whose string field exceeds its length cap", async () => {
+    const { record } = await buildExchangeRecord(
+      governanceInputs,
+      fixedRandomness,
+    );
+    // A valid record parses.
+    expect(() => parseExchangeRecord(record)).not.toThrow();
+    // A free-text field one character past MAX_TEXT_LENGTH is rejected.
+    expect(() =>
+      parseExchangeRecord({
+        ...record,
+        localIdentity: "a".repeat(MAX_TEXT_LENGTH + 1),
+      }),
+    ).toThrow();
+    // A base64url crypto field (the terms hash) past its length cap is rejected
+    // even though it is otherwise well-formed base64url.
+    expect(() =>
+      parseExchangeRecord({ ...record, termsHash: "a".repeat(257) }),
+    ).toThrow();
+  });
+
+  test("rejects a record whose array field exceeds its element-count cap", async () => {
+    const { record } = await buildExchangeRecord(
+      governanceInputs,
+      fixedRandomness,
+    );
+    // payloadSent padded one past MAX_PAYLOAD_ENTRIES is rejected before
+    // per-element validation (boundedArray), so a hostile record cannot force
+    // proportional allocation.
+    const overCountPayload = Array.from(
+      { length: MAX_PAYLOAD_ENTRIES + 1 },
+      (_, i) => ({ name: `c${i}` }),
+    );
+    expect(() =>
+      parseExchangeRecord({
+        ...record,
+        governance: { ...record.governance, payloadSent: overCountPayload },
+      }),
+    ).toThrow();
+    // matchingBasis padded one past MAX_LINKAGE_ENTRIES is likewise rejected.
+    const overCountBasis = Array.from(
+      { length: MAX_LINKAGE_ENTRIES + 1 },
+      (_, i) => ({ name: `f${i}`, type: "t" }),
+    );
+    expect(() =>
+      parseExchangeRecord({
+        ...record,
+        governance: { ...record.governance, matchingBasis: overCountBasis },
+      }),
+    ).toThrow();
   });
 });
 
