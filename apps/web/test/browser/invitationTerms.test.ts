@@ -282,6 +282,39 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     );
   });
 
+  // The matching-keys list is a NAMED region: its role="list" derives its accessible
+  // name from the visible "Matching strategies" caption via aria-labelledby, not a
+  // second, separately-authored aria-label that could drift from it -- the same
+  // single-source-of-name idiom the send-columns chip lists use (see the send-columns
+  // describe block below). Keeping the list named is the consent-surface decision on
+  // this file's three disclosure lists: a named list is announced by its name at its
+  // boundary, so it stays discoverable when a screen-reader user lands on it out of
+  // linear order -- reaching it by expanding this default-collapsed disclosure and
+  // moving into the freshly-revealed content, without the caption fresh in earshot --
+  // at the accepted cost of a second utterance of the short caption in strict linear
+  // reading. This pins that decision (all three lists named, not unnamed) so a later
+  // change cannot silently drop the name.
+  test("the matching-keys list is named by its visible caption via aria-labelledby, not a duplicate aria-label", async () => {
+    renderTerms();
+    // Default-collapsed: the list is out of the accessibility tree until the
+    // "Matching strategies" disclosure is opened, so expand it before resolving the
+    // list by role + accessible name.
+    await userEvent.click(toggle("Matching strategies"));
+
+    const list = page.getByRole("list", { name: "Matching strategies" });
+    await expect.element(list).toBeInTheDocument();
+    const el = list.element();
+    // The name is sourced from the visible caption, not duplicated onto the list.
+    expect(el.getAttribute("aria-label")).toBeNull();
+    // Named via the visible caption instead: aria-labelledby -> the caption node,
+    // whose text is exactly the caption the list's accessible name derives from.
+    const labelledBy = el.getAttribute("aria-labelledby");
+    expect(labelledBy).toBeTruthy();
+    expect(document.getElementById(labelledBy!)?.textContent).toBe(
+      "Matching strategies",
+    );
+  });
+
   test("every disclosure on the screen has a distinct aria-controls id", async () => {
     renderTerms();
     await expect.element(toggle("Other details")).toBeInTheDocument();
