@@ -12,19 +12,17 @@ import {
 // Guards the vendored @openmined/psi.js native prebuild tarball against silent
 // drift. The sha256 sidecar (verified in CI before npm ci) proves the bytes are
 // the committed ones; this proves those bytes still mean what we expect -- the
-// same platform set, per-platform libc tagging, and glibc floor -- so a re-vendor
-// that quietly drops a platform, mis-tags a libc, corrupts the WASM fallback, or
-// raises the floor fails here instead of degrading to WASM unnoticed. Contract
-// lives in ./vectors/psi-prebuild-manifest.json; the target state (which the
-// contract asserts below force a deliberate update toward) is board item
-// 208541964.
+// same platform set, per-platform libc tagging, genuinely musl-linked musl
+// builds, and the glibc floor -- so a re-vendor that quietly drops a platform,
+// mis-tags or mis-links a libc, corrupts the WASM fallback, or raises the glibc
+// floor fails here instead of degrading to WASM unnoticed. Contract lives in
+// ./vectors/psi-prebuild-manifest.json.
 
 interface Manifest {
   tarball: string;
   platforms: string[];
   wasmEngines: string[];
   linux: { libcTags: string[]; maxGlibcFloor: string };
-  target: { maxGlibcFloor: string; requiredLibcTags: string[]; note: string };
 }
 
 const manifest = JSON.parse(
@@ -106,10 +104,10 @@ describe("vendored PSI prebuild tarball manifest", () => {
   });
 
   test("tags every linux prebuild exactly as recorded", () => {
-    // Per-platform, not a union across platforms: seclink.3 must ship both the
-    // glibc and musl tag on EVERY linux arch, so node-gyp-build can never select
-    // a glibc binary under musl on any of them. A union check would miss an arch
-    // that shipped only glibc. Untagged today ([] -> [""]) -- board 208541964.
+    // Per-platform, not a union across platforms: every linux arch must ship both
+    // the glibc and musl tag, so node-gyp-build can never select a glibc binary
+    // under musl on any of them. A union check would miss an arch that shipped
+    // only glibc.
     const expected = [
       ...new Set(
         manifest.linux.libcTags.length ? manifest.linux.libcTags : [""],
@@ -128,24 +126,38 @@ describe("vendored PSI prebuild tarball manifest", () => {
     }
   });
 
-  test("records the exact linux glibc floor", () => {
-    expect(linuxPrebuilds.length).toBeGreaterThan(0);
-    const floors = linuxPrebuilds.map((prebuild) => {
+  test("records the exact glibc floor of the glibc prebuilds", () => {
+    const glibcLinux = linuxPrebuilds.filter((p) => p.tag !== "musl");
+    expect(glibcLinux.length).toBeGreaterThan(0);
+    const floors = glibcLinux.map((prebuild) => {
       const floor = maxGlibcFloor(prebuild.data);
       expect(
         floor,
-        `${prebuild.platform} references no GLIBC symbols`,
+        `${prebuild.platform} glibc build references no GLIBC symbols`,
       ).not.toBeNull();
       return floor as string;
     });
-    // Exact equality with the highest floor across the linux prebuilds. A RISE
-    // (regression -- fewer hosts can load it, the GLIBC_2.38 class this guard
-    // exists for) fails; a DROP (the seclink.3 improvement) also fails, forcing a
-    // deliberate manifest update toward `target` rather than letting the recorded
-    // value silently rot out of date.
+    // Exact equality with the highest floor across the glibc prebuilds. A RISE
+    // (regression -- fewer hosts can load it, the GLIBC_2.38 class this guard was
+    // built for) fails; a DROP (an improvement) also fails, forcing a deliberate
+    // manifest update rather than letting the recorded value silently rot.
     const observed = floors.reduce((a, b) =>
       compareVersion(a, b) >= 0 ? a : b,
     );
     expect(observed).toBe(manifest.linux.maxGlibcFloor);
+  });
+
+  test("ships musl prebuilds that are genuinely musl-linked", () => {
+    // A musl-tagged build that still references glibc symbols is mis-built and
+    // would dlopen-fail under Alpine (the exact silent-WASM regression the musl
+    // build exists to remove); catch it here rather than at runtime.
+    const muslLinux = linuxPrebuilds.filter((p) => p.tag === "musl");
+    expect(muslLinux.length).toBeGreaterThan(0);
+    for (const prebuild of muslLinux) {
+      expect(
+        maxGlibcFloor(prebuild.data),
+        `${prebuild.platform} musl build references GLIBC symbols`,
+      ).toBeNull();
+    }
   });
 });
