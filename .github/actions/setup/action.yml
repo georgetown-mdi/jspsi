@@ -21,6 +21,13 @@ runs:
       with:
         node-version: "26"
         cache: "npm"
+    - name: Verify vendored native tarball integrity
+      # @openmined/psi.js is a file: dependency carrying prebuilt native .node
+      # binaries; npm records no integrity hash for a file: tarball, so verify the
+      # committed sha256 before install to catch a swapped or corrupted vendored
+      # artifact. See lib/*.tgz.sha256.
+      run: sha256sum -c lib/openmined-psi.js-*.tgz.sha256
+      shell: bash
     - name: Install dependencies
       run: npm ci
       shell: bash
