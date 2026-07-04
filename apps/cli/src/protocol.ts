@@ -805,8 +805,8 @@ export async function runProtocol(
     }
 
     // Select the PSI crypto backend: the CLI runs under Node, so it prefers the
-    // native addon and falls back to WASM when no prebuild is present for this
-    // platform (currently always, until the addon ships -- board item 199653275).
+    // native addon and falls back to WASM when no prebuild ships for this
+    // platform.
     const { library: psiLibrary, backend: psiBackend } =
       await loadCliPsiBackend({
         onNativeUnavailable: ({ error }) =>
