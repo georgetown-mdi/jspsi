@@ -1,0 +1,21 @@
+{
+  "description": "Contract of the vendored @openmined/psi.js native prebuild tarball, re-derived from the committed lib/*.tgz by psiPrebuildManifest.test.ts. The .tgz.sha256 sidecar pins the exact bytes; this pins their MEANING -- which platforms ship, how the linux prebuilds are libc-tagged, and the glibc floor they link against -- so a silent re-vendor that drops a platform, changes tagging, or raises the glibc floor fails CI instead of degrading to WASM unnoticed. When the tarball is re-vendored (seclink.N bump), update this file to match the new artifact and confirm it moves toward `target`. The target state and the fork-side fix are tracked in board item 208541964.",
+  "tarball": "lib/openmined-psi.js-2.0.6-seclink.2.tgz",
+  "platforms": [
+    "darwin-arm64",
+    "darwin-x64",
+    "linux-arm64",
+    "linux-x64",
+    "win32-x64"
+  ],
+  "wasmEngines": ["psi_wasm_node.js", "psi_wasm_web.js", "psi_wasm_worker.js"],
+  "linux": {
+    "libcTags": [],
+    "maxGlibcFloor": "2.38"
+  },
+  "target": {
+    "maxGlibcFloor": "2.28",
+    "requiredLibcTags": ["glibc", "musl"],
+    "note": "seclink.3 must lower the linux glibc floor to <= 2.28 and add tagged musl prebuilds (node.napi.glibc.node / node.napi.musl.node) so the native backend engages on the shipped Alpine CLI image and on glibc 2.28-2.36 hosts. Until then the Alpine image and glibc<2.38 hosts run WASM. Board 208541964."
+  }
+}

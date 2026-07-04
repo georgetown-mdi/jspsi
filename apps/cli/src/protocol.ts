@@ -809,13 +809,23 @@ export async function runProtocol(
     // platform.
     const { library: psiLibrary, backend: psiBackend } =
       await loadCliPsiBackend({
-        onNativeUnavailable: ({ error }) =>
-          log.debug(
-            "native PSI addon unavailable, using WASM:",
-            error
-              ? sanitizeErrorForDisplay(error)
-              : "no prebuild for this platform",
-          ),
+        onNativeUnavailable: ({ error }) => {
+          if (error) {
+            // A prebuild for this platform loaded far enough to fail -- an ABI or
+            // libc mismatch (e.g. ERR_DLOPEN_FAILED from a glibc-linked addon on
+            // musl, or a host glibc older than the prebuild requires). The native
+            // accelerator is silently off when we expected it on, so warn; the
+            // ordinary "no prebuild ships for this platform" case stays at debug.
+            log.warn(
+              "native PSI addon failed to load, using WASM:",
+              sanitizeErrorForDisplay(error),
+            );
+          } else {
+            log.debug(
+              "native PSI addon unavailable (no prebuild for this platform), using WASM",
+            );
+          }
+        },
       });
     log.debug(`PSI crypto backend: ${psiBackend}`);
 

@@ -39,9 +39,11 @@ async function loadNativePsiAddon(): Promise<PSILibrary | null> {
 /**
  * Whether a native-addon load error is the ordinary "no native build for this
  * platform / package" case (quiet fallback) rather than a genuinely broken load
- * worth surfacing.
+ * worth surfacing. Exported so the classification the WASM fallback depends on is
+ * pinned by unit tests -- misclassifying a broken addon as "unavailable" would
+ * hide a real regression behind a silent fallback (see psiBackend.test.ts).
  */
-function isNativeUnavailable(error: unknown): boolean {
+export function isNativeUnavailable(error: unknown): boolean {
   const code = (error as { code?: unknown } | null)?.code;
   if (code === "ERR_MODULE_NOT_FOUND" || code === "MODULE_NOT_FOUND") {
     return true;
