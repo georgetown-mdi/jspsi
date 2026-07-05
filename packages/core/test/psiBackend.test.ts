@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
@@ -80,7 +80,26 @@ describe("loadPsiBackend", () => {
 });
 
 describe("detectNodeRuntime", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   test("detects the Node runtime under the node-environment unit suite", () => {
     expect(detectNodeRuntime()).toBe(true);
+  });
+
+  test("reports non-Node when a DOM window is present, even with a process shim", () => {
+    // A bundled browser build can shim `process`, so a present `window` is what
+    // disambiguates it from real Node. Stubbing `window` exercises the guard the
+    // node-environment suite otherwise never runs false -- dropping it would let
+    // such a browser misdetect as Node and consult the native loader.
+    vi.stubGlobal("window", {});
+    expect(detectNodeRuntime()).toBe(false);
+  });
+
+  test("reports non-Node when no process is present", () => {
+    // The browser-without-shim case: no Node `process` at all.
+    vi.stubGlobal("process", undefined);
+    expect(detectNodeRuntime()).toBe(false);
   });
 });

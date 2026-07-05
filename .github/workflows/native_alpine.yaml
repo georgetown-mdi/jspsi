@@ -1,0 +1,64 @@
+name: Native Addon (Alpine/musl)
+
+# Confirms the vendored native PSI addon loads and is byte-for-byte correct under
+# musl. The shipped CLI base image is Alpine (musl): node-gyp-build serves the
+# musl-tagged prebuild there, while the vitest native suites run on the glibc CI
+# host and select the glibc build, so they cannot exercise musl -- this gate does.
+# It derives the exact base image from the production Dockerfile (so it always
+# mirrors what ships, and fails loudly if that base ever leaves Alpine), installs
+# the committed tarball fresh inside it (as the production image does) rather than
+# reusing the runner's node_modules, and runs the native-only known-answer check.
+# Scoped to changes that can affect the vendored artifact, the base image, or the
+# check itself.
+on:
+  pull_request:
+    branches: [main, staging]
+    paths:
+      - "lib/**"
+      - "packages/core/test/vectors/psi-engine-wire-vectors.json"
+      - "packages/core/test/vectors/verify-native-wire-vectors.mjs"
+      - ".github/workflows/native_alpine.yaml"
+      # The run step derives its base image from the Dockerfile's FROM line, so a
+      # base-image change must re-trigger this gate to stay in sync with what ships.
+      - "Dockerfile"
+
+# Cancel a superseded run when a newer commit lands on the same PR/branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: this gate only needs to read the repo.
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: native byte-for-byte under Alpine/musl
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify the native addon under the shipped Alpine base
+        # Derive the base image from the production Dockerfile's RUNTIME stage so this
+        # gate always mirrors what ships, and fail loudly if that base is no longer a
+        # node:*-alpine (musl) image, since this gate only proves the musl native path.
+        # Then a fresh install of just the vendored tarball inside it (mirrors the
+        # production image) and the native-only known-answer check. --ignore-scripts
+        # is safe: node-gyp-build resolves the prebuild at require time, not install.
+        # Install stderr is left un-suppressed so a failing install surfaces its log.
+        run: |
+          # The runtime stage is the LAST `FROM` -- the image that actually ships and
+          # loads the native addon (an earlier `FROM ... AS builder` only compiles TS
+          # and never touches musl). A digest-pinned `@sha256:...` is kept whole so the
+          # exact shipped artifact is tested. `|| true` so an unreadable/absent base
+          # falls to the case below instead of aborting under the runner's pipefail.
+          # Assumes a literal image ref; a variable/ARG base fails later at docker pull.
+          base=$(grep -iE '^FROM[[:space:]]' Dockerfile | tail -1 | awk '{print $2}' || true)
+          case "$base" in
+            node:*-alpine | node:*-alpine@*) ;;
+            *)
+              echo "Dockerfile runtime base '$base' is not a node:*-alpine image; this musl gate's premise is stale -- update or retire it." >&2
+              exit 1
+              ;;
+          esac
+          echo "Testing the native musl addon under $base (Dockerfile runtime stage)"
+          docker run --rm -v "$PWD":/w "$base" sh -c 'set -e; cd /w && sha256sum -c lib/openmined-psi.js-*.tgz.sha256 && mkdir -p /app && cd /app && npm init -y >/dev/null 2>&1 && npm install --no-audit --no-fund --ignore-scripts /w/lib/openmined-psi.js-*.tgz >/dev/null && cp /w/packages/core/test/vectors/verify-native-wire-vectors.mjs verify.mjs && node verify.mjs /w/packages/core/test/vectors/psi-engine-wire-vectors.json'
