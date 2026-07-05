@@ -1,0 +1,40 @@
+name: Native Addon (Alpine/musl)
+
+# Confirms the vendored native PSI addon loads and is byte-for-byte correct under
+# musl. The shipped CLI base image is node:26-alpine, where node-gyp-build serves
+# the musl-tagged prebuild; the vitest native suites run on the glibc CI host and
+# select the glibc build, so they cannot exercise musl -- this gate does. It
+# installs the committed tarball fresh inside the container (as the production
+# image does) rather than reusing the runner's node_modules, and runs the
+# native-only known-answer check. Scoped to changes that can affect the vendored
+# artifact or the check itself.
+on:
+  pull_request:
+    branches: [main, staging]
+    paths:
+      - "lib/**"
+      - "packages/core/test/vectors/psi-engine-wire-vectors.json"
+      - "packages/core/test/vectors/verify-native-wire-vectors.mjs"
+      - ".github/workflows/native_alpine.yaml"
+
+# Cancel a superseded run when a newer commit lands on the same PR/branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: this gate only needs to read the repo.
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: native byte-for-byte under Alpine/musl
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify the native addon under node:26-alpine
+        # Fresh install of just the vendored tarball inside Alpine (mirrors the
+        # production image), then the native-only known-answer check. --ignore-scripts
+        # is safe: node-gyp-build resolves the prebuild at require time, not install.
+        run: |
+          docker run --rm -v "$PWD":/w node:26-alpine sh -c 'set -e; cd /w && sha256sum -c lib/openmined-psi.js-*.tgz.sha256 && mkdir -p /app && cd /app && npm init -y >/dev/null 2>&1 && npm install --no-audit --no-fund --ignore-scripts /w/lib/openmined-psi.js-*.tgz >/dev/null 2>&1 && cp /w/packages/core/test/vectors/verify-native-wire-vectors.mjs verify.mjs && node verify.mjs /w/packages/core/test/vectors/psi-engine-wire-vectors.json'
