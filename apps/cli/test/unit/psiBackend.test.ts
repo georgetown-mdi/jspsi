@@ -1,3 +1,8 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, test } from "vitest";
 
 import { isNativeUnavailable } from "../../src/psiBackend";
@@ -55,5 +60,39 @@ describe("isNativeUnavailable", () => {
     expect(isNativeUnavailable(new Error("boom"))).toBe(false);
     expect(isNativeUnavailable(null)).toBe(false);
     expect(isNativeUnavailable(undefined)).toBe(false);
+  });
+
+  test("node-gyp-build still throws the message the classifier keys on", () => {
+    // The quiet path above keys on a substring of node-gyp-build's no-match
+    // error -- an external contract, not a language guarantee. A future
+    // node-gyp-build reword, or a Node that stabilizes the experimental
+    // require.addon resolver node-gyp-build can dispatch to instead of its
+    // string-throwing JS path, would silently flip a genuine "no prebuild here"
+    // from quiet to a warning on every unsupported-platform run. Pin the
+    // contract at its source: invoke the node-gyp-build the vendored package
+    // actually loads (resolved through it, not a hoisted copy) against a dir
+    // with no prebuilds, and assert both the message and the classification.
+    const requireFrom = createRequire(import.meta.url);
+    const nodeGypBuild = createRequire(
+      requireFrom.resolve("@openmined/psi.js/package.json"),
+    )("node-gyp-build") as (dir: string) => unknown;
+    const emptyDir = mkdtempSync(join(tmpdir(), "ngb-contract-"));
+    try {
+      let thrown: unknown;
+      try {
+        nodeGypBuild(emptyDir);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(
+        thrown,
+        "node-gyp-build resolved a prebuild in an empty dir",
+      ).toBeInstanceOf(Error);
+      expect((thrown as Error).message).toMatch(/No native build was found/i);
+      // The classifier must still map that real error to the quiet fallback.
+      expect(isNativeUnavailable(thrown)).toBe(true);
+    } finally {
+      rmSync(emptyDir, { recursive: true, force: true });
+    }
   });
 });
