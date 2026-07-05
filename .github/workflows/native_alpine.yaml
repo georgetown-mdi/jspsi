@@ -4,23 +4,21 @@ name: Native Addon (Alpine/musl)
 # musl. The shipped CLI base image is Alpine (musl): node-gyp-build serves the
 # musl-tagged prebuild there, while the vitest native suites run on the glibc CI
 # host and select the glibc build, so they cannot exercise musl -- this gate does.
-# It derives the exact base image from the production Dockerfile (so it always
-# mirrors what ships, and fails loudly if that base ever leaves Alpine), installs
-# the committed tarball fresh inside it (as the production image does) rather than
-# reusing the runner's node_modules, and runs the native-only known-answer check.
-# Scoped to changes that can affect the vendored artifact, the base image, or the
-# check itself.
+# It derives the exact base image from the production Dockerfile's runtime stage
+# (so it always mirrors what ships, and fails loudly if that base ever leaves
+# Alpine), installs the committed tarball fresh inside it (as the production image
+# does) rather than reusing the runner's node_modules, and runs the native-only
+# known-answer check.
+#
+# This is a REQUIRED check, so it must report a status on EVERY PR to main/staging:
+# a `paths:`-filtered required check leaves PRs that touch none of its paths stuck
+# forever on "Expected -- waiting for status to be reported". So the workflow always
+# runs and the job green-passes trivially, doing the real musl verification only
+# when the vendored tarball, the wire vectors, this workflow, or the Dockerfile
+# actually changed (the same set the old `paths:` filter named).
 on:
   pull_request:
     branches: [main, staging]
-    paths:
-      - "lib/**"
-      - "packages/core/test/vectors/psi-engine-wire-vectors.json"
-      - "packages/core/test/vectors/verify-native-wire-vectors.mjs"
-      - ".github/workflows/native_alpine.yaml"
-      # The run step derives its base image from the Dockerfile's FROM line, so a
-      # base-image change must re-trigger this gate to stay in sync with what ships.
-      - "Dockerfile"
 
 # Cancel a superseded run when a newer commit lands on the same PR/branch.
 concurrency:
@@ -37,7 +35,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Full history so the change-detection diff can reach the PR's merge base.
+          fetch-depth: 0
+      - name: Decide whether the vendored artifact or this gate changed
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # Restrict the real (Docker) work to PRs that can affect the shipped native
+        # artifact or this check -- the vendored tarball, the wire vectors, this
+        # workflow, or the Dockerfile the base image is read from -- the same set the
+        # old `paths:` filter named. Every other PR still runs this job and reports
+        # success, so the required check never stalls. On a detection failure, fall
+        # back to running the full check rather than skipping it.
+        run: |
+          changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA" -- \
+            lib \
+            packages/core/test/vectors/psi-engine-wire-vectors.json \
+            packages/core/test/vectors/verify-native-wire-vectors.mjs \
+            .github/workflows/native_alpine.yaml \
+            Dockerfile || echo DIFF_FAILED)
+          if [ -n "$changed" ]; then
+            printf 'running the musl check (relevant change or detection failure):\n%s\n' "$changed"
+            echo "run=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "no vendored-artifact or gate change; passing without the musl check"
+            echo "run=false" >>"$GITHUB_OUTPUT"
+          fi
       - name: Verify the native addon under the shipped Alpine base
+        if: steps.scope.outputs.run == 'true'
         # Derive the base image from the production Dockerfile's RUNTIME stage so this
         # gate always mirrors what ships, and fail loudly if that base is no longer a
         # node:*-alpine (musl) image, since this gate only proves the musl native path.
