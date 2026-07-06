@@ -15,18 +15,21 @@ contributors.
 A document in this tier always has an overview-tier counterpart it complements,
 and each states the split in its intro: the overview says what a control or
 format is for and what it protects against; the spec says how it is constructed.
+(One document, [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md), is a deliberate
+exception -- see the note below.)
 
 ## Index
 
 | File | Scope | Audience | Does not cover |
 | ---- | ----- | -------- | -------------- |
 | [PROTOCOL.md](PROTOCOL.md) | The PSI and PSI-C algorithms, their composition into a record linkage, and the wire-level X25519 authenticated key exchange (construction, key schedule, message encoding). Also the **Self-attested record** subsection: where the record sits in the exchange protocol. | Security auditors, external implementors, developers | The exchange-agreement format (see [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md)); the threat model and authentication design (see [SECURITY_DESIGN.md](../SECURITY_DESIGN.md)); the network layer (see [COMMUNICATION.md](../COMMUNICATION.md)) |
-| [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md) | The application-layer AEAD envelope and per-direction key derivation, the inbound integrity/replay/ordering checks, the file-sync memory and liveness bounds, the bundled PeerJS signaling server's upgrade-surface bounds (inbound frame size, handshake timeouts, the liveness reaper, and the relay queue bounds), and the application-layer bounds on partner-parsed input -- collection counts, the linear-time regex dialect that transform patterns (raw patterns and the one `parse_date` expands from its format) execute under, and the caps on the transform-param values that drive unbounded per-row work (`pad_left` `length`, `parse_date` formats, raw pattern length) -- with their derived constant values, the operator-local CSV-read single-line byte ceiling (the lone input bound with no adversary), the SFTP fatal-packet crash safety, and the authenticated abort marker. | Security auditors, implementors | What each control protects against and why it is sufficient -- that is the **Channel security** overview in [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#channel-security); the SFTP-stack upgrade checklist (see [CONTRIBUTING.md](../../CONTRIBUTING.md#upgrading-the-sftp-stack-ssh2--ssh2-sftp-client)) |
+| [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md) | The application-layer AEAD envelope and per-direction key derivation, the inbound integrity/replay/ordering checks, the file-sync memory and liveness bounds, the bundled PeerJS signaling server's upgrade-surface bounds (inbound frame size, handshake timeouts, the liveness reaper, and the relay queue bounds), and the application-layer bounds on partner-parsed input -- collection counts, the linear-time regex dialect that transform patterns (raw patterns and the one `parse_date` expands from its format) execute under, and the caps on the transform-param values that drive unbounded per-row work (`pad_left` `length`, `parse_date` formats, raw pattern length) -- with their derived constant values, the operator-local CSV-read single-line byte ceiling (the lone input bound with no adversary), the SFTP fatal-packet crash safety, and the authenticated abort marker. | Security auditors, implementors | What each control protects against and why it is sufficient -- that is the **Channel security** overview in [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#channel-security); the SFTP-stack upgrade checklist (see [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md#upgrading-the-sftp-stack-ssh2--ssh2-sftp-client)) |
 | [FILE_SYNC.md](FILE_SYNC.md) | The file-sync transport state machine: the directory-as-state-machine, the filename taxonomy, the enforcement sites, the invariants, and the exchange preconditions for the `sftp` and `filedrop` channels. | Developers, designers | The user-facing configuration reference and the normative filename **grammar** (see [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md) -- see the tier-inversion note below); the channel/synchronization overview (see [COMMUNICATION.md](../COMMUNICATION.md)) |
 | [COMMUNICATION.md](COMMUNICATION.md) | The transport-contract complement to the communication overview: the deferred-decision rationale for the core library's terminal `ConnectionErrorKind` taxonomy. | Developers extending the transport layer | The channels, synchronization, message-delivery contract, and supporting services (see [COMMUNICATION.md](../COMMUNICATION.md)) |
 | [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md) | The self-attested exchange record **format**: the record and verification-keys file shapes, the format version, the HMAC commitment scheme and agreed-terms hash, the governance metadata, the disclosure framing, and the record's privacy properties. | Security auditors, external implementors, compliance reviewers, developers | The PSI protocol that produces the exchange (see [PROTOCOL.md](PROTOCOL.md)); the exchange-agreement format that supplies the governance fields (see [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md)); the canonical byte encoding (see [CANONICAL_ENCODING.md](CANONICAL_ENCODING.md)) |
 | [CANONICAL_ENCODING.md](CANONICAL_ENCODING.md) | The normative RFC 8785 (JCS) byte encoding the receipts, record commitments, and agreed-terms hash are computed over, with worked examples. Written so an independent implementation reproduces byte-identical output. | External implementors, security auditors | What the encoding is for and what it protects against -- that is the **Canonical encoding** overview in [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#canonical-encoding); how receipts use these bytes (see [PROTOCOL.md](PROTOCOL.md#non-repudiation)); the record format (see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)) |
 | [CREDENTIAL_STORAGE.md](CREDENTIAL_STORAGE.md) | The owner-only on-disk write path shared by the credential, signing-identity, exchange-record, and result-CSV files: the POSIX exclusive-create and atomic-rename discipline, the `fsync` durability and cross-write crash-ordering guarantee, the macOS `F_FULLFSYNC` and NFSv4-ACL caveats, the writable-and-readable-parent pre-flight, and the Windows ACL-narrowing and load-check internals. | Security auditors, implementors | What the files contain and the operator-facing required permissions, warnings, and remediation -- that is the **Key file security** overview in [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#key-file-security) |
+| [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md) | Why the `ssh2`/`ssh2-sftp-client` and `peerjs`/`peerjs-js-binarypack` stacks are exact-pinned, the internal premises the CLI SFTP adapter and the web inbound bound rest on, and the per-stack checklist to re-verify them before a bump. | Maintainers upgrading a pinned dependency | The controls the premises support (see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md)); the dependency-review requirement (see [CONTRIBUTING.md](../../CONTRIBUTING.md#dependency-policy)) |
 
 ## Where does my content go?
 
@@ -44,6 +47,7 @@ Within this tier, route by topic:
 - **The canonical byte encoding any of the above commits over** -> [CANONICAL_ENCODING.md](CANONICAL_ENCODING.md).
 - **The owner-only on-disk write path (exclusive-create, atomic rename, fsync durability, ACL narrowing) or its crash-ordering guarantee** -> [CREDENTIAL_STORAGE.md](CREDENTIAL_STORAGE.md).
 - **A `ConnectionErrorKind` classification decision** -> [COMMUNICATION.md](COMMUNICATION.md).
+- **A pinned-dependency internal premise or its upgrade checklist (`ssh2`, `peerjs`)** -> [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md).
 
 ### Two overlaps to disambiguate
 
@@ -61,3 +65,15 @@ is deliberate and recorded: do **not** "tidy" the filename grammar down into
 `docs/spec/`. The grammar stays in EXCHANGE_REFERENCE.md (operators need it) and
 FILE_SYNC.md defers to it; moving it would silently break FILE_SYNC's invariant
 references.
+
+### Maintainer-runbook exception: DEPENDENCY_PINS.md
+
+[DEPENDENCY_PINS.md](DEPENDENCY_PINS.md) bends the two tier rules above, on
+purpose. Its counterpart is [CONTRIBUTING.md](../../CONTRIBUTING.md#dependency-policy)
+(the dependency-review requirement), not a `docs/` overview; its content is a
+re-verification **procedure** over spec-level premises, not a construction; and
+it adds maintainers upgrading a pinned dependency to the tier's implementor and
+auditor audience. It lives here anyway because its substance is spec-tier -- the
+numeric SFTP constants, the BinaryPack marker table, and the ssh2 listener
+premises that [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md) rests on -- so it belongs
+beside that doc, not in a separate runbook tier for a single file.
