@@ -427,6 +427,55 @@ test("initiator fails fast (and sends an abort) on a malformed message-2 version
   await expect(initiator).rejects.toThrow(PROTOCOL_VERSION_MISMATCH_MESSAGE);
 });
 
+test("a malformed sibling field does not bury the version skew (responder path)", async () => {
+  // The structural guarantee: the version is read from a lenient probe BEFORE the
+  // strict envelope parse, so a malformed SIBLING field -- here a non-boolean
+  // `save`, which throws termsMessage.parse -- can no longer swallow the actionable
+  // version diagnosis behind a generic "failed to parse". This is the real-world
+  // shape of a future version reshaping any envelope field. Skew the version and
+  // garble `save` together; the named version message must still win, so the abort
+  // reason is the mismatch, not a parse error.
+  const [connA, connB] = makeConnections();
+  const responder = exchangeTerms(connB, "responder", termsB, 200);
+  await connA.send({
+    linkageTerms: termsA,
+    recordCount: 100,
+    protocolVersion: PROTOCOL_VERSION + 1,
+    save: "yes", // non-boolean: throws the strict envelope parse
+  });
+  const abort = await connA.receive();
+  expect(abort).toMatchObject({
+    decision: "abort",
+    abortReasons: [PROTOCOL_VERSION_MISMATCH_MESSAGE],
+  });
+  await expect(responder).rejects.toThrow(PROTOCOL_VERSION_MISMATCH_MESSAGE);
+});
+
+test("a malformed sibling field does not bury the version skew, and still aborts (initiator path)", async () => {
+  // The initiator mirror AND a no-hang guard: on message 2 the version is probed and
+  // reconciled BEFORE the strict parse, so a malformed sibling field co-occurring
+  // with a version skew still yields the named diagnosis -- and, critically, the
+  // initiator still SENDS an abort (message 3) rather than throwing a bare parse
+  // error that would strand the responder on its receive timeout. Drive the
+  // responder by hand to inject the frame.
+  const [connA, connB] = makeConnections();
+  const initiator = exchangeTerms(connA, "initiator", termsA, 100);
+  await connB.receive(); // msg 1: initiator's terms
+  await connB.send({
+    linkageTerms: termsB,
+    decision: "proceed",
+    recordCount: 200,
+    protocolVersion: PROTOCOL_VERSION + 1,
+    save: "yes", // non-boolean: throws the strict envelope parse
+  });
+  const abort = await connB.receive(); // msg 3: initiator's abort -- must arrive
+  expect(abort).toMatchObject({
+    decision: "abort",
+    abortReasons: [PROTOCOL_VERSION_MISMATCH_MESSAGE],
+  });
+  await expect(initiator).rejects.toThrow(PROTOCOL_VERSION_MISMATCH_MESSAGE);
+});
+
 test("a version mismatch is diagnosed ahead of a simultaneous terms mismatch", async () => {
   // When the partner differs on BOTH the protocol version AND the linkage terms,
   // the version skew is the root cause, so its diagnosis wins: the abort names the

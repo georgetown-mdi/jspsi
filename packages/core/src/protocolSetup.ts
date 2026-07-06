@@ -15,6 +15,7 @@ import { describeDecodeError } from "./utils/describeDecodeError";
 import { boundedArray } from "./utils/boundedArray";
 import {
   receiveParsed,
+  parseOrProtocolError,
   type MessageConnection,
 } from "./connection/messageConnection";
 
@@ -155,9 +156,12 @@ export const recordCountField = z
 // itself wire-compatible (an older peer strips the unknown key and this build
 // treats an absent advertisement as legacy), so such a partner is allowed to
 // proceed. The durable, forward-looking guarantee is that any two builds that
-// both carry the field fail cleanly the moment their versions differ -- provided
-// a future bump keeps the terms envelope's other required fields backward-
-// parseable, since the version can only be read out of an envelope that parses.
+// both carry the field fail cleanly the moment their versions differ. That
+// guarantee no longer rests on a future bump keeping the envelope's other fields
+// backward-parseable: the version is read from a lenient probe BEFORE the strict
+// parse (see protocolVersionProbe), so a reshaped sibling field cannot throw the
+// parse before the version is read and bury the skew diagnosis. The version is
+// read independently of the rest of the envelope on both message paths.
 /** @internal exported for the protocol-version reconcile tests. */
 export const PROTOCOL_VERSION = 1;
 
@@ -347,6 +351,35 @@ async function sendAbort(
   }
 }
 
+// A lenient probe that extracts ONLY `protocolVersion` from a raw terms frame,
+// read BEFORE the strict envelope parse so the reconcile below can always see the
+// peer's version -- even when the strict parse would throw. This makes the version
+// diagnosis independent of every OTHER envelope field's strictness: a future
+// version that reshapes a sibling field (a required `recordCount`, an optional
+// `save`, ...) can no longer throw `termsMessage.parse` before the version is read
+// and thereby bury the actionable "run the same version" message behind a generic
+// "failed to parse". It is the structural form of what was previously only a prose
+// rule -- that every envelope field stay backward-parseable across a bump. Like
+// `termsMessage`, `protocolVersion` is read as `unknown`, so a garbled value still
+// reconciles to the named skew rather than a parse error; a non-object frame, or one
+// carrying no version, probes to `undefined` (treated as a legacy peer). `.catch`
+// makes the probe itself total -- it never throws -- so a hostile or malformed frame
+// degrades to "no readable version" rather than an exception on this path.
+const protocolVersionProbe = z
+  .object({ protocolVersion: z.unknown().optional() })
+  .catch({ protocolVersion: undefined });
+
+/**
+ * Read the partner's advertised protocol version from a raw terms frame without
+ * requiring the whole envelope to parse (see {@link protocolVersionProbe}), so
+ * {@link reconcileProtocolVersion} can diagnose a version skew even when a sibling
+ * field would fail the strict parse. Returns `undefined` for a frame that carries
+ * no version (a legacy peer) or that is not an object.
+ */
+function probeProtocolVersion(rawData: unknown): unknown {
+  return protocolVersionProbe.parse(rawData).protocolVersion;
+}
+
 /**
  * Fail-closed reconcile of the partner's advertised {@link PROTOCOL_VERSION}. A
  * partner that advertised anything OTHER than our exact version -- a different
@@ -482,8 +515,22 @@ export async function exchangeTerms(
       ...hostKeyField,
     });
 
-    // Message 2: receive partner's terms + decision.
-    const msg = await receiveParsed(conn, termsWithDecisionMessage);
+    // Message 2: receive partner's terms + decision. Raw receive so the protocol
+    // version is read from the lenient probe and reconciled BEFORE the strict parse:
+    // a malformed sibling field on this frame must not throw the parse before the
+    // skew is diagnosed, which would strand the responder awaiting our message 3 with
+    // no abort sent (see protocolVersionProbe / reconcileProtocolVersion).
+    const rawMsg = await conn.receive();
+
+    // Fail-closed protocol-version check first -- before the strict parse and before
+    // any terms are weighed. A version skew is the root cause, so its actionable
+    // diagnosis (and the abort it best-effort sends the responder) wins over a
+    // record-count, terms, or sibling-field parse difference the mismatch might also
+    // produce (208014743). A legacy or abort frame carries no version, so this is a
+    // no-op there and the abort still surfaces at the decision check below.
+    await reconcileProtocolVersion(conn, probeProtocolVersion(rawMsg));
+
+    const msg = parseOrProtocolError(termsWithDecisionMessage, rawMsg);
 
     if (msg.decision === "abort") {
       throw new Error(
@@ -493,11 +540,6 @@ export async function exchangeTerms(
             : ""),
       );
     }
-
-    // Fail-closed protocol-version check before any terms are weighed: a version
-    // skew is the root cause, so its actionable diagnosis wins over a record-
-    // count or terms difference the mismatch might also produce (208014743).
-    await reconcileProtocolVersion(conn, msg.protocolVersion);
 
     // A `proceed` frame always carries the partner's record count (only the abort
     // frame omits it; see termsWithDecisionMessage). Its absence here is a
@@ -575,18 +617,15 @@ export async function exchangeTerms(
     let partnerDisclosesPayload: boolean | undefined;
     let partnerHostKey: PresentedHostKey | undefined;
     let partnerHostKeyMalformed = false;
-    // Captured before parseLinkageTerms (which may throw): a version skew is the
-    // likely reason the terms fail to parse, so the version reconcile below must
-    // run even when the linkage-terms parse threw, as long as the envelope itself
-    // parsed. A malformed version VALUE no longer forces that throw (the field is
-    // `unknown`, so it is captured and reconciled to a mismatch); this stays
-    // undefined only when `termsMessage.parse` throws on some OTHER required field
-    // (a wholly malformed frame carries no readable version).
-    let partnerProtocolVersion: unknown;
+    // Read the version from the lenient probe BEFORE the strict parse, so the
+    // reconcile below runs on the peer's version even when `termsMessage.parse`
+    // throws -- whether on the linkage terms (a version skew is the likely cause) or
+    // on any OTHER envelope field a future version might reshape. This no longer
+    // depends on the strict parse succeeding at all (see protocolVersionProbe).
+    const partnerProtocolVersion: unknown = probeProtocolVersion(rawData);
     let parseError: string | undefined;
     try {
       const parsed = termsMessage.parse(rawData);
-      partnerProtocolVersion = parsed.protocolVersion;
       partnerRecordCount = parsed.recordCount;
       partnerSaveIntent = parsed.save === true;
       partnerDisclosesPayload = parsed.disclosesPayload;
