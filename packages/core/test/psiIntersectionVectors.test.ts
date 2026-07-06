@@ -22,6 +22,12 @@ import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 // mapping fails here deterministically. This is the CORRECTNESS anchor; the
 // byte-for-byte anchor lives in psiEngineWireVectors.test.ts. Regenerate the
 // fixture with generate-psi-intersection-vectors.mjs in the vectors directory.
+//
+// This gate runs against the default WASM engine only; a native-backend replay
+// is intentionally omitted because the projection is data-defined -- any correct
+// engine build reproduces it -- and the native addon is already anchored
+// byte-for-byte in psiEngineWireVectorsNative.test.ts and behaviorally (the
+// identify-intersection scenario, cross-backend) in psiParticipantNativeParity.test.ts.
 
 type Table = [number[], number[]];
 type Cardinality =
@@ -160,10 +166,12 @@ for (const vector of vectors) {
     expect(starter).toStrictEqual(vector.starter);
     expect(joiner).toStrictEqual(vector.joiner);
 
-    // The committed pair is internally consistent: the starter's local indices
-    // are the joiner's partner indices and vice versa (the "server and client
-    // yield identical results" invariant the source tests also pin).
-    expect(vector.starter[0]).toStrictEqual(vector.joiner[1]);
-    expect(vector.starter[1]).toStrictEqual(vector.joiner[0]);
+    // The live starter and joiner agree: the starter's local indices are the
+    // joiner's partner indices and vice versa -- the "server and client yield
+    // identical results" invariant the source tests pin on freshly computed
+    // results (e.g. psiParticipant.test.ts). Asserted on the live tables, not the
+    // committed fixture, so a broken engine that desyncs the two sides fails here.
+    expect(starter[0]).toStrictEqual(joiner[1]);
+    expect(starter[1]).toStrictEqual(joiner[0]);
   });
 }
