@@ -1,0 +1,229 @@
+{
+  "description": "Resolved intersection-and-association known-answer vectors for the vendored @openmined/psi.js engine as psilink drives it. Each scenario fixes the engine inputs and pins both the intersection membership and the association/permutation mapping back to original input rows, normalized by sorting on the local index. These consolidate the toStrictEqual KATs otherwise inline in psiParticipant.test.ts, psiLink.test.ts, psiLinkForLinkageKeys.test.ts, psiLinkEmptyRound.test.ts, and psiLinkEmptyKey.test.ts into one portable fork-bump acceptance gate: a fork re-roll or an accidental engine swap that permutes or corrupts the association mapping fails psiIntersectionVectors.test.ts deterministically. This is a CORRECTNESS anchor (the projection is data-defined, so a correct engine always reproduces it), distinct from the BYTE-stability anchor in psi-engine-wire-vectors.json. Regenerate with generate-psi-intersection-vectors.mjs in this directory.",
+  "curve": "NIST P-256",
+  "revealIntersection": true,
+  "associationTableLayout": "[localRowIndices, partnerRowIndices]; the two arrays are equal length and pair index-for-index. The starter is sorted ascending by its local index (starter[0]); the joiner is sorted ascending by its partner index (joiner[1]), so across the pair starter[0] === joiner[1] and starter[1] === joiner[0]. undefined inputs (the no-key sentinel) serialize as JSON null.",
+  "vectors": [
+    {
+      "name": "identify-intersection-names",
+      "description": "PSIParticipant.identifyIntersection over a single key round of distinct names. Source: psiParticipant.test.ts ('psi yields correct results').",
+      "method": "identifyIntersection",
+      "starterInputs": [
+        "Alice",
+        "Bob",
+        "Carol",
+        "David",
+        "Elizabeth",
+        "Frank",
+        "Greta"
+      ],
+      "joinerInputs": ["Carol", "Elizabeth", "Henry"],
+      "starter": [
+        [2, 4],
+        [0, 1]
+      ],
+      "joiner": [
+        [0, 1],
+        [2, 4]
+      ]
+    },
+    {
+      "name": "cascade-two-key-value-contention",
+      "description": "linkViaPSI one-to-one, two key rounds: a name round then a value round where within-round uniqueness among the survivors drives the second match. Source: psiLink.test.ts ('results are correct').",
+      "method": "linkViaPSI",
+      "cardinality": "one-to-one",
+      "starterKeys": [
+        ["Alice", "Bob", "Carol", "David", "Elizabeth", "Frank", "Greta"],
+        ["1", "2", "1", "1", "1", "1", "1"]
+      ],
+      "joinerKeys": [
+        ["Carol", "Elizabeth", "Henry"],
+        ["3", "3", "2"]
+      ],
+      "starter": [
+        [1, 2, 4],
+        [2, 0, 1]
+      ],
+      "joiner": [
+        [2, 0, 1],
+        [1, 2, 4]
+      ]
+    },
+    {
+      "name": "cascade-survivor-relative-uniqueness",
+      "description": "linkViaPSI one-to-one where a value duplicated across the whole dataset ('Z','Z') becomes matchable once an earlier key claims its twin -- uniqueness is evaluated over the round's survivors, not the full dataset. Source: psiLink.test.ts ('survivor-relative uniqueness').",
+      "method": "linkViaPSI",
+      "cardinality": "one-to-one",
+      "starterKeys": [
+        ["A", "B"],
+        ["Z", "Z"]
+      ],
+      "joinerKeys": [
+        ["A", null],
+        [null, "Z"]
+      ],
+      "starter": [
+        [0, 1],
+        [0, 1]
+      ],
+      "joiner": [
+        [0, 1],
+        [0, 1]
+      ]
+    },
+    {
+      "name": "cascade-multi-key-standardized",
+      "description": "linkViaPSI one-to-one over two standardized linkage keys (SSN+LN+DOB, then the looser SSN+LN1+FN1): row 1 matches exactly on key 1, rows 0 and 2 carry forward and match on key 2, and key 1 having consumed a shared-SSN record forces row 2's match into key 2. The engine inputs are the per-row key strings the standardization pipeline derives from the source rows (baked here for portability). Source: psiLinkForLinkageKeys.test.ts.",
+      "method": "linkViaPSI",
+      "cardinality": "one-to-one",
+      "starterKeys": [
+        ["559811301HEARD19750716", "322842281IORIO19750817"],
+        ["559811301HJ", "322842281IA"]
+      ],
+      "joinerKeys": [
+        [
+          "559811301HEARD19750717",
+          "559811301HEARD19750716",
+          "322842281IORIO19750818"
+        ],
+        ["559811301HJ", "559811301HJ", "322842281IA"]
+      ],
+      "starter": [
+        [0, 1],
+        [1, 2]
+      ],
+      "joiner": [
+        [1, 2],
+        [0, 1]
+      ]
+    },
+    {
+      "name": "empty-round-joiner-fully-matched",
+      "description": "linkViaPSI one-to-one: the joiner is fully matched on key 0 (its key-1 set is empty) while the starter still holds an unmatched record. The matching loop must still run key 1 for both parties. Source: psiLinkEmptyRound.test.ts (joiner fully matched early).",
+      "method": "linkViaPSI",
+      "cardinality": "one-to-one",
+      "starterKeys": [
+        ["Carol", "David", "Frank"],
+        ["a", "b", "c"]
+      ],
+      "joinerKeys": [
+        ["Carol", "David"],
+        ["x", "y"]
+      ],
+      "starter": [
+        [0, 1],
+        [0, 1]
+      ],
+      "joiner": [
+        [0, 1],
+        [0, 1]
+      ]
+    },
+    {
+      "name": "empty-round-starter-fully-matched",
+      "description": "Mirror of the above: the starter's key-1 set is empty while the joiner still has an unmatched record. Source: psiLinkEmptyRound.test.ts (starter fully matched early).",
+      "method": "linkViaPSI",
+      "cardinality": "one-to-one",
+      "starterKeys": [
+        ["Carol", "David"],
+        ["a", "b"]
+      ],
+      "joinerKeys": [
+        ["Carol", "David", "Henry"],
+        ["x", "y", "z"]
+      ],
+      "starter": [
+        [0, 1],
+        [0, 1]
+      ],
+      "joiner": [
+        [0, 1],
+        [0, 1]
+      ]
+    },
+    {
+      "name": "empty-round-both-fully-matched",
+      "description": "linkViaPSI one-to-one: both parties fully match on key 0, so key 1 is a no-op on both sides. Source: psiLinkEmptyRound.test.ts (both-empty round).",
+      "method": "linkViaPSI",
+      "cardinality": "one-to-one",
+      "starterKeys": [
+        ["Carol", "David"],
+        ["a", "b"]
+      ],
+      "joinerKeys": [
+        ["Carol", "David"],
+        ["x", "y"]
+      ],
+      "starter": [
+        [0, 1],
+        [0, 1]
+      ],
+      "joiner": [
+        [0, 1],
+        [0, 1]
+      ]
+    },
+    {
+      "name": "empty-key-singleton-empty-string-matches",
+      "description": "linkViaPSI one-to-one: '' is a present, matchable key distinct from undefined (the no-key sentinel). The lone '' on each side is unique within its dataset and matches; undefined and non-matching named rows do not. Source: psiLinkEmptyKey.test.ts (singleton '' matches).",
+      "method": "linkViaPSI",
+      "cardinality": "one-to-one",
+      "starterKeys": [[null, "", "Alice"]],
+      "joinerKeys": [["Bob", null, ""]],
+      "starter": [[1], [2]],
+      "joiner": [[2], [1]]
+    },
+    {
+      "name": "empty-key-duplicated-empty-string-dropped",
+      "description": "linkViaPSI one-to-one: the starter has two '' values, so every '' is a within-dataset duplicate and is dropped from the round; the joiner's singleton '' therefore matches nothing. Source: psiLinkEmptyKey.test.ts ('' duplicated within a dataset is dropped).",
+      "method": "linkViaPSI",
+      "cardinality": "one-to-one",
+      "starterKeys": [["", "", "Alice"]],
+      "joinerKeys": [["", "Bob"]],
+      "starter": [[], []],
+      "joiner": [[], []]
+    },
+    {
+      "name": "empty-key-all-empty-column-no-match",
+      "description": "linkViaPSI one-to-one: every '' on both sides is a within-dataset duplicate, so the round drops them all and produces no match. Source: psiLinkEmptyKey.test.ts (all-'' column matches nothing).",
+      "method": "linkViaPSI",
+      "cardinality": "one-to-one",
+      "starterKeys": [["", ""]],
+      "joinerKeys": [["", "", ""]],
+      "starter": [[], []],
+      "joiner": [[], []]
+    },
+    {
+      "name": "empty-key-carried-forward-later-round",
+      "description": "linkViaPSI one-to-one: row 0 matches on key 0 ('A') and is removed; row 1 does not match on key 0 and carries forward to key 1, where both sides' value is '' -- so the carried-forward '' matches like any other value. Source: psiLinkEmptyKey.test.ts ('' matches in a later round).",
+      "method": "linkViaPSI",
+      "cardinality": "one-to-one",
+      "starterKeys": [
+        ["A", "B"],
+        ["x", ""]
+      ],
+      "joinerKeys": [
+        ["A", "Z"],
+        ["y", ""]
+      ],
+      "starter": [
+        [0, 1],
+        [0, 1]
+      ],
+      "joiner": [
+        [0, 1],
+        [0, 1]
+      ]
+    },
+    {
+      "name": "empty-key-duplicate-dropped-unique-still-matches",
+      "description": "linkViaPSI one-to-one: the starter's two '' rows are dropped as within-dataset duplicates while its unique 'Alice' still matches -- dropping the duplicated '' does not poison the rest of the round. Source: psiLinkEmptyKey.test.ts (duplicated '' dropped, unique value still matches).",
+      "method": "linkViaPSI",
+      "cardinality": "one-to-one",
+      "starterKeys": [["", "", "Alice"]],
+      "joinerKeys": [["", "Alice"]],
+      "starter": [[2], [1]],
+      "joiner": [[1], [2]]
+    }
+  ]
+}
