@@ -259,6 +259,71 @@ test("both parties advertise the protocol version on their terms messages", asyn
   expect("protocolVersion" in initiatorSent[1]).toBe(false);
 });
 
+// --- Payload-intent advertisement (single-pass table withholding) ------------
+
+test("both parties advertise disclosesPayload on their terms messages, read back the partner's", async () => {
+  // The single-pass association-table withhold gate reads the SENDER's advertised
+  // payload intent, so both terms messages (message 1 for the initiator, message 2
+  // for the responder) carry disclosesPayload when the caller supplies it, and each
+  // party reads the other's back. Message 3 -- the bare final decision -- does not
+  // carry it.
+  const [connA, connB] = makeConnections();
+  const wrap = (
+    conn: MessageConnection,
+    sink: Array<Record<string, unknown>>,
+  ): MessageConnection => ({
+    send: (m: unknown) => {
+      sink.push(m as Record<string, unknown>);
+      return conn.send(m);
+    },
+    receive: (t?: number) => conn.receive(t),
+    close: () => conn.close(),
+  });
+  const initiatorSent: Array<Record<string, unknown>> = [];
+  const responderSent: Array<Record<string, unknown>> = [];
+  const [a, b] = await Promise.all([
+    // A discloses payload, B does not.
+    exchangeTerms(
+      wrap(connA, initiatorSent),
+      "initiator",
+      termsA,
+      100,
+      undefined,
+      undefined,
+      true,
+    ),
+    exchangeTerms(
+      wrap(connB, responderSent),
+      "responder",
+      termsB,
+      200,
+      undefined,
+      undefined,
+      false,
+    ),
+  ]);
+  // Each party reads the OTHER's advertised flag.
+  expect(a.partnerDisclosesPayload).toBe(false);
+  expect(b.partnerDisclosesPayload).toBe(true);
+  // Message 1 (initiator) and message 2 (responder) both carry it; message 3 does not.
+  expect(initiatorSent[0]).toMatchObject({ disclosesPayload: true });
+  expect(responderSent[0]).toMatchObject({ disclosesPayload: false });
+  expect("disclosesPayload" in initiatorSent[1]).toBe(false);
+});
+
+test("an omitted disclosesPayload reads back as undefined", async () => {
+  // A caller that does not exercise the withhold path passes nothing, so the field
+  // is omitted from the wire and the partner reads `undefined` -- which the withhold
+  // gate treats as "discloses payload" (never blinds a helper that needs its table).
+  const [connA, connB] = makeConnections();
+  const [a, b] = await Promise.all([
+    exchangeTerms(connA, "initiator", termsA, 100),
+    exchangeTerms(connB, "responder", termsB, 200),
+  ]);
+  expect(a.partnerDisclosesPayload).toBeUndefined();
+  expect(b.partnerDisclosesPayload).toBeUndefined();
+});
+
 test("responder fails fast when message 1 advertises a different protocol version", async () => {
   // Fail-closed reconcile: a partner on a different PROTOCOL_VERSION is an
   // incompatible build, so the responder aborts with the actionable "run the

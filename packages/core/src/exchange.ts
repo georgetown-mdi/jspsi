@@ -1,5 +1,5 @@
 import { getLogger } from "./utils/logger.js";
-import { inferMetadata } from "./config/metadata.js";
+import { inferMetadata, isDisclosedToPartner } from "./config/metadata.js";
 import { getDefaultLinkageTerms } from "./defaults/linkageTerms.js";
 import { getDefaultStandardization } from "./defaults/standardization.js";
 import {
@@ -17,7 +17,11 @@ import {
   resolveRole,
 } from "./protocolSetup.js";
 import { reconcileHostKeyFingerprints } from "./hostKeyReconciliation.js";
-import { linkViaPSI, linkViaSinglePassPSI } from "./link.js";
+import {
+  linkViaPSI,
+  linkViaSinglePassPSI,
+  withholdsSenderAssociationTable,
+} from "./link.js";
 import {
   psiElementBounds,
   singlePassDatasetExceedsCap,
@@ -541,12 +545,21 @@ export async function runExchange(
   const onProtocolConfirmed = options.onProtocolConfirmed ?? (() => {});
   const verbosity = options.verbosity ?? 0;
 
+  // Whether THIS party will disclose payload to a partner entitled to output:
+  // true when its metadata transmits any column (isDisclosedToPartner, the single
+  // source of truth preparePayload gathers on). Advertised on the terms exchange
+  // so the partner can gate the single-pass association-table withholding on it --
+  // payload disclosure is per-party-local and lazy, so the partner cannot infer it
+  // and needs the explicit, authenticated signal (see the withhold gate below).
+  const localDisclosesPayload = prepared.metadata.some(isDisclosedToPartner);
+
   onStage(CONFIRMING_PROTOCOL_STAGE_ID);
   const {
     partnerTerms,
     warnings,
     partnerRecordCount,
     partnerSaveIntent,
+    partnerDisclosesPayload,
     partnerHostKey,
     partnerHostKeyMalformed,
   } = await exchangeTerms(
@@ -556,6 +569,7 @@ export async function runExchange(
     rowCount,
     options.saveIntent,
     options.observedHostKey,
+    localDisclosesPayload,
   );
   for (const warning of warnings) onWarning(warning);
 
@@ -633,6 +647,29 @@ export async function runExchange(
     elementBounds,
   );
 
+  // Single-pass association-table withholding, derived from symmetric
+  // authenticated session state so both parties reach the same verdict: when the
+  // resolved SENDER is a non-receiving helper (expectsOutput false) disclosing no
+  // payload, it needs nothing back, so the receiver suppresses its
+  // association-table half entirely and the sender skips awaiting it -- keeping a
+  // genuinely blind helper blind to its own membership. The sender's properties
+  // come from whichever side we are: our own when we are the sender, the partner's
+  // (read off the terms exchange) when we are the receiver. A missing partner flag
+  // (undefined -- a non-conforming peer that did not advertise it) defaults to
+  // "discloses payload", so it never blinds a helper that needs its table. Only
+  // consulted on the single-pass path (see withholdsSenderAssociationTable and
+  // link.ts).
+  const senderExpectsOutput = isReceiver
+    ? partnerTerms.output.expectsOutput
+    : linkageTerms.output.expectsOutput;
+  const senderDisclosesPayload = isReceiver
+    ? (partnerDisclosesPayload ?? true)
+    : localDisclosesPayload;
+  const withholdSenderTable = withholdsSenderAssociationTable(
+    senderExpectsOutput,
+    senderDisclosesPayload,
+  );
+
   // Single-pass is allowlisted; any other value (including the default) runs the
   // cascade. No mismatch guard needed here -- validateCompatibility already
   // aborted upstream if the two parties' strategies differ. Single-pass takes the
@@ -647,6 +684,7 @@ export async function runExchange(
           conn,
           linkageKeyIterables,
           partnerRecordCount,
+          withholdSenderTable,
           verbosity,
           onStage,
         )

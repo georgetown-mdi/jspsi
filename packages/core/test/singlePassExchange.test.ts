@@ -3,7 +3,10 @@ import { expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
 
 import { prepareForExchange, runExchange } from "../src/exchange";
-import { createMessagePipe } from "../src/connection/messageConnection";
+import {
+  createMessagePipe,
+  type MessageConnection,
+} from "../src/connection/messageConnection";
 
 import type { BuiltExchangeRecord } from "../src/exchangeRecord";
 import type { LinkageStrategy, Output } from "../src/config/linkageTerms";
@@ -197,7 +200,100 @@ test("single-pass one-sided output: only the receiver gets the table and payload
   expect(built(initiator).record.commitments.associationTable).toBeDefined();
   expect(built(responder).record.commitments.associationTable).toBeUndefined();
 
-  // Send-gate: the receiver gets the helper's payload; the helper gets none.
+  // Send-gate: the receiver gets the helper's payload; the helper gets none. That
+  // the helper's `note` payload arrives ALSO proves the payload-disclosing helper
+  // still received its association-table half (preparePayload reads it to build the
+  // enrichment) -- the table is withheld only from a helper disclosing no payload,
+  // exercised by the blind-helper test below.
   expect(initiator.partnerPayload.columns).toEqual(["note"]);
   expect(responder.partnerPayload.columns).toEqual([]);
+});
+
+test("single-pass one-sided, no-payload helper is blinded: table withheld, no hang", async () => {
+  // The closeable case: a non-receiving helper whose data discloses no payload needs
+  // nothing back, so the receiver withholds its association-table half at the source
+  // -- the helper's process never receives, and so never learns, which of its own
+  // records matched. The exchange still completes and the receiver gets its table.
+  const receiverOut: Output = { expectsOutput: true, shareWithPartner: false };
+  const helperOut: Output = { expectsOutput: false, shareWithPartner: true };
+
+  // first-name-only rows -- no inferred payload column -- so each party's
+  // disclosesPayload flag is false and the helper discloses nothing.
+  const receiverRows = [
+    { first_name: "Carol" },
+    { first_name: "Elizabeth" },
+    { first_name: "Henry" },
+  ];
+  const helperRows = [
+    { first_name: "Alice" },
+    { first_name: "Bob" },
+    { first_name: "Carol" },
+    { first_name: "Elizabeth" },
+  ];
+  const preparedNoPayload = (
+    identity: string,
+    output: Output,
+    rows: Array<{ first_name: string }>,
+  ) =>
+    prepareForExchange(
+      {
+        linkageTerms: {
+          ...baseTerms,
+          linkageStrategy: "single-pass",
+          identity,
+          output,
+        },
+      },
+      identity,
+      rows,
+      ["first_name"],
+    );
+
+  const [connReceiver, connHelper] = createMessagePipe();
+  // Capture every frame the helper's process receives, so we can assert the
+  // association-table frame (the only Array-shaped frame in the protocol) never
+  // reaches it.
+  const helperInbound: Array<unknown> = [];
+  const capturingHelper: MessageConnection = {
+    send: (m: unknown) => connHelper.send(m),
+    receive: async (timeoutMs?: number) => {
+      const frame = await connHelper.receive(timeoutMs);
+      helperInbound.push(frame);
+      return frame;
+    },
+    close: () => connHelper.close(),
+    setInboundFrameCap: connHelper.setInboundFrameCap?.bind(connHelper),
+  };
+
+  const [receiver, helper] = await Promise.all([
+    runExchange(
+      connReceiver,
+      "initiator",
+      preparedNoPayload("Receiver Co", receiverOut, receiverRows),
+      { psiLibrary },
+    ),
+    runExchange(
+      capturingHelper,
+      "responder",
+      preparedNoPayload("Helper Co", helperOut, helperRows),
+      { psiLibrary },
+    ),
+  ]);
+
+  expect(receiver.resolvedRole).toBe("receiver");
+  expect(helper.resolvedRole).toBe("sender");
+
+  // The receiver still resolves and receives its table; the helper gets none (gated
+  // as before). Carol and Elizabeth overlap -> two matches for the receiver.
+  expect(receiver.associationTable).toBeDefined();
+  expect(receiver.associationTable?.[0]).toHaveLength(2);
+  expect(helper.associationTable).toBeUndefined();
+
+  // Neither side discloses payload, so both payload halves are empty.
+  expect(receiver.partnerPayload.columns).toEqual([]);
+  expect(helper.partnerPayload.columns).toEqual([]);
+
+  // The blindness: no association-table frame ever reached the helper's process, and
+  // the exchange completed without hanging (Promise.all resolved).
+  expect(helperInbound.some((f) => Array.isArray(f))).toBe(false);
 });

@@ -181,6 +181,31 @@ export const PROTOCOL_VERSION_MISMATCH_MESSAGE =
 // as `save: false`. It is advisory metadata, not part of terms agreement, so a
 // mismatch never aborts: one party may save while the other does not.
 //
+// The optional `disclosesPayload` flag rides the terms exchange so each party
+// advertises, before linkage, whether it will disclose payload to a partner
+// entitled to output -- i.e. whether its own metadata has any column disclosed to
+// the partner (isDisclosedToPartner). It is per-party role metadata carried on the
+// envelope beside `linkageTerms`, never inside them, so it does not enter the
+// canonical/agreed-terms hash. Its one consumer is the single-pass
+// association-table withhold gate: the receiver withholds the sender's
+// association-table half only when the sender is a non-receiving helper that also
+// discloses no payload, and the sender's own flag is what tells the receiver (which
+// cannot infer it -- payload disclosure is per-party-local and lazy) that the
+// helper needs nothing back. Both parties read the SENDER's advertised flag, so the
+// withhold decision is derived from symmetric authenticated session state and they
+// stay in lockstep (see linkViaSinglePassPSI and withholdsSenderAssociationTable in
+// link.ts). Advertising it leaks nothing new: it is consulted only for a helper
+// disclosing payload to a partner that is entitled to receive that payload anyway.
+//
+// It is `.optional()` in the schema so it sits beside `save` as an omit-able
+// envelope field, but the production caller (runExchange) always passes a definite
+// boolean, so a terms message always carries it -- and since nothing has shipped,
+// both parties always run this same build and always send it, so the withhold
+// decision is always computed from a value both sides advertised. The gate
+// nonetheless defaults an absent value to "discloses payload" (do not withhold)
+// defensively, so a non-conforming peer that omits it can never drive the blind
+// path against a helper that actually needs its table.
+//
 // `recordCount` is required on message 1: it is always the initiator's opening
 // terms, never an abort, so a conforming initiator always carries the count and a
 // missing one is a clean decode failure at parse (an invariant made a check
@@ -195,6 +220,7 @@ const termsMessage = z.object({
   // legacy. See PROTOCOL_VERSION and reconcileProtocolVersion.
   protocolVersion: z.unknown().optional(),
   save: z.boolean().optional(),
+  disclosesPayload: z.boolean().optional(),
   hostKey: hostKeyField,
 });
 
@@ -216,6 +242,7 @@ const termsWithDecisionMessage = z.object({
   recordCount: recordCountField.optional(),
   protocolVersion: z.unknown().optional(), // read as unknown; see termsMessage
   save: z.boolean().optional(),
+  disclosesPayload: z.boolean().optional(), // per-party payload-intent; see termsMessage
   hostKey: hostKeyField,
 });
 
@@ -254,6 +281,16 @@ export interface TermsExchangeResult {
    * post-exchange notice to emit; it never affects whether the terms are agreed.
    */
   partnerSaveIntent: boolean;
+  /**
+   * Whether the partner advertised that it will disclose payload (its metadata
+   * has a column disclosed to us) on this terms exchange. `undefined` when the
+   * partner omitted the field -- a peer that does not advertise it, which the
+   * single-pass withhold gate treats as "discloses payload" (do not withhold), so
+   * a missing advertisement never blinds a helper that needs its table. Consumed
+   * only by that gate (see {@link resolveRole}'s caller in exchange.ts and
+   * `withholdsSenderAssociationTable` in link.ts); it never affects agreement.
+   */
+  partnerDisclosesPayload: boolean | undefined;
   /**
    * The SFTP host key the partner advertised observing on its side of the
    * rendezvous (fingerprint + key type), or `undefined` when the partner
@@ -381,6 +418,17 @@ async function reconcileProtocolVersion(
  * unchanged. The returned {@link TermsExchangeResult.partnerSaveIntent} is the
  * partner's advertised value (absent -> `false`); it never affects agreement.
  *
+ * When `localDisclosesPayload` is set, this party's payload-intent flag (whether
+ * its metadata discloses any column to the partner) is advertised on its terms
+ * message, and the partner's is read back as
+ * {@link TermsExchangeResult.partnerDisclosesPayload}. The production caller
+ * always passes a definite boolean; it is the authenticated input the single-pass
+ * association-table withhold gate reads (see exchange.ts and
+ * `withholdsSenderAssociationTable` in link.ts) to decide, in lockstep on both
+ * sides, whether a non-receiving helper's table half is withheld at the source.
+ * Like `save` it rides the one bidirectional round-trip and never affects whether
+ * the terms are agreed; left `undefined` it omits the field.
+ *
  * When `localHostKey` is set, this party's observed SFTP host key (fingerprint +
  * key type) is advertised on its terms message and the partner's is read back,
  * returned as {@link TermsExchangeResult.partnerHostKey} for cross-party
@@ -402,6 +450,7 @@ export async function exchangeTerms(
   localRecordCount: number,
   localSaveIntent?: boolean,
   localHostKey?: PresentedHostKey,
+  localDisclosesPayload?: boolean,
 ): Promise<TermsExchangeResult> {
   // Spread into the outgoing terms frame only when this party is saving, so a
   // non-save exchange sends no `save` field at all.
@@ -410,6 +459,16 @@ export async function exchangeTerms(
   // a party with nothing to advertise sends no `hostKey` field at all.
   const hostKeyField =
     localHostKey !== undefined ? { hostKey: localHostKey } : {};
+  // The payload-intent advertisement: spread when the caller supplies it (the
+  // production caller always does, as a definite boolean), so both a
+  // payload-disclosing and a no-payload party carry an explicit flag the partner's
+  // single-pass withhold gate reads. Omitted only by a caller that passes nothing
+  // (test helpers that do not exercise the withhold path); an omitted flag is read
+  // by the gate as "discloses payload" (do not withhold). See the schema comment.
+  const disclosesPayloadField =
+    localDisclosesPayload !== undefined
+      ? { disclosesPayload: localDisclosesPayload }
+      : {};
 
   if (handshakeRole === "initiator") {
     // Message 1: send our terms (carrying our record count and protocol version,
@@ -419,6 +478,7 @@ export async function exchangeTerms(
       recordCount: localRecordCount,
       protocolVersion: PROTOCOL_VERSION,
       ...saveField,
+      ...disclosesPayloadField,
       ...hostKeyField,
     });
 
@@ -495,6 +555,7 @@ export async function exchangeTerms(
       warnings,
       partnerRecordCount: msg.recordCount,
       partnerSaveIntent: msg.save === true,
+      partnerDisclosesPayload: msg.disclosesPayload,
       partnerHostKey: msg.hostKey.value,
       partnerHostKeyMalformed: msg.hostKey.malformed,
     };
@@ -511,6 +572,7 @@ export async function exchangeTerms(
     // missing count is caught as a parse error before this value is returned).
     let partnerRecordCount = 0;
     let partnerSaveIntent = false;
+    let partnerDisclosesPayload: boolean | undefined;
     let partnerHostKey: PresentedHostKey | undefined;
     let partnerHostKeyMalformed = false;
     // Captured before parseLinkageTerms (which may throw): a version skew is the
@@ -527,6 +589,7 @@ export async function exchangeTerms(
       partnerProtocolVersion = parsed.protocolVersion;
       partnerRecordCount = parsed.recordCount;
       partnerSaveIntent = parsed.save === true;
+      partnerDisclosesPayload = parsed.disclosesPayload;
       partnerHostKey = parsed.hostKey.value;
       partnerHostKeyMalformed = parsed.hostKey.malformed;
       partnerTerms = parseLinkageTerms(parsed.linkageTerms);
@@ -565,6 +628,7 @@ export async function exchangeTerms(
       recordCount: localRecordCount,
       protocolVersion: PROTOCOL_VERSION,
       ...saveField,
+      ...disclosesPayloadField,
       ...hostKeyField,
     });
 
@@ -584,6 +648,7 @@ export async function exchangeTerms(
       warnings,
       partnerRecordCount,
       partnerSaveIntent,
+      partnerDisclosesPayload,
       partnerHostKey,
       partnerHostKeyMalformed,
     };

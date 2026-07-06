@@ -339,6 +339,39 @@ function relieveTransientMemory(): void {
 }
 
 /**
+ * Whether the single-pass receiver withholds the sender's association-table half
+ * ({@link linkViaSinglePassPSI}'s message 3) entirely, so a genuinely blind
+ * helper's process never receives -- and so never learns -- its own membership
+ * (which of its records matched).
+ *
+ * Withhold exactly when the SENDER is a non-receiving helper (`expectsOutput:
+ * false`, so it gets no result table of its own) that ALSO discloses no payload
+ * (its metadata transmits no column, so it has no matched rows to enrich). That is
+ * the one closeable case in a one-sided single-pass exchange: the helper needs its
+ * association-table half only to build its own result (it has none) or to enrich
+ * the payload it discloses (it discloses none), so withholding leaves it needing
+ * nothing back. A helper that discloses payload still receives the full table (it
+ * reads `associationTable[0]` to build enrichment for the overlap -- an intrinsic,
+ * threat-model-accepted membership disclosure), and a party entitled to output
+ * always receives it.
+ *
+ * Both parties compute this from the SAME authenticated session state -- the
+ * resolved sender's output entitlement and its advertised `disclosesPayload` flag,
+ * carried on the terms exchange -- so the receiver's decision to suppress the frame
+ * and the sender's decision to skip awaiting it are always the same, keeping the
+ * two in lockstep. The frame is suppressed ENTIRELY, never sent empty: an
+ * empty-versus-populated association table would leak the match count by the
+ * frame's presence and size, so only omitting it closes the channel. See
+ * docs/notes/one-sided-disclosure.md and docs/spec/PROTOCOL.md.
+ */
+export function withholdsSenderAssociationTable(
+  senderExpectsOutput: boolean,
+  senderDisclosesPayload: boolean,
+): boolean {
+  return !senderExpectsOutput && !senderDisclosesPayload;
+}
+
+/**
  * The single-pass linkage strategy: an alternative to {@link linkViaPSI} that
  * produces the same matched row pairs but uses one network round-trip instead of
  * one per linkage key. exchange.ts chooses between the two on `linkageStrategy`.
@@ -361,6 +394,16 @@ function relieveTransientMemory(): void {
  *   count and the agreed key count it derives the per-exchange frame cap and the
  *   abort-if-over-ceiling gate -- identically on both parties, so they reach the
  *   same verdict from authenticated session state alone (see frameSize.ts).
+ * @param withholdSenderTable - When `true`, the receiver suppresses message 3
+ *   (the sender's association-table half) ENTIRELY and the sender skips awaiting
+ *   it, so a non-receiving, no-payload helper's process never receives -- and so
+ *   never learns -- its own membership. Both parties pass the same value, derived
+ *   from symmetric authenticated session state (see
+ *   {@link withholdsSenderAssociationTable} and its caller in exchange.ts), so the
+ *   suppress and the skip stay in lockstep and neither side blocks on a frame the
+ *   other will not send. Defaults to `false` (the frame is exchanged as before).
+ *   When it withholds, the sender returns an empty table `[[], []]` -- it genuinely
+ *   does not learn its matches, which is the blindness this realizes.
  */
 export async function linkViaSinglePassPSI(
   protocol: {
@@ -370,6 +413,7 @@ export async function linkViaSinglePassPSI(
   conn: MessageConnection,
   data: Array<IndexableIterable<string | undefined>>,
   partnerRecordCount: number,
+  withholdSenderTable: boolean = false,
   verbosity: number = 0,
   setStage?: (id: string) => void,
 ): Promise<AssociationTable> {
@@ -489,6 +533,21 @@ export async function linkViaSinglePassPSI(
     // Collect the response-masking and reply-build transients before idling on
     // the partner's table.
     relieveTransientMemory();
+
+    if (withholdSenderTable) {
+      // We are a non-receiving helper disclosing no payload: the receiver
+      // suppresses message 3, so do NOT await a frame it will not send (that would
+      // hang to the inactivity timeout). Return an empty table -- we genuinely do
+      // not learn which of our records matched, which is the blindness this path
+      // realizes. Both sides derived this from the same authenticated state, so the
+      // skip and the receiver's suppression agree.
+      log.debug(
+        `${participant.id}: association table withheld; staying blind to my ` +
+          `own matches`,
+      );
+      stage("done");
+      return [[], []];
+    }
 
     const table = await receiveParsed(conn, associationTableMessage);
     stage("done");
@@ -617,6 +676,25 @@ export async function linkViaSinglePassPSI(
       result[1].push(m.theirIndex);
     }
   }
+
+  // Collect the cascade's per-key reconstruction maps before returning.
+  relieveTransientMemory();
+
+  if (withholdSenderTable) {
+    // The sender is a non-receiving helper disclosing no payload: suppress its
+    // association-table half ENTIRELY -- not sent empty. An empty-versus-populated
+    // table would leak the match count by the frame's presence and size, so only
+    // omitting the frame closes the channel and keeps the helper blind. The sender
+    // derived the same decision and skips awaiting this frame, so the two stay in
+    // lockstep. We still return our own resolved table below.
+    log.debug(
+      `${participant.id}: ${result[0].length} match(es); withholding the ` +
+        `sender's association-table half`,
+    );
+    stage("done");
+    return result;
+  }
+
   const pairs = result[0].map((i, k): [number, number] => [result[1][k], i]);
   pairs.sort((a, b) => a[0] - b[0]);
   const theirResult: AssociationTable = [
@@ -628,8 +706,6 @@ export async function linkViaSinglePassPSI(
     `${participant.id}: ${result[0].length} match(es); returning sender's ` +
       `view`,
   );
-  // Collect the cascade's per-key reconstruction maps before returning.
-  relieveTransientMemory();
   await conn.send(theirResult);
   stage("done");
   return result;
