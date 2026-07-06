@@ -291,10 +291,10 @@ export class PSIParticipant {
    * value now in sorted slot i, so a match reported in sorted terms can be traced
    * back to the row it came from. Requires the `"starter"` role.
    */
-  public createServerSetup(values: ReadonlyArray<string>): {
+  public async createServerSetup(values: ReadonlyArray<string>): Promise<{
     setup: Uint8Array;
     permutation: Array<number>;
-  } {
+  }> {
     const server = this.psi.server;
     if (!server)
       throw new Error(`${this.id}: createServerSetup requires the server role`);
@@ -313,7 +313,9 @@ export class PSIParticipant {
    * Doubly-encrypts the partner's request under the server key, returning the
    * serialized response. Requires the `"starter"` role.
    */
-  public processClientRequest(requestBytes: Uint8Array): Uint8Array {
+  public async processClientRequest(
+    requestBytes: Uint8Array,
+  ): Promise<Uint8Array> {
     const server = this.psi.server;
     if (!server)
       throw new Error(
@@ -332,7 +334,9 @@ export class PSIParticipant {
    * Encrypts this party's set once under the client key, returning the serialized
    * request. Requires the `"joiner"` role.
    */
-  public createClientRequest(values: ReadonlyArray<string>): Uint8Array {
+  public async createClientRequest(
+    values: ReadonlyArray<string>,
+  ): Promise<Uint8Array> {
     const client = this.psi.client;
     if (!client)
       throw new Error(
@@ -351,10 +355,10 @@ export class PSIParticipant {
    * internal sorted order; map it back to input order with the permutation from
    * {@link createServerSetup}. Requires the `"joiner"` role.
    */
-  public computeValueMatches(
+  public async computeValueMatches(
     setupBytes: Uint8Array,
     responseBytes: Uint8Array,
-  ): [Array<number>, Array<number>] {
+  ): Promise<[Array<number>, Array<number>]> {
     const client = this.psi.client;
     if (!client)
       throw new Error(

@@ -484,13 +484,13 @@ export async function linkViaSinglePassPSI(
     // - distinctValueIndexTable so partner knows how to reconstruct data
     stage("encrypting my data");
     const { setup, permutation } =
-      participant.createServerSetup(distinctValues);
+      await participant.createServerSetup(distinctValues);
 
     const request = (await conn.receive()) as Uint8Array;
     // Collect the setup-masking transients before the re-encryption masking.
     relieveTransientMemory();
     stage("doubly-encrypting partner's data");
-    const response = participant.processClientRequest(request);
+    const response = await participant.processClientRequest(request);
     // createServerSetup sorted distinctValues; remap the index table into that
     // sorted order so its indices match the sorted setup message.
     const sortedDistinctValueIndices = getSortedDistinctValueIndices(
@@ -555,7 +555,7 @@ export async function linkViaSinglePassPSI(
   }
 
   stage("encrypting my data");
-  await conn.send(participant.createClientRequest(distinctValues));
+  await conn.send(await participant.createClientRequest(distinctValues));
 
   // Tighten the read gate to the per-exchange derived cap before reading the
   // reply, then clear it so the later payload read uses the default. Set after
@@ -614,7 +614,7 @@ export async function linkViaSinglePassPSI(
   relieveTransientMemory();
   stage("identifying shared elements");
   const [receiverDistinctValueIds, senderDistinctValueIds] =
-    participant.computeValueMatches(setupBytes, responseBytes);
+    await participant.computeValueMatches(setupBytes, responseBytes);
   const distinctValueReceiverToSenderMap = new Map<number, number>();
   for (let k = 0; k < receiverDistinctValueIds.length; ++k) {
     distinctValueReceiverToSenderMap.set(
