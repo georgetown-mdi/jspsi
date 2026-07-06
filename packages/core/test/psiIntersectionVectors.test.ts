@@ -28,6 +28,12 @@ import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 // engine build reproduces it -- and the native addon is already anchored
 // byte-for-byte in psiEngineWireVectorsNative.test.ts and behaviorally (the
 // identify-intersection scenario, cross-backend) in psiParticipantNativeParity.test.ts.
+//
+// Scope caveat for a re-roller: a green run means the engine still computes
+// linkage CORRECTLY, not that a re-rolled or swapped engine is SECURE. It does
+// not verify no-leakage-beyond-the-intersection, malicious-security, or byte
+// interop, and does not replace the @openmined/psi.js security review
+// CONTRIBUTING.md's Cryptographic-dependencies rule requires.
 
 type Table = [number[], number[]];
 type Cardinality =

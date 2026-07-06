@@ -501,8 +501,14 @@ const doc = {
     "association mapping fails psiIntersectionVectors.test.ts deterministically. " +
     "This is a CORRECTNESS anchor (the projection is data-defined, so a correct " +
     "engine always reproduces it), distinct from the BYTE-stability anchor in " +
-    "psi-engine-wire-vectors.json. Regenerate with " +
-    "generate-psi-intersection-vectors.mjs in this directory.",
+    "psi-engine-wire-vectors.json. A green run confirms only that the engine still " +
+    "computes linkage correctly; it does NOT verify the properties that make PSI " +
+    "safe -- that nothing beyond the intersection is revealed, malicious-counterparty " +
+    "resistance, or curve/key handling -- nor byte-level interop, and it does NOT " +
+    "substitute for the explicit security review CONTRIBUTING.md's " +
+    "Cryptographic-dependencies rule requires for any @openmined/psi.js re-roll or " +
+    "replacement. Regenerate with generate-psi-intersection-vectors.mjs in this " +
+    "directory.",
   curve: "NIST P-256",
   revealIntersection: true,
   associationTableLayout:
