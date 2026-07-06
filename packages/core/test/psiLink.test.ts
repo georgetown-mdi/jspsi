@@ -242,9 +242,13 @@ test("withholdsSenderAssociationTable withholds only for a non-receiving, no-pay
 });
 
 // Run a single-pass exchange over a fresh pipe, capturing every frame the SENDER
-// (starter) receives, so a test can assert whether message 3 -- the association
-// table, the only [number[], number[]] frame in the protocol -- ever reaches it.
-async function runSinglePassCapturingSenderInbound(
+// (starter) receives AND every frame the RECEIVER (joiner) sends, so a test can
+// assert -- from both ends -- whether message 3 (the association table, the only
+// [number[], number[]] frame in the protocol) ever crosses the wire. Capturing the
+// receiver's OUTBOUND is what catches a regression that sends an empty [[], []]
+// table instead of suppressing the frame: the sender's inbound alone would miss it,
+// since a withholding sender never awaits that frame.
+async function runSinglePassCapturingFrames(
   senderSet: Array<string>,
   receiverSet: Array<string>,
   withhold: boolean,
@@ -252,9 +256,11 @@ async function runSinglePassCapturingSenderInbound(
   senderResult: AssociationTable;
   receiverResult: AssociationTable;
   senderInbound: Array<unknown>;
+  receiverOutbound: Array<unknown>;
 }> {
   const [sConn, cConn] = createMessagePipe();
   const senderInbound: Array<unknown> = [];
+  const receiverOutbound: Array<unknown> = [];
   const capturingSenderConn: MessageConnection = {
     send: (m: unknown) => sConn.send(m),
     receive: async (timeoutMs?: number) => {
@@ -263,6 +269,15 @@ async function runSinglePassCapturingSenderInbound(
       return frame;
     },
     close: () => sConn.close(),
+  };
+  const capturingReceiverConn: MessageConnection = {
+    send: (m: unknown) => {
+      receiverOutbound.push(m);
+      return cConn.send(m);
+    },
+    receive: (timeoutMs?: number) => cConn.receive(timeoutMs),
+    close: () => cConn.close(),
+    setInboundFrameCap: cConn.setInboundFrameCap?.bind(cConn),
   };
   const sp = new PSIParticipant(
     "server",
@@ -289,29 +304,25 @@ async function runSinglePassCapturingSenderInbound(
     linkViaSinglePassPSI(
       { cardinality: "one-to-one" },
       cp,
-      cConn,
+      capturingReceiverConn,
       [receiverSet],
       senderSet.length,
       withhold,
       -1,
     ),
   ]);
-  return { senderResult, receiverResult, senderInbound };
+  return { senderResult, receiverResult, senderInbound, receiverOutbound };
 }
 
 test("single-pass withholding keeps a blind helper's table off the wire; the receiver is unaffected", async () => {
   const senderSet = ["A", "B", "C"];
   const receiverSet = ["B", "C", "D"];
-  const base = await runSinglePassCapturingSenderInbound(
+  const base = await runSinglePassCapturingFrames(
     senderSet,
     receiverSet,
     false,
   );
-  const held = await runSinglePassCapturingSenderInbound(
-    senderSet,
-    receiverSet,
-    true,
-  );
+  const held = await runSinglePassCapturingFrames(senderSet, receiverSet, true);
 
   // Withholding changes only the helper's blindness, never the receiver's own
   // resolved table: the receiver computes the identical result either way.
@@ -319,10 +330,12 @@ test("single-pass withholding keeps a blind helper's table off the wire; the rec
   expect(base.receiverResult[0]).toHaveLength(2); // B, C overlap
 
   // Baseline (deliver): the helper receives its table -- two inbound frames, the
-  // request then the [number[], number[]] table -- and learns its two matches.
+  // request then the [number[], number[]] table -- and learns its two matches. The
+  // receiver sent that table frame (an Array).
   expect(base.senderResult[0]).toHaveLength(2);
   expect(base.senderInbound).toHaveLength(2);
   expect(base.senderInbound.some((f) => Array.isArray(f))).toBe(true);
+  expect(base.receiverOutbound.some((f) => Array.isArray(f))).toBe(true);
 
   // Withheld: the helper is genuinely blind -- it returns an empty table and its
   // process never receives message 3. Its only inbound frame is the receiver's
@@ -332,6 +345,13 @@ test("single-pass withholding keeps a blind helper's table off the wire; the rec
   expect(held.senderInbound).toHaveLength(1);
   expect(held.senderInbound[0]).toBeInstanceOf(Uint8Array);
   expect(held.senderInbound.some((f) => Array.isArray(f))).toBe(false);
+
+  // Enforced from the RECEIVER's side too: it never SENT any association-table
+  // frame -- not even an empty [[], []]. An "optimization" that emitted an empty
+  // table instead of suppressing the frame (the count-leaking regression the design
+  // forbids) would send an Array here and fail this assertion, which the sender's
+  // inbound alone -- a withholding sender never awaits the frame -- would not catch.
+  expect(held.receiverOutbound.some((f) => Array.isArray(f))).toBe(false);
 });
 
 test("single-pass withholding does not leak the match count by frame presence or size", async () => {
@@ -341,12 +361,14 @@ test("single-pass withholding does not leak the match count by frame presence or
   // it sees. Suppressing the frame entirely (rather than sending an empty table) is
   // what closes that channel: an empty-versus-populated table would leak the count
   // by its presence and size.
-  const populated = await runSinglePassCapturingSenderInbound(
+  // Both receivers hold the same number of distinct values (3), so the only thing
+  // that differs between the two runs is the intersection size (2 vs 0).
+  const populated = await runSinglePassCapturingFrames(
     ["A", "B", "C"],
     ["B", "C", "D"], // 2 matches
     true,
   );
-  const empty = await runSinglePassCapturingSenderInbound(
+  const empty = await runSinglePassCapturingFrames(
     ["A", "B", "C"],
     ["X", "Y", "Z"], // 0 matches
     true,
@@ -357,6 +379,13 @@ test("single-pass withholding does not leak the match count by frame presence or
     true,
   );
   expect(empty.senderInbound.every((f) => f instanceof Uint8Array)).toBe(true);
+  // Not just presence: the sole inbound frame (the receiver's request) is
+  // byte-identical in LENGTH across the two runs -- its size tracks the receiver's
+  // distinct-value count, held constant here, never the match count. So neither the
+  // presence nor the size of what the helper receives encodes the intersection size.
+  expect((populated.senderInbound[0] as Uint8Array).byteLength).toBe(
+    (empty.senderInbound[0] as Uint8Array).byteLength,
+  );
   // The differing match counts (2 vs 0) are computed only by the receiver; the
   // helper stays blind to both.
   expect(populated.receiverResult[0]).toHaveLength(2);
