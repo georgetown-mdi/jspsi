@@ -3,7 +3,10 @@ import { expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
 
 import { prepareForExchange, runExchange } from "../src/exchange";
-import { createMessagePipe } from "../src/connection/messageConnection";
+import {
+  createMessagePipe,
+  type MessageConnection,
+} from "../src/connection/messageConnection";
 
 import type { BuiltExchangeRecord } from "../src/exchangeRecord";
 import type { LinkageStrategy, Output } from "../src/config/linkageTerms";
@@ -197,7 +200,173 @@ test("single-pass one-sided output: only the receiver gets the table and payload
   expect(built(initiator).record.commitments.associationTable).toBeDefined();
   expect(built(responder).record.commitments.associationTable).toBeUndefined();
 
-  // Send-gate: the receiver gets the helper's payload; the helper gets none.
+  // Send-gate: the receiver gets the helper's payload; the helper gets none. That
+  // the helper's `note` payload arrives ALSO proves the payload-disclosing helper
+  // still received its association-table half (preparePayload reads it to build the
+  // enrichment) -- the table is withheld only from a helper disclosing no payload,
+  // exercised by the blind-helper test below.
   expect(initiator.partnerPayload.columns).toEqual(["note"]);
   expect(responder.partnerPayload.columns).toEqual([]);
+});
+
+// Run a one-sided single-pass exchange (receiver expects output, helper does not)
+// end to end, capturing every frame the HELPER's process receives so a test can
+// assert -- at the wire -- whether the association-table frame (the only
+// Array-shaped frame) reaches it. `helperDiscloses` gives the helper a payload
+// column (so it is NOT blinded); `helperIsInitiator` swaps the handshake-role
+// assignment so BOTH payload-exchange orderings are exercised (resolveRole makes
+// the output party the PSI receiver regardless, so this only reorders the payload
+// phase, which is where an untested permutation could hide a frame-desync hang).
+async function runOneSidedSinglePass(opts: {
+  helperDiscloses: boolean;
+  helperIsInitiator: boolean;
+}): Promise<{
+  receiver: ExchangeResult;
+  helper: ExchangeResult;
+  helperInbound: Array<unknown>;
+}> {
+  const receiverOut: Output = { expectsOutput: true, shareWithPartner: false };
+  const helperOut: Output = { expectsOutput: false, shareWithPartner: true };
+
+  // Carol and Elizabeth overlap. Receiver rows are first-name-only; the helper's
+  // gain a `note` payload column only when it discloses.
+  const receiverRows = [
+    { first_name: "Carol" },
+    { first_name: "Elizabeth" },
+    { first_name: "Henry" },
+  ];
+  const helperRows: Array<Record<string, string>> = opts.helperDiscloses
+    ? [
+        { first_name: "Alice", note: "h-a" },
+        { first_name: "Bob", note: "h-b" },
+        { first_name: "Carol", note: "h-c" },
+        { first_name: "Elizabeth", note: "h-e" },
+      ]
+    : [
+        { first_name: "Alice" },
+        { first_name: "Bob" },
+        { first_name: "Carol" },
+        { first_name: "Elizabeth" },
+      ];
+
+  const prepare = (
+    identity: string,
+    output: Output,
+    rows: Array<Record<string, string>>,
+    columnNames: Array<string>,
+  ) =>
+    prepareForExchange(
+      {
+        linkageTerms: {
+          ...baseTerms,
+          linkageStrategy: "single-pass",
+          identity,
+          output,
+        },
+      },
+      identity,
+      rows,
+      columnNames,
+    );
+
+  const [connReceiver, connHelper] = createMessagePipe();
+  const helperInbound: Array<unknown> = [];
+  const capturingHelper: MessageConnection = {
+    send: (m: unknown) => connHelper.send(m),
+    receive: async (timeoutMs?: number) => {
+      const frame = await connHelper.receive(timeoutMs);
+      helperInbound.push(frame);
+      return frame;
+    },
+    close: () => connHelper.close(),
+    setInboundFrameCap: connHelper.setInboundFrameCap?.bind(connHelper),
+  };
+
+  // The pipe is symmetric, so the two parties can sit on either end; the handshake
+  // role (which orders the payload phase) is set independently per opts.
+  const [helper, receiver] = await Promise.all([
+    runExchange(
+      capturingHelper,
+      opts.helperIsInitiator ? "initiator" : "responder",
+      prepare(
+        "Helper Co",
+        helperOut,
+        helperRows,
+        opts.helperDiscloses ? ["first_name", "note"] : ["first_name"],
+      ),
+      { psiLibrary },
+    ),
+    runExchange(
+      connReceiver,
+      opts.helperIsInitiator ? "responder" : "initiator",
+      prepare("Receiver Co", receiverOut, receiverRows, ["first_name"]),
+      { psiLibrary },
+    ),
+  ]);
+  return { receiver, helper, helperInbound };
+}
+
+test("single-pass one-sided, no-payload helper is blinded: table withheld, no hang", async () => {
+  // The closeable case: a non-receiving helper whose data discloses no payload needs
+  // nothing back, so the receiver withholds its association-table half at the source
+  // -- the helper's process never receives, and so never learns, which of its own
+  // records matched. The exchange still completes and the receiver gets its table.
+  const { receiver, helper, helperInbound } = await runOneSidedSinglePass({
+    helperDiscloses: false,
+    helperIsInitiator: false,
+  });
+
+  expect(receiver.resolvedRole).toBe("receiver");
+  expect(helper.resolvedRole).toBe("sender");
+
+  // The receiver still resolves and receives its table; the helper gets none (gated
+  // as before). Carol and Elizabeth overlap -> two matches for the receiver.
+  expect(receiver.associationTable).toBeDefined();
+  expect(receiver.associationTable?.[0]).toHaveLength(2);
+  expect(helper.associationTable).toBeUndefined();
+
+  // Neither side discloses payload, so both payload halves are empty.
+  expect(receiver.partnerPayload.columns).toEqual([]);
+  expect(helper.partnerPayload.columns).toEqual([]);
+
+  // The blindness: no association-table frame ever reached the helper's process, and
+  // the exchange completed without hanging (Promise.all resolved).
+  expect(helperInbound.some((f) => Array.isArray(f))).toBe(false);
+});
+
+test("single-pass blind helper stays blind and hang-free with the helper as initiator", async () => {
+  // The reverse handshake-role assignment: the blind helper is the INITIATOR, so it
+  // sends first in the post-linkage payload phase (the other frame ordering the
+  // primary test does not cover). The withholding and the no-hang guarantee must
+  // hold in this permutation too.
+  const { receiver, helper, helperInbound } = await runOneSidedSinglePass({
+    helperDiscloses: false,
+    helperIsInitiator: true,
+  });
+
+  expect(receiver.resolvedRole).toBe("receiver");
+  expect(helper.resolvedRole).toBe("sender");
+  expect(receiver.associationTable?.[0]).toHaveLength(2);
+  expect(helper.associationTable).toBeUndefined();
+  expect(helperInbound.some((f) => Array.isArray(f))).toBe(false);
+});
+
+test("single-pass one-sided, payload-disclosing helper still receives its table at the wire", async () => {
+  // The other side of the gate: a non-receiving helper that DOES disclose payload
+  // needs its matched rows to build the enrichment it sends, so the table is NOT
+  // withheld -- its process receives the association-table frame. Asserted at the
+  // wire (the frame arrives), not merely inferred from the receiver's payload.
+  const { receiver, helper, helperInbound } = await runOneSidedSinglePass({
+    helperDiscloses: true,
+    helperIsInitiator: false,
+  });
+
+  expect(helper.resolvedRole).toBe("sender");
+  // Still gated from the emitted result -- the helper is not entitled to output.
+  expect(helper.associationTable).toBeUndefined();
+  // The receiver gets the helper's disclosed payload for the matched rows...
+  expect(receiver.partnerPayload.columns).toEqual(["note"]);
+  // ...which is only possible because the helper received its association-table half:
+  // the table frame (the only Array-shaped frame) DID reach the helper's process.
+  expect(helperInbound.some((f) => Array.isArray(f))).toBe(true);
 });

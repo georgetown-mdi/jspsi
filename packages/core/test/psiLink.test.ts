@@ -8,6 +8,7 @@ import { PSIParticipant } from "../src/participant";
 import {
   linkViaPSI,
   linkViaSinglePassPSI,
+  withholdsSenderAssociationTable,
   associationAndIterationArray,
   encodeInt32LE,
   decodeInt32LE,
@@ -124,6 +125,7 @@ test("single-pass yields the byte-identical association table as the cascade", a
       spServerConn,
       serverData,
       clientData[0].length,
+      false,
       -1,
     ),
     linkViaSinglePassPSI(
@@ -132,6 +134,7 @@ test("single-pass yields the byte-identical association table as the cascade", a
       spClientConn,
       clientData,
       serverData[0].length,
+      false,
       -1,
     ),
   ]);
@@ -209,10 +212,186 @@ test("single-pass reproduces the cascade's survivor-relative uniqueness", async 
   ]);
 
   const [singlePassSender, singlePassReceiver] = await run(
-    (protocol, p, c, d) => linkViaSinglePassPSI(protocol, p, c, d, 2, -1),
+    (protocol, p, c, d) =>
+      linkViaSinglePassPSI(protocol, p, c, d, 2, false, -1),
   );
   expect(singlePassSender).toStrictEqual(cascadeSender);
   expect(singlePassReceiver).toStrictEqual(cascadeReceiver);
+});
+
+// ─── linkViaSinglePassPSI: withholding the sender's table from a blind helper ──
+// A non-receiving helper (expectsOutput false) disclosing no payload needs nothing
+// back, so the receiver suppresses message 3 (the sender's association-table half)
+// ENTIRELY and the sender skips awaiting it. Both parties derive the same decision
+// from authenticated session state (withholdsSenderAssociationTable), so the
+// suppress and the skip stay in lockstep and neither hangs.
+
+test("withholdsSenderAssociationTable withholds only for a non-receiving, no-payload sender", () => {
+  // The gating predicate both parties evaluate, exercised directly on all three
+  // cases. Because it is a pure function of the resolved sender's output
+  // entitlement and its payload-intent flag -- state both parties hold identically
+  // -- the receiver (deciding to suppress) and the sender (deciding to skip) always
+  // reach the same verdict, whichever side calls it.
+  // Entitled to output: always deliver, regardless of payload intent.
+  expect(withholdsSenderAssociationTable(true, false)).toBe(false);
+  expect(withholdsSenderAssociationTable(true, true)).toBe(false);
+  // No output but discloses payload: still delivered -- it needs its matched rows.
+  expect(withholdsSenderAssociationTable(false, true)).toBe(false);
+  // No output AND no payload: the one closeable case -- withhold.
+  expect(withholdsSenderAssociationTable(false, false)).toBe(true);
+});
+
+// Run a single-pass exchange over a fresh pipe, capturing every frame the SENDER
+// (starter) receives AND every frame the RECEIVER (joiner) sends, so a test can
+// assert -- from both ends -- whether message 3 (the association table, the only
+// [number[], number[]] frame in the protocol) ever crosses the wire. Capturing the
+// receiver's OUTBOUND is what catches a regression that sends an empty [[], []]
+// table instead of suppressing the frame: the sender's inbound alone would miss it,
+// since a withholding sender never awaits that frame.
+async function runSinglePassCapturingFrames(
+  senderSet: Array<string>,
+  receiverSet: Array<string>,
+  withhold: boolean,
+): Promise<{
+  senderResult: AssociationTable;
+  receiverResult: AssociationTable;
+  senderInbound: Array<unknown>;
+  receiverOutbound: Array<unknown>;
+}> {
+  const [sConn, cConn] = createMessagePipe();
+  const senderInbound: Array<unknown> = [];
+  const receiverOutbound: Array<unknown> = [];
+  const capturingSenderConn: MessageConnection = {
+    send: (m: unknown) => sConn.send(m),
+    receive: async (timeoutMs?: number) => {
+      const frame = await sConn.receive(timeoutMs);
+      senderInbound.push(frame);
+      return frame;
+    },
+    close: () => sConn.close(),
+  };
+  const capturingReceiverConn: MessageConnection = {
+    send: (m: unknown) => {
+      receiverOutbound.push(m);
+      return cConn.send(m);
+    },
+    receive: (timeoutMs?: number) => cConn.receive(timeoutMs),
+    close: () => cConn.close(),
+    setInboundFrameCap: cConn.setInboundFrameCap?.bind(cConn),
+  };
+  const sp = new PSIParticipant(
+    "server",
+    psiLibrary,
+    { role: "starter", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+  const cp = new PSIParticipant(
+    "client",
+    psiLibrary,
+    { role: "joiner", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+  const [senderResult, receiverResult] = await Promise.all([
+    linkViaSinglePassPSI(
+      { cardinality: "one-to-one" },
+      sp,
+      capturingSenderConn,
+      [senderSet],
+      receiverSet.length,
+      withhold,
+      -1,
+    ),
+    linkViaSinglePassPSI(
+      { cardinality: "one-to-one" },
+      cp,
+      capturingReceiverConn,
+      [receiverSet],
+      senderSet.length,
+      withhold,
+      -1,
+    ),
+  ]);
+  return { senderResult, receiverResult, senderInbound, receiverOutbound };
+}
+
+test("single-pass withholding keeps a blind helper's table off the wire; the receiver is unaffected", async () => {
+  const senderSet = ["A", "B", "C"];
+  const receiverSet = ["B", "C", "D"];
+  const base = await runSinglePassCapturingFrames(
+    senderSet,
+    receiverSet,
+    false,
+  );
+  const held = await runSinglePassCapturingFrames(senderSet, receiverSet, true);
+
+  // Withholding changes only the helper's blindness, never the receiver's own
+  // resolved table: the receiver computes the identical result either way.
+  expect(held.receiverResult).toStrictEqual(base.receiverResult);
+  expect(base.receiverResult[0]).toHaveLength(2); // B, C overlap
+
+  // Baseline (deliver): the helper receives its table -- two inbound frames, the
+  // request then the [number[], number[]] table -- and learns its two matches. The
+  // receiver sent that table frame (an Array).
+  expect(base.senderResult[0]).toHaveLength(2);
+  expect(base.senderInbound).toHaveLength(2);
+  expect(base.senderInbound.some((f) => Array.isArray(f))).toBe(true);
+  expect(base.receiverOutbound.some((f) => Array.isArray(f))).toBe(true);
+
+  // Withheld: the helper is genuinely blind -- it returns an empty table and its
+  // process never receives message 3. Its only inbound frame is the receiver's
+  // request (a Uint8Array); no association-table frame ever reaches it. The run
+  // completed (Promise.all resolved), proving neither side hung on the skipped frame.
+  expect(held.senderResult).toStrictEqual([[], []]);
+  expect(held.senderInbound).toHaveLength(1);
+  expect(held.senderInbound[0]).toBeInstanceOf(Uint8Array);
+  expect(held.senderInbound.some((f) => Array.isArray(f))).toBe(false);
+
+  // Enforced from the RECEIVER's side too: it never SENT any association-table
+  // frame -- not even an empty [[], []]. An "optimization" that emitted an empty
+  // table instead of suppressing the frame (the count-leaking regression the design
+  // forbids) would send an Array here and fail this assertion, which the sender's
+  // inbound alone -- a withholding sender never awaits the frame -- would not catch.
+  expect(held.receiverOutbound.some((f) => Array.isArray(f))).toBe(false);
+});
+
+test("single-pass withholding does not leak the match count by frame presence or size", async () => {
+  // Empty-versus-populated indistinguishability: whether the intersection is
+  // populated or empty, the blind helper observes the SAME inbound traffic -- one
+  // request frame, no table frame -- so the match count cannot be read off the wire
+  // it sees. Suppressing the frame entirely (rather than sending an empty table) is
+  // what closes that channel: an empty-versus-populated table would leak the count
+  // by its presence and size.
+  // Both receivers hold the same number of distinct values (3), so the only thing
+  // that differs between the two runs is the intersection size (2 vs 0).
+  const populated = await runSinglePassCapturingFrames(
+    ["A", "B", "C"],
+    ["B", "C", "D"], // 2 matches
+    true,
+  );
+  const empty = await runSinglePassCapturingFrames(
+    ["A", "B", "C"],
+    ["X", "Y", "Z"], // 0 matches
+    true,
+  );
+  expect(populated.senderInbound).toHaveLength(1);
+  expect(empty.senderInbound).toHaveLength(1);
+  expect(populated.senderInbound.every((f) => f instanceof Uint8Array)).toBe(
+    true,
+  );
+  expect(empty.senderInbound.every((f) => f instanceof Uint8Array)).toBe(true);
+  // Not just presence: the sole inbound frame (the receiver's request) is
+  // byte-identical in LENGTH across the two runs -- its size tracks the receiver's
+  // distinct-value count, held constant here, never the match count. So neither the
+  // presence nor the size of what the helper receives encodes the intersection size.
+  expect((populated.senderInbound[0] as Uint8Array).byteLength).toBe(
+    (empty.senderInbound[0] as Uint8Array).byteLength,
+  );
+  // The differing match counts (2 vs 0) are computed only by the receiver; the
+  // helper stays blind to both.
+  expect(populated.receiverResult[0]).toHaveLength(2);
+  expect(empty.receiverResult[0]).toHaveLength(0);
+  expect(populated.senderResult).toStrictEqual([[], []]);
+  expect(empty.senderResult).toStrictEqual([[], []]);
 });
 
 // ─── associationAndIterationArray: pathological-count bound ───────────────────
@@ -404,6 +583,7 @@ test("the single-pass receiver read gate is bounded to the derived reply cap", a
     fake,
     [["a", "b", "c"]],
     partnerRows,
+    false,
     -1,
   );
   // Let the receiver send its request and park on receive(); then deliver a reply
@@ -444,6 +624,7 @@ test("single-pass receiver rejects a reply whose index table contradicts its rec
     conn,
     [["a", "b"]], // one key
     5,
+    false,
     -1,
   );
   await peer.receive(); // consume the receiver's encrypted request
@@ -477,6 +658,7 @@ test("single-pass receiver rejects a reply whose sender count contradicts the ex
     conn,
     [["a", "b"]], // one key, two local rows
     3, // the sender exchanged 3 records
+    false,
     -1,
   );
   await peer.receive(); // consume the receiver's encrypted request
@@ -511,6 +693,7 @@ test("single-pass aborts symmetrically when the exchange exceeds the ceiling", a
     conn,
     [["a", "b"]],
     MAX_SINGLE_PASS_CELLS + 1, // partner alone is over the budget
+    false,
     -1,
   );
   await expect(run).rejects.toThrow(/single-pass cannot carry this dataset/);
@@ -539,6 +722,7 @@ test("single-pass aborts symmetrically from the starter side too", async () => {
     conn,
     [["a", "b"]],
     MAX_SINGLE_PASS_CELLS + 1, // partner alone is over the budget
+    false,
     -1,
   );
   await expect(run).rejects.toThrow(/single-pass cannot carry this dataset/);
