@@ -162,7 +162,7 @@ export class InProcessPsiEngine implements PsiEngine {
     const client = this.client;
     if (!client)
       throw new Error(
-        `${this.id}: computeValueMatches requires the client role`,
+        `${this.id}: computeAssociationTable requires the client role`,
       );
     const setup = this.pendingSetup;
     if (setup === undefined)

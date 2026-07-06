@@ -68,10 +68,13 @@ export interface PsiWorkerHandle {
  * strictly lockstep -- each round awaits the partner's reply before the next crypto
  * call -- so at most one request is ever in flight; the id map exists to route the
  * reply and to fail every outstanding call at once on worker death or
- * {@link dispose}. A worker crash / early exit surfaces through `onError` as a
- * terminal rejection rather than a hang, and {@link dispose} rejects anything
- * pending and terminates the worker so a ref'd worker handle can never hold the
- * process open at teardown.
+ * {@link dispose}. That invariant is enforced, not merely assumed: {@link call}
+ * rejects a second request while one is still in flight rather than letting two
+ * replies race the id map. A worker crash / early exit surfaces through `onError`
+ * as a terminal rejection rather than a hang, and marks the engine terminal so
+ * every later call fails fast with the crash cause instead of posting to a dead
+ * worker; {@link dispose} rejects anything pending and terminates the worker so a
+ * ref'd worker handle can never hold the process open at teardown.
  */
 export class WorkerPsiEngine implements PsiEngine {
   private readonly handle: PsiWorkerHandle;
@@ -81,6 +84,9 @@ export class WorkerPsiEngine implements PsiEngine {
     { resolve: (value: unknown) => void; reject: (error: unknown) => void }
   >();
   private disposed = false;
+  // Set to the worker's failure once `onError` fires, so a later call fails fast
+  // with the real cause instead of posting to a dead worker (see call()).
+  private terminalError: Error | undefined;
 
   constructor(handle: PsiWorkerHandle) {
     this.handle = handle;
@@ -102,6 +108,7 @@ export class WorkerPsiEngine implements PsiEngine {
 
   private failAll(error: unknown): void {
     const err = error instanceof Error ? error : new Error(String(error));
+    this.terminalError ??= err;
     for (const entry of this.pending.values()) entry.reject(err);
     this.pending.clear();
   }
@@ -109,6 +116,18 @@ export class WorkerPsiEngine implements PsiEngine {
   private call<T>(body: PsiWorkerRequestBody): Promise<T> {
     if (this.disposed)
       return Promise.reject(new Error("PSI worker engine is disposed"));
+    // A worker crash left the engine terminal: fail fast with the crash cause
+    // rather than posting to a dead worker and hanging.
+    if (this.terminalError) return Promise.reject(this.terminalError);
+    // Enforce the strictly-lockstep invariant instead of only asserting it in the
+    // class doc: a second request while one is still in flight is a caller bug, so
+    // reject it rather than letting two replies race the single id map.
+    if (this.pending.size > 0)
+      return Promise.reject(
+        new Error(
+          "PSI worker engine received a concurrent request; the exchange must be strictly lockstep",
+        ),
+      );
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       this.pending.set(id, {
@@ -186,7 +205,19 @@ export function servePsiWorker(
     void Promise.resolve()
       .then(() => run(request.body))
       .then(
-        (result) => post({ id: request.id, ok: true, result }),
+        (result) => {
+          post({ id: request.id, ok: true, result });
+          // Relieve the per-element JS<->native marshalling churn this op created,
+          // now that its result has been handed back to the host. That churn -- the
+          // dominant term in the single-pass receiver's peak, per frameSize.ts --
+          // now lives on this worker's heap rather than the main thread's, so the
+          // host-side relieveTransientMemory (link.ts) can no longer reach it; this
+          // is its worker-side counterpart. A no-op unless the worker was launched
+          // with --expose-gc (the CLI does); the collection pause is negligible
+          // beside the curve masking each op performs, and the dispatch is coarse
+          // (a handful of ops per exchange), never per element.
+          relievePsiWorkerMemory();
+        },
         (error: unknown) =>
           post({
             id: request.id,
@@ -195,4 +226,13 @@ export function servePsiWorker(
           }),
       );
   };
+}
+
+// Worker-side sibling of relieveTransientMemory (link.ts): force a collection of the
+// transient marshalling garbage a completed crypto op leaves on the worker heap. A
+// no-op unless the runtime exposes a global gc (the CLI launches its PSI worker with
+// --expose-gc; a browser Web Worker never exposes gc, exactly as the browser main
+// thread does not today).
+function relievePsiWorkerMemory(): void {
+  (globalThis as typeof globalThis & { gc?: () => void }).gc?.();
 }

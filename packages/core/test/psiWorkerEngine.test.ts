@@ -178,3 +178,36 @@ test("a worker error fails every outstanding call", async () => {
 
   await expect(pending).rejects.toThrow(/worker exited unexpectedly/);
 });
+
+test("a call after a worker error fails fast with the crash cause", async () => {
+  let fireError: (error: unknown) => void = () => {};
+  const handle: PsiWorkerHandle = {
+    postMessage: () => {},
+    setHandlers: ({ onError }) => {
+      fireError = onError;
+    },
+    terminate: () => {},
+  };
+  const engine = new WorkerPsiEngine(handle);
+
+  fireError(new Error("worker exited unexpectedly"));
+
+  // A fresh call must reject immediately with the crash cause, not hang waiting
+  // for a reply from the dead worker.
+  await expect(engine.createServerSetup(["a"])).rejects.toThrow(
+    /worker exited unexpectedly/,
+  );
+});
+
+test("a second concurrent call is rejected as a lockstep violation", async () => {
+  const handle: PsiWorkerHandle = {
+    // Never replies, so the first request stays in flight.
+    postMessage: () => {},
+    setHandlers: () => {},
+    terminate: () => {},
+  };
+  const engine = new WorkerPsiEngine(handle);
+
+  void engine.createServerSetup(["a"]);
+  await expect(engine.createClientRequest(["b"])).rejects.toThrow(/lockstep/);
+});
