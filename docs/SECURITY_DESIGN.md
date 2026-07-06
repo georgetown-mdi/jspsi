@@ -6,6 +6,8 @@ title: "PSI-Link Security Design"
 
 This document covers the threat model, authentication design, and channel security for PSI-Link exchanges, and introduces the private set intersection (PSI) protocol on which the privacy guarantee rests at a conceptual level. It does not specify the PSI and PSI-C algorithms or the wire-level key-exchange protocol in detail (see [PROTOCOL.md](spec/PROTOCOL.md)), the network channels over which exchanges run (see [COMMUNICATION.md](COMMUNICATION.md)), or CLI configuration for authentication (see [CLI.md](CLI.md)). It covers the channel-security controls only at the level of what each protects against and why the design is sufficient; their construction, derived constant values, and enforcement points are specified in [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md). Intended readers are security teams and compliance officers.
 
+> Adding to this doc? Keep it conceptual and operational. Constant values, byte/wire layouts, algorithm steps, and the rationale behind them belong in the spec tier -- see [docs/spec/](spec/README.md), "Where does my content go?".
+
 # Overview
 
 PSI-Link protects an exchange with three independent layers:
@@ -226,7 +228,7 @@ Beyond confidentiality, the file-sync channels are hardened against a hostile se
 - **SFTP fatal-packet crash safety.** A malformed SFTP reply packet would otherwise reach a listener-free wrapper and crash the CLI before its orderly cleanup and typed exit-code mapping run; a guarded `'error'` listener turns the fatal error into a handled, orderly failure.
 - **Authenticated abort marker.** A party that fails terminally writes an authenticated `<id>-abort.json` so a parked peer fails fast instead of waiting out the full peer-inactivity budget. The token is keyed from the session key, so a hostile admin cannot forge an abort against a live peer, and a missing or forged marker only degrades to the pre-existing peer-silence timeout.
 
-All of these controls are net-new security behavior subject to the explicit security review required by [CONTRIBUTING](../CONTRIBUTING.md#dependency-policy) before release. Their construction, the SFTP-stack internal premises they depend on, and the upgrade checklist for those premises are in [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md) and [CONTRIBUTING.md](../CONTRIBUTING.md#upgrading-the-sftp-stack-ssh2--ssh2-sftp-client).
+All of these controls are net-new security behavior subject to the explicit security review required by [CONTRIBUTING](../CONTRIBUTING.md#dependency-policy) before release. Their construction, the SFTP-stack internal premises they depend on, and the upgrade checklist for those premises are in [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md) and [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#upgrading-the-sftp-stack-ssh2--ssh2-sftp-client).
 
 WebRTC connections use DTLS which provides end-to-end encryption, so the peer-coordination server never sees data-channel traffic. A TURN relay, when used to traverse NAT or firewall restrictions, preserves this property: it forwards encrypted DTLS packets without terminating the session.
 

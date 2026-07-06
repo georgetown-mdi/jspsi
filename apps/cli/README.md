@@ -83,4 +83,4 @@ and stops it after):
 npm run test:integration -w apps/cli
 ```
 
-See [CONTRIBUTING.md](../../CONTRIBUTING.md#integration-tests) for details.
+See [docs/TESTING.md](../../docs/TESTING.md#integration-tests) for details.

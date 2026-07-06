@@ -49,6 +49,12 @@ jobs:
       # @psilink/core build above.
       - name: Doc links
         run: npm run linkcheck
+      # Backstops CONTRIBUTING.md as a quickstart: fails if it grows a section
+      # outside its heading allowlist or cites a `node_modules/` source path --
+      # the two mechanical tells that reference-depth detail (which belongs in
+      # docs/spec/DEPENDENCY_PINS.md or docs/TESTING.md) crept back in.
+      - name: CONTRIBUTING scope
+        run: npm run check:contributing
       # Scripts project (.claude/scripts/*.mjs) has its own vitest suite. Plain
       # .mjs with no server or Docker dependency, so a stock runner suffices. This
       # is the repo-wide non-path-filtered gate that guarantees the suite is always

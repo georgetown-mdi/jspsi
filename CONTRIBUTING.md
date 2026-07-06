@@ -6,6 +6,14 @@ title: "Contributing to PSI-Link"
 
 Thank you for your interest in contributing. PSI-Link handles personally identifiable information in high-stakes environments; correctness, security, and auditability matter more than velocity. Please read this document before opening a pull request.
 
+## Scope of this document
+
+This is the pre-contribution quickstart: repository layout, how to build and test, the conventions CI and review enforce, and the pull-request and dependency-review process. It is not a reference. Keep deeper material out of it:
+
+- Dependency-internal premises and upgrade runbooks -> [docs/spec/DEPENDENCY_PINS.md](docs/spec/DEPENDENCY_PINS.md).
+- Test-infrastructure internals and the coverage rationale -> [docs/TESTING.md](docs/TESTING.md).
+- Wire formats, constants, algorithm steps, and the "would only need revisiting if..." rationale behind them -> [docs/spec/](docs/spec/README.md).
+
 ## Repository Structure
 
 PSI-Link is organized as an npm workspaces monorepo.
@@ -52,145 +60,34 @@ npm run test:unit -w apps/web
 npx vitest run path/to/file.test.ts   # single file
 ```
 
-### Integration tests
+### Integration and browser tests
 
-Must pass before a PR merges to `main` or `staging`.
-
-CLI. The suite stands up an SFTP server and drives the real SFTP adapter
-against it over a loopback socket. It is self-managing -- a vitest `globalSetup`
-on the integration project starts the server before the suite and stops it
-after -- so no manual steps are required:
+Must pass before a PR merges to `main` or `staging`. Each suite is
+self-managing -- it starts and stops the server it needs -- so no manual setup
+is required:
 
 ```sh
-npm run test:integration -w apps/cli
+npm run test:integration -w apps/cli   # SFTP adapter driven over a loopback server
+npm run test:integration -w apps/web
+npm run test:browser     -w apps/web   # cross-impl vectors + live exchange, real Chromium
 ```
 
-By default the server runs in-process (an `ssh2.Server` on an ephemeral
-loopback port serving a temporary directory), so each run -- and each worktree
--- is isolated with no shared port or state. Set `PSILINK_SFTP_BACKEND=native`
-to run the same suite against a native OpenSSH `sshd` spawned as an
-unprivileged child, exercising the adapter against a real server:
-
-```sh
-PSILINK_SFTP_BACKEND=native npm run test:integration -w apps/cli
-```
-
-The native backend runs hardened configurations real deployments use, selected
-by `PSILINK_SFTP_NATIVE_PROFILE` (default `baseline`, the plain forced
-`internal-sftp` config); the same conformance suite runs against each:
-
-```sh
-PSILINK_SFTP_BACKEND=native PSILINK_SFTP_NATIVE_PROFILE=restricted-crypto npm run test:integration -w apps/cli
-```
-
-- `restricted-crypto` -- a locked-down kex/cipher/MAC/host-key/pubkey policy,
-  plus a test that a client offering only a key exchange the policy excludes (one
-  OpenSSH allows by default) is refused.
-- `rate-limited` -- connection and auth rate limits. The suite running under them
-  is the coverage; there is no exceed-the-limit test (it would be CI-flaky).
-- `allowlist` -- an explicit `user@host` allow matrix, plus a test asserting a
-  valid key under a username other than the served user is rejected.
-- `chroot` -- `ChrootDirectory` confinement, plus a test that a path outside the
-  served root is unreachable from a chrooted session. It needs `sshd` running as
-  root over a root-owned jail, so it runs only on Linux as root and is launched
-  through a dedicated script that skips cleanly (exit 0, with a message)
-  everywhere else:
-
-```sh
-# Linux only; skips cleanly elsewhere. The PATH forwarding lets npm and node
-# resolve under sudo when secure_path would otherwise drop them (the CI leg uses
-# the same form); a plain `sudo npm run ...` works where sudo keeps your PATH.
-sudo --preserve-env=PATH env "PATH=$PATH" npm run test:integration:native-chroot -w apps/cli
-```
-
-A standing console sentinel guards the CLI integration suite: it wraps `console`
-directly and fails a test file at `afterAll` on any `console.log`/`warn`/`error`
-that no allowlist matcher accepts (the inverse of blanket silencing, and the one
-check that sees third-party `console.*` which the loglevel-based
-`withCapturedLogs` cannot). If your change makes the suite emit new console
-output, the fix is to eliminate it at the source -- route it through the logger
-or assert it under `withCapturedLogs`; accept it as intended only by adding a
-matcher to the allowlist in `apps/cli/test/integration/consoleAllowlist.ts`, a
-visible edit a reviewer sees. A matcher that never fires across a run is reported
-at teardown so the allowlist cannot accumulate dead entries.
-
-Web (dev server managed automatically -- same pattern as the CLI integration tests):
-
-```sh
-npm run test:integration -w apps/web    # auto-starts, waits for, and stops the dev server
-```
-
-For a faster inner loop you can keep a warm server running across many runs:
-`test:integration` detects an already-running server, reuses it, and leaves it
-up rather than stopping it.
-
-```sh
-npm run dev           -w apps/web    # start (and keep) the dev server in a terminal
-npm run test:integration -w apps/web    # reuses the running server
-# stop the dev server in the terminal when done (Ctrl-C)
-```
-
-The browser suite -- cross-implementation byte-vector checks, a live PSI
-exchange, and React component tests such as the accept consent gate, run in real
-Chromium via Playwright -- self-manages the dev server the same way: it stands up
-the PeerJS coordination server the exchange needs, reuses a running `npm run
-dev`, and otherwise starts and stops its own.
-
-```sh
-npm run test:browser -w apps/web    # auto-starts, waits for, and stops the dev server
-```
-
-It runs in CI as part of the web build-and-test gate (`eb_build_and_test.yaml`),
-which provisions Chromium on the runner; run it locally too when changing the web
-PSI exchange, the cross-implementation vectors, or a web UI component it covers
-(such as the accept consent gate).
+The native SFTP backends and hardened profiles, the console sentinel, the
+warm-server inner loop, and the browser-suite plumbing are in
+[docs/TESTING.md](docs/TESTING.md).
 
 ### Coverage
 
-Coverage is an informational REPORT to help you and reviewers see which product
-paths a change leaves unexercised. It is produced on demand -- it is not part of
-`npm test` and does not run in CI.
-
-```sh
-npm run coverage                    # all workspaces; writes a report per workspace
-npm run coverage -w packages/core   # a single workspace
-```
-
-It uses `@vitest/coverage-v8` (first-party Vitest tooling, so no second runner)
-and writes a text summary to the terminal plus a browsable HTML report and an
-`lcov.info` (for editors/tooling) under each workspace's `coverage/` directory.
-The denominator is scoped to product source under each `src/` tree, with the
-generated route tree and vendored `apps/web/src/contrib` excluded, so the numbers
-reflect hand-written product code. The report runs `core` unit, `cli`
-unit and integration (the SFTP adapter is exercised only by the integration
-suite), and `web` unit plus `web` browser (real Chromium via Playwright). The web
-unit and browser projects run together and their coverage is merged, so the
-component, live-exchange, and consent-gate paths exercised only in the browser
-are reflected instead of reading as near-zero; running `npm run coverage` for the
-web workspace therefore stands up the dev server and Chromium the same way `npm
-run test:browser` does. The web black-box integration suite is deliberately
-excluded: it fetches a separately-spawned dev-server process and imports no
-`src`, so under `--coverage` it measures the empty runner process, not the
-server. Capturing that server-entry/route-handler code is feasible -- run the
-spawned server under `NODE_V8_COVERAGE` and merge its profile -- but low-value:
-it buys a bespoke merge step outside Vitest's model to cover thin server-entry
-and route glue whose behavior the integration suite already asserts end-to-end,
-so it is out of scope, not a deferred gap.
-
-There is deliberately NO global percentage gate, and adding one is not a missing
-piece to be "fixed": a blanket "N% or the build fails" bar rewards vanity tests
-that raise the number without raising confidence, so the report informs review
-rather than blocking merges. Do not add a `thresholds` line to the Vitest
-coverage config. If coverage gating is ever wanted, it is scoped to
-`packages/core` and expressed as diff/patch coverage (coverage of the lines a PR
-changes), never an absolute whole-repo percentage -- and even that stays opt-in.
+Coverage is an informational report (`npm run coverage`), not part of `npm test`
+and not a CI gate. There is deliberately no global percentage threshold -- do
+not add one. Rationale and what the report covers: [docs/TESTING.md](docs/TESTING.md#coverage).
 
 ## Code Conventions
 
 - **TypeScript** with strict mode throughout. Avoid `any`; if you must use it, add a comment explaining why.
 - **Naming**: `camelCase` in TypeScript; `snake_case` in user-facing JSON and YAML files. Semicolons required.
 - **Comments**: write one only when the _why_ is non-obvious - a hidden constraint, subtle invariant, or known limitation. Do not restate what the code does. Multi-line `//` blocks are permitted for genuinely complex runtime constraints that cannot fit on one line.
-- **Encode runtime invariants as checks, not prose**: a claim that something does not happen at runtime - a line that never fires, an unreachable branch, a callback that never runs - belongs in an executable check that fails when the claim breaks, not a comment or doc note that cannot. Prose asserting a runtime fact rots silently; a check cannot lie. Cautionary example: a note that the ssh2-sftp-client "Global ... listener" console lines were "found NOT to fire" went stale when later host-key work made them fire, with no library bump involved; the CLI integration console sentinel (whose reviewable allowlist is `apps/cli/test/integration/consoleAllowlist.ts`) now enforces that invariant as a check instead. Where the check can only be best-effort - e.g. an async-late settle that a finite `afterAll` cannot wait out - say so: a backstop is not a guarantee, and the executable form must not reintroduce the overclaim it replaced (here the real guarantee is that the adapter routes those lines to the logger at the source, not that the sentinel is certain to catch them late).
+- **Encode runtime invariants as checks, not prose**: a claim that something does not happen at runtime - a line that never fires, an unreachable branch, a callback that never runs - belongs in an executable check that fails when the claim breaks, not a comment or doc note that cannot; prose asserting a runtime fact rots silently, a check cannot lie. Cautionary example: a note that the ssh2-sftp-client "Global ... listener" console lines were "found NOT to fire" went stale when later host-key work made them fire (no library bump); the CLI integration console sentinel enforces that invariant as a check instead. A best-effort check must say so - a backstop is not a guarantee.
 - **JSDoc**: `/** */` on all exports; `/** @internal */` (with no description) for test-only exports.
 - **Validation**: define the TypeScript interface first, then derive the Zod schema with `z.ZodType<Interface>`. Apply `camelizeKeys` before Zod parsing so user-facing YAML/JSON remains `snake_case` while TypeScript sees `camelCase`.
 - **Transport branching**: `connection.channel` is the discriminant. Use allowlists (not blocklists) in `exchange.ts` and `protocol.ts` so a new channel is rejected unless explicitly added.
@@ -223,7 +120,7 @@ When behavior changes, update the matching tier:
 - Wire format, protocol internals, or implementation-level spec -> the relevant `docs/spec/` file.
 - A change touching both tiers updates both.
 
-If you are writing a constant value, a byte/wire layout, an HKDF info string or other algorithm step, or a "would only need revisiting if..." design rationale, it belongs in `docs/spec/` - regardless of which doc you currently have open. Overview docs (`docs/`) stay conceptual and operational.
+If you are writing a constant value, a byte/wire layout, an HKDF info string or other algorithm step, or the "would only need revisiting if..." rationale behind one of those, it belongs in `docs/spec/` - regardless of which doc you currently have open. Overview docs (`docs/`) stay conceptual and operational, including operational rationale such as the coverage-gate decision.
 
 Documentation-tier placement is in scope for code review: a reviewer flags spec-level detail written into a `docs/` overview doc.
 
@@ -278,59 +175,9 @@ PSI-Link is licensed under [Apache 2.0](LICENSE.md); add third-party dependencie
 
 **Cryptographic dependencies** - `@openmined/psi.js`, `@noble/curves`, and any AEAD, key-agreement, or key-derivation library - require explicit security review and maintainer approval before merging. These libraries underpin the privacy and integrity guarantees of every exchange. Dependency upgrades driven by security advisories take priority over feature work.
 
-**SFTP stack (`ssh2` / `ssh2-sftp-client`)** - the CLI's SFTP adapter (`apps/cli/src/connection/ssh2SftpAdapter.ts`) deliberately drives `ssh2` internals past the public `ssh2-sftp-client` API, so both packages are exact-pinned in `apps/cli/package.json`: every bump - including a security patch, which is then a deliberate edit rather than an `npm audit fix` that slips in unreviewed - must re-verify that coupling before it merges. Before raising either version, follow the [Upgrading the SFTP stack](#upgrading-the-sftp-stack-ssh2--ssh2-sftp-client) checklist below, which names the internal premises, the source files to re-read, and the contract-assertion test (run in CI by the CLI integration suite) that fails red on a lifecycle change.
-
-**WebRTC stack (`peerjs` / `peerjs-js-binarypack`)** - the web data-channel inbound bound (`apps/web/src/psi/boundedReassembly.ts`) reaches past the public `DataConnection` API into PeerJS reassembly/unpack internals and parses the `peerjs-js-binarypack` wire format directly, exactly the kind of internal coupling the SFTP stack pins for. Both packages are therefore exact-pinned in `apps/web/package.json` - `peerjs-js-binarypack` is declared there directly (not left a floating transitive of `peerjs`) precisely because the bound parses its wire format, the same reason `ssh2` is pinned directly in `apps/cli/package.json` though it is reached through `ssh2-sftp-client`. Both are pulled out of the routine `non-critical` Dependabot batch into a reviewed `webrtc-stack` group (`.github/dependabot.yml`), so a bump is a deliberate, reviewed edit rather than an `npm audit fix` or grouped minor/patch PR that slips in unreviewed. Before raising either version, follow the [Upgrading the PeerJS stack](#upgrading-the-peerjs-stack-peerjs--peerjs-js-binarypack) checklist below, which names the internal premises, the source files to re-read, and the install-time check and tests that fail loud on a premise change.
+**The SFTP stack (`ssh2` / `ssh2-sftp-client`) and the WebRTC stack (`peerjs` / `peerjs-js-binarypack`)** are reached past their public APIs into internals, so each is exact-pinned (in `apps/cli/package.json` and `apps/web/package.json` respectively). Every bump is a deliberate, security-reviewed edit -- never an `npm audit fix` that slips in unreviewed -- and must re-verify the internal premises first. Why they are pinned, the premises, and the per-stack upgrade checklist: [docs/spec/DEPENDENCY_PINS.md](docs/spec/DEPENDENCY_PINS.md).
 
 Per-dependency licenses are recorded authoritatively in the CycloneDX SBOM attached to each release - every direct and transitive dependency with its license; see [docs/RELEASES.md](docs/RELEASES.md#software-bill-of-materials-sbom). Attributions for redistributed and vendored components are in the top-level [`NOTICE`](NOTICE).
-
-## Upgrading the SFTP Stack (ssh2 / ssh2-sftp-client)
-
-The channel-security bounds specified in [docs/spec/CHANNEL_SECURITY.md](docs/spec/CHANNEL_SECURITY.md) reach past the public `ssh2-sftp-client` API and drive ssh2 internals directly (`apps/cli/src/connection/ssh2SftpAdapter.ts`), so they rest on premises about ssh2's internal behavior that an upgrade can silently break. Re-verify the following on any `ssh2` or `ssh2-sftp-client` version bump, before the bump merges.
-
-The internal assumptions the adapter relies on:
-
-- ssh2's `Client.sftp()` strips its own setup-time `'error'` listener (and the `'exit'`/`'close'` ones) from the `SFTPWrapper` before handing it back, so after a real connect the wrapper carries zero `'error'` listeners until the adapter attaches its own. The whole crash fix is sound only while this holds; if ssh2 retains its listener the adapter's "no one else guards the wrapper" reasoning is false.
-- ssh2 reports end-of-directory from the handle-based `readdir` as an `Error` whose `code` equals `STATUS_CODE.EOF` (numeric `1`), not as an empty success batch -- the EOF contract `list()`'s batch loop terminates on.
-- `STATUS_CODE.EOF === 1` and `OPEN_MODE.WRITE | CREAT | EXCL === 0x2A`, the numeric SFTP constants the adapter hard-codes (it does not import them: ssh2 exposes their runtime values only from the internal `lib/protocol/SFTP.js`, not from its package entry point, and `@types/ssh2` types them only as a compile-time `sftp` namespace). These are fixed SFTPv3 wire-protocol values, so they are extremely unlikely to renumber, but confirm them against `STATUS_CODE`/`OPEN_MODE` in the source below if the surrounding code moves.
-- `STATUS_CODE.FAILURE === 4` (`SSH_FX_FAILURE`), the third numeric SFTP constant the adapter hard-codes: `rename()` retries a transient server failure only on this status (the source still exists, so a re-issue is safe) and treats every other status as terminal, and `createExclusive` maps it to an `exists()`-disambiguated `EEXIST`. The premise is that ssh2-sftp-client surfaces a server `FAILURE` on its high-level `rename` as numeric `err.code === 4` -- it passes ssh2's raw status through `fmtError` onto `err.code`, the same `4` `createExclusive` reads from the raw `open` callback. If a future version remaps `rename`'s `err.code` to a non-numeric string (e.g. `ERR_GENERIC_CLIENT`) or renumbers `FAILURE`, the retry silently stops firing -- the transient-rename flake returns, with no correctness break; the `ssh2SftpAdapter` unit tests pin the numeric-`4` behavior.
-- ssh2-sftp-client stores the raw wrapper on `this.sftp`, assigned once in its `'ready'` handler and otherwise only cleared, with no auto-reconnect that swaps it after `connect()` resolves.
-- ssh2-sftp-client exposes the underlying ssh2 `Client` as `this.client`, and ssh2's `Client.setNoDelay(true)` toggles `TCP_NODELAY` on the live socket. `connect()` calls it once after the connection is established to disable Nagle's algorithm -- a per-round-trip latency optimization for the chatty rendezvous protocol (see board item 199674097). Unlike every other premise here this one carries no correctness weight: the call is guarded and non-fatal, so a future version that relocates the `Client` or drops `setNoDelay` makes the adapter log a warning and continue with Nagle enabled (slower, still correct) rather than fail.
-- A malformed reply to the in-flight request itself is bounded by the adapter's wall-clock deadline, not by `cleanupRequests`, because ssh2 has already deleted the request from `_requests` by the time `doFatalSFTPError` runs: the `NAME` and `DATA` response handlers delete it unconditionally before the parse/check that calls `doFatalSFTPError`, and the `HANDLE` handler deletes it inside its malformed branch (on a defined request id) immediately before that call. All three leave nothing for `cleanupRequests` to fail. If a future ssh2 instead deleted after the fatal path (or stopped deleting in the `HANDLE` malformed branch), `cleanupRequests` would begin failing in-flight requests too - which would change the mechanism but not break it (the deadline still bounds the operation). The deadline must stay regardless; the `liveness` fault-injection unit test below proves the current ordering.
-- ssh2-sftp-client's `put(src, dest)` pipes a non-Buffer `src` into the write stream (`_put`'s else-branch, `rdr.pipe(wtr)`), and that write stream consumes under ack-driven backpressure -- ssh2's `WriteStream._write` calls its stream callback (releasing the next pull) only after the server acknowledges the write. The `put` liveness idle window rests on both: the adapter hands `put` a Readable that streams the payload in `SFTP_PUT_PROGRESS_CHUNK_BYTES` (64 KiB) chunks and resets the window each time a chunk is pulled, so a withheld write ack stalls the pull and trips the window while a slow-but-progressing upload keeps resetting it. It rests further on ssh2's `SFTP.write` chaining a buffer larger than `_maxWriteLen` into multiple WRITE packets and firing the stream callback only after the *last* ack -- which is precisely *why* the source is chunked rather than handed over whole: a single whole-buffer write surfaces no progress until completion, making a large legitimate upload indistinguishable from a stall for its full duration. If a future version buffers a provided stream eagerly instead of piping it under backpressure, the window's progress signal would no longer track the server and the bound would need rework; if it merely acks per-sub-write incrementally, the chunking becomes redundant but harmless. This uses only the public stream interface (it does not drive the raw `SFTPWrapper`), so it adds no new internal coupling beyond these behavioral premises. The `ssh2SftpAdapter` unit tests pin the stall-fires and slow-but-progressing-does-not behaviors and byte-exact upload through the chunked source; the integration suite uploads real payloads through it.
-- A host-key verification rejection (`hostVerifier` calling `verify(false)`, from either `open()` verifier in core's `fileSyncConnection` -- the pinned-key enforce path on a mismatch, or the no-pin fail-closed default) surfaces as an `Error` whose message contains the fragment `Host denied`, with no machine-readable `code` set. `connect()`'s retry predicate matches that fragment to treat the rejection as terminal -- a non-matching (or absent) pin never becomes a matching one, so retrying only re-runs the key exchange against the same untrusted host. If a future version renames the fatal-handshake message (it originates in ssh2's `kex.js` as `Host denied (verification failed)`), the predicate stops firing and a host-key failure is retried `maxReconnectAttempts` times before failing with the same outcome -- slower and noisier, but no security regression, since core's `fileSyncConnection` re-wraps the same rejection into its `SFTP host-key verification failed:` message regardless. Confirm the fragment still appears on the rejection error if either package is bumped.
-- The first-use host-key probe (`fileSyncConnection`'s `probeHostKeyFingerprint`) and the `settleVerify` guard around every verifier verdict rest on four ssh2 internal behaviors, all security-relevant. (1) ssh2 invokes the `hostVerifier` at host-key verification and reaches userauth -- credential transmission -- ONLY after `verify(true)`, so `verify(false)` aborts the handshake before any password/private key is sent; this is what lets the probe connect with credentials present in its options yet never present them to an unverified host. (2) Returning `undefined` from the verifier (our `void` async callback) parks the handshake pending the async verdict. (3) ssh2's `readyTimeout` stays armed across that park, so the probe's use of the raw (unbounded) transport is still time-bounded. (4) A late `verify()` against an already-torn-down protocol throws because `doFatalError` nulls `protocol._destruct`; `settleVerify` swallows exactly that throw so a teardown-race refusal cannot become an unhandled rejection -- it never swallows a live verdict. If a future version reached userauth before the verifier, transmitted credentials despite `verify(false)`, stopped arming `readyTimeout` until after verification, or changed teardown so a late `verify()` no longer throws, re-evaluate: the first three are security regressions (credentials to an unverified host, or an unbounded probe), the last only makes `settleVerify`'s guard unnecessary. Also note `keyBlob` is a Buffer slice view with a meaningful `byteOffset`/`byteLength` (ssh2's `bufferSlice`); `hostKeyBlob` carries those through, because a bare `new Uint8Array(keyBlob.buffer)` would hash the whole pooled buffer and compute the wrong fingerprint.
-- ssh2-sftp-client's constructor takes the `error`/`end`/`close` event callbacks as its second positional argument and runs them through `globalListener`, which invokes a callback only for an event the high-level client did not itself initiate (its `endCalled` / `*Handled` guard) and performs its own handled-flag bookkeeping and `this.sftp` teardown regardless of the callback body. The adapter passes explicit callbacks there to route those out-of-band ssh2-`Client` events to its project logger -- `error` at error level, the benign first-use-probe / `verify(false)`-rejection `end`/`close` at trace -- instead of the library's default `console.error` / `console.log` (whose bare `Global ... listener` lines otherwise leak past the logger and the suite's log-level controls). The `error` message is server-controlled (ssh2 builds it from the `SSH_MSG_DISCONNECT` description), so it is rendered through `sanitizeErrorForDisplay` -- escaped against log injection and run through the PEM/key redaction backstop -- before it reaches the logger and any `--log-file`; on a bump, confirm no credential can ride a `Client`-level `error` to this sink (today none can). The routing is observational only: it changes where the diagnostic goes, never control flow. If a bump changes the constructor signature, drops the second-argument callbacks, or makes a callback load-bearing (e.g. moves the `this.sftp` clear into the `close` body), re-verify; the worst case is the cosmetic console lines returning, not a correctness break.
-
-Dependency source files to re-read on an upgrade:
-
-- `node_modules/ssh2/lib/client.js`: `sftp()` and its inner `removeListeners()` / `onReady` -- confirm the setup-time `'error'` listener is still stripped before the wrapper is handed back.
-- `node_modules/ssh2/lib/protocol/SFTP.js`: `doFatalSFTPError` (still emits `'error'` on the wrapper, then destroys and calls `cleanupRequests`), the `NAME` and `DATA` handlers (still delete the in-flight request from `_requests` unconditionally before the parse/check that calls `doFatalSFTPError`) and the `HANDLE` handler (still deletes inside its malformed branch, on a defined request id, immediately before that call), so `cleanupRequests` does not fail a reply-to-self in-flight request in any of the three cases; `STATUS_CODE` and `OPEN_MODE` (still the values above), and the handle-path `readdir` EOF contract; and `WriteStream._write` / `SFTP.write` (the stream callback still fires only after the server acks, and an over-`_maxWriteLen` write still chains into multiple packets acked at the end -- the ack-driven backpressure and no-incremental-progress premises the `put` idle window's chunking rests on).
-- `node_modules/ssh2-sftp-client/src/index.js`: confirm the wrapper is still reached via `this.sftp` with the lifecycle above, that the underlying ssh2 `Client` is still held on `this.client` (the `setNoDelay` seam), that `rename` still passes the raw numeric status through `fmtError` onto `err.code` (so a server `SSH_FX_FAILURE` surfaces as `err.code === 4`, the premise the rename retry gates on), and that `_put` still pipes a non-Buffer `src` into the write stream (`rdr.pipe(wtr)`) rather than buffering it (the premise the `put` idle window's progress signal rests on); and that the constructor still accepts the `error`/`end`/`close` callbacks as its second positional argument, run through `globalListener`, which still does the handled-flag and `this.sftp` bookkeeping itself (the seam the adapter routes off the console).
-- `node_modules/ssh2/lib/protocol/kex.js`: confirm a host-denied handshake failure still throws with a message containing `Host denied` (the fragment `connect()`'s terminal-on-host-key-rejection retry predicate matches, since ssh2 sets no `code` on it); confirm the `hostVerifier` is still invoked at host-key verification with `service('ssh-userauth')` reached only afterward via `onHandshakeComplete` (the credential-non-disclosure premise the probe rests on), and that returning `undefined` from the verifier still parks the handshake pending the async verdict.
-- `node_modules/ssh2/lib/client.js`: confirm `readyTimeout` is still armed at socket connect and not cleared while an async `hostVerifier` is parked (it bounds the probe's raw, budget-unwrapped transport).
-- `node_modules/ssh2/lib/protocol/Protocol.js` / `protocol/utils.js`: confirm `doFatalError` still nulls `protocol._destruct`, so a late `verify()` on an already-torn-down protocol throws -- the only throw `settleVerify` swallows; if teardown stops throwing there, `settleVerify`'s guard becomes unnecessary (not unsafe).
-
-Then run `npm run test:integration -w apps/cli` against the new version. The contract-assertion tests in `apps/cli/test/integration/sftpConnection.test.ts` pin the zero-listener premise from both sides (a raw ssh2-sftp-client connect leaves zero `'error'` listeners on the wrapper; an adapter connect leaves exactly one), so a lifecycle change fails those tests red rather than regressing the crash guard silently.
-
-## Upgrading the PeerJS Stack (peerjs / peerjs-js-binarypack)
-
-The web WebRTC data-channel inbound bound specified in [docs/spec/CHANNEL_SECURITY.md](docs/spec/CHANNEL_SECURITY.md) reaches past the public `DataConnection` API into PeerJS reassembly/unpack internals and parses the `peerjs-js-binarypack` wire format directly (`apps/web/src/psi/boundedReassembly.ts`), so it rests on premises about both packages' internal behavior that an upgrade can silently break. Re-verify the following on any `peerjs` or `peerjs-js-binarypack` version bump, before the bump merges.
-
-The internal assumptions the bound relies on:
-
-- The binary/chunked `DataConnection` class -- the one `peer.connect` and an incoming connection use by default -- exposes `_handleChunk` (reassembling chunk slices keyed by `__peerData` into `_chunkedData`, deleting the entry on completion), `_handleDataMessage` (the sole point each frame is `unpack`ed: an unchunked frame directly, the reassembled buffer via the completion recursion), and `_chunkedData` (the per-id partial store). `assertChunkReassemblySupported` checks all three exist at install time, so a rename or removal fails loud. These three are specific to the binarypack (Binary) serializer class; the Cbor/MsgPack/JSON/None connection classes do not chunk and lack `_chunkedData`/`_handleChunk`, so a default-serializer change to a non-chunking class trips the assert. The residual to re-verify BY HAND, because the assert cannot catch it: a future serializer that also exposes these three names but uses a different (non-binarypack) wire format would pass the assert while the marker scan parses the wrong format -- confirm `peer.connect` still defaults to the binarypack Binary serializer. A marker misparse itself over-charges (rejects, fail-closed) or runs the cursor off the end (delegated to PeerJS, which errors), never under-counting, but the chunk-byte accounting could mismatch, so this is a re-verify premise, not a silent-safe one.
-- The chunk envelope shape `_handleChunk` consumes: `__peerData` (the message id shared by every chunk of a frame), `n` (chunk index), `total` (chunk count), `data` (slice bytes). The byte/chunk accounting keys on `__peerData`; a rename collapses every chunk to one in-flight entry -- which over-rejects (fail-safe), not fail-open -- but is unverified by the assert, so confirm the field names on a bump.
-- The BinaryPack marker dispatch the scan mirrors (`peerjs-js-binarypack`'s `Unpacker.unpack`): fixint/fixraw/fixstr/fixarray/fixmap and the `0xc0`-`0xdf` markers, maps declaring two child values per pair, the raw-vs-str split at `0xa0`/`0xb0`, the fixed scalar skip widths and the `u16`/`u32` length-prefix widths, and `unpack_string`/`unpack_raw` advancing the buffer cursor by exactly the declared `size` regardless of how the payload decodes. A format change either over-charges (rejecting early, fail-closed) or runs the cursor off the end (treated as malformed and delegated), so it weakens the scan's precision rather than disabling it, but re-verify the marker table on a `peerjs-js-binarypack` bump.
-- `unpack`'s past-the-end read returns `0` (a positive fixint) rather than throwing -- the `new Array(N)` zero-fill the scan's "no container declares more elements than the bytes that follow it" check closes -- while the length-prefixed `read()` path (raw/str payloads) throws on underrun, the cursor-underrun-is-malformed path the scan catches and delegates. If a future version throws on the array zero-fill read instead, the bytes-that-follow check becomes belt-and-suspenders (still safe); if the length-prefixed path stops throwing, re-evaluate the delegate-on-underrun reasoning.
-
-Dependency source files to re-read on an upgrade:
-
-- `node_modules/peerjs/dist/bundler.mjs` (the bundled binary/chunked `DataConnection`): confirm `_handleChunk` still reassembles into `_chunkedData` keyed by `__peerData` and recurses into `_handleDataMessage` on completion; that `_handleDataMessage` is still the sole `unpack` point both the unchunked and reassembled paths flow through; that `peer.connect`'s default serializer is still the binarypack Binary class (and that `_chunkedData`/`_handleChunk` remain specific to it); and that the chunk envelope still carries `__peerData`/`n`/`total`/`data`.
-- `node_modules/peerjs-js-binarypack/dist/binarypack.mjs` (`Unpacker.unpack`): confirm the marker table above, and that `unpack_string`/`unpack_raw` advance the cursor by exactly the declared `size`.
-- `apps/web/src/psi/boundedReassembly.ts`: re-confirm `readValueHeader`/`structureOverBudget` still mirror that marker table and that `assertChunkReassemblySupported` still probes the three internals; update the cost weights only with the security-review judgment noted in the spec.
-
-`assertChunkReassemblySupported` runs at install time on every connection in `openPeerMessageConnection`, and the live browser exchange test (`apps/web/test/browser/invitedPSI.test.ts`, run in CI) installs the guard on a real `DataConnection`, so a renamed or removed internal fails the install loud rather than running with no inbound bound. The unit tests (`apps/web/test/unit/boundedReassembly.test.ts`) pin the marker table, the per-kind cost weights, and the fail-closed bounds. A purely BEHAVIORAL change that keeps the names -- a different chunking serializer, a renamed chunk field, a marker-format change -- is not caught by the assert or the happy-path browser test, so the by-hand premises above must be re-verified against the source files on any bump.
 
 ## Export Control
 

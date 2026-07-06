@@ -6,6 +6,8 @@ title: "Exchange Specification Reference"
 
 This document is the complete field-level reference for PSI-Link exchange specifications. It covers all fields in the four components - linkage terms, connection, metadata, and data standardization - including types, valid values, consistency rules, and examples. It does not cover how the PSI protocol uses these parameters (see [PROTOCOL.md](spec/PROTOCOL.md)), the threat model or authentication design (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md)), or the CLI commands that consume this file (see [CLI.md](CLI.md)). Intended for anyone configuring an exchange.
 
+> Adding to this doc? Keep it conceptual and operational. Constant values, byte/wire layouts, algorithm steps, and the rationale behind them belong in the spec tier -- see [docs/spec/](spec/README.md), "Where does my content go?".
+
 Exchange specifications are JSON or YAML documents that fully describe a PSI-Link exchange between two parties. They are consumed by both the web application and the CLI application. The web application provides an interactive editor for creating them; the CLI application accepts them as configuration files.
 
 An exchange specification has four top-level components:
