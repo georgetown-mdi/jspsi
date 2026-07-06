@@ -297,7 +297,8 @@ const scenarios = [
       "linkViaPSI one-to-one where a value duplicated across the whole dataset " +
       "('Z','Z') becomes matchable once an earlier key claims its twin -- " +
       "uniqueness is evaluated over the round's survivors, not the full dataset. " +
-      "Source: psiLink.test.ts ('survivor-relative uniqueness').",
+      "Source: psiLink.test.ts ('single-pass reproduces the cascade's " +
+      "survivor-relative uniqueness'), whose cascade branch pins this projection.",
     method: "linkViaPSI",
     cardinality: "one-to-one",
     starterKeys: [
