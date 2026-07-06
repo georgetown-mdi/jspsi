@@ -11,6 +11,7 @@ import { columnValues, inferDateFormat } from "./utils/date.js";
 import { sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
 import type { CSVRow } from "./file.js";
 import { PSIParticipant } from "./participant.js";
+import type { PsiEngine } from "./psiEngine.js";
 import {
   exchangeTerms,
   exchangeBootstrapSecret,
@@ -442,6 +443,16 @@ export interface RunExchangeOptions {
   /** The loaded PSI WASM/native library instance. */
   psiLibrary: PSILibrary;
   /**
+   * Builds the crypto engine for the PSI participant, given its resolved role and
+   * id. When omitted, the participant runs the masking in-process on the calling
+   * thread (the default, and what the browser uses). The CLI supplies a factory
+   * that spawns a `worker_threads` worker so the masking runs off the
+   * event-loop-owning thread, keeping it responsive for the SFTP heartbeat and
+   * timers; the returned engine is disposed when the PSI phase ends (board item
+   * 208035324).
+   */
+  psiEngineFactory?: (role: "starter" | "joiner", id: string) => PsiEngine;
+  /**
    * Called at the start of each protocol stage. The `id` values match those
    * returned by {@link describeExchangeStages}.
    */
@@ -637,14 +648,15 @@ export async function runExchange(
     receiverRecordCount,
   );
 
+  const psiRole = isReceiver ? "joiner" : "starter";
+  const psiId = isReceiver ? "client" : "server";
   const participant = new PSIParticipant(
-    isReceiver ? "client" : "server",
+    psiId,
     psiLibrary,
-    {
-      role: isReceiver ? "joiner" : "starter",
-      verbose: verbosity,
-    },
+    { role: psiRole, verbose: verbosity },
     elementBounds,
+    undefined,
+    options.psiEngineFactory?.(psiRole, psiId),
   );
 
   // Single-pass association-table withholding, derived from symmetric
@@ -676,26 +688,36 @@ export async function runExchange(
   // partner record count too: it (with this party's count and the agreed key
   // count) derives the per-exchange frame cap and the abort-if-over-ceiling gate,
   // identically on both parties (see linkViaSinglePassPSI and frameSize.ts).
-  const associationTable =
-    linkageTerms.linkageStrategy === "single-pass"
-      ? await linkViaSinglePassPSI(
-          { cardinality: "one-to-one" },
-          participant,
-          conn,
-          linkageKeyIterables,
-          partnerRecordCount,
-          withholdSenderTable,
-          verbosity,
-          onStage,
-        )
-      : await linkViaPSI(
-          { cardinality: "one-to-one" },
-          participant,
-          conn,
-          linkageKeyIterables,
-          verbosity,
-          onStage,
-        );
+  let associationTable: AssociationTable;
+  try {
+    associationTable =
+      linkageTerms.linkageStrategy === "single-pass"
+        ? await linkViaSinglePassPSI(
+            { cardinality: "one-to-one" },
+            participant,
+            conn,
+            linkageKeyIterables,
+            partnerRecordCount,
+            withholdSenderTable,
+            verbosity,
+            onStage,
+          )
+        : await linkViaPSI(
+            { cardinality: "one-to-one" },
+            participant,
+            conn,
+            linkageKeyIterables,
+            verbosity,
+            onStage,
+          );
+  } finally {
+    // Dispose the participant's crypto engine once the PSI phase is done (or has
+    // thrown); the participant is not used past this point. For the default
+    // in-process engine this is a no-op, but the CLI's worker-backed engine
+    // terminates its worker_threads worker here, so a ref'd worker handle can never
+    // hold the process open at teardown (board item 208035324).
+    participant.dispose();
+  }
 
   // Send-gate: transmit payload only to a partner entitled to the result. A party
   // with expectsOutput:false learns no matched records, so it has no use for
