@@ -363,8 +363,12 @@ async function sendAbort(
 // `termsMessage`, `protocolVersion` is read as `unknown`, so a garbled value still
 // reconciles to the named skew rather than a parse error; a non-object frame, or one
 // carrying no version, probes to `undefined` (treated as a legacy peer). `.catch`
-// makes the probe itself total -- it never throws -- so a hostile or malformed frame
-// degrades to "no readable version" rather than an exception on this path.
+// degrades a non-object frame to that "no readable version" rather than a parse
+// error on this path. Every frame this is fed is transport-deserialized wire data --
+// plain JSON/data with no accessors, see the two call sites -- so it does not throw
+// on any reachable input; it is not relied on to survive an arbitrary in-process
+// object (a throwing getter on `protocolVersion` would escape `.catch`, but no wire
+// peer can inject one).
 const protocolVersionProbe = z
   .object({ protocolVersion: z.unknown().optional() })
   .catch({ protocolVersion: undefined });

@@ -476,6 +476,67 @@ test("a malformed sibling field does not bury the version skew, and still aborts
   await expect(initiator).rejects.toThrow(PROTOCOL_VERSION_MISMATCH_MESSAGE);
 });
 
+test("a same-version malformed sibling field still fails as a parse error, not a silent proceed", async () => {
+  // The other half of the probe's contract: reading the version early must NOT let
+  // a malformed frame through. With a MATCHING version, the reconcile is a no-op, so
+  // the strict parse must still run and reject a non-boolean `save` -- the probe
+  // defers to the full parse rather than reconstructing agreement from its partial
+  // view. Guards against a future short-circuit that trusted the probe. Responder
+  // path: the abort names the parse failure, never the (matching) version.
+  const [connA, connB] = makeConnections();
+  const responder = exchangeTerms(connB, "responder", termsB, 200);
+  await connA.send({
+    linkageTerms: termsA,
+    recordCount: 100,
+    protocolVersion: PROTOCOL_VERSION, // MATCHES -- reconcile is a no-op
+    save: "yes", // non-boolean: the strict parse must still reject this
+  });
+  const abort = await connA.receive();
+  expect(abort).toMatchObject({ decision: "abort" });
+  expect((abort as { abortReasons?: string[] }).abortReasons?.[0]).toMatch(
+    /failed to parse/,
+  );
+  expect((abort as { abortReasons?: string[] }).abortReasons?.[0]).not.toBe(
+    PROTOCOL_VERSION_MISMATCH_MESSAGE,
+  );
+  await expect(responder).rejects.toThrow(/failed to parse/);
+});
+
+test("initiator: a same-version malformed message 2 still rejects as a protocol error", async () => {
+  // The initiator mirror: a MATCHING version means the reconcile no-ops and the
+  // strict parse (parseOrProtocolError) must still reject a non-boolean `save` as a
+  // clean protocol ConnectionError -- not the version message, and not a silent
+  // proceed. Drive the responder by hand to inject the frame.
+  const [connA, connB] = makeConnections();
+  const initiator = exchangeTerms(connA, "initiator", termsA, 100);
+  await connB.receive(); // msg 1: initiator's terms
+  await connB.send({
+    linkageTerms: termsB,
+    decision: "proceed",
+    recordCount: 200,
+    protocolVersion: PROTOCOL_VERSION, // MATCHES -- reconcile is a no-op
+    save: "yes", // non-boolean: the strict parse must still reject this
+  });
+  const err = await initiator.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as Error).message).not.toBe(PROTOCOL_VERSION_MISMATCH_MESSAGE);
+});
+
+test("a non-object terms frame degrades cleanly (probe returns no version, strict parse rejects)", async () => {
+  // The probe's `.catch` branch, exercised on a wire-reachable input: a bare
+  // non-object frame (a hostile or corrupt peer). The probe returns `undefined`
+  // (legacy, reconcile no-op) rather than throwing, and the strict parse then
+  // rejects the frame -- a clean parse-error abort, never an uncaught exception or a
+  // hang. Encodes the probe's "no readable version, no throw" contract as a check.
+  const [connA, connB] = makeConnections();
+  const responder = exchangeTerms(connB, "responder", termsB, 200);
+  await connA.send("not an object");
+  const abort = await connA.receive();
+  expect(abort).toMatchObject({ decision: "abort" });
+  await expect(responder).rejects.toThrow(/failed to parse/);
+});
+
 test("a version mismatch is diagnosed ahead of a simultaneous terms mismatch", async () => {
   // When the partner differs on BOTH the protocol version AND the linkage terms,
   // the version skew is the root cause, so its diagnosis wins: the abort names the
