@@ -559,6 +559,39 @@ test("a version mismatch is diagnosed ahead of a simultaneous terms mismatch", a
   await expect(responder).rejects.toThrow(PROTOCOL_VERSION_MISMATCH_MESSAGE);
 });
 
+test("initiator: a version skew on an abort frame wins over the peer's abort reason", async () => {
+  // Precedence pin for the reconcile-before-abort-check ordering (the initiator
+  // branch runs reconcileProtocolVersion before the decision === "abort" check): a
+  // message 2 that BOTH aborts AND carries a skewed protocolVersion is diagnosed as
+  // the version skew -- the root cause -- rather than relaying the peer's stated abort
+  // reason. That frame shape is reachable only from a non-conforming or malicious
+  // peer: a conforming responder's sendAbort never spreads protocolVersion onto an
+  // abort frame, so a genuine abort probes to undefined, the reconcile no-ops, and the
+  // peer's reason surfaces (pinned by the abort-relay tests above). This guards the
+  // ordering against a refactor that put the abort check first and re-buried the skew.
+  const [connA, connB] = makeConnections();
+  const initiator = exchangeTerms(connA, "initiator", termsA, 100);
+  await connB.receive(); // msg 1: initiator's terms
+  await connB.send({
+    linkageTerms: termsB,
+    decision: "abort",
+    abortReasons: ["responder rejected for its own stated reason"],
+    protocolVersion: PROTOCOL_VERSION + 1, // non-conforming: an abort carrying a version
+  });
+  // The initiator diagnoses the skew first and best-effort sends its own abort
+  // (msg 3) carrying the version message -- not a relay of the peer's reason -- so the
+  // hand-driven responder is not stranded on its receive timeout. Drain and confirm.
+  const abort = await connB.receive();
+  expect(abort).toMatchObject({
+    decision: "abort",
+    abortReasons: [PROTOCOL_VERSION_MISMATCH_MESSAGE],
+  });
+  const err = await initiator.catch((e: unknown) => e);
+  expect((err as Error).message).toBe(PROTOCOL_VERSION_MISMATCH_MESSAGE);
+  // The peer's stated abort reason is NOT what surfaced: the version skew won.
+  expect((err as Error).message).not.toContain("responder rejected");
+});
+
 // --- Role determination ------------------------------------------------------
 
 test("only initiator expects output -> initiator is receiver", () => {
