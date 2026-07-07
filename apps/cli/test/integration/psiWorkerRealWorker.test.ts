@@ -3,13 +3,9 @@ import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 
 import { afterEach, expect, test } from "vitest";
-import {
-  WorkerPsiEngine,
-  type PsiEngine,
-  type PsiWorkerHandle,
-  type PsiWorkerRequest,
-  type PsiWorkerResponse,
-} from "@psilink/core";
+import { WorkerPsiEngine, type PsiEngine } from "@psilink/core";
+
+import { createWorkerThreadHandle } from "../../src/psiWorkerHost";
 
 // Exercises the CLI PSI crypto offload (board item 208035324) against the REAL
 // shipping worker: a `worker_threads` worker running the built
@@ -26,7 +22,24 @@ import {
 const workerEntry = fileURLToPath(
   new URL("../../dist/psiWorker.worker.js", import.meta.url),
 );
-const workerTest = test.skipIf(!existsSync(workerEntry));
+const workerBuilt = existsSync(workerEntry);
+// A skipIf on a build artifact is convenient but silent: it can no-op GREEN in the
+// primary CLI leg too if that leg's build step ever regresses, leaving the offload
+// unexercised while the run reports success -- the exact silent-skip a prior round
+// hit. So the primary leg sets PSILINK_REQUIRE_WORKER_BUILD=1, which turns a missing
+// bundle into a hard failure here rather than a skip. This mirrors
+// PSILINK_SFTP_CHROOT_REQUIRED in cli_build_and_test.yaml, which likewise fails rather
+// than skips when its precondition is absent where it must hold. The var is unset in
+// the hardened/native legs (which intentionally do not build the CLI) and in local
+// src-only runs, so the suite still skips cleanly there.
+if (process.env.PSILINK_REQUIRE_WORKER_BUILD === "1" && !workerBuilt) {
+  throw new Error(
+    `PSILINK_REQUIRE_WORKER_BUILD=1 but the CLI worker bundle is absent at ` +
+      `${workerEntry}: the real-worker offload suite would silently skip. Build it ` +
+      `first with \`npm run build -w apps/cli\`.`,
+  );
+}
+const workerTest = test.skipIf(!workerBuilt);
 
 // Every worker this file spawns, so a test that fails before its own teardown
 // cannot leak a ref'd worker that would hold the vitest process open (the workers
@@ -47,38 +60,21 @@ interface SpawnedEngine {
   errors: unknown[];
 }
 
-// Spawn a real worker on the shipping bundle and wrap it as psiWorkerHost.ts does,
-// but expose the Worker so a test can observe its teardown directly.
+// Spawn a real worker on the shipping bundle and wrap it through the SAME
+// createWorkerThreadHandle production uses, so this test exercises the real host-side
+// wiring (including the exit-code handling: a worker terminated before it finishes
+// starting exits 0, a started one exits 1, so a fault is any exit WE did not initiate,
+// not any nonzero code) rather than a hand-rolled mirror that could drift from it. The
+// Worker is returned so a test can drive and observe its teardown directly; a separate
+// 'error' listener records faults for assertions -- an independent observer, not a
+// reimplementation of the handle's own error routing (Node allows many listeners).
 function spawnEngine(role: "starter" | "joiner", id: string): SpawnedEngine {
   const worker = new Worker(workerEntry, { workerData: { role, id } });
   spawned.push(worker);
   const errors: unknown[] = [];
-  // Mirror psiWorkerHost.ts, including its exit handling: an exit's CODE is
-  // unreliable -- a worker terminated before it finishes starting exits 0, a
-  // started one exits 1 -- so a fault is any exit WE did not initiate, not any
-  // nonzero code. (Gating on `code !== 0` here would let an immediate terminate,
-  // which exits 0, leave a pending call hanging.)
-  let terminating = false;
-  const handle: PsiWorkerHandle = {
-    postMessage: (request: PsiWorkerRequest) => worker.postMessage(request),
-    setHandlers: ({ onMessage, onError }) => {
-      worker.on("message", (response: PsiWorkerResponse) =>
-        onMessage(response),
-      );
-      worker.on("error", (error) => {
-        errors.push(error);
-        onError(error);
-      });
-      worker.on("exit", () => {
-        if (!terminating) onError(new Error("PSI worker exited unexpectedly"));
-      });
-    },
-    terminate: () => {
-      terminating = true;
-      void worker.terminate();
-    },
-  };
-  return { engine: new WorkerPsiEngine(handle), worker, errors };
+  worker.on("error", (error) => errors.push(error));
+  const engine = new WorkerPsiEngine(createWorkerThreadHandle(worker));
+  return { engine, worker, errors };
 }
 
 // Drive the full engine round-trip in the participant's order and return the

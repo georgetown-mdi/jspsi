@@ -50,19 +50,30 @@ export function createPsiEngine(
   return new InProcessPsiEngine(library, role, id);
 }
 
-function spawnWorkerPsiEngine(
-  entry: string,
-  role: "starter" | "joiner",
-  id: string,
-): WorkerPsiEngine {
-  // The worker exposes gc() for the single-pass memory relief itself, at startup
-  // (see psiWorker.worker.ts): --expose-gc cannot be passed through a worker's
-  // execArgv (Node rejects it), so nothing gc-related is set here.
-  const worker = new Worker(entry, { workerData: { role, id } });
-  // The worker is deliberately NOT unref'd: while crypto is in flight the process
-  // must stay alive, exactly as the synchronous masking kept it. dispose() (driven
-  // by the exchange's teardown finally) calls terminate(), which is what releases
-  // the process at the end -- so a ref'd worker handle never outlives the exchange.
+// The minimal worker_threads Worker surface {@link createWorkerThreadHandle} drives.
+// Node's Worker satisfies it structurally; a unit test supplies a fake so the failure
+// routing below can be exercised deterministically -- a real 'messageerror' cannot be
+// provoked with today's cloneable payloads.
+interface WorkerThreadLike {
+  on(event: "message", listener: (value: PsiWorkerResponse) => void): void;
+  on(event: "error", listener: (error: unknown) => void): void;
+  on(event: "messageerror", listener: (error: unknown) => void): void;
+  on(event: "exit", listener: (code: number) => void): void;
+  postMessage(value: PsiWorkerRequest): void;
+  terminate(): unknown;
+}
+
+/**
+ * Wrap a worker_threads Worker as the runtime-agnostic {@link PsiWorkerHandle} the
+ * {@link WorkerPsiEngine} drives. This is the SINGLE definition of the host-side event
+ * wiring -- message-reply routing plus the error / messageerror / exit failure paths:
+ * the real-worker integration test wraps an actual Worker through it and a unit test
+ * wraps a fake, so neither re-implements a mirror that can drift from production (the
+ * drift that once let a broken exit handler ship untested).
+ */
+export function createWorkerThreadHandle(
+  worker: WorkerThreadLike,
+): PsiWorkerHandle {
   // Set when dispose() drives the teardown, so the worker's own 'exit' event is
   // recognized as the expected stop rather than a crash. terminate() reports a
   // NONZERO exit code (1) for a worker that had started serving -- indistinguishable
@@ -71,7 +82,7 @@ function spawnWorkerPsiEngine(
   // dispose() has already failed every pending call before terminating, so an
   // expected exit must NOT re-enter onError.
   let terminating = false;
-  const handle: PsiWorkerHandle = {
+  return {
     postMessage: (request: PsiWorkerRequest) => worker.postMessage(request),
     setHandlers: ({ onMessage, onError }) => {
       worker.on("message", (response: PsiWorkerResponse) =>
@@ -98,5 +109,20 @@ function spawnWorkerPsiEngine(
       void worker.terminate();
     },
   };
-  return new WorkerPsiEngine(handle);
+}
+
+function spawnWorkerPsiEngine(
+  entry: string,
+  role: "starter" | "joiner",
+  id: string,
+): WorkerPsiEngine {
+  // The worker exposes gc() for the single-pass memory relief itself, at startup
+  // (see psiWorker.worker.ts): --expose-gc cannot be passed through a worker's
+  // execArgv (Node rejects it), so nothing gc-related is set here.
+  const worker = new Worker(entry, { workerData: { role, id } });
+  // The worker is deliberately NOT unref'd: while crypto is in flight the process
+  // must stay alive, exactly as the synchronous masking kept it. dispose() (driven by
+  // the exchange's teardown finally) calls terminate(), which is what releases the
+  // process at the end -- so a ref'd worker handle never outlives the exchange.
+  return new WorkerPsiEngine(createWorkerThreadHandle(worker));
 }
