@@ -712,10 +712,11 @@ export async function runExchange(
           );
   } finally {
     // Dispose the participant's crypto engine once the PSI phase is done (or has
-    // thrown); the participant is not used past this point. For the default
-    // in-process engine this is a no-op, but the CLI's worker-backed engine
-    // terminates its worker_threads worker here, so a ref'd worker handle can never
-    // hold the process open at teardown (board item 208035324).
+    // thrown); the participant is not used past this point. The default in-process
+    // engine frees its library server/client objects here (the secret key among the
+    // WASM-heap state they hold), and the CLI's worker-backed engine terminates its
+    // worker_threads worker, so a ref'd worker handle can never hold the process
+    // open at teardown (board item 208035324).
     participant.dispose();
   }
 

@@ -65,8 +65,12 @@ export interface PsiEngine {
     responseBytes: Uint8Array,
   ): Promise<[Array<number>, Array<number>]>;
   /**
-   * Release engine resources. A no-op for the in-process engine (the library
-   * objects are garbage-collected); the worker-backed engine terminates its worker.
+   * Release engine resources. The in-process engine frees the library's server /
+   * client objects -- embind wrappers over WASM-heap C++ state, including the
+   * generated secret key, which JS garbage collection does NOT reclaim (only their
+   * explicit `delete()` does) -- bounding the key's lifetime to the exchange; the
+   * worker-backed engine terminates its worker (which frees that state with the
+   * whole isolate). Terminal: no other method may be called after dispose().
    */
   dispose(): void;
 }
@@ -87,6 +91,9 @@ export class InProcessPsiEngine implements PsiEngine {
   // The joiner's deserialized setup, held between receiveServerSetup and the
   // computeAssociationTable that consumes it. Undefined outside that window.
   private pendingSetup: DeserializedServerSetup | undefined;
+  // Latched by dispose() so freeing the library objects is idempotent: their
+  // embind delete() is not safe to call twice.
+  private disposed = false;
 
   constructor(library: PSILibrary, role: Config["role"], id: string) {
     this.library = library;
@@ -176,6 +183,15 @@ export class InProcessPsiEngine implements PsiEngine {
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     this.pendingSetup = undefined;
+    // Free the WASM-heap C++ state behind the embind server / client wrappers --
+    // including the generated secret key -- which JS GC does not reclaim. dispose()
+    // is terminal (the participant is not used past it; see exchange.ts), so no
+    // later call can touch the freed objects, and the disposed guard above keeps a
+    // repeated dispose() from a double delete().
+    this.server?.delete();
+    this.client?.delete();
   }
 }
