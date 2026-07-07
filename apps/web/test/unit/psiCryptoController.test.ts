@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 
 import {
   createBrowserPsiEngineFactory,
+  createBufferingRequestRouter,
   createPsiCryptoWorkerHandle,
   decodePsiWorkerInit,
   encodePsiWorkerInit,
@@ -224,5 +225,70 @@ describe("createBrowserPsiEngineFactory", () => {
       engine.dispose();
       expect(workers[0].terminations).toBe(1);
     });
+  });
+});
+
+describe("createBufferingRequestRouter", () => {
+  // Flush pending microtasks so the router's startDispatcher().then() settles before
+  // an assertion (a setTimeout(0) drains the microtask queue). setTimeout, not
+  // Math.random/Date, so nothing non-deterministic enters the test.
+  const tick = (): Promise<void> =>
+    new Promise((resolve) => setTimeout(resolve, 0));
+
+  const req = (id: number): PsiWorkerRequest => ({
+    id,
+    body: { method: "createClientRequest", values: [String(id)] },
+  });
+
+  test("buffers requests during load, then drains them in order and routes the rest directly", async () => {
+    const dispatched: Array<number> = [];
+    // A dispatcher that resolves only when the test says so, so requests can be posted
+    // during the load window (before the engine is ready).
+    let resolveStart!: (dispatch: (request: PsiWorkerRequest) => void) => void;
+    const startDispatcher = (): Promise<(request: PsiWorkerRequest) => void> =>
+      new Promise((resolve) => {
+        resolveStart = resolve;
+      });
+    const failRequest = vi.fn();
+    const route = createBufferingRequestRouter(startDispatcher, failRequest);
+
+    // Arrive while the engine is still loading -> buffered, nothing dispatched yet.
+    route(req(0));
+    route(req(1));
+    expect(dispatched).toEqual([]);
+
+    // The engine loads: buffered requests drain in the order they arrived.
+    resolveStart((request) => dispatched.push(request.id));
+    await tick();
+    expect(dispatched).toEqual([0, 1]);
+
+    // A request arriving after load routes straight through, not through the buffer.
+    route(req(2));
+    expect(dispatched).toEqual([0, 1, 2]);
+    expect(failRequest).not.toHaveBeenCalled();
+  });
+
+  test("fails buffered and subsequent requests when the engine never loads", async () => {
+    // The load-failure signal a real WASM-load failure would trigger: buffered and
+    // later requests are answered with the failure rather than left to hang. Only a
+    // fake dispatcher can drive this on demand (a real WASM load always succeeds here).
+    let rejectStart!: (error: unknown) => void;
+    const startDispatcher = (): Promise<(request: PsiWorkerRequest) => void> =>
+      new Promise((_resolve, reject) => {
+        rejectStart = reject;
+      });
+    const failRequest = vi.fn();
+    const route = createBufferingRequestRouter(startDispatcher, failRequest);
+
+    route(req(0)); // buffered while loading
+    rejectStart(new Error("WASM engine failed to load"));
+    await tick();
+    // The buffered request is failed fast with the load error, not left hanging.
+    expect(failRequest).toHaveBeenCalledWith(0, "WASM engine failed to load");
+
+    // A request arriving after the failure also fails fast rather than hanging.
+    route(req(1));
+    expect(failRequest).toHaveBeenCalledWith(1, "WASM engine failed to load");
+    expect(failRequest).toHaveBeenCalledTimes(2);
   });
 });

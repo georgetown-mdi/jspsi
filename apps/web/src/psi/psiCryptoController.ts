@@ -67,6 +67,53 @@ export function decodePsiWorkerInit(name: string): PsiWorkerInit {
   return JSON.parse(name) as PsiWorkerInit;
 }
 
+/**
+ * The worker-side request router for {@link ./psiCrypto.worker}: buffers incoming
+ * crypto requests until an asynchronously-loaded dispatcher is ready, then drains
+ * them in order and routes the rest straight through. If the dispatcher fails to load
+ * (a WASM-engine load failure), every buffered and subsequent request is answered with
+ * a failure reply through `failRequest` -- so the host's pending call fails fast rather
+ * than hanging on a worker that will never reply, the browser counterpart of the CLI
+ * worker's exit(1)-on-load-failure signal. `startDispatcher` cannot both resolve and
+ * reject, so a request is buffered-and-drained XOR failed, never both, and never
+ * double-answered.
+ *
+ * Extracted here (Node-loadable) rather than inlined in the browser-only worker entry
+ * so this buffer / drain / fail state machine -- including the load-failure path a real
+ * WASM load will not exercise on demand -- is unit-testable with a fake dispatcher,
+ * exactly as the host-side {@link createPsiCryptoWorkerHandle} is. `startDispatcher`
+ * resolves to the ready request handler; the worker wires it to load the WASM engine
+ * and call `servePsiWorker`.
+ */
+export function createBufferingRequestRouter(
+  startDispatcher: () => Promise<(request: PsiWorkerRequest) => void>,
+  failRequest: (id: number, error: string) => void,
+): (request: PsiWorkerRequest) => void {
+  let dispatch: ((request: PsiWorkerRequest) => void) | undefined;
+  const buffered: Array<PsiWorkerRequest> = [];
+  let loadFailure: string | undefined;
+  void startDispatcher().then(
+    (ready) => {
+      for (const request of buffered) ready(request);
+      buffered.length = 0;
+      dispatch = ready;
+    },
+    (error: unknown) => {
+      loadFailure = error instanceof Error ? error.message : String(error);
+      for (const request of buffered) failRequest(request.id, loadFailure);
+      buffered.length = 0;
+    },
+  );
+  return (request: PsiWorkerRequest) => {
+    if (loadFailure !== undefined) {
+      failRequest(request.id, loadFailure);
+      return;
+    }
+    if (dispatch) dispatch(request);
+    else buffered.push(request);
+  };
+}
+
 /** Turn a worker `onerror` / `onmessageerror` event into an Error. The event is a
  * browser ErrorEvent whose `message` names the fault; fall back to a fixed message
  * when it carries none. */
