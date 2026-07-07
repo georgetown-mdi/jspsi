@@ -200,6 +200,14 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // Not routed through tracked(): the heartbeat owns its own in-flight state
   // (`pinging`) and only ever pings when no tracked op is running.
   private sendKeepalive(): Promise<void> {
+    // Don't issue a keepalive on a session already known dead, mirroring the entry
+    // guard every other server-driven op carries. The fatal-'error' path also stops
+    // the heartbeat, so a beat should never reach here after a fatal error; this
+    // keeps the invariant uniform (and robust to any future change in that ordering)
+    // rather than posting realPath onto a destroyed channel. The heartbeat swallows
+    // the rejection, so it never surfaces to the exchange.
+    const dead = this.deadSessionError("keepalive", ".");
+    if (dead) return Promise.reject(dead);
     return withSftpOperationDeadline(
       this.client.realPath(".").then(() => {}),
       this.stallDeadlineMs,

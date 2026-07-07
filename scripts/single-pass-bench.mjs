@@ -175,9 +175,11 @@ async function runRates(argv) {
     const sVals = Array.from({ length: D }, (_, i) => `s_${i}`);
     const cVals = Array.from({ length: D }, (_, i) => `c_${i}`);
 
-    // The masking building blocks are async (the CLI runs them off-thread through
-    // a worker-backed engine; board item 208035324). Awaiting each in turn still
-    // times one operation at a time, so the per-op microsecond figures stand.
+    // The masking building blocks are async as of board item 208035324 (so the CLI
+    // can run them off-thread through a worker-backed engine). This bench passes no
+    // engine, so the participants use the default in-process engine and the crypto
+    // still runs on THIS thread; awaiting each call in turn times one operation at a
+    // time, so the per-op microsecond figures stand.
     let t = performance.now();
     const { setup } = await server.createServerSetup(sVals);
     const tSetup = performance.now() - t;

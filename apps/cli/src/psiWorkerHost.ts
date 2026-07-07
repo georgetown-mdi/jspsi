@@ -63,6 +63,14 @@ function spawnWorkerPsiEngine(
   // must stay alive, exactly as the synchronous masking kept it. dispose() (driven
   // by the exchange's teardown finally) calls terminate(), which is what releases
   // the process at the end -- so a ref'd worker handle never outlives the exchange.
+  // Set when dispose() drives the teardown, so the worker's own 'exit' event is
+  // recognized as the expected stop rather than a crash. terminate() reports a
+  // NONZERO exit code (1) for a worker that had started serving -- indistinguishable
+  // by code from the startup process.exit(1) in psiWorker.worker.ts -- so the exit
+  // code cannot tell a clean disposal from a fault; whether WE asked it to stop can.
+  // dispose() has already failed every pending call before terminating, so an
+  // expected exit must NOT re-enter onError.
+  let terminating = false;
   const handle: PsiWorkerHandle = {
     postMessage: (request: PsiWorkerRequest) => worker.postMessage(request),
     setHandlers: ({ onMessage, onError }) => {
@@ -71,14 +79,16 @@ function spawnWorkerPsiEngine(
       );
       worker.on("error", (error) => onError(error));
       worker.on("exit", (code) => {
-        // Exit 0 follows a clean terminate(); any other code is a crash or a failed
-        // startup, which must fail the exchange rather than let it hang on a dead
-        // worker.
-        if (code !== 0)
+        // A worker that exits on its own -- a failed startup or a crash -- must fail
+        // the exchange rather than let it hang on a dead worker. A terminate()'d
+        // worker also exits nonzero, so an exit is a fault only when we did not
+        // initiate it; an expected teardown is one dispose() has already settled.
+        if (!terminating)
           onError(new Error(`PSI worker exited with code ${code}`));
       });
     },
     terminate: () => {
+      terminating = true;
       void worker.terminate();
     },
   };

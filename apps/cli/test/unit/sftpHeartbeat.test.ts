@@ -203,4 +203,56 @@ describe("SftpHeartbeat", () => {
       vi.useRealTimers();
     }
   });
+
+  test("a reconnect while a prior keepalive is still in flight still beats, and the stale ping is inert", async () => {
+    vi.useFakeTimers();
+    try {
+      const { ping, calls } = makePing();
+      const hb = new SftpHeartbeat({ ping, log: log(), intervalMs: 1_000 });
+      hb.start();
+      // A beat fires and its keepalive is still unanswered (the server is slow)...
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(ping).toHaveBeenCalledTimes(1);
+      // ...when a fatal error tears the session down mid-ping and the adapter then
+      // reconnects. The new session must beat on its own interval, not stay
+      // suppressed by the prior cycle's stuck `pinging` flag.
+      hb.stop();
+      hb.start();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(ping).toHaveBeenCalledTimes(2);
+      // The interrupted first ping settling late is inert: it must not reschedule
+      // onto the new session (which would stack a second, racing beat). With the new
+      // session's own ping still in flight (so no beat is armed on a timer), nothing
+      // else can fire, so the count holds.
+      calls[0].resolve();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(ping).toHaveBeenCalledTimes(2);
+      // The new session's own ping still drives its next beat normally.
+      calls[1].resolve();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(ping).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("start() clears a stuck in-flight count left by a torn-down session", async () => {
+    vi.useFakeTimers();
+    try {
+      const { ping } = makePing();
+      const hb = new SftpHeartbeat({ ping, log: log(), intervalMs: 1_000 });
+      hb.start();
+      // An operation is in flight when the session is torn down (a fatal error),
+      // and is never balanced by opSettled on that dead session.
+      hb.opStarted();
+      hb.stop();
+      // Reconnect: the new session must not inherit the stale in-flight count, which
+      // would make every tick skip the beat.
+      hb.start();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(ping).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

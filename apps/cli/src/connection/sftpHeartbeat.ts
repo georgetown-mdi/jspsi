@@ -111,6 +111,11 @@ export class SftpHeartbeat {
   // Latched by stop(): a fired-but-not-yet-run tick, and a ping settling after
   // teardown, both no-op once set so nothing reschedules past stop().
   private stopped = false;
+  // Bumped by every start()/stop(). A ping issued in one cycle captures the epoch;
+  // its late settlement is ignored once the epoch has moved on, so an in-flight ping
+  // that outlives a teardown or a reconnect can neither clear the new cycle's
+  // `pinging` flag nor reschedule a beat onto it.
+  private epoch = 0;
 
   constructor(options: SftpHeartbeatOptions) {
     this.ping = options.ping;
@@ -125,6 +130,13 @@ export class SftpHeartbeat {
    */
   start(): void {
     this.stopped = false;
+    // A fresh cycle: advance the epoch (so an in-flight ping from the prior cycle is
+    // inert) and drop the transient state a torn-down session may have left set -- a
+    // stuck `pinging`, or an `inFlight` an interrupted op never balanced -- either of
+    // which would otherwise make every tick on the new session skip its beat.
+    this.epoch += 1;
+    this.pinging = false;
+    this.inFlight = 0;
     this.lastActivityAt = Date.now();
     this.schedule(this.intervalMs);
   }
@@ -149,6 +161,11 @@ export class SftpHeartbeat {
    */
   stop(): void {
     this.stopped = true;
+    // Advance the epoch so any in-flight ping's late settlement is inert, and drop
+    // the transient counters so a later start() begins from a clean slate.
+    this.epoch += 1;
+    this.pinging = false;
+    this.inFlight = 0;
     clearTimeout(this.timer);
     this.timer = undefined;
   }
@@ -186,6 +203,10 @@ export class SftpHeartbeat {
 
   private sendPing(): void {
     this.pinging = true;
+    // Bind this ping to the current cycle; a stop()/start() (teardown or reconnect)
+    // since it was issued advances the epoch, making the settlement below a no-op so
+    // a stale ping cannot clear the new cycle's `pinging` flag or reschedule onto it.
+    const epoch = this.epoch;
     void this.ping()
       .then(() => this.log.trace("SFTP keepalive sent"))
       .catch((err: unknown) =>
@@ -194,6 +215,7 @@ export class SftpHeartbeat {
         ),
       )
       .finally(() => {
+        if (epoch !== this.epoch) return;
         this.pinging = false;
         this.lastActivityAt = Date.now();
         // A ping that settled after stop() must not re-arm a torn-down heartbeat.
