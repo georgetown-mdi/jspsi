@@ -78,6 +78,12 @@ function spawnWorkerPsiEngine(
         onMessage(response),
       );
       worker.on("error", (error) => onError(error));
+      // A message that fails structured-clone deserialization surfaces as
+      // 'messageerror', NOT 'error'; with no listener it is silently dropped and the
+      // pending call would hang. Route it to onError so the call fails fast. Not
+      // reachable with today's cloneable payloads (byte arrays and index lists), but
+      // a boundary hardening against a future non-cloneable reply.
+      worker.on("messageerror", (error) => onError(error));
       worker.on("exit", (code) => {
         // A worker that exits on its own -- a failed startup or a crash -- must fail
         // the exchange rather than let it hang on a dead worker. A terminate()'d

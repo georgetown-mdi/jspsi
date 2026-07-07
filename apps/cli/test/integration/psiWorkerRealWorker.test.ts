@@ -53,6 +53,12 @@ function spawnEngine(role: "starter" | "joiner", id: string): SpawnedEngine {
   const worker = new Worker(workerEntry, { workerData: { role, id } });
   spawned.push(worker);
   const errors: unknown[] = [];
+  // Mirror psiWorkerHost.ts, including its exit handling: an exit's CODE is
+  // unreliable -- a worker terminated before it finishes starting exits 0, a
+  // started one exits 1 -- so a fault is any exit WE did not initiate, not any
+  // nonzero code. (Gating on `code !== 0` here would let an immediate terminate,
+  // which exits 0, leave a pending call hanging.)
+  let terminating = false;
   const handle: PsiWorkerHandle = {
     postMessage: (request: PsiWorkerRequest) => worker.postMessage(request),
     setHandlers: ({ onMessage, onError }) => {
@@ -63,12 +69,14 @@ function spawnEngine(role: "starter" | "joiner", id: string): SpawnedEngine {
         errors.push(error);
         onError(error);
       });
-      worker.on("exit", (code) => {
-        if (code !== 0)
-          onError(new Error(`PSI worker exited with code ${code}`));
+      worker.on("exit", () => {
+        if (!terminating) onError(new Error("PSI worker exited unexpectedly"));
       });
     },
-    terminate: () => void worker.terminate(),
+    terminate: () => {
+      terminating = true;
+      void worker.terminate();
+    },
   };
   return { engine: new WorkerPsiEngine(handle), worker, errors };
 }
@@ -163,6 +171,26 @@ workerTest(
     await expect(starter.engine.createClientRequest(["w"])).rejects.toThrow(
       /disposed/,
     );
+  },
+  30_000,
+);
+
+workerTest(
+  "a call outstanding when the worker exits unexpectedly settles rather than hanging",
+  async () => {
+    const starter = spawnEngine("starter", "exit-mid-call");
+    // Issue a masking op and, without awaiting it, kill the worker out from under
+    // it -- an unexpected exit (a crash's exit reaches the same handler). Whether
+    // the op finished just before the kill (resolved) or the exit rejected the
+    // pending call via onError -> failAll, it must SETTLE; the one outcome the
+    // WorkerPsiEngine's fail-fast paths forbid is a call left hanging on a dead
+    // worker, which would time this test out.
+    const settled = starter.engine.createServerSetup(["a", "b", "c"]).then(
+      () => "resolved",
+      () => "rejected",
+    );
+    await starter.worker.terminate();
+    await expect(settled).resolves.toMatch(/^(resolved|rejected)$/);
   },
   30_000,
 );
