@@ -26,6 +26,7 @@ import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
 import { buildRotatedKeyFile, saveKeyFile } from "./keyFile";
 import { preflightKeyFilePath } from "./keyFilePreflight";
 import { loadCliPsiBackend } from "./psiBackend";
+import { createPsiEngine } from "./psiWorkerHost";
 import { writeExchangeRecord, type RecordOutput } from "./recordFile";
 import { writeOutput } from "./util/cli";
 import { logRuntimeEnv } from "./util/runtimeEnv";
@@ -845,6 +846,11 @@ export async function runProtocol(
         prepared,
         {
           psiLibrary,
+          // Run the PSI masking in a worker thread so a long round keeps the
+          // event-loop-owning thread responsive for the SFTP heartbeat and the
+          // liveness timers (board item 208035324). Falls back to in-process when
+          // the bundled worker is absent (dev / tests); see createPsiEngine.
+          psiEngineFactory: (role, id) => createPsiEngine(psiLibrary, role, id),
           verbosity,
           saveIntent,
           // Advertise the observed SFTP host key for cross-party reconciliation
