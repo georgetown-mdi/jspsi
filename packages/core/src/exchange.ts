@@ -648,17 +648,6 @@ export async function runExchange(
     receiverRecordCount,
   );
 
-  const psiRole = isReceiver ? "joiner" : "starter";
-  const psiId = isReceiver ? "client" : "server";
-  const participant = new PSIParticipant(
-    psiId,
-    psiLibrary,
-    { role: psiRole, verbose: verbosity },
-    elementBounds,
-    undefined,
-    options.psiEngineFactory?.(psiRole, psiId),
-  );
-
   // Single-pass association-table withholding, derived from symmetric
   // authenticated session state so both parties reach the same verdict: when the
   // resolved SENDER is a non-receiving helper (expectsOutput false) disclosing no
@@ -688,6 +677,24 @@ export async function runExchange(
   // partner record count too: it (with this party's count and the agreed key
   // count) derives the per-exchange frame cap and the abort-if-over-ceiling gate,
   // identically on both parties (see linkViaSinglePassPSI and frameSize.ts).
+  //
+  // Construct the participant LAST, as the final statement before the try that
+  // disposes it. Its crypto engine is a worker_threads worker in the CLI (spawned by
+  // psiEngineFactory), so keeping construction adjacent to the guarding try means no
+  // statement can throw between the worker being spawned and the finally that
+  // terminates it -- the engine can never be orphaned. Nothing above depends on the
+  // participant, so this ordering is free.
+  const psiRole = isReceiver ? "joiner" : "starter";
+  const psiId = isReceiver ? "client" : "server";
+  const participant = new PSIParticipant(
+    psiId,
+    psiLibrary,
+    { role: psiRole, verbose: verbosity },
+    elementBounds,
+    undefined,
+    options.psiEngineFactory?.(psiRole, psiId),
+  );
+
   let associationTable: AssociationTable;
   try {
     associationTable =
