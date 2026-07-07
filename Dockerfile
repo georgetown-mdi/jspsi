@@ -35,6 +35,13 @@ RUN --mount=type=cache,target=/root/.npm \
 
 COPY --from=builder /build/apps/cli/dist/index.js ./psi-link
 RUN chmod +x ./psi-link
+# The PSI crypto worker entry must sit beside the CLI entry: psiWorkerHost.ts
+# resolves it as `<__dirname>/psiWorker.worker.js` (here /app), and without it
+# createPsiEngine silently falls back to the in-process engine -- so the whole
+# off-thread offload (and the SFTP heartbeat that depends on the event loop being
+# free during a round) would not run in the shipped image (board item 208035324).
+# Keep its name; it is spawned as a worker, never executed, so no shebang/chmod.
+COPY --from=builder /build/apps/cli/dist/psiWorker.worker.js ./psiWorker.worker.js
 
 WORKDIR /work
 
