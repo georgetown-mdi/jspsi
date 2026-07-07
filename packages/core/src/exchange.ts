@@ -678,25 +678,33 @@ export async function runExchange(
   // count) derives the per-exchange frame cap and the abort-if-over-ceiling gate,
   // identically on both parties (see linkViaSinglePassPSI and frameSize.ts).
   //
-  // Construct the participant LAST, as the final statement before the try that
-  // disposes it. Its crypto engine is a worker_threads worker in the CLI (spawned by
-  // psiEngineFactory), so keeping construction adjacent to the guarding try means no
-  // statement can throw between the worker being spawned and the finally that
-  // terminates it -- the engine can never be orphaned. Nothing above depends on the
+  // Build the crypto engine, then the participant, INSIDE the disposing try. The
+  // engine psiEngineFactory returns is a worker (a worker_threads worker in the CLI, a
+  // Web Worker in the browser) that must be terminated on every exit path. Evaluating
+  // the factory as a constructor argument would spawn that worker BEFORE the
+  // PSIParticipant constructor runs, so a throw in the constructor would orphan it;
+  // building the engine first and disposing it in the finally when the participant
+  // never took ownership makes "the worker is never orphaned" a structural guarantee
+  // rather than a comment resting on the constructor happening not to throw. The
+  // default in-process engine is built inside the constructor from `library`, so
+  // `engine` is undefined on that path and the else-branch is a no-op (a constructor
+  // throw there allocates nothing to dispose). Nothing above depends on the
   // participant, so this ordering is free.
   const psiRole = isReceiver ? "joiner" : "starter";
   const psiId = isReceiver ? "client" : "server";
-  const participant = new PSIParticipant(
-    psiId,
-    psiLibrary,
-    { role: psiRole, verbose: verbosity },
-    elementBounds,
-    undefined,
-    options.psiEngineFactory?.(psiRole, psiId),
-  );
+  const engine = options.psiEngineFactory?.(psiRole, psiId);
 
+  let participant: PSIParticipant | undefined;
   let associationTable: AssociationTable;
   try {
+    participant = new PSIParticipant(
+      psiId,
+      psiLibrary,
+      { role: psiRole, verbose: verbosity },
+      elementBounds,
+      undefined,
+      engine,
+    );
     associationTable =
       linkageTerms.linkageStrategy === "single-pass"
         ? await linkViaSinglePassPSI(
@@ -718,13 +726,16 @@ export async function runExchange(
             onStage,
           );
   } finally {
-    // Dispose the participant's crypto engine once the PSI phase is done (or has
-    // thrown); the participant is not used past this point. The default in-process
-    // engine frees its library server/client objects here (the secret key among the
-    // WASM-heap state they hold), and the CLI's worker-backed engine terminates its
-    // worker_threads worker, so a ref'd worker handle can never hold the process
-    // open at teardown (board item 208035324).
-    participant.dispose();
+    // Dispose the crypto engine once the PSI phase is done (or has thrown); the
+    // participant is not used past this point. Disposing the participant frees its
+    // engine -- the default in-process engine frees its library server/client objects
+    // (the secret key among the WASM-heap state they hold), and a worker-backed engine
+    // terminates its worker, so a ref'd worker handle can never hold the process open
+    // at teardown. If the constructor threw before the participant took ownership,
+    // dispose the bare injected engine so the worker psiEngineFactory already spawned
+    // is still terminated, never orphaned (board item 208035324).
+    if (participant !== undefined) participant.dispose();
+    else engine?.dispose();
   }
 
   // Send-gate: transmit payload only to a partner entitled to the result. A party

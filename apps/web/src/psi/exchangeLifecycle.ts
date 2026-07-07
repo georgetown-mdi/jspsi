@@ -6,6 +6,8 @@ import {
 } from "@psilink/core";
 
 import { authenticateExchange } from "./authenticateExchange";
+import { createBrowserPsiEngineFactory } from "./psiCryptoController";
+import { defaultSpawnPsiCryptoWorker } from "./psiCryptoWorkerClient";
 import { openPeerMessageConnection } from "./peerMessageConnection";
 
 import type { DataConnection } from "peerjs";
@@ -378,6 +380,14 @@ export async function runExchangeLifecycle(
     const psiLibrary = await psi;
     const result = await runExchange(mc, exchangeRole, prepared, {
       psiLibrary,
+      // Run the PSI masking in a Web Worker off the UI thread, so the tab stays
+      // responsive and the WebRTC peer keepalives keep firing during a round (board
+      // item 209368277). runExchange disposes this engine on every exchange-end path
+      // (success, error, abort), which terminates the worker -- no leak. psiLibrary
+      // above stays the in-process fallback core requires; the worker loads its own.
+      psiEngineFactory: createBrowserPsiEngineFactory(
+        defaultSpawnPsiCryptoWorker,
+      ),
       onStage: emitStage,
     });
     // The privacy-sensitive exchange has succeeded here. A failure building the
