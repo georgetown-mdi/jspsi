@@ -225,10 +225,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // opStarted before it runs, opSettled when it settles (either way). This both
   // resets the idle window on real traffic and marks the session busy, so the
   // heartbeat never issues a concurrent keepalive while an operation is on the
-  // wire. finally() preserves the operation's value and rejection unchanged.
+  // wire. finally() preserves the operation's value and rejection unchanged. The
+  // epoch token opStarted returns is handed back to opSettled so an op whose session
+  // was torn down mid-flight (a reconnect advanced the heartbeat's epoch) cannot
+  // decrement the new session's in-flight count when it finally settles.
   private tracked<T>(op: Promise<T>): Promise<T> {
-    this.heartbeat.opStarted();
-    return op.finally(() => this.heartbeat.opSettled());
+    const epoch = this.heartbeat.opStarted();
+    return op.finally(() => this.heartbeat.opSettled(epoch));
   }
 
   // Layers the non-fatal slow-operation warning (observability) over an in-flight

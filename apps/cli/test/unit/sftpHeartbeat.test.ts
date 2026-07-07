@@ -70,12 +70,12 @@ describe("SftpHeartbeat", () => {
       // A long operation spans the interval boundary: the operation itself keeps
       // the session alive, so no concurrent keepalive is issued (which would be
       // an unsafe second op on the one ssh2-sftp-client connection).
-      hb.opStarted();
+      const op = hb.opStarted();
       await vi.advanceTimersByTimeAsync(5_000);
       expect(ping).not.toHaveBeenCalled();
       // Once it settles the idle clock restarts; a keepalive follows one interval
       // of genuine quiet later, not immediately.
-      hb.opSettled();
+      hb.opSettled(op);
       await vi.advanceTimersByTimeAsync(999);
       expect(ping).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
@@ -94,8 +94,8 @@ describe("SftpHeartbeat", () => {
       // A brief operation lands halfway through the window and resets the clock,
       // so the pending beat must not fire at the original interval.
       await vi.advanceTimersByTimeAsync(500);
-      hb.opStarted();
-      hb.opSettled();
+      const op = hb.opStarted();
+      hb.opSettled(op);
       await vi.advanceTimersByTimeAsync(500);
       expect(ping).not.toHaveBeenCalled();
       // A full interval after the activity, the beat fires.
@@ -251,6 +251,33 @@ describe("SftpHeartbeat", () => {
       hb.start();
       await vi.advanceTimersByTimeAsync(1_000);
       expect(ping).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a stale operation settling after a reconnect does not decrement the new session's in-flight count", async () => {
+    vi.useFakeTimers();
+    try {
+      const { ping } = makePing();
+      const hb = new SftpHeartbeat({ ping, log: log(), intervalMs: 1_000 });
+      hb.start();
+      // Session A issues an operation whose settlement is deferred -- a large
+      // transfer, or a request buffered on a channel that is about to die.
+      const staleOp = hb.opStarted();
+      // A fatal error tears session A down, then the adapter reconnects on the SAME
+      // heartbeat instance (stop() zeroes the count; start() re-arms).
+      hb.stop();
+      hb.start();
+      // Session B now has a genuine long operation in flight, so no keepalive may
+      // fire while it runs (a second concurrent op on the one client is unsafe).
+      hb.opStarted();
+      // Session A's deferred operation finally settles. Its epoch has moved on, so
+      // it must NOT decrement session B's in-flight count -- a stale decrement would
+      // zero the count and let a beat fire concurrently with session B's live op.
+      hb.opSettled(staleOp);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(ping).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
