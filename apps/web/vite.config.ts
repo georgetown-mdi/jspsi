@@ -238,5 +238,16 @@ export default defineConfig((_configEnv) => {
       tsconfigPaths: true,
       alias: srcAliases,
     },
+    optimizeDeps: {
+      // Pre-bundle the WASM PSI worker engine at dev-server startup. It is imported
+      // only by the off-main-thread PSI crypto worker (src/psi/psiCrypto.worker.ts),
+      // which Vite discovers lazily on the worker's first spawn -- so without this,
+      // that first spawn triggers a dependency re-optimize and a full page reload
+      // mid-exchange (and mid browser test, where the reload fails the run). Listing
+      // it here optimizes it up front, like the main-thread `psi_wasm_web` engine the
+      // app entry already pulls in at startup. Dev/test only; the production build
+      // code-splits the worker and its engine, so this does not affect `vite build`.
+      include: ["@openmined/psi.js/psi_wasm_worker"],
+    },
   };
 });
