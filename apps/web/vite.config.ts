@@ -34,6 +34,18 @@ const srcAliases = {
   "@": path.resolve(__dirname, "src"),
 };
 
+// The WASM PSI worker engine. It is imported only by src/psi/psiCrypto.worker.ts, a
+// `new Worker(new URL(...))` entry Vite's dependency scanner does not traverse, so it
+// is not discovered at startup. Without pre-bundling it in `optimizeDeps.include`, the
+// worker's first spawn triggers a dependency re-optimize and a full page reload
+// mid-exchange -- which fails a browser test (the reloaded exchange errors) and reloads
+// a `npm run dev` session. It must be listed on BOTH the browser test project (below)
+// AND the dev server via the root `optimizeDeps` (further below), because the inline
+// vitest projects do not inherit the root config -- the same reason srcAliases is
+// duplicated. Dev/test only; the production build code-splits the worker and inlines
+// its WASM, so `optimizeDeps` never affects `vite build`.
+const psiWorkerWasmEngine = "@openmined/psi.js/psi_wasm_worker";
+
 // The PeerJS signaling server attaches its WebSocket `upgrade` handler only when
 // the /api/peerjs route module first runs usePeerServer() -- triggered by an HTTP
 // GET to /api/peerjs/id|peers. The real client dials the signaling WebSocket with
@@ -184,6 +196,11 @@ export default defineConfig((_configEnv) => {
           // browser project must resolve them since the inline projects do not
           // inherit the root `resolve`.
           resolve: { alias: srcAliases },
+          // Pre-bundle the PSI worker engine here too: this project runs the tests
+          // that spawn the crypto worker (exchangeLifecycle, psiCryptoWorker), and it
+          // does not inherit the root `optimizeDeps`, so without this its first spawn
+          // reloads the run on a cold optimizer cache (see psiWorkerWasmEngine).
+          optimizeDeps: { include: [psiWorkerWasmEngine] },
         },
       ],
     },
@@ -239,15 +256,11 @@ export default defineConfig((_configEnv) => {
       alias: srcAliases,
     },
     optimizeDeps: {
-      // Pre-bundle the WASM PSI worker engine at dev-server startup. It is imported
-      // only by the off-main-thread PSI crypto worker (src/psi/psiCrypto.worker.ts),
-      // which Vite discovers lazily on the worker's first spawn -- so without this,
-      // that first spawn triggers a dependency re-optimize and a full page reload
-      // mid-exchange (and mid browser test, where the reload fails the run). Listing
-      // it here optimizes it up front, like the main-thread `psi_wasm_web` engine the
-      // app entry already pulls in at startup. Dev/test only; the production build
-      // code-splits the worker and its engine, so this does not affect `vite build`.
-      include: ["@openmined/psi.js/psi_wasm_worker"],
+      // Pre-bundle the PSI worker engine for the dev server (`npm run dev`) so a first
+      // exchange does not reload the page. The browser test project sets its own copy,
+      // since inline vitest projects do not inherit this root config (see
+      // psiWorkerWasmEngine).
+      include: [psiWorkerWasmEngine],
     },
   };
 });
