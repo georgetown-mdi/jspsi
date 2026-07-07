@@ -5,9 +5,10 @@ title: "Pinned Dependency Internals and Upgrade Checklists"
 # Pinned dependency internals
 
 Two dependency stacks are reached past their public APIs, so their internals are
-load-bearing and their versions are exact-pinned. This document records the
-internal premises each stack rests on and the checklist to re-verify them before
-a bump merges. The review requirement itself is in
+load-bearing and their versions are exact-pinned; a third dependency, the PSI
+crypto addon, is a vendored local fork. This document records the internal
+premises each rests on and the checklist to re-verify them before a bump merges.
+The review requirement itself is in
 [CONTRIBUTING.md](../../CONTRIBUTING.md#dependency-policy); this is the spec-tier
 complement -- the premises and the procedure.
 
@@ -26,6 +27,22 @@ complement -- the premises and the procedure.
   precisely because the bound parses its wire format -- and pulled out of the
   routine Dependabot batch into a reviewed `webrtc-stack` group
   (`.github/dependabot.yml`).
+- **PSI crypto addon (`@openmined/psi.js`).** A psilink fork vendored as a local
+  `file:` tarball (`lib/openmined-psi.js-<version>.tgz`), not a registry package,
+  because it ships native N-API prebuilds and carries fork patches upstream does
+  not. Pinned by construction (a `file:` path resolves to exactly the committed
+  bytes); the review gate is the committed integrity sidecar and the crypto-code
+  review requirement. See [The vendored @openmined/psi.js addon](#the-vendored-openminedpsijs-addon).
+
+## The vendored @openmined/psi.js addon
+
+`@openmined/psi.js` is vendored as a local tarball (`lib/openmined-psi.js-<version>.tgz`, a `file:` dependency), not a registry package, because it is a psilink fork that ships **native N-API prebuilds** upstream does not (board item 199653275). The prebuilds cover the platforms the CLI deploys on -- Linux x64/arm64 in both glibc and musl (Alpine) variants, macOS, and Windows x64 -- so a Node deployment loads the native backend (roughly an order of magnitude faster than WASM; see [PROTOCOL.md](PROTOCOL.md)), and any platform without a prebuild falls back to the always-correct WASM build. The browser always uses WASM.
+
+**Integrity.** npm records no `integrity` hash for a `file:` tarball in the lockfile, so the committed sidecar `lib/<tarball>.sha256` is the integrity check in its place: the setup action (`.github/actions/setup/action.yml`) runs `sha256sum -c` against it before install, and the Alpine leg re-checks it before a native wire-vector verify (`.github/workflows/native_alpine.yaml`), so a swapped or corrupted tarball fails the build. Because npm caches a `file:` dependency by its version string, a rebuild that keeps the same version (below) MUST regenerate the sidecar AND force a reinstall, or both the check and the installed bytes would keep the stale content.
+
+**The `seclink.2` worker-teardown fix (board item 208035324).** The tarball was rebuilt in place (same `2.0.6-seclink.2` version string, new bytes) to fix a `worker_threads` teardown segfault: running any masking op inside a worker and then tearing the worker down crashed the whole process (exit 139, which a worker-thread segfault is not contained below), because BoringSSL lazily initializes per-thread state whose `__cxa_thread_atexit` destructor fired AFTER the N-API environment was already torn down. The fork's fix is a `napi_add_env_cleanup_hook` (in the fork's `private_set_intersection/napi/psi_napi.cpp`) that calls `OPENSSL_thread_stop()` to release that per-thread state while the environment is still alive. Without it, running the PSI crypto off the event-loop-owning thread -- the CLI's worker offload -- would segfault at the end of every native-backend exchange; with it the worker tears down cleanly, which is what lets the offload use the native backend at all rather than pinning the worker to WASM. The `apps/cli` real-worker integration test (`test/integration/psiWorkerRealWorker.test.ts`) is the regression guard: a reintroduced segfault crashes the test process rather than letting it assert.
+
+**Rebuilding or bumping.** The addon is built from the fork's own Docker build image, not from this repo. On any rebuild -- a fork change, an upstream merge, or a version bump -- regenerate the sidecar (`sha256sum <tarball> > <tarball>.sha256`), and if the version string did not change, remove `node_modules/@openmined/psi.js` and reinstall so npm re-fetches the new bytes past its version cache. A rebuild that touches the native crypto is crypto-code review scope (see [CONTRIBUTING.md](../../CONTRIBUTING.md#dependency-policy)).
 
 ## Upgrading the SFTP Stack (ssh2 / ssh2-sftp-client)
 
