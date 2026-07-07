@@ -155,28 +155,42 @@ async function runRates(argv) {
       "---------+--------",
   );
   for (const D of Ds) {
-    const server = new PSIParticipant("s", lib, {
-      role: "starter",
-      verbose: -1,
-    });
-    const client = new PSIParticipant("c", lib, {
-      role: "joiner",
-      verbose: -1,
-    });
+    // Per-message element-count bounds the participant enforces on every inbound
+    // PSI frame (the required 4th constructor argument; see PsiElementBounds /
+    // psiElementBounds in packages/core). Each flat set holds D distinct values,
+    // so D is the exact, permissive bound for all three message kinds here.
+    const bounds = { setup: D, request: D, response: D };
+    const server = new PSIParticipant(
+      "s",
+      lib,
+      { role: "starter", verbose: -1 },
+      bounds,
+    );
+    const client = new PSIParticipant(
+      "c",
+      lib,
+      { role: "joiner", verbose: -1 },
+      bounds,
+    );
     const sVals = Array.from({ length: D }, (_, i) => `s_${i}`);
     const cVals = Array.from({ length: D }, (_, i) => `c_${i}`);
 
+    // The masking building blocks are async as of board item 208035324 (so the CLI
+    // can run them off-thread through a worker-backed engine). This bench passes no
+    // engine, so the participants use the default in-process engine and the crypto
+    // still runs on THIS thread; awaiting each call in turn times one operation at a
+    // time, so the per-op microsecond figures stand.
     let t = performance.now();
-    const { setup } = server.createServerSetup(sVals);
+    const { setup } = await server.createServerSetup(sVals);
     const tSetup = performance.now() - t;
     t = performance.now();
-    const request = client.createClientRequest(cVals);
+    const request = await client.createClientRequest(cVals);
     const tReq = performance.now() - t;
     t = performance.now();
-    const response = server.processClientRequest(request);
+    const response = await server.processClientRequest(request);
     const tResp = performance.now() - t;
     t = performance.now();
-    client.computeValueMatches(setup, response);
+    await client.computeValueMatches(setup, response);
     const tMatch = performance.now() - t;
 
     const us = (ms) => ((ms / D) * 1000).toFixed(1);
@@ -401,10 +415,16 @@ async function runChildRole(role, rows, keys, overlap) {
   const overlapRows = Math.floor(rows * overlap);
   const data = makeColumns(role, rows, keys, overlapRows);
   const psiRole = role === "sender" ? "starter" : "joiner";
-  const participant = new PSIParticipant(role, lib, {
-    role: psiRole,
-    verbose: -1,
-  });
+  // Per-message element-count bounds (the required 4th constructor argument): the
+  // symmetric sweep pools at most keys * rows distinct values per party, the
+  // worst-case cell count, so that is the exact upper bound for every frame kind.
+  const cellBound = keys * rows;
+  const participant = new PSIParticipant(
+    role,
+    lib,
+    { role: psiRole, verbose: -1 },
+    { setup: cellBound, request: cellBound, response: cellBound },
+  );
   const conn = ipcConnection();
 
   // Under --gc the child is forked with --expose-gc, so @psilink/core's
@@ -425,14 +445,17 @@ async function runChildRole(role, rows, keys, overlap) {
   const start = performance.now();
   // partnerRecordCount is the peer's row count -- equal to `rows` in this
   // symmetric sweep. It must be the real count: the derived single-pass cap gate
-  // (frameSize.ts, board item 206154573) rejects a negative placeholder. verbosity
-  // is -1 (silent); setStage is the 7th argument.
+  // (frameSize.ts, board item 206154573) rejects a negative placeholder. The 6th
+  // argument withholds the sender's own table (false here -- both sides compute a
+  // table, so the receiver's match count can be checked); verbosity is -1
+  // (silent); setStage is the 8th argument.
   const table = await linkViaSinglePassPSI(
     { cardinality: "one-to-one" },
     participant,
     conn,
     data,
     rows,
+    false,
     -1,
     setStage,
   );

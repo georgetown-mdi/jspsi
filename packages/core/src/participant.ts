@@ -15,10 +15,9 @@ import {
   type PsiMessageKind,
 } from "./connection/psiElementScan";
 import { singleIssueArray } from "./utils/singleIssueArray";
+import { InProcessPsiEngine, type PsiEngine } from "./psiEngine";
 
-import type { Client as PSIClient } from "@openmined/psi.js/implementation/client.d.ts";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
-import type { Server as PSIServer } from "@openmined/psi.js/implementation/server.d.ts";
 
 import { getLoggerForVerbosity } from "./utils/logger";
 
@@ -166,7 +165,6 @@ type ProtocolId = StarterProtocolStageId | JoinerProtocolStageId;
 
 export class PSIParticipant {
   id: string;
-  private library: PSILibrary;
   config: Config;
   private setStage: (id: ProtocolId) => void;
   private stages:
@@ -175,8 +173,7 @@ export class PSIParticipant {
     | undefined;
   private log: ReturnType<typeof getLoggerForVerbosity>;
   private elementBounds: PsiElementBounds;
-
-  private psi: { server?: PSIServer; client?: PSIClient } = {};
+  private engine: PsiEngine;
 
   constructor(
     id: string,
@@ -190,9 +187,14 @@ export class PSIParticipant {
     // that forgot it.
     elementBounds: PsiElementBounds,
     setStage?: (id: ProtocolId) => void,
+    // The crypto engine backing this participant. Defaults to an in-process engine
+    // built from `library` -- today's behavior, with the masking running on the
+    // calling thread. The CLI injects a worker-backed engine so the masking runs
+    // off the event-loop-owning thread; that engine holds the key objects in its
+    // worker, so `library` is used only to build the default (board item 208035324).
+    engine?: PsiEngine,
   ) {
     this.id = id;
-    this.library = library;
     this.config = config;
     this.elementBounds = elementBounds;
     this.setStage = setStage ? setStage : () => {};
@@ -203,11 +205,8 @@ export class PSIParticipant {
 
     this.log = getLoggerForVerbosity("participant", this.config.verbose);
 
-    if (this.config.role === "starter") {
-      this.psi.server = library.server!.createWithNewKey(true);
-    } else if (this.config.role === "joiner") {
-      this.psi.client = library.client!.createWithNewKey(true);
-    }
+    this.engine =
+      engine ?? new InProcessPsiEngine(library, this.config.role, this.id);
 
     this.setStages();
   }
@@ -222,6 +221,15 @@ export class PSIParticipant {
 
   getStages() {
     return this.stages;
+  }
+
+  /**
+   * Release the crypto engine's resources (see {@link PsiEngine.dispose}). Call at
+   * exchange teardown: a no-op for the default in-process engine, but the
+   * worker-backed engine terminates its worker here so the process can exit.
+   */
+  dispose(): void {
+    this.engine.dispose();
   }
 
   // Reject a partner-supplied PSI frame that DECLARES more encrypted elements than
@@ -260,22 +268,6 @@ export class PSIParticipant {
       );
   }
 
-  // This protocol only ever sends a Raw server setup (createSetupMessage with
-  // dataStructure.Raw), so a received setup whose data-structure oneof is anything
-  // other than Raw -- or is unset -- is malformed: getRaw() reads `undefined` for
-  // it, and the reveal-intersection path requires Raw and aborts on it with a
-  // cryptic library error. Reject it here as a clean protocol abort. (The
-  // pre-deserialize element scan already bounded the setup's allocation; a non-Raw
-  // setup carries a single bounded byte blob, not a repeated element list, so it
-  // does not amplify -- this check is a correctness/fail-closed guard, not a memory
-  // bound.)
-  private assertRawServerSetup(setup: { getRaw(): object | undefined }): void {
-    if (!setup.getRaw())
-      throw new Error(
-        `${this.id} protocol error: PSI server setup is not a Raw data structure`,
-      );
-  }
-
   // Building-block PSI steps used by the single-pass strategy
   // (linkViaSinglePassPSI in link.ts). Unlike identifyIntersection below, which
   // runs the whole back-and-forth itself, single-pass calls these one at a time
@@ -291,54 +283,36 @@ export class PSIParticipant {
    * value now in sorted slot i, so a match reported in sorted terms can be traced
    * back to the row it came from. Requires the `"starter"` role.
    */
-  public createServerSetup(values: ReadonlyArray<string>): {
+  public async createServerSetup(values: ReadonlyArray<string>): Promise<{
     setup: Uint8Array;
     permutation: Array<number>;
-  } {
-    const server = this.psi.server;
-    if (!server)
-      throw new Error(`${this.id}: createServerSetup requires the server role`);
-    const permutation: Array<number> = [];
-    const setup = server.createSetupMessage(
-      0.0,
-      -1,
-      values,
-      this.library.dataStructure.Raw,
-      permutation,
-    );
-    return { setup: setup.serializeBinary(), permutation };
+  }> {
+    return this.engine.createServerSetup(values);
   }
 
   /**
    * Doubly-encrypts the partner's request under the server key, returning the
    * serialized response. Requires the `"starter"` role.
    */
-  public processClientRequest(requestBytes: Uint8Array): Uint8Array {
-    const server = this.psi.server;
-    if (!server)
-      throw new Error(
-        `${this.id}: processClientRequest requires the server role`,
-      );
+  public async processClientRequest(
+    requestBytes: Uint8Array,
+  ): Promise<Uint8Array> {
     this.assertInboundElementBound(
       "request",
       requestBytes,
       this.elementBounds.request,
     );
-    const request = this.library.request.deserializeBinary(requestBytes);
-    return server.processRequest(request).serializeBinary();
+    return this.engine.processClientRequest(requestBytes);
   }
 
   /**
    * Encrypts this party's set once under the client key, returning the serialized
    * request. Requires the `"joiner"` role.
    */
-  public createClientRequest(values: ReadonlyArray<string>): Uint8Array {
-    const client = this.psi.client;
-    if (!client)
-      throw new Error(
-        `${this.id}: createClientRequest requires the client role`,
-      );
-    return client.createRequest(values).serializeBinary();
+  public async createClientRequest(
+    values: ReadonlyArray<string>,
+  ): Promise<Uint8Array> {
+    return this.engine.createClientRequest(values);
   }
 
   /**
@@ -351,30 +325,40 @@ export class PSIParticipant {
    * internal sorted order; map it back to input order with the permutation from
    * {@link createServerSetup}. Requires the `"joiner"` role.
    */
-  public computeValueMatches(
+  public async computeValueMatches(
     setupBytes: Uint8Array,
     responseBytes: Uint8Array,
-  ): [Array<number>, Array<number>] {
-    const client = this.psi.client;
-    if (!client)
-      throw new Error(
-        `${this.id}: computeValueMatches requires the client role`,
-      );
+  ): Promise<[Array<number>, Array<number>]> {
+    await this.receiveServerSetup(setupBytes);
+    return this.computeAssociationTable(responseBytes);
+  }
+
+  // Host-side element-count guard, then hand the setup to the engine to
+  // deserialize, Raw-check, and hold. Split from the match (below) so the cascade
+  // joiner can validate the setup the instant it arrives -- a fail-fast before it
+  // sends its own request -- while the response it matches against arrives a round
+  // trip later. The guard runs here, above the engine seam, so the engine only ever
+  // deserializes an already-bounded frame.
+  private receiveServerSetup(setupBytes: Uint8Array): Promise<void> {
     this.assertInboundElementBound(
       "serverSetup",
       setupBytes,
       this.elementBounds.setup,
     );
-    const setup = this.library.serverSetup.deserializeBinary(setupBytes);
-    this.assertRawServerSetup(setup);
+    return this.engine.receiveServerSetup(setupBytes);
+  }
+
+  // Host-side element-count guard, then hand the response to the engine to match
+  // against the setup held by the preceding receiveServerSetup.
+  private computeAssociationTable(
+    responseBytes: Uint8Array,
+  ): Promise<[Array<number>, Array<number>]> {
     this.assertInboundElementBound(
       "response",
       responseBytes,
       this.elementBounds.response,
     );
-    const response = this.library.response.deserializeBinary(responseBytes);
-    const table = client.getAssociationTable(setup, response);
-    return [table[0], table[1]];
+    return this.engine.computeAssociationTable(responseBytes);
   }
 
   /**
@@ -385,22 +369,14 @@ export class PSIParticipant {
     set: Array<string>,
   ): Promise<AssociationTable> {
     if (this.config.role === "starter") {
-      const sortingPermutation: Array<number> = [];
-
-      const serverSetup = this.psi.server!.createSetupMessage(
-        0.0,
-        -1,
-        set,
-        this.library.dataStructure.Raw,
-        sortingPermutation,
-      );
+      const { setup, permutation } = await this.createServerSetup(set);
 
       this.log.debug(
         `${this.id}: starting identify-intersection protocol; sending server ` +
           " data encrypted by server",
       );
       this.setStage("sending startup message");
-      await conn.send(serverSetup.serializeBinary());
+      await conn.send(setup);
 
       this.log.debug(`${this.id}: waiting for client request`);
       this.setStage("waiting for client request");
@@ -409,17 +385,9 @@ export class PSIParticipant {
       this.log.debug(`${this.id}: received client data encrypted by client`);
       this.setStage("processing client request");
 
-      this.assertInboundElementBound(
-        "request",
-        clientRequestRaw as Uint8Array,
-        this.elementBounds.request,
-      );
-      const clientRequest = this.library.request.deserializeBinary(
+      const serverResponse = await this.processClientRequest(
         clientRequestRaw as Uint8Array,
       );
-      const serverResponse = this.psi
-        .server!.processRequest(clientRequest)
-        .serializeBinary();
 
       this.log.debug(
         `${this.id}: sending client data encrypted by both server and client`,
@@ -440,7 +408,7 @@ export class PSIParticipant {
 
       const result: Array<Array<number>> = [localIndices, partnerIndices];
       for (let i = 0; i < result[0].length; ++i) {
-        result[0][i] = sortingPermutation[result[0][i]];
+        result[0][i] = permutation[result[0][i]];
       }
 
       this.log.debug(`${this.id}: sending my original indices`);
@@ -460,22 +428,17 @@ export class PSIParticipant {
       this.log.debug(`${this.id}: receiving server data encrypted by server`);
       this.setStage("processing startup message");
 
-      this.assertInboundElementBound(
-        "serverSetup",
-        serverSetupRaw as Uint8Array,
-        this.elementBounds.setup,
-      );
-      const serverSetup = this.library.serverSetup.deserializeBinary(
-        serverSetupRaw as Uint8Array,
-      );
-      this.assertRawServerSetup(serverSetup);
+      // Validate and hold the server setup the instant it arrives -- a fail-fast
+      // before we send our own request -- while the response we match it against
+      // arrives a round trip later.
+      await this.receiveServerSetup(serverSetupRaw as Uint8Array);
 
-      const clientRequest = this.psi.client!.createRequest(set);
+      const clientRequest = await this.createClientRequest(set);
 
       this.log.debug(`${this.id}: sending client data encrypted by client`);
       this.setStage("sending client request");
 
-      await conn.send(clientRequest.serializeBinary());
+      await conn.send(clientRequest);
 
       this.setStage("waiting for response");
 
@@ -486,20 +449,11 @@ export class PSIParticipant {
       );
       this.setStage("creating association table");
 
-      this.assertInboundElementBound(
-        "response",
-        serverResponseRaw as Uint8Array,
-        this.elementBounds.response,
-      );
-      const serverResponse = this.library.response.deserializeBinary(
+      // Association table: indices into client data mapped to the (likely permuted)
+      // indices given by the server, matched against the setup held above.
+      const associationTable = await this.computeAssociationTable(
         serverResponseRaw as Uint8Array,
       );
-      /**
-       * Association table is indices into client data mapped to the indices
-       * given by the server (which are likely permuted).
-       */
-      const associationTable: Array<Array<number>> =
-        this.psi.client!.getAssociationTable(serverSetup, serverResponse);
       const localIndices = associationTable[0];
 
       this.log.debug(

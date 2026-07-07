@@ -20,13 +20,21 @@ import {
   SFTP_SLOW_OPERATION_WARNING_MS,
   SFTP_STALL_DEADLINE_MS,
 } from "../../src/connection/sftpLivenessGuard";
+import {
+  SFTP_HEARTBEAT_INTERVAL_MS,
+  SFTP_TCP_KEEPALIVE_DELAY_MS,
+} from "../../src/connection/sftpHeartbeat";
 
-// Models ssh2-sftp-client exposing the underlying ssh2 Client (which carries
-// setNoDelay) on `.client`. connect() calls setNoDelay(true) on it to disable
-// Nagle; a mock that omits it makes connect() warn that setNoDelay is
-// unavailable on every successful connect. Provide a no-op so the faithful mock
-// matches the real client and that warning does not fire.
-const noDelayClient = () => ({ setNoDelay: () => {} });
+// Models ssh2-sftp-client exposing the underlying ssh2 Client on `.client`.
+// connect() calls setNoDelay(true) on it to disable Nagle and setKeepAlive(true,
+// delay) on its underlying net.Socket (`_sock`) to enable kernel TCP keepalive; a
+// mock that omits either makes connect() warn that the setting is unavailable on
+// every successful connect. Provide no-ops so the faithful mock matches the real
+// client and neither warning fires.
+const noDelayClient = () => ({
+  setNoDelay: () => {},
+  _sock: { setKeepAlive: () => {} },
+});
 
 // Replaces the adapter's logger with a warn-swallowing stub. The deadline /
 // idle-window tests advance past SFTP_SLOW_OPERATION_WARNING_MS (30 s) on the
@@ -2024,6 +2032,122 @@ describe("fatal wrapper-error guard", () => {
       adapter.safeDelete("/remote/out.json"),
     ).resolves.toBeUndefined();
     expect(del).not.toHaveBeenCalled();
+  });
+});
+
+// --- session heartbeat and TCP keepalive -------------------------------------
+//
+// connect() enables kernel TCP keepalive on the underlying socket (a transport-
+// layer backstop) and arms the application heartbeat that issues a periodic no-op
+// realPath (which, unlike a transport keepalive, resets the server's SFTP-command
+// idle timer). The heartbeat must fire on the interval when the session is idle,
+// and must stop on every terminal path -- end() and a fatal wrapper error -- so
+// nothing keeps beating on a torn-down or dead session. The interval/idle/
+// in-flight-suppression logic itself is unit-tested against SftpHeartbeat; these
+// pin the adapter's wiring of it.
+
+describe("session heartbeat and TCP keepalive", () => {
+  // A faithful connected-client mock: the raw wrapper (for the fatal-'error'
+  // guard), the ssh2 Client with setNoDelay + a socket carrying setKeepAlive, and
+  // realPath (the heartbeat's no-op) + end (teardown).
+  function connectMock() {
+    const setKeepAlive = vi.fn();
+    const realPath = vi.fn().mockResolvedValue("/remote");
+    const end = vi.fn().mockResolvedValue(true);
+    const wrapper = makeWrapper();
+    const client = {
+      sftp: wrapper,
+      connect: vi.fn().mockResolvedValue(undefined),
+      client: { setNoDelay: vi.fn(), _sock: { setKeepAlive } },
+      realPath,
+      end,
+    };
+    return { client, wrapper, setKeepAlive, realPath, end };
+  }
+
+  test("connect enables kernel TCP keepalive on the underlying socket", async () => {
+    const adapter = new SSH2SFTPClientAdapter();
+    const { client, setKeepAlive } = connectMock();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = client;
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    expect(setKeepAlive).toHaveBeenCalledWith(
+      true,
+      SFTP_TCP_KEEPALIVE_DELAY_MS,
+    );
+  });
+
+  test("connect warns (and continues) when the socket's setKeepAlive is unavailable", async () => {
+    const adapter = new SSH2SFTPClientAdapter();
+    const warn = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn, trace: vi.fn() };
+    const { client } = connectMock();
+    // Model an ssh2 upgrade that relocated the socket: no _sock. connect must
+    // still succeed (keepalive is transport hygiene, not a correctness need).
+    delete (client.client as { _sock?: unknown })._sock;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = client;
+    await expect(
+      adapter.connect({ host: "h", maxReconnectAttempts: 0 }),
+    ).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("setKeepAlive"));
+  });
+
+  test("arms a heartbeat that issues a realPath keepalive once the session goes idle", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      stubAdapterLog(adapter);
+      const { client, realPath } = connectMock();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = client;
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+      // Nothing yet just before the interval; the no-op fires once it elapses.
+      await vi.advanceTimersByTimeAsync(SFTP_HEARTBEAT_INTERVAL_MS - 1);
+      expect(realPath).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(realPath).toHaveBeenCalledWith(".");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("end() stops the heartbeat so no keepalive fires after teardown", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      stubAdapterLog(adapter);
+      const { client, realPath } = connectMock();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = client;
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+      await adapter.end();
+      // However long the (now closed) session sits, no keepalive is issued.
+      await vi.advanceTimersByTimeAsync(SFTP_HEARTBEAT_INTERVAL_MS * 3);
+      expect(realPath).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a fatal wrapper error stops the heartbeat", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      stubAdapterLog(adapter);
+      const { client, wrapper, realPath } = connectMock();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = client;
+      await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+      // The session dies: the heartbeat must not keep pinging a dead channel that
+      // can never answer.
+      wrapper.emit("error", new Error("Malformed NAME packet"));
+      await vi.advanceTimersByTimeAsync(SFTP_HEARTBEAT_INTERVAL_MS * 3);
+      expect(realPath).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

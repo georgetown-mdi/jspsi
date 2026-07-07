@@ -213,7 +213,7 @@ const OVER_DECLARED_COUNT = 64;
 const tinyElements = () =>
   Array.from({ length: OVER_DECLARED_COUNT }, () => new Uint8Array([1, 2]));
 
-test("processClientRequest rejects a request declaring more elements than the bound", () => {
+test("processClientRequest rejects a request declaring more elements than the bound", async () => {
   // Single-pass sender seam: the starter would deserialize the receiver's request.
   const sender = new PSIParticipant(
     "sender",
@@ -232,7 +232,7 @@ test("processClientRequest rejects a request declaring more elements than the bo
   // ordering as a runtime check, not an inference from statement order.
   const deserialize = vi.spyOn(psiLibrary.request, "deserializeBinary");
   try {
-    expect(() => sender.processClientRequest(bytes)).toThrow(
+    await expect(sender.processClientRequest(bytes)).rejects.toThrow(
       /inbound PSI request declares more than 4 encrypted element\(s\)/,
     );
     expect(deserialize).not.toHaveBeenCalled();
@@ -241,7 +241,7 @@ test("processClientRequest rejects a request declaring more elements than the bo
   }
 });
 
-test("computeValueMatches rejects a setup declaring more elements than the bound", () => {
+test("computeValueMatches rejects a setup declaring more elements than the bound", async () => {
   // Single-pass receiver seam (setup): the joiner would deserialize the sender's
   // setup.
   const receiver = new PSIParticipant(
@@ -257,14 +257,14 @@ test("computeValueMatches rejects a setup declaring more elements than the bound
   // The response is never reached (the setup check fires first), so a trivial one
   // suffices.
   const response = new psiLibrary.response().serializeBinary();
-  expect(() =>
+  await expect(
     receiver.computeValueMatches(setup.serializeBinary(), response),
-  ).toThrow(
+  ).rejects.toThrow(
     /inbound PSI serverSetup declares more than 4 encrypted element\(s\)/,
   );
 });
 
-test("computeValueMatches rejects a response declaring more elements than the bound", () => {
+test("computeValueMatches rejects a response declaring more elements than the bound", async () => {
   // Single-pass receiver seam (response): a within-bound setup, an over-declared
   // response, so the response check is what fires.
   const receiver = new PSIParticipant(
@@ -279,12 +279,14 @@ test("computeValueMatches rejects a response declaring more elements than the bo
   setup.setRaw(raw);
   const response = new psiLibrary.response();
   response.setEncryptedElementsList(tinyElements());
-  expect(() =>
+  await expect(
     receiver.computeValueMatches(
       setup.serializeBinary(),
       response.serializeBinary(),
     ),
-  ).toThrow(/inbound PSI response declares more than 4 encrypted element\(s\)/);
+  ).rejects.toThrow(
+    /inbound PSI response declares more than 4 encrypted element\(s\)/,
+  );
 });
 
 test("cascade identifyIntersection (starter) rejects an over-declared request frame", async () => {
@@ -355,7 +357,7 @@ function nonRawServerSetupBytes(): Uint8Array {
   return new psiLibrary.serverSetup().serializeBinary();
 }
 
-test("computeValueMatches rejects a non-Raw server setup", () => {
+test("computeValueMatches rejects a non-Raw server setup", async () => {
   // Single-pass receiver seam: UNBOUNDED bounds, so it is the Raw check -- not the
   // element-count bound -- that fires.
   const receiver = new PSIParticipant(
@@ -365,9 +367,9 @@ test("computeValueMatches rejects a non-Raw server setup", () => {
     UNBOUNDED_PSI_ELEMENTS,
   );
   const response = new psiLibrary.response().serializeBinary();
-  expect(() =>
+  await expect(
     receiver.computeValueMatches(nonRawServerSetupBytes(), response),
-  ).toThrow(/server setup is not a Raw data structure/);
+  ).rejects.toThrow(/server setup is not a Raw data structure/);
 });
 
 test("cascade identifyIntersection (joiner) rejects a non-Raw server setup frame", async () => {

@@ -49,8 +49,16 @@ jobs:
       # dependency bump that breaks the coupling. The suite is self-managing: a
       # vitest globalSetup starts the SFTP test server before the suite and stops
       # it after, so no extra setup step is needed.
+      #
+      # PSILINK_REQUIRE_WORKER_BUILD=1 makes the real-worker offload suite FAIL (not
+      # skip) if the CLI bundle built above is missing, so a regressed build step
+      # cannot let that suite silently no-op green here -- mirroring
+      # PSILINK_SFTP_CHROOT_REQUIRED in the chroot leg. It is set only on this leg,
+      # which builds the CLI; the hardened/native legs do not build it and skip.
       - name: Integration tests (CLI, in-process server)
         run: npm run test:integration -w apps/cli
+        env:
+          PSILINK_REQUIRE_WORKER_BUILD: "1"
       # A second leg runs the same suite against a native OpenSSH sshd, so the
       # adapter is also exercised against a real server. sshd ships on the Ubuntu
       # runner, but its build fatally checks for the privilege-separation
