@@ -1,9 +1,9 @@
 // This adapter drives ssh2's raw SFTPWrapper internals past the public
 // ssh2-sftp-client API, so ssh2 and ssh2-sftp-client are exact-pinned in
 // package.json. On any upgrade of either, re-verify the internal premises per
-// the checklist in CONTRIBUTING.md ("Upgrading the SFTP stack") before
-// it merges -- a "compatible" bump can silently break a premise no normal-path
-// test exercises.
+// the "Upgrading the SFTP Stack" checklist in docs/spec/DEPENDENCY_PINS.md
+// before it merges -- a "compatible" bump can silently break a premise no
+// normal-path test exercises.
 import Ssh2SftpClient from "ssh2-sftp-client";
 import {
   FileInfo,
@@ -35,6 +35,7 @@ import {
   withSftpOperationDeadline,
   withSlowOperationWarning,
 } from "./sftpLivenessGuard";
+import { SFTP_TCP_KEEPALIVE_DELAY_MS, SftpHeartbeat } from "./sftpHeartbeat";
 
 // A single entry as ssh2's SFTPWrapper.readdir reports it. Only the fields the
 // transport consumes are typed; ssh2 supplies more (longname, the rest of
@@ -61,10 +62,16 @@ const SSH_FX_FAILURE = 4;
 interface Ssh2SftpClientInternals {
   // The underlying ssh2 Client instance. ssh2-sftp-client constructs it as
   // `this.client` and drives every connection through it; its public
-  // setNoDelay(boolean) toggles TCP_NODELAY on the live socket. Optional so the
-  // guarded call in connect() can warn-and-continue (the setting is a latency
-  // optimization, not a correctness requirement) if an upgrade relocates it.
-  client?: { setNoDelay(noDelay: boolean): void };
+  // setNoDelay(boolean) toggles TCP_NODELAY on the live socket. `_sock` is the
+  // ssh2 Client's underlying net.Socket, whose setKeepAlive(enable, initialDelay)
+  // enables kernel TCP keepalive -- ssh2 exposes setNoDelay but not setKeepAlive,
+  // so the keepalive backstop reaches the socket directly. Both are optional so
+  // the guarded calls in connect() can warn-and-continue (each is transport
+  // hygiene, not a correctness requirement) if an upgrade relocates them.
+  client?: {
+    setNoDelay(noDelay: boolean): void;
+    _sock?: { setKeepAlive?(enable: boolean, initialDelay: number): void };
+  };
   sftp: {
     open(
       path: string,
@@ -124,6 +131,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // fault-injection test drive the deadline in milliseconds instead of waiting
   // the real 60 s; it is never wired to user input.
   private readonly stallDeadlineMs: number;
+  // Keeps an idle session alive past a server's SFTP-command idle timeout by
+  // issuing a periodic no-op realPath. Created here (never null) so the op-bracket
+  // helper can call opStarted/opSettled unconditionally; armed by connect() on
+  // success and torn down by end() and the fatal-'error' guard. See
+  // {@link ./sftpHeartbeat}.
+  private readonly heartbeat: SftpHeartbeat;
 
   /**
    * `options.verbosity` sets the adapter's log verbosity (default 1).
@@ -173,6 +186,41 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         this.log.trace("ssh2 client connection closed outside an operation"),
     });
     this.stallDeadlineMs = options.stallDeadlineMs ?? SFTP_STALL_DEADLINE_MS;
+    this.heartbeat = new SftpHeartbeat({
+      ping: () => this.sendKeepalive(),
+      log: this.log,
+    });
+  }
+
+  // The heartbeat's no-op keepalive: a single realPath(".") -- the cheapest real
+  // SFTP round-trip, which (unlike an SSH/TCP keepalive) resets the server's
+  // SFTP-command idle timer. Bounded by the same per-op deadline as the metadata
+  // ops so a dead or hostile session cannot leave the keepalive hanging; the
+  // heartbeat swallows the outcome, so this bound never surfaces to the exchange.
+  // Not routed through tracked(): the heartbeat owns its own in-flight state
+  // (`pinging`) and only ever pings when no tracked op is running.
+  private sendKeepalive(): Promise<void> {
+    return withSftpOperationDeadline(
+      this.client.realPath(".").then(() => {}),
+      this.stallDeadlineMs,
+      () =>
+        transportOperationStalledError(
+          "keepalive",
+          ".",
+          `did not complete within ${this.stallDeadlineMs} ms (the server ` +
+            `withheld the realPath response)`,
+        ),
+    );
+  }
+
+  // Bracket a server-driven operation with the heartbeat's activity accounting:
+  // opStarted before it runs, opSettled when it settles (either way). This both
+  // resets the idle window on real traffic and marks the session busy, so the
+  // heartbeat never issues a concurrent keepalive while an operation is on the
+  // wire. finally() preserves the operation's value and rejection unchanged.
+  private tracked<T>(op: Promise<T>): Promise<T> {
+    this.heartbeat.opStarted();
+    return op.finally(() => this.heartbeat.opSettled());
   }
 
   // Layers the non-fatal slow-operation warning (observability) over an in-flight
@@ -223,8 +271,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   //
   // This and the other internal-ssh2 premises this adapter relies on are
   // enumerated, with the dependency source files to re-read and the
-  // integration-test command to run, in the "Upgrading the SFTP stack" checklist
-  // in CONTRIBUTING.md. Re-verify them on any ssh2 /
+  // integration-test command to run, in the "Upgrading the SFTP Stack" checklist
+  // in docs/spec/DEPENDENCY_PINS.md. Re-verify them on any ssh2 /
   // ssh2-sftp-client upgrade.
   //
   // ssh2's Client.sftp() attaches a setup-time 'error' listener to the wrapper
@@ -290,6 +338,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     this.fatalSftpError = undefined;
     sftp.on("error", (err: Error) => {
       this.fatalSftpError = err;
+      // The session is dead: stop beating so the heartbeat does not keep issuing
+      // realPath keepalives the destroyed channel can never answer. A later
+      // connect() re-arms it via start(); a later end() calls stop() again (a
+      // no-op once stopped).
+      this.heartbeat.stop();
     });
   }
 
@@ -370,6 +423,31 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       );
     }
 
+    // Enable kernel TCP keepalive on the established socket as the transport-layer
+    // backstop beneath the application heartbeat below: it keeps NAT/firewall flow
+    // state warm and lets the kernel detect a silently dead peer, but does NOT
+    // reset the server's SFTP-command idle timer (that is what the heartbeat's
+    // realPath is for). ssh2 exposes setNoDelay but not setKeepAlive, so reach the
+    // Client's underlying net.Socket (`_sock`) directly, the same access-past-the-
+    // public-API premise the fatal-'error' guard and createExclusive rely on
+    // (re-verify on any ssh2 upgrade per the DEPENDENCY_PINS.md checklist). connect()
+    // reruns on each reconnect against a fresh socket, so this re-applies every
+    // time. Guarded and non-fatal, exactly like setNoDelay: keepalive is transport
+    // hygiene, not a correctness requirement, so an upstream that relocates the
+    // socket must degrade to no-keepalive, not fail to connect. See board item
+    // 208035324.
+    const rawSocket = internals.client?._sock;
+    if (typeof rawSocket?.setKeepAlive === "function") {
+      rawSocket.setKeepAlive(true, SFTP_TCP_KEEPALIVE_DELAY_MS);
+    } else {
+      this.log.warn(
+        "ssh2's underlying client socket (_sock.setKeepAlive) is not available " +
+          "after connect(); the SFTP connection runs without kernel TCP " +
+          "keepalive (the application heartbeat still defeats the server idle " +
+          "timeout). Check the ssh2 / ssh2-sftp-client changelog.",
+      );
+    }
+
     // Verify that the sftp session required by createExclusive is available.
     // Run this once after retryPromise resolves rather than inside its
     // callback so an API breakage (a permanent failure mode) does not consume
@@ -404,9 +482,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // the process. See attachFatalErrorListener for the full rationale and the
     // reconnect/idempotency analysis.
     this.attachFatalErrorListener(sftp);
+    // The session is established: arm the keepalive heartbeat so a long idle
+    // stretch (a PSI round on the computing side) does not let the server's idle
+    // timeout drop it. start() resets the idle clock, so a reconnect re-arms
+    // cleanly. It is torn down by end() and by the fatal-'error' guard.
+    this.heartbeat.start();
   }
 
   end(): Promise<void> {
+    // Stop the keepalive before tearing the client down so no beat races the
+    // teardown, and so the unref'd timer never lingers past the session.
+    this.heartbeat.stop();
     return this.client.end().then(() => {});
   }
 
@@ -466,159 +552,166 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // Hoisted out of the executor so the slow-operation warning can report
     // entries-read-so-far as the listing's cheap observed-progress signal.
     const results: FileInfo[] = [];
-    return this.warnIfSlow(
-      new Promise<FileInfo[]>((resolve, reject) => {
-        let settled = false;
-        // Undefined until opendir hands back a handle. settle() closes it only when
-        // it is set, so a deadline that fires before (or instead of) a successful
-        // opendir still settles -- with nothing to close.
-        let handle: Buffer | undefined;
-        // Round-trip counter for the liveness bound. A hostile server can return
-        // valid but empty (count = 0) non-EOF readdir batches forever: each one
-        // advances neither the entry-count nor the filename-length size bound and
-        // never carries the EOF status, so the batch loop would recurse without
-        // end. Capping the total readdir calls fails that progress-free flood with
-        // a typed terminal error. (Production is safe from deep synchronous
-        // recursion because ssh2 dispatches each readdir callback from a socket
-        // event, a fresh tick; the cap is the DoS bound, not a stack guard.)
-        let readdirCalls = 0;
-        // Settle the listing exactly once, then close the handle best-effort. The
-        // `settled` guard makes a late readdir callback or a late deadline fire a
-        // no-op and prevents a double close. `deadline` is declared just below but
-        // only read when settle() runs -- always after the timer is armed -- so the
-        // forward reference resolves before it is used.
-        const settle = (action: () => void): void => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(deadline);
-          // Settle BEFORE closing, and never gate the settlement on the close
-          // callback: a hostile server can withhold the close callback exactly as
-          // it withholds a readdir, so awaiting close() here would let the deadline
-          // fire, clear its own timer, then hang forever inside an un-returning
-          // close -- restoring the unbounded wait this guard exists to defeat.
-          // Close is best-effort cleanup that reclaims the handle on a well-behaved
-          // server; a withheld close callback leaks the handle until session
-          // teardown, with the listing already settled. A close() error on a
-          // read-only directory handle has no data meaning, so it is swallowed.
-          action();
-          if (handle !== undefined) sftp.close(handle, () => {});
-        };
-        // Whole-operation wall-clock deadline. The round-trip cap cannot catch a
-        // server that withholds an opendir/readdir/close callback entirely -- no
-        // batch ever arrives to count -- so only elapsed time can fail that case.
-        // Armed before opendir so it also bounds an opendir that never calls back;
-        // settle() clears it on every terminal path so a completed listing leaves
-        // no pending timer.
-        const deadline = setTimeout(
-          () =>
-            settle(() =>
-              reject(listingStalledByTimeoutError(path, this.stallDeadlineMs)),
-            ),
-          this.stallDeadlineMs,
-        );
-        // The deadline is the safety bound, not real work: cleared on every
-        // terminal path, so unref'ing it only matters if the process is winding
-        // down with a listing still in flight, where it must not block exit.
-        deadline.unref();
-        sftp.opendir(path, (openErr, openedHandle) => {
-          // The deadline may have already fired (the server withheld the opendir
-          // callback past the bound, then delivered it late); settle() already
-          // rejected the listing, so do not open a read against it. settle() ran
-          // before `handle` was assigned, though, so it could not close a handle
-          // opendir is only now handing back -- close it here best-effort so this
-          // late handle does not leak until session teardown.
-          if (settled) {
-            if (!openErr) sftp.close(openedHandle, () => {});
-            return;
-          }
-          if (openErr) {
-            settle(() => reject(openErr));
-            return;
-          }
-          handle = openedHandle;
-          const readNextBatch = (): void => {
-            // Mirror the settled-guards in settle() and the readdir callback below.
-            // Both call sites reach here synchronously after a settled check and the
-            // deadline timer cannot fire between synchronous statements, so settled
-            // is necessarily false today; re-checking at the recursion entry keeps
-            // the driver self-evidently safe against any future change that could
-            // re-enter it after the deadline fired, at the cost of only a skipped
-            // round-trip rather than a double-settle.
+    return this.tracked(
+      this.warnIfSlow(
+        new Promise<FileInfo[]>((resolve, reject) => {
+          let settled = false;
+          // Undefined until opendir hands back a handle. settle() closes it only when
+          // it is set, so a deadline that fires before (or instead of) a successful
+          // opendir still settles -- with nothing to close.
+          let handle: Buffer | undefined;
+          // Round-trip counter for the liveness bound. A hostile server can return
+          // valid but empty (count = 0) non-EOF readdir batches forever: each one
+          // advances neither the entry-count nor the filename-length size bound and
+          // never carries the EOF status, so the batch loop would recurse without
+          // end. Capping the total readdir calls fails that progress-free flood with
+          // a typed terminal error. (Production is safe from deep synchronous
+          // recursion because ssh2 dispatches each readdir callback from a socket
+          // event, a fresh tick; the cap is the DoS bound, not a stack guard.)
+          let readdirCalls = 0;
+          // Settle the listing exactly once, then close the handle best-effort. The
+          // `settled` guard makes a late readdir callback or a late deadline fire a
+          // no-op and prevents a double close. `deadline` is declared just below but
+          // only read when settle() runs -- always after the timer is armed -- so the
+          // forward reference resolves before it is used.
+          const settle = (action: () => void): void => {
             if (settled) return;
-            // Pre-increment: this issues at most MAX_LISTING_READDIR_BATCHES actual
-            // readdir round-trips. The (cap + 1)th entry to readNextBatch trips the
-            // guard and rejects BEFORE issuing another readdir, so the server sees
-            // exactly MAX_LISTING_READDIR_BATCHES readdir calls (what the test
-            // asserts), even though `readdirCalls` itself reaches cap + 1 here.
-            if (++readdirCalls > MAX_LISTING_READDIR_BATCHES) {
+            settled = true;
+            clearTimeout(deadline);
+            // Settle BEFORE closing, and never gate the settlement on the close
+            // callback: a hostile server can withhold the close callback exactly as
+            // it withholds a readdir, so awaiting close() here would let the deadline
+            // fire, clear its own timer, then hang forever inside an un-returning
+            // close -- restoring the unbounded wait this guard exists to defeat.
+            // Close is best-effort cleanup that reclaims the handle on a well-behaved
+            // server; a withheld close callback leaks the handle until session
+            // teardown, with the listing already settled. A close() error on a
+            // read-only directory handle has no data meaning, so it is swallowed.
+            action();
+            if (handle !== undefined) sftp.close(handle, () => {});
+          };
+          // Whole-operation wall-clock deadline. The round-trip cap cannot catch a
+          // server that withholds an opendir/readdir/close callback entirely -- no
+          // batch ever arrives to count -- so only elapsed time can fail that case.
+          // Armed before opendir so it also bounds an opendir that never calls back;
+          // settle() clears it on every terminal path so a completed listing leaves
+          // no pending timer.
+          const deadline = setTimeout(
+            () =>
               settle(() =>
                 reject(
-                  listingStalledByBatchCountError(
-                    path,
-                    MAX_LISTING_READDIR_BATCHES,
-                  ),
+                  listingStalledByTimeoutError(path, this.stallDeadlineMs),
                 ),
-              );
+              ),
+            this.stallDeadlineMs,
+          );
+          // The deadline is the safety bound, not real work: cleared on every
+          // terminal path, so unref'ing it only matters if the process is winding
+          // down with a listing still in flight, where it must not block exit.
+          deadline.unref();
+          sftp.opendir(path, (openErr, openedHandle) => {
+            // The deadline may have already fired (the server withheld the opendir
+            // callback past the bound, then delivered it late); settle() already
+            // rejected the listing, so do not open a read against it. settle() ran
+            // before `handle` was assigned, though, so it could not close a handle
+            // opendir is only now handing back -- close it here best-effort so this
+            // late handle does not leak until session teardown.
+            if (settled) {
+              if (!openErr) sftp.close(openedHandle, () => {});
               return;
             }
-            // openedHandle (not the outer `handle`) is the non-null Buffer here;
-            // the outer `handle` exists only to let settle() close it on any path.
-            sftp.readdir(openedHandle, (readErr, list) => {
-              // A readdir callback delivered after the deadline already settled
-              // must not process a batch against a rejected listing.
+            if (openErr) {
+              settle(() => reject(openErr));
+              return;
+            }
+            handle = openedHandle;
+            const readNextBatch = (): void => {
+              // Mirror the settled-guards in settle() and the readdir callback below.
+              // Both call sites reach here synchronously after a settled check and the
+              // deadline timer cannot fire between synchronous statements, so settled
+              // is necessarily false today; re-checking at the recursion entry keeps
+              // the driver self-evidently safe against any future change that could
+              // re-enter it after the deadline fired, at the cost of only a skipped
+              // round-trip rather than a double-settle.
               if (settled) return;
-              if (readErr) {
-                if (readErr.code === SSH_FX_EOF) settle(() => resolve(results));
-                else settle(() => reject(readErr));
+              // Pre-increment: this issues at most MAX_LISTING_READDIR_BATCHES actual
+              // readdir round-trips. The (cap + 1)th entry to readNextBatch trips the
+              // guard and rejects BEFORE issuing another readdir, so the server sees
+              // exactly MAX_LISTING_READDIR_BATCHES readdir calls (what the test
+              // asserts), even though `readdirCalls` itself reaches cap + 1 here.
+              if (++readdirCalls > MAX_LISTING_READDIR_BATCHES) {
+                settle(() =>
+                  reject(
+                    listingStalledByBatchCountError(
+                      path,
+                      MAX_LISTING_READDIR_BATCHES,
+                    ),
+                  ),
+                );
                 return;
               }
-              // `list` is defined whenever readErr is null (the branch above has
-              // already returned otherwise); `?? []` keeps the type honest and
-              // treats a defensively-missing batch as empty. Apply the two bounds
-              // in the SAME order as LocalFSClient.list(): the entry-count bound
-              // first -- it governs every entry whatever its name -- then the
-              // per-name length bound, so both adapters surface the same error
-              // variant for a directory that breaches both at once. results.length
-              // counts every entry seen (none are filtered out here), matching
-              // LocalFSClient's `scanned`.
-              for (const entry of list ?? []) {
-                if (results.length >= MAX_DIRECTORY_ENTRIES) {
-                  settle(() =>
-                    reject(directoryTooLargeError(path, MAX_DIRECTORY_ENTRIES)),
-                  );
+              // openedHandle (not the outer `handle`) is the non-null Buffer here;
+              // the outer `handle` exists only to let settle() close it on any path.
+              sftp.readdir(openedHandle, (readErr, list) => {
+                // A readdir callback delivered after the deadline already settled
+                // must not process a batch against a rejected listing.
+                if (settled) return;
+                if (readErr) {
+                  if (readErr.code === SSH_FX_EOF)
+                    settle(() => resolve(results));
+                  else settle(() => reject(readErr));
                   return;
                 }
-                if (entry.filename.length > MAX_FILENAME_LENGTH) {
-                  settle(() =>
-                    reject(
-                      filenameTooLongError(
-                        path,
-                        entry.filename,
-                        MAX_FILENAME_LENGTH,
+                // `list` is defined whenever readErr is null (the branch above has
+                // already returned otherwise); `?? []` keeps the type honest and
+                // treats a defensively-missing batch as empty. Apply the two bounds
+                // in the SAME order as LocalFSClient.list(): the entry-count bound
+                // first -- it governs every entry whatever its name -- then the
+                // per-name length bound, so both adapters surface the same error
+                // variant for a directory that breaches both at once. results.length
+                // counts every entry seen (none are filtered out here), matching
+                // LocalFSClient's `scanned`.
+                for (const entry of list ?? []) {
+                  if (results.length >= MAX_DIRECTORY_ENTRIES) {
+                    settle(() =>
+                      reject(
+                        directoryTooLargeError(path, MAX_DIRECTORY_ENTRIES),
                       ),
-                    ),
-                  );
-                  return;
+                    );
+                    return;
+                  }
+                  if (entry.filename.length > MAX_FILENAME_LENGTH) {
+                    settle(() =>
+                      reject(
+                        filenameTooLongError(
+                          path,
+                          entry.filename,
+                          MAX_FILENAME_LENGTH,
+                        ),
+                      ),
+                    );
+                    return;
+                  }
+                  results.push({
+                    name: entry.filename,
+                    // ssh2 reports mtime in seconds; FileInfo.modifyTime is ms -- the
+                    // same conversion ssh2-sftp-client's list() applies.
+                    modifyTime: entry.attrs.mtime * 1000,
+                    size: entry.attrs.size,
+                  });
                 }
-                results.push({
-                  name: entry.filename,
-                  // ssh2 reports mtime in seconds; FileInfo.modifyTime is ms -- the
-                  // same conversion ssh2-sftp-client's list() applies.
-                  modifyTime: entry.attrs.mtime * 1000,
-                  size: entry.attrs.size,
-                });
-              }
-              readNextBatch();
-            });
-          };
-          readNextBatch();
-        });
-      }),
-      "directory listing",
-      path,
-      () =>
-        `${results.length} ${results.length === 1 ? "entry" : "entries"} read ` +
-        "so far",
+                readNextBatch();
+              });
+            };
+            readNextBatch();
+          });
+        }),
+        "directory listing",
+        path,
+        () =>
+          `${results.length} ${results.length === 1 ? "entry" : "entries"} read ` +
+          "so far",
+      ),
     );
   }
 
@@ -636,22 +729,24 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       // which is why the live path bounds the idle gap instead.)
       // Elapsed-only warning: an uncapped read has no counting sink, so there is
       // no cheap bytes-so-far signal to report.
-      return this.warnIfSlow(
-        withSftpOperationDeadline(
-          this.client.get(path, undefined, {
-            readStreamOptions: options,
-          }) as Promise<Buffer<ArrayBufferLike>>,
-          this.stallDeadlineMs,
-          () =>
-            transportOperationStalledError(
-              "file read",
-              path,
-              `did not complete within ${this.stallDeadlineMs} ms (the server ` +
-                `withheld the transfer)`,
-            ),
+      return this.tracked(
+        this.warnIfSlow(
+          withSftpOperationDeadline(
+            this.client.get(path, undefined, {
+              readStreamOptions: options,
+            }) as Promise<Buffer<ArrayBufferLike>>,
+            this.stallDeadlineMs,
+            () =>
+              transportOperationStalledError(
+                "file read",
+                path,
+                `did not complete within ${this.stallDeadlineMs} ms (the server ` +
+                  `withheld the transfer)`,
+              ),
+          ),
+          "file read",
+          path,
         ),
-        "file read",
-        path,
       );
     }
 
@@ -683,11 +778,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // `result` is the returned promise.
     void this.client.get(path, sink).then(complete, fail);
     // Warn with bytes-so-far and an average rate from the sink's running count.
-    return this.warnIfSlow(result, "file read", path, (elapsedMs) => {
-      const bytes = bytesReceived();
-      const rate = Math.round(bytes / (elapsedMs / 1000));
-      return `${bytes} bytes received so far (~${rate} bytes/s)`;
-    });
+    return this.tracked(
+      this.warnIfSlow(result, "file read", path, (elapsedMs) => {
+        const bytes = bytesReceived();
+        const rate = Math.round(bytes / (elapsedMs / 1000));
+        return `${bytes} bytes received so far (~${rate} bytes/s)`;
+      }),
+    );
   }
 
   put(src: PutSource, dest: string, options?: PutOptions): Promise<unknown> {
@@ -706,50 +803,52 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       const payloadBytes = Buffer.isBuffer(src)
         ? src.length
         : src.reduce((total, part) => total + part.length, 0);
-      return this.warnIfSlow(
-        retryPromise(
-          () => {
-            // Re-check the dead-session guard before EVERY attempt, not only at
-            // method entry -- mirroring rename(). A fatal SFTP protocol error can
-            // land between attempts (the guarded wrapper 'error' listener sets it)
-            // and leave no in-flight request for cleanupRequests to fail; without
-            // this re-check the next attempt would issue put() on the dead channel,
-            // whose write stream never opens, so the source is never pulled and the
-            // idle window would run its full bound before the typed terminal error
-            // (which is not retryable) ended the retry. Re-checking turns that wait
-            // into the prompt failure rename() already gives.
-            const dead = this.deadSessionError("file write", dest);
-            if (dead) return Promise.reject(dead);
-            // Fresh source + idle window per attempt: the source is single-use, but
-            // it is rebuilt from the retained Buffer/chunk list on each retry, so
-            // the broad retry behavior is preserved. The over-window stall is owned
-            // by the source, decided at the point of detection; this attempt's
-            // settle only feeds the non-stall outcomes via complete()/fail().
-            const { source, result, complete, fail } = createBoundedPutSource(
-              dest,
-              payload,
-              SFTP_PUT_PROGRESS_CHUNK_BYTES,
-              this.stallDeadlineMs,
-            );
-            void this.client
-              .put(source, dest, { writeStreamOptions: options })
-              .then(complete, fail);
-            return result;
-          },
-          // `??` not `||` so an explicit retries: 0 disables the retry rather than
-          // being coerced to the default of 5.
-          this.options!.retries ?? 5,
-          100,
-          // Do not retry the idle-window stall: a TransportOperationStalledError is
-          // terminal (a server withholding acks will keep withholding), so retrying
-          // would stack the 60 s bound. Mirrors rename(), which likewise excludes
-          // the typed stall from its retry predicate; the dead-session short-circuit
-          // (also a TransportOperationStalledError) is excluded for the same reason.
-          (error) => !(error instanceof TransportOperationStalledError),
+      return this.tracked(
+        this.warnIfSlow(
+          retryPromise(
+            () => {
+              // Re-check the dead-session guard before EVERY attempt, not only at
+              // method entry -- mirroring rename(). A fatal SFTP protocol error can
+              // land between attempts (the guarded wrapper 'error' listener sets it)
+              // and leave no in-flight request for cleanupRequests to fail; without
+              // this re-check the next attempt would issue put() on the dead channel,
+              // whose write stream never opens, so the source is never pulled and the
+              // idle window would run its full bound before the typed terminal error
+              // (which is not retryable) ended the retry. Re-checking turns that wait
+              // into the prompt failure rename() already gives.
+              const dead = this.deadSessionError("file write", dest);
+              if (dead) return Promise.reject(dead);
+              // Fresh source + idle window per attempt: the source is single-use, but
+              // it is rebuilt from the retained Buffer/chunk list on each retry, so
+              // the broad retry behavior is preserved. The over-window stall is owned
+              // by the source, decided at the point of detection; this attempt's
+              // settle only feeds the non-stall outcomes via complete()/fail().
+              const { source, result, complete, fail } = createBoundedPutSource(
+                dest,
+                payload,
+                SFTP_PUT_PROGRESS_CHUNK_BYTES,
+                this.stallDeadlineMs,
+              );
+              void this.client
+                .put(source, dest, { writeStreamOptions: options })
+                .then(complete, fail);
+              return result;
+            },
+            // `??` not `||` so an explicit retries: 0 disables the retry rather than
+            // being coerced to the default of 5.
+            this.options!.retries ?? 5,
+            100,
+            // Do not retry the idle-window stall: a TransportOperationStalledError is
+            // terminal (a server withholding acks will keep withholding), so retrying
+            // would stack the 60 s bound. Mirrors rename(), which likewise excludes
+            // the typed stall from its retry predicate; the dead-session short-circuit
+            // (also a TransportOperationStalledError) is excluded for the same reason.
+            (error) => !(error instanceof TransportOperationStalledError),
+          ),
+          "file write",
+          dest,
+          () => `${payloadBytes} byte payload`,
         ),
-        "file write",
-        dest,
-        () => `${payloadBytes} byte payload`,
       );
     }
 
@@ -766,29 +865,31 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // window). A stream/string src has no cheap size, so the slow-op warning falls
     // back to elapsed-only.
     const retries = typeof src === "string" ? (this.options!.retries ?? 5) : 0;
-    return this.warnIfSlow(
-      retryPromise(
-        () => {
-          // Re-check the dead-session guard before every attempt, as the Buffer
-          // branch does: a fatal SFTP error landing between string-src retries
-          // would otherwise issue put() on the dead channel, whose buffered
-          // request never calls back, and ride the whole-exchange budget. (For a
-          // single-attempt stream this is just the method-entry check.)
-          const dead = this.deadSessionError("file write", dest);
-          if (dead) return Promise.reject(dead);
-          return this.client.put(src, dest, { writeStreamOptions: options });
-        },
-        // `??` not `||` (in the string case) so an explicit retries: 0 disables
-        // the retry rather than being coerced to the default of 5.
-        retries,
-        100,
-        // Terminate on the dead-session typed error rather than retrying it --
-        // the only TransportOperationStalledError this branch can see, since it
-        // has no idle window; mirrors the Buffer branch's predicate.
-        (error) => !(error instanceof TransportOperationStalledError),
+    return this.tracked(
+      this.warnIfSlow(
+        retryPromise(
+          () => {
+            // Re-check the dead-session guard before every attempt, as the Buffer
+            // branch does: a fatal SFTP error landing between string-src retries
+            // would otherwise issue put() on the dead channel, whose buffered
+            // request never calls back, and ride the whole-exchange budget. (For a
+            // single-attempt stream this is just the method-entry check.)
+            const dead = this.deadSessionError("file write", dest);
+            if (dead) return Promise.reject(dead);
+            return this.client.put(src, dest, { writeStreamOptions: options });
+          },
+          // `??` not `||` (in the string case) so an explicit retries: 0 disables
+          // the retry rather than being coerced to the default of 5.
+          retries,
+          100,
+          // Terminate on the dead-session typed error rather than retrying it --
+          // the only TransportOperationStalledError this branch can see, since it
+          // has no idle window; mirrors the Buffer branch's predicate.
+          (error) => !(error instanceof TransportOperationStalledError),
+        ),
+        "file write",
+        dest,
       ),
-      "file write",
-      dest,
     );
   }
 
@@ -799,15 +900,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // per-operation deadline carries negligible false-fail risk (same profile as
     // createExclusive); it fast-fails a withheld delete callback in 60 s rather
     // than letting it ride the whole-exchange budget.
-    return this.warnIfSlow(
-      this.boundByDeadline(
-        this.client.delete(path).then(() => {}),
+    return this.tracked(
+      this.warnIfSlow(
+        this.boundByDeadline(
+          this.client.delete(path).then(() => {}),
+          "file delete",
+          path,
+          "delete",
+        ),
         "file delete",
         path,
-        "delete",
       ),
-      "file delete",
-      path,
     );
   }
 
@@ -836,17 +939,19 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // in any case a no-op, since the inner swallow resolved every attempt so it
     // never saw a rejection to re-issue.
     if (this.fatalSftpError !== undefined) return Promise.resolve();
-    return this.boundByDeadline(
-      this.client.delete(path, true).then(
+    return this.tracked(
+      this.boundByDeadline(
+        this.client.delete(path, true).then(
+          () => {},
+          () => {},
+        ),
+        "file delete",
+        path,
+        "delete",
+      ).then(
         () => {},
         () => {},
       ),
-      "file delete",
-      path,
-      "delete",
-    ).then(
-      () => {},
-      () => {},
     );
   }
 
@@ -866,44 +971,47 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // ssh2 numeric status through fmtError to err.code (the same premise
     // createExclusive relies on); a non-status library error (e.g. a dead-session
     // 'ERR_GENERIC_CLIENT') is not 4 and so is not retried.
-    return this.warnIfSlow(
-      retryPromise(
-        () => {
-          // Re-check the dead-session guard before EVERY attempt, not only at
-          // method entry. A fatal SFTP protocol error can land in the gap
-          // between attempts (an unsolicited malformed packet, or a malformed
-          // reply to a just-completed attempt): it sets fatalSftpError but
-          // leaves no in-flight request for ssh2's cleanupRequests to fail. The
-          // next attempt would then buffer its request on the
-          // destroyed-but-socket-alive channel, whose callback never fires, and
-          // hang until the consumer's whole-exchange budget -- defeating, for
-          // the retried rename, the prompt-failure guarantee this guard gives
-          // every other server-driven op. Re-checking turns it into a prompt
-          // TransportOperationStalledError, which is not status 4 and so ends
-          // the retry rather than being re-issued.
-          const dead = this.deadSessionError("file rename", fromPath);
-          if (dead) return Promise.reject(dead);
-          // Bound each attempt's server round-trip: a withheld rename callback
-          // fast-fails in 60 s with the typed terminal error (which, not being
-          // SSH_FX_FAILURE, ends the retry below) rather than hanging this attempt
-          // forever and stalling the whole exchange. rename is a single metadata
-          // round-trip, so the flat deadline carries negligible false-fail risk.
-          return this.boundByDeadline(
-            this.client.rename(fromPath, toPath).then(() => {}),
-            "file rename",
-            fromPath,
-            "rename",
-          );
-        },
-        // `??` not `||` so an explicit retries: 0 disables the retry rather than
-        // being coerced to the default of 5.
-        this.options!.retries ?? 5,
-        100,
-        (error) =>
-          (error as Ssh2SftpError | null | undefined)?.code === SSH_FX_FAILURE,
+    return this.tracked(
+      this.warnIfSlow(
+        retryPromise(
+          () => {
+            // Re-check the dead-session guard before EVERY attempt, not only at
+            // method entry. A fatal SFTP protocol error can land in the gap
+            // between attempts (an unsolicited malformed packet, or a malformed
+            // reply to a just-completed attempt): it sets fatalSftpError but
+            // leaves no in-flight request for ssh2's cleanupRequests to fail. The
+            // next attempt would then buffer its request on the
+            // destroyed-but-socket-alive channel, whose callback never fires, and
+            // hang until the consumer's whole-exchange budget -- defeating, for
+            // the retried rename, the prompt-failure guarantee this guard gives
+            // every other server-driven op. Re-checking turns it into a prompt
+            // TransportOperationStalledError, which is not status 4 and so ends
+            // the retry rather than being re-issued.
+            const dead = this.deadSessionError("file rename", fromPath);
+            if (dead) return Promise.reject(dead);
+            // Bound each attempt's server round-trip: a withheld rename callback
+            // fast-fails in 60 s with the typed terminal error (which, not being
+            // SSH_FX_FAILURE, ends the retry below) rather than hanging this attempt
+            // forever and stalling the whole exchange. rename is a single metadata
+            // round-trip, so the flat deadline carries negligible false-fail risk.
+            return this.boundByDeadline(
+              this.client.rename(fromPath, toPath).then(() => {}),
+              "file rename",
+              fromPath,
+              "rename",
+            );
+          },
+          // `??` not `||` so an explicit retries: 0 disables the retry rather than
+          // being coerced to the default of 5.
+          this.options!.retries ?? 5,
+          100,
+          (error) =>
+            (error as Ssh2SftpError | null | undefined)?.code ===
+            SSH_FX_FAILURE,
+        ),
+        "file rename",
+        `${fromPath} to ${toPath}`,
       ),
-      "file rename",
-      `${fromPath} to ${toPath}`,
     );
   }
 
@@ -1034,15 +1142,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // only races: a handle opened just before a withheld close is not reclaimed
     // (that close cannot itself complete), but the exchange fails terminally
     // rather than stalling, and the session teardown releases the session.
-    return this.warnIfSlow(
-      this.boundByDeadline(
-        attempt,
+    return this.tracked(
+      this.warnIfSlow(
+        this.boundByDeadline(
+          attempt,
+          "exclusive create",
+          path,
+          "open, existence-check, or close",
+        ),
         "exclusive create",
         path,
-        "open, existence-check, or close",
       ),
-      "exclusive create",
-      path,
     );
   }
 
@@ -1058,15 +1168,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // carries negligible false-fail risk and fast-fails a withheld stat callback in
     // 60 s rather than letting the lock-path race check ride the whole-exchange
     // budget.
-    return this.warnIfSlow(
-      this.boundByDeadline(
-        this.client.exists(remotePath).then(Boolean),
+    return this.tracked(
+      this.warnIfSlow(
+        this.boundByDeadline(
+          this.client.exists(remotePath).then(Boolean),
+          "existence check",
+          remotePath,
+          "stat",
+        ),
         "existence check",
         remotePath,
-        "stat",
       ),
-      "existence check",
-      remotePath,
     );
   }
 }
