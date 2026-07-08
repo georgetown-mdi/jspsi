@@ -61,7 +61,9 @@ export default function AcceptForm({ files }: AcceptFormProps) {
   });
 
   return (
-    <Paper>
+    // h=100% so the home grid can stretch this panel to the taller invite panel's
+    // height -- the two compose boxes then read as a pair of equal-height cards.
+    <Paper h="100%">
       <Title order={2}>Accept an invitation you were sent</Title>
       <form
         onSubmit={(e) => {

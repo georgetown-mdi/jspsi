@@ -233,11 +233,12 @@ export function ExchangeView(config: ExchangeConfig) {
 
   // The screen-level accessibility throughline. Three focus targets, each its own
   // ref so the effects below stay independent:
-  //  - leadingHeadingRef: the exchange-summary heading both roles now lead with --
-  //    the summary sits in the left column, and the inviter's share block moved
-  //    below the two columns. Focused once on mount so a keyboard/screen-reader
-  //    user who pressed Generate/Accept lands on the new screen rather than on the
-  //    unmounted button. This is the entry move, not a mid-protocol one.
+  //  - leadingHeadingRef: the heading each role leads with, focused once on mount so
+  //    a keyboard/screen-reader user who pressed Generate/Accept lands on the new
+  //    screen rather than on the unmounted button. The inviter leads with the share
+  //    block heading (it sits above the columns, since sharing the link is the urgent
+  //    post-generate task); the acceptor, which renders no share block, leads with
+  //    the exchange-summary heading. This is the entry move, not a mid-protocol one.
   //  - resultsHeadingRef: the Status heading, focused on `done` so the results are
   //    announced, and also when the partner connects -- the inviter's share block
   //    unmounts then, so this recovers the focus that unmount would otherwise
@@ -263,7 +264,7 @@ export function ExchangeView(config: ExchangeConfig) {
   // The partner is connected once the run has advanced past the pre-stages
   // ("before start"/"waiting for peer") into a protocol stage. Drives the inviter
   // share block's removal: once connected there is nothing left to share, so the
-  // link/code block (rendered below the columns) drops out entirely.
+  // link/code block (rendered above the columns) drops out entirely.
   const peerConnected = !preStages.some((stage) => stage.id === stageId);
 
   // Recover focus orphaned by the inviter share block UNMOUNTING on peer-connect:
@@ -618,11 +619,24 @@ export function ExchangeView(config: ExchangeConfig) {
           {warningAlert.message}
         </Alert>
       )}
-      {/* The summary stays on the RIGHT -- the same side it sits on while setting
-          up -- so the agreed reference keeps a consistent place across the flow.
-          Status (the run's progress and downloads) takes the LEFT, upper area, so it
-          is visible without scrolling. Columns stack on a narrow viewport
-          (base: 12). */}
+      {/* The inviter's link/code leads the screen: sharing it out-of-band is the one
+          urgent task right after generating, so it sits ABOVE the columns (and takes
+          initial focus, see leadingHeadingRef) rather than below a tall summary where
+          it would scroll off. It drops out once the partner connects -- nothing left
+          to share, and Status then shows the run is underway, so the block (and any
+          "Partner connected" restatement) would only add noise. The acceptor renders
+          no share block. */}
+      {config.role === "inviter" && !peerConnected && (
+        <ShareBlock
+          deepLink={config.share.deepLink}
+          encoded={config.share.encoded}
+          expires={config.expires}
+          headingRef={leadingHeadingRef}
+        />
+      )}
+      {/* The summary stays on the RIGHT; Status (the run's progress and downloads)
+          takes the LEFT so it is visible without scrolling. Columns stack on a narrow
+          viewport (base: 12). */}
       <Grid gap="xl" align="flex-start">
         <Grid.Col span={{ base: 12, md: 5 }}>
           <Status
@@ -643,10 +657,20 @@ export function ExchangeView(config: ExchangeConfig) {
             linkageTerms={config.linkageTerms}
             perspective={config.role === "inviter" ? "proposing" : "accepted"}
             headingOrder={headingOrder}
-            // Both roles lead with the summary heading (the inviter's share block
-            // moved below the columns).
-            headingRef={leadingHeadingRef}
-            // The inviter's expiry is shown in the share block below, so it is
+            // The inviter leads with the share block above (which takes initial
+            // focus); the acceptor renders no share block, so it leads with the
+            // summary heading here instead.
+            headingRef={
+              config.role === "inviter" ? undefined : leadingHeadingRef
+            }
+            // Both roles condense here: the run screen shows the terms as reference,
+            // not a decision -- the inviter authored them, and the acceptor already
+            // consented on the review screen -- so the disclose/produce facts stay
+            // visible and the lower tiers fold into one disclosure, keeping the panel
+            // short (and, for the inviter, the share block above it in view). The
+            // acceptor's pre-consent review screen is the one that stays full.
+            condensed
+            // The inviter's expiry is shown in the share block above, so it is
             // withheld here to avoid showing the same deadline twice; the acceptor
             // has no share block, so its summary carries the expiry.
             expires={config.role === "inviter" ? undefined : config.expires}
@@ -674,18 +698,6 @@ export function ExchangeView(config: ExchangeConfig) {
           />
         </Grid.Col>
       </Grid>
-      {/* The inviter's link/code to share out-of-band, below the columns so the
-          summary and Status lead. It drops out entirely once the partner connects:
-          there is nothing left to share, and Status then shows the run is underway,
-          so the block (and any "Partner connected" restatement) would only add
-          noise. The acceptor renders no share block. */}
-      {config.role === "inviter" && !peerConnected && (
-        <ShareBlock
-          deepLink={config.share.deepLink}
-          encoded={config.share.encoded}
-          expires={config.expires}
-        />
-      )}
     </Stack>
   );
 }

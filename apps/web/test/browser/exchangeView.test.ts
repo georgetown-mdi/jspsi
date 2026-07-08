@@ -363,19 +363,40 @@ describe("ExchangeView focus throughline", () => {
     });
   });
 
-  test("moves focus to the exchange-summary heading on mount for the inviter", async () => {
-    // Both roles now lead with the exchange-summary heading (the left column); the
-    // inviter's share block moved below the columns. Entry focus lands on that
-    // heading -- taking a keyboard/screen-reader user who pressed Generate to the
-    // new screen rather than leaving focus on the unmounted compose button. The
-    // inviter's summary heading is "Exchange proposal" (the proposing perspective).
+  test("moves focus to the share-block heading on mount for the inviter", async () => {
+    // The inviter leads with the share block (above the columns): sharing the link is
+    // the urgent post-generate task, so entry focus lands on its heading -- taking a
+    // keyboard/screen-reader user who pressed Generate to the link to copy rather than
+    // leaving focus on the unmounted compose button. The heading is "Share this
+    // invitation".
     setOutcome("none");
     render(inviterConfig("secret-a"));
 
     await vi.waitFor(() => {
       const active = document.activeElement;
       expect(active?.tagName).toBe("H3");
-      expect(active?.textContent).toBe("Exchange proposal");
+      expect(active?.textContent).toBe("Share this invitation");
+    });
+  });
+
+  test("moves focus to the exchange-summary heading on mount for the acceptor", async () => {
+    // The acceptor renders no share block, so it leads with the terms summary heading
+    // (the inviter leads with the share block instead). Entry focus lands there on
+    // mount -- taking a keyboard/screen-reader user who pressed Accept to the terms
+    // rather than leaving focus on the unmounted button. The acceptor's summary
+    // heading is order 2, "Invitation from <identity>". Guards the role-divergent
+    // headingRef ternary: were it to drop the acceptor's ref, the inviter test above
+    // still passes (its focus comes from ShareBlock) while the acceptor silently loses
+    // entry focus to <body>.
+    setOutcome("none");
+    render(acceptorConfig("secret-a"));
+
+    await vi.waitFor(() => {
+      const active = document.activeElement;
+      expect(active?.tagName).toBe("H2");
+      expect(active?.textContent).toBe(
+        "Invitation from County Health Department",
+      );
     });
   });
 
@@ -383,11 +404,11 @@ describe("ExchangeView focus throughline", () => {
     setOutcome("none");
     render(inviterConfig("secret-a"));
 
-    // The inviter auto-starts; entry focus lands on the summary heading. Move it
-    // into the share block (onto the copy-link button the inviter would use while
-    // it waits), so the connect below orphans it.
+    // The inviter auto-starts; entry focus lands on the share-block heading. Move it
+    // onto the copy-link button (the inviter would use it while it waits), so the
+    // connect below orphans the focus when the share block unmounts.
     await vi.waitFor(() => {
-      expect(document.activeElement?.textContent).toBe("Exchange proposal");
+      expect(document.activeElement?.textContent).toBe("Share this invitation");
       expect(lifecycle.calls).toHaveLength(1);
     });
     const copyLink = page.getByRole("button", {
@@ -416,7 +437,7 @@ describe("ExchangeView focus throughline", () => {
     render(inviterConfig("secret-a"));
     await vi.waitFor(() => expect(lifecycle.calls).toHaveLength(1));
 
-    // Focus rests on the summary heading (the left column, which stays mounted
+    // Focus rests on the summary heading (the right column, which stays mounted
     // through the connect), so it is NOT orphaned when the share block unmounts.
     const terms = page.getByRole("heading", {
       name: "Exchange proposal",
@@ -445,6 +466,30 @@ describe("ExchangeView focus throughline", () => {
 
     await expect
       .element(page.getByText(/No columns are sent to your partner/))
+      .toBeInTheDocument();
+  });
+});
+
+describe("ExchangeView condenses the run-screen summary for both roles", () => {
+  // The run screen shows the terms as post-consent / authored reference, so both roles
+  // condense the summary behind the "See the full terms" fold. (The acceptor's
+  // PRE-CONSENT review screen is a different component and stays full -- guarded in
+  // acceptInvitationTerms.test.ts.) These guard against `condensed` being dropped from
+  // ExchangeView: the always-visible "No columns are sent" assertion above would still
+  // pass with the terms fully expanded, so it cannot catch a de-condense regression.
+  test("the inviter run screen condenses the summary", async () => {
+    setOutcome("none");
+    render(inviterConfig("secret-a"));
+    await expect
+      .element(page.getByRole("button", { name: "See the full terms" }))
+      .toBeInTheDocument();
+  });
+
+  test("the acceptor run screen condenses the summary", async () => {
+    setOutcome("none");
+    render(acceptorConfig("secret-a"));
+    await expect
+      .element(page.getByRole("button", { name: "See the full terms" }))
       .toBeInTheDocument();
   });
 });

@@ -188,7 +188,10 @@ export function InvitePanel({ session, setSession, files }: InvitePanelProps) {
   };
 
   return (
-    <Paper>
+    // While composing, the home grid stretches the two panels to equal height, so
+    // this Paper fills its column beside the accept panel; in the takeover it sits in
+    // an auto-height Box where 100% resolves to content height (a no-op).
+    <Paper h={session === undefined ? "100%" : undefined}>
       <Title order={2}>Invite someone to join you in a data exchange</Title>
       {session === undefined ? (
         <Stack mt="md">
