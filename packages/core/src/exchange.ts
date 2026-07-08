@@ -358,15 +358,25 @@ export interface ExchangeStageDefinition {
  * build a progress indicator; the stage `id` values match the strings emitted
  * during execution.
  *
- * Stages: one "confirming protocol" step (terms exchange + role resolution),
- * followed by one "stage N / K" step per linkage key.
+ * Stages: one "confirming protocol" step (terms exchange + role resolution).
+ * For the cascade strategy, one "stage N / K" step per linkage key follows, since
+ * each key is a separate on-wire PSI round. Single-pass runs every key in one
+ * exchange and then replays them locally in-memory, so it emits no per-key stage
+ * (the replay is instant); its only enumerated step is confirming protocol, and
+ * the encrypt/match stages it emits pass through the caller's onStage unlabeled.
  */
 export function describeExchangeStages(
   prepared: PreparedExchange,
 ): ExchangeStageDefinition[] {
+  const confirming: ExchangeStageDefinition = {
+    id: CONFIRMING_PROTOCOL_STAGE_ID,
+    label: "Confirming protocol",
+  };
+  if (prepared.linkageTerms.linkageStrategy === "single-pass")
+    return [confirming];
   const keyCount = prepared.linkageTerms.linkageKeys.length;
   return [
-    { id: CONFIRMING_PROTOCOL_STAGE_ID, label: "Confirming protocol" },
+    confirming,
     ...Array.from({ length: keyCount }, (_, i) => ({
       id: `stage ${i + 1} / ${keyCount}`,
       label: `Linking key ${i + 1} / ${keyCount}`,

@@ -77,6 +77,28 @@ yargs(hideBin(process.argv))
     verifyReceiptHandler,
   )
   .usage("$0 [command] [options]")
+  // Fail fast on a misspelled option (e.g. --server-user for --server-username):
+  // without this, yargs silently drops an unrecognized flag into argv where no
+  // command reads it, so a typo'd credential or path override is quietly ignored
+  // and the run proceeds with the wrong (or default) value. strictOptions, not
+  // strict: it validates flags only, leaving the positionals the zero-setup and
+  // offline commands read straight from argv._ (URL/input/output, invitation
+  // strings) untouched -- full strict rejects those as "unknown arguments".
+  .strictOptions()
+  .fail((msg, err) => {
+    // yargs invokes this for a parse/validation failure (msg set, err null) and
+    // for an error thrown while parsing or in a command handler (err set). Let a
+    // thrown error propagate to the top-level catch below, which sanitizes any
+    // partner-/server-controlled bytes before display; only yargs' own validation
+    // messages are handled here. An unrecognized option (or other argument-shape
+    // failure) is a usage error, so exit 64 (EX_USAGE) to match the repeated-
+    // single-value-option and other usage-error exits, rather than yargs' default
+    // exit 1. The message is yargs' own fixed text (e.g. "Unknown arguments: ..."),
+    // never partner-controlled, so it is safe to print directly.
+    if (err) throw err;
+    console.error(`${msg}\nRun with --help to see the available options.`);
+    process.exit(64);
+  })
   .help("h")
   .alias("h", "help")
   .alias("V", "version")

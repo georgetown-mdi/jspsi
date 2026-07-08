@@ -281,6 +281,8 @@ For `psilink exchange`, a missing, malformed, or unreadable configuration file (
 
 Passing a single-value option more than once - for example `psilink invite --accept-timeout 60s --accept-timeout 120s`, or a repeated `--log-level`, `--log-file`, `--server-port`, `--peer-timeout`, or `--linkage-strategy` - is a usage error and exits 64, naming the flag (`--<flag> may be given only once`), rather than silently taking one of the values. Count flags (`-v`/`--verbose`) and boolean flags (and their `--no-` forms, such as `--record`/`--no-record`) may still be repeated and keep their accumulate / last-one-wins / negation semantics.
 
+Passing an unrecognized option - a misspelling such as `--server-user` for `--server-username`, or `--retain-file` for `--retain-files` - is a usage error and exits 64, naming the offending option, before any connection is attempted. Without this the flag was silently dropped and the run proceeded with the option's default (or a stale configuration value), so a mistyped credential or path override went unnoticed. Positional arguments - the server URL, input and output files, and invitation strings - are validated by each command, not by this check, so an invitation string that begins with `-` is still accepted (see [Invitation strings](#invitation-strings)).
+
 ## See also
 
 - [EXCHANGE_REFERENCE.md](EXCHANGE_REFERENCE.md) - exchange specification format consumed by the CLI

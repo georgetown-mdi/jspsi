@@ -640,11 +640,16 @@ export async function linkViaSinglePassPSI(
   // the consumed id arrays) before replaying the cascade.
   relieveTransientMemory();
 
-  // Replay the cascade.
+  // Replay the cascade. This is purely local, in-memory work with no on-wire
+  // round trip per key -- the whole single-pass exchange already happened in the
+  // one setup/response above -- so it completes near-instantly and emits NO
+  // per-key stage. A "linking key N / M" line here would flash by uselessly while
+  // the operator's real wait was the up-front encryption stages; describeExchange-
+  // Stages omits the per-key stages for single-pass to match (cascade keeps them,
+  // where each key is a genuine round trip).
   const matched: IndexIterationMap = new Array(numRecords).fill(undefined);
   const senderMatched: Array<boolean> = new Array(numSenderRecords).fill(false);
   for (let j = 0; j < numLinkageKeys; ++j) {
-    stage(`stage ${j + 1} / ${numLinkageKeys}`);
     const receiverDistinctValueToRowMap = getUnmatchedDistinctValueToRowMap(
       distinctValueIndexTable[j],
       (row) => matched[row] !== undefined,
