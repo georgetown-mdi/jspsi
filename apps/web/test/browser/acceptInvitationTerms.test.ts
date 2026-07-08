@@ -2,7 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
-import { userEvent } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -168,6 +168,42 @@ describe("accept screen: terms render from a decoded token", () => {
     expect(html).toContain("MOU-2025-0042");
     expect(html).toContain("risk_score");
     expect(html).toContain("program_outcome");
+  });
+
+  test("the review (consent) screen is never condensed -- every tier stays always-visible", async () => {
+    // The consent-integrity invariant: the acceptor's PRE-CONSENT review screen must
+    // render the FULL terms, never the condensed fold used on the post-consent
+    // reference surfaces. If AcceptInvitationPanel ever passed `condensed`, the lower
+    // tiers (how records are matched, legal, other details) would hide behind a "See
+    // the full terms" disclosure at the very screen where informed consent is given --
+    // and the renderHtml helper (which opens every toggle) would mask it. So this
+    // renders WITHOUT opening anything and asserts the fold is absent while a lower
+    // tier is present in the accessibility tree unaided.
+    flushSync(() =>
+      root!.render(
+        createElement(
+          MantineProvider,
+          null,
+          createElement(AcceptInvitationPanel, {
+            decode: { status: "ready", invitation: makeInvitation() },
+            consented: false,
+            onConsentedChange: () => {},
+            acceptorName: "",
+            onAcceptorNameChange: () => {},
+            onAcquireError: () => {},
+            onAcquired: () => {},
+          }),
+        ),
+      ),
+    );
+    // No condensing fold on the consent screen ...
+    expect(
+      page.getByRole("button", { name: "See the full terms" }).query(),
+    ).toBeNull();
+    // ... and a lower tier is always-visible without expanding anything.
+    await expect
+      .element(page.getByRole("heading", { name: "How records are matched" }))
+      .toBeInTheDocument();
   });
 
   test("renders the deduplicate setting as a duplicate-matches note", async () => {

@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActionIcon,
   Alert,
-  Badge,
   Box,
   Button,
   Checkbox,
@@ -826,7 +825,6 @@ export function LinkageTermsEditor({
                   style={{ listStyle: "none", padding: 0, margin: 0 }}
                 >
                   {draft.keys.map((entry, index) => {
-                    const satisfiable = keyIsSatisfiable(index);
                     // The key name is operator-authored but can be self-imported from
                     // a JSON/YAML document, so sanitize it for display and in
                     // accessible names -- the same discipline ExpertKeyEditor applies
@@ -845,26 +843,7 @@ export function LinkageTermsEditor({
                             onChange={(e) =>
                               toggleKey(index, e.currentTarget.checked)
                             }
-                            label={
-                              <Group gap="xs" wrap="nowrap">
-                                <Text size="sm">{keyLabel}</Text>
-                                <Badge
-                                  size="xs"
-                                  variant="light"
-                                  color={satisfiable ? "green" : "red"}
-                                  role="img"
-                                  aria-label={
-                                    satisfiable
-                                      ? "Your columns can satisfy this key"
-                                      : "Your columns cannot satisfy this key"
-                                  }
-                                >
-                                  {satisfiable
-                                    ? "satisfiable"
-                                    : "not satisfiable"}
-                                </Badge>
-                              </Group>
-                            }
+                            label={<Text size="sm">{keyLabel}</Text>}
                           />
                           <Group gap={4} wrap="nowrap">
                             <ActionIcon
@@ -1060,12 +1039,8 @@ export function LinkageTermsEditor({
                 icon={<IconInfoCircle aria-hidden />}
                 title="Fixed in this version"
               >
-                Matched identifiers are revealed (not just a count), and each
-                record matches at most one of your partner&apos;s. These are not
-                adjustable yet. Who receives the matched results is set above;
-                which of your columns are sent to your partner is set per column
-                under Your columns above. Turn on Expert authoring to build keys
-                directly or import and export the terms.
+                Turn on Expert authoring to build keys directly or import and
+                export the terms.
               </Alert>
             )}
           </Stack>
@@ -1086,6 +1061,11 @@ export function LinkageTermsEditor({
               linkageTerms={previewTerms}
               perspective="proposing"
               headingOrder={3}
+              // The author's own live preview: condensed so the pinned column stays
+              // compact. The disclose/produce facts track edits in the always-visible
+              // core; the lower tiers (how records are matched, legal, other details)
+              // fold behind one disclosure the author can open to check a key edit.
+              condensed
             />
           </Stack>
         </Grid.Col>

@@ -26,9 +26,11 @@ import type { InviterSession } from "@components/InvitePanel";
  * generated.
  *
  * While no session exists the two compose panels sit side by side, equal-width and
- * top-aligned so each sizes to its own content (the invite flow is the taller of
- * the two), with the shared drop below; on a narrow viewport they stack (the
- * `base: 12` span). Once {@link InvitePanel} generates an invitation it stores the
+ * equal-height -- the grid stretches both columns to the taller of the two (the
+ * invite flow), so the shorter accept panel matches its height and the two read as a
+ * pair of equal cards rather than each sizing to its own content -- with the shared
+ * drop below; on a narrow viewport they stack (the `base: 12` span). Once
+ * {@link InvitePanel} generates an invitation it stores the
  * session here, and the page drops the grid, the accept form, and the shared drop
  * to render the panel -- now showing the {@link ExchangeView} -- across the full
  * route width, so the exchange screen takes over the view the way the accept route
@@ -61,7 +63,7 @@ export function HomePage() {
       )}
       {session === undefined ? (
         <Stack mt="md">
-          <Grid align="flex-start">
+          <Grid align="stretch">
             <Grid.Col span={{ base: 12, md: 6 }}>
               <InvitePanel
                 session={session}

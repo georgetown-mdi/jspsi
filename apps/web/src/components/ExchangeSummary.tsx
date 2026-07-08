@@ -32,6 +32,7 @@ export function ExchangeSummary({
   disclosedPayloadColumns,
   headingRef,
   sendColumns,
+  condensed,
 }: {
   linkageTerms: LinkageTerms;
   /** Which viewer this renders for; drives the heading and per-party copy (see
@@ -52,6 +53,12 @@ export function ExchangeSummary({
    * inviter's "proposing" preview). An empty array renders the explicit
    * "no columns are sent" confirmation. */
   sendColumns?: Array<string>;
+  /** Condense the panel for a viewer who authored these terms (the inviter's
+   * post-generate exchange screen): the disclose/produce facts stay visible and the
+   * lower reference tiers fold into one disclosure, so the panel stays short and the
+   * share block above it stays in view. Forwarded to {@link InvitationTerms}. Left
+   * off (full terms) for the acceptor's consent and during-run views. */
+  condensed?: boolean;
 }) {
   return (
     <Paper withBorder p="md">
@@ -63,6 +70,7 @@ export function ExchangeSummary({
         disclosedPayloadColumns={disclosedPayloadColumns}
         headingRef={headingRef}
         outboundColumns={sendColumns}
+        condensed={condensed}
       />
     </Paper>
   );

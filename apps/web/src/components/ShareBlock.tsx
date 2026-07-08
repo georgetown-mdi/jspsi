@@ -10,6 +10,8 @@ import {
 } from "@mantine/core";
 import { IconCheck, IconCopy } from "@tabler/icons-react";
 
+import type { Ref } from "react";
+
 /** A labelled, copy-to-clipboard view of one shareable artifact. It is only ever
  * rendered on the client -- behind the inviter exchange screen, which the compose
  * screen swaps in only from an event handler, so it is absent from the server
@@ -84,15 +86,23 @@ export function ShareBlock({
   deepLink,
   encoded,
   expires,
+  headingRef,
 }: {
   deepLink: string;
   encoded: string;
   /** The invitation's expiry instant (ISO 8601), if it carries one. */
   expires?: string;
+  /** Focus target for the heading. The inviter exchange screen leads with this
+   * block (sharing the link is the urgent post-generate task) and moves initial
+   * focus here on mount, so a keyboard/screen-reader user who pressed Generate lands
+   * on the link to copy rather than on the unmounted compose button. */
+  headingRef?: Ref<HTMLHeadingElement>;
 }) {
   return (
     <Stack gap="sm">
-      <Title order={3}>Share this invitation</Title>
+      <Title order={3} ref={headingRef} tabIndex={-1}>
+        Share this invitation
+      </Title>
       <Text size="sm" c="dimmed">
         Send one of these to your partner over a trusted channel (for example,
         secure email). It carries a one-time secret, so treat it as confidential

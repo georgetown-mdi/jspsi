@@ -635,6 +635,10 @@ export function PrepareData({
             perspective="accepted"
             headingOrder={3}
             sendColumns={disclosed}
+            // Post-consent reference (consent was given on the review screen), so the
+            // terms condense: the disclose/produce facts and this party's own outbound
+            // chips stay the standing last-look, and the lower tiers fold away.
+            condensed
           />
         </Grid.Col>
       </Grid>

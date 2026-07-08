@@ -367,6 +367,101 @@ describe("InvitationTerms: per-key matching disclosures", () => {
   });
 });
 
+describe("InvitationTerms: the condensed reference view folds the lower tiers", () => {
+  // The post-consent / authored REFERENCE surfaces (both run screens, prepare-your-
+  // data, the inviter's live preview) render the summary condensed: the disclose/
+  // produce facts stay always-visible; the lower reference tiers (what you receive,
+  // how records are matched, the legal agreement, and "Other details") fold behind one
+  // "See the full terms" disclosure. The acceptor's PRE-CONSENT review screen never
+  // passes condensed -- guarded directly in acceptInvitationTerms.test.ts, and here by
+  // every other test rendering without it.
+  const FOLD = "See the full terms";
+  function renderCondensed(overrides?: Partial<LinkageTerms>) {
+    root!.render(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(InvitationTerms, {
+          linkageTerms: { ...terms, ...overrides },
+          perspective: "proposing",
+          condensed: true,
+        }),
+      ),
+    );
+  }
+
+  test("the must-see facts stay always-visible; the lower tiers fold behind a collapsed disclosure", async () => {
+    renderCondensed();
+
+    // The fold toggle is present and collapsed by default.
+    const fold = toggle(FOLD);
+    await expect.element(fold).toBeInTheDocument();
+    expect(fold.element().getAttribute("aria-expanded")).toBe("false");
+
+    // It is a real disclosure held to the same contract as the others: while closed
+    // its panel is hidden from AT + the tab order (aria-hidden + inert), proving the
+    // tiers are present-but-hidden rather than merely absent.
+    const collapse = await readyCollapse(FOLD);
+    expect(collapse.getAttribute("aria-hidden")).toBe("true");
+    expect(collapse.hasAttribute("inert")).toBe(true);
+
+    // The must-see facts stay in the always-visible core: the viewer's own send
+    // ("What you disclose", chips) and the matching-method / result-sharing pair
+    // ("What the exchange produces").
+    const disclose = group("What you disclose");
+    await expect.element(disclose).toBeInTheDocument();
+    expect(disclose.element().textContent).toContain(
+      "Columns sent to your partner",
+    );
+    const produce = group("What the exchange produces");
+    await expect.element(produce).toBeInTheDocument();
+    expect(produce.element().textContent).toContain("Result sharing");
+
+    // The lower tiers are folded away. Gate on the fold panel having committed first
+    // (readyPanel), so a regression that leaked the tiers visible cannot pass on a
+    // not-yet-committed read: once committed, they are still out of the accessibility
+    // tree until the fold is opened.
+    await readyPanel(FOLD);
+    expect(group("How records are matched").query()).toBeNull();
+    expect(group("Legal agreement").query()).toBeNull();
+  });
+
+  test("opening the fold reveals the lower tiers -- nothing was removed, only folded", async () => {
+    renderCondensed();
+    await userEvent.click(toggle(FOLD));
+
+    // Once expanded, the matching mechanics and the legal-agreement governance frame
+    // are reachable again.
+    await expect.element(group("How records are matched")).toBeInTheDocument();
+    await expect.element(group("Legal agreement")).toBeInTheDocument();
+  });
+
+  test("folding never sweeps the disclosure-critical psi-c caveat out of the always-visible core", async () => {
+    // psi-c is a disclosure GUARANTEE (only the count is revealed). Its "not yet
+    // applied" caveat must stay in the always-visible "What the exchange produces"
+    // tier -- folding it would let a viewer read count-only as in force while the run
+    // still reveals matched identifiers. This is the one caveat that may never move
+    // below its headline, so it must never move behind the fold either.
+    renderCondensed({ algorithm: "psi-c" });
+    const produce = group("What the exchange produces");
+    await expect.element(produce).toBeInTheDocument();
+    expect(produce.element().textContent).toContain(
+      "matched records are still revealed",
+    );
+  });
+
+  test("the fold toggle is self-describing (perspective-neutral, so it fits agreed terms too)", async () => {
+    renderCondensed();
+    const fold = toggle(FOLD);
+    await expect.element(fold).toBeInTheDocument();
+    const describedById = fold.element().getAttribute("aria-describedby");
+    expect(describedById).toBeTruthy();
+    expect(document.getElementById(describedById!)?.textContent).toBe(
+      "Contains how records are matched and the other terms.",
+    );
+  });
+});
+
 describe("InvitationTerms: a key disclosure stays mounted but hidden under a reduced-motion preference", () => {
   // Since Mantine 9.4 a closed Collapse no longer unmounts its panel for a
   // reduced-motion user: it keeps the panel mounted inside a hidden React Activity
@@ -445,6 +540,40 @@ describe("InvitationTerms: a key disclosure stays mounted but hidden under a red
     await userEvent.click(toggle("Matching strategies"));
     for (const name of ["SSN + LN + DOB", "SSN + FN1"])
       await expectResolvableCollapsedWrapper(name);
+  });
+
+  test("the condensed fold's aria-controls wrapper survives collapse under reduced motion", async () => {
+    // The new "See the full terms" fold uses the same always-mounted-wrapper design.
+    // Under reduced motion Mantine may UNMOUNT the closed panel, so an id placed on
+    // the Collapse panel (instead of the outer wrapper) would dangle -- assert the
+    // wrapper stays present here, the invariant the other disclosures are held to.
+    root!.render(
+      createElement(
+        MantineProvider,
+        { theme: { respectReducedMotion: true } },
+        createElement(InvitationTerms, {
+          linkageTerms: terms,
+          perspective: "proposing",
+          condensed: true,
+        }),
+      ),
+    );
+    const fold = toggle("See the full terms");
+    await expect.element(fold).toBeInTheDocument();
+    expect(fold.element().getAttribute("aria-expanded")).toBe("false");
+    const id = fold.element().getAttribute("aria-controls");
+    expect(id).toBeTruthy();
+    // Wait for the reduced-motion effect to settle: the closed panel is then either
+    // gone (unmounted) or hidden (display:none).
+    await expect
+      .poll(() => {
+        const panel = document.getElementById(id!)
+          ?.firstElementChild as HTMLElement | null;
+        return panel === null || getComputedStyle(panel).display === "none";
+      })
+      .toBe(true);
+    // ... and through it all the wrapper stays present, so aria-controls resolves.
+    expect(document.getElementById(id!)).not.toBeNull();
   });
 });
 
