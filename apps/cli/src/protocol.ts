@@ -604,10 +604,18 @@ export async function runProtocol(
         "connection did not establish a handshake role after synchronization",
       );
 
+    // Report the negotiated handshake role by what this party does next, NOT as
+    // "arrived first/second". Under lockless rendezvous (which retain mode, and
+    // therefore a split inbound/outbound directory, forces) the role is a
+    // deterministic lexicographic tiebreaker on the two hello filenames, not a
+    // record of wall-clock arrival, so "arrived first" was misleading there: the
+    // party whose peer id sorts lower is always the responder regardless of who
+    // connected first. Describing the send/wait behavior is accurate under both
+    // rendezvous modes and is the operationally useful fact (which side acts next).
     if (role === "responder") {
-      log.info("arrived first - will wait for message");
+      log.info("waiting for my partner's first message");
     } else {
-      log.info("arrived second - will send first message");
+      log.info("sending my partner the first message");
     }
 
     log.info("starting polling");

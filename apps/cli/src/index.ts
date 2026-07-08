@@ -1,85 +1,10 @@
-import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 
 import { sanitizeErrorForDisplay } from "@psilink/core";
 
-import {
-  builder as zeroSetupBuilder,
-  handler as zeroSetupHandler,
-} from "./commands/zeroSetup";
-import {
-  builder as exchangeBuilder,
-  handler as exchangeHandler,
-} from "./commands/exchange";
-import {
-  builder as fingerprintBuilder,
-  handler as fingerprintHandler,
-} from "./commands/fingerprint";
-import {
-  builder as inviteBuilder,
-  handler as inviteHandler,
-} from "./commands/invite";
-import {
-  builder as acceptBuilder,
-  handler as acceptHandler,
-} from "./commands/accept";
-import {
-  builder as initBuilder,
-  handler as initHandler,
-} from "./commands/init";
-import {
-  builder as verifyReceiptBuilder,
-  handler as verifyReceiptHandler,
-} from "./commands/verifyReceipt";
+import { buildCli } from "./cliParser";
 
-yargs(hideBin(process.argv))
-  .scriptName("psilink")
-  .command(
-    "$0",
-    "Quick exchange: psilink [--save] URL INPUT_FILE [OUTPUT_FILE]",
-    zeroSetupBuilder,
-    zeroSetupHandler,
-  )
-  .command(
-    "init [args..]",
-    "Write a commented configuration template (no exchange, no key file)",
-    initBuilder,
-    initHandler,
-  )
-  .command(
-    "invite [args..]",
-    "Generate an invitation (offline), or invite and run an exchange (online)",
-    inviteBuilder,
-    inviteHandler,
-  )
-  .command(
-    "accept [args..]",
-    "Accept a partner invitation (offline), or accept and run (online)",
-    acceptBuilder,
-    acceptHandler,
-  )
-  .command(
-    "exchange <input> [output]",
-    "Execute a recurring exchange",
-    exchangeBuilder,
-    exchangeHandler,
-  )
-  .command(
-    "fingerprint",
-    "Show (and lazily create) this party's signing certificate fingerprint",
-    fingerprintBuilder,
-    fingerprintHandler,
-  )
-  .command(
-    "verify-receipt <record> [input-file] [result-file]",
-    "Verify a stored exchange record and open its commitments (read-only)",
-    verifyReceiptBuilder,
-    verifyReceiptHandler,
-  )
-  .usage("$0 [command] [options]")
-  .help("h")
-  .alias("h", "help")
-  .alias("V", "version")
+buildCli(hideBin(process.argv))
   .parseAsync()
   .catch((err: unknown) => {
     // Last-resort printer for an error that escaped every command handler. Route
