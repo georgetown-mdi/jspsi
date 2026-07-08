@@ -57,6 +57,12 @@ export interface ConnectionServerOverrides {
    * {@link applyConnectionOverrides}, which rejects it standalone.
    */
   privateKeyPassphrase?: string;
+  /**
+   * Answer the server's keyboard-interactive prompts with the password. Requires
+   * a password (from this override or the base config); see
+   * {@link applyConnectionOverrides}, which rejects it without one. sftp-only.
+   */
+  keyboardInteractive?: boolean;
   port?: number;
   /**
    * Outbound (self-written) directory for a split-directory exchange. When set,
@@ -133,6 +139,8 @@ export function applyConnectionOverrides(
       server.privateKey = serverOverrides.privateKey;
     if (serverOverrides.privateKeyPassphrase !== undefined)
       server.privateKeyPassphrase = serverOverrides.privateKeyPassphrase;
+    if (serverOverrides.keyboardInteractive !== undefined)
+      server.keyboardInteractive = serverOverrides.keyboardInteractive;
     if (serverOverrides.port !== undefined) server.port = serverOverrides.port;
 
     // A passphrase decrypts an encrypted private key and is meaningless without
@@ -149,6 +157,21 @@ export function applyConnectionOverrides(
         "--server-private-key-passphrase requires --server-private-key (or a " +
           "private_key in the configuration): a passphrase decrypts an " +
           "encrypted private key and has no effect without one.",
+      );
+
+    // keyboard-interactive answers the server's prompts with the password, so it
+    // is meaningless without one. Reject it up front with a flag-named message
+    // rather than deferring to the core schema's config-field wording (its
+    // "keyboard_interactive requires password" refine, which this mirrors), since
+    // the override is applied after the config was parsed and would otherwise not
+    // be re-validated. The password may arrive from --server-password (applied
+    // just above) or already sit in the loaded config.
+    if (server.keyboardInteractive === true && server.password === undefined)
+      throw new UsageError(
+        "--server-keyboard-interactive requires --server-password (or a " +
+          "password in the configuration): it answers the server's " +
+          "keyboard-interactive prompts with that password and has no effect " +
+          "without one.",
       );
   }
 

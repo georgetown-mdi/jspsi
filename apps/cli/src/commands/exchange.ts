@@ -82,6 +82,11 @@ export function builder(cmd: Argv): Argv {
       "server-private-key-passphrase":
         "passphrase for an encrypted SSH private key; use @path to read from " +
         "file; overrides connection.server.privateKeyPassphrase in config",
+      "server-keyboard-interactive":
+        "answer the server's keyboard-interactive prompts with the password, " +
+        "overriding connection.server.keyboard_interactive in config; requires " +
+        "a password. Enable for a server that rejects the direct password " +
+        "method but accepts the same password over keyboard-interactive",
       "peer-id":
         "stable identifier for this party; appears in filenames and logs. " +
         "Overrides connection.options.peer_id in config. Requires " +

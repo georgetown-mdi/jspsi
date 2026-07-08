@@ -256,6 +256,25 @@ test("diffConnectionAgainstTarget: a differing private-key passphrase warns name
   expect(warnings.join("\n")).not.toContain("old-pass.txt");
 });
 
+test("diffConnectionAgainstTarget: a differing keyboard-interactive setting warns", () => {
+  // keyboard_interactive is a reconcilable override (via connectionOverridesFrom)
+  // and a non-secret boolean, so it is compared like the sibling credentials but
+  // echoes its values (like port), not name-only. connectionFromURL applies the
+  // --server-keyboard-interactive override into the target.
+  const target = connectionFromURL(new URL("sftp://host/drop"), {
+    server: { password: "@pw.txt", keyboardInteractive: true },
+  });
+  const existing: SFTPConnectionConfig = {
+    channel: "sftp",
+    server: { host: "host", path: "/drop", password: "@pw.txt" },
+  };
+  const { conflicts, warnings } = diffConnectionAgainstTarget(existing, target);
+  expect(conflicts).toEqual([]);
+  expect(warnings.some((w) => w.startsWith("keyboard-interactive:"))).toBe(
+    true,
+  );
+});
+
 // --- connectionFromURL + --outbound-path (split directories) -----------------
 
 test("connectionFromURL: --outbound-path splits an sftp URL path into inbound/outbound", () => {
@@ -370,6 +389,10 @@ const OFFLINE_IGNORED_OVERRIDES: ReadonlyArray<{
     flag: "--server-private-key-passphrase",
     option: { serverPrivateKeyPassphrase: "@pass.txt" },
   },
+  {
+    flag: "--server-keyboard-interactive",
+    option: { serverKeyboardInteractive: true },
+  },
   { flag: "--server-port", option: { serverPort: 2222 } },
   { flag: "--outbound-path", option: { outboundPath: "/drop/out" } },
 ];
@@ -404,6 +427,19 @@ test("warnServerOverridesIgnoredOffline: one warning names every set flag", () =
 test("warnServerOverridesIgnoredOffline: stays silent when no override is set", () => {
   const warnings: string[] = [];
   warnServerOverridesIgnoredOffline({}, { warn: (m) => warnings.push(m) });
+  expect(warnings).toEqual([]);
+});
+
+test("warnServerOverridesIgnoredOffline: --no-server-keyboard-interactive (false) is not reported as ignored", () => {
+  // The gate is `=== true`, not `!== undefined`: the negated form arrives as
+  // `false`, which equals the default (a no-op), so it must NOT be listed as an
+  // ignored override. This pins that gate as an executable check rather than
+  // only a code comment (a `!== undefined` regression would list it and fail).
+  const warnings: string[] = [];
+  warnServerOverridesIgnoredOffline(
+    { serverKeyboardInteractive: false },
+    { warn: (m) => warnings.push(m) },
+  );
   expect(warnings).toEqual([]);
 });
 
@@ -491,6 +527,13 @@ test("connectionOverridesFrom: maps pollingFrequencyMs to the pollIntervalMs ove
 test("connectionOverridesFrom: an absent --polling-frequency leaves pollIntervalMs unset", () => {
   const overrides = connectionOverridesFrom({});
   expect(overrides.options?.pollIntervalMs).toBeUndefined();
+});
+
+test("connectionOverridesFrom: maps serverKeyboardInteractive into the server sub-group", () => {
+  const overrides = connectionOverridesFrom({
+    serverKeyboardInteractive: true,
+  });
+  expect(overrides.server?.keyboardInteractive).toBe(true);
 });
 
 // --- warnLowPollingFrequency -------------------------------------------------

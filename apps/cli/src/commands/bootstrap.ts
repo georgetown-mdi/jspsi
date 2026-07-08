@@ -404,6 +404,18 @@ export function diffConnectionAgainstTarget(
       want.privateKeyPassphrase !== have.privateKeyPassphrase
     )
       warnings.push("private key passphrase: differs from the saved value");
+    // keyboard_interactive is a non-secret auth toggle (settable only via
+    // --server-keyboard-interactive, never from a URL), so its values are echoed
+    // like the port above rather than redacted like the credentials; the
+    // `!== undefined` guard keeps it silent unless the override actually set it.
+    if (
+      want.keyboardInteractive !== undefined &&
+      want.keyboardInteractive !== have.keyboardInteractive
+    )
+      warnings.push(
+        `keyboard-interactive: specified ${want.keyboardInteractive}, saved ` +
+          `${have.keyboardInteractive ?? "unset"}`,
+      );
   } else if (target.channel === "filedrop") {
     // filedrop's only locator is the directory -> conflict. No port/credentials
     // apply. The directory is the single shared `path` or the split
@@ -1498,6 +1510,7 @@ export type CommonBootstrapDescribeOverrides = Partial<
     | "server-password"
     | "server-private-key"
     | "server-private-key-passphrase"
+    | "server-keyboard-interactive"
     | "peer-id"
     | "timestamp-in-filename"
     | "retain-files"
@@ -1567,6 +1580,15 @@ export function addCommonBootstrapOptions(
         describe["server-private-key-passphrase"] ??
         "passphrase for an encrypted SSH private key; use @path to read from " +
           "file; requires --server-private-key",
+    })
+    .option("server-keyboard-interactive", {
+      type: "boolean",
+      describe:
+        describe["server-keyboard-interactive"] ??
+        "answer the server's keyboard-interactive prompts with the password; " +
+          "requires a password. Enable for a server that rejects the direct " +
+          "password method but accepts the same password over " +
+          "keyboard-interactive",
     })
     .option("connection-timeout", {
       type: "string",
@@ -1683,6 +1705,7 @@ export interface CommonBootstrapOptions {
   serverPassword?: string;
   serverPrivateKey?: string;
   serverPrivateKeyPassphrase?: string;
+  serverKeyboardInteractive?: boolean;
   connectionTimeout?: number;
   peerTimeout?: number;
   // The --polling-frequency override, in MILLISECONDS (not seconds like the two
@@ -1740,6 +1763,11 @@ export function parseCommonBootstrapArgs(
       argv,
       "server-private-key-passphrase",
     ) as string | undefined,
+    // Boolean toggle, so it keeps a plain cast (a repeat is valid, like the other
+    // boolean flags); yargs yields true only when the enabling form is passed.
+    serverKeyboardInteractive: argv["server-keyboard-interactive"] as
+      | boolean
+      | undefined,
     connectionTimeout: durationFlagSeconds(
       argv,
       "connection-timeout",
@@ -1786,6 +1814,7 @@ export type ConnectionOverrideOptions = Pick<
   | "serverPassword"
   | "serverPrivateKey"
   | "serverPrivateKeyPassphrase"
+  | "serverKeyboardInteractive"
   | "serverPort"
   | "locklessRendezvous"
   | "peerId"
@@ -1812,6 +1841,7 @@ export function connectionOverridesFrom(
       password: options.serverPassword,
       privateKey: options.serverPrivateKey,
       privateKeyPassphrase: options.serverPrivateKeyPassphrase,
+      keyboardInteractive: options.serverKeyboardInteractive,
       port: options.serverPort,
       outboundPath: options.outboundPath,
     },
@@ -1967,14 +1997,16 @@ export type OfflineIgnoredServerOverrides = Pick<
   | "serverPassword"
   | "serverPrivateKey"
   | "serverPrivateKeyPassphrase"
+  | "serverKeyboardInteractive"
   | "serverPort"
   | "outboundPath"
 >;
 
 /**
  * Warn that the server-block overrides (`--server-username`, `--server-password`,
- * `--server-private-key`, `--server-private-key-passphrase`, `--server-port`, and
- * `--outbound-path`) have no effect
+ * `--server-private-key`, `--server-private-key-passphrase`,
+ * `--server-keyboard-interactive`, `--server-port`, and `--outbound-path`) have no
+ * effect
  * on an OFFLINE invite/accept. Those paths write a placeholder (invite) or
  * invitation-endpoint-seeded (accept) connection block for the operator to edit
  * before `psilink exchange`, rather than building a connection from a URL the way
@@ -2003,6 +2035,11 @@ export function warnServerOverridesIgnoredOffline(
     ignored.push("--server-private-key");
   if (options.serverPrivateKeyPassphrase !== undefined)
     ignored.push("--server-private-key-passphrase");
+  // Gate on `=== true`, not presence: yargs sets the negated form
+  // (--no-server-keyboard-interactive) to false, which is also the default, so
+  // only the enabling form was an override that could have done anything.
+  if (options.serverKeyboardInteractive === true)
+    ignored.push("--server-keyboard-interactive");
   if (options.serverPort !== undefined) ignored.push("--server-port");
   if (options.outboundPath !== undefined) ignored.push("--outbound-path");
   if (ignored.length === 0) return;

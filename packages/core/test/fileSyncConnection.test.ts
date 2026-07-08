@@ -698,6 +698,43 @@ test("providerOptions cannot disable host-key verification", async () => {
   expect(permitted).toBe(false);
 });
 
+// --- open (sftp keyboard-interactive) ----------------------------------------
+
+test("keyboard_interactive with a password sets tryKeyboard", async () => {
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      password: "real-password",
+      keyboardInteractive: true,
+    },
+  });
+  expect(opts["tryKeyboard"]).toBe(true);
+  // The password stays in the options too, so ssh2 offers the direct password
+  // method alongside keyboard-interactive (the robust GUI-client behavior).
+  expect(opts["password"]).toBe("real-password");
+});
+
+test("tryKeyboard is not set when keyboard_interactive is absent", async () => {
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: { host: "sftp.example.org", password: "real-password" },
+  });
+  expect(opts["tryKeyboard"]).toBeUndefined();
+});
+
+test("tryKeyboard is not set when keyboard_interactive has no password", async () => {
+  // The schema refine rejects this combination, but buildSftpConnectOptions
+  // guards it independently: with no password there is nothing to answer prompts
+  // with, so tryKeyboard is withheld rather than enabling an un-answerable method
+  // (defends a direct library caller that bypasses the schema).
+  const opts = await captureSftpConnectOptions({
+    channel: "sftp",
+    server: { host: "sftp.example.org", keyboardInteractive: true },
+  });
+  expect(opts["tryKeyboard"]).toBeUndefined();
+});
+
 // --- host-key verification (enforce / fail-closed / probe) -------------------
 
 // A raw OpenSSH ssh-ed25519 host-key blob: uint32 len + "ssh-ed25519" + uint32
