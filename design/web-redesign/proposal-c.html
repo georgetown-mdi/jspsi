@@ -13,6 +13,7 @@
     --sec: #565b57;
     --faint: #767b73;
     --accent: #0c7a8a;
+    --accent-glow: rgba(12, 122, 138, 0.22);
     --on-accent: #ffffff;
     --rule: #d4d1c6;
     --rule-soft: #e5e2d8;
@@ -48,6 +49,7 @@
       --sec: #a3a89f;
       --faint: #878d83;
       --accent: #3fb6c9;
+      --accent-glow: rgba(63, 182, 201, 0.28);
       --on-accent: #0b2a30;
       --rule: #31342e;
       --rule-soft: #272a24;
@@ -82,6 +84,7 @@
     --sec: #a3a89f;
     --faint: #878d83;
     --accent: #3fb6c9;
+    --accent-glow: rgba(63, 182, 201, 0.28);
     --on-accent: #0b2a30;
     --rule: #31342e;
     --rule-soft: #272a24;
@@ -115,6 +118,7 @@
     --sec: #565b57;
     --faint: #767b73;
     --accent: #0c7a8a;
+    --accent-glow: rgba(12, 122, 138, 0.22);
     --on-accent: #ffffff;
     --rule: #d4d1c6;
     --rule-soft: #e5e2d8;
@@ -247,9 +251,10 @@
   .rail {
     position: sticky;
     top: 20px;
-    background: var(--railbg);
-    border-radius: 10px;
-    padding: 20px 18px 22px 18px;
+    background: var(--col);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    padding: 18px 16px 20px 16px;
   }
   .wordmark {
     font-family: Consolas, "Lucida Console", ui-monospace, monospace;
@@ -258,66 +263,90 @@
     letter-spacing: 0.04em;
     margin-bottom: 18px;
   }
-  .rail .eyebrow {
-    margin-top: 18px;
+  .rail .wordmark {
+    font-family: inherit;
+    font-weight: 650;
+    font-size: 14.5px;
+    letter-spacing: normal;
+    margin: 0 0 4px 0;
+  }
+  .wordrule {
+    border: 0;
+    border-top: 1px solid var(--rule);
+    margin: 0 0 14px 0;
+  }
+  .rail-group {
+    font-variant-caps: all-small-caps;
+    letter-spacing: 0.09em;
+    font-weight: 650;
+    font-size: 14px;
+    color: var(--sec);
+    margin: 18px 0 4px 0;
+  }
+  .rail-groupnote {
+    font-size: 12px;
+    color: var(--faint);
+    margin: 0 0 4px 0;
   }
   .rail-steps,
   .rail-tabs,
   .rail-timeline {
     list-style: none;
-    margin: 6px 0 0 0;
+    margin: 0;
     padding: 0;
   }
   .rail-steps li,
   .rail-timeline li {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 7px 0;
+    position: relative;
+    padding: 6px 0 6px 24px;
     font-size: 14px;
-    font-weight: 600;
+    color: var(--sec);
   }
-  .rail-steps .glyph,
-  .rail-timeline .glyph {
-    flex: none;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    border: 2px solid var(--sec);
-    box-sizing: border-box;
-    background: transparent;
-    margin-top: 1px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
+  .rail-steps li::before,
+  .rail-timeline li::before {
+    content: "";
+    position: absolute;
+    left: 3px;
+    top: 11px;
+    width: 9px;
+    height: 9px;
+    border: 2px solid var(--faint);
+    background: var(--col);
+    z-index: 1;
+  }
+  .rail-steps li::after,
+  .rail-timeline li::after {
+    content: "";
+    position: absolute;
+    left: 8px;
+    top: 22px;
+    bottom: -8px;
+    width: 1px;
+    background: var(--rule);
+  }
+  .rail-steps li:last-child::after,
+  .rail-timeline li:last-child::after {
+    display: none;
+  }
+  .rail-steps li.done,
+  .rail-timeline li.done {
+    color: var(--ink);
+  }
+  .rail-steps li.done::before,
+  .rail-timeline li.done::before {
+    background: var(--ink);
+    border-color: var(--ink);
+  }
+  .rail-steps li.current,
+  .rail-timeline li.current {
+    color: var(--ink);
     font-weight: 650;
-    color: var(--sec);
-    font-variant-numeric: tabular-nums;
   }
-  .rail-steps li.done .glyph,
-  .rail-timeline li.done .glyph {
-    background: var(--accent) var(--check) center / 13px no-repeat;
+  .rail-steps li.current::before,
+  .rail-timeline li.current::before {
     border-color: var(--accent);
-    color: transparent;
-  }
-  .rail-steps li.current .glyph,
-  .rail-timeline li.current .glyph {
-    border-color: var(--accent);
-    color: var(--accent);
-    box-shadow:
-      inset 0 0 0 3px var(--railbg),
-      inset 0 0 0 12px var(--accent);
-  }
-  .rail-steps li.current .glyph {
-    color: var(--on-accent);
-  }
-  .rail-timeline li.current .glyph {
-    color: var(--on-accent);
-  }
-  .rail-steps li.pending,
-  .rail-timeline li.pending {
-    color: var(--sec);
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
   }
   .rail-steps a,
   .rail-tabs a {
@@ -329,47 +358,37 @@
     text-underline-offset: 3px;
     cursor: pointer;
   }
-  .rail-steps li.current {
-    color: var(--ink);
-  }
   .rail-tabs li {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
     padding: 6px 0;
     font-size: 14px;
-    font-weight: 600;
   }
   .rail-tabs a {
     color: var(--ink);
     text-decoration: underline;
     text-underline-offset: 3px;
     cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
   }
   .rail-tabs li.current-tab a {
     color: var(--accent);
   }
-  .chip {
-    display: inline-block;
-    font-size: 11px;
-    font-weight: 650;
-    letter-spacing: 0.03em;
-    border: 1px solid var(--rule);
-    background: var(--col);
-    color: var(--sec);
-    border-radius: 999px;
-    padding: 1px 8px;
-    text-decoration: none;
+  .val {
+    font-family: Consolas, "Lucida Console", ui-monospace, monospace;
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--faint);
+    white-space: nowrap;
   }
-  .chip.on {
-    border-color: var(--accent);
+  .val.edited {
     color: var(--accent);
+    font-weight: 600;
   }
-  .chip.attn {
-    border-color: var(--warn);
+  .val.attn {
     color: var(--warn);
-    background: var(--warn-bg);
+    font-weight: 600;
   }
   .problems {
     margin-top: 20px;
@@ -1569,8 +1588,9 @@
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    background: var(--railbg);
-    border-radius: 8px;
+    background: var(--col);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
     padding: 8px 12px;
     font-size: 13.5px;
     font-weight: 650;
@@ -1608,13 +1628,13 @@
     border-top: 1px solid var(--rule-soft);
     font-size: 13.5px;
   }
-  .adjust-disclosure {
+  .customize-disclosure {
     margin: 12px 0;
     border: 1px solid var(--rule);
     border-radius: 8px;
     background: var(--col);
   }
-  .adjust-disclosure summary {
+  .customize-disclosure summary {
     list-style: none;
     padding: 10px 12px;
     font-weight: 650;
@@ -1624,22 +1644,22 @@
     justify-content: space-between;
     align-items: center;
   }
-  .adjust-disclosure summary::-webkit-details-marker {
+  .customize-disclosure summary::-webkit-details-marker {
     display: none;
   }
-  .adjust-disclosure summary::after {
+  .customize-disclosure summary::after {
     content: "";
     width: 16px;
     height: 16px;
     background: var(--chevron) center / 16px no-repeat;
   }
-  .adjust-disclosure ul {
+  .customize-disclosure ul {
     list-style: none;
     margin: 0;
     padding: 0 12px 12px 12px;
     font-size: 14px;
   }
-  .adjust-disclosure ul li {
+  .customize-disclosure ul li {
     padding: 6px 0;
     display: flex;
     justify-content: space-between;
@@ -2002,37 +2022,33 @@
   <div class="bench">
     <nav class="rail" aria-label="Exchange setup">
       <div class="wordmark">psilink</div>
-      <p class="eyebrow">Set up</p>
+      <hr class="wordrule" />
+      <p class="rail-group">Set up</p>
       <ol class="rail-steps">
         <li class="current">
-          <span class="glyph" aria-hidden="true">1</span
-          ><a aria-current="step">Your file</a>
+          <a aria-current="step">Your file</a>
         </li>
         <li class="pending">
-          <span class="glyph" aria-hidden="true">2</span
-          ><a>Columns &amp; disclosure</a>
+          <a>Matching &amp; sharing</a>
         </li>
         <li class="pending">
-          <span class="glyph" aria-hidden="true">3</span
-          ><a>Review &amp; create</a>
+          <a>Review &amp; create</a>
         </li>
       </ol>
-      <p class="eyebrow">Adjust (optional)<sup class="pin">2</sup></p>
+      <p class="rail-group">Customize<sup class="pin">2</sup></p>
+      <p class="rail-groupnote">Filled in from your file.</p>
       <ul class="rail-tabs">
         <li>
-          <a data-goto="tab-cleaning"
-            >Cleaning <span class="chip">Recommended</span></a
-          >
+          <a data-goto="tab-cleaning">Cleaning</a>
+          <span class="val">3 fields</span>
         </li>
         <li>
-          <a data-goto="tab-keys"
-            >Matching keys <span class="chip">Recommended</span></a
-          >
+          <a data-goto="tab-keys">Matching keys</a>
+          <span class="val">2 keys</span>
         </li>
         <li>
-          <a data-goto="tab-agreement"
-            >Legal agreement <span class="chip">None</span></a
-          >
+          <a data-goto="tab-agreement">Legal agreement</a>
+          <span class="val">&mdash;</span>
         </li>
       </ul>
     </nav>
@@ -2103,14 +2119,14 @@
         </p>
         <p class="small">
           Cleaning, matching keys, and the option of a legal agreement were set
-          from your file's columns. Adjust any of them from the rail, any time
-          before you create the invitation.
+          from your file's columns. Customize any of them from the rail, any
+          time before you create the invitation.
         </p>
       </div>
 
       <div class="workfoot">
         <button class="btn" data-goto="bench-columns">
-          Continue to columns &amp; disclosure
+          Continue to matching &amp; sharing
         </button>
         <p class="status-line sub small" style="font-weight: 400">
           A name and a file are needed to proceed.
@@ -2164,14 +2180,17 @@
         not the user, fills the form: dropping
         <code>clients_2025.csv</code> derives cleaning, keys, and disclosure
         defaults. The callout states the consequence plainly - most exchanges
-        are done in three steps.
+        are done in three steps - and the rail says it once, in the group note
+        "Filled in from your file.", instead of stamping a status word on every
+        tab.
       </li>
       <li>
-        <b>USWDS: Step indicator.</b> Only the true sequence is numbered
-        (1-2-3). Cleaning, keys, and agreement are not steps, so they are
-        unnumbered tabs in a separate "Adjust (optional)" group - live links at
-        full contrast with state chips, never styled as disabled. Pending steps
-        are grey but AA-legible.
+        <b>USWDS: Step indicator.</b> Only the true sequence sits on the
+        connected spine of square markers. Cleaning, keys, and agreement are not
+        steps, so they live in the separate "Customize" group - live links at
+        full contrast, each stating its current value as a quiet fact in the
+        data voice. Pending steps are grey but AA-legible, never
+        disabled-looking.
       </li>
       <li>
         <b>USWDS: Earn trust.</b> The standing ledger fills the moment the file
@@ -2188,50 +2207,46 @@
 <section
   class="screen"
   id="bench-columns"
-  data-title="Step 2 - Columns &amp; disclosure"
+  data-title="Step 2 - Matching &amp; sharing"
   data-group="inviter"
 >
   <div class="bench">
     <nav class="rail" aria-label="Exchange setup">
       <div class="wordmark">psilink</div>
-      <p class="eyebrow">Set up</p>
+      <hr class="wordrule" />
+      <p class="rail-group">Set up</p>
       <ol class="rail-steps">
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span
-          ><a data-goto="bench-file">Your file</a>
+          <a data-goto="bench-file">Your file</a>
         </li>
         <li class="current">
-          <span class="glyph" aria-hidden="true">2</span
-          ><a aria-current="step">Columns &amp; disclosure</a>
+          <a aria-current="step">Matching &amp; sharing</a>
         </li>
         <li class="pending">
-          <span class="glyph" aria-hidden="true">3</span
-          ><a>Review &amp; create</a>
+          <a>Review &amp; create</a>
         </li>
       </ol>
-      <p class="eyebrow">Adjust (optional)</p>
+      <p class="rail-group">Customize</p>
+      <p class="rail-groupnote">Filled in from your file.</p>
       <ul class="rail-tabs">
         <li>
-          <a data-goto="tab-cleaning"
-            >Cleaning <span class="chip">Recommended</span></a
-          >
+          <a data-goto="tab-cleaning">Cleaning</a>
+          <span class="val">3 fields</span>
         </li>
         <li>
-          <a data-goto="tab-keys"
-            >Matching keys <span class="chip">Recommended</span></a
-          >
+          <a data-goto="tab-keys">Matching keys</a>
+          <span class="val">2 keys</span>
         </li>
         <li>
-          <a data-goto="tab-agreement"
-            >Legal agreement <span class="chip">None</span></a
-          >
+          <a data-goto="tab-agreement">Legal agreement</a>
+          <span class="val">&mdash;</span>
         </li>
       </ul>
     </nav>
 
     <div class="work">
       <p class="eyebrow">Step 2 of 3</p>
-      <h1 tabindex="-1">Columns &amp; disclosure<sup class="pin">1</sup></h1>
+      <h1 tabindex="-1">Matching &amp; sharing<sup class="pin">1</sup></h1>
       <p>
         Confirm what each column is and what it is used for. This is the one
         review every exchange needs: it decides exactly what your partner can
@@ -2504,7 +2519,7 @@
     </aside>
   </div>
   <aside class="notes-panel" aria-label="Design notes">
-    <h2>Design notes - Columns &amp; disclosure</h2>
+    <h2>Design notes - Matching &amp; sharing</h2>
     <ol>
       <li>
         <b>USWDS: Earn trust.</b> The only mandatory review in the whole flow is
@@ -2538,37 +2553,32 @@
   <div class="bench">
     <nav class="rail" aria-label="Exchange setup">
       <div class="wordmark">psilink</div>
-      <p class="eyebrow">Set up</p>
+      <hr class="wordrule" />
+      <p class="rail-group">Set up</p>
       <ol class="rail-steps">
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span
-          ><a data-goto="bench-file">Your file</a>
+          <a data-goto="bench-file">Your file</a>
         </li>
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span
-          ><a data-goto="bench-columns">Columns &amp; disclosure</a>
+          <a data-goto="bench-columns">Matching &amp; sharing</a>
         </li>
         <li class="current">
-          <span class="glyph" aria-hidden="true">3</span
-          ><a aria-current="step">Review &amp; create</a>
+          <a aria-current="step">Review &amp; create</a>
         </li>
       </ol>
-      <p class="eyebrow">Adjust (optional)</p>
+      <p class="rail-group">Customize</p>
       <ul class="rail-tabs">
         <li>
-          <a data-goto="tab-cleaning"
-            >Cleaning <span class="chip">Recommended</span></a
-          >
+          <a data-goto="tab-cleaning">Cleaning</a>
+          <span class="val">3 fields</span>
         </li>
         <li>
-          <a data-goto="tab-keys"
-            >Matching keys <span class="chip">Recommended</span></a
-          >
+          <a data-goto="tab-keys">Matching keys</a>
+          <span class="val">2 keys</span>
         </li>
         <li>
-          <a data-goto="tab-agreement"
-            >Legal agreement <span class="chip on">Attached</span></a
-          >
+          <a data-goto="tab-agreement">Legal agreement</a>
+          <span class="val edited">MOU-2025-0042</span>
         </li>
       </ul>
     </nav>
@@ -2691,7 +2701,7 @@
             </tr>
             <tr>
               <th scope="row">Cleaning</th>
-              <td>Recommended - 3 fields</td>
+              <td>3 fields, filled in from your file</td>
               <td class="chg">
                 <button class="linklike small" data-goto="tab-cleaning">
                   Change<span class="visually-hidden"> cleaning</span>
@@ -2850,43 +2860,38 @@
 <section
   class="screen"
   id="tab-cleaning"
-  data-title="Adjust - Cleaning"
+  data-title="Customize - Cleaning"
   data-group="inviter"
 >
   <div class="bench">
     <nav class="rail" aria-label="Exchange setup">
       <div class="wordmark">psilink</div>
-      <p class="eyebrow">Set up</p>
+      <hr class="wordrule" />
+      <p class="rail-group">Set up</p>
       <ol class="rail-steps">
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span
-          ><a data-goto="bench-file">Your file</a>
+          <a data-goto="bench-file">Your file</a>
         </li>
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span
-          ><a data-goto="bench-columns">Columns &amp; disclosure</a>
+          <a data-goto="bench-columns">Matching &amp; sharing</a>
         </li>
         <li class="pending">
-          <span class="glyph" aria-hidden="true">3</span
-          ><a data-goto="bench-review">Review &amp; create</a>
+          <a data-goto="bench-review">Review &amp; create</a>
         </li>
       </ol>
-      <p class="eyebrow">Adjust (optional)</p>
+      <p class="rail-group">Customize</p>
       <ul class="rail-tabs">
         <li class="current-tab">
-          <a aria-current="true"
-            >Cleaning <span class="chip on">Customized</span></a
-          >
+          <a aria-current="true">Cleaning</a>
+          <span class="val attn">1 field failing</span>
         </li>
         <li>
-          <a data-goto="tab-keys"
-            >Matching keys <span class="chip">Recommended</span></a
-          >
+          <a data-goto="tab-keys">Matching keys</a>
+          <span class="val">2 keys</span>
         </li>
         <li>
-          <a data-goto="tab-agreement"
-            >Legal agreement <span class="chip on">Attached</span></a
-          >
+          <a data-goto="tab-agreement">Legal agreement</a>
+          <span class="val edited">MOU-2025-0042</span>
         </li>
       </ul>
       <div class="problems">
@@ -2901,7 +2906,7 @@
       <button class="backlink" data-goto="bench-review">
         &larr; Back to Review &amp; create
       </button>
-      <p class="eyebrow">Adjust (optional)</p>
+      <p class="eyebrow">Customize</p>
       <h1 tabindex="-1">Cleaning<sup class="pin">2</sup></h1>
       <p>
         Each field below is cleaned before matching so small differences -
@@ -3169,7 +3174,7 @@
           <p style="margin-top: 1rem">
             <button class="btn btn-quiet btn-sm">Add another name field</button>
             <button class="btn btn-quiet btn-sm">Remove this field</button>
-            <span class="chip" style="margin-left: 6px">Expert authoring</span>
+            <span class="pchip" style="margin-left: 6px">Expert authoring</span>
           </p>
         </div>
       </details>
@@ -3388,10 +3393,11 @@
         the navigation, not a banner that scrolls away.
       </li>
       <li>
-        <b>Optional until it is not.</b> Cleaning ships with recommended steps
-        derived from the file and stays out of the required path - but a problem
-        promotes this tab: the rail links straight here. The chip flips from
-        "Recommended" to "Customized" the moment any step is touched.
+        <b>Optional until it is not.</b> Cleaning ships with steps derived from
+        the file and stays out of the required path - but a problem promotes
+        this tab: the rail links straight here, and the tab's value turns amber
+        ("1 field failing") in step with the Problems block. Color appears only
+        for edited and needs-attention states.
       </li>
       <li>
         <b>18F Content Guide: plain language.</b> Every step in the add-a-step
@@ -3413,43 +3419,38 @@
 <section
   class="screen"
   id="tab-keys"
-  data-title="Adjust - Matching keys"
+  data-title="Customize - Matching keys"
   data-group="inviter"
 >
   <div class="bench">
     <nav class="rail" aria-label="Exchange setup">
       <div class="wordmark">psilink</div>
-      <p class="eyebrow">Set up</p>
+      <hr class="wordrule" />
+      <p class="rail-group">Set up</p>
       <ol class="rail-steps">
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span
-          ><a data-goto="bench-file">Your file</a>
+          <a data-goto="bench-file">Your file</a>
         </li>
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span
-          ><a data-goto="bench-columns">Columns &amp; disclosure</a>
+          <a data-goto="bench-columns">Matching &amp; sharing</a>
         </li>
         <li class="pending">
-          <span class="glyph" aria-hidden="true">3</span
-          ><a data-goto="bench-review">Review &amp; create</a>
+          <a data-goto="bench-review">Review &amp; create</a>
         </li>
       </ol>
-      <p class="eyebrow">Adjust (optional)</p>
+      <p class="rail-group">Customize</p>
       <ul class="rail-tabs">
         <li>
-          <a data-goto="tab-cleaning"
-            >Cleaning <span class="chip">Recommended</span></a
-          >
+          <a data-goto="tab-cleaning">Cleaning</a>
+          <span class="val">3 fields</span>
         </li>
         <li class="current-tab">
-          <a aria-current="true"
-            >Matching keys <span class="chip on">Customized</span></a
-          >
+          <a aria-current="true">Matching keys</a>
+          <span class="val edited">2 keys, edited</span>
         </li>
         <li>
-          <a data-goto="tab-agreement"
-            >Legal agreement <span class="chip on">Attached</span></a
-          >
+          <a data-goto="tab-agreement">Legal agreement</a>
+          <span class="val edited">MOU-2025-0042</span>
         </li>
       </ul>
     </nav>
@@ -3458,7 +3459,7 @@
       <button class="backlink" data-goto="bench-review">
         &larr; Back to Review &amp; create
       </button>
-      <p class="eyebrow">Adjust (optional)</p>
+      <p class="eyebrow">Customize</p>
       <h1 tabindex="-1">Matching keys</h1>
       <p>
         Records are matched on these keys, tried in order. Earlier keys match
@@ -3957,44 +3958,38 @@
 <section
   class="screen"
   id="tab-agreement"
-  data-title="Adjust - Legal agreement"
+  data-title="Customize - Legal agreement"
   data-group="inviter"
 >
   <div class="bench">
     <nav class="rail" aria-label="Exchange setup">
       <div class="wordmark">psilink</div>
-      <p class="eyebrow">Set up</p>
+      <hr class="wordrule" />
+      <p class="rail-group">Set up</p>
       <ol class="rail-steps">
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span
-          ><a data-goto="bench-file">Your file</a>
+          <a data-goto="bench-file">Your file</a>
         </li>
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span
-          ><a data-goto="bench-columns">Columns &amp; disclosure</a>
+          <a data-goto="bench-columns">Matching &amp; sharing</a>
         </li>
         <li class="pending">
-          <span class="glyph" aria-hidden="true">3</span
-          ><a data-goto="bench-review">Review &amp; create</a>
+          <a data-goto="bench-review">Review &amp; create</a>
         </li>
       </ol>
-      <p class="eyebrow">Adjust (optional)</p>
+      <p class="rail-group">Customize</p>
       <ul class="rail-tabs">
         <li>
-          <a data-goto="tab-cleaning"
-            >Cleaning <span class="chip">Recommended</span></a
-          >
+          <a data-goto="tab-cleaning">Cleaning</a>
+          <span class="val">3 fields</span>
         </li>
         <li>
-          <a data-goto="tab-keys"
-            >Matching keys <span class="chip">Recommended</span></a
-          >
+          <a data-goto="tab-keys">Matching keys</a>
+          <span class="val">2 keys</span>
         </li>
         <li class="current-tab">
-          <a aria-current="true"
-            >Legal agreement <span class="chip on">Attached</span
-            ><sup class="pin">1</sup></a
-          >
+          <a aria-current="true">Legal agreement<sup class="pin">1</sup></a>
+          <span class="val edited">MOU-2025-0042</span>
         </li>
       </ul>
     </nav>
@@ -4003,7 +3998,7 @@
       <button class="backlink" data-goto="bench-review">
         &larr; Back to Review &amp; create
       </button>
-      <p class="eyebrow">Adjust (optional)</p>
+      <p class="eyebrow">Customize</p>
       <h1 tabindex="-1">Legal agreement</h1>
 
       <div class="check">
@@ -4104,9 +4099,11 @@
     <h2>Design notes - Legal agreement</h2>
     <ol>
       <li>
-        <b>State chips carry the story.</b> The rail chip flips from "None" to
-        "Attached" and the ledger's Agreement row fills in the same moment - the
-        reviewer can see the whole system react to one checkbox.
+        <b>Quiet facts carry the story.</b> The rail's Agreement value flips
+        from an em-dash to "MOU-2025-0042" - the fact itself, in the data voice
+        - and the ledger's Agreement row fills in the same moment. The reviewer
+        sees the whole system react to one checkbox, with no judgment word
+        anywhere.
       </li>
       <li>
         <b>GOV.UK: Do not demand what you can default - except here.</b> An
@@ -4130,25 +4127,23 @@
   <div class="bench">
     <nav class="rail" aria-label="Exchange progress">
       <div class="wordmark">psilink</div>
-      <p class="eyebrow">This exchange<sup class="pin">4</sup></p>
+      <hr class="wordrule" />
+      <p class="rail-group">This exchange<sup class="pin">4</sup></p>
       <ol class="rail-timeline">
         <li class="current">
-          <span class="glyph" aria-hidden="true">1</span
-          ><span aria-current="step">Share</span>
+          <span aria-current="step">Share</span>
         </li>
         <li class="pending">
-          <span class="glyph" aria-hidden="true">2</span
-          ><span>Partner accepts</span>
+          <span>Partner accepts</span>
         </li>
         <li class="pending">
-          <span class="glyph" aria-hidden="true">3</span
-          ><span>Confirm protocol</span>
+          <span>Confirm protocol</span>
         </li>
         <li class="pending">
-          <span class="glyph" aria-hidden="true">4</span><span>Link keys</span>
+          <span>Link keys</span>
         </li>
         <li class="pending">
-          <span class="glyph" aria-hidden="true">5</span><span>Done</span>
+          <span>Done</span>
         </li>
       </ol>
     </nav>
@@ -4329,25 +4324,23 @@
   <div class="bench">
     <nav class="rail" aria-label="Exchange progress">
       <div class="wordmark">psilink</div>
-      <p class="eyebrow">This exchange</p>
+      <hr class="wordrule" />
+      <p class="rail-group">This exchange</p>
       <ol class="rail-timeline">
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span><span>Share</span>
+          <span>Share</span>
         </li>
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span
-          ><span>Partner accepts</span>
+          <span>Partner accepts</span>
         </li>
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span
-          ><span>Confirm protocol</span>
+          <span>Confirm protocol</span>
         </li>
         <li class="current">
-          <span class="glyph" aria-hidden="true">4</span
-          ><span aria-current="step">Link keys</span>
+          <span aria-current="step">Link keys</span>
         </li>
         <li class="pending">
-          <span class="glyph" aria-hidden="true">5</span><span>Done</span>
+          <span>Done</span>
         </li>
       </ol>
       <div class="problems warned">
@@ -4487,24 +4480,23 @@
   <div class="bench">
     <nav class="rail" aria-label="Exchange progress">
       <div class="wordmark">psilink</div>
-      <p class="eyebrow">This exchange</p>
+      <hr class="wordrule" />
+      <p class="rail-group">This exchange</p>
       <ol class="rail-timeline">
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span><span>Share</span>
+          <span>Share</span>
         </li>
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span
-          ><span>Partner accepts</span>
+          <span>Partner accepts</span>
         </li>
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span
-          ><span>Confirm protocol</span>
+          <span>Confirm protocol</span>
         </li>
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span><span>Link keys</span>
+          <span>Link keys</span>
         </li>
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span><span>Done</span>
+          <span>Done</span>
         </li>
       </ol>
     </nav>
@@ -4654,21 +4646,22 @@
   <div class="bench">
     <nav class="rail" aria-label="Exchange progress">
       <div class="wordmark">psilink</div>
-      <p class="eyebrow">This exchange &middot; SFTP<sup class="pin">3</sup></p>
+      <hr class="wordrule" />
+      <p class="rail-group">
+        This exchange &middot; SFTP<sup class="pin">3</sup>
+      </p>
       <ol class="rail-timeline">
         <li class="current">
-          <span class="glyph" aria-hidden="true">1</span
-          ><span aria-current="step">Save file</span>
+          <span aria-current="step">Save file</span>
         </li>
         <li class="pending">
-          <span class="glyph" aria-hidden="true">2</span
-          ><span>Partner accepts</span>
+          <span>Partner accepts</span>
         </li>
         <li class="pending">
-          <span class="glyph" aria-hidden="true">3</span><span>CLI runs</span>
+          <span>CLI runs</span>
         </li>
         <li class="pending">
-          <span class="glyph" aria-hidden="true">4</span><span>Results</span>
+          <span>Results</span>
         </li>
       </ol>
     </nav>
@@ -4836,24 +4829,25 @@
   <div class="bench">
     <nav class="rail" aria-label="Accept an invitation">
       <div class="wordmark">psilink</div>
-      <p class="eyebrow">Accept an invitation</p>
+      <hr class="wordrule" />
+      <p class="rail-group">Accept an invitation</p>
       <ol class="rail-steps">
         <li class="current">
-          <span class="glyph" aria-hidden="true">1</span
-          ><a aria-current="step">Review terms</a>
+          <a aria-current="step">Review terms</a>
         </li>
         <li class="pending">
-          <span class="glyph" aria-hidden="true">2</span
-          ><a>Consent &amp; your file</a>
+          <a>Consent &amp; your file</a>
         </li>
         <li class="pending">
-          <span class="glyph" aria-hidden="true">3</span
-          ><a>Confirm your columns</a>
+          <a>Confirm your columns</a>
         </li>
       </ol>
-      <p class="eyebrow">Adjust (optional)</p>
+      <p class="rail-group">Customize</p>
       <ul class="rail-tabs">
-        <li><a>Cleaning</a></li>
+        <li>
+          <a>Cleaning</a>
+          <span class="val">&mdash;</span>
+        </li>
       </ul>
     </nav>
 
@@ -5046,24 +5040,25 @@
   <div class="bench">
     <nav class="rail" aria-label="Accept an invitation">
       <div class="wordmark">psilink</div>
-      <p class="eyebrow">Accept an invitation</p>
+      <hr class="wordrule" />
+      <p class="rail-group">Accept an invitation</p>
       <ol class="rail-steps">
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span
-          ><a data-goto="accept-review">Review terms</a>
+          <a data-goto="accept-review">Review terms</a>
         </li>
         <li class="current">
-          <span class="glyph" aria-hidden="true">2</span
-          ><a aria-current="step">Consent &amp; your file</a>
+          <a aria-current="step">Consent &amp; your file</a>
         </li>
         <li class="pending">
-          <span class="glyph" aria-hidden="true">3</span
-          ><a>Confirm your columns</a>
+          <a>Confirm your columns</a>
         </li>
       </ol>
-      <p class="eyebrow">Adjust (optional)</p>
+      <p class="rail-group">Customize</p>
       <ul class="rail-tabs">
-        <li><a>Cleaning</a></li>
+        <li>
+          <a>Cleaning</a>
+          <span class="val">&mdash;</span>
+        </li>
       </ul>
     </nav>
 
@@ -5257,28 +5252,24 @@
   <div class="bench">
     <nav class="rail" aria-label="Accept an invitation">
       <div class="wordmark">psilink</div>
-      <p class="eyebrow">Accept an invitation</p>
+      <hr class="wordrule" />
+      <p class="rail-group">Accept an invitation</p>
       <ol class="rail-steps">
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span
-          ><a data-goto="accept-review">Review terms</a>
+          <a data-goto="accept-review">Review terms</a>
         </li>
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span
-          ><a data-goto="accept-consent-file">Consent &amp; your file</a>
+          <a data-goto="accept-consent-file">Consent &amp; your file</a>
         </li>
         <li class="current">
-          <span class="glyph" aria-hidden="true">3</span
-          ><a aria-current="step">Confirm your columns</a>
+          <a aria-current="step">Confirm your columns</a>
         </li>
       </ol>
-      <p class="eyebrow">Adjust (optional)</p>
+      <p class="rail-group">Customize</p>
       <ul class="rail-tabs">
         <li>
-          <a
-            >Cleaning <span class="chip attn">1 field needs attention</span
-            ><sup class="pin">1</sup></a
-          >
+          <a>Cleaning<sup class="pin">1</sup></a>
+          <span class="val attn">1 field failing</span>
         </li>
       </ul>
     </nav>
@@ -5586,8 +5577,8 @@
     <ol>
       <li>
         <b>Progressive disclosure.</b> The acceptor sees the Cleaning tab only
-        when the verdict gives a reason - its rail chip surfaces "1 field needs
-        attention" instead of demanding a review of every field on every accept.
+        when the verdict gives a reason - its rail value turns amber ("1 field
+        failing") instead of demanding a review of every field on every accept.
       </li>
       <li>
         <b>GDS principle 4.</b> The verdict strip diagnoses ("Key 2 needs a ZIP
@@ -5616,20 +5607,20 @@
   <div class="bench">
     <nav class="rail" aria-label="Exchange progress">
       <div class="wordmark">psilink</div>
-      <p class="eyebrow">This exchange</p>
+      <hr class="wordrule" />
+      <p class="rail-group">This exchange</p>
       <ol class="rail-timeline">
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span><span>Connect</span>
+          <span>Connect</span>
         </li>
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span
-          ><span>Confirm protocol</span>
+          <span>Confirm protocol</span>
         </li>
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span><span>Link keys</span>
+          <span>Link keys</span>
         </li>
         <li class="done">
-          <span class="glyph" aria-hidden="true"></span><span>Done</span>
+          <span>Done</span>
         </li>
       </ol>
     </nav>
@@ -5972,15 +5963,15 @@
       <h1 tabindex="-1">The bench at 400 px</h1>
       <p style="max-width: 72ch">
         On a narrow viewport the three regions re-stack: the rail compresses to
-        a step strip, the optional tabs fold behind an "Adjust" disclosure, and
-        the ledger becomes a collapsible "What you will share" bar pinned above
-        the fold.<sup class="pin">1</sup>
+        a step strip, the optional tabs fold behind a "Customize" disclosure,
+        and the ledger becomes a collapsible "What you will share" bar pinned
+        above the fold.<sup class="pin">1</sup>
       </p>
 
       <div class="device">
         <div class="device-inner">
           <div class="step-strip">
-            <span>Step 2 of 3 - Columns &amp; disclosure</span>
+            <span>Step 2 of 3 - Matching &amp; sharing</span>
             <span class="mono" aria-hidden="true">2/3</span>
           </div>
 
@@ -6004,17 +5995,18 @@
             </div>
           </details>
 
-          <details class="adjust-disclosure">
-            <summary>Adjust (optional)</summary>
+          <details class="customize-disclosure">
+            <summary>Customize</summary>
+            <p class="rail-groupnote" style="padding: 0 12px; margin: 0">
+              Filled in from your file.
+            </p>
             <ul>
+              <li><span>Cleaning</span> <span class="val">3 fields</span></li>
               <li>
-                <span>Cleaning</span> <span class="chip">Recommended</span>
+                <span>Matching keys</span> <span class="val">2 keys</span>
               </li>
               <li>
-                <span>Matching keys</span> <span class="chip">Recommended</span>
-              </li>
-              <li>
-                <span>Legal agreement</span> <span class="chip">None</span>
+                <span>Legal agreement</span> <span class="val">&mdash;</span>
               </li>
             </ul>
           </details>
@@ -6028,7 +6020,7 @@
             "
           >
             <h2 style="margin: 0 0 4px 0; font-size: 1.1rem">
-              Columns &amp; disclosure
+              Matching &amp; sharing
             </h2>
             <p class="small sub" style="margin-top: 0">
               Confirm what each column is used for.
@@ -6084,9 +6076,9 @@
         away.
       </li>
       <li>
-        <b>USWDS: Step indicator, small variant.</b> The numbered spine
-        compresses to "Step 2 of 3" text rather than disappearing; the optional
-        tabs keep their chips inside the Adjust disclosure.
+        <b>USWDS: Step indicator, small variant.</b> The spine compresses to
+        "Step 2 of 3" text rather than disappearing; the optional tabs keep
+        their right-aligned values inside the Customize disclosure.
       </li>
     </ol>
   </aside>

@@ -26,15 +26,17 @@ working surface, and give it orientation rather than decomposition.
 One working surface per role - a "bench" with three regions: a section rail on the left, a
 work column in the center, and a standing disclosure ledger on the right.
 
-- A three-step required spine: 1 Your file (name and file; recommended terms are derived
-  from the file the moment it is read), 2 Columns & disclosure (the one mandatory review -
-  the only decision with no safe default), 3 Review & create (owns the invitation lifetime,
+- A three-step required spine: 1 Your file (name and file; default terms are derived from
+  the file the moment it is read), 2 Matching & sharing (the one mandatory review - the
+  only decision with no safe default), 3 Review & create (owns the invitation lifetime,
   who receives the matched results, the transport choice, a check-your-answers table with
   change links, and the create button).
-- Optional adjustment tabs, unnumbered and out of the spine: Cleaning, Matching keys, and
-  Legal agreement, each with a state chip in the rail (Recommended / Customized; None /
-  Attached). They ship with defaults derived from the file and are promoted from optional
-  to required only when a problem gives a reason - the rail's Problems block is the error
+- A Customize group of optional tabs, unnumbered and out of the spine: Cleaning, Matching
+  keys, and Legal agreement. Each tab's state is a quiet fact in the rail ("3 fields",
+  "2 keys", an agreement reference or an em-dash) rather than a status word; color appears
+  only when a tab has been edited or needs attention. The tabs ship with defaults derived
+  from the file - declared once in the rail, not per item - and are promoted from optional
+  to required only when a problem gives a reason: the rail's Problems block is the error
   summary, and it links into the tab that needs attention.
 - The disclosure ledger (You will send / You will receive / Matched on / Expires / Results
   go to / Agreement / Transport) is always visible and fills in as the exchange takes
