@@ -144,8 +144,7 @@ test("a malformed credential-bearing server URL does not echo the credential", (
   // the password nor the username -- not via the message, and not via the parse
   // error's enumerable `input` property on the attached cause. Assert at the
   // render boundary (sanitizeErrorForDisplay, the sole path exitWithError uses)
-  // so both are covered end to end. Before the fix the raw input was
-  // interpolated into the message and this failed on the credential bytes.
+  // so both are covered end to end.
   let err: unknown;
   try {
     resolvePositionals(["sftp://alice:s3cr3t@host:99999999/drop", "input.csv"]);

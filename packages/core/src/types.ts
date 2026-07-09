@@ -4,9 +4,9 @@ import { z } from "zod";
  * Paired arrays of matched row indices produced by PSI linkage.
  *
  * `[0]` contains our (local) row indices; `[1]` contains the corresponding
- * partner row indices. Both arrays are the same length. The entries in `[0]`
- * are in strictly ascending order — this is a guaranteed invariant of
- * {@link linkViaPSI} and is relied upon by payload reconstruction.
+ * partner row indices. The entries in `[0]` are in strictly ascending order --
+ * a guaranteed invariant of {@link linkViaPSI} relied upon by payload
+ * reconstruction.
  */
 export type AssociationTable = [Array<number>, Array<number>];
 

@@ -32,7 +32,6 @@ export function getHostname() {
 
   const protocol = isSecure(server) ? "https:" : "http:";
 
-  // no clue what is happening if we don't have an address
   if (!addressInfo)
     throw Error("no address information available for getHostname");
 

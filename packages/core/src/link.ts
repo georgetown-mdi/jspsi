@@ -498,7 +498,6 @@ export async function linkViaSinglePassPSI(
       permutation,
     );
 
-    // Layout: docs/spec/PROTOCOL.md.
     const reply = encodeSinglePassReply(
       setup,
       response,

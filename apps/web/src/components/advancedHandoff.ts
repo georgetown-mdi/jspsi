@@ -32,15 +32,8 @@ export interface AdvancedHandoff {
 
 let pending: AdvancedHandoff | undefined;
 
-/** Fail loudly if the hand-off is touched outside the browser. The store is
- * client-only by design -- the writer is a click handler and the reader sits
- * behind the `/advanced` route's `ssr: false` -- and that is load-bearing for
- * confidentiality: module-level state on the server is shared across every
- * request, so a server-side read or write would leak one user's file selection to
- * another. This turns a future regression (a render-time read on an SSR'd route,
- * or dropping `ssr: false`) into an immediate error rather than a silent
- * cross-request leak, per the repo convention of encoding a "does not happen at
- * runtime" claim as a check rather than a comment. */
+/** Fail loudly if the hand-off is touched outside the browser; see the module
+ * header for why this is load-bearing. */
 function assertClient(): void {
   if (typeof window === "undefined")
     throw new Error(

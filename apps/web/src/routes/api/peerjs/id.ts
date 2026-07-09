@@ -22,7 +22,7 @@ const corsMiddleware = createMiddleware({ type: "request" }).server(
       headers: Object.fromEntries(request.headers.entries()),
     };
 
-    let corsResult: "next" | "end" | any = undefined;
+    let corsResult: "next" | "end" | Error | undefined = undefined;
 
     applyCors(
       corsRequest,
@@ -31,13 +31,11 @@ const corsMiddleware = createMiddleware({ type: "request" }).server(
         getHeader: getResponseHeader,
         setHeader: setResponseHeader,
         end: () => {
-          console.warn("end was called within cors");
           corsResult = "end";
         },
       },
       (err) => {
         if (err) {
-          console.warn("next was called and err is:", err);
           corsResult = err;
         } else {
           corsResult = "next";
@@ -45,11 +43,16 @@ const corsMiddleware = createMiddleware({ type: "request" }).server(
       },
     );
 
-    if (corsResult === "next") return next();
+    // applyCors invokes its callbacks synchronously, but TS cannot see closure
+    // assignments, so it still narrows corsResult to undefined here; widen back
+    // to the declared union before branching.
+    const settledCorsResult = corsResult as "next" | "end" | Error | undefined;
 
-    if (corsResult === "end") throw new Error("cors ended early");
+    if (settledCorsResult === "next") return next();
 
-    throw new Error("cors resulted in error: " + corsResult.toString());
+    if (settledCorsResult === "end") throw new Error("cors ended early");
+
+    throw new Error("cors resulted in error: " + settledCorsResult);
   },
 );
 

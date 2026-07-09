@@ -85,7 +85,7 @@ test("order doesn't matter", () => {
   expect(serverResult[1]).toStrictEqual([0, 1]);
 });
 
-// ─── association-table wire message: pathological-count bound ─────────────────
+// --- association-table wire message: pathological-count bound -----------------
 // The association table is partner-controlled (the PPRL threat model treats the
 // counterparty as adversarial) and rides the ~512 MiB exchange frame. An inner
 // index array of hundreds of thousands of invalid elements overflowed Zod's call
@@ -120,7 +120,7 @@ test("a legitimately large association table parses", async () => {
   expect(second).toHaveLength(n);
 });
 
-// ─── numberArrayMessage: direct-`.parse()` send-before-parse site ─────────────
+// --- numberArrayMessage: direct-`.parse()` send-before-parse site -------------
 // The joiner's final received frame -- the starter's original-index list -- is
 // read by a direct `parseOrProtocolError(numberArrayMessage, ...)` AFTER the
 // status acknowledgement is sent (so a malformed frame cannot strand the
@@ -194,7 +194,7 @@ test("a legitimately large original-index frame parses", () => {
   expect(parseOrProtocolError(numberArrayMessage, valid)).toHaveLength(n);
 });
 
-// ─── PSI decode element-count guard: frame-bytes vs element-count amplification ─
+// --- PSI decode element-count guard: frame-bytes vs element-count amplification -
 // A malicious partner can pack a PSI setup / request / response with many minimal
 // (~2-byte) repeated encrypted-element entries -- staying within the frame byte
 // cap, yet declaring up to ~frameBytes/2 elements. deserializeBinary allocates one
@@ -342,7 +342,7 @@ test("cascade identifyIntersection (joiner) rejects an over-declared server setu
   );
 });
 
-// ─── Non-Raw server setup: the element-count guard cannot be bypassed ──────────
+// --- Non-Raw server setup: the element-count guard cannot be bypassed ----------
 // This protocol only ever sends a Raw server setup. A setup whose data-structure
 // oneof is anything other than Raw -- or is left unset -- has `getRaw()` undefined,
 // so its declared element count would be a benign 0 that slips past the bound,

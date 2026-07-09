@@ -12,6 +12,12 @@ import PSI from "@openmined/psi.js/psi_wasm_web";
 
 import { runExchangeLifecycle } from "../../src/psi/exchangeLifecycle.js";
 
+import {
+  canReachServer,
+  clientRows,
+  firstNameOnlyTerms,
+  serverRows,
+} from "../utils/pspiFixtures.js";
 import { connectRendezvousPair } from "../utils/rendezvousPair.js";
 import { sortAssociationTable } from "../utils/associationTable.js";
 
@@ -50,51 +56,8 @@ const addressInfo: AddressInfo = {
 const hostString = `http://${addressInfo.address}:${addressInfo.port.toString()}`;
 const serverUnreachableNote = `PeerJS coordination server at ${hostString} unreachable`;
 
-// Probe the PeerJS coordination server with a short timeout, inside a hook rather
-// than at module scope, so an unreachable server skips this suite instead of
-// taking down the whole browser project at import (see invitedPSI.test.ts).
-async function canReachServer(): Promise<boolean> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 1_000);
-  try {
-    await fetch(`${hostString}/`, { signal: controller.signal });
-    return true;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-const serverRows = [
-  { first_name: "Alice" },
-  { first_name: "Bob" },
-  { first_name: "Carol" },
-  { first_name: "David" },
-  { first_name: "Elizabeth" },
-  { first_name: "Frank" },
-  { first_name: "Greta" },
-];
-const clientRows = [
-  { first_name: "Carol" },
-  { first_name: "Elizabeth" },
-  { first_name: "Henry" },
-];
-
-// The default linkage-key templates all require SSN/DOB/lastName combinations, so
-// none survive filtering for a firstName-only dataset. Provide one explicit key so
-// both parties produce valid, matching linkage terms (a single key, so the stage
-// progression below is exactly [confirming protocol, stage 1 / 1]).
-const firstNameOnlyTerms = {
-  version: "1.0.0",
-  date: "2026-01-01",
-  algorithm: "psi" as const,
-  linkageStrategy: "cascade" as const,
-  output: { expectsOutput: true, shareWithPartner: true },
-  deduplicate: false,
-  linkageFields: [{ name: "firstName", type: "first_name" as const }],
-  linkageKeys: [{ name: "firstName", elements: [{ field: "firstName" }] }],
-};
+// firstNameOnlyTerms provides exactly one linkage key, so the stage progression
+// below is exactly [confirming protocol, stage 1 / 1].
 
 /** Everything one role's lifecycle reported back, captured for assertion. */
 interface CapturedRun {
@@ -157,7 +120,7 @@ let initiator: CapturedRun | undefined;
 // Generous timeout: peer coordination, the WASM load, and the round-trip exchange
 // all happen here.
 beforeAll(async () => {
-  if (!(await canReachServer())) return;
+  if (!(await canReachServer(hostString))) return;
 
   const sharedSecret = generateSharedSecret();
   const { inviterPeer, acceptorPeer, inviterConn, acceptorConn } =

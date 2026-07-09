@@ -443,20 +443,21 @@ async function runChildRole(role, rows, keys, overlap) {
   const setStage = (id) => marks.push({ id, t: performance.now() });
 
   const start = performance.now();
-  // partnerRecordCount is the peer's row count -- equal to `rows` in this
-  // symmetric sweep. It must be the real count: the derived single-pass cap gate
-  // (frameSize.ts, board item 206154573) rejects a negative placeholder. The 6th
-  // argument withholds the sender's own table (false here -- both sides compute a
-  // table, so the receiver's match count can be checked); verbosity is -1
-  // (silent); setStage is the 8th argument.
+  // partnerRecordCount must be the peer's real row count (equal to `rows` in this
+  // symmetric sweep): the derived single-pass cap gate rejects a negative
+  // placeholder. Both sides compute a table so the receiver's match count can be
+  // checked, so the sender's own table is not withheld.
+  const partnerRecordCount = rows;
+  const withholdSenderTable = false;
+  const verbosity = -1;
   const table = await linkViaSinglePassPSI(
     { cardinality: "one-to-one" },
     participant,
     conn,
     data,
-    rows,
-    false,
-    -1,
+    partnerRecordCount,
+    withholdSenderTable,
+    verbosity,
     setStage,
   );
   const wallMs = performance.now() - start;

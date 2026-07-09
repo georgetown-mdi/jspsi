@@ -1,13 +1,19 @@
 import { dirname, join, resolve } from "node:path";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { chromium } from "playwright";
+
+import {
+  getFreePort,
+  sleep,
+  spawnProdServer,
+  stopProdServer,
+  waitForRoot,
+} from "./prodServer.js";
 
 import type { Browser } from "playwright";
 import type { ChildProcess } from "node:child_process";
@@ -43,66 +49,6 @@ const GENERATE_TIMEOUT_MS = 30_000;
 // attaches its handlers is lost, so the invite flow re-applies its inputs until the
 // Generate button reflects them within this window.
 const HYDRATION_TIMEOUT_MS = 20_000;
-const STOP_TIMEOUT_MS = 5_000;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-/** Ask the OS for a free loopback TCP port so this server never collides with the
- * shared globalSetup dev server. Mirrors prodSignaling.test.ts. */
-function getFreePort(): Promise<number> {
-  return new Promise((resolvePort, reject) => {
-    const probe = createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-      if (typeof address !== "object" || address === null) {
-        probe.close(() =>
-          reject(new Error("could not determine a free port from the probe")),
-        );
-        return;
-      }
-      const port = address.port;
-      probe.close(() => resolvePort(port));
-    });
-  });
-}
-
-async function httpAccepts(url: string, timeoutMs: number): Promise<boolean> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    await res.body?.cancel();
-    return true;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function waitForRoot(
-  url: string,
-  proc: ChildProcess,
-  getLaunchError: () => Error | undefined,
-): Promise<void> {
-  const deadline = Date.now() + READY_TIMEOUT_MS;
-  for (;;) {
-    const launchError = getLaunchError();
-    if (launchError) throw launchError;
-    if (proc.exitCode !== null || proc.signalCode !== null)
-      throw new Error(
-        `production server exited before becoming ready ` +
-          `(code ${proc.exitCode}, signal ${proc.signalCode})`,
-      );
-    if (await httpAccepts(url, 1_000)) return;
-    if (Date.now() >= deadline)
-      throw new Error(`production server did not answer ${url} in time`);
-    await sleep(250);
-  }
-}
 
 // A CSV comfortably above CSV_WORKER_FILE_BYTE_THRESHOLD (4 MiB), carrying columns
 // that infer to default linkage keys so the invitation is producible. Duplicate rows
@@ -124,68 +70,25 @@ describe.skipIf(!hasBuild)(
     let browser: Browser | undefined;
     let tempDir: string | undefined;
     let port = 0;
-    let launchError: Error | undefined;
 
     beforeAll(async () => {
       tempDir = mkdtempSync(join(tmpdir(), "psilink-csv-worker-"));
       port = await getFreePort();
-      const env: NodeJS.ProcessEnv = {
-        ...process.env,
-        PORT: String(port),
-        NITRO_HOST: "127.0.0.1",
-      };
-      const proc = spawn("node", [prodEntry], {
-        cwd: webRoot,
-        env,
-        detached: true,
-        stdio: "ignore",
-      });
+      const { child: proc, getLaunchError } = await spawnProdServer(
+        prodEntry,
+        webRoot,
+        port,
+      );
       child = proc;
-      proc.unref();
-      proc.on("error", (err) => {
-        launchError = err;
-      });
-      await new Promise<void>((r) => setImmediate(r));
-      if (launchError) throw launchError;
 
-      await waitForRoot(`http://127.0.0.1:${port}/`, proc, () => launchError);
+      await waitForRoot(`http://127.0.0.1:${port}/`, proc, getLaunchError);
       browser = await chromium.launch({ headless: true });
     }, READY_TIMEOUT_MS + 20_000);
 
     afterAll(async () => {
       await browser?.close();
       if (tempDir) rmSync(tempDir, { recursive: true, force: true });
-
-      const c = child;
-      if (
-        !c ||
-        c.pid === undefined ||
-        c.exitCode !== null ||
-        c.signalCode !== null
-      )
-        return;
-      const pid = c.pid;
-      c.ref();
-      await new Promise<void>((resolveStop) => {
-        const timer = setTimeout(() => {
-          try {
-            process.kill(-pid, "SIGKILL");
-          } catch {
-            // already gone
-          }
-        }, STOP_TIMEOUT_MS);
-        timer.unref();
-        c.once("exit", () => {
-          clearTimeout(timer);
-          resolveStop();
-        });
-        try {
-          process.kill(-pid, "SIGTERM");
-        } catch {
-          clearTimeout(timer);
-          resolveStop();
-        }
-      });
+      await stopProdServer(child);
     });
 
     test(

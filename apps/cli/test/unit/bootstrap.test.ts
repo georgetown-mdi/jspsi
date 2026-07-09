@@ -1497,18 +1497,23 @@ function onlineBootstrapParams(
   };
 }
 
+/** Locate the onAuthenticated hook among runProtocol's call arguments by type,
+ *  not position. Asserting exactly one function argument makes the mock fail
+ *  loudly if a second function-typed parameter is ever added to runProtocol (in
+ *  any position) rather than silently selecting the wrong one.
+ */
+function soleFunctionArg(callArgs: unknown[]): () => void | Promise<void> {
+  const fnArgs = callArgs.filter((a) => typeof a === "function");
+  expect(fnArgs).toHaveLength(1);
+  return fnArgs[0] as () => void | Promise<void>;
+}
+
 test("runOnlineBootstrap writes the config from the hook even when the exchange then fails", async () => {
   // Handshake succeeds (runProtocol invokes onAuthenticated -> saveConfig), then
   // the data exchange fails. The config must already be on disk so the
   // recurring-exchange setup is recoverable without re-inviting.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    // Locate the onAuthenticated hook among the call arguments by type, not
-    // position. Asserting exactly one function argument makes the mock fail
-    // loudly if a second function-typed parameter is ever added to runProtocol
-    // (in any position) rather than silently selecting the wrong one.
-    const fnArgs = callArgs.filter((a) => typeof a === "function");
-    expect(fnArgs).toHaveLength(1);
-    const onAuthenticated = fnArgs[0] as () => void | Promise<void>;
+    const onAuthenticated = soleFunctionArg(callArgs);
     await onAuthenticated();
     throw new Error("data exchange failed");
   }) as never);
@@ -2034,12 +2039,7 @@ test("runOnlineBootstrap notes the config is on disk when the exchange fails aft
   // must be told the config + key are on disk so they retry with
   // `psilink exchange` rather than re-inviting.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    // See the matching note above: select the hook by type and assert it is the
-    // sole function argument so a future function-typed parameter cannot be
-    // picked up silently.
-    const fnArgs = callArgs.filter((a) => typeof a === "function");
-    expect(fnArgs).toHaveLength(1);
-    const onAuthenticated = fnArgs[0] as () => void | Promise<void>;
+    const onAuthenticated = soleFunctionArg(callArgs);
     await onAuthenticated();
     throw new Error("data exchange failed");
   }) as never);
@@ -2139,9 +2139,7 @@ test("runOnlineBootstrap with reuseExistingConfig logs the recovery note when th
   // the rotated key is saved) and the reused config is on disk, then the exchange
   // fails. Both files are present, so the note must point at `psilink exchange`.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    const fnArgs = callArgs.filter((a) => typeof a === "function");
-    expect(fnArgs).toHaveLength(1);
-    const onAuthenticated = fnArgs[0] as () => void | Promise<void>;
+    const onAuthenticated = soleFunctionArg(callArgs);
     await onAuthenticated();
     throw new Error("data exchange failed");
   }) as never);
@@ -2239,9 +2237,7 @@ test("runOnlineBootstrap with reuseExistingConfig keeps the existing config and 
   // The hook is a no-op when reusing: the pre-existing config is left as-is and
   // only the rotated key (saved by runProtocol) lands.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    const fnArgs = callArgs.filter((a) => typeof a === "function");
-    expect(fnArgs).toHaveLength(1);
-    const onAuthenticated = fnArgs[0] as () => void | Promise<void>;
+    const onAuthenticated = soleFunctionArg(callArgs);
     await onAuthenticated();
     return {};
   }) as never);
@@ -2268,9 +2264,7 @@ test("runOnlineBootstrap re-gates the config write: a config appearing after the
   // onAuthenticatedError (non-fatal), not propagated -- the same contract the
   // real runProtocol upholds.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    const fnArgs = callArgs.filter((a) => typeof a === "function");
-    expect(fnArgs).toHaveLength(1);
-    const onAuthenticated = fnArgs[0] as () => void | Promise<void>;
+    const onAuthenticated = soleFunctionArg(callArgs);
     try {
       await onAuthenticated();
       return {};

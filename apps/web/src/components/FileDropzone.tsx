@@ -90,14 +90,7 @@ export default function FileDropzone({
         onDrop={handleDrop}
         onReject={handleReject}
         maxSize={MAX_CSV_FILE_BYTES} // see csvIntake.ts for the bound
-        accept={[
-          "text/plain",
-          MIME_TYPES.csv,
-          "application/vnd.ms-excel",
-          // MIME_TYPES.xls,
-          // MIME_TYPES.xlsx,
-          // 'application/vnd.apache.parquet'
-        ]}
+        accept={["text/plain", MIME_TYPES.csv, "application/vnd.ms-excel"]}
         {...(disabled
           ? {
               disabled: true,

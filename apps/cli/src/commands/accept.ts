@@ -213,21 +213,21 @@ export function displayInvitation(
   token: InvitationToken,
   log: ReturnType<typeof getLogger>,
 ): void {
-  const t = token.linkageTerms;
+  const terms = token.linkageTerms;
   log.info("Invitation details:");
   // identity and linkage-key names are partner-controlled free text (the inviter
   // crafts the token); escape them before they reach the acceptor's terminal,
   // since this summary is shown before the operator confirms acceptance.
-  log.info(`  inviting party: ${sanitizeForDisplay(t.identity)}`);
-  log.info(`  PSI algorithm: ${t.algorithm}`);
+  log.info(`  inviting party: ${sanitizeForDisplay(terms.identity)}`);
+  log.info(`  PSI algorithm: ${terms.algorithm}`);
   // The linkage strategy is a mandatory-consistency term (like the algorithm),
   // and single-pass is disclosure-affecting -- it is the load-bearing thing the
   // acceptor consents to here -- so show it plainly and, for single-pass, the
   // disclosure-tradeoff note. The value is a schema enum, not partner free text,
   // so it needs no sanitizing; the note is shared with the inviter's selection
   // surface so both parties read identical framing.
-  log.info(`  linkage strategy: ${t.linkageStrategy}`);
-  if (t.linkageStrategy === "single-pass")
+  log.info(`  linkage strategy: ${terms.linkageStrategy}`);
+  if (terms.linkageStrategy === "single-pass")
     log.info(`  note: ${singlePassDisclosureNotice()}`);
   // Stated from the accepting party's perspective (this summary is shown only to
   // the acceptor, before it confirms): YOU receive iff the inviter shares, and the
@@ -235,15 +235,15 @@ export function displayInvitation(
   // tells the acceptor plainly whether it gets a result, rather than leaving it to
   // invert the inviter's "shares with partner" bit.
   log.info(
-    `  you will receive the result: ${t.output.shareWithPartner ? "yes" : "no"}`,
+    `  you will receive the result: ${terms.output.shareWithPartner ? "yes" : "no"}`,
   );
   log.info(
     `  the inviting party will receive the result: ` +
-      `${t.output.expectsOutput ? "yes" : "no"}`,
+      `${terms.output.expectsOutput ? "yes" : "no"}`,
   );
   log.info(
     `  linkage keys: ` +
-      `${t.linkageKeys.map((k) => sanitizeForDisplay(k.name)).join(", ")}`,
+      `${terms.linkageKeys.map((k) => sanitizeForDisplay(k.name)).join(", ")}`,
   );
   // The columns the inviter declared it will transmit for matched records, in the
   // inviter's namespace -- what this party will RECEIVE. Derived from the wire's
@@ -269,11 +269,13 @@ export function displayInvitation(
   // Partner-controlled names, so escaped. This is the CLI counterpart of the web
   // consent screen's "your partner requests from you" line, mirroring the disclosed
   // subset block above on the opposite direction.
-  if (t.payload?.receive !== undefined)
+  if (terms.payload?.receive !== undefined)
     log.info(
       `  columns the inviting party requests from you: ` +
-        (t.payload.receive.length > 0
-          ? t.payload.receive.map((c) => sanitizeForDisplay(c.name)).join(", ")
+        (terms.payload.receive.length > 0
+          ? terms.payload.receive
+              .map((c) => sanitizeForDisplay(c.name))
+              .join(", ")
           : "(none) -- any payload column would abort the exchange"),
     );
   if (token.expires !== undefined) log.info(`  expires: ${token.expires}`);

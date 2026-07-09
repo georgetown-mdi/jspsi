@@ -32,7 +32,7 @@ function rawSetupBytes(count: number, byteLen = 0): Uint8Array {
   return m.serializeBinary();
 }
 
-// ─── Equivalence: the scan count matches what deserializeBinary materializes ────
+// --- Equivalence: the scan count matches what deserializeBinary materializes ----
 // This is the load-bearing safety property. The scan runs BEFORE deserialize to
 // bound the amplifying allocation, so it must never under-count the elements the
 // library would produce. Pin it across message kinds, element counts, element byte
@@ -101,7 +101,7 @@ test("a non-Raw (GCS) server setup declares no amplifiable element list", () => 
   ).toBeLessThanOrEqual(2);
 });
 
-// ─── Over-declaration: stops early, above the ceiling ──────────────────────────
+// --- Over-declaration: stops early, above the ceiling --------------------------
 
 test("an over-declared frame is reported above the ceiling without a full count", () => {
   const bytes = requestBytes(1000, 0); // 1000 empty elements, ~2 KB
@@ -119,7 +119,7 @@ test("a setup that packs elements under the Raw oneof is counted at depth", () =
   ).toBeGreaterThan(4);
 });
 
-// ─── Malformed frames fail closed ──────────────────────────────────────────────
+// --- Malformed frames fail closed ----------------------------------------------
 
 test("an empty frame declares zero elements", () => {
   expect(countDeclaredPsiElements(new Uint8Array(0), "request", BIG)).toBe(0);

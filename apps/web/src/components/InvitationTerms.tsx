@@ -328,31 +328,12 @@ function CondensableDetails({
 
 /**
  * Renders the inviter's linkage terms decoded from an invitation for review. The
- * always-visible core is organized by disclosure DIRECTION rather than as one flat
- * list, so a reader can tell what each fact is about, and ordered by how much the
- * consent decision turns on it: four labelled tiers -- "What you disclose" (the
- * viewer's own outbound send and the egress request for its data -- led first because
- * the acceptor's own disclosure is its hardest-to-undo fact), "What the exchange
- * produces" (the matching method and result sharing -- what is revealed and to whom),
- * "What you receive" (the inbound partner data), and "How records are matched" (the
- * linkage strategy and matching keys -- mechanics the diligent open, kept below the
- * outcome) -- then an attached legal agreement as a cross-cutting governance frame,
- * placed last in the always-visible core as a pre-consent checkpoint (still legible,
- * never demoted into "Other details", but framing the decision rather than leading
- * ahead of what the acceptor discloses). Each tier is a role="group" whose caption is
- * a heading, so assistive tech
- * both lets a screen-reader user jump between tiers and announces each as one related
- * set. The matching list itself sits behind a default-collapsed "Matching strategies"
- * disclosure inside the "How records are matched" tier; inside it each linkage key is
- * its own further default-collapsed disclosure, whose header is the key name and a
- * short derived one-liner of the fields it matches on (each carrying a terse breadth
- * marker -- "(partial)", "(fuzzy)" -- when its element loosens matching), and whose
- * expanded body holds the per-element transform/swap/fuzzy detail. The remaining dense
- * detail (personal-data constraints, payload columns, and dedup notes) sits behind a
- * single default-collapsed "Other details" disclosure, whose toggle is self-describing
- * -- a one-line summary of its contents, associated as the toggle's accessible
- * description. The legal agreement is not among that detail -- it is promoted whole
- * into the always-visible core.
+ * always-visible core is organized by disclosure DIRECTION and ordered by how much
+ * the consent decision turns on it, into labelled role="group" tiers ("What you
+ * disclose", "What the exchange produces", "What you receive", "How records are
+ * matched", then the legal agreement), with the dense remainder behind a single
+ * default-collapsed "Other details" disclosure; each tier's own inline comment
+ * carries its rationale.
  *
  * Every "proposed but not yet applied" caveat (psi-c count-only, deduplicate, and
  * per-element fuzzy comparison) follows ONE placement rule, so the flagging is

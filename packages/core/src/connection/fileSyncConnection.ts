@@ -78,7 +78,7 @@ const settleVerify = (
   try {
     verify(permitted);
   } catch {
-    // Handshake already torn down; the verdict can no longer be delivered.
+    // swallow: see settleVerify header
   }
 };
 
@@ -306,8 +306,7 @@ const RETAIN_INSPECTION_POLL_CYCLES = 2;
 // (>5) approaches the peer timeout and gives no practical benefit.
 const MAX_CONSECUTIVE_ENOENT = 3;
 
-// Suffix shared by all hello files. Using a named constant avoids repeating
-// magic strings and numbers at the multiple slice/endsWith sites below.
+// Suffix shared by all hello files.
 const HELLO_SUFFIX = "-hello.json";
 
 // Suffix of the lock-mode tiebreaker file (`<peer1>-<peer2>-lock.json`). Named
@@ -405,11 +404,11 @@ const peerIdFromControlName = (
 // independent of any id). Validating the stem as a v4 UUID is what lets every
 // other `temp-*.tmp` -- a foreign `temp-export.tmp`, an unrelated sync-tool
 // scratch file -- fall through to the foreign-file policy (tolerated) rather
-// than being deleted by the entry sweep. The original orphaned-temp sweep
-// (193792285) matched any `temp-`/`.tmp` name, which destroyed such a foreign
-// file in a namespace collision; this narrows it so the two notions of
-// "foreign" (here and the foreign-file snapshot) agree. uuidVersion() throws on
-// a non-UUID stem, so the uuidValidate() short-circuit must precede it.
+// than being deleted by the entry sweep. Matching any `temp-`/`.tmp` name would
+// destroy such a foreign file in a namespace collision; the v4-UUID validation
+// keeps the two notions of "foreign" (here and the foreign-file snapshot) in
+// agreement. uuidVersion() throws on a non-UUID stem, so the uuidValidate()
+// short-circuit must precede it.
 const isProtocolTempName = (name: string): boolean => {
   if (!name.startsWith("temp-") || !name.endsWith(".tmp")) return false;
   const stem = name.slice("temp-".length, -".tmp".length);
@@ -770,13 +769,12 @@ interface DeserializedMessage {
 // version marker -- is not this build's MESSAGE_ENVELOPE_VERSION. That byte is
 // the one signal that separates a same-version peer's (possibly corrupt) frame
 // from a foreign wire format: a JSON-text control message from a peer that
-// predates the binary envelope (#318) begins with '{' (0x7B), and any future
+// predates the binary envelope begins with '{' (0x7B), and any future
 // envelope-version bump raises the byte, so an unrecognized value most likely
 // means the partner is on an incompatible psilink version rather than that a
 // same-version frame corrupted. The read path translates this into an
 // operator-facing "likely incompatible partner version" hint instead of the raw
-// "malformed envelope" text (a version skew was a multi-hour debugging session
-// in production; 208014743). It cannot be perfectly precise -- a foreign format
+// "malformed envelope" text. It cannot be perfectly precise -- a foreign format
 // that happens to reuse byte 0 == 1 would still fall through to the generic
 // checks -- so the message is a "likely" hint, not a certain diagnosis.
 class IncompatibleEnvelopeVersionError extends Error {
@@ -1070,7 +1068,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // enforcing host-key verifier when its pin check passed (the only success
   // path that reaches a real, authenticated session). Read post-handshake by the
   // orchestrator to advertise this party's observed fingerprint in the
-  // authenticated terms exchange for cross-party reconciliation (201058119). It
+  // authenticated terms exchange for cross-party reconciliation. It
   // stays `undefined` on every path that observes no host key -- a file-drop
   // mount, the browser/proxy SFTP path (neither runs ssh2's hostVerifier), and a
   // refused connection (no-pin fail-closed or a mismatch) that never establishes
@@ -1104,7 +1102,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   private warnedUnexpectedFiles = new Set<string>();
   // Foreign (grammar-failing) file names present in the directory at
   // synchronize() entry. Recorded so the poll loop tolerates them
-  // (isRecognizedLoopFile) and 194800733's "new foreign file" warning measures
+  // (isRecognizedLoopFile) and the "new foreign file" warning measures
   // only names that appear AFTER entry. Grammar-MATCHING names are never stored
   // here: a message-shaped <id>-<digits>.json is a protocol file, rejected at
   // the no-flag entry guard or swept under --sweep-exchange-files, never
@@ -2457,8 +2455,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           }
         } catch (err) {
           // A fully-synced hello that fails the schema (or an over-cap body) is a
-          // terminal UsageError (I5b), same classification as 193901017 -- let it
-          // propagate. A close() during inspection aborts the gate read with the
+          // terminal UsageError (I5b) -- let it propagate. A close() during
+          // inspection aborts the gate read with the
           // ConnectionClosedError reason (close()'s abort() invariant); propagate
           // that as a clean shutdown (exit 69) rather than masking it as a
           // retain-uncertain UsageError. Any other failure is an unresolved read
@@ -2650,14 +2648,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // receiver silently skips every incoming message. Enforce at the class
     // boundary so a direct library consumer hits a clear error rather than a
     // stall.
-    //
-    // Note: a warning nudging a stable peer_id when retainFiles is true was
-    // removed here. The UUID-collision-on-reuse failure that warning addressed
-    // is now hard-blocked by the fresh-directory guard (synchronize() rejects a
-    // non-empty directory in retain mode) plus this timestampInFilename guard
-    // (which prevents the NNN parse from ever producing undefined). A stable
-    // peer_id only affects audit-transcript readability, which is a docs concern
-    // and not a runtime warning.
     if (this.options.retainFiles && !this.options.timestampInFilename)
       throw new UsageError(
         "retain mode requires timestamp_in_filename: without it message " +
@@ -2702,8 +2692,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // Any other protocol file is an error: a second peer hello, a self-hello (a
     // same-id leftover from a crashed session), a lock, an ack marker, a joining
     // sentinel, or a stale message. The directory is the state machine, so by
-    // default this stays strict-empty for protocol files. This item (195255994)
-    // adds two relaxations, in the foreign and sweep branches below:
+    // default this stays strict-empty for protocol files, with two relaxations
+    // in the foreign and sweep branches below:
     //   - FOREIGN files (names that FAIL the protocol grammar -- conflict copies,
     //     partial downloads, unrelated files) are snapshotted and tolerated in
     //     both modes, deleting nothing. A message-shaped <id>-<digits>.json is
@@ -2722,8 +2712,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // cleaned up rather than left as litter and entry is not aborted on its
     // account. `ignored` is the sanctioned extension point for kinds that may
     // legitimately pre-exist as the protocol grows; the foreign-file snapshot
-    // below (195255994) is a sibling tolerance mechanism for grammar-failing
-    // names.
+    // below is a sibling tolerance mechanism for grammar-failing names.
     // A peer hello is `<peerId>-hello.json` with a non-empty id that is not our
     // own (isPeerHelloName). A bare `-hello.json` slices to an empty id and is
     // therefore NOT a peer hello: it still matches the grammar
@@ -2774,11 +2763,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       orphanedTempFiles.forEach((file) => ignored.add(file.name));
     }
 
-    // All three classifications exclude `ignored` (currently only orphaned
-    // temp-*.tmp). A temp name can never satisfy isPeerHelloName, so the guard
-    // is a no-op today, but keeping it symmetric with the two filters below
-    // avoids a latent trap if `ignored` ever gains a name that could pass
-    // isPeerHelloName.
+    // All three classifications exclude `ignored`, kept symmetric with the two
+    // filters below so a future `ignored` entry that could pass isPeerHelloName
+    // is not silently reclassified.
     let peerHellos = files.filter(
       (file) => !ignored.has(file.name) && this.isPeerHelloName(file.name),
     );
@@ -2866,8 +2853,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // Foreign-file snapshot (always, both modes, flag or not). Cleared at entry
     // above and populated here; it deletes nothing, so it is safe in retain mode
     // where sync-mediated conflict copies are expected noise. Feeds the poll
-    // loop's isRecognizedLoopFile so these names are tolerated and 194800733's
-    // "new foreign file" warning measures only names that appear after entry.
+    // loop's isRecognizedLoopFile so these names are tolerated and the "new
+    // foreign file" warning measures only names that appear after entry.
     foreignFiles.forEach((file) => this.foreignFileSnapshot.add(file.name));
     if (foreignFiles.length > 0)
       this.log.info(
@@ -3038,8 +3025,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         // the write up to a small bounded budget at the polling cadence to raise
         // the odds it lands before the peer would otherwise time out (the peer is
         // concurrently polling, so the advertisement need not arrive on the first
-        // try). This hardens 193901017's documented best-effort floor; it does
-        // not change detection -- see ADVERTISE_HELLO_RETRY_ATTEMPTS.
+        // try). It does not change detection -- see
+        // ADVERTISE_HELLO_RETRY_ATTEMPTS.
         //
         // Only after the budget is exhausted do we fall through to the
         // log-and-degrade path. Whatever the write's outcome, THIS party still
@@ -3109,17 +3096,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             }
           }
         }
-        // Reset role/peer fields defensively, mirroring the outer catch. They
-        // are not yet assigned on this branch (the assignments below the
-        // mismatch gate have not run), so this is a no-op today; setting them
-        // removes the asymmetry with the outer catch and avoids leaving stale
-        // state if those assignments were ever reordered above the gate.
+        // Reset role/peer fields, mirroring the outer catch.
         this.peerId = undefined;
         this.role = "unknown role";
         this.handshakeRole = undefined;
-        // Clear any armed abort state with the identity it derives from. A no-op
-        // today (arming is post-handshake, after rendezvous), kept for parity
-        // with the close() clear and to stay correct if arming ever moves.
         this.clearAbortState();
         this.resetSessionState();
         throw mismatch;
@@ -3142,13 +3122,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       const joiningPath = `${this.path}/${joiningName}`;
       const helloName = `${this.id}${HELLO_SUFFIX}`;
       try {
-        // The three `!this.options.retainFiles` guards in this block are vacuous
-        // here: this lock joiner fast-path runs only when !locklessRendezvous,
-        // and the entry guard rejects retain mode without lockless (retain
-        // requires lockless), so retain never reaches this block. They are kept
-        // only to match the file-wide responsibleFiles tracking idiom -- every
-        // mutation is `!retainFiles`-guarded (see I4a) -- not because retain mode
-        // is reachable here.
+        // The `!this.options.retainFiles` guards below match the file-wide
+        // responsibleFiles idiom (every mutation is `!retainFiles`-guarded, I4a);
+        // retain mode never reaches this lock joiner fast-path.
         //
         // The sentinel carries the hello body so the rename below yields a
         // fully-valid `<id>-hello.json` the peer reads through its gate; the
@@ -3958,9 +3934,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         this.peerId = undefined;
         this.role = "unknown role";
         this.handshakeRole = undefined;
-        // Clear any armed abort state with the identity it derives from. A no-op
-        // today (arming is post-handshake, after rendezvous), kept for parity
-        // with the close() clear and to stay correct if arming ever moves.
         this.clearAbortState();
         this.resetSessionState();
         throw err instanceof Error ? err : new Error(errMessage(err));
@@ -4259,7 +4232,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // -- the case this detection exists to catch.
   //
   // This is the single extensible baseline for site 3. Foreign files present at
-  // entry are snapshotted (195255994) and tolerated through this predicate -- see
+  // entry are snapshotted and tolerated through this predicate -- see
   // the foreignFileSnapshot check at the top -- so the loop keeps one notion of
   // "recognized". The snapshot holds only grammar-FAILING names: a
   // `<peerId>-<digits>.json` MATCHES the message grammar, so it is a protocol
@@ -4273,7 +4246,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // legitimately retained, already-consumed peer message.
   private isRecognizedLoopFile(name: string, peerId: string): boolean {
     // Foreign files snapshotted at synchronize() entry are tolerated for the
-    // session: they predate the exchange and are not new noise (195255994). The
+    // session: they predate the exchange and are not new noise. The
     // snapshot holds only grammar-FAILING names, so this never shadows the
     // message scan -- a <peerId>-<digits>.json matches the grammar, is never
     // snapshotted, and is selected then rejected by poll() rather than
@@ -4328,7 +4301,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // `<id>-<peerId>-x-ack.json` alike. The only stray names that still pass are
     // acks of a correctly-shaped target that was never actually sent (e.g.
     // `<id>-<peerId>-999-ack.json`): distinguishing those is the identity
-    // question the directory snapshot (195255994) owns, and such an ack is inert
+    // question the directory snapshot owns, and such an ack is inert
     // -- zero-length and matching no expected-ack lookup. Prefix tests and the
     // byte-count parse are prefix/terminal anchored, so this stays correct even
     // if a peer_id itself contains a dash.
@@ -4558,7 +4531,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
               // message, so skip it. A foreign message-shaped file with a non-
               // matching NNN is skipped here too and so escapes the unexpected-
               // file policy -- it is indistinguishable by name from a retained
-              // message. 195255994's snapshot does not cover it: a
+              // message. The snapshot does not cover it: a
               // `<peerId>-<digits>.json` matches the message grammar, so it is a
               // protocol file (rejected at the no-flag entry guard, swept by
               // --sweep-exchange-files), never snapshotted. This residual skip
@@ -4727,10 +4700,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
             } catch (parseErr: unknown) {
               // An unrecognized envelope version byte is the file-sync signature
               // of a version-mismatched partner (a JSON-text message from a
-              // pre-#318 peer leads with '{', and a future envelope bump raises
-              // the byte), so name that real cause instead of the raw "malformed
-              // envelope" text -- turning a cryptic frame-parse failure into one
-              // obvious log line (208014743). foundVersion and
+              // pre-envelope peer leads with '{', and a future envelope bump
+              // raises the byte), so name that real cause instead of the raw
+              // "malformed envelope" text -- turning a cryptic frame-parse
+              // failure into one obvious log line. foundVersion and
               // MESSAGE_ENVELOPE_VERSION are small header numbers, not partner
               // text; name and peerId stay sanitized as before.
               if (parseErr instanceof IncompatibleEnvelopeVersionError)

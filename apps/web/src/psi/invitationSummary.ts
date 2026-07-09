@@ -977,12 +977,6 @@ export function summarizeInvitation(
     linkageFields.push(summary);
   }
 
-  // The consent screen reflects the inviter's terms as proposed, not only what
-  // today's exchange executes: deduplicate and the per-element
-  // generateFuzzyComparisons are surfaced even though the run does not yet apply
-  // them (matching is currently hard-wired to one-to-one, and fuzzy expansion is
-  // unimplemented). Wiring both into the run is tracked on the product board; the
-  // displayed terms are what the acceptor agrees to.
   // The unique fields the keys match on, compact and deduped in order of first
   // appearance, for the always-visible consent line above the collapsed matching
   // detail. Derived from the keys' elements (the fields actually matched on), not
@@ -1003,6 +997,12 @@ export function summarizeInvitation(
     }
   }
 
+  // The consent screen reflects the inviter's terms as proposed, not only what
+  // today's exchange executes: deduplicate and the per-element
+  // generateFuzzyComparisons are surfaced even though the run does not yet apply
+  // them (matching is currently hard-wired to one-to-one, and fuzzy expansion is
+  // unimplemented). The *Applied flags below carry that gap to the renderer; the
+  // displayed terms are what the acceptor agrees to.
   const summary: InvitationSummary = {
     invitingParty: sanitizeForDisplay(terms.identity),
     algorithm: terms.algorithm,

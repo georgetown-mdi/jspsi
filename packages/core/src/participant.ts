@@ -398,7 +398,7 @@ export class PSIParticipant {
 
       this.setStage("waiting for association table");
 
-      // note: what we receive is backwards, so this is correct
+      // The partner sends [theirIndices, ourIndices]; the swapped names restore our-first order.
       const [partnerIndices, localIndices] = await receiveParsed(
         conn,
         associationTableMessage,
@@ -406,20 +406,19 @@ export class PSIParticipant {
       this.log.debug(`${this.id}: received association table`);
       this.setStage("processing association table");
 
-      const result: Array<Array<number>> = [localIndices, partnerIndices];
-      for (let i = 0; i < result[0].length; ++i) {
-        result[0][i] = permutation[result[0][i]];
+      for (let i = 0; i < localIndices.length; ++i) {
+        localIndices[i] = permutation[localIndices[i]];
       }
 
       this.log.debug(`${this.id}: sending my original indices`);
-      await conn.send(result[0]);
+      await conn.send(localIndices);
 
       this.log.debug(`${this.id}: waiting for status completed`);
       await receiveParsed(conn, statusCompletedMessage);
 
       this.setStage("done");
 
-      return [result[0], result[1]];
+      return [localIndices, partnerIndices];
     } else {
       this.setStage("waiting for startup message");
       this.log.debug(`${this.id}: starting identify-intersection protocol`);

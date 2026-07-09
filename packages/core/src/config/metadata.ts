@@ -7,7 +7,7 @@ import { safeParseCamelized } from "./safeParseCamelized.js";
 
 import type { SemanticType } from "../types";
 
-// ─── Metadata ────────────────────────────────────────────────────────────────
+// --- Metadata ----------------------------------------------------------------
 /**
  * The role a declared input column plays in an exchange:
  *
@@ -127,7 +127,7 @@ export function safeParseMetadata(raw: unknown) {
   return safeParseCamelized(MetadataSchema, raw);
 }
 
-// ─── Metadata Inference ──────────────────────────────────────────────────────
+// --- Metadata Inference ------------------------------------------------------
 interface TypeMeta {
   type: SemanticType;
   aliases: Array<string>;
@@ -258,17 +258,14 @@ export function inferMetadata(columnNames: Array<string>): Metadata {
     return { name, type, role, isPayload };
   });
 
-  const numIdentifiers = result.reduce(
-    (acc, x) => acc + Number(x.type === "identifier"),
-    0,
-  );
+  const numIdentifiers = result.filter(
+    (column) => column.type === "identifier",
+  ).length;
 
   if (numIdentifiers === 1) {
-    return result.map((x) => {
-      if (x.type !== "identifier") return x;
-      x.role = "identifier";
-      return x;
-    });
+    return result.map((column) =>
+      column.type === "identifier" ? { ...column, role: "identifier" } : column,
+    );
   }
 
   // id/identifier columns already carry role: "identifier" via

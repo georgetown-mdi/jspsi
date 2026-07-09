@@ -16,6 +16,7 @@ import {
   ConnectionError,
   type MessageConnection,
 } from "../src/connection/messageConnection";
+import { recordingConnection } from "./utils/recordingConnection";
 
 // --- Test fixtures -----------------------------------------------------------
 
@@ -106,7 +107,7 @@ test("date mismatch produces a warning but exchange proceeds", async () => {
   expect(b.value.warnings.some((w) => w.includes("date mismatch"))).toBe(true);
 });
 
-// --- Observed host-key advertisement (201058119) -----------------------------
+// --- Observed host-key advertisement -----------------------------------------
 
 const hostKeyA: PresentedHostKey = {
   fingerprint: "SHA256:" + "a".repeat(43),
@@ -223,7 +224,7 @@ test("initiator flags a present-but-malformed partner hostKey without aborting",
   expect(result.partnerHostKeyMalformed).toBe(true);
 });
 
-// --- Protocol-version reconcile (208014743) ----------------------------------
+// --- Protocol-version reconcile ----------------------------------------------
 
 test("both parties advertise the protocol version on their terms messages", async () => {
   // The forward-looking clean check: both terms messages carry this build's
@@ -231,22 +232,11 @@ test("both parties advertise the protocol version on their terms messages", asyn
   // the two versions differ. Message 3 (the bare final decision) does not carry
   // it -- each party already read the other's version off message 1 / message 2.
   const [connA, connB] = makeConnections();
-  const wrap = (
-    conn: MessageConnection,
-    sink: Array<Record<string, unknown>>,
-  ): MessageConnection => ({
-    send: (m: unknown) => {
-      sink.push(m as Record<string, unknown>);
-      return conn.send(m);
-    },
-    receive: (t?: number) => conn.receive(t),
-    close: () => conn.close(),
-  });
-  const initiatorSent: Array<Record<string, unknown>> = [];
-  const responderSent: Array<Record<string, unknown>> = [];
+  const { conn: recordingA, sent: initiatorSent } = recordingConnection(connA);
+  const { conn: recordingB, sent: responderSent } = recordingConnection(connB);
   const [a, b] = await Promise.all([
-    exchangeTerms(wrap(connA, initiatorSent), "initiator", termsA, 100),
-    exchangeTerms(wrap(connB, responderSent), "responder", termsB, 200),
+    exchangeTerms(recordingA, "initiator", termsA, 100),
+    exchangeTerms(recordingB, "responder", termsB, 200),
   ]);
   // Same-version parties are unaffected: the exchange completes.
   expect(a.partnerTerms.identity).toBe("Party B");
@@ -268,23 +258,12 @@ test("both parties advertise disclosesPayload on their terms messages, read back
   // party reads the other's back. Message 3 -- the bare final decision -- does not
   // carry it.
   const [connA, connB] = makeConnections();
-  const wrap = (
-    conn: MessageConnection,
-    sink: Array<Record<string, unknown>>,
-  ): MessageConnection => ({
-    send: (m: unknown) => {
-      sink.push(m as Record<string, unknown>);
-      return conn.send(m);
-    },
-    receive: (t?: number) => conn.receive(t),
-    close: () => conn.close(),
-  });
-  const initiatorSent: Array<Record<string, unknown>> = [];
-  const responderSent: Array<Record<string, unknown>> = [];
+  const { conn: recordingA, sent: initiatorSent } = recordingConnection(connA);
+  const { conn: recordingB, sent: responderSent } = recordingConnection(connB);
   const [a, b] = await Promise.all([
     // A discloses payload, B does not.
     exchangeTerms(
-      wrap(connA, initiatorSent),
+      recordingA,
       "initiator",
       termsA,
       100,
@@ -293,7 +272,7 @@ test("both parties advertise disclosesPayload on their terms messages, read back
       true,
     ),
     exchangeTerms(
-      wrap(connB, responderSent),
+      recordingB,
       "responder",
       termsB,
       200,
@@ -643,22 +622,11 @@ test("record counts ride the terms messages, not a separate frame", async () => 
   // {recordCount} frame. Capture every frame each party sends and assert the
   // counts arrive on the terms messages and nowhere on their own.
   const [connA, connB] = makeConnections();
-  const wrap = (
-    conn: MessageConnection,
-    sink: Array<Record<string, unknown>>,
-  ): MessageConnection => ({
-    send: (m: unknown) => {
-      sink.push(m as Record<string, unknown>);
-      return conn.send(m);
-    },
-    receive: (t?: number) => conn.receive(t),
-    close: () => conn.close(),
-  });
-  const initiatorSent: Array<Record<string, unknown>> = [];
-  const responderSent: Array<Record<string, unknown>> = [];
+  const { conn: recordingA, sent: initiatorSent } = recordingConnection(connA);
+  const { conn: recordingB, sent: responderSent } = recordingConnection(connB);
   const [a, b] = await Promise.all([
-    exchangeTerms(wrap(connA, initiatorSent), "initiator", termsA, 100),
-    exchangeTerms(wrap(connB, responderSent), "responder", termsB, 200),
+    exchangeTerms(recordingA, "initiator", termsA, 100),
+    exchangeTerms(recordingB, "responder", termsB, 200),
   ]);
 
   // Each party read the other's count off the terms exchange.

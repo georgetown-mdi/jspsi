@@ -43,7 +43,7 @@ const base = {
   linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
 };
 
-// ─── Happy path ──────────────────────────────────────────────────────────────
+// --- Happy path --------------------------------------------------------------
 
 test("parses a complete valid set of terms", () => {
   const result = parseLinkageTerms({
@@ -128,7 +128,7 @@ test("accepts a zip_code linkage field referenced by a key", () => {
   }
 });
 
-// ─── Cross-field constraint: deduplicate → expectsOutput ─────────────────────
+// --- Cross-field constraint: deduplicate → expectsOutput ---------------------
 
 test("deduplicate: true with expectsOutput: true is valid", () => {
   const result = safeParseLinkageTerms({
@@ -160,7 +160,7 @@ test("deduplicate: false with expectsOutput: false is valid", () => {
   expect(result.success).toBe(true);
 });
 
-// ─── Cross-field constraint: expectsOutput: false → no payload.receive ───────
+// --- Cross-field constraint: expectsOutput: false → no payload.receive -------
 
 test("expectsOutput: false with a non-empty payload.receive is invalid", () => {
   // A party that receives no output cannot receive payload columns for matched
@@ -196,7 +196,7 @@ test("expectsOutput: true with a non-empty payload.receive is valid", () => {
   expect(result.success).toBe(true);
 });
 
-// ─── allowedCharacters regex validation ──────────────────────────────────────
+// --- allowedCharacters regex validation --------------------------------------
 
 test("allowedCharacters accepts a valid character class", () => {
   const result = safeParseLinkageTerms({
@@ -254,7 +254,7 @@ test("allowedCharacters rejects a class the runtime engine cannot compile", () =
   }
 });
 
-// ─── parse vs safeParse ──────────────────────────────────────────────────────
+// --- parse vs safeParse ------------------------------------------------------
 
 test("parseLinkageTerms throws ZodError on invalid input", () => {
   expect(() => parseLinkageTerms({ version: "not-semver" })).toThrow(ZodError);
@@ -353,7 +353,7 @@ test("an unknown partner key is stripped, not echoed (non-strict invariant)", ()
   expect(result.success).toBe(true);
 });
 
-// ─── version semver format ───────────────────────────────────────────────────
+// --- version semver format ---------------------------------------------------
 
 test.each([
   ["1.0", false],
@@ -366,7 +366,7 @@ test.each([
   expect(result.success).toBe(valid);
 });
 
-// ─── uniqueness constraints ───────────────────────────────────────────────────
+// --- uniqueness constraints ---------------------------------------------------
 
 test("duplicate linkage field names are rejected", () => {
   const result = safeParseLinkageTerms({
@@ -432,7 +432,7 @@ test("same field used twice with distinct names is valid", () => {
   expect(result.success).toBe(true);
 });
 
-// ─── referential integrity: element fields and swap targets ──────────────────
+// --- referential integrity: element fields and swap targets ------------------
 // Linkage terms are partner-controlled, so an incoherent set (a key element
 // naming an undeclared field, or a swap target matching no element in its key)
 // must be rejected at decode rather than collapsing the affected key to a
@@ -473,7 +473,7 @@ test("a swap target matching no element in its key is rejected", () => {
   expect(result.error.issues[0].message).toMatch(/swap target/);
 });
 
-// ─── Transform-regex dialect conformance ─────────────────────────────────────
+// --- Transform-regex dialect conformance -------------------------------------
 // Element-transform regex patterns are partner-controlled and run per row over
 // the full dataset, under the linear-time engine (utils/linearRegex.ts), so they
 // cannot backtrack catastrophically. The remaining validation control is dialect
@@ -578,7 +578,7 @@ test("an element-transform regex the engine cannot compile is rejected at valida
   expect(result.error.issues[0].message).toMatch(/linear-time dialect/);
 });
 
-// ─── pad_left length bound (partner-controlled allocation DoS) ────────────────
+// --- pad_left length bound (partner-controlled allocation DoS) ----------------
 // A pad_left element transform reads a partner-controlled `length` and runs
 // padStart(length, char) per row over the full dataset; an unbounded value
 // allocates a giant string per row and exhausts the acceptor's memory (the
@@ -651,7 +651,7 @@ test("a malformed pad_left length still validates, so the runtime factory check 
   );
 });
 
-// ─── parse_date format-string bound (partner-controlled per-row regex DoS) ────
+// --- parse_date format-string bound (partner-controlled per-row regex DoS) ----
 // parse_date builds a regex from `inputFormat` and assembles its result from
 // `outputFormat`, recompiled per row by applyElementTransform over the full
 // dataset. An unbounded format makes every row compile / allocate work
@@ -754,7 +754,7 @@ test("a non-string parse_date format still validates, so the runtime factory han
   ).toBe(true);
 });
 
-// ─── transform regex pattern-length bound (source sanity pre-filter) ──
+// --- transform regex pattern-length bound (source sanity pre-filter) --
 // The four tier:"regex" functions compile their raw pattern / delimiter under the
 // linear-time engine (compiled once per transform array, memoized).
 // MAX_TRANSFORM_PATTERN_LENGTH caps the pattern SOURCE length -- a cheap sanity
@@ -921,7 +921,7 @@ test("a duplicate element field with distinct name aliases still validates", () 
   expect(result.success).toBe(true);
 });
 
-// ─── linkageFields and linkageKeys constraints ────────────────────────────────
+// --- linkageFields and linkageKeys constraints --------------------------------
 
 test("empty linkageFields array is rejected", () => {
   const result = safeParseLinkageTerms({ ...base, linkageFields: [] });
@@ -941,7 +941,7 @@ test("linkage key with empty elements array is rejected", () => {
   expect(result.success).toBe(false);
 });
 
-// ─── linkageField type discriminated union ────────────────────────────
+// --- linkageField type discriminated union ----------------------------
 
 test("unknown linkage field type is rejected", () => {
   const result = safeParseLinkageTerms({
@@ -951,7 +951,7 @@ test("unknown linkage field type is rejected", () => {
   expect(result.success).toBe(false);
 });
 
-// ─── semantic-type enum values are snake_case (strict) ───────────────────────
+// --- semantic-type enum values are snake_case (strict) -----------------------
 
 // Every user-facing semantic-type value is snake_case (matching the convention
 // for everything users write in YAML/JSON); camelizeKeys transforms object KEYS
@@ -1056,7 +1056,7 @@ test("a rejected camelCase enum value is not echoed in the parse error", () => {
     expect(fuzzyResult.error.message).not.toContain("editDistances");
 });
 
-// ─── camelizeKeys integration ────────────────────────────────────────────────
+// --- camelizeKeys integration ------------------------------------------------
 
 test("parses snake_case keys from disk", () => {
   // The spec uses snake_case keys (e.g. linkage_fields, expects_output);
@@ -1150,7 +1150,7 @@ test("transform params keys are normalized (params are not opaque)", () => {
   });
 });
 
-// ─── linkageStrategy schema ──────────────────────────────────────────────────
+// --- linkageStrategy schema --------------------------------------------------
 
 describe("linkageStrategy", () => {
   // snake_case `linkage_strategy` exercises the camelize pre-pass for the new
@@ -1183,7 +1183,7 @@ describe("linkageStrategy", () => {
   });
 });
 
-// ─── validateCompatibility ───────────────────────────────────────────────────
+// --- validateCompatibility ---------------------------------------------------
 
 const sharedFields: LinkageTerms["linkageFields"] = [
   { name: "ssn", type: "ssn" },
@@ -1736,7 +1736,7 @@ test("payload comparison is element-wise: a comma in a column name does not alia
   ).toBe(true);
 });
 
-// ─── validateCompatibility: partner-string sanitization ──────────────────────
+// --- validateCompatibility: partner-string sanitization ----------------------
 // A mismatch echoes a partner-supplied value into operator-facing output; these
 // pin that every such value is routed through sanitizeForDisplay (control/ANSI
 // and deceptive Unicode neutralized, over-long values truncated) while ordinary
@@ -1846,7 +1846,7 @@ test("the empty-receive diagnostic neutralizes a partner-supplied send column na
   expect(msg).toContain("\\x1b");
 });
 
-// ─── deduplicate: no cross-party consistency check ───────────────────────────
+// --- deduplicate: no cross-party consistency check ---------------------------
 // Each party independently decides whether to deduplicate its own inputs.
 // The only related cross-party constraint is that a deduplicating party must
 // receive output, which is already enforced by the output cross-check.
@@ -1883,7 +1883,7 @@ test("both parties deduplicating is compatible when both expect output", () => {
   expect(errors).toHaveLength(0);
 });
 
-// ─── Untrusted-input bounds ──────────────────────────────────────────────────
+// --- Untrusted-input bounds --------------------------------------------------
 // These terms ride inside an invitation token whose only integrity check is a
 // transcription checksum anyone can recompute, so each partner-controlled
 // free-text and array field carries a generous `.max()`. The bounds are wide
@@ -2134,7 +2134,7 @@ test("an over-count transform params record is rejected without the per-key came
   expect(inspected).toBeLessThan(MAX_PARAMS_ENTRIES * 10);
 });
 
-// ─── Nested-collection count bounds ──────────────────────────────────────────
+// --- Nested-collection count bounds ------------------------------------------
 // Each constraint `exclude` list, a key element's `transform` step list, and a
 // key's `elements` list is partner-controlled and nested beneath an outer array,
 // so an over-count payload could make Zod accumulate one issue per invalid
@@ -2295,7 +2295,7 @@ test("a pathological-count linkage key elements list fails cleanly, not with a R
   }
 });
 
-// ─── Payload send/receive count bounds ───────────────────────────────────────
+// --- Payload send/receive count bounds ---------------------------------------
 // payload.send / payload.receive are partner-controlled column lists sitting one
 // object-frame below the root, so they do not drive the ~130k STACK overflow the
 // nested collections hit -- but at ~3.5M invalid entries Zod throws `Invalid
@@ -2372,7 +2372,7 @@ test("a pathological-count payload receive list is rejected by the node budget, 
   );
 });
 
-// ─── Top-level linkageFields / linkageKeys count bounds ──────────────────────
+// --- Top-level linkageFields / linkageKeys count bounds ----------------------
 // These two flat top-level arrays sit directly below the root, so a pathological
 // count does not overflow the call stack -- but a partner array of millions of
 // invalid entries still makes Zod throw `Invalid string length` building its
@@ -2569,7 +2569,7 @@ test("rejects an over-long legal agreement purpose", () => {
   ).toThrow(ZodError);
 });
 
-// ─── Acceptor term derivation (output mirror) ────────────────────────────────
+// --- Acceptor term derivation (output mirror) --------------------------------
 
 // The acceptor adopts the inviter's agreed fields/keys but mirrors the output
 // direction and substitutes its identity (deriveAcceptedLinkageTerms). These pin

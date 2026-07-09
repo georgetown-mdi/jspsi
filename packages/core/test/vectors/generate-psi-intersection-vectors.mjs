@@ -130,7 +130,7 @@ async function runLink(cardinality, starterKeys, joinerKeys) {
   ];
 }
 
-// ── Multi-key standardized scenario (psiLinkForLinkageKeys.test.ts) ────────────
+// -- Multi-key standardized scenario (psiLinkForLinkageKeys.test.ts) ------------
 // The engine sees per-round KEY STRINGS, not raw rows; the raw-row ->
 // key-string mapping is the standardization layer's concern, covered by its own
 // tests. So the generator runs the standardization pipeline once to derive the
@@ -252,7 +252,7 @@ const multiKeyJoinerKeys = makeIterables(multiKeyClientRows).map((it) => [
   ...it,
 ]);
 
-// ── Scenario table ────────────────────────────────────────────────────────────
+// -- Scenario table ------------------------------------------------------------
 // Each scenario names its source inline test so the two stay discoverably in
 // step. `inputs` are the exact engine inputs; `expect` (starter, joiner) is
 // filled in by running the scenario below.

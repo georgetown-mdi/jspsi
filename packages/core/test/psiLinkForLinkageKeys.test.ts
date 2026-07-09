@@ -14,7 +14,7 @@ import type { ColumnMetadata } from "../src/config/metadata";
 import { createMessagePipe } from "../src/connection/messageConnection";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 
-// ─── Fixtures ────────────────────────────────────────────────────────────────
+// --- Fixtures ----------------------------------------------------------------
 
 const metadata: ColumnMetadata[] = [
   { name: "id", type: "identifier", role: "identifier", isPayload: false },
@@ -86,7 +86,7 @@ function makeIterables(
   );
 }
 
-// ─── PSI participants ─────────────────────────────────────────────────────────
+// --- PSI participants ---------------------------------------------------------
 
 const psiLibrary = await PSI();
 
@@ -107,7 +107,7 @@ const client = new PSIParticipant(
 
 log.setLevel("DEBUG");
 
-// ─── Tests ────────────────────────────────────────────────────────────────────
+// --- Tests --------------------------------------------------------------------
 
 test("rules match in order", async () => {
   // Data is pre-cleaned: SSNs without dashes, DOBs in YYYYMMDD.

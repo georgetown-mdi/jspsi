@@ -137,8 +137,6 @@ export function builder(cmd: Argv): Argv {
     });
 }
 
-// --- Argument parsing --------------------------------------------------------
-
 // The common bootstrap options (config/key paths, identity, server-* overrides,
 // timeouts, record/-file, log-level, verbosity, the file-sync flags) plus the
 // exchange-specific positionals and CLI-only sweep controls. record/recordFile/
@@ -207,8 +205,6 @@ export function parseArgs(argv: Arguments): ExchangeArgs {
       (argv["force-retain-sweep"] as boolean | undefined) ?? false,
   };
 }
-
-// --- Config loading ----------------------------------------------------------
 
 // The runtime-injected authentication fields: their values come only from
 // `.psilink.key`, so an operator who sets them in the top-level `authentication`
@@ -432,8 +428,7 @@ export function loadConfig(options: ExchangeOptions): {
     // Operator-policy fields parsed from the YAML `authentication` block (today,
     // token_max_age_days), carried end to end -- protocol.ts reads
     // tokenMaxAgeDays here to stamp the rotated token's expiry. The injected
-    // fields below come only from the key file and override any YAML value --
-    // already stripped above, so this ordering is belt-and-suspenders.
+    // fields below come only from the key file and override any YAML value.
     ...specAuth,
     sharedSecret: keyData.sharedSecret,
     expires: keyData.expires,
@@ -447,8 +442,6 @@ export function loadConfig(options: ExchangeOptions): {
     ...exchangeDataSpec,
   };
 }
-
-// --- Token expiry advisory ---------------------------------------------------
 
 /**
  * Divisor applied to `token_max_age_days` to derive the "expiring soon" warning
@@ -557,8 +550,6 @@ export function tokenExpiringAdvisory(
   );
 }
 
-// --- Data preparation --------------------------------------------------------
-
 /** @internal exported for testing */
 export async function prepareDataset(
   exchangeDataSpec: ExchangeDataSpec,
@@ -626,8 +617,6 @@ export async function prepareDataset(
     prepared.expectedPayloadColumns = expectedFromConfig;
   return prepared;
 }
-
-// --- Handler -----------------------------------------------------------------
 
 export async function handler(argv: Arguments): Promise<void> {
   // parseArgs resolves the log level and reads every option, so it runs before

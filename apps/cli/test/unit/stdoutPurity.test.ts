@@ -1,15 +1,11 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { expect, test, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import logLibrary from "loglevel";
 import type { Arguments } from "yargs";
 import {
   computeCertificateFingerprint,
   generateSigningIdentity,
-  getDiagnosticSink,
-  setDiagnosticSink,
-  type DiagnosticSink,
 } from "@psilink/core";
 
 import { handler as inviteHandler } from "../../src/commands/invite";
@@ -19,6 +15,10 @@ import {
   loadSigningIdentity,
   saveSigningIdentity,
 } from "../../src/signingIdentityFile";
+import {
+  captureStdio,
+  snapshotDiagnosticSinkAndLevel,
+} from "../loggingTestSupport";
 
 // Executable form of the contract issue 206965143 establishes: stdout carries
 // only a command's result data, and every diagnostic goes to stderr. These tests
@@ -41,20 +41,7 @@ import {
 
 const DIAGNOSTIC_PREFIX = /\[(TRACE|DEBUG|INFO|WARN|ERROR)\]/;
 
-let originalSink: DiagnosticSink | undefined;
-let originalLevel: number;
-
-beforeEach(() => {
-  originalSink = getDiagnosticSink();
-  originalLevel = logLibrary.getLevel();
-});
-
-afterEach(() => {
-  setDiagnosticSink(originalSink);
-  logLibrary.setLevel(
-    originalLevel as Parameters<typeof logLibrary.setLevel>[0],
-  );
-});
+snapshotDiagnosticSinkAndLevel();
 
 // Run `fn` with stdout and stderr captured. stdout aggregates both `console.log`
 // (which formats and appends a newline, as Node's console does) and any direct
@@ -65,25 +52,14 @@ afterEach(() => {
 async function runCapturing(
   fn: () => Promise<void>,
 ): Promise<{ stdout: string; stderr: string }> {
-  const stdout: string[] = [];
-  const stderr: string[] = [];
+  const { stdoutWrites, stderrWrites, restore } = captureStdio();
+  // console.log aggregates into the same stdout stream as process.stdout.write,
+  // in emit order, so a stdout assertion sees both mechanisms as one run would.
   const logSpy = vi
     .spyOn(console, "log")
     .mockImplementation((...args: unknown[]) => {
-      stdout.push(args.map((a) => String(a)).join(" ") + "\n");
+      stdoutWrites.push(args.map((a) => String(a)).join(" ") + "\n");
     });
-  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
-    chunk: string | Uint8Array,
-  ) => {
-    stdout.push(String(chunk));
-    return true;
-  }) as typeof process.stdout.write);
-  const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
-    chunk: string | Uint8Array,
-  ) => {
-    stderr.push(String(chunk));
-    return true;
-  }) as typeof process.stderr.write);
   const exitSpy = vi
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as never);
@@ -91,11 +67,10 @@ async function runCapturing(
     await fn();
   } finally {
     logSpy.mockRestore();
-    stdoutSpy.mockRestore();
-    stderrSpy.mockRestore();
+    restore();
     exitSpy.mockRestore();
   }
-  return { stdout: stdout.join(""), stderr: stderr.join("") };
+  return { stdout: stdoutWrites.join(""), stderr: stderrWrites.join("") };
 }
 
 test("offline invite: stdout is the invitation token only, diagnostics on stderr", async () => {

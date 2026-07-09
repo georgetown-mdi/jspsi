@@ -59,10 +59,8 @@ export class CanonicalEncodingError extends UsageError {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message);
     this.name = "CanonicalEncodingError";
-    // Preserve the underlying error (e.g. a throwing getter caught at the
-    // canonicalString boundary) as the cause, matching the error-conversion
-    // convention used elsewhere in the codebase. UsageError's constructor takes
-    // only a message, so set cause directly rather than forwarding super options.
+    // UsageError's constructor takes only a message, so set cause directly
+    // rather than forwarding super options.
     if (options?.cause !== undefined) this.cause = options.cause;
   }
 }
@@ -246,30 +244,10 @@ export function canonicalString(value: unknown): string {
     return encoded;
   } catch (err) {
     // Boundary guard upholding the module's contract that every rejection is a
-    // CanonicalEncodingError. Both assertCanonical and canonicalize read property
-    // values as they traverse, invoking any enumerable getter on the input (see
-    // the Object.entries hazard note in assertCanonical). A getter that throws, a
-    // circular reference that overflows the recursion, or any other unexpected
-    // failure during traversal would otherwise escape as a raw error (a circular
-    // input is itself un-encodable, so converting it to a usage error is correct,
-    // not merely tolerated). The domain rejections fail() raises are CanonicalEncoding
-    // errors already, each carrying its precise JSON path; re-throw those
-    // unchanged so the path messages are preserved. Anything else is converted
-    // here. The converted error is still a CanonicalEncodingError (a UsageError,
-    // exit 64): a throwing getter on caller-supplied data is a data problem, not
-    // an internal failure. This blanket catch also reclassifies a genuine bug in
-    // assertCanonical/canonicalize as a CanonicalEncodingError; that is an
-    // accepted trade for the single-error-type contract, not accidental.
-    //
-    // Unlike the domain rejections, a converted error is pathed at the root `$`,
-    // not at the offending property (e.g. a getter at `$.outer.boom` still
-    // reports `$`). Pinpointing the property would require a per-property
-    // try/catch inside the traversal, reintroducing exactly the per-node overhead
-    // this single boundary wrap was chosen to avoid; a getter-bearing input is
-    // also exotic (only non-schema-parsed data can carry one). The original
-    // error is preserved as `.cause`, so its stack still locates the property
-    // even though the message says `$`. If a consumer ever feeds getter-bearing
-    // objects in routinely, revisit and thread the precise path.
+    // CanonicalEncodingError. Domain rejections carry their precise JSON path, so
+    // re-throw them unchanged. Anything else (a throwing getter, a circular
+    // reference that overflows the recursion) is converted to a root-pathed
+    // CanonicalEncodingError with the original preserved on `.cause`.
     if (err instanceof CanonicalEncodingError) throw err;
     fail(
       `unexpected error during traversal (${

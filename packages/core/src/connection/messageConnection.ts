@@ -266,8 +266,7 @@ export class QueuedMessageConnection implements MessageConnection {
   private readonly hooks: TransportHooks;
   // Single source of truth for the terminal lifecycle; undefined means open.
   // Every transition into a terminal state runs transport teardown exactly
-  // once, so this one field replaces the former error/pendingError/closed/
-  // terminated flags and the guards that read them (see {@link TerminalState}).
+  // once (see {@link TerminalState}).
   private state: TerminalState | undefined;
   // Armed while a receive() is parked with an empty queue; fires a terminal
   // transport failure if the peer stays silent past inactivityTimeoutMs.
@@ -508,8 +507,7 @@ export class QueuedMessageConnection implements MessageConnection {
     this.disarmIdle();
     this.failSends(error);
     // No flush: a half-close means the peer has gone, so there is nothing to
-    // drain outbound to (matching the no-flush teardown the former
-    // promote-via-fail path ran).
+    // drain outbound to.
     void Promise.resolve(this.hooks.close()).catch(() => {});
   }
 
@@ -525,9 +523,7 @@ export class QueuedMessageConnection implements MessageConnection {
       const message = this.queue.shift();
       // The just-drained frame was the last one a half-close was waiting on:
       // promote the deferred error to `failed`. Teardown already ran at finish()
-      // time, so this is a pure state transition - which is what collapses the
-      // former close-racing-the-drain special case (a bare this.error
-      // assignment guarded by a non-local "close already tore down" invariant).
+      // time, so this is a pure state transition.
       if (this.state?.kind === "draining" && this.queue.length === 0) {
         this.state = { kind: "failed", error: this.state.error };
       }
@@ -571,10 +567,9 @@ export class QueuedMessageConnection implements MessageConnection {
   async close(): Promise<void> {
     // Idempotent, and a no-op once any terminal state is reached: fail() and
     // finish() each already ran teardown, so re-running it - or overwriting
-    // their error with a generic close - would be wrong. This is what collapses
-    // the close-racing-the-final-drain case: a close() during a pending drain
-    // simply returns, leaving `draining` to promote its deferred error on the
-    // final receive().
+    // their error with a generic close - would be wrong. A close() during a
+    // pending drain simply returns, leaving `draining` to promote its deferred
+    // error on the final receive().
     if (this.state !== undefined) return;
     this.state = { kind: "closed" };
     this.disarmIdle();

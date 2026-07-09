@@ -1,19 +1,17 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import logLibrary from "loglevel";
-import type { Arguments } from "yargs";
-import {
-  getDiagnosticSink,
-  getLogger,
-  setDiagnosticSink,
-  UsageError,
-  type DiagnosticSink,
-} from "@psilink/core";
+import { getDiagnosticSink, getLogger, UsageError } from "@psilink/core";
 
 import { configureLogFile } from "../../src/util/cli";
 import { parseCommonBootstrapArgs } from "../../src/commands/bootstrap";
+import {
+  argv,
+  captureStdio,
+  snapshotDiagnosticSinkAndLevel,
+} from "../loggingTestSupport";
 
 // configureLogFile installs core's process-wide diagnostic sink (the seam every
 // prefixed logger consults at emit time). These tests snapshot and restore that
@@ -21,26 +19,16 @@ import { parseCommonBootstrapArgs } from "../../src/commands/bootstrap";
 // logger so state from one test never bleeds into another.
 
 let tmpDir: string;
-let originalSink: DiagnosticSink | undefined;
-let originalLevel: number;
+
+snapshotDiagnosticSinkAndLevel();
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-logfile-"));
-  originalSink = getDiagnosticSink();
-  originalLevel = logLibrary.getLevel();
 });
 
 afterEach(() => {
-  setDiagnosticSink(originalSink);
-  logLibrary.setLevel(
-    originalLevel as Parameters<typeof logLibrary.setLevel>[0],
-  );
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
-
-function argv(extra: Record<string, unknown>): Arguments {
-  return { _: [], $0: "psilink", ...extra } as unknown as Arguments;
-}
 
 // --- (a) log lines appear in the file when --log-file is set -----------------
 
@@ -192,13 +180,7 @@ test("configureLogFile: diagnostics go to the file, never stdout", () => {
   // other test here only reads the file. Spy stdout, log every level to the file,
   // and assert stdout stays clean while the file captures the lines.
   const logPath = path.join(tmpDir, "purity.log");
-  const stdoutWrites: string[] = [];
-  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
-    chunk: string | Uint8Array,
-  ) => {
-    stdoutWrites.push(String(chunk));
-    return true;
-  }) as typeof process.stdout.write);
+  const { stdoutWrites, restore } = captureStdio();
   const sink = configureLogFile(logPath);
   logLibrary.setDefaultLevel(logLibrary.levels.TRACE);
   try {
@@ -210,7 +192,7 @@ test("configureLogFile: diagnostics go to the file, never stdout", () => {
     log.error("error to file");
   } finally {
     sink.close();
-    stdoutSpy.mockRestore();
+    restore();
   }
   const stdout = stdoutWrites.join("");
   expect(stdout).not.toMatch(/\[(TRACE|DEBUG|INFO|WARN|ERROR)\]/);

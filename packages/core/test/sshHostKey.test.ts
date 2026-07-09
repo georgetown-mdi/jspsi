@@ -6,8 +6,16 @@ import {
   computeHostKeyFingerprint,
   keyTypeFromBlob,
   matchHostKeyFingerprint,
-  verifyHostKeyFingerprint,
 } from "../src/utils/sshHostKey";
+
+// Single-pin boolean form: wrap the pin in a one-element list for
+// matchHostKeyFingerprint, which returns the matched pin or undefined.
+async function verifyHostKeyFingerprint(
+  keyBlob: Uint8Array<ArrayBuffer>,
+  pin: string,
+): Promise<boolean> {
+  return (await matchHostKeyFingerprint(keyBlob, [pin])) !== undefined;
+}
 
 // Build a 51-byte OpenSSH wire-format blob for a fresh ed25519 key pair.
 //

@@ -80,8 +80,7 @@ export function durationFlagSeconds(
 ): number | undefined {
   const raw = singleValue(argv, name);
   if (raw === undefined) return undefined;
-  // singleValue returns unknown; the flags routed here are declared type:"string"
-  // so yargs always yields a string, but coerce defensively so a contract
+  // Coerce the unknown from singleValue to a string so a type:"string" contract
   // violation surfaces as parseDurationFlag's flag-named UsageError rather than a
   // raw TypeError from .trim() on a non-string.
   const seconds = parseDurationFlag(`--${name}`, String(raw)) / 1000;
@@ -125,10 +124,7 @@ export function durationFlagMs(
 ): number | undefined {
   const raw = singleValue(argv, name);
   if (raw === undefined) return undefined;
-  // singleValue returns unknown; the flag routed here is declared type:"string"
-  // so yargs always yields a string, but coerce defensively so a contract
-  // violation surfaces as parseFineDurationFlag's flag-named UsageError rather
-  // than a raw TypeError from .trim() on a non-string (mirroring durationFlagSeconds).
+  // Coerce to a string defensively, as durationFlagSeconds does.
   return parseFineDurationFlag(`--${name}`, String(raw));
 }
 

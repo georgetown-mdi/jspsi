@@ -1,79 +1,16 @@
-import { createServer } from "node:http";
-
 import { afterEach, describe, expect, test } from "vitest";
 import WebSocket from "ws";
 
-import {
-  MAX_HANDSHAKE_PARAM_LENGTH,
-  WebSocketServer,
-} from "@peerjs-server/services/webSocketServer/index.ts";
 import { Errors } from "@peerjs-server/enums.ts";
-import { Realm } from "@peerjs-server/models/realm.ts";
+import { MAX_HANDSHAKE_PARAM_LENGTH } from "@peerjs-server/services/webSocketServer/index.ts";
 
-import type { AddressInfo } from "node:net";
-import type { IRealm } from "@peerjs-server/models/realm.ts";
-import type { Server } from "node:http";
+import {
+  connectRegistered,
+  createSignalingHarness,
+  handshakeParamString,
+} from "../utils/signalingHarness.ts";
 
-// The signaling server's default authentication gate: the well-known PeerJS key,
-// id and token being free strings (so this models the unauthenticated client).
-const KEY = "peerjs";
-
-interface Harness {
-  wss: WebSocketServer;
-  httpServer: Server;
-  port: number;
-  realm: IRealm;
-}
-
-let harness: Harness | undefined;
-const clients: Array<WebSocket> = [];
-
-afterEach(async () => {
-  for (const ws of clients.splice(0)) {
-    try {
-      ws.terminate();
-    } catch {
-      // already gone
-    }
-  }
-  const server = harness?.httpServer;
-  harness = undefined;
-  if (server)
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-});
-
-function startHarness(): Promise<Harness> {
-  const httpServer = createServer();
-  const realm = new Realm();
-  const wss = new WebSocketServer({
-    server: httpServer,
-    realm,
-    config: { path: "/", key: KEY, concurrent_limit: 5000 },
-  });
-  // The real wiring attaches an error listener; without one the server's
-  // `emit("error")` on a socket error would throw as an unhandled EventEmitter
-  // `error`.
-  wss.on("error", () => {});
-  return new Promise((resolve) => {
-    httpServer.listen(0, "127.0.0.1", () => {
-      const { port } = httpServer.address() as AddressInfo;
-      const h: Harness = { wss, httpServer, port, realm };
-      harness = h;
-      resolve(h);
-    });
-  });
-}
-
-function paramString(params: {
-  id?: string;
-  token?: string;
-  key?: string;
-}): string {
-  const id = params.id ?? "peer";
-  const token = params.token ?? "tok";
-  const key = params.key ?? KEY;
-  return `key=${key}&id=${id}&token=${token}`;
-}
+const { start: startHarness, clients } = createSignalingHarness(afterEach);
 
 /** Reject `promise` if it does not settle within `ms`, with a labelled error so
  * a never-arriving event fails with a clear diagnostic rather than blocking to
@@ -93,47 +30,6 @@ function withTimeout<T>(
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-/** Open an upgrade with the given handshake params and resolve once the server
- * answers OPEN -- the registered path. The signaling path is `/peerjs` (config
- * `path` "/" plus the WS_PATH suffix). */
-function connectRegistered(
-  port: number,
-  params: { id?: string; token?: string; key?: string },
-): Promise<WebSocket> {
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(
-      `ws://127.0.0.1:${port}/peerjs?${paramString(params)}`,
-    );
-    clients.push(ws);
-    // Remove every listener on the first terminal event so a later close or
-    // error -- e.g. the `afterEach` teardown of a successfully-registered socket
-    // -- cannot reject an already-resolved promise.
-    const cleanup = () => {
-      ws.off("message", onMessage);
-      ws.off("error", onError);
-      ws.off("close", onClose);
-    };
-    const onMessage = (data: WebSocket.RawData) => {
-      const type = (JSON.parse(data.toString()) as { type?: unknown }).type;
-      if (type === "OPEN") {
-        cleanup();
-        resolve(ws);
-      }
-    };
-    const onError = (err: Error) => {
-      cleanup();
-      reject(err);
-    };
-    const onClose = () => {
-      cleanup();
-      reject(new Error("signaling socket closed before OPEN"));
-    };
-    ws.on("message", onMessage);
-    ws.on("error", onError);
-    ws.on("close", onClose);
-  });
-}
-
 /** Open an upgrade with the given handshake params and resolve with the `msg`
  * of the server's ERROR frame -- the refused path. Resolves with `null` if the
  * socket closes without an ERROR frame, so a test fails clearly rather than
@@ -144,7 +40,7 @@ function connectExpectRejection(
 ): Promise<string | null> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(
-      `ws://127.0.0.1:${port}/peerjs?${paramString(params)}`,
+      `ws://127.0.0.1:${port}/peerjs?${handshakeParamString(params)}`,
     );
     clients.push(ws);
     let errorMsg: string | null = null;
@@ -185,7 +81,7 @@ describe("signaling-server handshake parameter length bound", () => {
     const { port, realm } = await startHarness();
     const capId = "a".repeat(MAX_HANDSHAKE_PARAM_LENGTH);
 
-    const ws = await connectRegistered(port, { id: capId });
+    const ws = await connectRegistered(port, clients, { id: capId });
     expect(ws.readyState).toBe(WebSocket.OPEN);
     expect(realm.getClientById(capId)).toBeDefined();
     // The id is exactly the registered value, never truncated or otherwise
@@ -209,7 +105,7 @@ describe("signaling-server handshake parameter length bound", () => {
       );
     });
 
-    const ws = await connectRegistered(port, { id });
+    const ws = await connectRegistered(port, clients, { id });
     ws.send(JSON.stringify({ type: "OFFER", dst: "peer-2", payload: "sdp" }));
 
     const { id: registeredId, src } = await withTimeout(

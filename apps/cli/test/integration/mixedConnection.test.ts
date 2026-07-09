@@ -201,54 +201,42 @@ test("joiner rendezvous recovers from a transient rename failure", async () => {
   desynchronize(sftpConn);
 });
 
-test("sftp sends, local receives", async () => {
+test.each([
+  {
+    label: "sftp sends, local receives",
+    sender: sftpConn,
+    receiver: localConn,
+  },
+  {
+    label: "local sends, sftp receives",
+    sender: localConn,
+    receiver: sftpConn,
+  },
+])("$label", async ({ sender, receiver }) => {
   const sftpSyncPromise = sftpConn.synchronize();
   const localSyncPromise = new Promise<void>((resolve, reject) => {
     setImmediate(() => void localConn.synchronize().then(resolve, reject));
   });
   await Promise.all([sftpSyncPromise, localSyncPromise]);
 
-  localConn.start();
+  receiver.start();
 
   const messagePromise = new Promise((resolve) => {
-    localConn.once("data", (data: unknown) => {
+    receiver.once("data", (data: unknown) => {
       resolve(data);
     });
   });
 
-  await sftpConn.send({ message: "hello from sftp" });
+  const payload = {
+    message: `hello from ${sender === sftpConn ? "sftp" : "local"}`,
+  };
+  await sender.send(payload);
   const message = await messagePromise;
 
-  localConn.stop();
+  receiver.stop();
 
   desynchronize(sftpConn);
   desynchronize(localConn);
 
-  expect(message).toEqual({ message: "hello from sftp" });
-});
-
-test("local sends, sftp receives", async () => {
-  const sftpSyncPromise = sftpConn.synchronize();
-  const localSyncPromise = new Promise<void>((resolve, reject) => {
-    setImmediate(() => void localConn.synchronize().then(resolve, reject));
-  });
-  await Promise.all([sftpSyncPromise, localSyncPromise]);
-
-  sftpConn.start();
-
-  const messagePromise = new Promise((resolve) => {
-    sftpConn.once("data", (data: unknown) => {
-      resolve(data);
-    });
-  });
-
-  await localConn.send({ message: "hello from local" });
-  const message = await messagePromise;
-
-  sftpConn.stop();
-
-  desynchronize(sftpConn);
-  desynchronize(localConn);
-
-  expect(message).toEqual({ message: "hello from local" });
+  expect(message).toEqual(payload);
 });

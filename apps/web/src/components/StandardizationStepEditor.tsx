@@ -65,14 +65,10 @@ export function StandardizationStepEditor({
   /** Rebind this field to the chosen input column. Omitted where binding is fixed. */
   onInputColumnChange?: (column: string) => void;
 }) {
-  // Announce the step-list summary on a debounce: a burst of add/remove/reorder
-  // edits announces once, not per action, and a reorder (which leaves the count
-  // unchanged) is still announced because the summary names the steps in order. The
-  // visible list is not debounced. Only a CHANGE is announced, never the initial
-  // pipeline (each field card seeds one, so a mount-time announcement would be a
-  // chorus) -- comparing against the last announced summary rather than a first-run
-  // flag stays correct under StrictMode's double-invoked mount effect. The timer is
-  // cleared on every change and unmount so none leaks.
+  // Never announce the initial pipeline: each field card seeds one, so a mount-time
+  // announcement would be a chorus. Comparing against the last announced summary
+  // rather than a first-run flag stays correct under StrictMode's double-invoked
+  // mount effect.
   const stepSummary =
     steps.length === 0
       ? "No cleaning steps; values are used as-is."
@@ -127,17 +123,11 @@ export function StandardizationStepEditor({
       <StepListEditor
         steps={steps}
         onStepsChange={onStepsChange}
-        // The per-party cleaning surface: raw patterns are authorable here, local to
-        // this party and changing only its own match rate. The cross-party
-        // element-transform editor does NOT use this component -- it drives
-        // StepListEditor directly and omits allowRawPatterns, so a token-embedded
-        // (partner-authored) regex stays read-only.
+        // Per-party cleaning surface: raw patterns change only this party's own
+        // match rate (see the prop's JSDoc).
         allowRawPatterns
       />
 
-      {/* One polite, atomic live region for this field's step list: announces the
-          debounced summary after an add, remove, or reorder, never the whole card
-          per keystroke. */}
       <VisuallyHidden role="status" aria-live="polite" aria-atomic="true">
         {stepAnnouncement}
       </VisuallyHidden>

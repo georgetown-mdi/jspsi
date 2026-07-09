@@ -368,9 +368,7 @@ export class EncryptedMessageConnection implements MessageConnection {
   // `"security"` ConnectionError and throws it; a transport drop surfaced by
   // inner.receive propagates unchanged.
   private async handleInbound(data: unknown): Promise<unknown> {
-    // The inner transport now delivers the raw binary envelope as a Uint8Array.
-    // Anything else -- notably an old base64url-in-JSON `{ enc }` object -- is a
-    // format mismatch (a clean break with the pre-binary format) rejected here.
+    // The envelope is a Uint8Array; reject anything else as a format mismatch.
     if (!(data instanceof Uint8Array)) {
       throw this.fail(
         new ConnectionError(
@@ -384,8 +382,7 @@ export class EncryptedMessageConnection implements MessageConnection {
     // Binary length bound. The transport read layer already refuses an over-cap
     // inbound file before reading it (see MAX_FRAME_SIZE_BYTES and
     // docs/spec/CHANNEL_SECURITY.md); this is the same single value applied here
-    // as defense-in-depth -- now a binary length check, where the pre-binary
-    // format used a base64url-string `.max()`.
+    // as defense-in-depth.
     if (bytes.length > MAX_FRAME_SIZE_BYTES) {
       throw this.fail(
         new ConnectionError(

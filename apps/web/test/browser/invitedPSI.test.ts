@@ -13,6 +13,12 @@ import PSI from "@openmined/psi.js/psi_wasm_web";
 import { authenticateExchange } from "../../src/psi/authenticateExchange.js";
 import { openPeerMessageConnection } from "../../src/psi/peerMessageConnection.js";
 
+import {
+  canReachServer,
+  clientRows,
+  firstNameOnlyTerms,
+  serverRows,
+} from "../utils/pspiFixtures.js";
 import { connectRendezvousPair } from "../utils/rendezvousPair.js";
 import { sortAssociationTable } from "../utils/associationTable.js";
 
@@ -42,56 +48,6 @@ const hostString =
 
 const serverUnreachableNote = `PeerJS coordination server at ${hostString} unreachable`;
 
-// Probe the PeerJS coordination server with a short timeout. The `browser`
-// vitest project stands this server up via the dev-server globalSetup, so a
-// normal `test:browser` run finds it. Running this file directly without that
-// setup leaves it down -- in which case this suite skips rather than failing.
-// Reachability is decided here, inside a hook, never at module scope: the
-// networked exchange below used to run during import, where a "Failed to fetch"
-// took down the entire browser project (0 tests collected), hiding the
-// server-less vector suites (canonical, exchangeRecord) that share it.
-async function canReachServer(): Promise<boolean> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 1_000);
-  try {
-    await fetch(`${hostString}/`, { signal: controller.signal });
-    return true;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-const serverRows = [
-  { first_name: "Alice" },
-  { first_name: "Bob" },
-  { first_name: "Carol" },
-  { first_name: "David" },
-  { first_name: "Elizabeth" },
-  { first_name: "Frank" },
-  { first_name: "Greta" },
-];
-const clientRows = [
-  { first_name: "Carol" },
-  { first_name: "Elizabeth" },
-  { first_name: "Henry" },
-];
-
-// The default linkage-key templates all require SSN/DOB/lastName combinations,
-// so none survive filtering for a firstName-only dataset. Provide one explicit
-// key so both parties produce valid, matching linkage terms.
-const firstNameOnlyTerms = {
-  version: "1.0.0",
-  date: "2026-01-01",
-  algorithm: "psi" as const,
-  linkageStrategy: "cascade" as const,
-  output: { expectsOutput: true, shareWithPartner: true },
-  deduplicate: false,
-  linkageFields: [{ name: "firstName", type: "first_name" as const }],
-  linkageKeys: [{ name: "firstName", elements: [{ field: "firstName" }] }],
-};
-
 // Undefined until a reachable server lets beforeAll run the exchange; the tests
 // gate on this, so an unreachable server skips rather than reading a stale or
 // absent result.
@@ -102,7 +58,7 @@ let clientResult: ReturnType<typeof sortAssociationTable> | undefined;
 // exchange all happen here. The hook timeout turns a stuck server into a clear
 // failure, not a hang.
 beforeAll(async () => {
-  const reachable = await canReachServer();
+  const reachable = await canReachServer(hostString);
   if (!reachable) return;
 
   // The backend-free rendezvous stands in for the invitation: a fresh shared

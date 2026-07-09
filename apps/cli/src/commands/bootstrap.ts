@@ -1023,18 +1023,17 @@ export function buildDataSpec(args: {
 export { unsatisfiedLinkageFields } from "@psilink/core";
 
 /** Build a {@link PreparedExchange} for an online run from a resolved spec. */
-export async function prepareForOnlineExchange(
+export function prepareForOnlineExchange(
   dataSpec: ResolvedDataSpec,
   identity: string,
   rows: { rawRows: Array<CSVRow>; columns: string[] },
-): Promise<PreparedExchange> {
-  const prepared = prepareForExchange(
+): PreparedExchange {
+  return prepareForExchange(
     dataSpec as ExchangeDataSpec,
     identity,
     rows.rawRows,
     rows.columns,
   );
-  return prepared;
 }
 
 /**

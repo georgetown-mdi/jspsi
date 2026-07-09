@@ -9,7 +9,7 @@ import {
 import { MAX_LINKAGE_ENTRIES } from "../src/config/linkageTerms";
 import { recordCountField } from "../src/protocolSetup";
 
-// ─── MAX_RECORD_COUNT: the cell-count gate's exact-product dependency, as a check ─
+// --- MAX_RECORD_COUNT: the cell-count gate's exact-product dependency, as a check -
 // The cell-count gate (singlePassDatasetExceedsCap) decides keyCount * recordCount
 // > MAX_SINGLE_PASS_CELLS, and its precision argument holds only while that product
 // is exact -- below 2^53. That once rested implicitly on the recordCount schema's
@@ -38,7 +38,7 @@ test("recordCountField rejects a record count above the explicit bound at decode
   expect(recordCountField.safeParse(1.5).success).toBe(false);
 });
 
-// ─── psiElementBounds: authenticated per-message decode-seam caps ──────────────
+// --- psiElementBounds: authenticated per-message decode-seam caps --------------
 // Both parties derive identical bounds from the agreed key count and the two
 // exchanged record counts. The setup carries the sender's set; the request and the
 // response (which re-encrypts that request) carry the receiver's.
@@ -50,7 +50,7 @@ test("psiElementBounds maps each message kind to keyCount * the relevant party's
   expect(bounds.response).toBe(3 * 7); // re-encrypted receiver's set
 });
 
-// ─── MAX_PSI_DECODE_ELEMENTS: the pre-deserialize ceiling's two security props ──
+// --- MAX_PSI_DECODE_ELEMENTS: the pre-deserialize ceiling's two security props --
 // The absolute element ceiling (connection/psiElementScan.ts is the enforcer) rests
 // on two numeric properties. Both are derived from MAX_FRAME_SIZE_BYTES and the
 // per-element sizes, so a future edit to either input could silently break one --

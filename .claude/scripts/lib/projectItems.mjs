@@ -33,7 +33,7 @@ const USER_AGENT = "psilink-board-scripts";
  * network subcommands fail in-sandbox. gh is kept only for `gh auth token`,
  * which is network-free (it just reads stored credentials) and so works in-sandbox.
  */
-export function gh(args) {
+function gh(args) {
   return execFileSync("gh", args, {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
@@ -197,7 +197,7 @@ export function toNumericId(arg, expectedProject) {
  * fall out of the resulting map; extend this and extractFields together if a new
  * type needs surfacing.
  */
-export const FIELD_VALUES_FRAGMENT =
+const FIELD_VALUES_FRAGMENT =
   "fieldValues(first: 20) { nodes { __typename " +
   "... on ProjectV2ItemFieldTextValue { text field { ... on ProjectV2FieldCommon { name } } } " +
   "... on ProjectV2ItemFieldNumberValue { number field { ... on ProjectV2FieldCommon { name } } } " +
@@ -209,7 +209,7 @@ export const FIELD_VALUES_FRAGMENT =
  * string; number values map to their number. Nodes with no field name (or an
  * unselected value type, which has neither text/number/name) are skipped.
  */
-export function extractFields(fieldValues) {
+function extractFields(fieldValues) {
   const out = {};
   for (const node of fieldValues?.nodes ?? []) {
     const name = node?.field?.name;

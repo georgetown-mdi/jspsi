@@ -2,10 +2,6 @@ import Papa from "papaparse";
 
 import type { LocalFile } from "papaparse";
 
-/* function isFile(x: File | NodeJS.ReadableStream): x is File {
-  return (x as File).name !== undefined;
-} */
-
 /**
  * Per-logical-line byte ceiling for the streamed CSV reads ({@link loadCSVFile}
  * and {@link loadCSVColumnSample}). PapaParse must buffer one whole logical line
@@ -86,8 +82,6 @@ export async function assertLeadingLineWithinByteCeiling(
   }>;
   if (typeof source.size !== "number" || typeof source.slice !== "function")
     return;
-  // A file no larger than the ceiling cannot hold a line that exceeds it, so the
-  // common case reads nothing at all.
   if (source.size <= byteCeiling) return;
 
   // Read the first window only; a well-formed header terminates inside it, so a
@@ -194,6 +188,19 @@ export function guardStreamLineByteCeiling(
   };
   source.on("data", onData);
   return () => source.removeListener?.("data", onData);
+}
+
+/**
+ * Detach the line-ceiling guard and release the source once a parse settles.
+ * PapaParse's teardown -- whether a natural `complete`, an early `parser.abort()`,
+ * or an `error` -- does not close the underlying stream, so an
+ * `fs.createReadStream` descriptor would otherwise linger until GC; `destroy` is a
+ * no-op once a natural EOF has closed it, and skipped for a non-stream LocalFile
+ * (no `destroy`).
+ */
+function releaseSource(detachGuard: () => void, source: StreamSource): void {
+  detachGuard();
+  source.destroy?.();
 }
 
 /**
@@ -336,12 +343,7 @@ export async function loadCSVFile(
         meta = results.meta;
       },
       complete: () => {
-        // Detach the guard and release the source. PapaParse's parser teardown does
-        // not close the underlying stream, so an fs.createReadStream descriptor
-        // would otherwise linger until GC; destroy is a no-op once a natural EOF has
-        // closed it, and skipped for a non-stream LocalFile (no `destroy`).
-        detachGuard();
-        source.destroy?.();
+        releaseSource(detachGuard, source);
         // `meta` is set by the chunk callback, which fires at least once before
         // complete for any input (PapaParse parses at least one chunk, even an
         // empty file). Rejecting on the unreachable no-chunk case makes that an
@@ -371,9 +373,8 @@ export async function loadCSVFile(
       error: (error) => {
         // The guard's ceiling trip surfaces here -- it destroys the source with
         // singleLineCeilingError, which PapaParse reports as a read error -- as does
-        // a genuine read/stream error. Same release as complete.
-        detachGuard();
-        source.destroy?.();
+        // a genuine read/stream error.
+        releaseSource(detachGuard, source);
         reject(error);
       },
     });
@@ -525,14 +526,7 @@ export function loadCSVColumnSample(
         }
       },
       complete: () => {
-        // An early `parser.abort()` (sample cap reached, or no column to sample)
-        // tears down PapaParse's parser but not the underlying source, so a Node
-        // stream's listeners and an fs.createReadStream's descriptor would linger
-        // until GC -- the opposite of the bounded read's intent. Detach the guard
-        // and release the source; destroy is a no-op once a natural EOF has closed
-        // it, and skipped for a non-stream LocalFile (no `destroy`).
-        detachGuard();
-        source.destroy?.();
+        releaseSource(detachGuard, source);
         // chunk fires at least once for any input -- even an empty or header-only
         // file -- so columns is set unless the parse produced no chunk. Reject that
         // unreachable case rather than mask it, matching loadCSVFile's invariant.
@@ -545,9 +539,8 @@ export function loadCSVColumnSample(
       error: (error) => {
         // The guard's ceiling trip surfaces here -- it destroys the source with
         // singleLineCeilingError, which PapaParse reports as a read error -- as does
-        // a genuine read/stream error. Same release as complete.
-        detachGuard();
-        source.destroy?.();
+        // a genuine read/stream error.
+        releaseSource(detachGuard, source);
         reject(error);
       },
     });
