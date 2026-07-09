@@ -112,6 +112,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 
 ### Fixed
 
+- The web app's peer signaling server now accepts the IPv6 loopback origin: the CORS allowlist built the entry without the colon before the port (`http://[::1]3000`), so a browser at `http://[::1]:<port>` was always rejected. IPv4 loopback and non-loopback deployments are unaffected.
 - Linkage values are now normalized to Unicode NFC before matching, and again after any case-folding step, so the same value in different normalization forms -- the common macOS-NFC vs database-NFD split -- matches instead of silently failing. See `docs/EXCHANGE_REFERENCE.md`.
 - Fixed a deadlock in the multi-key matching loop where one party could skip a linkage key the partner still ran, hanging the exchange; it surfaced under one-to-one and many-to-one linkages when the parties' matched sets diverged.
 - An exchange now fails with a clear error (bounded by `peer_timeout_ms`) when the partner stops responding, instead of hanging; the timeout message names the likely peer-side causes.

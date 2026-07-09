@@ -779,7 +779,7 @@ export async function runExchange(
   // resultSize (the intersection size) is bound only when both parties are
   // entitled to output; heldAssociationTable gates both the record's committed
   // table and the table returned to the caller, so it is one predicate. See the
-  // field JSDocs on ExchangeRecord for the disclosure rationale.
+  // ExchangeResult.associationTable JSDoc below for the disclosure rationale.
   const bothExpectOutput =
     linkageTerms.output.expectsOutput && partnerTerms.output.expectsOutput;
   const heldAssociationTable = linkageTerms.output.expectsOutput;
