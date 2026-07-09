@@ -1786,6 +1786,20 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       connectOptions["privateKey"] = config.server.privateKey;
     if (config.server.privateKeyPassphrase !== undefined)
       connectOptions["passphrase"] = config.server.privateKeyPassphrase;
+    // Offer the keyboard-interactive auth method alongside `password` for a
+    // server that disables the direct `password` method but accepts the same
+    // password over keyboard-interactive (ssh2 tries password first, then
+    // keyboard-interactive, exactly as a GUI SFTP client does). The transport
+    // adapter reads this flag to install a handler that answers the server's
+    // prompts with `password`; gated on a password being present so the handler
+    // always has a value to answer with (the schema also refines this). Nothing
+    // is installed unless the operator opted in, so default behavior is
+    // unchanged. See SSH2SFTPClientAdapter.connect and docs/EXCHANGE_REFERENCE.md.
+    if (
+      config.server.keyboardInteractive === true &&
+      config.server.password !== undefined
+    )
+      connectOptions["tryKeyboard"] = true;
     // serverConnectTimeoutMs for SFTP is enforced by ssh2 via readyTimeout, not a
     // Promise.race wrapper -- the per-attempt deadline is equivalent. Always set:
     // the schema defaults the field to DEFAULT_SERVER_CONNECT_TIMEOUT_MS, and the

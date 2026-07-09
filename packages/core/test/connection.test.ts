@@ -659,6 +659,72 @@ test("SFTP server with certificate and privateKey together is rejected (not yet 
   expect(messages.some((m) => m.includes("certificate"))).toBe(true);
 });
 
+// --- SFTPServer: keyboard_interactive requires password ----------------------
+
+test("SFTP server with keyboard_interactive and password is accepted", () => {
+  const result = safeParseConnectionConfig({
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      password: "hunter2",
+      keyboard_interactive: true,
+    },
+  });
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  if (result.data.channel !== "sftp") return;
+  expect(result.data.server.keyboardInteractive).toBe(true);
+});
+
+test("SFTP server with keyboard_interactive but no password is rejected", () => {
+  const result = safeParseConnectionConfig({
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      keyboard_interactive: true,
+    },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const issue = result.error.issues.find((i) =>
+    i.message.includes("keyboard_interactive requires password"),
+  );
+  expect(issue).toBeDefined();
+  expect(issue?.path).toContain("keyboardInteractive");
+});
+
+test("SFTP server with keyboard_interactive and privateKey (no password) is rejected", () => {
+  // keyboard_interactive answers prompts with the password, so it is invalid
+  // alongside key-only auth -- the requires-password refine fires.
+  const result = safeParseConnectionConfig({
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----",
+      keyboard_interactive: true,
+    },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(
+    messages.some((m) => m.includes("keyboard_interactive requires")),
+  ).toBe(true);
+});
+
+test("SFTP server with keyboard_interactive: false and no password is accepted", () => {
+  // The refine only fires for an explicit `true`; the default-off value is a
+  // no-op that must not demand a password.
+  const result = safeParseConnectionConfig({
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      keyboard_interactive: false,
+    },
+  });
+  expect(result.success).toBe(true);
+});
+
 // --- SFTPServer: host_key_fingerprint format ---------------------------------
 
 test("SFTP server with valid host_key_fingerprint is accepted", () => {

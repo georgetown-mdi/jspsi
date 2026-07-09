@@ -283,6 +283,72 @@ test("a passphrase override is ignored (not an error) off the sftp channel", () 
   expect(result).toEqual(base);
 });
 
+// --- keyboard-interactive override -------------------------------------------
+
+test("serverKeyboardInteractive applies alongside a password override", () => {
+  const result = applyConnectionOverrides(baseSFTP, {
+    server: { password: "@pass.txt", keyboardInteractive: true },
+  });
+  if (result.channel !== "sftp") return;
+  expect(result.server.keyboardInteractive).toBe(true);
+  expect(result.server.password).toBe("@pass.txt");
+});
+
+test("serverKeyboardInteractive applies when the password is already in the base config", () => {
+  const base: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "sftp.example.org", password: "@/secrets/pw" },
+  };
+  const result = applyConnectionOverrides(base, {
+    server: { keyboardInteractive: true },
+  });
+  if (result.channel !== "sftp") return;
+  expect(result.server.keyboardInteractive).toBe(true);
+});
+
+test("a keyboard-interactive override with no password is rejected with a UsageError", () => {
+  // Mirrors the core schema's "keyboard_interactive requires password" refine at
+  // the CLI override layer, with a flag-named message.
+  expect(() =>
+    applyConnectionOverrides(baseSFTP, {
+      server: { keyboardInteractive: true },
+    }),
+  ).toThrow(UsageError);
+  expect(() =>
+    applyConnectionOverrides(baseSFTP, {
+      server: { keyboardInteractive: true },
+    }),
+  ).toThrow("requires --server-password");
+});
+
+test("a keyboard-interactive override is ignored (not an error) off the sftp channel", () => {
+  // sftp-scoped like the credential overrides: silently dropped on filedrop.
+  const base: ConnectionConfig = { channel: "filedrop", path: "/mnt/share" };
+  const result = applyConnectionOverrides(base, {
+    server: { keyboardInteractive: true },
+  });
+  expect(result).toEqual(base);
+});
+
+test("a keyboard-interactive: false override turns it off over a config that had it on", () => {
+  // The negated CLI form (--no-server-keyboard-interactive) arrives as `false`;
+  // it must override a config's `true`, and (being false, not true) it does not
+  // trip the requires-password guard even though this config carries no password.
+  const base: ConnectionConfig = {
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      password: "@pw.txt",
+      keyboardInteractive: true,
+    },
+  };
+  const result = applyConnectionOverrides(base, {
+    server: { keyboardInteractive: false },
+  });
+  if (result.channel !== "sftp") return;
+  expect(result.server.keyboardInteractive).toBe(false);
+});
+
 // --- immutability ------------------------------------------------------------
 
 test("empty overrides object does not change the connection", () => {

@@ -125,6 +125,21 @@ export interface SFTPServer {
    */
   privateKeyPassphrase?: string;
   /**
+   * Answer the server's `keyboard-interactive` authentication prompts with the
+   * configured `password`, in addition to offering the direct `password`
+   * method. Only valid with `password`; a `boolean` defaulting to `false`.
+   *
+   * Enable this for a server that disables the SSH `password` authentication
+   * method but accepts `keyboard-interactive` -- the same password, collected
+   * over a different SSH auth method (the server sends a prompt the client
+   * answers, rather than the client offering the password directly). Every
+   * prompt the server sends is answered with the same configured password, so it
+   * does not satisfy a multi-prompt or one-time-code challenge; those cannot be
+   * answered from a single stored secret. See docs/EXCHANGE_REFERENCE.md
+   * (connection.server).
+   */
+  keyboardInteractive?: boolean;
+  /**
    * Expected server host-key fingerprint(s) in OpenSSH SHA256 format
    * (`SHA256:<43 standard base64 chars>`): a single fingerprint, or a non-empty
    * list of them. When set, every SFTP connection on the CLI `sftp` channel
@@ -155,6 +170,7 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
     password: z.string().optional(),
     privateKey: z.string().optional(),
     privateKeyPassphrase: z.string().optional(),
+    keyboardInteractive: z.boolean().optional(),
     // Kept in the schema (not stripped by z.object()) so that a config that
     // supplies either field gets a clear rejection refine below rather than
     // silent discard. The transform at the end drops both before the output
@@ -184,6 +200,20 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
     {
       message: "privateKeyPassphrase is only valid with privateKey",
       path: ["privateKeyPassphrase"],
+    },
+  )
+  // keyboard_interactive answers the server's prompts with `password`, so it is
+  // meaningless without one. Requiring password also makes it mutually exclusive
+  // with privateKey by construction (the at-most-one-primary refine above already
+  // forbids password+privateKey together), so no separate key check is needed.
+  .refine(
+    (s) => !(s.keyboardInteractive === true && s.password === undefined),
+    {
+      message:
+        "keyboard_interactive requires password; it answers the server's " +
+        "keyboard-interactive prompts with that password and has no effect " +
+        "without one",
+      path: ["keyboardInteractive"],
     },
   )
   .refine((s) => s.certificate === undefined, {

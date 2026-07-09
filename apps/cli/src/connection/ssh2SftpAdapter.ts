@@ -71,6 +71,20 @@ interface Ssh2SftpClientInternals {
   client?: {
     setNoDelay(noDelay: boolean): void;
     _sock?: { setKeepAlive?(enable: boolean, initialDelay: number): void };
+    // The ssh2 Client is an EventEmitter; the adapter registers a persistent
+    // 'keyboard-interactive' listener on it to answer a server that authenticates
+    // that method (see attachKeyboardInteractive). Typed narrowly to the one
+    // event the adapter uses rather than the full ssh2 Client surface.
+    on?(
+      event: "keyboard-interactive",
+      listener: (
+        name: string,
+        instructions: string,
+        lang: string,
+        prompts: { prompt: string; echo?: boolean }[],
+        finish: (answers: string[]) => void,
+      ) => void,
+    ): void;
   };
   sftp: {
     open(
@@ -120,6 +134,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // destroyed by ssh2 and cannot recover, and connect() resets it to undefined
   // alongside attaching a listener to a fresh wrapper.
   private fatalSftpError: Error | undefined;
+  // True once the keyboard-interactive answer handler has been attached to the
+  // underlying ssh2 Client. ssh2-sftp-client constructs that Client once and
+  // reuses it across reconnects (connect() does not strip user listeners), so
+  // the handler is attached exactly once -- re-attaching per reconnect would
+  // stack duplicate listeners and eventually trip a MaxListenersExceeded
+  // warning. See attachKeyboardInteractive.
+  private keyboardInteractiveAttached = false;
   // The per-operation liveness bound (ms) every server-driven op is held to: the
   // wall-clock deadline for the reads and the metadata write/stat/delete ops, and
   // the no-progress idle window for put. Defaults to SFTP_STALL_DEADLINE_MS and is
@@ -357,6 +378,63 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     });
   }
 
+  // Answer the SSH server's keyboard-interactive authentication prompts with the
+  // configured password. Enabled by connection.server.keyboard_interactive (core
+  // sets `tryKeyboard` and keeps `password` in the connect options) for a server
+  // that disables the direct `password` auth method but accepts the same secret
+  // over keyboard-interactive.
+  //
+  // Attached to the underlying ssh2 Client (an EventEmitter) exactly once per
+  // adapter; the Client is reused across reconnects, so the listener persists.
+  // The password is read from the live connect options (this.options) at answer
+  // time, NOT captured at attach time: connect() refreshes this.options on every
+  // (re)connect, so the listener always answers with the CURRENT credential and a
+  // future reconnect under a different credential can never be answered with a
+  // stale secret (a check, not a comment, standing in for "the password never
+  // changes across an adapter's reconnects"). A non-string password answers empty,
+  // which fails auth cleanly rather than sending `undefined`; it is unreachable
+  // from a product connect (the connect() gate attaches only when it saw a string
+  // password, and reconnects reuse the same options). Every prompt is answered
+  // with the same password: a non-interactive tool has a single stored secret, so
+  // a genuine multi-prompt or one-time-code challenge is not satisfiable here and
+  // simply fails auth (ssh2 auto-responds to a zero-prompt request itself, so this
+  // listener only fires when the server actually asks). The password is passed
+  // straight to ssh2's finish callback and never logged.
+  //
+  // Without this listener a server that requests keyboard-interactive would stall
+  // the handshake until ssh2's readyTimeout (ssh2 emits the event and waits for a
+  // response that never comes), so the connect-time guard fails loudly if the
+  // ssh2 Client no longer exposes on() rather than letting that silent stall
+  // return as an opaque timeout.
+  private attachKeyboardInteractive(): void {
+    if (this.keyboardInteractiveAttached) return;
+    const client = (this.client as unknown as Ssh2SftpClientInternals).client;
+    if (typeof client?.on !== "function")
+      throw new Error(
+        "keyboard-interactive authentication was requested " +
+          "(connection.server.keyboard_interactive) but the underlying ssh2 " +
+          "client does not expose on(); the installed ssh2 / ssh2-sftp-client " +
+          "version may have changed - check for breaking changes in their " +
+          "changelogs",
+      );
+    client.on(
+      "keyboard-interactive",
+      (_name, _instructions, _lang, prompts, finish) => {
+        // Read the password fresh from the live connect options at answer time
+        // (see the method comment): never a stale captured secret.
+        const current = this.options?.password;
+        const answer = typeof current === "string" ? current : "";
+        // One answer per prompt: the SSH keyboard-interactive protocol requires
+        // the response count to equal the prompt count (RFC 4256; the server
+        // enforces it, not ssh2's authInfoRes). prompts is never empty here (ssh2
+        // auto-responds to a zero-prompt request without emitting), so this always
+        // answers at least once.
+        finish(prompts.map(() => answer));
+      },
+    );
+    this.keyboardInteractiveAttached = true;
+  }
+
   // A terminal error built from a previously captured fatal SFTP-protocol error,
   // or undefined if the session has not been killed. Every server-driven
   // operation consults this at entry so one that runs after a malformed packet
@@ -396,6 +474,18 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     const { maxReconnectAttempts: _, ...rest } = options;
     const connectOptions = rest as Ssh2SftpClient.ConnectOptions;
     this.options = connectOptions;
+    // Install the keyboard-interactive answer handler BEFORE connecting, so it is
+    // registered by the time ssh2 negotiates auth. core sets tryKeyboard only
+    // alongside a password (schema-refined), so the password guard here is a
+    // belt-and-suspenders backstop for a direct adapter caller: with no password
+    // there is nothing to answer prompts with, so the handler is skipped and the
+    // method falls through to whatever other auth (if any) the options carry,
+    // rather than answering with an empty string.
+    if (
+      connectOptions.tryKeyboard === true &&
+      typeof connectOptions.password === "string"
+    )
+      this.attachKeyboardInteractive();
     await retryPromise(
       () => this.client.connect(connectOptions),
       maxReconnects,

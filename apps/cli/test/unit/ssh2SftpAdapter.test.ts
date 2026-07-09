@@ -214,6 +214,186 @@ describe("connect retry", () => {
   });
 });
 
+// --- keyboard-interactive authentication -------------------------------------
+
+describe("keyboard-interactive", () => {
+  // A mock of the underlying ssh2 Client (ssh2-sftp-client's `.client`) that
+  // records the listeners the adapter registers on it, so a test can invoke the
+  // keyboard-interactive handler the adapter attaches. setNoDelay/_sock are the
+  // no-ops connect() also calls (see noDelayClient).
+  function keyboardClient(): {
+    client: {
+      setNoDelay: () => void;
+      _sock: { setKeepAlive: () => void };
+      on: ReturnType<typeof vi.fn>;
+    };
+    listeners: Record<string, ((...args: unknown[]) => void)[]>;
+  } {
+    const listeners: Record<string, ((...args: unknown[]) => void)[]> = {};
+    const on = vi.fn(
+      (event: string, listener: (...args: unknown[]) => void) => {
+        (listeners[event] ??= []).push(listener);
+      },
+    );
+    return {
+      client: { setNoDelay: () => {}, _sock: { setKeepAlive: () => {} }, on },
+      listeners,
+    };
+  }
+
+  // Install a mock ssh2-sftp-client on the adapter whose underlying ssh2 Client
+  // is `ssh2Client`, so connect() drives the real keyboard-interactive attach.
+  function installClient(
+    adapter: SSH2SFTPClientAdapter,
+    ssh2Client: unknown,
+  ): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = {
+      sftp: {
+        open: vi.fn(),
+        close: vi.fn(),
+        opendir: vi.fn(),
+        readdir: vi.fn(),
+        on: vi.fn(),
+      },
+      connect: vi.fn().mockResolvedValue(undefined),
+      client: ssh2Client,
+    };
+  }
+
+  test("answers the server's prompts with the password when tryKeyboard is set", async () => {
+    const adapter = new SSH2SFTPClientAdapter();
+    const { client, listeners } = keyboardClient();
+    installClient(adapter, client);
+
+    await adapter.connect({
+      host: "sftp.example.org",
+      password: "hunter2",
+      tryKeyboard: true,
+      maxReconnectAttempts: 0,
+    });
+
+    expect(client.on).toHaveBeenCalledWith(
+      "keyboard-interactive",
+      expect.any(Function),
+    );
+    const handler = listeners["keyboard-interactive"]?.[0];
+    expect(handler).toBeDefined();
+    // Drive the handler as ssh2 would: two password prompts, expecting one answer
+    // each, all the configured password.
+    const finish = vi.fn();
+    handler!(
+      "name",
+      "instructions",
+      "en",
+      [
+        { prompt: "Password:", echo: false },
+        { prompt: "Verification:", echo: false },
+      ],
+      finish,
+    );
+    expect(finish).toHaveBeenCalledWith(["hunter2", "hunter2"]);
+  });
+
+  test("does not attach a handler when tryKeyboard is not set", async () => {
+    const adapter = new SSH2SFTPClientAdapter();
+    const { client } = keyboardClient();
+    installClient(adapter, client);
+
+    await adapter.connect({
+      host: "sftp.example.org",
+      password: "hunter2",
+      maxReconnectAttempts: 0,
+    });
+
+    // connect() registers nothing on the ssh2 Client itself unless keyboard-
+    // interactive is enabled (the fatal-error listener goes on the SFTPWrapper).
+    expect(client.on).not.toHaveBeenCalled();
+  });
+
+  test("does not attach a handler when tryKeyboard is set but no password is present", async () => {
+    // Defensive: core only sets tryKeyboard alongside a password, but a direct
+    // caller could pass tryKeyboard with no password; with nothing to answer
+    // prompts with, the handler is skipped rather than answering empty.
+    const adapter = new SSH2SFTPClientAdapter();
+    const { client } = keyboardClient();
+    installClient(adapter, client);
+
+    await adapter.connect({
+      host: "sftp.example.org",
+      tryKeyboard: true,
+      maxReconnectAttempts: 0,
+    });
+
+    expect(client.on).not.toHaveBeenCalled();
+  });
+
+  test("attaches the handler exactly once across repeated connects", async () => {
+    // The ssh2 Client is reused across reconnects; the handler must be attached
+    // once, or repeated connects would stack duplicate listeners.
+    const adapter = new SSH2SFTPClientAdapter();
+    const { client } = keyboardClient();
+    installClient(adapter, client);
+
+    const opts = {
+      host: "sftp.example.org",
+      password: "hunter2",
+      tryKeyboard: true,
+      maxReconnectAttempts: 0,
+    };
+    await adapter.connect({ ...opts });
+    await adapter.connect({ ...opts });
+
+    expect(client.on).toHaveBeenCalledTimes(1);
+  });
+
+  test("answers with the current password after a reconnect, not a stale captured one", async () => {
+    // Read-fresh: the once-attached listener reads this.options.password at answer
+    // time, so a later connect() carrying a different password is answered with
+    // the new one. A closure that captured the password at attach time would
+    // answer the first password -- this pins the read-fresh invariant as a check.
+    const adapter = new SSH2SFTPClientAdapter();
+    const { client, listeners } = keyboardClient();
+    installClient(adapter, client);
+
+    await adapter.connect({
+      host: "sftp.example.org",
+      password: "first",
+      tryKeyboard: true,
+      maxReconnectAttempts: 0,
+    });
+    await adapter.connect({
+      host: "sftp.example.org",
+      password: "second",
+      tryKeyboard: true,
+      maxReconnectAttempts: 0,
+    });
+
+    // Still attached exactly once, but answering with the latest password.
+    expect(client.on).toHaveBeenCalledTimes(1);
+    const handler = listeners["keyboard-interactive"]?.[0];
+    const finish = vi.fn();
+    handler!("n", "i", "en", [{ prompt: "Password:", echo: false }], finish);
+    expect(finish).toHaveBeenCalledWith(["second"]);
+  });
+
+  test("fails loudly when the ssh2 client cannot register the handler", async () => {
+    // Without on(), a keyboard-interactive request would silently stall the
+    // handshake to readyTimeout; the connect-time guard surfaces it instead.
+    const adapter = new SSH2SFTPClientAdapter();
+    installClient(adapter, noDelayClient()); // no on()
+
+    await expect(
+      adapter.connect({
+        host: "sftp.example.org",
+        password: "hunter2",
+        tryKeyboard: true,
+        maxReconnectAttempts: 0,
+      }),
+    ).rejects.toThrow("keyboard-interactive");
+  });
+});
+
 // --- rename retry ------------------------------------------------------------
 
 describe("rename retry", () => {
