@@ -30,8 +30,8 @@
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.9",
-    "eslint": "^10.5.0",
-    "prettier": "^3.8.4",
+    "eslint": "^10.6.0",
+    "prettier": "^3.9.4",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9",
     "yaml": "^2.9.0"
