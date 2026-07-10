@@ -100,7 +100,7 @@ describe("Dockerfile dependency freeze", () => {
   });
 
   it("copies both workspace link targets so the node_modules links resolve", () => {
-    // node_modules/@psilink/core -> ../packages/core and
+    // node_modules/@psilink/core -> ../../packages/core and
     // node_modules/psilink -> ../apps/cli must not dangle.
     expect(allRuntimeDests).toContain("/app/packages/core/package.json");
     expect(allRuntimeDests).toContain("/app/apps/cli/package.json");
