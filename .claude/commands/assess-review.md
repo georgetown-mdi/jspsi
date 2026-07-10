@@ -23,15 +23,31 @@ Start with the whole, not the parts:
 
 - **Soundness.** Comment on the overall approach and any patterns across the
   findings.
-- **Trajectory.** Reconstruct earlier rounds from the branch's commit history
-  (`git log staging..HEAD` -- prior review-fix commits show what past rounds
-  already addressed) and compare against the current findings. Is the
-  count net-decreasing (converging) or are fixes spawning fresh findings (churn)?
-- **Brittle areas.** When the same file or module keeps surfacing across rounds,
-  name it. A blind full-diff pass has diminishing returns there -- recommend
-  pivoting to a focused, independent assessment of just that area (point fresh
-  agents at it cold) rather than another whole-branch cold round. Say which areas,
-  and why they look brittle.
+- **Trajectory.** Read the `## Trajectory` section light-review wrote into
+  `review_findings.md`, and the rounds ledger at
+  `scratch/review-rounds/<branch>.jsonl` for the rounds before it (fall back to
+  reconstructing rounds from `git log staging..HEAD` review-fix commits if
+  either is missing). Converging is confirmed-new falling with repeats near
+  zero; churn is fixes spawning findings.
+
+Then check the **step-back triggers**. If ANY fires, do NOT proceed to
+fix-and-rerun: stop, and recommend a structural pivot instead -- a focused
+independent assessment of the churning area (fresh agents, cold) or a judge
+panel of alternative shapes -- presented to the owner in prose with options and
+a recommendation. Churn escalates to a different activity, never to another
+blind whole-branch round.
+
+1. The same file or area carries confirmed findings in three consecutive rounds
+   (two, for a diff under ~150 lines).
+2. This round confirmed as many findings as the previous round's fixes closed,
+   or more.
+3. Reviewers propose contradictory remedies for the same hunk, or the contested
+   list (high-severity, single-reviewer findings) grew from the previous round.
+4. Two or more reviewers voted that a materially simpler shape exists.
+5. A fix you are about to make would grow the branch's diff by roughly a third
+   or more.
+6. The driving board issue's **Affected areas** is in context and the diff has
+   spread well beyond it.
 
 ## Step 3 -- Triage and fix
 
@@ -40,6 +56,14 @@ hunks/files it names, not the whole diff), then decide.
 
 - **Default to fixing.** Drive-by corrections are welcome -- you do not need
   permission to fix something small and clearly right.
+- **Prose findings get a high bar.** Fix a finding that asks for a comment,
+  JSDoc, or doc paragraph only when the missing constraint is unrecoverable
+  from the code, names, types, and tests AND its absence enables a concrete
+  wrong edit you can name -- and prefer carrying it as a check, a test, or a
+  more explicit name over prose. Reviews here have a measured many-to-one bias
+  toward adding prose; do not ratchet. The same bar applies to prose you are
+  tempted to add defensively while triaging: pre-empting a re-raise is not a
+  reason.
 - **Autonomy boundary.** Settle implementation details yourself. STOP and ask the
   owner or PM before a fix that reaches beyond this change: public API / CLI /
   config-schema, protocol or wire format, security-relevant behavior, a
@@ -74,4 +98,5 @@ green. When it is ready, say so.
 
 ## Step 5 -- Clean up
 
-Delete `review_findings.md` from your working directory.
+Delete `review_findings.md` from your working directory. Leave
+`scratch/review-rounds/` in place -- it is the cross-round trajectory ledger.

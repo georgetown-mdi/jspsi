@@ -28,6 +28,12 @@ single round-trip. Do NOT run `gh project item-list` or hand-write any gh/GraphQ
 that pulls the entire board into context and is the inefficiency this command
 exists to avoid. If the item is reported not found, say so and stop.
 
+The fetched body is context for you, not material for the repo. Never copy its
+prose, its item ids, or its register into code comments, docs, or commit
+messages -- durable text is written for readers who cannot see the board. A
+guarantee the acceptance criteria demand is discharged in a test or a check,
+not narrated in a comment.
+
 ## Step 2 -- Choose a branch name
 
 Slugify the issue title to lowercase letters, digits, and hyphens (so it is a
@@ -82,11 +88,34 @@ Know when to decide and when to ask:
 Implement on the branch, following CONTRIBUTING.md. Verify before you commit:
 rebuild core (`npm run build -w packages/core`) if you touched it -- it was built
 at issue start, so this only picks up changes you made. Then `npm run typecheck &&
-npm run lint`, and run the tests covering what you changed. Report what you ran
-and the result; do not commit on red without saying so.
+npm run lint`, and run the tests covering what you changed. Then sweep your own
+diff (`git diff`): delete every comment that restates the code, narrates the
+change, or cites a board id, and move any "this cannot happen" claim into a
+check. Report what you ran and the result; do not commit on red without saying
+so.
 
 Commit to the new branch following CONTRIBUTING.md's commit conventions (no
 markdown, no top-level lists, no self-attribution). Never commit to staging or
 main. Each substantial set of changes should receive its own commit; small
 patches can be amendments. Stop at the commit -- do not push or open a PR unless
 asked.
+
+## Step 5 -- Recommend the review tier
+
+The review-depth decision needs the actual diff, which does not exist at issue
+time, so it is made here. Measure the branch -- `git diff "staging...HEAD"
+--stat` for files and net lines, and check the touched files against the
+security-review scope (the enumeration in CONTRIBUTING.md's Pull Request
+Process and the PR template's security-review comment) -- and end your report
+with a one-line review-tier recommendation:
+
+- Docs-only or trivial mechanical change -> no cold review; the gates suffice.
+- Under ~150 changed lines and no security surface -> one /light-review +
+  /assess-review round.
+- Security surface, protocol or wire format, structural restructure, or a large
+  diff -> the full pipeline: /light-review + /assess-review (at most two
+  rounds, honoring the step-back triggers), then a role-specialized security
+  panel before merge.
+
+State the bucket, the numbers behind it, and any file that forces the third
+bucket. The owner decides; this is a recommendation.

@@ -47,8 +47,15 @@ Beyond the conventions in `CONTRIBUTING.md`:
 - Typecheck, lint, and format are CI checks.
 - Project state belongs in the GitHub project and docs/, not agent memory.
 - Encode a "does not happen at runtime" claim (a line that never fires, an unreachable branch) as a check, never a comment or doc note -- prose asserting a runtime fact rots silently; a check cannot lie. Full rule and the Global-listener cautionary example: `CONTRIBUTING.md`, Code Conventions.
+- Before committing, sweep your own diff: delete every comment that restates the code, narrates change history ("now", "previously", "moved here"), or cites a board item id. Thoroughness is demonstrated in tests and checks, not prose.
+- When you finish implementing a branch, end your report with a review-tier recommendation sized from the actual diff (`git diff "staging...HEAD" --stat` plus a security-surface check), not from the issue -- tiers and rule: `.claude/commands/start-issue.md`, Step 5.
+- Board content is working context, never repo material: item ids and issue-body prose stay out of code, comments, docs, and commit messages.
 - Prettier ignores markdown.
 - Branch names shouldn't use '/'.
+- Rebase and merge in a detached /tmp worktree (`git worktree add --detach`), never in /workspace: the IDE formatter/LSP races the working tree. Afterwards `git reset --hard` the branch in /workspace and remove the worktree.
+- The Bash tool runs zsh: unquoted `$var` does not word-split, bare `grep` is ugrep, and an unmatched glob is an error -- quote globs, and use arrays or `xargs` for multi-file commands.
+- `vitest -w` is watch mode and hangs a non-interactive session; use `npx vitest run` or `npm test -w <workspace>`.
+- Dev containers are firewall-blocked: never give subagents web-search or web-fetch tasks.
 - Don't use chip to raise issues -- ask directly.
 - When you document a change, route the detail by tier: spec-level detail (constant values, byte/wire layout, HKDF info strings, algorithm steps) belongs in `docs/spec/`; overview docs (`docs/`) stay conceptual and operational -- regardless of which doc you currently have open. Full rule: `CONTRIBUTING.md`, Documentation.
 - `CONTRIBUTING.md` is a pre-contribution quickstart, not a reference: do not add dependency-internal premises, upgrade runbooks, test-infra internals, coverage rationale, or design rationale to it -- route per its "Scope of this document" section. A CI backstop (`npm run check:contributing`) fails the build on the two mechanical tells -- a new `##`/`###` section outside its quickstart allowlist, or a `node_modules/` source-path citation -- but doc-tier placement is otherwise a review call, so keep deep material out even when it would pass.
