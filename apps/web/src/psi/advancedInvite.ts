@@ -673,6 +673,79 @@ function declarableFieldNames(
   );
 }
 
+/**
+ * Append a same-typed linkage field bound to the type's first free
+ * `role: linkage` column, named uniquely off the type's first field and seeded
+ * with its steps -- so the second field starts from the same recommended
+ * pipeline. A type with no free column returns the draft unchanged (the
+ * add-field affordance is gated on one existing).
+ */
+export function draftWithFieldAdded(
+  draft: AdvancedInviteDraft,
+  type: LinkageField["type"],
+): AdvancedInviteDraft {
+  const bound = new Set(draft.standardization.map((t) => t.input));
+  const freeColumn = draft.metadata
+    .filter((column) => column.role === "linkage" && column.type === type)
+    .map((column) => column.name)
+    .find((column) => !bound.has(column));
+  if (freeColumn === undefined) return draft;
+  const typeByOutput = new Map(
+    authoredLinkageFields(draft.metadata, draft.standardization).map(
+      (field) => [field.name, field.type],
+    ),
+  );
+  const sibling = draft.standardization.find(
+    (transformation) => typeByOutput.get(transformation.output) === type,
+  );
+  const base = sibling?.output ?? type;
+  const taken = new Set(draft.standardization.map((t) => t.output));
+  let n = 2;
+  let output = `${base}_${n}`;
+  while (taken.has(output)) output = `${base}_${++n}`;
+  return {
+    ...draft,
+    standardization: [
+      ...draft.standardization,
+      { output, input: freeColumn, steps: sibling?.steps ?? [] },
+    ],
+  };
+}
+
+/**
+ * The authored field names the operator's columns can actually PRODUCE -- the
+ * satisfiability universe a key's badge is judged against. Derived from the
+ * authored fields (not the one-field-per-type default) and resolved through
+ * the given standardization -- the same inputs the Generate gate uses -- so an
+ * authored same-typed second field (e.g. first_name_2) reads as satisfiable.
+ * The probe restates the authored fields onto default terms; only its
+ * linkageFields are read (resolveFieldColumns ignores linkageKeys), and the
+ * identity is a constant because it never affects the field or key set.
+ */
+export function producibleFieldNames(
+  metadata: Metadata,
+  standardization: Standardization,
+  columns: ReadonlyArray<string>,
+): Set<string> {
+  const fields = authoredLinkageFields(metadata, standardization);
+  const probe: LinkageTerms = {
+    ...getDefaultLinkageTerms("", metadata),
+    linkageFields: fields,
+  };
+  const { unsatisfied } = assessLinkageSatisfiability(
+    [...columns],
+    probe,
+    standardization,
+    metadata,
+  );
+  const unsatisfiedNames = new Set(unsatisfied.map((field) => field.name));
+  return new Set(
+    fields
+      .map((field) => field.name)
+      .filter((name) => !unsatisfiedNames.has(name)),
+  );
+}
+
 /** Whether the inviter's columns can supply every field `key` references (each
  * element's `field` is declarable -- see {@link declarableFieldNames}). A key that
  * is not supplyable dangles the built terms, so the import disables it

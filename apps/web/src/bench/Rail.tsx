@@ -23,12 +23,15 @@ export interface RailStep {
  * One row in a {@link RailFacts} group: an optional-surface label and the
  * quiet fact summarizing its state ("3 fields", "2 keys"). An absent fact
  * renders as an em-dash; `tone` colors the fact only when the surface has been
- * edited or needs attention, per the mockup's quiet-fact rule.
+ * edited or needs attention, per the mockup's quiet-fact rule. With `onSelect`
+ * the label is a link into the surface; `current` marks the open tab.
  */
 export interface RailFact {
   label: string;
   fact?: string;
   tone?: "edited" | "attention";
+  onSelect?: () => void;
+  current?: boolean;
 }
 
 /**
@@ -163,7 +166,22 @@ export function RailFacts({ facts }: { facts: ReadonlyArray<RailFact> }) {
     <ul className={styles.railFacts}>
       {facts.map((entry) => (
         <li key={entry.label}>
-          <span>{entry.label}</span>
+          {entry.onSelect !== undefined ? (
+            <button
+              type="button"
+              className={
+                entry.current === true
+                  ? `${styles.stepLink} ${styles.currentTab}`
+                  : styles.stepLink
+              }
+              aria-current={entry.current === true ? "true" : undefined}
+              onClick={entry.onSelect}
+            >
+              {entry.label}
+            </button>
+          ) : (
+            <span>{entry.label}</span>
+          )}
           <span
             className={
               entry.tone === undefined

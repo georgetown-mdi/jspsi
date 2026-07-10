@@ -3,16 +3,27 @@ import { describe, expect, test } from "vitest";
 import {
   answersRows,
   editorFromCsv,
+  editorWithAlgorithm,
+  editorWithAuthoredDraft,
   editorWithColumnDisclosure,
   editorWithColumnType,
+  editorWithDeduplicate,
+  editorWithFieldAdded,
+  editorWithFieldSteps,
   editorWithIdentity,
+  editorWithImportedTerms,
+  editorWithKeyEnabled,
+  editorWithKeyMoved,
+  editorWithLegalAgreement,
   editorWithLifetime,
+  editorWithLinkageStrategy,
   editorWithOutputDirection,
   enabledKeys,
   fileCardMeta,
   identifierProblem,
   inviterLedgerRows,
   inviterRailFacts,
+  keySatisfiabilityFor,
   lifetimeLabel,
   resetToRecommended,
   reviewValidation,
@@ -244,7 +255,7 @@ describe("review and create", () => {
       /^\d+ fields?, filled in from your file$/,
     );
     expect(byLabel.get("Matching keys")?.value).toMatch(
-      /^\d+ keys?, recommended order$/,
+      /^\d+ keys?, tried in order$/,
     );
     expect(byLabel.get("Invitation lifetime")?.value).toBe("1 day");
     expect(byLabel.get("Invitation lifetime")?.setAbove).toBe(true);
@@ -257,5 +268,166 @@ describe("review and create", () => {
     const rows = inviterLedgerRows(editor, "2026-07-08T19:32:00.000Z");
     const expires = rows.find((row) => row.label === "Expires");
     expect(expires?.value).toContain("July 8, 2026");
+  });
+});
+
+function mintedTerms(editor: ReturnType<typeof editorFromCsv>) {
+  const validation = reviewValidation(editor);
+  if (validation.terms === undefined)
+    throw new Error("draft unexpectedly cannot mint");
+  return validation.terms;
+}
+
+describe("customize tabs", () => {
+  test("reordering keys changes key order in minted terms", () => {
+    const editor = editorFromCsv("Dana", csv);
+    const before = mintedTerms(editor).linkageKeys.map((key) => key.name);
+    expect(before.length).toBeGreaterThan(1);
+
+    const moved = editorWithKeyMoved(editor, 0, 1);
+    const after = mintedTerms(moved).linkageKeys.map((key) => key.name);
+    expect(after[0]).toBe(before[1]);
+    expect(after[1]).toBe(before[0]);
+    expect(after.slice(2)).toEqual(before.slice(2));
+  });
+
+  test("gated settings cannot alter minted terms", () => {
+    const seeded = editorFromCsv("Dana", csv);
+    const forced = editorWithDeduplicate(
+      editorWithAlgorithm(seeded, "psi-c"),
+      true,
+    );
+    expect(forced.draft.algorithm).toBe("psi-c");
+    expect(forced.draft.deduplicate).toBe(true);
+    const terms = mintedTerms(forced);
+    expect(terms.algorithm).toBe("psi");
+    expect(terms.deduplicate).toBe(false);
+  });
+
+  test("adding a same-typed field binds the free column uniquely", () => {
+    const seeded = editorFromCsv("Dana", csv);
+    // Retype the payload column to a second first_name, then bind it: the new
+    // field takes the type's recommended pipeline under a unique name.
+    const { editor: retypedOnly } = editorWithColumnType(
+      seeded,
+      csv,
+      "program_code",
+      "first_name",
+    );
+    // A retype preserves the sent disclosure, so the column must also be set
+    // to match before it is a bindable linkage column.
+    const { editor: retyped } = editorWithColumnDisclosure(
+      retypedOnly,
+      csv,
+      "program_code",
+      "match",
+    );
+    const added = editorWithFieldAdded(retyped, "first_name");
+    const grown = added.draft.standardization.length;
+    expect(grown).toBe(retyped.draft.standardization.length + 1);
+    const appended = added.draft.standardization[grown - 1];
+    expect(appended.input).toBe("program_code");
+    expect(appended.output).toMatch(/_2$/);
+
+    // No free column of the type: the draft is untouched.
+    const noop = editorWithFieldAdded(seeded, "zip_code");
+    expect(noop.draft).toBe(seeded.draft);
+  });
+
+  test("importing terms with an unsupplyable field degrades gracefully", () => {
+    const donor = editorFromCsv("Dana", {
+      ...csv,
+      columns: ["ssn", "first_name", "last_name", "dob"],
+      rawRows: [
+        {
+          ssn: "123456789",
+          first_name: "Ann",
+          last_name: "Lee",
+          dob: "01/02/1990",
+        },
+      ],
+    });
+    const donorTerms = mintedTerms(donor);
+
+    // The receiving file has ssn4, not ssn: every donor key referencing the
+    // full-ssn field arrives disabled with its unsatisfiable badge, and the
+    // satisfiable subset still mints.
+    const editor = editorFromCsv("Dana", csv);
+    const imported = editorWithImportedTerms(editor, csv, donorTerms);
+    expect(imported.keysAuthored).toBe(true);
+    const disabled = imported.draft.keys.filter((entry) => !entry.enabled);
+    expect(disabled.length).toBeGreaterThan(0);
+    const satisfiable = keySatisfiabilityFor(imported);
+    expect(
+      imported.draft.keys.some((_entry, index) => !satisfiable(index)),
+    ).toBe(true);
+    expect(reviewValidation(imported).canGenerate).toBe(true);
+  });
+
+  test("terms export/import round-trips the minted terms", () => {
+    const editor = editorWithLegalAgreement(
+      editorWithKeyMoved(editorFromCsv("Dana", csv), 0, 1),
+      {
+        reference: "MOU-1",
+        purpose: "Eval",
+        expirationDate: "2099-12-31",
+      },
+    );
+    const exported = mintedTerms(editor);
+    const reimported = editorWithImportedTerms(editor, csv, exported);
+    expect(mintedTerms(reimported)).toEqual(exported);
+  });
+
+  test("column edits preserve authored keys", () => {
+    const seeded = editorFromCsv("Dana", csv);
+    const keyNames = (candidate: typeof seeded) =>
+      candidate.draft.keys.map((entry) => entry.key.name);
+
+    const { editor: reconciled } = editorWithColumnType(
+      seeded,
+      csv,
+      "ssn4",
+      "other",
+    );
+    expect(keyNames(reconciled).length).toBeLessThan(keyNames(seeded).length);
+
+    const authored = editorWithAuthoredDraft(seeded, seeded.draft);
+    const { editor: preserved } = editorWithColumnType(
+      authored,
+      csv,
+      "ssn4",
+      "other",
+    );
+    expect(keyNames(preserved)).toEqual(keyNames(seeded));
+  });
+
+  test("agreement fields flow into the minted terms and the ledger", () => {
+    const editor = editorWithLegalAgreement(editorFromCsv("Dana", csv), {
+      reference: "MOU-2025-0042",
+      purpose: "Program evaluation",
+      expirationDate: "2099-12-31",
+    });
+    const terms = mintedTerms(editor);
+    expect(terms.legalAgreement?.reference).toBe("MOU-2025-0042");
+    expect(inviterRailFacts(editor)[2].fact).toBe("MOU-2025-0042");
+    expect(ledgerValue(editor, "Agreement").value).toBe("MOU-2025-0042");
+  });
+
+  test("sealed sessions refuse the tab mutators", () => {
+    const donorTerms = mintedTerms(editorFromCsv("Dana", csv));
+    const sealed = sealEditor(editorFromCsv("Dana", csv));
+    expect(editorWithKeyMoved(sealed, 0, 1)).toBe(sealed);
+    expect(editorWithKeyEnabled(sealed, 0, false)).toBe(sealed);
+    expect(editorWithLinkageStrategy(sealed, "single-pass")).toBe(sealed);
+    expect(
+      editorWithLegalAgreement(sealed, {
+        reference: "x",
+        purpose: "y",
+        expirationDate: "2099-01-01",
+      }),
+    ).toBe(sealed);
+    expect(editorWithFieldSteps(sealed, "name", [])).toBe(sealed);
+    expect(editorWithAuthoredDraft(sealed, sealed.draft)).toBe(sealed);
+    expect(editorWithImportedTerms(sealed, csv, donorTerms)).toBe(sealed);
   });
 });

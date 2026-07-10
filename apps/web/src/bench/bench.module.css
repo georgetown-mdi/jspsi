@@ -493,6 +493,67 @@
   color: var(--bench-danger);
 }
 
+.currentTab {
+  color: var(--bench-accent);
+}
+
+.backlink {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 14px;
+  color: var(--bench-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  margin-bottom: 0.8rem;
+}
+
+.guidedKeys {
+  list-style: none;
+  margin: 0.8rem 0;
+  padding: 0;
+  max-width: 640px;
+}
+
+.guidedKeys li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--bench-rule-soft);
+}
+
+.keyBadge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.keyBadgeSatisfiable {
+  color: var(--bench-ok);
+  border: 1px solid var(--bench-ok);
+}
+
+.keyBadgeUnsatisfiable {
+  color: var(--bench-danger);
+  border: 1px solid var(--bench-danger);
+}
+
+.movers {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
+}
+
 .radioCard {
   border: 2px solid var(--bench-rule);
   border-radius: 8px;
@@ -553,6 +614,13 @@
   font-weight: 650;
   padding: 0;
   margin-bottom: 4px;
+}
+
+.rowHeader {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--bench-ink);
+  font-weight: 600;
 }
 
 .columnChips {

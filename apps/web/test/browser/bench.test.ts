@@ -61,6 +61,37 @@ vi.mock("@psi/invitation", async (importOriginal) => {
   };
 });
 
+// Defer the CSV parse per-test to observe in-flight state (the Continue
+// gate, the abort signal). With `defer` unset it delegates to the real
+// loader.
+const csvLoadHarness = vi.hoisted(() => ({
+  defer: false,
+  lastSignal: undefined as AbortSignal | undefined,
+  resolve: undefined as ((value: unknown) => void) | undefined,
+}));
+vi.mock("@psi/csvParseController", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    loadCSVFileOffMainThread: (
+      file: unknown,
+      options?: { signal?: AbortSignal },
+    ) => {
+      csvLoadHarness.lastSignal = options?.signal;
+      if (!csvLoadHarness.defer)
+        return (
+          actual.loadCSVFileOffMainThread as (
+            f: unknown,
+            o?: unknown,
+          ) => Promise<unknown>
+        )(file, options);
+      return new Promise((resolve) => {
+        csvLoadHarness.resolve = resolve;
+      });
+    },
+  };
+});
+
 const EM_DASH = "\u2014";
 
 let container: HTMLElement | undefined;
@@ -79,6 +110,9 @@ afterEach(() => {
   root = undefined;
   container = undefined;
   mintHarness.fail = undefined;
+  csvLoadHarness.defer = false;
+  csvLoadHarness.lastSignal = undefined;
+  csvLoadHarness.resolve = undefined;
 });
 
 describe("bench lobby", () => {
@@ -243,6 +277,10 @@ describe("inviter bench", () => {
     await expect
       .element(page.getByText("Nothing - matching only"))
       .toBeInTheDocument();
+    // The debounced disclosure summary voices the new (empty) send set.
+    await expect
+      .element(page.getByText("No columns will be sent to your partner."))
+      .toBeInTheDocument();
     await expect
       .element(
         page.getByText("No values will be sent to your partner", {
@@ -294,6 +332,12 @@ describe("inviter bench", () => {
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Matching & sharing");
+
+    // The conflict's audible half: announced even though the seed mounted
+    // already in conflict.
+    await expect
+      .element(page.getByText("Problem: choose a single row identifier."))
+      .toBeInTheDocument();
 
     await page
       .getByLabelText("How identifier is used")
@@ -394,6 +438,166 @@ describe("inviter bench", () => {
       "1 hour after you share",
     );
     expect(expiresRow?.querySelector("dd")?.textContent).toMatch(/20\d\d/);
+  });
+
+  test("customize tabs: reorder keys, author an agreement, gated settings stay inert", async () => {
+    mount(createElement(InviterBench));
+
+    await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana");
+    const fileInput = document.querySelector('input[type="file"]');
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      new File(
+        [
+          "client_id,first_name,last_name,dob,program_code\n" +
+            "1,Ann,Lee,01/02/1990,A\n",
+        ],
+        "clients.csv",
+        { type: "text/csv" },
+      ),
+    );
+    await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
+
+    const ledgerRow = (label: string) =>
+      Array.from(
+        document.querySelectorAll(
+          `aside[aria-label="This exchange"] .${styles.ledgerRow}`,
+        ),
+      ).find(
+        (row) => row.querySelector("dt")?.childNodes[0].textContent === label,
+      );
+
+    // The rail's Customize facts are links once the file is read; the open
+    // tab carries aria-current="true" (spine steps use "step").
+    await page.getByRole("button", { name: "Matching keys" }).click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Matching keys");
+    expect(document.querySelector('[aria-current="true"]')?.textContent).toBe(
+      "Matching keys",
+    );
+
+    // Reordering the guided list reorders the ledger's matched-on keys.
+    const orderBefore = ledgerRow("Matched on")?.querySelector("dd")
+      ?.textContent as string;
+    await page
+      .getByRole("button", { name: /^Move .+ later$/ })
+      .first()
+      .click();
+    const orderAfter = ledgerRow("Matched on")?.querySelector("dd")
+      ?.textContent as string;
+    expect(orderAfter).not.toBe(orderBefore);
+
+    // Selecting single-pass flows through the schema-parse guard and
+    // surfaces the disclosure warning at the point of choice.
+    await page.getByLabelText("Single-pass").click();
+    await expect
+      .element(page.getByText("Single-pass widens what one of you can observe"))
+      .toBeInTheDocument();
+
+    // The gated method and deduplication controls are visible but inert.
+    await expect.element(page.getByLabelText("Matching method")).toBeDisabled();
+    await expect
+      .element(
+        page.getByLabelText(
+          "Allow several of your records to match one partner record",
+        ),
+      )
+      .toBeDisabled();
+
+    // The agreement authored in its tab reaches the ledger and the review
+    // table.
+    await page.getByRole("button", { name: "Legal agreement" }).click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Legal agreement");
+    await page.getByLabelText("Attach a legal agreement").click();
+    await userEvent.fill(
+      page.getByLabelText("Agreement reference"),
+      "MOU-2025-0042",
+    );
+    await userEvent.fill(
+      page.getByLabelText("Purpose of the disclosure"),
+      "Program evaluation",
+    );
+    await userEvent.fill(page.getByLabelText("Expiration date"), "2099-12-31");
+    expect(ledgerRow("Agreement")?.querySelector("dd")?.textContent).toBe(
+      "MOU-2025-0042",
+    );
+
+    // The ported input contracts survive the bench: the expiry is a real
+    // date input and the reference keeps its length bound.
+    const expiration = document.querySelector('input[type="date"]');
+    expect(expiration).not.toBeNull();
+    const reference = document.querySelector(
+      'input[placeholder="MOU-2025-0042"]',
+    );
+    expect(reference?.getAttribute("maxlength")).toBe("256");
+
+    await page.getByRole("button", { name: /Back to Review & create/ }).click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Review & create");
+
+    await expect
+      .element(page.getByText("Ready to create."))
+      .toBeInTheDocument();
+    const agreementRow = Array.from(document.querySelectorAll("th")).find(
+      (heading) => heading.textContent === "Legal agreement",
+    )?.parentElement;
+    expect(agreementRow?.textContent).toContain("MOU-2025-0042");
+
+    // Reset discards the authored terms and announces it politely.
+    await page.getByRole("button", { name: "Reset to recommended" }).click();
+    await expect
+      .element(page.getByText("Reset to the recommended settings."))
+      .toBeInTheDocument();
+    expect(
+      Array.from(document.querySelectorAll("th")).find(
+        (heading) => heading.textContent === "Legal agreement",
+      )?.parentElement?.textContent,
+    ).toContain("None");
+  });
+
+  test("intake surfaces rejections and gates on an in-flight parse", async () => {
+    mount(createElement(InviterBench));
+
+    await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana");
+    const fileInput = () =>
+      document.querySelector('input[type="file"]') as HTMLElement;
+
+    // A refused drop names its reason instead of flashing an icon.
+    await userEvent.upload(
+      page.elementLocator(fileInput()),
+      new File(["x"], "image.png", { type: "image/png" }),
+    );
+    await expect
+      .element(page.getByText("not a supported file type", { exact: false }))
+      .toBeInTheDocument();
+
+    // While a parse is in flight Continue stays gated and the read carries an
+    // abort signal; unmounting aborts it so the worker tears down.
+    csvLoadHarness.defer = true;
+    await userEvent.upload(
+      page.elementLocator(fileInput()),
+      new File(["first_name,last_name,dob\nAnn,Lee,01/02/1990\n"], "a.csv", {
+        type: "text/csv",
+      }),
+    );
+    await expect
+      .element(
+        page.getByRole("button", { name: "Continue to matching & sharing" }),
+      )
+      .toBeDisabled();
+    const signal = csvLoadHarness.lastSignal;
+    expect(signal).toBeDefined();
+    expect((signal as AbortSignal).aborted).toBe(false);
+
+    root?.unmount();
+    root = undefined;
+    expect((signal as AbortSignal).aborted).toBe(true);
   });
 
   test("a failed mint leaves the terms editable and create retryable", async () => {

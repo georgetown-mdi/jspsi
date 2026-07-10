@@ -32,9 +32,7 @@ import {
   LinkageStrategySchema,
   MAX_NAME_LENGTH,
   MAX_TEXT_LENGTH,
-  assessLinkageSatisfiability,
   authoredLinkageFields,
-  getDefaultLinkageTerms,
   sanitizeForDisplay,
 } from "@psilink/core";
 
@@ -47,6 +45,8 @@ import {
   buildAdvancedTerms,
   defaultStandardizationForRows,
   draftFromTerms,
+  draftWithFieldAdded,
+  producibleFieldNames,
   setDraftMetadata,
   validateAdvancedInvite,
 } from "@psi/advancedInvite";
@@ -272,43 +272,15 @@ export function LinkageTermsEditor({
 
   // Per-key satisfiability badge, derived from the draft's CURRENT metadata AND
   // authored standardization so it tracks both column-type edits and per-field
-  // column bindings. A field is producible when the shared resolution binds it to a
-  // present column; deriving the field universe from authoredLinkageFields (not the
-  // one-field-per-type default) and resolving through draft.standardization -- the
-  // same inputs the Generate gate and the declared-field list use -- is what lets an
-  // authored same-typed second field (e.g. first_name_2) read as satisfiable. With
-  // the bare default field set and no standardization, such a field is absent from
-  // the universe and its key would wrongly badge unsatisfiable while it generates
-  // and produces at the exchange.
-  const producibleFieldNames = useMemo(() => {
-    // identity is deliberately NOT a dependency: getDefaultLinkageTerms uses it
-    // only to populate terms.identity, never to derive the field or key set, so
-    // it cannot change which fields are producible. Pass a constant so a keystroke
-    // in the name field does not recompute this (and the real input sensitivity --
-    // the column metadata and standardization -- stays legible in the dependency
-    // array). The probe restates the authored fields onto default terms; only its
-    // linkageFields are read (resolveFieldColumns ignores linkageKeys), so the
-    // default keys are inert.
-    const fields = authoredLinkageFields(draft.metadata, draft.standardization);
-    const probe: LinkageTerms = {
-      ...getDefaultLinkageTerms("", draft.metadata),
-      linkageFields: fields,
-    };
-    const { unsatisfied } = assessLinkageSatisfiability(
-      seed.columns,
-      probe,
-      draft.standardization,
-      draft.metadata,
-    );
-    const unsatisfiedNames = new Set(unsatisfied.map((f) => f.name));
-    return new Set(
-      fields.map((f) => f.name).filter((name) => !unsatisfiedNames.has(name)),
-    );
-  }, [draft.metadata, draft.standardization, seed.columns]);
+  // column bindings (see producibleFieldNames for why the universe is the
+  // authored field set, not the one-field-per-type default).
+  const producible = useMemo(
+    () =>
+      producibleFieldNames(draft.metadata, draft.standardization, seed.columns),
+    [draft.metadata, draft.standardization, seed.columns],
+  );
   const keyIsSatisfiable = (index: number): boolean =>
-    draft.keys[index].key.elements.every((el) =>
-      producibleFieldNames.has(el.field),
-    );
+    draft.keys[index].key.elements.every((el) => producible.has(el.field));
 
   // The fields a key element may reference: derived from the authored standardization
   // (not the one-field-per-type default), so when the operator binds two transformations
@@ -352,17 +324,6 @@ export function LinkageTermsEditor({
           silentEmptyLabels.length === 1 ? "produces" : "produce"
         } no value for any row and cannot match. Check the cleaning steps.`;
 
-  // The inviter's `role: linkage` columns of a semantic type, in metadata order --
-  // the columns a same-typed field MAY bind to. Drives the add-field free-column
-  // search below (StandardizationCards computes its own copy for the affordance).
-  const columnsForType = (
-    metadata: Metadata,
-    type: LinkageField["type"],
-  ): Array<string> =>
-    metadata
-      .filter((column) => column.role === "linkage" && column.type === type)
-      .map((column) => column.name);
-
   // A signature of each field's input binding for the cleaning error boundary's
   // auto-recovery (see CleaningErrorBoundary); a reset or remap changes it.
   const cleaningResetKey = useMemo(
@@ -397,41 +358,12 @@ export function LinkageTermsEditor({
       ...prev,
       standardization: prev.standardization.filter((t) => t.output !== output),
     }));
-  // Append a same-typed field bound to its first free column, named uniquely off the
-  // type's first field and seeded with its steps (so the second field starts from the
-  // same recommended pipeline). It reads the host's authoritative array via the
-  // functional updater, so the
-  // affordance the component gates on `addableTypes` and this free-column search stay
-  // consistent (the early return never fires while the component shows the button).
+  // Reads the host's authoritative array via the functional updater, so the
+  // affordance the component gates on `addableTypes` and the shared helper's
+  // free-column search stay consistent (its no-op return never fires while the
+  // component shows the button).
   const addFieldForType = (type: LinkageField["type"]) =>
-    setDraft((prev) => {
-      const bound = new Set(prev.standardization.map((t) => t.input));
-      const freeColumn = columnsForType(prev.metadata, type).find(
-        (c) => !bound.has(c),
-      );
-      if (freeColumn === undefined) return prev;
-      const typeByOutput = new Map(
-        authoredLinkageFields(prev.metadata, prev.standardization).map((f) => [
-          f.name,
-          f.type,
-        ]),
-      );
-      const sibling = prev.standardization.find(
-        (t) => typeByOutput.get(t.output) === type,
-      );
-      const base = sibling?.output ?? type;
-      const taken = new Set(prev.standardization.map((t) => t.output));
-      let n = 2;
-      let output = `${base}_${n}`;
-      while (taken.has(output)) output = `${base}_${++n}`;
-      return {
-        ...prev,
-        standardization: [
-          ...prev.standardization,
-          { output, input: freeColumn, steps: sibling?.steps ?? [] },
-        ],
-      };
-    });
+    setDraft((prev) => draftWithFieldAdded(prev, type));
 
   const updateDraft = (next: Partial<AdvancedInviteDraft>) => {
     setAnnouncement("");

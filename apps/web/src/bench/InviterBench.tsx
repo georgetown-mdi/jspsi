@@ -1,9 +1,10 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 
-import { Alert, Anchor } from "@mantine/core";
+import { Alert, Anchor, VisuallyHidden } from "@mantine/core";
+import { IconAlertCircle } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 
-import { sanitizeErrorForDisplay } from "@psilink/core";
+import { sanitizeErrorForDisplay, sanitizeForDisplay } from "@psilink/core";
 
 import { InvitationFileError, generateInvitation } from "@psi/invitation";
 import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
@@ -17,11 +18,24 @@ import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 import { Rail, RailFacts, RailGroup, RailProblems, RailSteps } from "./Rail";
 import {
   editorFromCsv,
+  editorWithAlgorithm,
+  editorWithAuthoredDraft,
   editorWithColumnDisclosure,
   editorWithColumnType,
+  editorWithDeduplicate,
+  editorWithFieldAdded,
+  editorWithFieldInput,
+  editorWithFieldRemoved,
+  editorWithFieldSteps,
   editorWithIdentity,
+  editorWithImportedTerms,
+  editorWithKeyEnabled,
+  editorWithKeyMoved,
+  editorWithLegalAgreement,
   editorWithLifetime,
+  editorWithLinkageStrategy,
   editorWithOutputDirection,
+  editorWithRecommendedCleaning,
   inviterLedgerRows,
   inviterRailFacts,
   resetToRecommended,
@@ -29,32 +43,36 @@ import {
   sealEditor,
   spineProblems,
 } from "./inviterModel";
+import { AgreementTab } from "./AgreementTab";
 import { BenchShell } from "./BenchShell";
+import { CleaningTab } from "./CleaningTab";
+import { KeysTab } from "./KeysTab";
 import { Ledger } from "./Ledger";
 import { MatchingSharingSection } from "./MatchingSharingSection";
 import { ReviewCreateSection } from "./ReviewCreateSection";
 import { YourFileSection } from "./YourFileSection";
 
-import type { AcquiredCsv, InviterEditor } from "./inviterModel";
+import type { AcquiredCsv, InviterEditor, SpineTarget } from "./inviterModel";
 import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { IntakeAlert } from "./YourFileSection";
 import type { RailStep } from "./Rail";
 import type { SemanticType } from "@psilink/core";
 
-type SpineSection = "file" | "columns" | "review" | "share";
+type Section = SpineTarget | "share";
+type SpineStep = "file" | "columns" | "review";
 
-const SPINE_LABELS: Record<Exclude<SpineSection, "share">, string> = {
+const SPINE_LABELS: Record<SpineStep, string> = {
   file: "Your file",
   columns: "Matching & sharing",
   review: "Review & create",
 };
 
-const SPINE_ORDER: ReadonlyArray<Exclude<SpineSection, "share">> = [
-  "file",
-  "columns",
-  "review",
-];
+const SPINE_ORDER: ReadonlyArray<SpineStep> = ["file", "columns", "review"];
+
+function isSpineStep(section: Section): section is SpineStep {
+  return (SPINE_ORDER as ReadonlyArray<Section>).includes(section);
+}
 
 function demotionNotice(demoted: ReadonlyArray<string>): string {
   if (demoted.length === 0) return "";
@@ -70,7 +88,8 @@ function demotionNotice(demoted: ReadonlyArray<string>): string {
  */
 export function InviterBench() {
   const [name, setName] = useState("");
-  const [section, setSection] = useState<SpineSection>("file");
+  const [section, setSection] = useState<Section>("file");
+  const [lastSpineStep, setLastSpineStep] = useState<SpineStep>("file");
   const [acquired, setAcquired] = useState<AcquiredCsv>();
   const [sourceFile, setSourceFile] = useState<File>();
   const [editor, setEditor] = useState<InviterEditor>();
@@ -80,14 +99,32 @@ export function InviterBench() {
   const [invitation, setInvitation] = useState<GeneratedInvitation>();
   const [minting, setMinting] = useState(false);
   const [createAlert, setCreateAlert] = useState<IntakeAlert>();
+  const [expertMode, setExpertMode] = useState(false);
+  const [editorAnnouncement, setEditorAnnouncement] = useState("");
+
+  function goTo(next: Section) {
+    if (isSpineStep(next)) setLastSpineStep(next);
+    setSection(next);
+  }
+
+  // Non-announcing edits clear the live region (the old editor's
+  // cleared-by-the-next-interaction rule), so a stale notice never lingers
+  // and a repeated identical notice re-announces.
+  function applyEditor(next: InviterEditor) {
+    setEditor(next);
+    setEditorAnnouncement("");
+  }
 
   // A parse may still be in flight when the surface unmounts or a newer file
   // is dropped; the id lets the stale resolution fall on the floor instead of
-  // clobbering current state (the FileAcquire pattern).
+  // clobbering current state, and the abort tears the parse worker down so a
+  // discarded read does not run to completion (the FileAcquire pattern).
   const parseId = useRef(0);
+  const parseAbort = useRef<AbortController | undefined>(undefined);
   useEffect(
     () => () => {
       parseId.current += 1;
+      parseAbort.current?.abort();
     },
     [],
   );
@@ -105,10 +142,15 @@ export function InviterBench() {
 
   async function readFile(file: File) {
     const id = ++parseId.current;
+    parseAbort.current?.abort();
+    const controller = new AbortController();
+    parseAbort.current = controller;
     setReading(true);
     setIntakeAlert(undefined);
     try {
-      const result = await loadCSVFileOffMainThread(file);
+      const result = await loadCSVFileOffMainThread(file, {
+        signal: controller.signal,
+      });
       if (id !== parseId.current) return;
       const columns = result.meta.fields ?? [];
       const emptyPositions = emptyColumnPositions(columns);
@@ -164,6 +206,10 @@ export function InviterBench() {
   // bind to one read of the file.
   async function createInvitation() {
     if (editor === undefined || sourceFile === undefined) return;
+    // The Create button is disabled on any open problem; this repeats the gate
+    // because spineProblems covers the identifier conflict, which
+    // canGenerate alone does not.
+    if (spineProblems(editor).length > 0) return;
     const validation = reviewValidation(editor);
     if (!validation.canGenerate || validation.terms === undefined) return;
     setMinting(true);
@@ -180,7 +226,7 @@ export function InviterBench() {
       });
       setEditor(sealEditor(editor));
       setInvitation(minted);
-      setSection("share");
+      goTo("share");
     } catch (error) {
       if (error instanceof InvitationFileError) {
         // The mint re-parses the retained file, so it can fail in the same
@@ -224,8 +270,11 @@ export function InviterBench() {
   const fileReady = name.trim().length > 0 && linkable;
   const sealed = editor?.sealed === true;
 
+  // Inside a Customize tab no spine step is current; the step the operator
+  // came from stays navigable like any completed step.
+  const inTab = !isSpineStep(section) && section !== "share";
   const currentPosition = SPINE_ORDER.indexOf(
-    section === "share" ? "review" : section,
+    isSpineStep(section) ? section : lastSpineStep,
   );
   const steps: Array<RailStep> =
     section === "share"
@@ -237,23 +286,29 @@ export function InviterBench() {
         ]
       : SPINE_ORDER.map((step, position) => {
           const state =
-            step === section
+            !inTab && step === section
               ? "current"
-              : position < currentPosition
+              : position < currentPosition || (inTab && step === lastSpineStep)
                 ? "done"
                 : "pending";
           return {
             label: SPINE_LABELS[step],
             state,
-            onSelect: state === "done" ? () => setSection(step) : undefined,
+            onSelect: state === "done" ? () => goTo(step) : undefined,
           };
         });
+
+  const facts = inviterRailFacts(editor).map((fact) => ({
+    ...fact,
+    onSelect: editor !== undefined ? () => goTo(fact.target) : undefined,
+    current: section === fact.target,
+  }));
 
   const problems = sealed
     ? []
     : spineProblems(editor).map((problem) => ({
         label: problem.message,
-        onSelect: () => setSection(problem.target),
+        onSelect: () => goTo(problem.target),
       }));
 
   return (
@@ -271,7 +326,7 @@ export function InviterBench() {
               <RailSteps steps={steps} />
             </RailGroup>
             <RailGroup label="Customize" note="Filled in from your file.">
-              <RailFacts facts={inviterRailFacts(editor)} />
+              <RailFacts facts={facts} />
             </RailGroup>
             <RailProblems problems={problems} />
           </Rail>
@@ -311,7 +366,7 @@ export function InviterBench() {
             linkable={linkable}
             alert={intakeAlert}
             onContinue={() => {
-              if (fileReady) setSection("columns");
+              if (fileReady) goTo("columns");
             }}
           />
         )}
@@ -339,7 +394,7 @@ export function InviterBench() {
                 )
               }
               announcement={announcement}
-              onContinue={() => setSection("review")}
+              onContinue={() => goTo("review")}
             />
           )}
         {section === "review" &&
@@ -352,22 +407,115 @@ export function InviterBench() {
                 problems={spineProblems(editor)}
                 minting={minting}
                 onLifetime={(seconds) =>
-                  setEditor(editorWithLifetime(editor, seconds))
+                  applyEditor(editorWithLifetime(editor, seconds))
                 }
                 onDirection={(direction) =>
-                  setEditor(editorWithOutputDirection(editor, direction))
+                  applyEditor(editorWithOutputDirection(editor, direction))
                 }
-                onReset={() => setEditor(resetToRecommended(editor, acquired))}
+                onReset={() => {
+                  setEditor(resetToRecommended(editor, acquired));
+                  setEditorAnnouncement("Reset to the recommended settings.");
+                }}
                 onCreate={() => void createInvitation()}
-                onNavigate={setSection}
+                onNavigate={goTo}
               />
               {createAlert !== undefined && (
-                <Alert color="red" title={createAlert.title} mt="md">
-                  {createAlert.message}
+                <Alert
+                  color="red"
+                  title={createAlert.title}
+                  icon={<IconAlertCircle />}
+                  mt="md"
+                >
+                  <span style={{ whiteSpace: "pre-line" }}>
+                    {createAlert.message}
+                  </span>
                 </Alert>
               )}
             </>
           )}
+        {section === "cleaning" &&
+          editor !== undefined &&
+          acquired !== undefined && (
+            <CleaningTab
+              editor={editor}
+              csv={acquired}
+              expertMode={expertMode}
+              onFieldSteps={(output, fieldSteps) =>
+                applyEditor(editorWithFieldSteps(editor, output, fieldSteps))
+              }
+              onFieldInput={(output, input) =>
+                applyEditor(editorWithFieldInput(editor, output, input))
+              }
+              onFieldAdded={(type) =>
+                applyEditor(editorWithFieldAdded(editor, type))
+              }
+              onFieldRemoved={(output) =>
+                applyEditor(editorWithFieldRemoved(editor, output))
+              }
+              onResetCleaning={() => {
+                setEditor(editorWithRecommendedCleaning(editor, acquired));
+                setEditorAnnouncement(
+                  "Cleaning reset to the recommended steps.",
+                );
+              }}
+              cleaningError={reviewValidation(editor).errors.standardization}
+              onBack={() => goTo("review")}
+            />
+          )}
+        {section === "keys" &&
+          editor !== undefined &&
+          acquired !== undefined && (
+            <KeysTab
+              editor={editor}
+              csv={acquired}
+              expertMode={expertMode}
+              onExpertMode={setExpertMode}
+              onKeyEnabled={(index, enabled) =>
+                applyEditor(editorWithKeyEnabled(editor, index, enabled))
+              }
+              onKeyMoved={(index, offset) => {
+                const moved = editorWithKeyMoved(editor, index, offset);
+                setEditor(moved);
+                if (moved !== editor) {
+                  const key = moved.draft.keys[index + offset];
+                  setEditorAnnouncement(
+                    `Moved ${sanitizeForDisplay(key.key.name)} to position ${index + offset + 1} of ${moved.draft.keys.length}. Keys earlier in the list match first.`,
+                  );
+                }
+              }}
+              onAuthoredDraft={(draft) =>
+                applyEditor(editorWithAuthoredDraft(editor, draft))
+              }
+              onStrategy={(strategy) =>
+                applyEditor(editorWithLinkageStrategy(editor, strategy))
+              }
+              onAlgorithm={(algorithm) =>
+                applyEditor(editorWithAlgorithm(editor, algorithm))
+              }
+              onDeduplicate={(deduplicate) =>
+                applyEditor(editorWithDeduplicate(editor, deduplicate))
+              }
+              onImport={(terms) => {
+                setEditor(editorWithImportedTerms(editor, acquired, terms));
+                setEditorAnnouncement(
+                  "Imported. Review the loaded terms before creating.",
+                );
+              }}
+              keysError={reviewValidation(editor).errors.keys}
+              announce={setEditorAnnouncement}
+              onBack={() => goTo("review")}
+            />
+          )}
+        {section === "agreement" && editor !== undefined && (
+          <AgreementTab
+            editor={editor}
+            validation={reviewValidation(editor)}
+            onAgreement={(agreement) =>
+              applyEditor(editorWithLegalAgreement(editor, agreement))
+            }
+            onBack={() => goTo("review")}
+          />
+        )}
         {section === "share" && (
           <>
             <h1 tabIndex={-1}>Your invitation is ready</h1>
@@ -387,6 +535,11 @@ export function InviterBench() {
             </Alert>
           </>
         )}
+        <VisuallyHidden>
+          <p aria-live="polite" aria-atomic="true">
+            {editorAnnouncement}
+          </p>
+        </VisuallyHidden>
       </div>
     </BenchShell>
   );
