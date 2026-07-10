@@ -129,19 +129,33 @@ export function applyConnectionOverrides(
   const { server: serverOverrides = {}, options: optionsOverrides = {} } =
     overrides;
 
+  // Tracks whether any override merged into result.server (or a directory split
+  // ran below), so the single connection-wide re-validation near the end runs
+  // exactly when an override could have introduced an invalid value -- e.g. an
+  // out-of-range --server-port, or a --server-password paired with a privateKey
+  // already in the base config -- not on an untouched, already-validated config.
+  let serverModified = false;
+
   if (result.channel === "sftp") {
     const { server } = result;
     if (serverOverrides.username !== undefined)
       server.username = serverOverrides.username;
-    if (serverOverrides.password !== undefined)
+    if (serverOverrides.password !== undefined) {
       server.password = serverOverrides.password;
-    if (serverOverrides.privateKey !== undefined)
+      serverModified = true;
+    }
+    if (serverOverrides.privateKey !== undefined) {
       server.privateKey = serverOverrides.privateKey;
+      serverModified = true;
+    }
     if (serverOverrides.privateKeyPassphrase !== undefined)
       server.privateKeyPassphrase = serverOverrides.privateKeyPassphrase;
     if (serverOverrides.keyboardInteractive !== undefined)
       server.keyboardInteractive = serverOverrides.keyboardInteractive;
-    if (serverOverrides.port !== undefined) server.port = serverOverrides.port;
+    if (serverOverrides.port !== undefined) {
+      server.port = serverOverrides.port;
+      serverModified = true;
+    }
 
     // A passphrase decrypts an encrypted private key and is meaningless without
     // one. Reject it up front with a flag-named message rather than deferring to
@@ -289,10 +303,12 @@ export function applyConnectionOverrides(
       server.inboundPath = server.inboundPath ?? server.path;
       server.outboundPath = serverOverrides.outboundPath;
       delete server.path;
+      serverModified = true;
     } else if (result.channel === "filedrop") {
       result.inboundPath = result.inboundPath ?? result.path;
       result.outboundPath = serverOverrides.outboundPath;
       delete result.path;
+      serverModified = true;
     } else {
       // webrtc has no directory, so the flag is meaningless there. Only
       // `exchange` can reach this -- the URL-driven commands reject a webrtc URL
@@ -318,13 +334,21 @@ export function applyConnectionOverrides(
           "requires retain mode; pass --retain-files (or set retain_files: " +
           "true in the configuration).",
       );
+  }
 
-    // Validate the assembled split through the core schema so the remaining
-    // rejections -- an inbound equal to the outbound, a relative or unset
-    // filedrop path, the pair-set-together rule -- surface with the same messages
-    // and rules the live connection enforces, rather than being re-implemented
-    // here. The literal `@path` credential refs a connection may still carry
-    // validate cleanly as strings (resolved later, at live use).
+  // Re-validate the merged connection through the core schema once, whenever an
+  // override touched result.server or its directory paths -- a credential, the
+  // port, or the outbound-path split. This is the connection-wide counterpart to
+  // the options re-validation above: it runs on every path that can introduce an
+  // invalid value (not only the --outbound-path branch), so an out-of-range
+  // --server-port is caught here regardless of which other overrides accompany
+  // it. The remaining outbound-path-specific rejections -- an inbound equal to
+  // the outbound, a relative or unset filedrop path, the pair-set-together rule
+  // -- surface from the same call with the same messages and rules the live
+  // connection enforces, rather than being re-implemented here. The literal
+  // `@path` credential refs a connection may still carry validate cleanly as
+  // strings (resolved later, at live use).
+  if (serverModified) {
     const connValidation = safeParseConnectionConfig(result);
     if (!connValidation.success)
       throw new UsageError(
