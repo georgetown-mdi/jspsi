@@ -6,6 +6,7 @@ import {
   BEFORE_START_STAGE_ID,
   DONE_STAGE_ID,
   WAITING_STAGE_ID,
+  acceptorTimelineSteps,
   awaitingPartner,
   currentStageLabel,
   initialRun,
@@ -224,5 +225,95 @@ describe("the visit history", () => {
 
   test("completion times render as a time of day", () => {
     expect(timeOfDayLabel(at(43))).toBe("2:43 PM");
+  });
+});
+
+describe("the acceptor timeline and labels", () => {
+  const at = (minute: number) => new Date(2026, 6, 8, 14, minute);
+
+  function acceptorStates(run: ExchangeRun): Array<string> {
+    return acceptorTimelineSteps(run).map(
+      (step) => `${step.label}:${step.state}`,
+    );
+  }
+
+  function acceptorToWaiting(): ExchangeRun {
+    const seeded = runWithStages(
+      initialRun("acceptor"),
+      stagesFor(preparedWith("cascade", 2), "acceptor"),
+    );
+    return runWithStage(seeded, WAITING_STAGE_ID, at(32));
+  }
+
+  test("the acceptor's waiting stage is labelled 'Connecting to your partner'", () => {
+    const stages = stagesFor(preparedWith("cascade", 2), "acceptor");
+    expect(stages[1].label).toBe("Connecting to your partner");
+    // The initial-run tree (before prepare) carries the same acceptor label.
+    expect(currentStageLabel(acceptorToWaiting())).toBe(
+      "Connecting to your partner",
+    );
+  });
+
+  test("the acceptor rail is four steps: Connect, Confirm protocol, Link keys, Done", () => {
+    expect(
+      acceptorTimelineSteps(initialRun("acceptor")).map((step) => step.label),
+    ).toEqual(["Connect", "Confirm protocol", "Link keys", "Done"]);
+  });
+
+  test("Connect stays current through before-start and the connecting wait", () => {
+    expect(acceptorStates(initialRun("acceptor"))).toEqual([
+      "Connect:current",
+      "Confirm protocol:pending",
+      "Link keys:pending",
+      "Done:pending",
+    ]);
+    expect(acceptorStates(acceptorToWaiting())[0]).toBe("Connect:current");
+  });
+
+  test("a protocol stage flips Connect to done and Confirm protocol to current", () => {
+    const confirming = runWithStage(
+      acceptorToWaiting(),
+      CONFIRMING_PROTOCOL_STAGE_ID,
+      at(39),
+    );
+    expect(acceptorStates(confirming)).toEqual([
+      "Connect:done",
+      "Confirm protocol:current",
+      "Link keys:pending",
+      "Done:pending",
+    ]);
+  });
+
+  test("the per-key stages sit under Link keys", () => {
+    const linking = runWithStage(
+      runWithStage(acceptorToWaiting(), CONFIRMING_PROTOCOL_STAGE_ID, at(39)),
+      "stage 2 / 2",
+      at(43),
+    );
+    expect(acceptorStates(linking)[2]).toBe("Link keys:current");
+    expect(currentStageLabel(linking)).toBe("Linking key 2 / 2");
+  });
+
+  test("completion finishes every acceptor step", () => {
+    const done = runWithCompletion(
+      runWithStage(acceptorToWaiting(), CONFIRMING_PROTOCOL_STAGE_ID, at(39)),
+      at(47),
+    );
+    expect(acceptorStates(done)).toEqual([
+      "Connect:done",
+      "Confirm protocol:done",
+      "Link keys:done",
+      "Done:done",
+    ]);
+    expect(currentStageLabel(done)).toBe("Done");
+  });
+
+  test("the inviter's waiting label is unchanged by the acceptor parameterization", () => {
+    expect(stagesFor(preparedWith("cascade", 2))[1].label).toBe(
+      "Waiting for your partner",
+    );
+    expect(
+      currentStageLabel(runWithStage(initialRun(), WAITING_STAGE_ID, at(32))),
+    ).toBe("Waiting for your partner");
   });
 });

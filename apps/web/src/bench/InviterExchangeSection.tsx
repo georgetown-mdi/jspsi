@@ -1,12 +1,17 @@
 import { useEffect, useRef } from "react";
 
-import { Alert, Button, CopyButton } from "@mantine/core";
-import { IconAlertCircle } from "@tabler/icons-react";
-import { Link } from "@tanstack/react-router";
+import { Button, CopyButton } from "@mantine/core";
 
 import { dateTimeLabel, invitationUsable } from "./inviterModel";
 import { awaitingPartner } from "./exchangeRun";
 
+import {
+  AnotherExchangeFoot,
+  DonePanel,
+  DownloadRow,
+  FailureAlert,
+  WithheldResultInset,
+} from "./BenchRunSurface";
 import { StatusPanel } from "./StatusPanel";
 import styles from "./bench.module.css";
 
@@ -58,44 +63,6 @@ function CopyRow({
           ) : null
         }
       </div>
-    </div>
-  );
-}
-
-function DownloadRow({
-  label,
-  caveat,
-  href,
-  fileName,
-}: {
-  label: string;
-  caveat?: "keep private";
-  href: string;
-  fileName: string;
-}) {
-  return (
-    <div className={styles.dlRow}>
-      <span className={styles.dlLabel}>
-        {label}
-        {caveat !== undefined && (
-          <>
-            {" "}
-            <span className={styles.keepPrivate}>({caveat})</span>
-          </>
-        )}
-        :
-      </span>
-      {/* The accessible name carries the caveat as well as the filename: the
-          caveat is part of what the operator agrees to by downloading, so a
-          screen reader browsing links must hear it, not only the filename. */}
-      <a
-        className={`${styles.linkLike} ${styles.mono}`}
-        href={href}
-        download={fileName}
-        aria-label={`${label}${caveat === undefined ? "" : ` (${caveat})`}: ${fileName}`}
-      >
-        {fileName}
-      </a>
     </div>
   );
 }
@@ -160,14 +127,6 @@ export function InviterExchangeSection({
     if (!active || active === document.body) headingRef.current?.focus();
   }, [phase, failure]);
 
-  // A failure alert receives focus when it appears, so the message is read
-  // before anything else. Failure and completion are mutually exclusive (a
-  // failed run never reaches `done`), so the two effects cannot fight.
-  const alertRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (failure !== undefined) alertRef.current?.focus();
-  }, [failure]);
-
   const title =
     phase === "done"
       ? "Exchange complete"
@@ -181,15 +140,7 @@ export function InviterExchangeSection({
         {title}
       </h1>
       {failure !== undefined && (
-        <Alert
-          color="red"
-          icon={<IconAlertCircle aria-hidden />}
-          title={failure.title}
-          ref={alertRef}
-          tabIndex={-1}
-          mb="md"
-        >
-          <span style={{ whiteSpace: "pre-line" }}>{failure.message}</span>
+        <FailureAlert failure={failure}>
           {retryable && (
             <Button color="red" variant="light" mt="sm" onClick={onTryAgain}>
               Try again
@@ -203,7 +154,7 @@ export function InviterExchangeSection({
               Start over with a fresh invitation
             </Button>
           )}
-        </Alert>
+        </FailureAlert>
       )}
       {/* The copy artifacts drop out once the partner connects (nothing left
           to share) and on any failure except a retryable one -- a dead
@@ -252,27 +203,10 @@ export function InviterExchangeSection({
         </div>
       )}
       {phase === "done" && (
-        <div className={styles.donePanel}>
-          <p className={styles.bigCount}>
-            Exchange complete
-            {outputs?.matchedRecordCount !== undefined && (
-              <>
-                {" - "}
-                <span className={styles.mono}>
-                  {new Intl.NumberFormat("en-US").format(
-                    outputs.matchedRecordCount,
-                  )}
-                </span>{" "}
-                matched records
-              </>
-            )}
-          </p>
-          {run.finishedAt !== undefined && (
-            <p className={`${styles.small} ${styles.sub} ${styles.mono}`}>
-              Finished {dateTimeLabel(run.finishedAt)}
-            </p>
-          )}
-        </div>
+        <DonePanel
+          matchedRecordCount={outputs?.matchedRecordCount}
+          finishedAt={run.finishedAt}
+        />
       )}
       <StatusPanel
         run={run}
@@ -283,13 +217,7 @@ export function InviterExchangeSection({
         <>
           <h2>Downloads</h2>
           {outputs.resultWithheld === true ? (
-            <div className={styles.stateInset}>
-              <p className={styles.stateLabel}>Results withheld by the terms</p>
-              <p className={styles.small} style={{ margin: 0 }}>
-                Your records contributed to the match. By the agreed terms, you
-                receive no result table, so there is nothing to download here.
-              </p>
-            </div>
+            <WithheldResultInset />
           ) : (
             <DownloadRow
               label="Download result"
@@ -324,11 +252,7 @@ export function InviterExchangeSection({
         </>
       )}
       {(phase === "done" || failure?.category === "output") && (
-        <div className={styles.workFoot}>
-          <Button component={Link} to="/bench">
-            Set up another exchange
-          </Button>
-        </div>
+        <AnotherExchangeFoot />
       )}
     </>
   );

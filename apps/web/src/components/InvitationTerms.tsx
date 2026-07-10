@@ -452,9 +452,10 @@ export function InvitationTerms({
    * and the rest of the body are identical. */
   perspective?: "review" | "accepted" | "proposing";
   /** Semantic heading level (its visual size is fixed at the h2 scale), so the
-   * heading nests correctly under its container -- h2 below the acceptor page's
-   * h1, h3 below the inviter section's h2. */
-  headingOrder?: 2 | 3;
+   * heading nests correctly under its container -- h1 when this is the page's
+   * own heading (the bench review step), h2 below the acceptor page's h1, h3
+   * below the inviter section's h2. */
+  headingOrder?: 1 | 2 | 3;
   // tabIndex + ref so a screen the terms lead can move focus here when they
   // appear, announcing them to assistive tech.
   headingRef?: Ref<HTMLHeadingElement>;
@@ -629,8 +630,9 @@ export function InvitationTerms({
   const reduceMotion = useReducedMotion();
   // Tier captions are headings one level below the terms heading, so a screen reader
   // can jump between tiers by heading and the outline nests under the page's own
-  // heading. headingOrder is 2 | 3, so this is 3 | 4 (both valid Title orders).
-  const tierHeadingOrder = (headingOrder + 1) as 3 | 4;
+  // heading. headingOrder is 1 | 2 | 3, so this is 2 | 3 | 4 (all valid Title
+  // orders).
+  const tierHeadingOrder = (headingOrder + 1) as 2 | 3 | 4;
   return (
     <Stack gap="sm">
       <Title

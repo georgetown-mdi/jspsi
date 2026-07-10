@@ -22,18 +22,36 @@ export const BEFORE_START_STAGE_ID = "before start";
 export const WAITING_STAGE_ID = "waiting for peer";
 export const DONE_STAGE_ID = "done";
 
-const preStages: Array<StageDefinition> = [
-  {
-    id: BEFORE_START_STAGE_ID,
-    label: "Before start",
-    state: ProcessState.BeforeStart,
-  },
-  {
-    id: WAITING_STAGE_ID,
-    label: "Waiting for your partner",
-    state: ProcessState.Waiting,
-  },
-];
+/** The two run seats: the inviter (PSI responder that listens) and the acceptor
+ * (PSI initiator that dials). The only thing the pure run model varies by role is
+ * the waiting-stage label and the rail timeline the run drives. */
+export type ExchangeSeat = "inviter" | "acceptor";
+
+/** The waiting-stage label each seat shows: the inviter waits for the partner to
+ * accept; the acceptor is the one dialing, so it is connecting to the partner. */
+const WAITING_STAGE_LABEL: Record<ExchangeSeat, string> = {
+  inviter: "Waiting for your partner",
+  acceptor: "Connecting to your partner",
+};
+
+/** The pre-stages for a seat: the terminal-before-start stage every run opens
+ * with, and the waiting stage whose label is the seat's. */
+function preStagesFor(seat: ExchangeSeat): Array<StageDefinition> {
+  return [
+    {
+      id: BEFORE_START_STAGE_ID,
+      label: "Before start",
+      state: ProcessState.BeforeStart,
+    },
+    {
+      id: WAITING_STAGE_ID,
+      label: WAITING_STAGE_LABEL[seat],
+      state: ProcessState.Waiting,
+    },
+  ];
+}
+
+const preStages = preStagesFor("inviter");
 
 const doneStage: StageDefinition = {
   id: DONE_STAGE_ID,
@@ -43,10 +61,13 @@ const doneStage: StageDefinition = {
 
 /** The stage tree before the prepared exchange exists: the pre-stages, the
  * protocol-confirmation stage every exchange opens with, and the terminal done
- * stage. Replaced wholesale once `prepare` yields the real tree. */
-export function initialStages(): Array<StageDefinition> {
+ * stage. Replaced wholesale once `prepare` yields the real tree. The seat only
+ * sets the waiting-stage label; it defaults to the inviter's. */
+export function initialStages(
+  seat: ExchangeSeat = "inviter",
+): Array<StageDefinition> {
   return [
-    ...preStages,
+    ...preStagesFor(seat),
     {
       id: CONFIRMING_PROTOCOL_STAGE_ID,
       label: "Confirming protocol",
@@ -57,10 +78,14 @@ export function initialStages(): Array<StageDefinition> {
 }
 
 /** The full per-exchange stage tree, built once after prepare: the pre-stages,
- * the protocol stages the prepared exchange declares, and the done stage. */
-export function stagesFor(prepared: PreparedExchange): Array<StageDefinition> {
+ * the protocol stages the prepared exchange declares, and the done stage. The
+ * seat only sets the waiting-stage label; it defaults to the inviter's. */
+export function stagesFor(
+  prepared: PreparedExchange,
+  seat: ExchangeSeat = "inviter",
+): Array<StageDefinition> {
   return [
-    ...preStages,
+    ...preStagesFor(seat),
     ...describeExchangeStages(prepared).map((stage) => ({
       ...stage,
       state: ProcessState.Working as const,
@@ -87,9 +112,9 @@ export interface ExchangeRun {
   failed: boolean;
 }
 
-export function initialRun(): ExchangeRun {
+export function initialRun(seat: ExchangeSeat = "inviter"): ExchangeRun {
   return {
-    stages: initialStages(),
+    stages: initialStages(seat),
     stageId: BEFORE_START_STAGE_ID,
     visits: [{ id: BEFORE_START_STAGE_ID, label: "Before start" }],
     failed: false,
@@ -184,6 +209,36 @@ export function timelineSteps(run: ExchangeRun): Array<TimelineStep> {
           ? 2
           : 3;
   return TIMELINE_LABELS.map((label, index) => ({
+    label,
+    state: index < current ? "done" : index === current ? "current" : "pending",
+  }));
+}
+
+const ACCEPTOR_TIMELINE_LABELS = [
+  "Connect",
+  "Confirm protocol",
+  "Link keys",
+  "Done",
+] as const;
+
+/**
+ * The acceptor's rail timeline. Unlike the inviter's, it opens at Connect and
+ * has no Share or Partner-accepts step -- the acceptor dials, so its rail never
+ * shows a stage it cannot act on. Connect stays current through the pre-stages
+ * (before-start and the "Connecting to your partner" wait); a protocol stage
+ * flips it to Confirm protocol; the per-key rounds sit under Link keys; and
+ * everything is done at completion.
+ */
+export function acceptorTimelineSteps(run: ExchangeRun): Array<TimelineStep> {
+  const current =
+    run.stageId === DONE_STAGE_ID
+      ? ACCEPTOR_TIMELINE_LABELS.length
+      : preStages.some((stage) => stage.id === run.stageId)
+        ? 0
+        : run.stageId === CONFIRMING_PROTOCOL_STAGE_ID
+          ? 1
+          : 2;
+  return ACCEPTOR_TIMELINE_LABELS.map((label, index) => ({
     label,
     state: index < current ? "done" : index === current ? "current" : "pending",
   }));
