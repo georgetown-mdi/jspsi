@@ -371,3 +371,106 @@ describe("acceptor cleaning attention", () => {
     expect(attention.railValue).toBe("1 key to review");
   });
 });
+
+describe("acceptor columns editor state: input-override layer", () => {
+  // A single firstName field with two candidate columns of that same type, so the
+  // default binding (the FIRST column of the type -- resolveFieldColumns) and an
+  // explicit input override (the SECOND column) are observably different. Only
+  // given_name starts role: linkage; nickname is remapped to it in the tests below
+  // via setColumnTypeForMatching, exactly as the columns-step quick-fix mapper does.
+  const oneFieldTerms: LinkageTerms = {
+    version: "1.0.0",
+    identity: "County Health Department",
+    date: "2026-01-01",
+    algorithm: "psi",
+    linkageStrategy: "cascade",
+    output: { expectsOutput: true, shareWithPartner: true },
+    deduplicate: false,
+    linkageFields: [{ name: "firstName", type: "first_name" }],
+    linkageKeys: [{ name: "first", elements: [{ field: "firstName" }] }],
+  };
+  const columns = ["given_name", "nickname"];
+
+  test("a live input override rebinds the field to the target column", () => {
+    const seed = acceptorInitialColumnsState(columns);
+    const bothLinkage = setColumnTypeForMatching(
+      setColumnTypeForMatching(seed.metadata, "given_name", "first_name"),
+      "nickname",
+      "first_name",
+    );
+    const withoutOverride = editorFor(columns, oneFieldTerms, {
+      metadata: bothLinkage,
+    });
+    // With no override, the default binding is the first role: linkage column of
+    // the type.
+    expect(withoutOverride.editorState.standardization[0].input).toBe(
+      "given_name",
+    );
+
+    const withOverride = editorFor(columns, oneFieldTerms, {
+      metadata: bothLinkage,
+      inputOverrides: new Map([["firstName", "nickname"]]),
+    });
+    expect(withOverride.editorState.standardization[0].input).toBe("nickname");
+  });
+
+  test("a stale input override (target no longer role: linkage of that type) is dropped", () => {
+    const seed = acceptorInitialColumnsState(columns);
+    // Only given_name is role: linkage; nickname is left at its inferred role
+    // (payload, an unrecognized header), so an override pointing at it is stale.
+    const onlyGivenNameLinkage = setColumnTypeForMatching(
+      seed.metadata,
+      "given_name",
+      "first_name",
+    );
+    const { editorState } = editorFor(columns, oneFieldTerms, {
+      metadata: onlyGivenNameLinkage,
+      inputOverrides: new Map([["firstName", "nickname"]]),
+    });
+    // The stale override is dropped; the derived default (given_name) returns
+    // rather than binding a column the core would refuse.
+    expect(editorState.standardization[0].input).toBe("given_name");
+  });
+
+  test("layering order: an input rebind stales a step override authored against the old input", () => {
+    const seed = acceptorInitialColumnsState(columns);
+    const bothLinkage = setColumnTypeForMatching(
+      setColumnTypeForMatching(seed.metadata, "given_name", "first_name"),
+      "nickname",
+      "first_name",
+    );
+    // Author a step override against the ORIGINAL input (given_name).
+    const stepOverrides = new Map([
+      [
+        "firstName",
+        { input: "given_name", steps: [{ function: "to_upper_case" }] },
+      ],
+    ]);
+    const beforeRebind = editorFor(columns, oneFieldTerms, {
+      metadata: bothLinkage,
+      stepOverrides,
+    });
+    // The step override applies while the field is still bound to given_name.
+    expect(beforeRebind.editorState.standardization[0].input).toBe(
+      "given_name",
+    );
+    expect(beforeRebind.editorState.standardization[0].steps).toEqual([
+      { function: "to_upper_case" },
+    ]);
+
+    // Now rebind the input to nickname AND keep the same (now-stale) step
+    // override. applyInputOverrides runs before applyStepOverrides, so the step
+    // override's `input: "given_name"` no longer matches the rebound
+    // transformation's input and is dropped, rather than silently cleaning the
+    // new column with steps authored for the old one.
+    const afterRebind = editorFor(columns, oneFieldTerms, {
+      metadata: bothLinkage,
+      inputOverrides: new Map([["firstName", "nickname"]]),
+      stepOverrides,
+    });
+    expect(afterRebind.editorState.standardization[0].input).toBe("nickname");
+    expect(afterRebind.editorState.standardization[0].steps).not.toEqual([
+      { function: "to_upper_case" },
+    ]);
+  });
+});

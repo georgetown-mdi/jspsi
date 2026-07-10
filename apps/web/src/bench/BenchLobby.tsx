@@ -25,7 +25,9 @@ export function BenchLobby() {
   // accept bench with the token in the URL fragment, never a search param (the
   // same confidential-value handling the inviter's deep-link and the legacy
   // accept form use). An empty extraction shows the inline field error and does
-  // not navigate.
+  // not navigate. The button itself is disabled until the field holds a usable
+  // token (see below), so this guard only covers a submit that slips past that
+  // disabled state.
   function reviewInvitation() {
     const token = tokenFromInput(invitation);
     if (token === "") {
@@ -34,6 +36,8 @@ export function BenchLobby() {
     }
     void navigate({ to: "/bench/accept", hash: token });
   }
+
+  const invitationToken = tokenFromInput(invitation);
 
   return (
     <BenchPage>
@@ -83,7 +87,12 @@ export function BenchLobby() {
               }}
             />
             <p>
-              <Button variant="outline" mt="sm" onClick={reviewInvitation}>
+              <Button
+                variant="outline"
+                mt="sm"
+                disabled={invitationToken === ""}
+                onClick={reviewInvitation}
+              >
                 Review invitation
               </Button>
             </p>

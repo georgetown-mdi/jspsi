@@ -610,6 +610,8 @@ export function AcceptorBench() {
             />
             <TextInput
               mt="md"
+              withAsterisk
+              required
               label="Your name"
               description="Recorded in your exchange record so your partner can identify you"
               value={acceptorName}

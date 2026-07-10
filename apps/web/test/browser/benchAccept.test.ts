@@ -9,9 +9,19 @@ import { createRoot } from "react-dom/client";
 
 import { MantineProvider } from "@mantine/core";
 
-import { encodeInvitation, generateSharedSecret } from "@psilink/core";
+import {
+  encodeInvitation,
+  generateSharedSecret,
+  sanitizeForDisplay,
+} from "@psilink/core";
 
+import {
+  acceptorColumnsEditorState,
+  acceptorInitialColumnsState,
+  acceptorVerdict,
+} from "@bench/acceptorColumnsModel";
 import { AcceptorBench } from "@bench/AcceptorBench";
+import { AcceptorColumnsStep } from "@bench/AcceptorColumnsStep";
 import { BenchLobby } from "@bench/BenchLobby";
 import { stagesFor } from "@bench/exchangeRun";
 import styles from "@bench/bench.module.css";
@@ -299,24 +309,31 @@ describe("bench lobby: review invitation", () => {
     expect(navigation.calls).toEqual([{ to: "/bench/accept", hash: "ABC123" }]);
   });
 
-  test("an empty paste shows the inline field error and does not navigate", async () => {
+  test("Review invitation is disabled until the field holds a usable token", async () => {
     mount(createElement(BenchLobby));
-    await expect
-      .element(page.getByLabelText("Invitation link or code"))
-      .toBeInTheDocument();
+    const review = page.getByRole("button", { name: "Review invitation" });
+    // Empty field: nothing to review, so the action is withheld.
+    await expect.element(review).toBeDisabled();
 
-    // A URL with an empty fragment extracts to no token.
+    await userEvent.fill(
+      page.getByLabelText("Invitation link or code"),
+      "MYTOKEN",
+    );
+    await expect.element(review).toBeEnabled();
+
+    // Whitespace alone is not a usable token (tokenFromInput trims), so the gate
+    // closes again rather than offering an action that would no-op.
+    await userEvent.fill(page.getByLabelText("Invitation link or code"), "   ");
+    await expect.element(review).toBeDisabled();
+
+    // A URL whose fragment is empty also extracts to no token.
     await userEvent.fill(
       page.getByLabelText("Invitation link or code"),
       "https://example.test/accept#",
     );
-    await userEvent.click(
-      page.getByRole("button", { name: "Review invitation" }),
-    );
+    await expect.element(review).toBeDisabled();
 
-    const error = page.getByText("An invitation is required");
-    await expect.element(error).toBeInTheDocument();
-    expect(error.element().getAttribute("role")).toBe("alert");
+    // No navigation happened while the field was empty or whitespace-only.
     expect(navigation.calls).toEqual([]);
   });
 });
@@ -351,6 +368,47 @@ describe("acceptor bench: decode gate", () => {
     await expect
       .element(page.getByText("No invitation was found", { exact: false }))
       .toBeInTheDocument();
+  });
+
+  test("a ready decode moves focus to the terms heading", async () => {
+    window.location.hash = await encodeAcceptToken();
+    mount(createElement(AcceptorBench));
+    const heading = page.getByText("Invitation from County Health Department");
+    await expect.element(heading).toBeInTheDocument();
+    // headingRef + tabIndex=-1 on InvitationTerms's own heading, so a
+    // keyboard/screen-reader user lands on the revealed terms rather than the
+    // spinner that preceded them.
+    await vi.waitFor(() => {
+      expect(document.activeElement).toBe(heading.element());
+    });
+  });
+
+  test("a schema-failure decode renders the collapsed one-line error", async () => {
+    // A checksum-valid token that fails the invitation schema (an invalid
+    // sharedSecret) makes decodeInvitation throw a ZodError. The acceptor must
+    // see the collapsed `<path>: <message>` one-liner from describeDecodeError,
+    // never Zod's serialized issues blob.
+    window.location.hash = await encodeRaw({
+      version: "1",
+      linkageTerms: acceptorTerms,
+      sharedSecret: "not-a-valid-shared-secret",
+      connectionEndpoint: {
+        channel: "webrtc",
+        host: "127.0.0.1",
+        port: 3000,
+        path: "/api/",
+      },
+    });
+    mount(createElement(AcceptorBench));
+
+    await expect
+      .element(page.getByText("Cannot accept this invitation"))
+      .toBeInTheDocument();
+    const text = document.body.textContent;
+    expect(text).toContain("sharedSecret:");
+    // The raw blob is `JSON.stringify(issues)`, which always carries a "code"
+    // key; the readable one-liner never does.
+    expect(text).not.toContain('"code"');
   });
 });
 
@@ -751,6 +809,55 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
     await expect
       .element(page.getByRole("heading", { name: "Confirm your columns" }))
       .toBeInTheDocument();
+  });
+});
+
+describe("acceptor columns step: disclosure summary sanitization", () => {
+  test("a disclosed column name carrying a bidi override renders escaped, never raw", async () => {
+    // The operator's own CSV header is untrusted display input: a bidi override
+    // (U+202E, right-to-left override) embedded in a column name must not
+    // reorder the summary of what leaves the machine. The name is unrecognized,
+    // so it infers to role: payload -- the disclosed set -- while
+    // first_name/last_name satisfy both keys, so the "What you will send" panel
+    // renders instead of the mapper.
+    const bidiColumn = "notes\u202Eevil";
+    const columns = ["first_name", "last_name", bidiColumn];
+    const rows = [Object.fromEntries(columns.map((c) => [c, "x"]))];
+    const columnsState = acceptorInitialColumnsState(columns);
+    const editorState = acceptorColumnsEditorState(
+      columnsState,
+      acceptorTerms,
+      rows,
+    );
+    const verdict = acceptorVerdict(columns, acceptorTerms, editorState);
+    const noop = () => undefined;
+    mount(
+      createElement(AcceptorColumnsStep, {
+        linkageTerms: acceptorTerms,
+        columns,
+        columnsState,
+        editorState,
+        verdict,
+        onMetadataChange: noop,
+        onRemap: noop,
+        onReset: noop,
+        onLaunch: noop,
+        onBack: noop,
+      }),
+    );
+
+    // Scoped to the summary panel: the metadata grid on the same step renders
+    // the raw column name (a distinct surface), so a document-wide raw-character
+    // check would not pin this panel's escaping.
+    const summary = page.getByText("For each matched row:", { exact: false });
+    await expect.element(summary).toBeInTheDocument();
+    const text = summary.element().textContent;
+    // The escaped form sanitizeForDisplay produces (a visible backslash-u
+    // literal), never the raw override character.
+    expect(text).toContain(
+      `For each matched row: ${sanitizeForDisplay(bidiColumn)}.`,
+    );
+    expect(text).not.toContain("\u202E");
   });
 });
 

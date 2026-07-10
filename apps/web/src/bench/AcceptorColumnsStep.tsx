@@ -15,6 +15,8 @@ import {
   IconCircleCheck,
 } from "@tabler/icons-react";
 
+import { sanitizeForDisplay } from "@psilink/core";
+
 import { MetadataGrid } from "@components/MetadataGrid";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
@@ -257,7 +259,16 @@ export function AcceptorColumnsStep({
               </Text>
             ) : (
               <Text size="xs">
-                For each matched row: {disclosed.join(", ")}.
+                {/* These are the operator's OWN CSV headers, not a sanitized
+                    summary value, so sanitize them for display like every other
+                    column-name surface -- a header carrying bidi/zero-width/
+                    homoglyph characters must not misrepresent to the operator
+                    what leaves their machine. */}
+                For each matched row:{" "}
+                {disclosed
+                  .map((column) => sanitizeForDisplay(column))
+                  .join(", ")}
+                .
               </Text>
             )}
           </Paper>
