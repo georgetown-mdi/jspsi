@@ -20,6 +20,7 @@ import { cssVariablesResolver, mantineTheme } from "@theme";
 import { DefaultCatchBoundary } from "@components/DefaultCatchBoundary";
 import { NotFound } from "@components/NotFound";
 import { Shell } from "@components/Shell";
+import { resolveChrome } from "@components/chrome";
 import { resolveContentWidth } from "@components/contentWidth";
 import { seo } from "@utils/seo";
 
@@ -72,13 +73,20 @@ function RootComponent() {
   // Read the active route's declared content width here, above the shell, so the
   // shell can size the content column from one value (the route cannot pass it up
   // from inside the Outlet). select returns a primitive, so the root re-renders
-  // only when the resolved width actually changes.
+  // only when the resolved width actually changes. The chrome seam works the same
+  // way: bench routes bring their own page surface and landmarks, so wrapping
+  // them in the legacy Shell would nest two <main> elements.
   const contentWidth = useMatches({ select: resolveContentWidth });
+  const chrome = useMatches({ select: resolveChrome });
   return (
     <RootDocument>
-      <Shell contentWidth={contentWidth}>
+      {chrome === "bench" ? (
         <Outlet />
-      </Shell>
+      ) : (
+        <Shell contentWidth={contentWidth}>
+          <Outlet />
+        </Shell>
+      )}
     </RootDocument>
   );
 }

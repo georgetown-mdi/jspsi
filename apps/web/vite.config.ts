@@ -25,6 +25,7 @@ logLibrary.setDefaultLevel(config.LOG_LEVEL);
 // catch-all; `@psi` here stands in for that catch-all, which the unit project
 // needs because its `src/psi` sources pull in `@utils/*`.
 const srcAliases = {
+  "@bench": path.resolve(__dirname, "src/bench"),
   "@components": path.resolve(__dirname, "src/components"),
   "@utils": path.resolve(__dirname, "src/utils"),
   "@util": path.resolve(__dirname, "src/util"),

@@ -1,0 +1,370 @@
+/* Layout and identity classes for the linkage bench, translated from the
+   approved mockup (design/web-redesign/proposal-c.html) onto the --bench-*
+   tokens (tokens.css). Interactive controls stay Mantine; these classes carry
+   only what Mantine cannot: the three-region bench grid, the rail and ledger
+   chrome, and the mockup's type discipline (mono = real data or protocol
+   state, sans = guidance). */
+
+.page {
+  min-height: 100dvh;
+  background: var(--bench-surface);
+  color: var(--bench-ink);
+  font-size: 16.5px;
+  line-height: 1.5;
+}
+
+.page h1 {
+  font-size: 1.6rem;
+  font-weight: 650;
+  line-height: 1.25;
+  margin: 0 0 0.6rem 0;
+}
+
+.page h2 {
+  font-size: 1.18rem;
+  font-weight: 650;
+  margin: 2rem 0 0.6rem 0;
+}
+
+.page h3 {
+  font-size: 1rem;
+  font-weight: 650;
+  margin: 1.4rem 0 0.4rem 0;
+}
+
+.page p {
+  margin: 0.5rem 0;
+  max-width: 68ch;
+}
+
+.page a {
+  color: var(--bench-accent);
+}
+
+.mono {
+  font-family: Consolas, "Lucida Console", ui-monospace, monospace;
+  font-size: 0.92em;
+  font-variant-numeric: tabular-nums;
+}
+
+.eyebrow {
+  font-size: 12px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--bench-secondary);
+  margin: 0 0 0.35rem 0;
+}
+
+.sub {
+  color: var(--bench-secondary);
+}
+
+.small {
+  font-size: 14px;
+}
+
+/* ---------- three-region bench ---------- */
+
+.grid {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr) 296px;
+  gap: 28px;
+  max-width: 1260px;
+  margin: 0 auto;
+  padding: 30px 32px 40px 32px;
+  align-items: start;
+}
+
+.gridNoRail {
+  grid-template-columns: minmax(0, 1fr) 296px;
+}
+
+.gridNoLedger {
+  grid-template-columns: 232px minmax(0, 1fr);
+}
+
+.gridPlain {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 860px;
+}
+
+.work {
+  background: var(--bench-column);
+  border: 1px solid var(--bench-rule);
+  border-radius: 10px;
+  box-shadow: var(--bench-shadow);
+  padding: 30px 36px 34px 36px;
+  min-width: 0;
+}
+
+.work > * {
+  max-width: 640px;
+}
+
+/* ---------- rail ---------- */
+
+.rail {
+  position: sticky;
+  top: 20px;
+  background: var(--bench-column);
+  border: 1px solid var(--bench-rule);
+  border-radius: 2px;
+  padding: 18px 16px 20px 16px;
+}
+
+.wordmark {
+  font-family: Consolas, "Lucida Console", ui-monospace, monospace;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  margin-bottom: 18px;
+}
+
+.rail .wordmark {
+  font-family: inherit;
+  font-weight: 650;
+  font-size: 14.5px;
+  letter-spacing: normal;
+  margin: 0 0 4px 0;
+}
+
+.wordRule {
+  border: 0;
+  border-top: 1px solid var(--bench-rule);
+  margin: 0 0 14px 0;
+}
+
+.railGroup {
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.09em;
+  font-weight: 650;
+  font-size: 14px;
+  color: var(--bench-secondary);
+  margin: 18px 0 4px 0;
+}
+
+.railGroupNote {
+  font-size: 12px;
+  color: var(--bench-faint);
+  margin: 0 0 4px 0;
+}
+
+.railSteps,
+.railFacts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.step {
+  position: relative;
+  padding: 6px 0 6px 24px;
+  font-size: 14px;
+  color: var(--bench-secondary);
+}
+
+.step::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 11px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--bench-faint);
+  background: var(--bench-column);
+  z-index: 1;
+}
+
+.step::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 22px;
+  bottom: -8px;
+  width: 1px;
+  background: var(--bench-rule);
+}
+
+.step:last-child::after {
+  display: none;
+}
+
+.stepDone {
+  color: var(--bench-ink);
+}
+
+.stepDone::before {
+  background: var(--bench-ink);
+  border-color: var(--bench-ink);
+}
+
+.stepCurrent {
+  color: var(--bench-ink);
+  font-weight: 650;
+}
+
+.stepCurrent::before {
+  border-color: var(--bench-accent);
+  background: var(--bench-accent);
+  box-shadow: 0 0 0 3px var(--bench-accent-glow);
+}
+
+.railFacts li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 14px;
+}
+
+.val {
+  font-family: Consolas, "Lucida Console", ui-monospace, monospace;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--bench-faint);
+  white-space: nowrap;
+}
+
+.valEdited {
+  color: var(--bench-accent);
+  font-weight: 600;
+}
+
+.valAttention {
+  color: var(--bench-warn);
+  font-weight: 600;
+}
+
+/* ---------- ledger ---------- */
+
+.ledger {
+  position: sticky;
+  top: 20px;
+  background: var(--bench-column);
+  border: 1px solid var(--bench-rule);
+  border-radius: 10px;
+  padding: 18px 20px 16px 20px;
+}
+
+.ledger h2 {
+  margin: 0 0 4px 0;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--bench-secondary);
+}
+
+.ledger dl {
+  margin: 8px 0 0 0;
+}
+
+.ledgerRow {
+  border-top: 1px solid var(--bench-rule);
+  padding: 9px 0 8px 0;
+}
+
+.ledgerRow dt {
+  font-size: 11.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--bench-secondary);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.ledgerRow dd {
+  margin: 3px 0 0 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+  font-family: Consolas, "Lucida Console", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash {
+  color: var(--bench-faint);
+}
+
+.ledgerRef {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--bench-accent);
+  white-space: nowrap;
+}
+
+.trust {
+  margin: 14px 0 0 0;
+  padding-top: 12px;
+  border-top: 2px solid var(--bench-rule);
+  font-size: 13px;
+  color: var(--bench-secondary);
+}
+
+/* ---------- lobby ---------- */
+
+.lobby {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 56px 32px 40px 32px;
+}
+
+.lobby .wordmark {
+  margin-bottom: 8px;
+}
+
+.tagline {
+  font-size: 1.08rem;
+  max-width: 62ch;
+}
+
+.lobbyActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin: 1.8rem 0 1.2rem 0;
+}
+
+.actionCard {
+  background: var(--bench-column);
+  border: 2px solid var(--bench-rule);
+  border-radius: 10px;
+  padding: 22px 24px 24px 24px;
+}
+
+.actionCard h3 {
+  margin: 0 0 6px 0;
+  font-size: 1.1rem;
+}
+
+.howItWorks {
+  border-top: 1px solid var(--bench-rule);
+  margin-top: 2rem;
+  padding-top: 1.2rem;
+  color: var(--bench-secondary);
+  font-size: 15px;
+}
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 1080px) {
+  .grid,
+  .gridNoRail,
+  .gridNoLedger {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rail,
+  .ledger {
+    position: static;
+  }
+
+  .lobbyActions {
+    grid-template-columns: 1fr;
+  }
+}

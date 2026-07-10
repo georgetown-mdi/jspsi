@@ -1,0 +1,52 @@
+import styles from "./bench.module.css";
+
+import type { ReactNode } from "react";
+
+/**
+ * One row of the disclosure ledger: an uppercase label, the value in the
+ * bench's monospace data voice, and an optional reference to the spine step
+ * that owns the value ("Step 2"). An absent value renders as a muted em-dash,
+ * the ledger's "not decided yet" mark.
+ */
+export interface LedgerRow {
+  label: string;
+  value?: ReactNode;
+  reference?: string;
+}
+
+/**
+ * The standing disclosure ledger on the bench's right: always visible,
+ * filling in as the exchange takes shape -- the running answer to "what leaves
+ * this machine". Rendered as an `<aside>` landmark named by its title.
+ */
+export function Ledger({
+  title = "This exchange",
+  rows,
+  footer,
+}: {
+  title?: string;
+  rows: ReadonlyArray<LedgerRow>;
+  footer?: ReactNode;
+}) {
+  return (
+    <aside className={styles.ledger} aria-label={title}>
+      <h2>{title}</h2>
+      <dl>
+        {rows.map((row) => (
+          <div key={row.label} className={styles.ledgerRow}>
+            <dt>
+              {row.label}
+              {row.reference !== undefined && (
+                <span className={styles.ledgerRef}>{row.reference}</span>
+              )}
+            </dt>
+            <dd>
+              {row.value ?? <span className={styles.dash}>{"\u2014"}</span>}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {footer !== undefined && <p className={styles.trust}>{footer}</p>}
+    </aside>
+  );
+}

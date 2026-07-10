@@ -11,7 +11,11 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AdvancedRouteImport } from './routes/advanced'
 import { Route as AcceptRouteImport } from './routes/accept'
+import { Route as BenchRouteRouteImport } from './routes/bench/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as BenchIndexRouteImport } from './routes/bench/index'
+import { Route as BenchExchangeRouteImport } from './routes/bench/exchange'
+import { Route as BenchAcceptRouteImport } from './routes/bench/accept'
 import { Route as ApiPeerjsIndexRouteImport } from './routes/api/peerjs/index'
 import { Route as ApiPeerjsIdRouteImport } from './routes/api/peerjs/id'
 import { Route as ApiPeerjsKeyPeersRouteImport } from './routes/api/peerjs/$key/peers'
@@ -26,10 +30,30 @@ const AcceptRoute = AcceptRouteImport.update({
   path: '/accept',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BenchRouteRoute = BenchRouteRouteImport.update({
+  id: '/bench',
+  path: '/bench',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const BenchIndexRoute = BenchIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => BenchRouteRoute,
+} as any)
+const BenchExchangeRoute = BenchExchangeRouteImport.update({
+  id: '/exchange',
+  path: '/exchange',
+  getParentRoute: () => BenchRouteRoute,
+} as any)
+const BenchAcceptRoute = BenchAcceptRouteImport.update({
+  id: '/accept',
+  path: '/accept',
+  getParentRoute: () => BenchRouteRoute,
 } as any)
 const ApiPeerjsIndexRoute = ApiPeerjsIndexRouteImport.update({
   id: '/api/peerjs/',
@@ -49,8 +73,12 @@ const ApiPeerjsKeyPeersRoute = ApiPeerjsKeyPeersRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/bench': typeof BenchRouteRouteWithChildren
   '/accept': typeof AcceptRoute
   '/advanced': typeof AdvancedRoute
+  '/bench/accept': typeof BenchAcceptRoute
+  '/bench/exchange': typeof BenchExchangeRoute
+  '/bench/': typeof BenchIndexRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
   '/api/peerjs/': typeof ApiPeerjsIndexRoute
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
@@ -59,6 +87,9 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/accept': typeof AcceptRoute
   '/advanced': typeof AdvancedRoute
+  '/bench/accept': typeof BenchAcceptRoute
+  '/bench/exchange': typeof BenchExchangeRoute
+  '/bench': typeof BenchIndexRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
   '/api/peerjs': typeof ApiPeerjsIndexRoute
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
@@ -66,8 +97,12 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/bench': typeof BenchRouteRouteWithChildren
   '/accept': typeof AcceptRoute
   '/advanced': typeof AdvancedRoute
+  '/bench/accept': typeof BenchAcceptRoute
+  '/bench/exchange': typeof BenchExchangeRoute
+  '/bench/': typeof BenchIndexRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
   '/api/peerjs/': typeof ApiPeerjsIndexRoute
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
@@ -76,8 +111,12 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/bench'
     | '/accept'
     | '/advanced'
+    | '/bench/accept'
+    | '/bench/exchange'
+    | '/bench/'
     | '/api/peerjs/id'
     | '/api/peerjs/'
     | '/api/peerjs/$key/peers'
@@ -86,14 +125,21 @@ export interface FileRouteTypes {
     | '/'
     | '/accept'
     | '/advanced'
+    | '/bench/accept'
+    | '/bench/exchange'
+    | '/bench'
     | '/api/peerjs/id'
     | '/api/peerjs'
     | '/api/peerjs/$key/peers'
   id:
     | '__root__'
     | '/'
+    | '/bench'
     | '/accept'
     | '/advanced'
+    | '/bench/accept'
+    | '/bench/exchange'
+    | '/bench/'
     | '/api/peerjs/id'
     | '/api/peerjs/'
     | '/api/peerjs/$key/peers'
@@ -101,6 +147,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  BenchRouteRoute: typeof BenchRouteRouteWithChildren
   AcceptRoute: typeof AcceptRoute
   AdvancedRoute: typeof AdvancedRoute
   ApiPeerjsIdRoute: typeof ApiPeerjsIdRoute
@@ -124,12 +171,40 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AcceptRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/bench': {
+      id: '/bench'
+      path: '/bench'
+      fullPath: '/bench'
+      preLoaderRoute: typeof BenchRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/bench/': {
+      id: '/bench/'
+      path: '/'
+      fullPath: '/bench/'
+      preLoaderRoute: typeof BenchIndexRouteImport
+      parentRoute: typeof BenchRouteRoute
+    }
+    '/bench/exchange': {
+      id: '/bench/exchange'
+      path: '/exchange'
+      fullPath: '/bench/exchange'
+      preLoaderRoute: typeof BenchExchangeRouteImport
+      parentRoute: typeof BenchRouteRoute
+    }
+    '/bench/accept': {
+      id: '/bench/accept'
+      path: '/accept'
+      fullPath: '/bench/accept'
+      preLoaderRoute: typeof BenchAcceptRouteImport
+      parentRoute: typeof BenchRouteRoute
     }
     '/api/peerjs/': {
       id: '/api/peerjs/'
@@ -155,8 +230,25 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface BenchRouteRouteChildren {
+  BenchAcceptRoute: typeof BenchAcceptRoute
+  BenchExchangeRoute: typeof BenchExchangeRoute
+  BenchIndexRoute: typeof BenchIndexRoute
+}
+
+const BenchRouteRouteChildren: BenchRouteRouteChildren = {
+  BenchAcceptRoute: BenchAcceptRoute,
+  BenchExchangeRoute: BenchExchangeRoute,
+  BenchIndexRoute: BenchIndexRoute,
+}
+
+const BenchRouteRouteWithChildren = BenchRouteRoute._addFileChildren(
+  BenchRouteRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  BenchRouteRoute: BenchRouteRouteWithChildren,
   AcceptRoute: AcceptRoute,
   AdvancedRoute: AdvancedRoute,
   ApiPeerjsIdRoute: ApiPeerjsIdRoute,

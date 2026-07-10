@@ -1,0 +1,6293 @@
+<title>psilink redesign - Proposal C: The linkage bench</title>
+<style>
+  /* ============================================================
+   Proposal C v2 - "The linkage bench"
+   Lightweight transaction, optional adjustments.
+   Tokens first; components only ever reference tokens.
+   ============================================================ */
+  :root {
+    --bench: #f6f5f1;
+    --col: #ffffff;
+    --railbg: #ebe9e2;
+    --ink: #1a1c1a;
+    --sec: #565b57;
+    --faint: #767b73;
+    --accent: #0c7a8a;
+    --accent-glow: rgba(12, 122, 138, 0.22);
+    --on-accent: #ffffff;
+    --rule: #d4d1c6;
+    --rule-soft: #e5e2d8;
+    --ok: #2e6e45;
+    --warn: #8a5b06;
+    --danger: #b23a26;
+    --ok-bg: #e9f1eb;
+    --warn-bg: #f6eedc;
+    --danger-bg: #f5e5e0;
+    --accent-bg: #e3eef0;
+    --field-bg: #ffffff;
+    --field-bd: #83887f;
+    --code-bg: #efede4;
+    --stripe: #4fa2af;
+    --pin-bg: #0c7a8a;
+    --pin-ink: #ffffff;
+    --shadow: 0 1px 3px rgba(26, 28, 26, 0.1);
+    --check: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill="none" stroke="%23FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M3 8.5 6.5 12 13 4.5"/></svg>');
+    --chevron: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill="none" stroke="%23565B57" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 6.5 8 10.5 12 6.5"/></svg>');
+    /* review chrome: a presentation tool, deliberately not the product's palette */
+    --chrome-bg: #22252a;
+    --chrome-ink: #d8dbe1;
+    --chrome-sub: #9aa0ab;
+    --chrome-rule: #3a414a;
+    --chrome-accent: #6fc7d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bench: #131512;
+      --col: #1b1e1b;
+      --railbg: #101210;
+      --ink: #e8eae4;
+      --sec: #a3a89f;
+      --faint: #878d83;
+      --accent: #3fb6c9;
+      --accent-glow: rgba(63, 182, 201, 0.28);
+      --on-accent: #0b2a30;
+      --rule: #31342e;
+      --rule-soft: #272a24;
+      --ok: #7cc79a;
+      --warn: #d9a860;
+      --danger: #e08972;
+      --ok-bg: #17281d;
+      --warn-bg: #2b2213;
+      --danger-bg: #2e1913;
+      --accent-bg: #102a2f;
+      --field-bg: #161915;
+      --field-bd: #5a6057;
+      --code-bg: #171a14;
+      --stripe: #2e8c9c;
+      --pin-bg: #3fb6c9;
+      --pin-ink: #0b2a30;
+      --shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+      --check: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill="none" stroke="%230B2A30" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M3 8.5 6.5 12 13 4.5"/></svg>');
+      --chevron: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill="none" stroke="%23A3A89F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 6.5 8 10.5 12 6.5"/></svg>');
+      --chrome-bg: #0f1114;
+      --chrome-ink: #d8dbe1;
+      --chrome-sub: #9aa0ab;
+      --chrome-rule: #31383f;
+      --chrome-accent: #6fc7d6;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bench: #131512;
+    --col: #1b1e1b;
+    --railbg: #101210;
+    --ink: #e8eae4;
+    --sec: #a3a89f;
+    --faint: #878d83;
+    --accent: #3fb6c9;
+    --accent-glow: rgba(63, 182, 201, 0.28);
+    --on-accent: #0b2a30;
+    --rule: #31342e;
+    --rule-soft: #272a24;
+    --ok: #7cc79a;
+    --warn: #d9a860;
+    --danger: #e08972;
+    --ok-bg: #17281d;
+    --warn-bg: #2b2213;
+    --danger-bg: #2e1913;
+    --accent-bg: #102a2f;
+    --field-bg: #161915;
+    --field-bd: #5a6057;
+    --code-bg: #171a14;
+    --stripe: #2e8c9c;
+    --pin-bg: #3fb6c9;
+    --pin-ink: #0b2a30;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+    --check: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill="none" stroke="%230B2A30" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M3 8.5 6.5 12 13 4.5"/></svg>');
+    --chevron: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill="none" stroke="%23A3A89F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 6.5 8 10.5 12 6.5"/></svg>');
+    --chrome-bg: #0f1114;
+    --chrome-ink: #d8dbe1;
+    --chrome-sub: #9aa0ab;
+    --chrome-rule: #31383f;
+    --chrome-accent: #6fc7d6;
+  }
+  :root[data-theme="light"] {
+    --bench: #f6f5f1;
+    --col: #ffffff;
+    --railbg: #ebe9e2;
+    --ink: #1a1c1a;
+    --sec: #565b57;
+    --faint: #767b73;
+    --accent: #0c7a8a;
+    --accent-glow: rgba(12, 122, 138, 0.22);
+    --on-accent: #ffffff;
+    --rule: #d4d1c6;
+    --rule-soft: #e5e2d8;
+    --ok: #2e6e45;
+    --warn: #8a5b06;
+    --danger: #b23a26;
+    --ok-bg: #e9f1eb;
+    --warn-bg: #f6eedc;
+    --danger-bg: #f5e5e0;
+    --accent-bg: #e3eef0;
+    --field-bg: #ffffff;
+    --field-bd: #83887f;
+    --code-bg: #efede4;
+    --stripe: #4fa2af;
+    --pin-bg: #0c7a8a;
+    --pin-ink: #ffffff;
+    --shadow: 0 1px 3px rgba(26, 28, 26, 0.1);
+    --check: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill="none" stroke="%23FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M3 8.5 6.5 12 13 4.5"/></svg>');
+    --chevron: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill="none" stroke="%23565B57" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 6.5 8 10.5 12 6.5"/></svg>');
+    --chrome-bg: #22252a;
+    --chrome-ink: #d8dbe1;
+    --chrome-sub: #9aa0ab;
+    --chrome-rule: #3a414a;
+    --chrome-accent: #6fc7d6;
+  }
+
+  /* ---------- base ---------- */
+  html {
+    background: var(--bench);
+  }
+  body {
+    background: var(--bench);
+    color: var(--ink);
+    font-family:
+      "Segoe UI",
+      system-ui,
+      -apple-system,
+      sans-serif;
+    font-size: 16.5px;
+    line-height: 1.5;
+    margin: 0;
+    padding: 0 0 92px 0;
+  }
+  .mono,
+  code,
+  .lrow dd {
+    font-family: Consolas, "Lucida Console", ui-monospace, monospace;
+    font-size: 0.92em;
+    font-variant-numeric: tabular-nums;
+  }
+  h1 {
+    font-size: 1.6rem;
+    font-weight: 650;
+    line-height: 1.25;
+    margin: 0 0 0.6rem 0;
+  }
+  h1:focus {
+    outline: none;
+  }
+  h1:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 4px;
+  }
+  h2 {
+    font-size: 1.18rem;
+    font-weight: 650;
+    margin: 2rem 0 0.6rem 0;
+  }
+  h3 {
+    font-size: 1rem;
+    font-weight: 650;
+    margin: 1.4rem 0 0.4rem 0;
+  }
+  p {
+    margin: 0.5rem 0;
+    max-width: 68ch;
+  }
+  a {
+    color: var(--accent);
+  }
+  .eyebrow {
+    font-size: 12px;
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--sec);
+    margin: 0 0 0.35rem 0;
+  }
+  .sub {
+    color: var(--sec);
+  }
+  .small {
+    font-size: 14px;
+  }
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  :focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* ---------- deck ---------- */
+  .screen {
+    display: none;
+  }
+  .screen.active {
+    display: block;
+  }
+
+  /* ---------- three-region bench ---------- */
+  .bench {
+    display: grid;
+    grid-template-columns: 232px minmax(0, 1fr) 296px;
+    gap: 28px;
+    max-width: 1260px;
+    margin: 0 auto;
+    padding: 30px 32px 40px 32px;
+    align-items: start;
+  }
+  .bench.no-rail {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 860px;
+  }
+  .rail {
+    position: sticky;
+    top: 20px;
+    background: var(--col);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    padding: 18px 16px 20px 16px;
+  }
+  .wordmark {
+    font-family: Consolas, "Lucida Console", ui-monospace, monospace;
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: 0.04em;
+    margin-bottom: 18px;
+  }
+  .rail .wordmark {
+    font-family: inherit;
+    font-weight: 650;
+    font-size: 14.5px;
+    letter-spacing: normal;
+    margin: 0 0 4px 0;
+  }
+  .wordrule {
+    border: 0;
+    border-top: 1px solid var(--rule);
+    margin: 0 0 14px 0;
+  }
+  .rail-group {
+    font-variant-caps: all-small-caps;
+    letter-spacing: 0.09em;
+    font-weight: 650;
+    font-size: 14px;
+    color: var(--sec);
+    margin: 18px 0 4px 0;
+  }
+  .rail-groupnote {
+    font-size: 12px;
+    color: var(--faint);
+    margin: 0 0 4px 0;
+  }
+  .rail-steps,
+  .rail-tabs,
+  .rail-timeline {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .rail-steps li,
+  .rail-timeline li {
+    position: relative;
+    padding: 6px 0 6px 24px;
+    font-size: 14px;
+    color: var(--sec);
+  }
+  .rail-steps li::before,
+  .rail-timeline li::before {
+    content: "";
+    position: absolute;
+    left: 3px;
+    top: 11px;
+    width: 9px;
+    height: 9px;
+    border: 2px solid var(--faint);
+    background: var(--col);
+    z-index: 1;
+  }
+  .rail-steps li::after,
+  .rail-timeline li::after {
+    content: "";
+    position: absolute;
+    left: 8px;
+    top: 22px;
+    bottom: -8px;
+    width: 1px;
+    background: var(--rule);
+  }
+  .rail-steps li:last-child::after,
+  .rail-timeline li:last-child::after {
+    display: none;
+  }
+  .rail-steps li.done,
+  .rail-timeline li.done {
+    color: var(--ink);
+  }
+  .rail-steps li.done::before,
+  .rail-timeline li.done::before {
+    background: var(--ink);
+    border-color: var(--ink);
+  }
+  .rail-steps li.current,
+  .rail-timeline li.current {
+    color: var(--ink);
+    font-weight: 650;
+  }
+  .rail-steps li.current::before,
+  .rail-timeline li.current::before {
+    border-color: var(--accent);
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+  .rail-steps a,
+  .rail-tabs a {
+    color: inherit;
+    text-decoration: none;
+  }
+  .rail-steps li.done a {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+  }
+  .rail-tabs li {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    padding: 6px 0;
+    font-size: 14px;
+  }
+  .rail-tabs a {
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+  }
+  .rail-tabs li.current-tab a {
+    color: var(--accent);
+  }
+  .val {
+    font-family: Consolas, "Lucida Console", ui-monospace, monospace;
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--faint);
+    white-space: nowrap;
+  }
+  .val.edited {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .val.attn {
+    color: var(--warn);
+    font-weight: 600;
+  }
+  .problems {
+    margin-top: 20px;
+    border: 2px solid var(--danger);
+    background: var(--danger-bg);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .problems.warned {
+    border-color: var(--warn);
+    background: var(--warn-bg);
+  }
+  .problems h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: 0 0 6px 0;
+    color: var(--danger);
+  }
+  .problems.warned h2 {
+    color: var(--warn);
+  }
+  .problems ul {
+    margin: 0;
+    padding: 0 0 0 1.1em;
+    font-size: 13.5px;
+  }
+  .problems a {
+    color: inherit;
+    font-weight: 600;
+  }
+
+  /* ---------- work column ---------- */
+  .work {
+    background: var(--col);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    padding: 30px 36px 34px 36px;
+    min-width: 0;
+  }
+  .work > * {
+    max-width: 640px;
+  }
+  .workfoot {
+    margin-top: 2rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--rule);
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    flex-wrap: wrap;
+  }
+  .workfoot .status-line {
+    font-weight: 600;
+    margin: 0;
+  }
+  .workfoot .status-line.ok {
+    color: var(--ok);
+  }
+  .backlink {
+    display: inline-block;
+    margin-bottom: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent);
+    background: none;
+    border: none;
+    padding: 0;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  /* ---------- ledger ---------- */
+  .ledger {
+    position: sticky;
+    top: 20px;
+    background: var(--col);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 18px 20px 16px 20px;
+  }
+  .ledger h2 {
+    margin: 0 0 4px 0;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--sec);
+  }
+  .ledger .sealed-tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 650;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    padding: 1px 8px;
+    margin-bottom: 6px;
+  }
+  .ledger dl {
+    margin: 8px 0 0 0;
+  }
+  .lrow {
+    border-top: 1px solid var(--rule);
+    padding: 9px 0 8px 0;
+  }
+  .lrow dt {
+    font-size: 11.5px;
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--sec);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .lrow dd {
+    margin: 3px 0 0 0;
+    font-size: 14px;
+    overflow-wrap: anywhere;
+  }
+  .lrow dd .dash {
+    color: var(--faint);
+  }
+  .lref {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: none;
+    color: var(--accent);
+    white-space: nowrap;
+  }
+  .trust {
+    margin: 14px 0 0 0;
+    padding-top: 12px;
+    border-top: 2px solid var(--rule);
+    font-size: 13px;
+    color: var(--sec);
+  }
+
+  /* ---------- forms ---------- */
+  .field {
+    margin: 1.2rem 0;
+    max-width: 640px;
+  }
+  .field label,
+  .field > .label {
+    display: block;
+    font-weight: 650;
+    margin-bottom: 4px;
+  }
+  .hint {
+    display: block;
+    font-size: 14px;
+    color: var(--sec);
+    margin: 0 0 6px 0;
+    max-width: 62ch;
+  }
+  .field-error {
+    display: block;
+    font-size: 14px;
+    font-weight: 650;
+    color: var(--danger);
+    margin: 0 0 6px 0;
+  }
+  input[type="text"],
+  input[type="date"],
+  textarea,
+  select {
+    font-family: inherit;
+    font-size: 16px;
+    color: var(--ink);
+    background: var(--field-bg);
+    border: 2px solid var(--field-bd);
+    border-radius: 5px;
+    padding: 8px 10px;
+    width: 100%;
+    max-width: 480px;
+    box-sizing: border-box;
+  }
+  input.mono,
+  textarea.mono {
+    font-family: Consolas, "Lucida Console", ui-monospace, monospace;
+    font-size: 15px;
+  }
+  input.err-bd,
+  textarea.err-bd {
+    border-color: var(--danger);
+  }
+  select {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: var(--chevron);
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 16px;
+    padding-right: 34px;
+  }
+  select:disabled,
+  input:disabled {
+    border-style: dashed;
+    color: var(--sec);
+    background-color: var(--code-bg);
+    cursor: not-allowed;
+  }
+  textarea {
+    max-width: 640px;
+    min-height: 96px;
+    resize: vertical;
+  }
+  input[type="text"]:focus-visible,
+  input[type="date"]:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 1px;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--faint);
+    opacity: 1;
+  }
+
+  /* custom checkbox + radio */
+  .check,
+  .radio {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin: 0.7rem 0;
+    max-width: 640px;
+  }
+  .check input[type="checkbox"],
+  .radio input[type="radio"] {
+    appearance: none;
+    -webkit-appearance: none;
+    flex: none;
+    width: 24px;
+    height: 24px;
+    margin: 2px 0 0 0;
+    border: 2px solid var(--field-bd);
+    background: var(--field-bg);
+    cursor: pointer;
+  }
+  .check input[type="checkbox"] {
+    border-radius: 4px;
+  }
+  .radio input[type="radio"] {
+    border-radius: 50%;
+  }
+  .check input[type="checkbox"]:checked {
+    background: var(--accent) var(--check) center / 16px no-repeat;
+    border-color: var(--accent);
+  }
+  .radio input[type="radio"]:checked {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 4px var(--field-bg);
+    background: var(--accent);
+  }
+  .check input:disabled,
+  .radio input:disabled {
+    border-style: dashed;
+    background-color: var(--code-bg);
+  }
+  .check label,
+  .radio label {
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .check .hint,
+  .radio .hint {
+    margin-top: 2px;
+    font-weight: 400;
+  }
+  fieldset {
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 14px 18px 16px 18px;
+    margin: 1.2rem 0;
+    max-width: 640px;
+  }
+  legend {
+    font-weight: 650;
+    padding: 0 8px;
+  }
+  fieldset.bare {
+    border: none;
+    padding: 0;
+  }
+  fieldset.bare legend {
+    padding: 0;
+    margin-bottom: 4px;
+  }
+
+  /* radio cards (transport) */
+  .radio-card {
+    border: 2px solid var(--rule);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 10px 0;
+  }
+  .radio-card.selected {
+    border-color: var(--accent);
+    background: var(--accent-bg);
+  }
+  .radio-card .radio {
+    margin: 0;
+  }
+  .tag-roadmap {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--warn);
+    border: 1px solid var(--warn);
+    border-radius: 999px;
+    padding: 1px 8px;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+
+  /* switch */
+  .switch {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin: 1.2rem 0;
+    max-width: 640px;
+  }
+  .switch button[role="switch"] {
+    flex: none;
+    width: 46px;
+    height: 26px;
+    border-radius: 999px;
+    border: 2px solid var(--field-bd);
+    background: var(--field-bg);
+    position: relative;
+    cursor: pointer;
+    margin-top: 2px;
+    padding: 0;
+  }
+  .switch button[role="switch"]::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--field-bd);
+  }
+  .switch button[role="switch"][aria-checked="true"] {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .switch button[role="switch"][aria-checked="true"]::after {
+    left: auto;
+    right: 2px;
+    background: var(--on-accent);
+  }
+  .switch .label {
+    font-weight: 650;
+  }
+
+  /* buttons */
+  .btn {
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: 650;
+    color: var(--on-accent);
+    background: var(--accent);
+    border: 2px solid var(--accent);
+    border-radius: 6px;
+    padding: 9px 20px;
+    cursor: pointer;
+  }
+  .btn:hover {
+    filter: brightness(1.06);
+  }
+  .btn-secondary {
+    background: transparent;
+    color: var(--accent);
+  }
+  .btn-quiet {
+    background: transparent;
+    color: var(--ink);
+    border-color: var(--field-bd);
+    font-weight: 600;
+  }
+  .btn-danger {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #ffffff;
+  }
+  .btn:disabled {
+    background: var(--code-bg);
+    border-color: var(--rule);
+    color: var(--sec);
+    cursor: not-allowed;
+    filter: none;
+  }
+  .btn-sm {
+    font-size: 14px;
+    padding: 5px 12px;
+  }
+  .iconbtn {
+    background: transparent;
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--sec);
+    cursor: pointer;
+    flex: none;
+  }
+  .iconbtn svg {
+    width: 15px;
+    height: 15px;
+  }
+  .linklike {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    font-weight: 600;
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+  }
+
+  /* dropzone + file card */
+  .dropzone {
+    border: 2px dashed var(--field-bd);
+    border-radius: 8px;
+    background: var(--field-bg);
+    padding: 22px 24px;
+    text-align: center;
+    max-width: 640px;
+    cursor: pointer;
+  }
+  .dropzone p {
+    margin: 2px auto;
+  }
+  .dropzone .dz-max {
+    color: var(--sec);
+    font-size: 14px;
+  }
+  .filecard {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 12px 16px;
+    max-width: 640px;
+    margin: 12px 0;
+  }
+  .filecard svg {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    color: var(--accent);
+  }
+  .filecard .fname {
+    font-weight: 650;
+  }
+  .filecard .fmeta {
+    color: var(--sec);
+    font-size: 14px;
+  }
+
+  /* alerts + callouts */
+  .alert {
+    border-left: 5px solid;
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 1.1rem 0;
+    max-width: 640px;
+  }
+  .alert h3,
+  .alert h4 {
+    margin: 0 0 4px 0;
+    font-size: 16px;
+    font-weight: 650;
+  }
+  .alert p {
+    margin: 3px 0;
+    font-size: 15px;
+  }
+  .alert-ok {
+    border-color: var(--ok);
+    background: var(--ok-bg);
+  }
+  .alert-ok h3,
+  .alert-ok h4 {
+    color: var(--ok);
+  }
+  .alert-warn {
+    border-color: var(--warn);
+    background: var(--warn-bg);
+  }
+  .alert-warn h3,
+  .alert-warn h4 {
+    color: var(--warn);
+  }
+  .alert-danger {
+    border-color: var(--danger);
+    background: var(--danger-bg);
+  }
+  .alert-danger h3,
+  .alert-danger h4 {
+    color: var(--danger);
+  }
+  .alert-info {
+    border-color: var(--accent);
+    background: var(--accent-bg);
+  }
+  .alert-info h3,
+  .alert-info h4 {
+    color: var(--accent);
+  }
+  .callout {
+    background: var(--accent-bg);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 1.1rem 0;
+    max-width: 640px;
+  }
+  .callout p {
+    margin: 3px 0;
+  }
+  .callout .lead-line {
+    font-weight: 650;
+  }
+
+  /* state insets: "here is another state of this component", part of the mock's vocabulary */
+  .state-inset {
+    border: 1px dashed var(--faint);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 1.4rem 0;
+    max-width: 640px;
+  }
+  .state-inset > .state-label {
+    font-size: 11.5px;
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--faint);
+    margin: 0 0 8px 0;
+  }
+
+  /* tables */
+  .table-scroll {
+    overflow-x: auto;
+    max-width: 640px;
+  }
+  table.bench-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+  }
+  table.bench-table th {
+    font-size: 12px;
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--sec);
+    text-align: left;
+    padding: 6px 12px 6px 0;
+    border-bottom: 2px solid var(--rule);
+  }
+  table.bench-table td {
+    padding: 9px 12px 9px 0;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: middle;
+  }
+  table.bench-table td select {
+    max-width: 220px;
+    font-size: 14.5px;
+    padding: 5px 30px 5px 8px;
+  }
+  /* check answers */
+  table.answers th[scope="row"] {
+    font-size: 15px;
+    font-weight: 650;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--ink);
+    border-bottom: 1px solid var(--rule-soft);
+    padding: 10px 16px 10px 0;
+    width: 34%;
+    vertical-align: top;
+  }
+  table.answers td.chg {
+    text-align: right;
+    white-space: nowrap;
+  }
+  table.answers td.chg .set-above {
+    color: var(--faint);
+    font-size: 13px;
+  }
+
+  /* code / copy rows */
+  .copyrow {
+    margin: 1.1rem 0;
+    max-width: 640px;
+  }
+  .copyrow .copybox {
+    display: flex;
+    gap: 10px;
+    align-items: stretch;
+  }
+  .codeblock {
+    flex: 1;
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 10px 12px;
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+  .copybtn {
+    flex: none;
+    align-self: center;
+  }
+
+  /* chips in previews */
+  .pchip {
+    display: inline-block;
+    font-size: 12.5px;
+    font-weight: 650;
+    border-radius: 4px;
+    padding: 1px 7px;
+    border: 1px solid var(--rule);
+    background: var(--code-bg);
+    color: var(--sec);
+  }
+  .pchip-ok {
+    border-color: var(--ok);
+    color: var(--ok);
+    background: var(--ok-bg);
+  }
+  .pchip-warn {
+    border-color: var(--warn);
+    color: var(--warn);
+    background: var(--warn-bg);
+  }
+  .badge-adv {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--warn);
+    border: 1px solid var(--warn);
+    border-radius: 4px;
+    padding: 0 6px;
+    margin-left: 8px;
+  }
+  .badge-sat {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 650;
+    color: var(--ok);
+    border: 1px solid var(--ok);
+    background: var(--ok-bg);
+    border-radius: 999px;
+    padding: 1px 10px;
+  }
+  .badge-unsat {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 650;
+    color: var(--danger);
+    border: 1px solid var(--danger);
+    background: var(--danger-bg);
+    border-radius: 999px;
+    padding: 1px 10px;
+  }
+
+  /* cleaning cards + key cards */
+  .fieldcard,
+  .keycard {
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    margin: 1.1rem 0;
+    max-width: 640px;
+  }
+  .fieldcard > summary,
+  .fieldcard-head {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    font-weight: 650;
+    cursor: pointer;
+    flex-wrap: wrap;
+  }
+  .fieldcard > summary::-webkit-details-marker {
+    display: none;
+  }
+  .fieldcard > summary::before {
+    content: "";
+    width: 16px;
+    height: 16px;
+    background: var(--chevron) center / 16px no-repeat;
+    transform: rotate(-90deg);
+    flex: none;
+  }
+  .fieldcard[open] > summary::before {
+    transform: none;
+  }
+  .fieldcard .card-body,
+  .keycard .card-body {
+    padding: 4px 16px 16px 16px;
+    border-top: 1px solid var(--rule-soft);
+  }
+  .fieldcard .fromline {
+    font-weight: 400;
+    color: var(--sec);
+    font-size: 14px;
+  }
+  .steps {
+    list-style: none;
+    counter-reset: step;
+    margin: 0.6rem 0;
+    padding: 0;
+  }
+  .steps > li {
+    counter-increment: step;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid var(--rule-soft);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin: 6px 0;
+    flex-wrap: wrap;
+  }
+  .steps > li::before {
+    content: counter(step);
+    flex: none;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    color: var(--sec);
+    font-size: 12.5px;
+    font-weight: 650;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .steps .stepname {
+    font-weight: 650;
+    margin-right: auto;
+  }
+  .steps .stepparam {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    color: var(--sec);
+  }
+  .steps .stepparam input {
+    width: 200px;
+    font-size: 14px;
+    padding: 4px 8px;
+  }
+  .coverage {
+    font-size: 14.5px;
+    margin: 0.7rem 0;
+  }
+  .coverage.bad {
+    color: var(--danger);
+    font-weight: 650;
+  }
+  .stepmenu {
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    background: var(--field-bg);
+    box-shadow: var(--shadow);
+    padding: 8px 0;
+    max-width: 460px;
+    margin: 8px 0;
+  }
+  .stepmenu .menugroup {
+    padding: 6px 16px 2px 16px;
+    font-size: 11.5px;
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--faint);
+  }
+  .stepmenu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 7px 16px;
+    font-family: inherit;
+    font-size: 15px;
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .stepmenu button:hover {
+    background: var(--accent-bg);
+  }
+  .stepmenu button .blurb {
+    display: block;
+    font-size: 13px;
+    color: var(--sec);
+    font-weight: 400;
+  }
+  .keycard {
+    padding: 0;
+  }
+  .keycard .keyhead {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    flex-wrap: wrap;
+  }
+  .keycard .keyhead .keyno {
+    font-weight: 650;
+  }
+  .element {
+    border: 1px solid var(--rule-soft);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin: 8px 0;
+  }
+  .element .elrow {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+  .element .elrow .field {
+    margin: 4px 0;
+    flex: 1 1 180px;
+  }
+  .element .elrow .field label {
+    font-size: 13.5px;
+  }
+  .element .elrow select,
+  .element .elrow input {
+    font-size: 14.5px;
+    padding: 5px 8px;
+  }
+  .element .elrow select {
+    padding-right: 30px;
+  }
+  .multiselect {
+    border: 2px solid var(--field-bd);
+    border-radius: 5px;
+    background: var(--field-bg);
+    padding: 6px 8px;
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    max-width: 480px;
+  }
+  .mschip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--accent-bg);
+    border: 1px solid var(--accent);
+    color: var(--ink);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .mschip button {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-weight: 700;
+    cursor: pointer;
+    padding: 0 2px;
+    font-size: 14px;
+  }
+
+  /* guided key list */
+  .guided-keys {
+    list-style: none;
+    margin: 0.8rem 0;
+    padding: 0;
+    max-width: 640px;
+  }
+  .guided-keys > li {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin: 8px 0;
+  }
+  .guided-keys .check {
+    margin: 0;
+    flex: 1;
+  }
+  .guided-keys .movers {
+    display: flex;
+    gap: 6px;
+    flex: none;
+  }
+
+  /* column chips (default exchange columns) */
+  .colchips {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 0.6rem 0;
+    padding: 0;
+    list-style: none;
+  }
+  .colchips li {
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-radius: 999px;
+    padding: 3px 12px;
+    font-weight: 600;
+  }
+
+  /* status + progress */
+  .statuspanel {
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 16px 20px;
+    max-width: 640px;
+    margin: 1.2rem 0;
+  }
+  .stage-label {
+    text-align: center;
+    font-weight: 650;
+    font-size: 1.05rem;
+    margin: 6px 0 12px 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+  }
+  .spinner {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 3px solid var(--rule);
+    border-top-color: var(--accent);
+    animation: spin 0.9s linear infinite;
+    flex: none;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .progress {
+    height: 14px;
+    border: 1px solid var(--rule);
+    border-radius: 7px;
+    overflow: hidden;
+    background: var(--code-bg);
+  }
+  .progress .bar {
+    height: 100%;
+    background: repeating-linear-gradient(
+      45deg,
+      var(--accent) 0 10px,
+      var(--stripe) 10px 20px
+    );
+    background-size: 28.28px 28.28px;
+    animation: slide 1.1s linear infinite;
+  }
+  .progress.done-bar .bar {
+    animation: none;
+    background: var(--accent);
+  }
+  @keyframes slide {
+    to {
+      background-position: 28.28px 0;
+    }
+  }
+  .stage-history {
+    list-style: none;
+    margin: 0.8rem 0 0 0;
+    padding: 0;
+    font-size: 14.5px;
+  }
+  .stage-history li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0;
+    color: var(--sec);
+  }
+  .stage-history li.now {
+    color: var(--ink);
+    font-weight: 650;
+  }
+  .stage-history .tick {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--ok) var(--check) center / 10px no-repeat;
+  }
+  .stage-history li.now .tick {
+    background: var(--accent);
+  }
+
+  /* completion */
+  .donepanel {
+    border: 1px solid var(--rule);
+    border-left: 6px solid var(--accent);
+    border-radius: 8px;
+    padding: 20px 24px;
+    max-width: 640px;
+    margin: 1.2rem 0;
+  }
+  .donepanel .bigcount {
+    font-size: 1.5rem;
+    font-weight: 650;
+    margin: 0;
+  }
+  .dlrow {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--rule-soft);
+    max-width: 640px;
+    flex-wrap: wrap;
+  }
+  .dlrow .dl-label {
+    flex: 1 1 220px;
+    font-weight: 600;
+  }
+  .dlrow .dl-label .keep-private {
+    color: var(--danger);
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 12.5px;
+    letter-spacing: 0.05em;
+  }
+  .dlrow .linklike {
+    overflow-wrap: anywhere;
+    text-align: left;
+  }
+
+  /* landing */
+  .lobby {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 56px 32px 40px 32px;
+  }
+  .lobby .wordmark {
+    margin-bottom: 8px;
+  }
+  .lobby-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin: 1.8rem 0 1.2rem 0;
+  }
+  .action-card {
+    background: var(--col);
+    border: 2px solid var(--rule);
+    border-radius: 10px;
+    padding: 22px 24px 24px 24px;
+  }
+  .action-card h3 {
+    margin: 0 0 6px 0;
+    font-size: 1.1rem;
+  }
+  .howitworks {
+    border-top: 1px solid var(--rule);
+    margin-top: 2rem;
+    padding-top: 1.2rem;
+    color: var(--sec);
+    font-size: 15px;
+  }
+
+  /* terms review (acceptor) */
+  .terms h2 {
+    font-size: 1.05rem;
+    border-bottom: 2px solid var(--rule);
+    padding-bottom: 4px;
+  }
+  .terms dl {
+    margin: 0.6rem 0;
+  }
+  .terms dt {
+    font-weight: 650;
+    margin-top: 0.7rem;
+  }
+  .terms dd {
+    margin: 2px 0 0 0;
+    max-width: 62ch;
+  }
+  .terms ol.keylist {
+    margin: 0.4rem 0;
+    padding-left: 1.4rem;
+  }
+  .terms ol.keylist li {
+    margin: 4px 0;
+  }
+
+  /* verdict strip */
+  .verdict {
+    border-radius: 8px;
+    border: 2px solid;
+    padding: 12px 16px;
+    max-width: 640px;
+    margin: 1.1rem 0;
+    font-weight: 650;
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    flex-wrap: wrap;
+  }
+  .verdict .verdict-detail {
+    font-weight: 400;
+    color: var(--sec);
+  }
+  .verdict-warn {
+    border-color: var(--warn);
+    background: var(--warn-bg);
+    color: var(--warn);
+  }
+  .verdict-ok {
+    border-color: var(--ok);
+    background: var(--ok-bg);
+    color: var(--ok);
+  }
+  .verdict-bad {
+    border-color: var(--danger);
+    background: var(--danger-bg);
+    color: var(--danger);
+  }
+
+  /* states-errors gallery */
+  .gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 20px;
+    margin-top: 1.2rem;
+  }
+  .gallery .alert {
+    margin: 0;
+    max-width: none;
+  }
+  .gallery-cell > .cell-cap {
+    font-size: 12px;
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--faint);
+    margin: 0 0 6px 0;
+  }
+
+  /* narrow device frame */
+  .device {
+    width: 400px;
+    max-width: 100%;
+    margin: 1.6rem auto;
+    border: 10px solid var(--chrome-bg);
+    border-radius: 26px;
+    background: var(--bench);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  .device-inner {
+    padding: 14px 14px 22px 14px;
+  }
+  .step-strip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    background: var(--col);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    padding: 8px 12px;
+    font-size: 13.5px;
+    font-weight: 650;
+  }
+  .share-bar {
+    border: 1px solid var(--rule);
+    background: var(--col);
+    border-radius: 8px;
+    margin: 12px 0;
+  }
+  .share-bar summary {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    font-weight: 650;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .share-bar summary::-webkit-details-marker {
+    display: none;
+  }
+  .share-bar summary::after {
+    content: "";
+    width: 16px;
+    height: 16px;
+    background: var(--chevron) center / 16px no-repeat;
+  }
+  .share-bar[open] summary::after {
+    transform: rotate(180deg);
+  }
+  .share-bar .bar-body {
+    padding: 0 12px 12px 12px;
+    border-top: 1px solid var(--rule-soft);
+    font-size: 13.5px;
+  }
+  .customize-disclosure {
+    margin: 12px 0;
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    background: var(--col);
+  }
+  .customize-disclosure summary {
+    list-style: none;
+    padding: 10px 12px;
+    font-weight: 650;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .customize-disclosure summary::-webkit-details-marker {
+    display: none;
+  }
+  .customize-disclosure summary::after {
+    content: "";
+    width: 16px;
+    height: 16px;
+    background: var(--chevron) center / 16px no-repeat;
+  }
+  .customize-disclosure ul {
+    list-style: none;
+    margin: 0;
+    padding: 0 12px 12px 12px;
+    font-size: 14px;
+  }
+  .customize-disclosure ul li {
+    padding: 6px 0;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  /* ---------- annotation pins + notes ---------- */
+  .pin {
+    display: none;
+    width: 19px;
+    height: 19px;
+    border-radius: 50%;
+    background: var(--pin-bg);
+    color: var(--pin-ink);
+    font-size: 11.5px;
+    font-weight: 700;
+    line-height: 19px;
+    text-align: center;
+    vertical-align: super;
+    margin-left: 4px;
+    font-style: normal;
+    font-variant-numeric: tabular-nums;
+    font-family: "Segoe UI", system-ui, sans-serif;
+  }
+  body.notes-on .pin {
+    display: inline-block;
+  }
+  .notes-panel {
+    display: none;
+    position: fixed;
+    right: 16px;
+    top: 16px;
+    bottom: 88px;
+    width: 340px;
+    overflow-y: auto;
+    background: var(--chrome-bg);
+    color: var(--chrome-ink);
+    border: 1px solid var(--chrome-rule);
+    border-radius: 10px;
+    padding: 16px 18px;
+    z-index: 40;
+    font-size: 13.5px;
+    line-height: 1.5;
+  }
+  body.notes-on .screen.active .notes-panel {
+    display: block;
+  }
+  .notes-panel h2 {
+    margin: 0 0 8px 0;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--chrome-accent);
+  }
+  .notes-panel ol {
+    margin: 0;
+    padding-left: 1.4em;
+  }
+  .notes-panel li {
+    margin: 0 0 10px 0;
+  }
+  .notes-panel li::marker {
+    color: var(--chrome-accent);
+    font-weight: 700;
+  }
+  .notes-panel b {
+    color: #ffffff;
+  }
+  .notes-panel .no-notes {
+    color: var(--chrome-sub);
+  }
+
+  /* ---------- review chrome ---------- */
+  .chrome {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--chrome-bg);
+    color: var(--chrome-ink);
+    border-top: 1px solid var(--chrome-rule);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 18px;
+    font-size: 13px;
+    z-index: 50;
+  }
+  .chrome-left {
+    flex: 1 1 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .chrome-tag {
+    flex: none;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    border: 1px solid var(--chrome-accent);
+    color: var(--chrome-accent);
+    border-radius: 3px;
+    padding: 1px 6px;
+  }
+  .chrome-name {
+    font-weight: 650;
+    white-space: nowrap;
+  }
+  .chrome-title {
+    color: var(--chrome-sub);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chrome-center {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .chrome-count {
+    color: var(--chrome-sub);
+    font-variant-numeric: tabular-nums;
+    min-width: 100px;
+    text-align: center;
+  }
+  .chrome-right {
+    flex: 1 1 0;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .chrome button {
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    background: transparent;
+    color: var(--chrome-ink);
+    border: 1px solid var(--chrome-rule);
+    border-radius: 5px;
+    padding: 5px 12px;
+    cursor: pointer;
+  }
+  .chrome button:hover {
+    border-color: var(--chrome-accent);
+    color: var(--chrome-accent);
+  }
+  .chrome button[aria-pressed="true"],
+  .chrome button[aria-expanded="true"] {
+    background: var(--chrome-accent);
+    color: var(--chrome-bg);
+    border-color: var(--chrome-accent);
+  }
+  .chrome button:focus-visible {
+    outline: 3px solid var(--chrome-accent);
+    outline-offset: 2px;
+  }
+  .jump {
+    position: fixed;
+    right: 16px;
+    bottom: 58px;
+    width: 330px;
+    max-height: min(560px, calc(100vh - 120px));
+    overflow-y: auto;
+    background: var(--chrome-bg);
+    color: var(--chrome-ink);
+    border: 1px solid var(--chrome-rule);
+    border-radius: 10px;
+    padding: 12px 8px;
+    z-index: 60;
+    font-size: 13.5px;
+  }
+  .jump h2 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--chrome-accent);
+    margin: 10px 10px 4px 10px;
+  }
+  .jump h2:first-child {
+    margin-top: 2px;
+  }
+  .jump button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--chrome-ink);
+    font-family: inherit;
+    font-size: 13.5px;
+    padding: 6px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .jump button:hover {
+    background: var(--chrome-rule);
+  }
+  .jump button[aria-current="true"] {
+    color: var(--chrome-accent);
+    font-weight: 700;
+  }
+  .jump button .jn {
+    display: inline-block;
+    width: 24px;
+    color: var(--chrome-sub);
+    font-variant-numeric: tabular-nums;
+  }
+  .jump button:focus-visible {
+    outline: 3px solid var(--chrome-accent);
+    outline-offset: -2px;
+  }
+
+  /* ---------- responsive + motion ---------- */
+  @media (max-width: 1080px) {
+    .bench {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .rail,
+    .ledger {
+      position: static;
+    }
+    .notes-panel {
+      top: auto;
+      right: 0;
+      left: 0;
+      bottom: 52px;
+      width: auto;
+      max-height: 45vh;
+      border-radius: 12px 12px 0 0;
+    }
+    .lobby-actions {
+      grid-template-columns: 1fr;
+    }
+    .chrome-title {
+      display: none;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation: none !important;
+      transition: none !important;
+    }
+    .progress .bar {
+      background: var(--accent);
+    }
+    .spinner {
+      border-top-color: var(--rule);
+      border-left-color: var(--accent);
+    }
+  }
+</style>
+
+<!-- =============================================================
+     SCREEN 1 - landing
+============================================================= -->
+<section
+  class="screen active"
+  id="landing"
+  data-title="Landing"
+  data-group="inviter"
+>
+  <div class="lobby">
+    <div class="wordmark">psilink</div>
+    <h1 tabindex="-1">
+      psilink - private record linkage<sup class="pin">1</sup>
+    </h1>
+    <p style="font-size: 1.08rem; max-width: 62ch">
+      Find the records you both hold - without either of you seeing the other's
+      data.<sup class="pin">2</sup>
+    </p>
+    <p class="sub small">
+      Your file is processed entirely in your browser and it is never uploaded
+      to our server.
+    </p>
+
+    <h2 class="visually-hidden">Start a private data exchange</h2>
+    <div class="lobby-actions">
+      <div class="action-card">
+        <h3>Set up an exchange</h3>
+        <p class="small sub" style="min-height: 3em">
+          Choose a file, confirm what you disclose, and share an invitation.
+          Recommended terms come from your file; most exchanges need nothing
+          more.
+        </p>
+        <p>
+          <button class="btn" data-goto="bench-file">Set up an exchange</button>
+        </p>
+      </div>
+      <div class="action-card">
+        <h3>Accept an invitation you were sent</h3>
+        <div class="field" style="margin: 0.4rem 0 0.8rem 0">
+          <label for="accept-paste">Invitation link or code</label>
+          <span class="hint" id="accept-paste-hint"
+            >Paste the link or code your partner sent you</span
+          >
+          <textarea
+            id="accept-paste"
+            class="mono"
+            aria-describedby="accept-paste-hint"
+            placeholder="https://...#... or the bare code"
+            style="min-height: 64px"
+          ></textarea>
+        </div>
+        <p>
+          <button class="btn btn-secondary" data-goto="accept-review">
+            Review invitation
+          </button>
+        </p>
+      </div>
+    </div>
+
+    <p class="sub small">
+      Running exchanges on a schedule? The same setup saves an SFTP exchange
+      file for the command-line tool.<sup class="pin">3</sup>
+    </p>
+
+    <div class="howitworks">
+      <p style="max-width: 72ch">
+        <strong>How it works.</strong> Each of you keeps your file on your own
+        machine. psilink compares cryptographic fingerprints of the fields you
+        match on - a private set intersection - so only the records you both
+        hold are revealed, and only to the people the terms name. Your browser
+        connects directly to your partner's.
+      </p>
+    </div>
+  </div>
+  <aside class="notes-panel" aria-label="Design notes">
+    <h2>Design notes - Landing</h2>
+    <ol>
+      <li>
+        <b>GOV.UK: Start page minimalism.</b> One outcome sentence and two
+        doors. Every configuration choice lives inside the bench, behind safe
+        defaults - the start page carries none of it.
+      </li>
+      <li>
+        <b>18F Content Guide: interface writing.</b> Outcome first, mechanism
+        second: "find the records you both hold" precedes any mention of PSI,
+        which appears once, in the explainer strip.
+      </li>
+      <li>
+        <b>GDS principle 1: Start with user needs.</b> The scheduled-exchange
+        line is a quiet signpost for the operator persona, not a third door -
+        SFTP is a transport chosen later, inside the same setup.
+      </li>
+    </ol>
+  </aside>
+</section>
+
+<!-- =============================================================
+     SCREEN 2 - bench-file (Step 1 of 3)
+============================================================= -->
+<section
+  class="screen"
+  id="bench-file"
+  data-title="Step 1 - Your file"
+  data-group="inviter"
+>
+  <div class="bench">
+    <nav class="rail" aria-label="Exchange setup">
+      <div class="wordmark">psilink</div>
+      <hr class="wordrule" />
+      <p class="rail-group">Set up</p>
+      <ol class="rail-steps">
+        <li class="current">
+          <a aria-current="step">Your file</a>
+        </li>
+        <li class="pending">
+          <a>Matching &amp; sharing</a>
+        </li>
+        <li class="pending">
+          <a>Review &amp; create</a>
+        </li>
+      </ol>
+      <p class="rail-group">Customize<sup class="pin">2</sup></p>
+      <p class="rail-groupnote">Filled in from your file.</p>
+      <ul class="rail-tabs">
+        <li>
+          <a data-goto="tab-cleaning">Cleaning</a>
+          <span class="val">3 fields</span>
+        </li>
+        <li>
+          <a data-goto="tab-keys">Matching keys</a>
+          <span class="val">2 keys</span>
+        </li>
+        <li>
+          <a data-goto="tab-agreement">Legal agreement</a>
+          <span class="val">&mdash;</span>
+        </li>
+      </ul>
+    </nav>
+
+    <div class="work">
+      <p class="eyebrow">Step 1 of 3</p>
+      <h1 tabindex="-1">Your file</h1>
+
+      <div class="field">
+        <label for="inv-name">Your name</label>
+        <span class="hint" id="inv-name-hint"
+          >Recorded in the invitation's linkage terms so your partner can
+          identify you</span
+        >
+        <input
+          type="text"
+          id="inv-name"
+          value="Dana Okafor"
+          maxlength="200"
+          aria-describedby="inv-name-hint"
+        />
+      </div>
+
+      <div class="field">
+        <span class="label" id="dz-label">Your data file</span>
+        <div
+          class="dropzone"
+          role="button"
+          tabindex="0"
+          aria-labelledby="dz-label"
+        >
+          <p><strong>Drag files here or click to select</strong></p>
+          <p class="dz-max">(Max file size: 64 MB)</p>
+        </div>
+        <div class="filecard">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            aria-hidden="true"
+          >
+            <path
+              d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"
+            />
+            <path d="M13 3v6h6" />
+          </svg>
+          <div>
+            <div class="fname mono">clients_2025.csv</div>
+            <div class="fmeta mono">12,408 rows - 8.4 MB</div>
+          </div>
+          <button class="linklike small" style="margin-left: auto">
+            Choose a different file
+          </button>
+        </div>
+        <p class="small sub">
+          Your file is processed entirely in your browser and it is never
+          uploaded to our server.
+        </p>
+      </div>
+
+      <div class="callout">
+        <p class="lead-line">
+          Recommended terms are ready. Most exchanges need nothing more.<sup
+            class="pin"
+            >1</sup
+          >
+        </p>
+        <p class="small">
+          Cleaning, matching keys, and the option of a legal agreement were set
+          from your file's columns. Customize any of them from the rail, any
+          time before you create the invitation.
+        </p>
+      </div>
+
+      <div class="workfoot">
+        <button class="btn" data-goto="bench-columns">
+          Continue to matching &amp; sharing
+        </button>
+        <p class="status-line sub small" style="font-weight: 400">
+          A name and a file are needed to proceed.
+        </p>
+      </div>
+    </div>
+
+    <aside class="ledger" aria-label="This exchange">
+      <h2>This exchange<sup class="pin">3</sup></h2>
+      <dl>
+        <div class="lrow">
+          <dt>You will send <span class="lref">Step 2</span></dt>
+          <dd>enrollment_date, program_code</dd>
+        </div>
+        <div class="lrow">
+          <dt>You will receive <span class="lref">Step 2</span></dt>
+          <dd><span class="dash">&mdash;</span></dd>
+        </div>
+        <div class="lrow">
+          <dt>Matched on <span class="lref">Keys tab</span></dt>
+          <dd>1. ssn_last4 + dob + last_name<br />2. full name + dob + zip</dd>
+        </div>
+        <div class="lrow">
+          <dt>Expires <span class="lref">Step 3</span></dt>
+          <dd>1 hour after you share</dd>
+        </div>
+        <div class="lrow">
+          <dt>Results go to <span class="lref">Step 3</span></dt>
+          <dd>You and your partner</dd>
+        </div>
+        <div class="lrow">
+          <dt>Agreement <span class="lref">Agreement tab</span></dt>
+          <dd><span class="dash">None</span></dd>
+        </div>
+        <div class="lrow">
+          <dt>Transport <span class="lref">Step 3</span></dt>
+          <dd>Browser</dd>
+        </div>
+      </dl>
+      <p class="trust">
+        Your file stays in this browser. Nothing is uploaded; your partner
+        receives only what this ledger names.
+      </p>
+    </aside>
+  </div>
+  <aside class="notes-panel" aria-label="Design notes">
+    <h2>Design notes - Your file</h2>
+    <ol>
+      <li>
+        <b>GDS principle 4: Do the hard work to make it simple.</b> The file,
+        not the user, fills the form: dropping
+        <code>clients_2025.csv</code> derives cleaning, keys, and disclosure
+        defaults. The callout states the consequence plainly - most exchanges
+        are done in three steps - and the rail says it once, in the group note
+        "Filled in from your file.", instead of stamping a status word on every
+        tab.
+      </li>
+      <li>
+        <b>USWDS: Step indicator.</b> Only the true sequence sits on the
+        connected spine of square markers. Cleaning, keys, and agreement are not
+        steps, so they live in the separate "Customize" group - live links at
+        full contrast, each stating its current value as a quiet fact in the
+        data voice. Pending steps are grey but AA-legible, never
+        disabled-looking.
+      </li>
+      <li>
+        <b>USWDS: Earn trust.</b> The standing ledger fills the moment the file
+        is read: what leaves this machine is never more than a glance away, and
+        each row cites the step or tab that changes it.
+      </li>
+    </ol>
+  </aside>
+</section>
+
+<!-- =============================================================
+     SCREEN 3 - bench-columns (Step 2 of 3)
+============================================================= -->
+<section
+  class="screen"
+  id="bench-columns"
+  data-title="Step 2 - Matching &amp; sharing"
+  data-group="inviter"
+>
+  <div class="bench">
+    <nav class="rail" aria-label="Exchange setup">
+      <div class="wordmark">psilink</div>
+      <hr class="wordrule" />
+      <p class="rail-group">Set up</p>
+      <ol class="rail-steps">
+        <li class="done">
+          <a data-goto="bench-file">Your file</a>
+        </li>
+        <li class="current">
+          <a aria-current="step">Matching &amp; sharing</a>
+        </li>
+        <li class="pending">
+          <a>Review &amp; create</a>
+        </li>
+      </ol>
+      <p class="rail-group">Customize</p>
+      <p class="rail-groupnote">Filled in from your file.</p>
+      <ul class="rail-tabs">
+        <li>
+          <a data-goto="tab-cleaning">Cleaning</a>
+          <span class="val">3 fields</span>
+        </li>
+        <li>
+          <a data-goto="tab-keys">Matching keys</a>
+          <span class="val">2 keys</span>
+        </li>
+        <li>
+          <a data-goto="tab-agreement">Legal agreement</a>
+          <span class="val">&mdash;</span>
+        </li>
+      </ul>
+    </nav>
+
+    <div class="work">
+      <p class="eyebrow">Step 2 of 3</p>
+      <h1 tabindex="-1">Matching &amp; sharing<sup class="pin">1</sup></h1>
+      <p>
+        Confirm what each column is and what it is used for. This is the one
+        review every exchange needs: it decides exactly what your partner can
+        ever see.
+      </p>
+
+      <div class="table-scroll">
+        <table class="bench-table">
+          <caption class="visually-hidden">
+            Your columns: type and use
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Column</th>
+              <th scope="col">Type</th>
+              <th scope="col">How it is used</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="mono">client_id</td>
+              <td>
+                <select aria-label="Type for client_id">
+                  <option selected>Row identifier</option>
+                  <option>Name</option>
+                  <option>Date of birth</option>
+                  <option>SSN (last 4)</option>
+                  <option>ZIP code</option>
+                  <option>No matching type</option>
+                </select>
+              </td>
+              <td>
+                <select aria-label="How client_id is used">
+                  <option selected>Row identifier</option>
+                  <option>Matched on</option>
+                  <option>Sent to partner</option>
+                  <option>Ignored</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td class="mono">first_name</td>
+              <td>
+                <select aria-label="Type for first_name">
+                  <option selected>Name</option>
+                  <option>Date of birth</option>
+                  <option>SSN (last 4)</option>
+                  <option>ZIP code</option>
+                  <option>Row identifier</option>
+                  <option>No matching type</option>
+                </select>
+              </td>
+              <td>
+                <select aria-label="How first_name is used">
+                  <option selected>Matched on</option>
+                  <option>Sent to partner</option>
+                  <option>Ignored</option>
+                  <option>Row identifier</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td class="mono">last_name</td>
+              <td>
+                <select aria-label="Type for last_name">
+                  <option selected>Name</option>
+                  <option>Date of birth</option>
+                  <option>SSN (last 4)</option>
+                  <option>ZIP code</option>
+                  <option>Row identifier</option>
+                  <option>No matching type</option>
+                </select>
+              </td>
+              <td>
+                <select aria-label="How last_name is used">
+                  <option selected>Matched on</option>
+                  <option>Sent to partner</option>
+                  <option>Ignored</option>
+                  <option>Row identifier</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td class="mono">dob</td>
+              <td>
+                <select aria-label="Type for dob">
+                  <option selected>Date of birth</option>
+                  <option>Name</option>
+                  <option>SSN (last 4)</option>
+                  <option>ZIP code</option>
+                  <option>Row identifier</option>
+                  <option>No matching type</option>
+                </select>
+              </td>
+              <td>
+                <select aria-label="How dob is used">
+                  <option selected>Matched on</option>
+                  <option>Sent to partner</option>
+                  <option>Ignored</option>
+                  <option>Row identifier</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td class="mono">ssn_last4</td>
+              <td>
+                <select aria-label="Type for ssn_last4">
+                  <option selected>SSN (last 4)</option>
+                  <option>Name</option>
+                  <option>Date of birth</option>
+                  <option>ZIP code</option>
+                  <option>Row identifier</option>
+                  <option>No matching type</option>
+                </select>
+              </td>
+              <td>
+                <select aria-label="How ssn_last4 is used">
+                  <option selected>Matched on</option>
+                  <option>Sent to partner</option>
+                  <option>Ignored</option>
+                  <option>Row identifier</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td class="mono">zip</td>
+              <td>
+                <select aria-label="Type for zip">
+                  <option selected>ZIP code</option>
+                  <option>Name</option>
+                  <option>Date of birth</option>
+                  <option>SSN (last 4)</option>
+                  <option>Row identifier</option>
+                  <option>No matching type</option>
+                </select>
+              </td>
+              <td>
+                <select aria-label="How zip is used">
+                  <option selected>Matched on</option>
+                  <option>Sent to partner</option>
+                  <option>Ignored</option>
+                  <option>Row identifier</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td class="mono">enrollment_date</td>
+              <td>
+                <select aria-label="Type for enrollment_date">
+                  <option selected>No matching type</option>
+                  <option>Name</option>
+                  <option>Date of birth</option>
+                  <option>SSN (last 4)</option>
+                  <option>ZIP code</option>
+                  <option>Row identifier</option>
+                </select>
+              </td>
+              <td>
+                <select aria-label="How enrollment_date is used">
+                  <option selected>Sent to partner</option>
+                  <option>Matched on</option>
+                  <option>Ignored</option>
+                  <option>Row identifier</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td class="mono">program_code</td>
+              <td>
+                <select aria-label="Type for program_code">
+                  <option selected>No matching type</option>
+                  <option>Name</option>
+                  <option>Date of birth</option>
+                  <option>SSN (last 4)</option>
+                  <option>ZIP code</option>
+                  <option>Row identifier</option>
+                </select>
+              </td>
+              <td>
+                <select aria-label="How program_code is used">
+                  <option selected>Sent to partner</option>
+                  <option>Matched on</option>
+                  <option>Ignored</option>
+                  <option>Row identifier</option>
+                </select>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="hint" style="margin-top: 8px">
+        Only one column can be the row identifier. Choose a single
+        identifier.<sup class="pin">2</sup>
+      </p>
+
+      <h2>Extra data for matched records</h2>
+      <p class="small">
+        <strong>You will send:</strong>
+        <span class="mono">enrollment_date, program_code</span><br />
+        <strong>You will receive:</strong> the columns your partner marks as
+        sent, for each matched row.
+      </p>
+
+      <h3>Default exchange columns</h3>
+      <p>
+        For each row in your file that matches, you will send your partner these
+        elements:
+      </p>
+      <ul class="colchips">
+        <li class="mono">enrollment_date</li>
+        <li class="mono">program_code</li>
+      </ul>
+      <p class="small sub">
+        These are the defaults; you can change them with the "How it is used"
+        selects above. Your partner never receives the values in your
+        non-matching rows.
+      </p>
+
+      <div class="state-inset">
+        <p class="state-label">State: no columns marked "sent to partner"</p>
+        <p class="small" style="margin: 0">
+          No values will be sent to your partner. Your file's columns are used
+          only to find matches.
+        </p>
+      </div>
+
+      <div class="workfoot">
+        <button class="btn" data-goto="bench-review">
+          Continue to review &amp; create
+        </button>
+      </div>
+    </div>
+
+    <aside class="ledger" aria-label="This exchange">
+      <h2>This exchange</h2>
+      <dl>
+        <div class="lrow">
+          <dt>You will send <span class="lref">This step</span></dt>
+          <dd>enrollment_date, program_code</dd>
+        </div>
+        <div class="lrow">
+          <dt>You will receive <span class="lref">This step</span></dt>
+          <dd>Matched rows + your partner's shared columns</dd>
+        </div>
+        <div class="lrow">
+          <dt>Matched on <span class="lref">Keys tab</span></dt>
+          <dd>1. ssn_last4 + dob + last_name<br />2. full name + dob + zip</dd>
+        </div>
+        <div class="lrow">
+          <dt>Expires <span class="lref">Step 3</span></dt>
+          <dd>1 hour after you share</dd>
+        </div>
+        <div class="lrow">
+          <dt>Results go to <span class="lref">Step 3</span></dt>
+          <dd>You and your partner</dd>
+        </div>
+        <div class="lrow">
+          <dt>Agreement <span class="lref">Agreement tab</span></dt>
+          <dd><span class="dash">None</span></dd>
+        </div>
+        <div class="lrow">
+          <dt>Transport <span class="lref">Step 3</span></dt>
+          <dd>Browser</dd>
+        </div>
+      </dl>
+      <p class="trust">
+        Your file stays in this browser. Nothing is uploaded; your partner
+        receives only what this ledger names.
+      </p>
+    </aside>
+  </div>
+  <aside class="notes-panel" aria-label="Design notes">
+    <h2>Design notes - Matching &amp; sharing</h2>
+    <ol>
+      <li>
+        <b>USWDS: Earn trust.</b> The only mandatory review in the whole flow is
+        the disclosure decision. Everything else has a safe default; what leaves
+        your machine does not - so it is a numbered step, not an optional tab,
+        and the ledger's send/receive rows update live beside it.
+      </li>
+      <li>
+        <b>GOV.UK: Hint text, not error.</b> The single-identifier rule is
+        stated up front as a hint. It only becomes an entry in the rail's
+        Problems block if two identifiers are actually chosen.
+      </li>
+      <li>
+        <b>18F Content Guide.</b> "Your partner never receives the values in
+        your non-matching rows" - the load-bearing assurance sits directly under
+        the control that could change it.
+      </li>
+    </ol>
+  </aside>
+</section>
+
+<!-- =============================================================
+     SCREEN 4 - bench-review (Step 3 of 3)
+============================================================= -->
+<section
+  class="screen"
+  id="bench-review"
+  data-title="Step 3 - Review &amp; create"
+  data-group="inviter"
+>
+  <div class="bench">
+    <nav class="rail" aria-label="Exchange setup">
+      <div class="wordmark">psilink</div>
+      <hr class="wordrule" />
+      <p class="rail-group">Set up</p>
+      <ol class="rail-steps">
+        <li class="done">
+          <a data-goto="bench-file">Your file</a>
+        </li>
+        <li class="done">
+          <a data-goto="bench-columns">Matching &amp; sharing</a>
+        </li>
+        <li class="current">
+          <a aria-current="step">Review &amp; create</a>
+        </li>
+      </ol>
+      <p class="rail-group">Customize</p>
+      <ul class="rail-tabs">
+        <li>
+          <a data-goto="tab-cleaning">Cleaning</a>
+          <span class="val">3 fields</span>
+        </li>
+        <li>
+          <a data-goto="tab-keys">Matching keys</a>
+          <span class="val">2 keys</span>
+        </li>
+        <li>
+          <a data-goto="tab-agreement">Legal agreement</a>
+          <span class="val edited">MOU-2025-0042</span>
+        </li>
+      </ul>
+    </nav>
+
+    <div class="work">
+      <p class="eyebrow">Step 3 of 3</p>
+      <h1 tabindex="-1">Review &amp; create</h1>
+
+      <div class="field">
+        <label for="lifetime"
+          >Invitation lifetime<sup class="pin">2</sup></label
+        >
+        <span class="hint" id="lifetime-hint"
+          >How long this invitation can be accepted before it expires.</span
+        >
+        <select id="lifetime" aria-describedby="lifetime-hint">
+          <option selected>1 hour (recommended)</option>
+          <option>6 hours</option>
+          <option>1 day</option>
+          <option>7 days</option>
+          <option>30 days</option>
+          <option>1 year</option>
+        </select>
+        <span class="hint" style="margin-top: 6px"
+          >Shared now, it expires
+          <span class="mono">July 8, 2026, 3:32 PM (EDT)</span>.</span
+        >
+      </div>
+
+      <div class="field">
+        <label for="results-dir">Who receives the matched results</label>
+        <span class="hint" id="results-hint"
+          >The party who receives no results still contributes records to the
+          match.</span
+        >
+        <select id="results-dir" aria-describedby="results-hint">
+          <option selected>Both you and your partner (recommended)</option>
+          <option>Only you</option>
+          <option>Only your partner</option>
+        </select>
+      </div>
+
+      <fieldset class="bare">
+        <legend>How will this exchange run?</legend>
+        <div class="radio-card selected">
+          <div class="radio">
+            <input type="radio" id="tr-browser" name="transport" checked />
+            <div>
+              <label for="tr-browser"
+                >Live, in this browser (recommended)</label
+              >
+              <span class="hint"
+                >Your browsers connect directly. You get an invitation link and
+                code to share; keep this tab open while your partner
+                accepts.</span
+              >
+            </div>
+          </div>
+        </div>
+        <div class="radio-card">
+          <div class="radio">
+            <input type="radio" id="tr-sftp" name="transport" />
+            <div>
+              <label for="tr-sftp"
+                >Over SFTP, run by the psilink command-line tool<span
+                  class="tag-roadmap"
+                  >On the roadmap</span
+                ><sup class="pin">3</sup></label
+              >
+              <span class="hint">
+                Saves an exchange file that automates the command-line tool over
+                your SFTP server. Your partner accepts with the same invitation
+                code.
+                <button class="linklike small" data-goto="bench-sftp">
+                  See this path: Save your exchange file
+                </button>
+              </span>
+            </div>
+          </div>
+        </div>
+      </fieldset>
+
+      <h2>Exchange proposal<sup class="pin">1</sup></h2>
+      <p class="small sub">
+        Check every term before you create the invitation. Creating it seals the
+        terms.
+      </p>
+      <div class="table-scroll">
+        <table class="bench-table answers">
+          <caption class="visually-hidden">
+            Check your answers before creating the invitation
+          </caption>
+          <tbody>
+            <tr>
+              <th scope="row">Your name</th>
+              <td>Dana Okafor</td>
+              <td class="chg">
+                <button class="linklike small" data-goto="bench-file">
+                  Change<span class="visually-hidden"> your name</span>
+                </button>
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Your file</th>
+              <td class="mono">clients_2025.csv - 12,408 rows</td>
+              <td class="chg">
+                <button class="linklike small" data-goto="bench-file">
+                  Change<span class="visually-hidden"> your file</span>
+                </button>
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Columns shared</th>
+              <td class="mono">enrollment_date, program_code</td>
+              <td class="chg">
+                <button class="linklike small" data-goto="bench-columns">
+                  Change<span class="visually-hidden"> shared columns</span>
+                </button>
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Cleaning</th>
+              <td>3 fields, filled in from your file</td>
+              <td class="chg">
+                <button class="linklike small" data-goto="tab-cleaning">
+                  Change<span class="visually-hidden"> cleaning</span>
+                </button>
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Matching keys</th>
+              <td>2 keys, recommended order</td>
+              <td class="chg">
+                <button class="linklike small" data-goto="tab-keys">
+                  Change<span class="visually-hidden"> matching keys</span>
+                </button>
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Legal agreement</th>
+              <td class="mono">MOU-2025-0042</td>
+              <td class="chg">
+                <button class="linklike small" data-goto="tab-agreement">
+                  Change<span class="visually-hidden"> legal agreement</span>
+                </button>
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Invitation lifetime</th>
+              <td>1 hour</td>
+              <td class="chg">
+                <span class="set-above">Set above on this step</span>
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Results go to</th>
+              <td>You and your partner</td>
+              <td class="chg">
+                <span class="set-above">Set above on this step</span>
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Transport</th>
+              <td>Live, in this browser</td>
+              <td class="chg">
+                <span class="set-above">Set above on this step</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="workfoot">
+        <button class="btn" data-goto="bench-share">
+          Create the invitation
+        </button>
+        <button class="btn btn-quiet">Reset to recommended</button>
+        <p class="status-line ok">Ready to create.</p>
+      </div>
+
+      <div class="state-inset">
+        <p class="state-label">
+          State: a problem is open in an optional tab<sup class="pin">4</sup>
+        </p>
+        <div class="problems" style="margin-top: 0">
+          <h2>Problems</h2>
+          <ul>
+            <li>
+              <a
+                data-goto="tab-cleaning"
+                class="linklike"
+                style="color: inherit"
+                >Cleaning: "Date of birth" produces no value in any row</a
+              >
+            </li>
+          </ul>
+        </div>
+        <div
+          class="workfoot"
+          style="border-top: none; padding-top: 0.4rem; margin-top: 0.6rem"
+        >
+          <button class="btn" disabled>Create the invitation</button>
+          <p class="status-line" style="color: var(--danger)">
+            Resolve the 1 problem in Cleaning to continue.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <aside class="ledger" aria-label="This exchange">
+      <h2>This exchange</h2>
+      <dl>
+        <div class="lrow">
+          <dt>You will send <span class="lref">Step 2</span></dt>
+          <dd>enrollment_date, program_code</dd>
+        </div>
+        <div class="lrow">
+          <dt>You will receive <span class="lref">Step 2</span></dt>
+          <dd>Matched rows + your partner's shared columns</dd>
+        </div>
+        <div class="lrow">
+          <dt>Matched on <span class="lref">Keys tab</span></dt>
+          <dd>1. ssn_last4 + dob + last_name<br />2. full name + dob + zip</dd>
+        </div>
+        <div class="lrow">
+          <dt>Expires <span class="lref">This step</span></dt>
+          <dd>July 8, 2026, 3:32 PM (EDT)</dd>
+        </div>
+        <div class="lrow">
+          <dt>Results go to <span class="lref">This step</span></dt>
+          <dd>You and your partner</dd>
+        </div>
+        <div class="lrow">
+          <dt>Agreement <span class="lref">Agreement tab</span></dt>
+          <dd>MOU-2025-0042</dd>
+        </div>
+        <div class="lrow">
+          <dt>Transport <span class="lref">This step</span></dt>
+          <dd>Browser</dd>
+        </div>
+      </dl>
+      <p class="trust">
+        Your file stays in this browser. Nothing is uploaded; your partner
+        receives only what this ledger names.
+      </p>
+    </aside>
+  </div>
+  <aside class="notes-panel" aria-label="Design notes">
+    <h2>Design notes - Review &amp; create</h2>
+    <ol>
+      <li>
+        <b>GOV.UK: Check answers.</b> The full proposal is restated before the
+        point of no return, with a Change link to the step or tab that owns each
+        term. Creating the invitation seals the terms; the copy says so.
+      </li>
+      <li>
+        <b>Review-time decisions live at review.</b> Lifetime and
+        results-direction do not change what is disclosed - the ledger's
+        send/receive rows stay untouched as you change them - so they belong
+        here, not earlier in the path.
+      </li>
+      <li>
+        <b>Honesty about the roadmap.</b> The SFTP transport is fully designed
+        but ships in the command-line tool today; the "On the roadmap" tag keeps
+        the mock from presenting an un-shipped capability as in force.
+      </li>
+      <li>
+        <b>GOV.UK: Error summary.</b> When an optional tab develops a problem,
+        the rail's Problems block names it and links into the tab, and the
+        footer refuses to arm. Problems promote a tab from optional to required.
+      </li>
+    </ol>
+  </aside>
+</section>
+
+<!-- =============================================================
+     SCREEN 5 - tab-cleaning (optional tab)
+============================================================= -->
+<section
+  class="screen"
+  id="tab-cleaning"
+  data-title="Customize - Cleaning"
+  data-group="inviter"
+>
+  <div class="bench">
+    <nav class="rail" aria-label="Exchange setup">
+      <div class="wordmark">psilink</div>
+      <hr class="wordrule" />
+      <p class="rail-group">Set up</p>
+      <ol class="rail-steps">
+        <li class="done">
+          <a data-goto="bench-file">Your file</a>
+        </li>
+        <li class="done">
+          <a data-goto="bench-columns">Matching &amp; sharing</a>
+        </li>
+        <li class="pending">
+          <a data-goto="bench-review">Review &amp; create</a>
+        </li>
+      </ol>
+      <p class="rail-group">Customize</p>
+      <ul class="rail-tabs">
+        <li class="current-tab">
+          <a aria-current="true">Cleaning</a>
+          <span class="val attn">1 field failing</span>
+        </li>
+        <li>
+          <a data-goto="tab-keys">Matching keys</a>
+          <span class="val">2 keys</span>
+        </li>
+        <li>
+          <a data-goto="tab-agreement">Legal agreement</a>
+          <span class="val edited">MOU-2025-0042</span>
+        </li>
+      </ul>
+      <div class="problems">
+        <h2>Problems<sup class="pin">1</sup></h2>
+        <ul>
+          <li>Cleaning: "Date of birth" produces no value in any row</li>
+        </ul>
+      </div>
+    </nav>
+
+    <div class="work">
+      <button class="backlink" data-goto="bench-review">
+        &larr; Back to Review &amp; create
+      </button>
+      <p class="eyebrow">Customize</p>
+      <h1 tabindex="-1">Cleaning<sup class="pin">2</sup></h1>
+      <p>
+        Each field below is cleaned before matching so small differences -
+        spacing, case, accents, date styles - do not hide a match. These steps
+        came from your file; change them only if you know your data needs it.
+      </p>
+
+      <details class="fieldcard" open>
+        <summary>
+          Name <span class="fromline">cleaning your column</span>
+          <span class="mono">first_name</span>
+        </summary>
+        <div class="card-body">
+          <div class="field" style="margin-top: 0.8rem">
+            <label for="clean-col-name">Column to clean</label>
+            <select id="clean-col-name" style="max-width: 260px">
+              <option selected>first_name</option>
+              <option>last_name</option>
+            </select>
+          </div>
+          <ol class="steps">
+            <li>
+              <span class="stepname">Trim spaces</span>
+              <span class="movers">
+                <button class="iconbtn" aria-label="Move Trim spaces earlier">
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M8 13V3M4 7l4-4 4 4" />
+                  </svg>
+                </button>
+                <button class="iconbtn" aria-label="Move Trim spaces later">
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M8 3v10M4 9l4 4 4-4" />
+                  </svg>
+                </button>
+                <button class="iconbtn" aria-label="Remove Trim spaces">
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M3 4h10M6 4V2.5h4V4M5 4l.6 9h4.8L11 4" />
+                  </svg>
+                </button>
+              </span>
+            </li>
+            <li>
+              <span class="stepname">Lowercase</span>
+              <span class="movers">
+                <button class="iconbtn" aria-label="Move Lowercase earlier">
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M8 13V3M4 7l4-4 4 4" />
+                  </svg>
+                </button>
+                <button class="iconbtn" aria-label="Move Lowercase later">
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M8 3v10M4 9l4 4 4-4" />
+                  </svg>
+                </button>
+                <button class="iconbtn" aria-label="Remove Lowercase">
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M3 4h10M6 4V2.5h4V4M5 4l.6 9h4.8L11 4" />
+                  </svg>
+                </button>
+              </span>
+            </li>
+            <li>
+              <span class="stepname">Fold diacritics</span>
+              <span class="stepparam mono">&eacute; &rarr; e</span>
+              <span class="movers">
+                <button
+                  class="iconbtn"
+                  aria-label="Move Fold diacritics earlier"
+                >
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M8 13V3M4 7l4-4 4 4" />
+                  </svg>
+                </button>
+                <button class="iconbtn" aria-label="Move Fold diacritics later">
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M8 3v10M4 9l4 4 4-4" />
+                  </svg>
+                </button>
+                <button class="iconbtn" aria-label="Remove Fold diacritics">
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M3 4h10M6 4V2.5h4V4M5 4l.6 9h4.8L11 4" />
+                  </svg>
+                </button>
+              </span>
+            </li>
+          </ol>
+          <button class="btn btn-quiet btn-sm">Add a step</button>
+          <div
+            class="stepmenu"
+            role="menu"
+            aria-label="Add a step (shown open)"
+          >
+            <sup class="pin" style="position: absolute; margin: -8px 0 0 4px"
+              >3</sup
+            >
+            <p class="menugroup">Text shaping</p>
+            <button role="menuitem">
+              Trim spaces
+              <span class="blurb"
+                >Remove spaces at the start and end of the value</span
+              >
+            </button>
+            <button role="menuitem">
+              Lowercase
+              <span class="blurb"
+                >Fold letters to lower case so "Ana" matches "ANA"</span
+              >
+            </button>
+            <button role="menuitem">
+              Fold diacritics
+              <span class="blurb"
+                >Treat accented and plain letters as the same letter</span
+              >
+            </button>
+            <p class="menugroup">Extract</p>
+            <button role="menuitem">
+              Keep a pattern (regex) <span class="badge-adv">advanced</span>
+              <span class="blurb"
+                >Keep only the part of the value that matches a pattern</span
+              >
+            </button>
+            <button role="menuitem">
+              Split on a separator
+              <span class="blurb"
+                >Turn one value into several - "Ana; Luisa" becomes two
+                values</span
+              >
+            </button>
+            <p class="menugroup">Dates</p>
+            <button role="menuitem">
+              Normalize date to YYYY-MM-DD
+              <span class="blurb">Read many date styles and write one</span>
+            </button>
+            <p class="menugroup">Numbers &amp; codes</p>
+            <button role="menuitem">
+              Keep the first N characters
+              <span class="blurb"
+                >Truncate codes such as ZIP+4 down to their prefix</span
+              >
+            </button>
+          </div>
+          <p class="coverage">
+            Across your whole file:
+            <span class="mono">12,371 of 12,408</span> rows produce a value
+            (<span class="mono">99.7%</span>)
+          </p>
+          <details open>
+            <summary style="font-weight: 650; cursor: pointer">
+              Preview a sample of your rows
+            </summary>
+            <div class="table-scroll">
+              <table class="bench-table">
+                <caption class="visually-hidden">
+                  Sample of original and cleaned values
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Original</th>
+                    <th scope="col">Cleaned</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="mono">
+                      &nbsp;&nbsp;Mar&iacute;a G&Oacute;MEZ&nbsp;
+                    </td>
+                    <td>
+                      <span class="pchip pchip-ok mono">maria gomez</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="mono">N/A</td>
+                    <td><span class="pchip">dropped</span></td>
+                  </tr>
+                  <tr>
+                    <td class="mono"></td>
+                    <td><span class="pchip">empty value</span></td>
+                  </tr>
+                  <tr>
+                    <td class="mono">Ana; Luisa</td>
+                    <td><span class="pchip">splits into 2 values</span></td>
+                  </tr>
+                  <tr>
+                    <td class="mono">O'Neil-Smith 1987</td>
+                    <td>
+                      <span class="pchip pchip-ok mono">o'neil-smith 1987</span>
+                      <span class="pchip pchip-warn"
+                        >contains digits - name values usually do not</span
+                      >
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </details>
+          <p style="margin-top: 1rem">
+            <button class="btn btn-quiet btn-sm">Add another name field</button>
+            <button class="btn btn-quiet btn-sm">Remove this field</button>
+            <span class="pchip" style="margin-left: 6px">Expert authoring</span>
+          </p>
+        </div>
+      </details>
+
+      <details class="fieldcard" open>
+        <summary>
+          Date of birth <span class="fromline">cleaning your column</span>
+          <span class="mono">dob</span>
+          <span class="badge-unsat">no rows produce a value</span>
+        </summary>
+        <div class="card-body">
+          <ol class="steps">
+            <li>
+              <span class="stepname"
+                >Keep a pattern (regex)<span class="badge-adv"
+                  >advanced</span
+                ></span
+              >
+              <span class="stepparam"
+                ><label class="visually-hidden" for="regex-dob">Pattern</label
+                ><input
+                  type="text"
+                  id="regex-dob"
+                  class="mono err-bd"
+                  value="^\d{2}/\d{2}/\d{4}$"
+              /></span>
+              <span class="movers">
+                <button
+                  class="iconbtn"
+                  aria-label="Move Keep a pattern earlier"
+                >
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M8 13V3M4 7l4-4 4 4" />
+                  </svg>
+                </button>
+                <button class="iconbtn" aria-label="Move Keep a pattern later">
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M8 3v10M4 9l4 4 4-4" />
+                  </svg>
+                </button>
+                <button class="iconbtn" aria-label="Remove Keep a pattern">
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M3 4h10M6 4V2.5h4V4M5 4l.6 9h4.8L11 4" />
+                  </svg>
+                </button>
+              </span>
+              <span class="hint" style="flex-basis: 100%"
+                >Patterns over 1000 characters are rejected.</span
+              >
+            </li>
+            <li>
+              <span class="stepname">Normalize date to YYYY-MM-DD</span>
+              <span class="movers">
+                <button
+                  class="iconbtn"
+                  aria-label="Move Normalize date earlier"
+                >
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M8 13V3M4 7l4-4 4 4" />
+                  </svg>
+                </button>
+                <button class="iconbtn" aria-label="Move Normalize date later">
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M8 3v10M4 9l4 4 4-4" />
+                  </svg>
+                </button>
+                <button class="iconbtn" aria-label="Remove Normalize date">
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M3 4h10M6 4V2.5h4V4M5 4l.6 9h4.8L11 4" />
+                  </svg>
+                </button>
+              </span>
+            </li>
+          </ol>
+          <p class="coverage bad">
+            Across your whole file: no row produces a value.<sup class="pin"
+              >4</sup
+            >
+            Your <span class="mono">dob</span> values look like
+            <span class="mono">1987-03-14</span>; the pattern in step 1 expects
+            <span class="mono">03/14/1987</span>. Fix or remove step 1, or
+            remove this field from matching.
+          </p>
+        </div>
+      </details>
+
+      <details class="fieldcard">
+        <summary>
+          ZIP code <span class="fromline">cleaning your column</span>
+          <span class="mono">zip</span>
+          <span class="fromline mono">12,408 of 12,408 rows (100%)</span>
+        </summary>
+        <div class="card-body">
+          <ol class="steps">
+            <li>
+              <span class="stepname">Keep the first N characters</span
+              ><span class="stepparam mono">N = 5</span>
+            </li>
+          </ol>
+        </div>
+      </details>
+
+      <details class="fieldcard">
+        <summary>
+          SSN (last 4) <span class="fromline">from your column</span>
+          <span class="mono">ssn_last4</span>
+          <span class="fromline">- no cleaning steps; used as-is</span>
+          <span class="fromline mono">11,982 of 12,408 rows (96.6%)</span>
+        </summary>
+        <div class="card-body">
+          <p class="small sub">
+            This field needs no cleaning. <span class="mono">426</span> rows are
+            blank in your file; those rows cannot match on keys that use it.
+          </p>
+        </div>
+      </details>
+
+      <div class="workfoot">
+        <button class="btn btn-secondary" data-goto="bench-review">
+          Back to Review &amp; create
+        </button>
+      </div>
+    </div>
+
+    <aside class="ledger" aria-label="This exchange">
+      <h2>This exchange</h2>
+      <dl>
+        <div class="lrow">
+          <dt>You will send <span class="lref">Step 2</span></dt>
+          <dd>enrollment_date, program_code</dd>
+        </div>
+        <div class="lrow">
+          <dt>You will receive <span class="lref">Step 2</span></dt>
+          <dd>Matched rows + your partner's shared columns</dd>
+        </div>
+        <div class="lrow">
+          <dt>Matched on <span class="lref">Keys tab</span></dt>
+          <dd>1. ssn_last4 + dob + last_name<br />2. full name + dob + zip</dd>
+        </div>
+        <div class="lrow">
+          <dt>Expires <span class="lref">Step 3</span></dt>
+          <dd>1 hour after you share</dd>
+        </div>
+        <div class="lrow">
+          <dt>Results go to <span class="lref">Step 3</span></dt>
+          <dd>You and your partner</dd>
+        </div>
+        <div class="lrow">
+          <dt>Agreement <span class="lref">Agreement tab</span></dt>
+          <dd>MOU-2025-0042</dd>
+        </div>
+        <div class="lrow">
+          <dt>Transport <span class="lref">Step 3</span></dt>
+          <dd>Browser</dd>
+        </div>
+      </dl>
+      <p class="trust">
+        Cleaning never changes what is disclosed - only how well your rows
+        match. The send/receive rows above are untouched by this tab.
+      </p>
+    </aside>
+  </div>
+  <aside class="notes-panel" aria-label="Design notes">
+    <h2>Design notes - Cleaning</h2>
+    <ol>
+      <li>
+        <b>GOV.UK: Error summary.</b> The coverage alarm lives in the rail's
+        Problems block as well as on the field card, and the review step's
+        footer refuses to arm until it is resolved. The error summary is part of
+        the navigation, not a banner that scrolls away.
+      </li>
+      <li>
+        <b>Optional until it is not.</b> Cleaning ships with steps derived from
+        the file and stays out of the required path - but a problem promotes
+        this tab: the rail links straight here, and the tab's value turns amber
+        ("1 field failing") in step with the Problems block. Color appears only
+        for edited and needs-attention states.
+      </li>
+      <li>
+        <b>18F Content Guide: plain language.</b> Every step in the add-a-step
+        menu carries a one-line consequence in words ("so 'Ana' matches 'ANA'"),
+        with the regex family honestly badged "advanced".
+      </li>
+      <li>
+        <b>GDS principle 4.</b> The preview shows the user's own rows, original
+        beside cleaned, with explicit chips for dropped, empty, and split values
+        - the effect of cleaning is demonstrated, never asserted.
+      </li>
+    </ol>
+  </aside>
+</section>
+
+<!-- =============================================================
+     SCREEN 6 - tab-keys (optional tab)
+============================================================= -->
+<section
+  class="screen"
+  id="tab-keys"
+  data-title="Customize - Matching keys"
+  data-group="inviter"
+>
+  <div class="bench">
+    <nav class="rail" aria-label="Exchange setup">
+      <div class="wordmark">psilink</div>
+      <hr class="wordrule" />
+      <p class="rail-group">Set up</p>
+      <ol class="rail-steps">
+        <li class="done">
+          <a data-goto="bench-file">Your file</a>
+        </li>
+        <li class="done">
+          <a data-goto="bench-columns">Matching &amp; sharing</a>
+        </li>
+        <li class="pending">
+          <a data-goto="bench-review">Review &amp; create</a>
+        </li>
+      </ol>
+      <p class="rail-group">Customize</p>
+      <ul class="rail-tabs">
+        <li>
+          <a data-goto="tab-cleaning">Cleaning</a>
+          <span class="val">3 fields</span>
+        </li>
+        <li class="current-tab">
+          <a aria-current="true">Matching keys</a>
+          <span class="val edited">2 keys, edited</span>
+        </li>
+        <li>
+          <a data-goto="tab-agreement">Legal agreement</a>
+          <span class="val edited">MOU-2025-0042</span>
+        </li>
+      </ul>
+    </nav>
+
+    <div class="work">
+      <button class="backlink" data-goto="bench-review">
+        &larr; Back to Review &amp; create
+      </button>
+      <p class="eyebrow">Customize</p>
+      <h1 tabindex="-1">Matching keys</h1>
+      <p>
+        Records are matched on these keys, tried in order. Earlier keys match
+        first, so order the most precise keys first.
+      </p>
+
+      <ol class="guided-keys">
+        <li>
+          <div class="check">
+            <input type="checkbox" id="gk-1" checked />
+            <div>
+              <label for="gk-1"
+                >Key 1 -
+                <span class="mono">SSN + birth date + family name</span></label
+              >
+              <span class="hint"
+                >Most precise: a shared SSN fragment plus birth date rarely
+                collides.</span
+              >
+            </div>
+          </div>
+          <span class="movers">
+            <button class="iconbtn" aria-label="Move Key 1 later">
+              <svg
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M8 3v10M4 9l4 4 4-4" />
+              </svg>
+            </button>
+          </span>
+        </li>
+        <li>
+          <div class="check">
+            <input type="checkbox" id="gk-2" checked />
+            <div>
+              <label for="gk-2"
+                >Key 2 -
+                <span class="mono">Full name + birth date + ZIP</span></label
+              >
+              <span class="hint"
+                >Catches rows with a missing SSN; broader, so it runs
+                second.</span
+              >
+            </div>
+          </div>
+          <span class="movers">
+            <button class="iconbtn" aria-label="Move Key 2 earlier">
+              <svg
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M8 13V3M4 7l4-4 4 4" />
+              </svg>
+            </button>
+          </span>
+        </li>
+      </ol>
+
+      <div class="switch">
+        <button
+          role="switch"
+          aria-checked="true"
+          id="expert-sw"
+          aria-labelledby="expert-sw-label"
+        ></button>
+        <div>
+          <span class="label" id="expert-sw-label"
+            >Expert authoring<sup class="pin">2</sup></span
+          >
+          <span class="hint"
+            >Build linkage keys element by element, edit transforms and swaps,
+            and import or export the terms as JSON or YAML.</span
+          >
+        </div>
+      </div>
+
+      <div class="keycard">
+        <div class="keyhead">
+          <span class="keyno">Key 1</span>
+          <span class="badge-sat">satisfiable</span>
+          <span class="movers" style="margin-left: auto">
+            <button class="iconbtn" aria-label="Move Key 1 later">
+              <svg
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M8 3v10M4 9l4 4 4-4" />
+              </svg>
+            </button>
+            <button class="iconbtn" aria-label="Remove Key 1">
+              <svg
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                aria-hidden="true"
+              >
+                <path d="M3 4h10M6 4V2.5h4V4M5 4l.6 9h4.8L11 4" />
+              </svg>
+            </button>
+          </span>
+        </div>
+        <div class="card-body">
+          <div class="field" style="margin-top: 0.8rem">
+            <label for="k1-name">Key name</label>
+            <input
+              type="text"
+              id="k1-name"
+              value="SSN + birth date + family name"
+            />
+          </div>
+          <div class="element">
+            <div class="elrow">
+              <div class="field">
+                <label for="k1e1-field">Field</label>
+                <select id="k1e1-field">
+                  <option selected>SSN (last 4)</option>
+                  <option>Name</option>
+                  <option>Date of birth</option>
+                  <option>ZIP code</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="k1e1-alias">Alias (optional)</label>
+                <input type="text" id="k1e1-alias" placeholder="ssn4" />
+              </div>
+              <span class="movers" style="margin-bottom: 8px">
+                <button class="iconbtn" aria-label="Move element earlier">
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M8 13V3M4 7l4-4 4 4" />
+                  </svg>
+                </button>
+                <button class="iconbtn" aria-label="Move element later">
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M8 3v10M4 9l4 4 4-4" />
+                  </svg>
+                </button>
+                <button class="iconbtn" aria-label="Remove element">
+                  <svg
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M3 4h10M6 4V2.5h4V4M5 4l.6 9h4.8L11 4" />
+                  </svg>
+                </button>
+              </span>
+            </div>
+            <div class="field">
+              <span class="label small">Transform before matching</span>
+              <ol class="steps" style="margin-top: 4px">
+                <li>
+                  <span class="stepname">Keep the first N characters</span
+                  ><span class="stepparam mono">N = 4</span>
+                </li>
+              </ol>
+            </div>
+            <div class="field">
+              <label for="k1e1-fuzzy">Fuzzy comparison</label>
+              <span class="hint"
+                >Not available yet.<sup class="pin">1</sup> Exact comparison
+                applies for now.</span
+              >
+              <select id="k1e1-fuzzy" disabled>
+                <option selected>Two-digit transpositions</option>
+                <option>Single-character edits</option>
+                <option>Adjacent years (+/- 1)</option>
+              </select>
+            </div>
+          </div>
+          <div class="element">
+            <div class="elrow">
+              <div class="field">
+                <span class="label small">Element 2</span>
+                <p class="mono" style="margin: 2px 0">date of birth</p>
+              </div>
+              <div class="field">
+                <span class="label small">Element 3</span>
+                <p class="mono" style="margin: 2px 0">family name</p>
+              </div>
+            </div>
+          </div>
+          <p><button class="btn btn-quiet btn-sm">Add an element</button></p>
+        </div>
+      </div>
+
+      <div class="keycard">
+        <div class="keyhead">
+          <span class="keyno">Key 2</span>
+          <span class="badge-sat">satisfiable</span>
+          <span class="movers" style="margin-left: auto">
+            <button class="iconbtn" aria-label="Move Key 2 earlier">
+              <svg
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M8 13V3M4 7l4-4 4 4" />
+              </svg>
+            </button>
+            <button class="iconbtn" aria-label="Remove Key 2">
+              <svg
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                aria-hidden="true"
+              >
+                <path d="M3 4h10M6 4V2.5h4V4M5 4l.6 9h4.8L11 4" />
+              </svg>
+            </button>
+          </span>
+        </div>
+        <div class="card-body">
+          <div class="field" style="margin-top: 0.8rem">
+            <label for="k2-name">Key name</label>
+            <input
+              type="text"
+              id="k2-name"
+              value="Full name + birth date + ZIP"
+            />
+          </div>
+          <p class="small sub">
+            Elements:
+            <span class="mono"
+              >first name, last name, date of birth, ZIP code</span
+            >
+          </p>
+          <div class="field">
+            <span class="label" id="k2-swap-label"
+              >Swap (match in either order)</span
+            >
+            <span class="hint"
+              >Choose exactly two elements; they will match with their values in
+              either order.</span
+            >
+            <div
+              class="multiselect"
+              role="group"
+              aria-labelledby="k2-swap-label"
+            >
+              <span class="mschip"
+                >first name
+                <button aria-label="Remove first name from swap">
+                  &times;
+                </button></span
+              >
+              <span class="mschip"
+                >last name
+                <button aria-label="Remove last name from swap">
+                  &times;
+                </button></span
+              >
+            </div>
+          </div>
+          <p><button class="btn btn-quiet btn-sm">Add an element</button></p>
+        </div>
+      </div>
+
+      <p><button class="btn btn-secondary">Add a key</button></p>
+
+      <div class="state-inset">
+        <p class="state-label">State: a key that cannot run</p>
+        <div class="keyhead" style="padding: 0">
+          <span class="keyno">Key 3</span>
+          <span class="badge-unsat">not satisfiable</span>
+        </div>
+        <p class="small sub" style="margin-top: 6px">
+          A key shows this when one of its elements names a field with no usable
+          column in your file. The key is skipped until every element is
+          covered.
+        </p>
+      </div>
+
+      <h2>Matching settings</h2>
+      <fieldset class="bare">
+        <legend>Linkage strategy</legend>
+        <div class="radio">
+          <input type="radio" id="strat-cascade" name="strategy" checked />
+          <div>
+            <label for="strat-cascade">Cascade (recommended)</label>
+            <span class="hint"
+              >Keys run in order; a record matched by an earlier key is settled
+              and never re-exposed to later, broader keys.</span
+            >
+          </div>
+        </div>
+        <div class="radio">
+          <input type="radio" id="strat-single" name="strategy" />
+          <div>
+            <label for="strat-single">Single-pass</label>
+            <span class="hint">All keys run over all records at once.</span>
+          </div>
+        </div>
+      </fieldset>
+      <div class="state-inset">
+        <p class="state-label">State: Single-pass selected</p>
+        <div class="alert alert-warn" style="margin: 0">
+          <h4>Single-pass widens what one of you can observe</h4>
+          <p>
+            Every record meets every key, so a partner can learn more about
+            near-misses than under the cascade. Choose it only when both of you
+            accept that.
+          </p>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="match-method"
+          >Matching method<sup class="pin">1</sup></label
+        >
+        <span class="hint"
+          >"Reveal only the count (psi-c)" is not available yet; the standard
+          method applies.</span
+        >
+        <select id="match-method" disabled>
+          <option selected>Reveal the matched identifiers (standard)</option>
+          <option>Reveal only the count (psi-c)</option>
+        </select>
+      </div>
+      <div class="check">
+        <input type="checkbox" id="dedup" disabled />
+        <div>
+          <label for="dedup"
+            >Allow more than one of your records to match the same partner
+            record</label
+          >
+          <span class="hint"
+            >Not available yet. Each of your records matches at most one partner
+            record.</span
+          >
+        </div>
+      </div>
+
+      <h2>Import or export<sup class="pin">3</sup></h2>
+      <p class="small sub">
+        Carry these terms between exchanges, or keep them under version control.
+      </p>
+      <p>
+        <button class="btn btn-secondary btn-sm">Download JSON</button>
+        <button class="btn btn-secondary btn-sm">Download YAML</button>
+      </p>
+      <div class="field">
+        <label for="import-paste">Paste terms to import</label>
+        <textarea
+          id="import-paste"
+          class="mono"
+          placeholder="Paste terms as JSON or YAML"
+        ></textarea>
+      </div>
+      <p>
+        <button class="btn" disabled>Import</button>
+        <span class="hint" style="display: inline"
+          >Import turns on once something is pasted.</span
+        >
+      </p>
+      <div class="state-inset">
+        <p class="state-label">State: after a successful import</p>
+        <p class="small" style="color: var(--ok); font-weight: 650; margin: 0">
+          Imported. Review the loaded terms before generating.
+        </p>
+      </div>
+      <div class="state-inset">
+        <p class="state-label">State: after a failed import</p>
+        <div class="alert alert-danger" style="margin: 0">
+          <h4>Could not import these terms</h4>
+          <p>
+            The pasted text is not complete JSON or YAML. Paste the whole export
+            and import again; your other settings are unchanged.
+          </p>
+        </div>
+      </div>
+      <div class="state-inset">
+        <p class="state-label">State: Expert authoring off</p>
+        <div class="alert alert-info" style="margin: 0">
+          <p>
+            Fixed in this version. Turn on Expert authoring to edit keys element
+            by element and to import or export the terms.
+          </p>
+        </div>
+      </div>
+
+      <div class="workfoot">
+        <button class="btn btn-secondary" data-goto="bench-review">
+          Back to Review &amp; create
+        </button>
+      </div>
+    </div>
+
+    <aside class="ledger" aria-label="This exchange">
+      <h2>This exchange</h2>
+      <dl>
+        <div class="lrow">
+          <dt>You will send <span class="lref">Step 2</span></dt>
+          <dd>enrollment_date, program_code</dd>
+        </div>
+        <div class="lrow">
+          <dt>You will receive <span class="lref">Step 2</span></dt>
+          <dd>Matched rows + your partner's shared columns</dd>
+        </div>
+        <div class="lrow">
+          <dt>Matched on <span class="lref">This tab</span></dt>
+          <dd>1. ssn_last4 + dob + last_name<br />2. full name + dob + zip</dd>
+        </div>
+        <div class="lrow">
+          <dt>Expires <span class="lref">Step 3</span></dt>
+          <dd>1 hour after you share</dd>
+        </div>
+        <div class="lrow">
+          <dt>Results go to <span class="lref">Step 3</span></dt>
+          <dd>You and your partner</dd>
+        </div>
+        <div class="lrow">
+          <dt>Agreement <span class="lref">Agreement tab</span></dt>
+          <dd>MOU-2025-0042</dd>
+        </div>
+        <div class="lrow">
+          <dt>Transport <span class="lref">Step 3</span></dt>
+          <dd>Browser</dd>
+        </div>
+      </dl>
+      <p class="trust">
+        Key order changes how records match, never what is disclosed. The
+        send/receive rows are untouched by this tab.
+      </p>
+    </aside>
+  </div>
+  <aside class="notes-panel" aria-label="Design notes">
+    <h2>Design notes - Matching keys</h2>
+    <ol>
+      <li>
+        <b>Gated but visible.</b> Fuzzy comparison, count-only results (psi-c),
+        and duplicate matching are shown with their real labels and an explicit
+        "not available yet" - discoverable, inert, and never presented as in
+        force.
+      </li>
+      <li>
+        <b>GDS principle 9: Be consistent, not uniform.</b> The guided list and
+        the expert editor are the same section at two depths. Expert authoring
+        is one switch away, never a separate mode of the product - and never
+        removed to make the simple path look simpler.
+      </li>
+      <li>
+        <b>USWDS: Keep a record.</b> Import/export lets a steward version their
+        terms alongside the data-sharing agreement; the failure state keeps
+        their pasted text and their other settings.
+      </li>
+    </ol>
+  </aside>
+</section>
+
+<!-- =============================================================
+     SCREEN 7 - tab-agreement (optional tab)
+============================================================= -->
+<section
+  class="screen"
+  id="tab-agreement"
+  data-title="Customize - Legal agreement"
+  data-group="inviter"
+>
+  <div class="bench">
+    <nav class="rail" aria-label="Exchange setup">
+      <div class="wordmark">psilink</div>
+      <hr class="wordrule" />
+      <p class="rail-group">Set up</p>
+      <ol class="rail-steps">
+        <li class="done">
+          <a data-goto="bench-file">Your file</a>
+        </li>
+        <li class="done">
+          <a data-goto="bench-columns">Matching &amp; sharing</a>
+        </li>
+        <li class="pending">
+          <a data-goto="bench-review">Review &amp; create</a>
+        </li>
+      </ol>
+      <p class="rail-group">Customize</p>
+      <ul class="rail-tabs">
+        <li>
+          <a data-goto="tab-cleaning">Cleaning</a>
+          <span class="val">3 fields</span>
+        </li>
+        <li>
+          <a data-goto="tab-keys">Matching keys</a>
+          <span class="val">2 keys</span>
+        </li>
+        <li class="current-tab">
+          <a aria-current="true">Legal agreement<sup class="pin">1</sup></a>
+          <span class="val edited">MOU-2025-0042</span>
+        </li>
+      </ul>
+    </nav>
+
+    <div class="work">
+      <button class="backlink" data-goto="bench-review">
+        &larr; Back to Review &amp; create
+      </button>
+      <p class="eyebrow">Customize</p>
+      <h1 tabindex="-1">Legal agreement</h1>
+
+      <div class="check">
+        <input type="checkbox" id="agree-attach" checked />
+        <div>
+          <label for="agree-attach">Attach a legal agreement</label>
+          <span class="hint"
+            >Reference, purpose, and expiry your partner must enter
+            identically.</span
+          >
+        </div>
+      </div>
+
+      <div class="alert alert-info">
+        <p>
+          Your partner must enter these three values exactly as written here
+          before they can accept. A mismatch stops the exchange - use the
+          wording from your signed agreement.
+        </p>
+      </div>
+
+      <div class="field">
+        <label for="agree-ref">Agreement reference</label>
+        <input
+          type="text"
+          id="agree-ref"
+          class="mono"
+          value="MOU-2025-0042"
+          placeholder="MOU-2025-0042"
+        />
+      </div>
+      <div class="field">
+        <label for="agree-purpose">Purpose of the disclosure</label>
+        <input
+          type="text"
+          id="agree-purpose"
+          value="Program evaluation"
+          placeholder="Program evaluation"
+        />
+      </div>
+      <div class="field">
+        <label for="agree-exp">Expiration date</label>
+        <input
+          type="date"
+          id="agree-exp"
+          class="mono"
+          value="2026-12-31"
+          style="max-width: 220px"
+        />
+      </div>
+
+      <div class="workfoot">
+        <button class="btn btn-secondary" data-goto="bench-review">
+          Back to Review &amp; create
+        </button>
+      </div>
+    </div>
+
+    <aside class="ledger" aria-label="This exchange">
+      <h2>This exchange</h2>
+      <dl>
+        <div class="lrow">
+          <dt>You will send <span class="lref">Step 2</span></dt>
+          <dd>enrollment_date, program_code</dd>
+        </div>
+        <div class="lrow">
+          <dt>You will receive <span class="lref">Step 2</span></dt>
+          <dd>Matched rows + your partner's shared columns</dd>
+        </div>
+        <div class="lrow">
+          <dt>Matched on <span class="lref">Keys tab</span></dt>
+          <dd>1. ssn_last4 + dob + last_name<br />2. full name + dob + zip</dd>
+        </div>
+        <div class="lrow">
+          <dt>Expires <span class="lref">Step 3</span></dt>
+          <dd>1 hour after you share</dd>
+        </div>
+        <div class="lrow">
+          <dt>Results go to <span class="lref">Step 3</span></dt>
+          <dd>You and your partner</dd>
+        </div>
+        <div class="lrow">
+          <dt>Agreement <span class="lref">This tab</span></dt>
+          <dd>MOU-2025-0042</dd>
+        </div>
+        <div class="lrow">
+          <dt>Transport <span class="lref">Step 3</span></dt>
+          <dd>Browser</dd>
+        </div>
+      </dl>
+      <p class="trust">
+        Your file stays in this browser. Nothing is uploaded; your partner
+        receives only what this ledger names.
+      </p>
+    </aside>
+  </div>
+  <aside class="notes-panel" aria-label="Design notes">
+    <h2>Design notes - Legal agreement</h2>
+    <ol>
+      <li>
+        <b>Quiet facts carry the story.</b> The rail's Agreement value flips
+        from an em-dash to "MOU-2025-0042" - the fact itself, in the data voice
+        - and the ledger's Agreement row fills in the same moment. The reviewer
+        sees the whole system react to one checkbox, with no judgment word
+        anywhere.
+      </li>
+      <li>
+        <b>GOV.UK: Do not demand what you can default - except here.</b> An
+        agreement cannot be defaulted from a file; it is deliberately an opt-in
+        tab, and the must-enter-identically rule is stated where the values are
+        typed.
+      </li>
+    </ol>
+  </aside>
+</section>
+
+<!-- =============================================================
+     SCREEN 8 - bench-share (post-create, browser transport)
+============================================================= -->
+<section
+  class="screen"
+  id="bench-share"
+  data-title="Share the invitation"
+  data-group="inviter"
+>
+  <div class="bench">
+    <nav class="rail" aria-label="Exchange progress">
+      <div class="wordmark">psilink</div>
+      <hr class="wordrule" />
+      <p class="rail-group">This exchange<sup class="pin">4</sup></p>
+      <ol class="rail-timeline">
+        <li class="current">
+          <span aria-current="step">Share</span>
+        </li>
+        <li class="pending">
+          <span>Partner accepts</span>
+        </li>
+        <li class="pending">
+          <span>Confirm protocol</span>
+        </li>
+        <li class="pending">
+          <span>Link keys</span>
+        </li>
+        <li class="pending">
+          <span>Done</span>
+        </li>
+      </ol>
+    </nav>
+
+    <div class="work">
+      <h1 tabindex="-1">Your invitation is ready</h1>
+
+      <h2 style="margin-top: 1rem">Share this invitation</h2>
+      <p>
+        Send one of these to your partner over a trusted channel (for example,
+        secure email). It carries a one-time secret, so treat it as
+        confidential.<sup class="pin">1</sup> Keep this tab open while your
+        partner accepts.
+      </p>
+
+      <div class="copyrow">
+        <span class="label" style="font-weight: 650">Invitation link</span>
+        <span class="hint"
+          >Opens the accept page with the invitation prefilled</span
+        >
+        <div class="copybox">
+          <div class="codeblock mono">
+            https://psilink.example.gov/accept#eyJ2IjoxLCJzIjoiUlZ0&hellip;c2lnIjoiZmYzYSJ9
+          </div>
+          <button
+            class="btn btn-secondary btn-sm copybtn"
+            title="Copy to clipboard"
+          >
+            Copy
+          </button>
+        </div>
+      </div>
+      <div class="copyrow">
+        <span class="label" style="font-weight: 650">Invitation code</span>
+        <span class="hint"
+          >Paste into the accept form if the link cannot be used</span
+        >
+        <div class="copybox">
+          <div class="codeblock mono">
+            eyJ2IjoxLCJzIjoiUlZ0&hellip;c2lnIjoiZmYzYSJ9
+          </div>
+          <button
+            class="btn btn-secondary btn-sm copybtn"
+            title="Copy to clipboard"
+          >
+            Copied
+          </button>
+        </div>
+        <span class="hint"
+          >(shown in its just-copied state<sup class="pin">2</sup>)</span
+        >
+      </div>
+
+      <p class="small">
+        <strong
+          >This invitation expires
+          <span class="mono">July 8, 2026, 3:32 PM (EDT)</span>.</strong
+        >
+      </p>
+
+      <div class="callout">
+        <p class="lead-line">Keep this tab open.</p>
+        <p class="small">
+          Your browser is listening for your partner. Closing the tab cancels
+          the invitation; reloading starts over.
+        </p>
+      </div>
+
+      <div class="statuspanel">
+        <h2
+          style="
+            margin: 0 0 8px 0;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--sec);
+          "
+        >
+          Status
+        </h2>
+        <p class="stage-label" aria-live="polite">
+          <span class="spinner" aria-hidden="true"></span
+          ><span class="mono">Waiting for your partner</span>
+        </p>
+        <div class="progress" role="progressbar" aria-label="Exchange progress">
+          <div class="bar" style="width: 12%"></div>
+        </div>
+        <ol class="stage-history">
+          <li>
+            <span class="tick" aria-hidden="true"></span>Before start - done
+            <span class="mono">2:32 PM</span>
+          </li>
+          <li class="now">
+            <span class="tick" aria-hidden="true"></span>Waiting for your
+            partner
+          </li>
+        </ol>
+      </div>
+    </div>
+
+    <aside class="ledger" aria-label="This exchange">
+      <h2>This exchange</h2>
+      <span class="sealed-tag"
+        >Terms sealed at create<sup class="pin">3</sup></span
+      >
+      <dl>
+        <div class="lrow">
+          <dt>You will send</dt>
+          <dd>enrollment_date, program_code</dd>
+        </div>
+        <div class="lrow">
+          <dt>You will receive</dt>
+          <dd>Matched rows + your partner's shared columns</dd>
+        </div>
+        <div class="lrow">
+          <dt>Matched on</dt>
+          <dd>1. ssn_last4 + dob + last_name<br />2. full name + dob + zip</dd>
+        </div>
+        <div class="lrow">
+          <dt>Expires</dt>
+          <dd>July 8, 2026, 3:32 PM (EDT)</dd>
+        </div>
+        <div class="lrow">
+          <dt>Results go to</dt>
+          <dd>You and your partner</dd>
+        </div>
+        <div class="lrow">
+          <dt>Agreement</dt>
+          <dd>MOU-2025-0042</dd>
+        </div>
+        <div class="lrow">
+          <dt>Transport</dt>
+          <dd>Browser</dd>
+        </div>
+      </dl>
+      <p class="trust">
+        Your file stays in this browser. Nothing is uploaded; your partner
+        receives only what this ledger names.
+      </p>
+    </aside>
+  </div>
+  <aside class="notes-panel" aria-label="Design notes">
+    <h2>Design notes - Share</h2>
+    <ol>
+      <li>
+        <b>USWDS: Earn trust.</b> The one-time-secret and trusted-channel
+        warnings sit directly on the thing being shared, not in a help page.
+      </li>
+      <li>
+        <b>Copy degrades gracefully.</b> On insecure origins the clipboard API
+        is unavailable; the button falls back to selecting the text so manual
+        copy still works. The "Copied" state is shown here as its second state.
+      </li>
+      <li>
+        <b>Sealed terms stay on screen.</b> Creating the invitation froze the
+        ledger; while you wait, what you agreed to share never leaves the page.
+        This is the standing-last-look philosophy at its most literal.
+      </li>
+      <li>
+        <b>USWDS: Step indicator.</b> After create, the rail becomes the
+        protocol timeline - the same fixed-steps component, now tracking the
+        run, with <code>aria-current</code> on the live stage and an
+        <code>aria-live</code> status label for screen readers.
+      </li>
+    </ol>
+  </aside>
+</section>
+
+<!-- =============================================================
+     SCREEN 9 - bench-running
+============================================================= -->
+<section
+  class="screen"
+  id="bench-running"
+  data-title="Running - Linking key 2 of 2"
+  data-group="inviter"
+>
+  <div class="bench">
+    <nav class="rail" aria-label="Exchange progress">
+      <div class="wordmark">psilink</div>
+      <hr class="wordrule" />
+      <p class="rail-group">This exchange</p>
+      <ol class="rail-timeline">
+        <li class="done">
+          <span>Share</span>
+        </li>
+        <li class="done">
+          <span>Partner accepts</span>
+        </li>
+        <li class="done">
+          <span>Confirm protocol</span>
+        </li>
+        <li class="current">
+          <span aria-current="step">Link keys</span>
+        </li>
+        <li class="pending">
+          <span>Done</span>
+        </li>
+      </ol>
+      <div class="problems warned">
+        <h2>Problems<sup class="pin">2</sup></h2>
+        <ul>
+          <li>Partial coverage: Key 1 covers 11,982 of 12,408 rows (96.6%)</li>
+        </ul>
+      </div>
+    </nav>
+
+    <div class="work">
+      <h1 tabindex="-1">Exchange in progress</h1>
+
+      <div class="statuspanel">
+        <h2
+          style="
+            margin: 0 0 8px 0;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--sec);
+          "
+        >
+          Status
+        </h2>
+        <p class="stage-label" aria-live="polite">
+          <span class="spinner" aria-hidden="true"></span
+          ><span class="mono">Linking key 2 / 2</span>
+        </p>
+        <div class="progress" role="progressbar" aria-label="Exchange progress">
+          <div class="bar" style="width: 78%"></div>
+        </div>
+        <sup class="pin">1</sup>
+        <ol class="stage-history">
+          <li>
+            <span class="tick" aria-hidden="true"></span>Waiting for your
+            partner - done <span class="mono">2:39 PM</span>
+          </li>
+          <li>
+            <span class="tick" aria-hidden="true"></span>Confirming protocol -
+            done <span class="mono">2:40 PM</span>
+          </li>
+          <li>
+            <span class="tick" aria-hidden="true"></span>Linking key 1 / 2 -
+            done <span class="mono">2:43 PM</span>
+          </li>
+          <li class="now">
+            <span class="tick" aria-hidden="true"></span>Linking key 2 / 2
+          </li>
+        </ol>
+      </div>
+
+      <div class="alert alert-warn">
+        <h4>Partial coverage</h4>
+        <p>
+          Key 1 produces a value in
+          <span class="mono">11,982 of 12,408</span> rows (<span class="mono"
+            >96.6%</span
+          >). Rows without a value cannot match on that key; most are caught by
+          Key 2. This advisory stays until the exchange finishes.
+        </p>
+      </div>
+    </div>
+
+    <aside class="ledger" aria-label="This exchange">
+      <h2>This exchange</h2>
+      <span class="sealed-tag">Terms sealed at create</span>
+      <dl>
+        <div class="lrow">
+          <dt>You will send</dt>
+          <dd>enrollment_date, program_code</dd>
+        </div>
+        <div class="lrow">
+          <dt>You will receive</dt>
+          <dd>Matched rows + your partner's shared columns</dd>
+        </div>
+        <div class="lrow">
+          <dt>Matched on</dt>
+          <dd>1. ssn_last4 + dob + last_name<br />2. full name + dob + zip</dd>
+        </div>
+        <div class="lrow">
+          <dt>Expires</dt>
+          <dd>July 8, 2026, 3:32 PM (EDT)</dd>
+        </div>
+        <div class="lrow">
+          <dt>Results go to</dt>
+          <dd>You and your partner</dd>
+        </div>
+        <div class="lrow">
+          <dt>Agreement</dt>
+          <dd>MOU-2025-0042</dd>
+        </div>
+        <div class="lrow">
+          <dt>Transport</dt>
+          <dd>Browser</dd>
+        </div>
+      </dl>
+      <p class="trust">
+        Your file stays in this browser. Nothing is uploaded; your partner
+        receives only what this ledger names.
+      </p>
+    </aside>
+  </div>
+  <aside class="notes-panel" aria-label="Design notes">
+    <h2>Design notes - Running</h2>
+    <ol>
+      <li>
+        <b>Reduced motion respected.</b> The striped bar and spinner animate
+        only when the user allows motion; under
+        <code>prefers-reduced-motion</code> both render static, and the mono
+        stage label carries the state on its own.
+      </li>
+      <li>
+        <b>Warnings persist.</b> Partial coverage is not a toast: it lives in
+        the rail's Problems block (amber, not red - the run continues) and as a
+        standing advisory until Done, because it changes how the result should
+        be read.
+      </li>
+      <li>
+        <b>Mono is protocol truth.</b> Stage labels, counts, and timestamps are
+        all in the data voice - if it is mono, the protocol said it; if it is
+        sans, the interface is explaining.
+      </li>
+    </ol>
+  </aside>
+</section>
+
+<!-- =============================================================
+     SCREEN 10 - bench-done
+============================================================= -->
+<section
+  class="screen"
+  id="bench-done"
+  data-title="Done - results"
+  data-group="inviter"
+>
+  <div class="bench">
+    <nav class="rail" aria-label="Exchange progress">
+      <div class="wordmark">psilink</div>
+      <hr class="wordrule" />
+      <p class="rail-group">This exchange</p>
+      <ol class="rail-timeline">
+        <li class="done">
+          <span>Share</span>
+        </li>
+        <li class="done">
+          <span>Partner accepts</span>
+        </li>
+        <li class="done">
+          <span>Confirm protocol</span>
+        </li>
+        <li class="done">
+          <span>Link keys</span>
+        </li>
+        <li class="done">
+          <span>Done</span>
+        </li>
+      </ol>
+    </nav>
+
+    <div class="work">
+      <h1 tabindex="-1">Exchange complete</h1>
+
+      <div class="donepanel">
+        <p class="bigcount">
+          Exchange complete - <span class="mono">1,847</span> matched records
+        </p>
+        <p class="small sub mono">Finished July 8, 2026, 2:47 PM (EDT)</p>
+      </div>
+
+      <div class="statuspanel" style="border: none; padding: 0">
+        <p class="stage-label" aria-live="polite">
+          <span class="mono">Done</span>
+        </p>
+        <div
+          class="progress done-bar"
+          role="progressbar"
+          aria-label="Exchange progress"
+        >
+          <div class="bar" style="width: 100%"></div>
+        </div>
+      </div>
+
+      <h2>Downloads</h2>
+      <div class="dlrow">
+        <span class="dl-label">Download result:</span>
+        <button class="linklike mono">results.csv</button>
+      </div>
+      <div class="dlrow">
+        <span class="dl-label"
+          >Download record (safe to share):<sup class="pin">1</sup></span
+        >
+        <button class="linklike mono">
+          psilink-record-2026-07-08T14-32.json
+        </button>
+      </div>
+      <div class="dlrow">
+        <span class="dl-label"
+          >Download verification keys
+          <span class="keep-private">(keep private)</span>:<sup class="pin"
+            >2</sup
+          ></span
+        >
+        <button class="linklike mono">
+          psilink-record-2026-07-08T14-32.keys.json
+        </button>
+      </div>
+
+      <div class="callout" style="margin-top: 1.6rem">
+        <p class="lead-line">Keep a record.</p>
+        <p class="small">
+          File the record JSON with your project documentation - it is safe to
+          share and lets either party verify this run later. The verification
+          keys prove the record came from this exchange; store them where only
+          you can read them.
+        </p>
+      </div>
+
+      <div class="state-inset">
+        <p class="state-label">
+          State: results withheld by the terms<sup class="pin">3</sup>
+        </p>
+        <p class="small" style="margin: 0">
+          Your records contributed to the match. By the agreed terms, you
+          receive no result table, so there is nothing to download here.
+        </p>
+      </div>
+
+      <div class="workfoot">
+        <button class="btn" data-goto="landing">Set up another exchange</button>
+      </div>
+    </div>
+
+    <aside class="ledger" aria-label="This exchange">
+      <h2>This exchange</h2>
+      <span class="sealed-tag">Terms sealed at create</span>
+      <dl>
+        <div class="lrow">
+          <dt>You will send</dt>
+          <dd>enrollment_date, program_code</dd>
+        </div>
+        <div class="lrow">
+          <dt>You will receive</dt>
+          <dd>1,847 matched rows + shared columns</dd>
+        </div>
+        <div class="lrow">
+          <dt>Matched on</dt>
+          <dd>1. ssn_last4 + dob + last_name<br />2. full name + dob + zip</dd>
+        </div>
+        <div class="lrow">
+          <dt>Expires</dt>
+          <dd>Invitation used</dd>
+        </div>
+        <div class="lrow">
+          <dt>Results go to</dt>
+          <dd>You and your partner</dd>
+        </div>
+        <div class="lrow">
+          <dt>Agreement</dt>
+          <dd>MOU-2025-0042</dd>
+        </div>
+        <div class="lrow">
+          <dt>Transport</dt>
+          <dd>Browser</dd>
+        </div>
+      </dl>
+      <p class="trust">
+        Your file never left this browser. The results above are all your
+        partner received about your data.
+      </p>
+    </aside>
+  </div>
+  <aside class="notes-panel" aria-label="Design notes">
+    <h2>Design notes - Done</h2>
+    <ol>
+      <li>
+        <b>USWDS: Keep a record.</b> Three artifacts, three verbs: the result
+        you use, the record you file, the keys you guard. Each caveat is on the
+        download row itself.
+      </li>
+      <li>
+        <b>No color-only state.</b> "Keep private" is words, weight, and case -
+        not just red - so the warning survives every viewer and printer.
+      </li>
+      <li>
+        <b>Honest completion.</b> The withheld-result variant shows psilink
+        saying "you get nothing here" without apology or blur: the party who
+        receives no table still learns their contribution mattered.
+      </li>
+    </ol>
+  </aside>
+</section>
+
+<!-- =============================================================
+     SCREEN 11 - bench-sftp (SFTP transport path)
+============================================================= -->
+<section
+  class="screen"
+  id="bench-sftp"
+  data-title="SFTP - Save your exchange file"
+  data-group="inviter"
+>
+  <div class="bench">
+    <nav class="rail" aria-label="Exchange progress">
+      <div class="wordmark">psilink</div>
+      <hr class="wordrule" />
+      <p class="rail-group">
+        This exchange &middot; SFTP<sup class="pin">3</sup>
+      </p>
+      <ol class="rail-timeline">
+        <li class="current">
+          <span aria-current="step">Save file</span>
+        </li>
+        <li class="pending">
+          <span>Partner accepts</span>
+        </li>
+        <li class="pending">
+          <span>CLI runs</span>
+        </li>
+        <li class="pending">
+          <span>Results</span>
+        </li>
+      </ol>
+    </nav>
+
+    <div class="work">
+      <button class="backlink" data-goto="bench-review">
+        &larr; Back to Review &amp; create
+      </button>
+      <h1 tabindex="-1">
+        Save your exchange file<span class="tag-roadmap">On the roadmap</span
+        ><sup class="pin">1</sup>
+      </h1>
+      <p>
+        You chose to run this exchange over SFTP with the psilink command-line
+        tool. The linkage terms inside the exchange file are identical to a
+        browser exchange<sup class="pin">2</sup> - only the transport differs.
+      </p>
+
+      <div class="field">
+        <label for="sftp-host">SFTP server host</label>
+        <input
+          type="text"
+          id="sftp-host"
+          class="mono"
+          value="sftp.riverbend.example.gov"
+        />
+      </div>
+      <div class="field">
+        <label for="sftp-dir">Remote directory</label>
+        <input
+          type="text"
+          id="sftp-dir"
+          class="mono"
+          value="/exchanges/psilink"
+        />
+      </div>
+
+      <div class="alert alert-info">
+        <p>
+          Credentials are never stored in this file. The command-line tool
+          supplies them at run time from its own key file.
+        </p>
+      </div>
+
+      <div class="copyrow">
+        <span class="label" style="font-weight: 650">Invitation code</span>
+        <span class="hint"
+          >Your partner accepts with this same code, whichever transport they
+          run</span
+        >
+        <div class="copybox">
+          <div class="codeblock mono">
+            eyJ2IjoxLCJzIjoiUlZ0&hellip;c2lnIjoiZmYzYSJ9
+          </div>
+          <button
+            class="btn btn-secondary btn-sm copybtn"
+            title="Copy to clipboard"
+          >
+            Copy
+          </button>
+        </div>
+      </div>
+
+      <div class="workfoot" style="border-top: none; padding-top: 0">
+        <button class="btn">Save exchange file</button>
+      </div>
+
+      <div class="filecard" style="margin-top: 1.2rem">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          aria-hidden="true"
+        >
+          <path
+            d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"
+          />
+          <path d="M13 3v6h6" />
+        </svg>
+        <div>
+          <div class="fname mono">psilink-exchange-2026-07-08.yaml</div>
+          <div class="fmeta">Saved to your downloads</div>
+        </div>
+      </div>
+      <p class="small" style="max-width: 62ch">
+        Run it with the psilink command-line tool on the machine that reaches
+        your SFTP server. Your partner accepts with the same invitation code and
+        their own exchange file; the tool exchanges protocol messages through
+        <span class="mono">/exchanges/psilink</span> and writes the same three
+        result files you would download here.
+      </p>
+    </div>
+
+    <aside class="ledger" aria-label="This exchange">
+      <h2>This exchange</h2>
+      <dl>
+        <div class="lrow">
+          <dt>You will send <span class="lref">Step 2</span></dt>
+          <dd>enrollment_date, program_code</dd>
+        </div>
+        <div class="lrow">
+          <dt>You will receive <span class="lref">Step 2</span></dt>
+          <dd>Matched rows + your partner's shared columns</dd>
+        </div>
+        <div class="lrow">
+          <dt>Matched on <span class="lref">Keys tab</span></dt>
+          <dd>1. ssn_last4 + dob + last_name<br />2. full name + dob + zip</dd>
+        </div>
+        <div class="lrow">
+          <dt>Expires <span class="lref">Step 3</span></dt>
+          <dd>July 8, 2026, 3:32 PM (EDT)</dd>
+        </div>
+        <div class="lrow">
+          <dt>Results go to <span class="lref">Step 3</span></dt>
+          <dd>You and your partner</dd>
+        </div>
+        <div class="lrow">
+          <dt>Agreement <span class="lref">Agreement tab</span></dt>
+          <dd>MOU-2025-0042</dd>
+        </div>
+        <div class="lrow">
+          <dt>Transport <span class="lref">Step 3</span></dt>
+          <dd>SFTP (command-line tool)</dd>
+        </div>
+      </dl>
+      <p class="trust">
+        Your file stays on your machines. The SFTP server carries only encrypted
+        protocol messages - never your rows.
+      </p>
+    </aside>
+  </div>
+  <aside class="notes-panel" aria-label="Design notes">
+    <h2>Design notes - SFTP path</h2>
+    <ol>
+      <li>
+        <b>Roadmap honesty.</b> SFTP exchanges run in the command-line tool
+        today; this surface is the planned configurator for them. The tag keeps
+        the mock from presenting an un-shipped capability as in force - the same
+        rule the gated matching settings follow.
+      </li>
+      <li>
+        <b>Same terms, different transport.</b> The ledger is unchanged from the
+        browser path except the Transport row: choosing SFTP alters nothing
+        about what is disclosed, and the bench proves it by not changing.
+      </li>
+      <li>
+        <b>Timeline adapts, vocabulary holds.</b> The rail's SFTP variant (Save
+        file, Partner accepts, CLI runs, Results) reuses the browser timeline's
+        grammar so an operator who knows one reads the other.
+      </li>
+    </ol>
+  </aside>
+</section>
+
+<!-- =============================================================
+     SCREEN 12 - accept-review (acceptor)
+============================================================= -->
+<section
+  class="screen"
+  id="accept-review"
+  data-title="Accept - Review terms"
+  data-group="acceptor"
+>
+  <div class="bench">
+    <nav class="rail" aria-label="Accept an invitation">
+      <div class="wordmark">psilink</div>
+      <hr class="wordrule" />
+      <p class="rail-group">Accept an invitation</p>
+      <ol class="rail-steps">
+        <li class="current">
+          <a aria-current="step">Review terms</a>
+        </li>
+        <li class="pending">
+          <a>Consent &amp; your file</a>
+        </li>
+        <li class="pending">
+          <a>Confirm your columns</a>
+        </li>
+      </ol>
+      <p class="rail-group">Customize</p>
+      <ul class="rail-tabs">
+        <li>
+          <a>Cleaning</a>
+          <span class="val">&mdash;</span>
+        </li>
+      </ul>
+    </nav>
+
+    <div class="work terms">
+      <h1 tabindex="-1">Invitation from Dana Okafor</h1>
+      <p class="small sub">
+        Your partner entered this name; psilink has not verified it.<sup
+          class="pin"
+          >2</sup
+        >
+      </p>
+      <p>
+        To accept your partner's proposed terms, confirm your consent, enter
+        your name, and choose your data file. This invitation should have
+        reached you over a trusted channel. Your browser connects directly to
+        your partner.
+      </p>
+
+      <h2>What you disclose<sup class="pin">1</sup></h2>
+      <ul>
+        <li>
+          Cryptographic fingerprints built from your <strong>name</strong>,
+          <strong>date of birth</strong>, <strong>SSN (last 4)</strong>, and
+          <strong>ZIP code</strong> columns - never the raw values.
+        </li>
+        <li>
+          For rows that match: nothing more. These terms ask you to send no
+          additional columns.
+        </li>
+        <li>
+          Your partner never receives the values in your non-matching rows.
+        </li>
+      </ul>
+
+      <h2>What the exchange produces</h2>
+      <p>
+        A table of the records you both hold, found by comparing fingerprints -
+        a private set intersection. Neither side sees the other's file.
+      </p>
+
+      <h2>What you receive</h2>
+      <p>
+        The matched results go to <strong>both you and your partner</strong>.
+        For each matched row, your partner sends you
+        <span class="mono">enrollment_date</span> and
+        <span class="mono">program_code</span>.
+      </p>
+
+      <h2>How records are matched</h2>
+      <ol class="keylist">
+        <li>
+          <span class="mono">Key 1: SSN + birth date + family name</span> - most
+          precise, tried first
+        </li>
+        <li>
+          <span class="mono">Key 2: Full name + birth date + ZIP</span> -
+          catches rows without an SSN
+        </li>
+      </ol>
+      <p class="small">
+        Keys run as a cascade: a record matched by an earlier key is settled and
+        never re-exposed to later, broader keys. Before matching, names are
+        trimmed, lowercased, and stripped of accents; dates are normalized to
+        <span class="mono">YYYY-MM-DD</span>; ZIP codes are truncated to
+        <span class="mono">5</span> digits.
+      </p>
+
+      <h2>Other details</h2>
+      <dl>
+        <dt>Matching method</dt>
+        <dd>Reveal the matched identifiers (standard).</dd>
+        <dt>Result sharing<sup class="pin">3</sup></dt>
+        <dd>
+          Both parties receive results. Where terms send results to only one
+          party, the other's non-receipt is cooperative - agreed in the terms
+          and honored by the software, not cryptographically enforced.
+        </dd>
+        <dt>Duplicate matches</dt>
+        <dd>
+          Each of your records matches at most one of your partner's records.
+        </dd>
+        <dt>Personal data used</dt>
+        <dd>Name, date of birth, SSN (last 4), ZIP code.</dd>
+        <dt>Additional data for matched records</dt>
+        <dd>
+          Your partner sends
+          <span class="mono">enrollment_date, program_code</span>. You send
+          none.
+        </dd>
+        <dt>Legal agreement</dt>
+        <dd>
+          <span class="mono">MOU-2025-0042</span> - Program evaluation - expires
+          <span class="mono">2026-12-31</span>. You will enter these three
+          values identically on the next step.
+        </dd>
+        <dt>Invitation expires</dt>
+        <dd><span class="mono">July 8, 2026, 3:32 PM (EDT)</span></dd>
+        <dt>Transport</dt>
+        <dd>Live, in the browser.</dd>
+      </dl>
+
+      <div class="workfoot">
+        <button class="btn" data-goto="accept-consent-file">
+          Continue: consent &amp; your file
+        </button>
+      </div>
+    </div>
+
+    <aside class="ledger" aria-label="Proposed terms">
+      <h2>This exchange</h2>
+      <span class="sealed-tag"
+        >Proposed by Dana Okafor<sup class="pin">4</sup></span
+      >
+      <dl>
+        <div class="lrow">
+          <dt>You will send</dt>
+          <dd>No additional columns</dd>
+        </div>
+        <div class="lrow">
+          <dt>You will receive</dt>
+          <dd>Matched rows + enrollment_date, program_code</dd>
+        </div>
+        <div class="lrow">
+          <dt>Matched on</dt>
+          <dd>
+            1. ssn + birth date + family name<br />2. full name + birth date +
+            zip
+          </dd>
+        </div>
+        <div class="lrow">
+          <dt>Expires</dt>
+          <dd>July 8, 2026, 3:32 PM (EDT)</dd>
+        </div>
+        <div class="lrow">
+          <dt>Results go to</dt>
+          <dd>You and your partner</dd>
+        </div>
+        <div class="lrow">
+          <dt>Agreement</dt>
+          <dd>MOU-2025-0042</dd>
+        </div>
+        <div class="lrow">
+          <dt>Transport</dt>
+          <dd>Browser</dd>
+        </div>
+      </dl>
+      <p class="trust">
+        These terms are your partner's proposal, read-only. Accepting never
+        sends more than this ledger names.
+      </p>
+    </aside>
+  </div>
+  <aside class="notes-panel" aria-label="Design notes">
+    <h2>Design notes - Review terms</h2>
+    <ol>
+      <li>
+        <b>Informed consent, never condensed.</b> The acceptor always sees the
+        full expanded terms - every tier, every caveat - before the consent
+        checkbox exists on the next step. No summary view can replace this
+        screen.
+      </li>
+      <li>
+        <b>Sanitized partner strings.</b> "Dana Okafor" is partner-entered text:
+        it is rendered inert and flagged as unverified right under the heading,
+        before any trust can attach to it.
+      </li>
+      <li>
+        <b>Enforced vs cooperative.</b> The result-sharing entry states plainly
+        which guarantees are cryptographic and which are promises - the single
+        most misread fact in record linkage tools.
+      </li>
+      <li>
+        <b>Same instrument, other side.</b> The acceptor sees the ledger the
+        inviter built on, marked as a proposal. Symmetry is the trust argument:
+        nothing was staged for one audience.
+      </li>
+    </ol>
+  </aside>
+</section>
+
+<!-- =============================================================
+     SCREEN 13 - accept-consent-file
+============================================================= -->
+<section
+  class="screen"
+  id="accept-consent-file"
+  data-title="Accept - Consent &amp; your file"
+  data-group="acceptor"
+>
+  <div class="bench">
+    <nav class="rail" aria-label="Accept an invitation">
+      <div class="wordmark">psilink</div>
+      <hr class="wordrule" />
+      <p class="rail-group">Accept an invitation</p>
+      <ol class="rail-steps">
+        <li class="done">
+          <a data-goto="accept-review">Review terms</a>
+        </li>
+        <li class="current">
+          <a aria-current="step">Consent &amp; your file</a>
+        </li>
+        <li class="pending">
+          <a>Confirm your columns</a>
+        </li>
+      </ol>
+      <p class="rail-group">Customize</p>
+      <ul class="rail-tabs">
+        <li>
+          <a>Cleaning</a>
+          <span class="val">&mdash;</span>
+        </li>
+      </ul>
+    </nav>
+
+    <div class="work">
+      <p class="eyebrow">Step 2 of 3</p>
+      <h1 tabindex="-1">Consent &amp; your file</h1>
+      <p class="small sub">
+        This invitation should have reached you over a trusted channel. Your
+        browser connects directly to your partner.
+      </p>
+
+      <div class="check">
+        <input type="checkbox" id="consent" checked />
+        <div>
+          <label for="consent"
+            >I have reviewed my partner's proposed terms and consent to this
+            exchange<sup class="pin">1</sup></label
+          >
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="acc-name">Your name</label>
+        <span class="hint" id="acc-name-hint"
+          >Recorded in your exchange record so your partner can identify
+          you</span
+        >
+        <input
+          type="text"
+          id="acc-name"
+          value="Sam Alvarez"
+          maxlength="200"
+          aria-describedby="acc-name-hint"
+        />
+      </div>
+
+      <div class="field">
+        <span class="label" id="acc-dz-label">Your data file</span>
+        <div
+          class="dropzone"
+          role="button"
+          tabindex="0"
+          aria-labelledby="acc-dz-label"
+        >
+          <p><strong>Drag files here or click to select</strong></p>
+          <p class="dz-max">(Max file size: 64 MB)</p>
+        </div>
+        <div class="filecard">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            aria-hidden="true"
+          >
+            <path
+              d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"
+            />
+            <path d="M13 3v6h6" />
+          </svg>
+          <div>
+            <div class="fname mono">cohort_intake.csv</div>
+            <div class="fmeta mono">9,102 rows</div>
+          </div>
+          <button class="linklike small" style="margin-left: auto">
+            Choose a different file
+          </button>
+        </div>
+        <p class="small sub">
+          Your file is processed entirely in your browser and it is never
+          uploaded to our server.
+        </p>
+      </div>
+
+      <fieldset>
+        <legend>
+          Legal agreement - enter it exactly as agreed<sup class="pin">2</sup>
+        </legend>
+        <p class="hint" style="margin-top: 2px">
+          These three values must match your partner's entries exactly. A
+          mismatch stops the exchange.
+        </p>
+        <div class="field">
+          <label for="acc-agree-ref">Agreement reference</label>
+          <input
+            type="text"
+            id="acc-agree-ref"
+            class="mono"
+            value="MOU-2025-0042"
+            placeholder="MOU-2025-0042"
+          />
+        </div>
+        <div class="field">
+          <label for="acc-agree-purpose">Purpose of the disclosure</label>
+          <input
+            type="text"
+            id="acc-agree-purpose"
+            value="Program evaluation"
+            placeholder="Program evaluation"
+          />
+        </div>
+        <div class="field">
+          <label for="acc-agree-exp">Expiration date</label>
+          <input
+            type="date"
+            id="acc-agree-exp"
+            class="mono"
+            value="2026-12-31"
+            style="max-width: 220px"
+          />
+        </div>
+      </fieldset>
+
+      <div class="workfoot">
+        <button class="btn" data-goto="accept-columns">
+          Accept and continue
+        </button>
+      </div>
+    </div>
+
+    <aside class="ledger" aria-label="Proposed terms">
+      <h2>This exchange</h2>
+      <span class="sealed-tag">Proposed by Dana Okafor</span>
+      <dl>
+        <div class="lrow">
+          <dt>You will send</dt>
+          <dd>No additional columns</dd>
+        </div>
+        <div class="lrow">
+          <dt>You will receive</dt>
+          <dd>Matched rows + enrollment_date, program_code</dd>
+        </div>
+        <div class="lrow">
+          <dt>Matched on</dt>
+          <dd>
+            1. ssn + birth date + family name<br />2. full name + birth date +
+            zip
+          </dd>
+        </div>
+        <div class="lrow">
+          <dt>Expires</dt>
+          <dd>July 8, 2026, 3:32 PM (EDT)</dd>
+        </div>
+        <div class="lrow">
+          <dt>Results go to</dt>
+          <dd>You and your partner</dd>
+        </div>
+        <div class="lrow">
+          <dt>Agreement</dt>
+          <dd>MOU-2025-0042</dd>
+        </div>
+        <div class="lrow">
+          <dt>Transport</dt>
+          <dd>Browser</dd>
+        </div>
+      </dl>
+      <p class="trust">
+        These terms are your partner's proposal, read-only. Accepting never
+        sends more than this ledger names.
+      </p>
+    </aside>
+  </div>
+  <aside class="notes-panel" aria-label="Design notes">
+    <h2>Design notes - Consent &amp; your file</h2>
+    <ol>
+      <li>
+        <b>The gate is re-checked in the handler.</b> "Accept and continue" is
+        never merely visually disabled: consent, name, and file are verified
+        again when the button fires, so assistive tech and stale DOM states
+        cannot slip past the gate. The consent string is fixed, exact wording.
+      </li>
+      <li>
+        <b>GOV.UK: Ask for information once, in context.</b> The agreement
+        re-entry lives with the consent act, framed as transcription from the
+        signed document - the fieldset says why exactness matters before any
+        mismatch can happen.
+      </li>
+    </ol>
+  </aside>
+</section>
+
+<!-- =============================================================
+     SCREEN 14 - accept-columns
+============================================================= -->
+<section
+  class="screen"
+  id="accept-columns"
+  data-title="Accept - Confirm your columns"
+  data-group="acceptor"
+>
+  <div class="bench">
+    <nav class="rail" aria-label="Accept an invitation">
+      <div class="wordmark">psilink</div>
+      <hr class="wordrule" />
+      <p class="rail-group">Accept an invitation</p>
+      <ol class="rail-steps">
+        <li class="done">
+          <a data-goto="accept-review">Review terms</a>
+        </li>
+        <li class="done">
+          <a data-goto="accept-consent-file">Consent &amp; your file</a>
+        </li>
+        <li class="current">
+          <a aria-current="step">Confirm your columns</a>
+        </li>
+      </ol>
+      <p class="rail-group">Customize</p>
+      <ul class="rail-tabs">
+        <li>
+          <a>Cleaning<sup class="pin">1</sup></a>
+          <span class="val attn">1 field failing</span>
+        </li>
+      </ul>
+    </nav>
+
+    <div class="work">
+      <button class="backlink" data-goto="accept-consent-file">
+        &larr; Choose a different file
+      </button>
+      <p class="eyebrow">Step 3 of 3</p>
+      <h1 tabindex="-1">Confirm your columns</h1>
+      <p>
+        Tell us what each column in your file is and what should be done with
+        it. Nothing here is sent to your partner except the columns you mark as
+        shared; these settings stay on your device.
+      </p>
+
+      <div class="verdict verdict-warn" aria-live="polite">
+        <span>1 of 2 keys can match</span>
+        <span class="verdict-detail"
+          >Key 2 needs a ZIP code column; none of your columns is typed as one
+          yet.</span
+        >
+      </div>
+
+      <h2 style="margin-top: 1.2rem">
+        Map a column to each missing field<sup class="pin">2</sup>
+      </h2>
+      <div class="field">
+        <label for="map-zip">ZIP code</label>
+        <select id="map-zip" style="max-width: 280px">
+          <option>Choose a column</option>
+          <option selected>postal_code</option>
+          <option>consent_flag</option>
+          <option>subject_id</option>
+        </select>
+      </div>
+
+      <div class="state-inset">
+        <p class="state-label">State: after mapping postal_code</p>
+        <div class="verdict verdict-ok" style="margin: 0">
+          <span>All 2 keys can match</span>
+          <span class="verdict-detail"
+            >Every key in the invitation is covered by your columns.</span
+          >
+        </div>
+      </div>
+
+      <div class="state-inset">
+        <p class="state-label">State: no key covered yet</p>
+        <div class="verdict verdict-bad" style="margin: 0">
+          <span>This file cannot match yet</span>
+          <span class="verdict-detail"
+            >Neither key is covered by your columns. Map a column to each
+            missing field above to continue.</span
+          >
+        </div>
+      </div>
+
+      <div class="table-scroll">
+        <table class="bench-table">
+          <caption class="visually-hidden">
+            Your columns: type and use
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Column</th>
+              <th scope="col">Type</th>
+              <th scope="col">How it is used</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="mono">subject_id</td>
+              <td>
+                <select aria-label="Type for subject_id">
+                  <option selected>Row identifier</option>
+                  <option>Name</option>
+                  <option>Date of birth</option>
+                  <option>SSN (last 4)</option>
+                  <option>ZIP code</option>
+                  <option>No matching type</option>
+                </select>
+              </td>
+              <td>
+                <select aria-label="How subject_id is used">
+                  <option selected>Row identifier</option>
+                  <option>Matched on</option>
+                  <option>Sent to partner</option>
+                  <option>Ignored</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td class="mono">given_name</td>
+              <td>
+                <select aria-label="Type for given_name">
+                  <option selected>Name</option>
+                  <option>Date of birth</option>
+                  <option>SSN (last 4)</option>
+                  <option>ZIP code</option>
+                  <option>Row identifier</option>
+                  <option>No matching type</option>
+                </select>
+              </td>
+              <td>
+                <select aria-label="How given_name is used">
+                  <option selected>Matched on</option>
+                  <option>Sent to partner</option>
+                  <option>Ignored</option>
+                  <option>Row identifier</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td class="mono">family_name</td>
+              <td>
+                <select aria-label="Type for family_name">
+                  <option selected>Name</option>
+                  <option>Date of birth</option>
+                  <option>SSN (last 4)</option>
+                  <option>ZIP code</option>
+                  <option>Row identifier</option>
+                  <option>No matching type</option>
+                </select>
+              </td>
+              <td>
+                <select aria-label="How family_name is used">
+                  <option selected>Matched on</option>
+                  <option>Sent to partner</option>
+                  <option>Ignored</option>
+                  <option>Row identifier</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td class="mono">birth_date</td>
+              <td>
+                <select aria-label="Type for birth_date">
+                  <option selected>Date of birth</option>
+                  <option>Name</option>
+                  <option>SSN (last 4)</option>
+                  <option>ZIP code</option>
+                  <option>Row identifier</option>
+                  <option>No matching type</option>
+                </select>
+              </td>
+              <td>
+                <select aria-label="How birth_date is used">
+                  <option selected>Matched on</option>
+                  <option>Sent to partner</option>
+                  <option>Ignored</option>
+                  <option>Row identifier</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td class="mono">ssn4</td>
+              <td>
+                <select aria-label="Type for ssn4">
+                  <option selected>SSN (last 4)</option>
+                  <option>Name</option>
+                  <option>Date of birth</option>
+                  <option>ZIP code</option>
+                  <option>Row identifier</option>
+                  <option>No matching type</option>
+                </select>
+              </td>
+              <td>
+                <select aria-label="How ssn4 is used">
+                  <option selected>Matched on</option>
+                  <option>Sent to partner</option>
+                  <option>Ignored</option>
+                  <option>Row identifier</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td class="mono">postal_code</td>
+              <td>
+                <select aria-label="Type for postal_code">
+                  <option selected>ZIP code</option>
+                  <option>Name</option>
+                  <option>Date of birth</option>
+                  <option>SSN (last 4)</option>
+                  <option>Row identifier</option>
+                  <option>No matching type</option>
+                </select>
+              </td>
+              <td>
+                <select aria-label="How postal_code is used">
+                  <option selected>Matched on</option>
+                  <option>Sent to partner</option>
+                  <option>Ignored</option>
+                  <option>Row identifier</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td class="mono">consent_flag</td>
+              <td>
+                <select aria-label="Type for consent_flag">
+                  <option selected>No matching type</option>
+                  <option>Name</option>
+                  <option>Date of birth</option>
+                  <option>SSN (last 4)</option>
+                  <option>ZIP code</option>
+                  <option>Row identifier</option>
+                </select>
+              </td>
+              <td>
+                <select aria-label="How consent_flag is used">
+                  <option selected>Ignored</option>
+                  <option>Matched on</option>
+                  <option>Sent to partner</option>
+                  <option>Row identifier</option>
+                </select>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="hint" style="margin-top: 8px">
+        Only one column can be the row identifier. Choose a single identifier.
+      </p>
+
+      <h2>What you will send to your partner</h2>
+      <p class="small">
+        No additional columns. Your columns are used only to find matches; for
+        each matched row you receive
+        <span class="mono">enrollment_date</span> and
+        <span class="mono">program_code</span> from your partner.
+      </p>
+
+      <div class="state-inset">
+        <p class="state-label">
+          State: inside the Cleaning tab, when a key goes dead<sup class="pin"
+            >3</sup
+          >
+        </p>
+        <div class="alert alert-warn" style="margin: 0 0 10px 0">
+          <h4>A linkage key's rule drops every record</h4>
+          <p>
+            After cleaning, <span class="mono">Key 1</span> produces no usable
+            rows from your file. The key came with the invitation, so you cannot
+            edit it here - ask your partner for a corrected invitation.
+          </p>
+        </div>
+        <p class="small" style="margin: 0; font-weight: 650">
+          Finish or fix the highlighted cleaning steps before continuing.
+        </p>
+      </div>
+
+      <div class="workfoot">
+        <button class="btn" data-goto="accept-run-done">
+          Start the exchange
+        </button>
+        <button class="btn btn-quiet">Reset to recommended</button>
+      </div>
+    </div>
+
+    <aside class="ledger" aria-label="Proposed terms">
+      <h2>This exchange</h2>
+      <span class="sealed-tag">Proposed by Dana Okafor</span>
+      <dl>
+        <div class="lrow">
+          <dt>You will send</dt>
+          <dd>No additional columns</dd>
+        </div>
+        <div class="lrow">
+          <dt>You will receive</dt>
+          <dd>Matched rows + enrollment_date, program_code</dd>
+        </div>
+        <div class="lrow">
+          <dt>Matched on</dt>
+          <dd>
+            1. ssn + birth date + family name<br />2. full name + birth date +
+            zip
+          </dd>
+        </div>
+        <div class="lrow">
+          <dt>Expires</dt>
+          <dd>July 8, 2026, 3:32 PM (EDT)</dd>
+        </div>
+        <div class="lrow">
+          <dt>Results go to</dt>
+          <dd>You and your partner</dd>
+        </div>
+        <div class="lrow">
+          <dt>Agreement</dt>
+          <dd>MOU-2025-0042</dd>
+        </div>
+        <div class="lrow">
+          <dt>Transport</dt>
+          <dd>Browser</dd>
+        </div>
+      </dl>
+      <p class="trust">
+        Column typing and cleaning stay on your device. Your partner sees
+        matches, never these settings.
+      </p>
+    </aside>
+  </div>
+  <aside class="notes-panel" aria-label="Design notes">
+    <h2>Design notes - Confirm your columns</h2>
+    <ol>
+      <li>
+        <b>Progressive disclosure.</b> The acceptor sees the Cleaning tab only
+        when the verdict gives a reason - its rail value turns amber ("1 field
+        failing") instead of demanding a review of every field on every accept.
+      </li>
+      <li>
+        <b>GDS principle 4.</b> The verdict strip diagnoses ("Key 2 needs a ZIP
+        code column") and the quick-fix mapper repairs it in one select, without
+        sending the user back through their file.
+      </li>
+      <li>
+        <b>Dead keys are the partner's to fix.</b> The advisory is amber, not
+        red: the exchange can proceed on live keys, and the copy routes the fix
+        to its owner - "ask your partner for a corrected invitation" - rather
+        than dead-ending the acceptor.
+      </li>
+    </ol>
+  </aside>
+</section>
+
+<!-- =============================================================
+     SCREEN 15 - accept-run-done
+============================================================= -->
+<section
+  class="screen"
+  id="accept-run-done"
+  data-title="Accept - Run &amp; done"
+  data-group="acceptor"
+>
+  <div class="bench">
+    <nav class="rail" aria-label="Exchange progress">
+      <div class="wordmark">psilink</div>
+      <hr class="wordrule" />
+      <p class="rail-group">This exchange</p>
+      <ol class="rail-timeline">
+        <li class="done">
+          <span>Connect</span>
+        </li>
+        <li class="done">
+          <span>Confirm protocol</span>
+        </li>
+        <li class="done">
+          <span>Link keys</span>
+        </li>
+        <li class="done">
+          <span>Done</span>
+        </li>
+      </ol>
+    </nav>
+
+    <div class="work">
+      <h1 tabindex="-1">Exchange complete</h1>
+
+      <div class="donepanel">
+        <p class="bigcount">
+          Exchange complete - <span class="mono">1,847</span> matched records
+        </p>
+        <p class="small sub mono">Finished July 8, 2026, 2:47 PM (EDT)</p>
+      </div>
+
+      <div class="statuspanel" style="border: none; padding: 0">
+        <p class="stage-label" aria-live="polite">
+          <span class="mono">Done</span>
+        </p>
+        <div
+          class="progress done-bar"
+          role="progressbar"
+          aria-label="Exchange progress"
+        >
+          <div class="bar" style="width: 100%"></div>
+        </div>
+        <ol class="stage-history">
+          <li>
+            <span class="tick" aria-hidden="true"></span>Connecting to your
+            partner - done <span class="mono">2:39 PM</span>
+          </li>
+          <li>
+            <span class="tick" aria-hidden="true"></span>Confirming protocol -
+            done <span class="mono">2:40 PM</span>
+          </li>
+          <li>
+            <span class="tick" aria-hidden="true"></span>Linking key 1 / 2 -
+            done <span class="mono">2:43 PM</span>
+          </li>
+          <li>
+            <span class="tick" aria-hidden="true"></span>Linking key 2 / 2 -
+            done <span class="mono">2:47 PM</span>
+          </li>
+        </ol>
+      </div>
+
+      <h2>Downloads</h2>
+      <div class="dlrow">
+        <span class="dl-label">Download result:</span>
+        <button class="linklike mono">results.csv</button>
+      </div>
+      <div class="dlrow">
+        <span class="dl-label">Download record (safe to share):</span>
+        <button class="linklike mono">
+          psilink-record-2026-07-08T14-32.json
+        </button>
+      </div>
+      <div class="dlrow">
+        <span class="dl-label"
+          >Download verification keys
+          <span class="keep-private">(keep private)</span>:</span
+        >
+        <button class="linklike mono">
+          psilink-record-2026-07-08T14-32.keys.json
+        </button>
+      </div>
+
+      <div class="workfoot">
+        <button class="btn" data-goto="landing">Set up another exchange</button>
+      </div>
+    </div>
+
+    <aside class="ledger" aria-label="This exchange">
+      <h2>This exchange</h2>
+      <span class="sealed-tag">Agreed with Dana Okafor</span>
+      <dl>
+        <div class="lrow">
+          <dt>You sent</dt>
+          <dd>No additional columns</dd>
+        </div>
+        <div class="lrow">
+          <dt>You received</dt>
+          <dd>1,847 matched rows + enrollment_date, program_code</dd>
+        </div>
+        <div class="lrow">
+          <dt>Matched on</dt>
+          <dd>
+            1. ssn + birth date + family name<br />2. full name + birth date +
+            zip
+          </dd>
+        </div>
+        <div class="lrow">
+          <dt>Results went to</dt>
+          <dd>You and your partner</dd>
+        </div>
+        <div class="lrow">
+          <dt>Agreement</dt>
+          <dd>MOU-2025-0042</dd>
+        </div>
+        <div class="lrow">
+          <dt>Transport</dt>
+          <dd>Browser</dd>
+        </div>
+      </dl>
+      <p class="trust">
+        Your file never left this browser. The results above are all your
+        partner received about your data.
+      </p>
+    </aside>
+  </div>
+  <aside class="notes-panel" aria-label="Design notes">
+    <h2>Design notes - Acceptor run &amp; done</h2>
+    <ol>
+      <li>
+        <b>No manual start, no share step.</b> The acceptor's timeline begins at
+        Connect: their browser dials automatically once they start the exchange,
+        so the rail never shows them a stage they cannot act on.
+      </li>
+    </ol>
+  </aside>
+</section>
+
+<!-- =============================================================
+     SCREEN 16 - states-errors
+============================================================= -->
+<section
+  class="screen"
+  id="states-errors"
+  data-title="States &amp; errors"
+  data-group="states"
+>
+  <div class="bench no-rail">
+    <div class="work" style="max-width: none">
+      <h1 tabindex="-1">
+        States &amp; errors - the bench's failure vocabulary<sup class="pin"
+          >1</sup
+        >
+      </h1>
+      <p style="max-width: 72ch">
+        Every failure names what went wrong and the specific way forward. Input
+        is never cleared by a failure,<sup class="pin">2</sup> and each alert
+        receives focus when it appears (<span class="mono">tabIndex="-1"</span
+        >)<sup class="pin">3</sup> so the message is read before anything else.
+      </p>
+
+      <div class="gallery" style="max-width: none">
+        <div class="gallery-cell">
+          <p class="cell-cap">Accept - expired invitation</p>
+          <div class="alert alert-danger">
+            <h4>Cannot accept this invitation</h4>
+            <p>
+              It expired <span class="mono">July 8, 2026, 3:32 PM (EDT)</span>.
+              Ask your partner for a new invitation.
+            </p>
+          </div>
+        </div>
+
+        <div class="gallery-cell">
+          <p class="cell-cap">Run - security failure (do not retry)</p>
+          <div class="alert alert-danger">
+            <h4>Could not verify your partner</h4>
+            <p>
+              The check that proves the other side holds this invitation's
+              secret did not pass. Do not retry; start over with a fresh
+              invitation.
+            </p>
+            <p>
+              <button class="btn btn-danger btn-sm">
+                Start over with a fresh invitation
+              </button>
+            </p>
+          </div>
+        </div>
+
+        <div class="gallery-cell">
+          <p class="cell-cap">Run - retryable failure (the contrast case)</p>
+          <div class="alert alert-danger">
+            <h4>Exchange failed</h4>
+            <p>
+              The connection to your partner dropped - usually a temporary
+              connection problem. Your data stayed on your device.
+            </p>
+            <p><button class="btn btn-secondary btn-sm">Try again</button></p>
+          </div>
+        </div>
+
+        <div class="gallery-cell">
+          <p class="cell-cap">Run - results unavailable</p>
+          <div class="alert alert-danger">
+            <h4>Results unavailable</h4>
+            <p>
+              The exchange finished but the result table could not be retrieved.
+              Run the exchange again with a fresh invitation; your file and
+              settings are unchanged.
+            </p>
+          </div>
+        </div>
+
+        <div class="gallery-cell">
+          <p class="cell-cap">Accept - preparation failure</p>
+          <div class="alert alert-danger">
+            <h4>Could not prepare the exchange</h4>
+            <p>
+              Your file could not be staged for matching. Reload the page and
+              choose your file again.
+            </p>
+          </div>
+        </div>
+
+        <div class="gallery-cell">
+          <p class="cell-cap">File - unreadable</p>
+          <div class="alert alert-danger">
+            <h4>Could not read your file</h4>
+            <p>
+              The file could not be parsed as CSV. Export a fresh CSV from your
+              source system and choose it again; the original file is untouched.
+            </p>
+          </div>
+        </div>
+
+        <div class="gallery-cell">
+          <p class="cell-cap">File - cannot satisfy the invitation's keys</p>
+          <div class="alert alert-danger">
+            <h4>This file cannot be linked</h4>
+            <p>
+              The invitation's keys need a field none of your columns provides
+              <span class="mono">(missing: date of birth)</span>. Map a column
+              to it above, or ask your partner for terms that fit your file.
+            </p>
+          </div>
+        </div>
+
+        <div class="gallery-cell">
+          <p class="cell-cap">Create - generation failure</p>
+          <div class="alert alert-danger">
+            <h4>Could not generate invitation</h4>
+            <p>
+              The invitation could not be built from these terms. Check the
+              items named in the rail's Problems block and create it again.
+            </p>
+          </div>
+        </div>
+
+        <div class="gallery-cell">
+          <p class="cell-cap">Terms - import failure</p>
+          <div class="alert alert-danger">
+            <h4>Could not import these terms</h4>
+            <p>
+              The pasted text is not complete JSON or YAML. Paste the whole
+              export and import again; your other settings are unchanged.
+            </p>
+          </div>
+        </div>
+
+        <div class="gallery-cell">
+          <p class="cell-cap">File - rejected by the dropzone</p>
+          <div class="alert alert-danger">
+            <h4>That file cannot be used</h4>
+            <p>
+              That file is larger than the 64 MB maximum and/or not a supported
+              file type. Choose a CSV file under 64 MB.
+            </p>
+          </div>
+        </div>
+
+        <div class="gallery-cell">
+          <p class="cell-cap">Field - name missing at continue</p>
+          <div>
+            <div class="field" style="margin: 0">
+              <label for="err-name">Your name</label>
+              <span class="field-error">Your name is required</span>
+              <input type="text" id="err-name" class="err-bd" value="" />
+            </div>
+          </div>
+        </div>
+
+        <div class="gallery-cell">
+          <p class="cell-cap">Field - no file at continue</p>
+          <div class="alert alert-danger">
+            <h4>Choose a data file</h4>
+            <p>
+              A file is needed before the exchange can be set up. Drag one into
+              the dropzone or click it to select.
+            </p>
+          </div>
+        </div>
+
+        <div class="gallery-cell">
+          <p class="cell-cap">Accept form - nothing pasted</p>
+          <div>
+            <div class="field" style="margin: 0">
+              <label for="err-inv">Invitation link or code</label>
+              <span class="field-error">An invitation is required</span>
+              <textarea
+                id="err-inv"
+                class="mono err-bd"
+                placeholder="https://...#... or the bare code"
+                style="min-height: 56px"
+              ></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <aside class="notes-panel" aria-label="Design notes">
+    <h2>Design notes - States &amp; errors</h2>
+    <ol>
+      <li>
+        <b>GOV.UK: Error messages.</b> Specific and blame-free: each message
+        states what happened and the one concrete way forward. No vague failure
+        phrasing, no apology, no jargon.
+      </li>
+      <li>
+        <b>Never clear input.</b> A failure keeps everything the user typed or
+        chose - the pasted terms, the chosen file, the entered name - so
+        recovery is a correction, not a restart.
+      </li>
+      <li>
+        <b>Focus lands on the failure.</b> Alerts take
+        <span class="mono">tabIndex="-1"</span> and receive focus when they
+        appear; the security failure is worded to stop retries ("Do not retry")
+        while the retryable one invites them - danger and inconvenience never
+        share a voice.
+      </li>
+    </ol>
+  </aside>
+</section>
+
+<!-- =============================================================
+     SCREEN 17 - narrow
+============================================================= -->
+<section
+  class="screen"
+  id="narrow"
+  data-title="The bench at 400 px"
+  data-group="states"
+>
+  <div class="bench no-rail">
+    <div class="work" style="max-width: none">
+      <h1 tabindex="-1">The bench at 400 px</h1>
+      <p style="max-width: 72ch">
+        On a narrow viewport the three regions re-stack: the rail compresses to
+        a step strip, the optional tabs fold behind a "Customize" disclosure,
+        and the ledger becomes a collapsible "What you will share" bar pinned
+        above the fold.<sup class="pin">1</sup>
+      </p>
+
+      <div class="device">
+        <div class="device-inner">
+          <div class="step-strip">
+            <span>Step 2 of 3 - Matching &amp; sharing</span>
+            <span class="mono" aria-hidden="true">2/3</span>
+          </div>
+
+          <details class="share-bar" open>
+            <summary>What you will share</summary>
+            <div class="bar-body">
+              <dl style="margin: 8px 0 0 0">
+                <div class="lrow">
+                  <dt>You will send</dt>
+                  <dd>enrollment_date, program_code</dd>
+                </div>
+                <div class="lrow">
+                  <dt>Matched on</dt>
+                  <dd>2 keys, recommended order</dd>
+                </div>
+                <div class="lrow">
+                  <dt>Expires</dt>
+                  <dd>1 hour after you share</dd>
+                </div>
+              </dl>
+            </div>
+          </details>
+
+          <details class="customize-disclosure">
+            <summary>Customize</summary>
+            <p class="rail-groupnote" style="padding: 0 12px; margin: 0">
+              Filled in from your file.
+            </p>
+            <ul>
+              <li><span>Cleaning</span> <span class="val">3 fields</span></li>
+              <li>
+                <span>Matching keys</span> <span class="val">2 keys</span>
+              </li>
+              <li>
+                <span>Legal agreement</span> <span class="val">&mdash;</span>
+              </li>
+            </ul>
+          </details>
+
+          <div
+            style="
+              background: var(--col);
+              border: 1px solid var(--rule);
+              border-radius: 8px;
+              padding: 14px;
+            "
+          >
+            <h2 style="margin: 0 0 4px 0; font-size: 1.1rem">
+              Matching &amp; sharing
+            </h2>
+            <p class="small sub" style="margin-top: 0">
+              Confirm what each column is used for.
+            </p>
+            <div class="table-scroll">
+              <table class="bench-table" style="font-size: 13.5px">
+                <caption class="visually-hidden">
+                  Your columns (condensed)
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Column</th>
+                    <th scope="col">Used</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="mono">client_id</td>
+                    <td>Row identifier</td>
+                  </tr>
+                  <tr>
+                    <td class="mono">first_name</td>
+                    <td>Matched on</td>
+                  </tr>
+                  <tr>
+                    <td class="mono">dob</td>
+                    <td>Matched on</td>
+                  </tr>
+                  <tr>
+                    <td class="mono">program_code</td>
+                    <td>Sent to partner</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p style="margin-bottom: 0">
+              <button class="btn" style="width: 100%">
+                Continue to review &amp; create
+              </button>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <aside class="notes-panel" aria-label="Design notes">
+    <h2>Design notes - Narrow</h2>
+    <ol>
+      <li>
+        <b>The trust surface is non-negotiable.</b> The ledger survives every
+        viewport: at 400 px it is the first interactive element on the page,
+        collapsed but present, so "what leaves this machine" is still one tap
+        away.
+      </li>
+      <li>
+        <b>USWDS: Step indicator, small variant.</b> The spine compresses to
+        "Step 2 of 3" text rather than disappearing; the optional tabs keep
+        their right-aligned values inside the Customize disclosure.
+      </li>
+    </ol>
+  </aside>
+</section>
+
+<!-- =============================================================
+     Review chrome (presentation tool, not the product)
+============================================================= -->
+<div class="chrome" role="navigation" aria-label="Mockup review controls">
+  <div class="chrome-left">
+    <span class="chrome-tag">MOCKUP - NON-FUNCTIONAL</span>
+    <span class="chrome-name">Proposal C - The linkage bench</span>
+    <span class="chrome-title" id="chrome-title"></span>
+  </div>
+  <div class="chrome-center">
+    <button type="button" id="btn-prev">&larr; Prev</button>
+    <span class="chrome-count" id="chrome-count"></span>
+    <button type="button" id="btn-next">Next &rarr;</button>
+  </div>
+  <div class="chrome-right">
+    <button
+      type="button"
+      id="btn-screens"
+      aria-expanded="false"
+      aria-controls="jump"
+    >
+      Screens
+    </button>
+    <button type="button" id="btn-notes" aria-pressed="false">Notes</button>
+  </div>
+</div>
+<div class="jump" id="jump" hidden></div>
+
+<script>
+  (function () {
+    "use strict";
+
+    var screens = Array.prototype.slice.call(
+      document.querySelectorAll(".screen"),
+    );
+    var groupNames = {
+      inviter: "Inviter flow",
+      acceptor: "Acceptor flow",
+      states: "States & errors",
+    };
+    var current = 0;
+    var chromeTitle = document.getElementById("chrome-title");
+    var chromeCount = document.getElementById("chrome-count");
+    var btnPrev = document.getElementById("btn-prev");
+    var btnNext = document.getElementById("btn-next");
+    var btnScreens = document.getElementById("btn-screens");
+    var btnNotes = document.getElementById("btn-notes");
+    var jump = document.getElementById("jump");
+
+    function titleOf(section) {
+      var raw = section.getAttribute("data-title") || section.id;
+      var span = document.createElement("span");
+      span.innerHTML = raw;
+      return span.textContent;
+    }
+
+    /* Structural self-check: every data-goto must resolve to a screen id. */
+    Array.prototype.forEach.call(
+      document.querySelectorAll("[data-goto]"),
+      function (el) {
+        var id = el.getAttribute("data-goto");
+        if (!document.getElementById(id)) {
+          if (window.console) console.warn("data-goto target missing: " + id);
+        }
+      },
+    );
+
+    function show(index, moveFocus) {
+      if (index < 0 || index >= screens.length) return;
+      screens[current].classList.remove("active");
+      current = index;
+      var section = screens[current];
+      section.classList.add("active");
+      chromeTitle.textContent = titleOf(section);
+      chromeCount.textContent =
+        "Screen " + (current + 1) + " of " + screens.length;
+      btnPrev.disabled = current === 0;
+      btnNext.disabled = current === screens.length - 1;
+      Array.prototype.forEach.call(
+        jump.querySelectorAll("button[data-index]"),
+        function (b) {
+          b.setAttribute(
+            "aria-current",
+            String(Number(b.getAttribute("data-index")) === current),
+          );
+        },
+      );
+      window.scrollTo(0, 0);
+      if (moveFocus) {
+        var h1 = section.querySelector("h1");
+        if (h1) h1.focus();
+      }
+    }
+
+    function gotoId(id, moveFocus) {
+      for (var i = 0; i < screens.length; i++) {
+        if (screens[i].id === id) {
+          show(i, moveFocus !== false);
+          return;
+        }
+      }
+    }
+
+    /* Build the grouped jump list. */
+    (function buildJump() {
+      var order = ["inviter", "acceptor", "states"];
+      order.forEach(function (g) {
+        var members = screens
+          .map(function (s, i) {
+            return { s: s, i: i };
+          })
+          .filter(function (m) {
+            return m.s.getAttribute("data-group") === g;
+          });
+        if (!members.length) return;
+        var h = document.createElement("h2");
+        h.textContent = groupNames[g];
+        jump.appendChild(h);
+        members.forEach(function (m) {
+          var b = document.createElement("button");
+          b.type = "button";
+          b.setAttribute("data-index", String(m.i));
+          b.setAttribute("aria-current", "false");
+          var n = document.createElement("span");
+          n.className = "jn";
+          n.textContent = String(m.i + 1);
+          b.appendChild(n);
+          b.appendChild(document.createTextNode(titleOf(m.s)));
+          b.addEventListener("click", function () {
+            closeJump();
+            show(m.i, true);
+          });
+          jump.appendChild(b);
+        });
+      });
+    })();
+
+    function openJump() {
+      jump.hidden = false;
+      btnScreens.setAttribute("aria-expanded", "true");
+      var cur =
+        jump.querySelector('button[aria-current="true"]') ||
+        jump.querySelector("button");
+      if (cur) cur.focus();
+    }
+    function closeJump() {
+      jump.hidden = true;
+      btnScreens.setAttribute("aria-expanded", "false");
+    }
+    btnScreens.addEventListener("click", function () {
+      if (jump.hidden) openJump();
+      else closeJump();
+    });
+    document.addEventListener("click", function (e) {
+      if (!jump.hidden && !jump.contains(e.target) && e.target !== btnScreens)
+        closeJump();
+    });
+
+    btnPrev.addEventListener("click", function () {
+      show(current - 1, true);
+    });
+    btnNext.addEventListener("click", function () {
+      show(current + 1, true);
+    });
+
+    function toggleNotes() {
+      var on = document.body.classList.toggle("notes-on");
+      btnNotes.setAttribute("aria-pressed", String(on));
+    }
+    btnNotes.addEventListener("click", toggleNotes);
+
+    /* Flow CTAs: only data-goto controls navigate; everything else is inert. */
+    document.addEventListener("click", function (e) {
+      var el = e.target.closest ? e.target.closest("[data-goto]") : null;
+      if (el) {
+        e.preventDefault();
+        gotoId(el.getAttribute("data-goto"), true);
+      }
+    });
+
+    document.addEventListener("keydown", function (e) {
+      var t = e.target;
+      var tag = t && t.tagName ? t.tagName.toLowerCase() : "";
+      if (
+        tag === "input" ||
+        tag === "textarea" ||
+        tag === "select" ||
+        (t && t.isContentEditable)
+      )
+        return;
+      if (e.key === "Escape" && !jump.hidden) {
+        closeJump();
+        btnScreens.focus();
+        return;
+      }
+      if (e.key === "ArrowLeft") {
+        show(current - 1, true);
+      } else if (e.key === "ArrowRight") {
+        show(current + 1, true);
+      } else if (e.key === "n" || e.key === "N") {
+        toggleNotes();
+      }
+    });
+
+    show(0, false);
+  })();
+</script>
