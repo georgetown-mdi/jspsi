@@ -103,10 +103,18 @@ export function MatchingSharingSection({
           </tbody>
         </table>
       </div>
-      <p className={`${styles.small} ${styles.sub}`} aria-live="polite">
-        {announcement !== ""
-          ? announcement
-          : "Only one column can be the row identifier. Choose a single identifier."}
+      <p className={`${styles.small} ${styles.sub}`}>
+        Only one column can be the row identifier. Choose a single identifier.
+      </p>
+      {/* Always mounted so assistive tech observes content changes; kept
+          separate from the hint above so clearing a notice never re-announces
+          the hint. */}
+      <p
+        className={`${styles.small} ${styles.sub}`}
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {announcement}
       </p>
       <h2>Extra data for matched records</h2>
       <p className={styles.small}>

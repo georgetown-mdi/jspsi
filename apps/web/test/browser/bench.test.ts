@@ -246,6 +246,41 @@ describe("inviter bench", () => {
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(400);
   });
 
+  test("surfaces a two-identifier file in the rail's Problems block", async () => {
+    mount(createElement(InviterBench));
+
+    await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana");
+
+    const fileInput = document.querySelector('input[type="file"]');
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      new File(
+        ["id,identifier,last_name,dob\n1,2,Lee,01/02/1990\n"],
+        "twoids.csv",
+        { type: "text/csv" },
+      ),
+    );
+    await expect.element(page.getByText("twoids.csv")).toBeInTheDocument();
+
+    // The inferred two-identifier conflict is a rail problem from the moment
+    // the file is read, and its entry navigates into step 2 to fix it.
+    await page
+      .getByRole("button", { name: "Choose a single row identifier" })
+      .click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Matching & sharing");
+
+    await page
+      .getByLabelText("How identifier is used")
+      .selectOptions("ignored");
+    await expect
+      .element(page.getByLabelText("How identifier is used"))
+      .toHaveValue("ignored");
+    expect(document.querySelector('section[aria-label="Problems"]')).toBeNull();
+  });
+
   test("collapses to the single-column layout without rail and ledger", async () => {
     mount(createElement(AcceptUnderConstruction));
 
