@@ -60,6 +60,11 @@ hunks/files it names, not the whole diff), then decide.
   or a new code path (error handling, a guard, a fallback), pin its guarantees
   with a test in the same pass. No later round re-reviews a fix: another round
   exists only for the step-back triggers.
+- **A pattern in the findings gets a class sweep.** When several findings share
+  one mechanism (a port dropping behavior its original carried, a rename
+  missing sites, a repeated idiom misused), run one focused pass over that
+  class across the whole branch in the same triage -- a review round samples;
+  the sweep completes.
 - **Prose findings get a high bar.** Fix a finding that asks for a comment,
   JSDoc, or doc paragraph only when the missing constraint is unrecoverable
   from the code, names, types, and tests AND its absence enables a concrete
