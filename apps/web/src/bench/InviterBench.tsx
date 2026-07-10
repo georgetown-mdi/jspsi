@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 
 import { Alert, Anchor, VisuallyHidden } from "@mantine/core";
+import { IconAlertCircle } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 
 import { sanitizeErrorForDisplay, sanitizeForDisplay } from "@psilink/core";
@@ -116,11 +117,14 @@ export function InviterBench() {
 
   // A parse may still be in flight when the surface unmounts or a newer file
   // is dropped; the id lets the stale resolution fall on the floor instead of
-  // clobbering current state (the FileAcquire pattern).
+  // clobbering current state, and the abort tears the parse worker down so a
+  // discarded read does not run to completion (the FileAcquire pattern).
   const parseId = useRef(0);
+  const parseAbort = useRef<AbortController | undefined>(undefined);
   useEffect(
     () => () => {
       parseId.current += 1;
+      parseAbort.current?.abort();
     },
     [],
   );
@@ -138,10 +142,15 @@ export function InviterBench() {
 
   async function readFile(file: File) {
     const id = ++parseId.current;
+    parseAbort.current?.abort();
+    const controller = new AbortController();
+    parseAbort.current = controller;
     setReading(true);
     setIntakeAlert(undefined);
     try {
-      const result = await loadCSVFileOffMainThread(file);
+      const result = await loadCSVFileOffMainThread(file, {
+        signal: controller.signal,
+      });
       if (id !== parseId.current) return;
       const columns = result.meta.fields ?? [];
       const emptyPositions = emptyColumnPositions(columns);
@@ -197,6 +206,10 @@ export function InviterBench() {
   // bind to one read of the file.
   async function createInvitation() {
     if (editor === undefined || sourceFile === undefined) return;
+    // The Create button is disabled on any open problem; this repeats the gate
+    // because spineProblems covers the identifier conflict, which
+    // canGenerate alone does not.
+    if (spineProblems(editor).length > 0) return;
     const validation = reviewValidation(editor);
     if (!validation.canGenerate || validation.terms === undefined) return;
     setMinting(true);
@@ -407,8 +420,15 @@ export function InviterBench() {
                 onNavigate={goTo}
               />
               {createAlert !== undefined && (
-                <Alert color="red" title={createAlert.title} mt="md">
-                  {createAlert.message}
+                <Alert
+                  color="red"
+                  title={createAlert.title}
+                  icon={<IconAlertCircle />}
+                  mt="md"
+                >
+                  <span style={{ whiteSpace: "pre-line" }}>
+                    {createAlert.message}
+                  </span>
                 </Alert>
               )}
             </>

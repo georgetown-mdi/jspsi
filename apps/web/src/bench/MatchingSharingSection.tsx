@@ -1,11 +1,16 @@
-import { Button, NativeSelect } from "@mantine/core";
+import { useEffect, useRef, useState } from "react";
+
+import { Button, NativeSelect, VisuallyHidden } from "@mantine/core";
 
 import {
   DISCLOSURE_LABELS,
   SEMANTIC_TYPE_LABELS,
   disclosureChoicesForType,
   disclosureOf,
+  hasMultipleIdentifiers,
 } from "@psi/metadataEditing";
+
+import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
 import { disclosedColumnNames } from "@psilink/core";
 
@@ -39,6 +44,35 @@ export function MatchingSharingSection({
   onContinue: () => void;
 }) {
   const sent = disclosedColumnNames(metadata);
+
+  // The visible send set lives in the ledger and the extra-data block, which
+  // cannot speak for the selects; this debounced region voices the new set as
+  // it changes, computed from the same predicate the run transmits on. The
+  // timer clears on every change and on unmount, so an edit burst announces
+  // once.
+  const summary =
+    sent.length === 0
+      ? "No columns will be sent to your partner."
+      : `Columns sent to your partner: ${sent.join(", ")}.`;
+  const [summaryAnnouncement, setSummaryAnnouncement] = useState("");
+  const summaryRef = useRef(summary);
+  summaryRef.current = summary;
+  useEffect(() => {
+    const handle = setTimeout(
+      () => setSummaryAnnouncement(summaryRef.current),
+      600,
+    );
+    return () => clearTimeout(handle);
+  }, [summary]);
+
+  // The two-identifier conflict's visible surfaces are the standing hint and
+  // the rail's Problems entry, per the design; this deferred region is its
+  // audible half, voiced even when a seed mounts already in conflict.
+  const conflictAnnouncement = useDeferredAnnouncement(
+    hasMultipleIdentifiers(metadata)
+      ? "Problem: choose a single row identifier."
+      : "",
+  );
   return (
     <>
       <p className={styles.eyebrow}>Step 2 of 3</p>
@@ -63,7 +97,12 @@ export function MatchingSharingSection({
           <tbody>
             {metadata.map((column) => (
               <tr key={column.name}>
-                <td className={styles.mono}>{column.name}</td>
+                <th
+                  scope="row"
+                  className={`${styles.mono} ${styles.rowHeader}`}
+                >
+                  {column.name}
+                </th>
                 <td>
                   <NativeSelect
                     aria-label={`Type for ${column.name}`}
@@ -116,6 +155,12 @@ export function MatchingSharingSection({
       >
         {announcement}
       </p>
+      <VisuallyHidden role="status" aria-live="polite" aria-atomic="true">
+        {summaryAnnouncement}
+      </VisuallyHidden>
+      <VisuallyHidden role="status" aria-live="polite" aria-atomic="true">
+        {conflictAnnouncement}
+      </VisuallyHidden>
       <h2>Extra data for matched records</h2>
       <p className={styles.small}>
         <strong>You will send:</strong>{" "}

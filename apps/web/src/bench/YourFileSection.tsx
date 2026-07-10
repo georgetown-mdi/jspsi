@@ -1,7 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { Alert, Button, TextInput } from "@mantine/core";
+import { Alert, Button, Text, TextInput } from "@mantine/core";
 import { Dropzone } from "@mantine/dropzone";
+import { IconAlertCircle } from "@tabler/icons-react";
+import log from "loglevel";
 
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 
@@ -9,6 +11,7 @@ import { fileCardMeta } from "./inviterModel";
 import styles from "./bench.module.css";
 
 import type { AcquiredCsv } from "./inviterModel";
+import type { FileRejection } from "@mantine/dropzone";
 
 /** A titled alert for a failed or unusable read, focused when it appears so
  * the failure is announced without clearing the operator's input. */
@@ -50,7 +53,30 @@ export function YourFileSection({
     if (alert !== undefined) alertRef.current?.focus();
   }, [alert]);
 
-  const ready = name.trim().length > 0 && acquired !== undefined && linkable;
+  // The dropzone enforces the size cap and type list itself but only flashes a
+  // reject icon; surface why, or a refused drop is a silent no-op. Codes only
+  // in the log -- a rejected file's NAME can itself be sensitive here.
+  const [rejectionMessage, setRejectionMessage] = useState<string>();
+  const maxMb = MAX_CSV_FILE_BYTES / 1024 ** 2;
+  function handleReject(rejections: Array<FileRejection>) {
+    const codes = new Set(
+      rejections.flatMap((rejection) =>
+        rejection.errors.map((error) => error.code),
+      ),
+    );
+    log.warn(`rejected ${rejections.length} file(s):`, [...codes]);
+    const reasons: Array<string> = [];
+    if (codes.has("file-too-large"))
+      reasons.push(`larger than the ${maxMb} MB maximum`);
+    if (codes.has("file-invalid-type") || reasons.length === 0)
+      reasons.push("not a supported file type");
+    setRejectionMessage(
+      `That file is ${reasons.join(" and ")}. Choose a CSV file under ${maxMb} MB.`,
+    );
+  }
+
+  const ready =
+    name.trim().length > 0 && acquired !== undefined && linkable && !reading;
   return (
     <>
       <p className={styles.eyebrow}>Step 1 of 3</p>
@@ -65,9 +91,11 @@ export function YourFileSection({
       <Dropzone
         className={styles.dropzone}
         onDrop={(files) => {
+          setRejectionMessage(undefined);
           const file = files.at(0);
           if (file !== undefined) onFile(file);
         }}
+        onReject={handleReject}
         accept={["text/plain", "text/csv", "application/vnd.ms-excel"]}
         maxSize={MAX_CSV_FILE_BYTES}
         multiple={false}
@@ -78,10 +106,13 @@ export function YourFileSection({
         <p>
           <strong>Drag your CSV here or click to select</strong>
         </p>
-        <p className={styles.dropzoneMax}>
-          (Max file size: {MAX_CSV_FILE_BYTES / 1024 ** 2} MB)
-        </p>
+        <p className={styles.dropzoneMax}>(Max file size: {maxMb} MB)</p>
       </Dropzone>
+      {rejectionMessage !== undefined && (
+        <Text role="alert" c="red" size="sm" mt="xs">
+          {rejectionMessage}
+        </Text>
+      )}
       {acquired !== undefined && (
         <div className={styles.fileCard}>
           <svg
@@ -112,11 +143,14 @@ export function YourFileSection({
         <Alert
           color="red"
           title={alert.title}
+          icon={<IconAlertCircle />}
           mt="md"
           ref={alertRef}
           tabIndex={-1}
         >
-          {alert.message}
+          {/* sanitizeErrorForDisplay separates a cause chain with newlines;
+              pre-line preserves them (its documented rendering contract). */}
+          <span style={{ whiteSpace: "pre-line" }}>{alert.message}</span>
         </Alert>
       )}
       {acquired !== undefined && linkable && (

@@ -616,6 +616,13 @@
   margin-bottom: 4px;
 }
 
+.rowHeader {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--bench-ink);
+  font-weight: 600;
+}
+
 .columnChips {
   display: flex;
   gap: 8px;

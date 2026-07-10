@@ -61,6 +61,37 @@ vi.mock("@psi/invitation", async (importOriginal) => {
   };
 });
 
+// Defer the CSV parse per-test to observe in-flight state (the Continue
+// gate, the abort signal). With `defer` unset it delegates to the real
+// loader.
+const csvLoadHarness = vi.hoisted(() => ({
+  defer: false,
+  lastSignal: undefined as AbortSignal | undefined,
+  resolve: undefined as ((value: unknown) => void) | undefined,
+}));
+vi.mock("@psi/csvParseController", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    loadCSVFileOffMainThread: (
+      file: unknown,
+      options?: { signal?: AbortSignal },
+    ) => {
+      csvLoadHarness.lastSignal = options?.signal;
+      if (!csvLoadHarness.defer)
+        return (
+          actual.loadCSVFileOffMainThread as (
+            f: unknown,
+            o?: unknown,
+          ) => Promise<unknown>
+        )(file, options);
+      return new Promise((resolve) => {
+        csvLoadHarness.resolve = resolve;
+      });
+    },
+  };
+});
+
 const EM_DASH = "\u2014";
 
 let container: HTMLElement | undefined;
@@ -79,6 +110,9 @@ afterEach(() => {
   root = undefined;
   container = undefined;
   mintHarness.fail = undefined;
+  csvLoadHarness.defer = false;
+  csvLoadHarness.lastSignal = undefined;
+  csvLoadHarness.resolve = undefined;
 });
 
 describe("bench lobby", () => {
@@ -243,6 +277,10 @@ describe("inviter bench", () => {
     await expect
       .element(page.getByText("Nothing - matching only"))
       .toBeInTheDocument();
+    // The debounced disclosure summary voices the new (empty) send set.
+    await expect
+      .element(page.getByText("No columns will be sent to your partner."))
+      .toBeInTheDocument();
     await expect
       .element(
         page.getByText("No values will be sent to your partner", {
@@ -294,6 +332,12 @@ describe("inviter bench", () => {
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Matching & sharing");
+
+    // The conflict's audible half: announced even though the seed mounted
+    // already in conflict.
+    await expect
+      .element(page.getByText("Problem: choose a single row identifier."))
+      .toBeInTheDocument();
 
     await page
       .getByLabelText("How identifier is used")
@@ -514,6 +558,46 @@ describe("inviter bench", () => {
         (heading) => heading.textContent === "Legal agreement",
       )?.parentElement?.textContent,
     ).toContain("None");
+  });
+
+  test("intake surfaces rejections and gates on an in-flight parse", async () => {
+    mount(createElement(InviterBench));
+
+    await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana");
+    const fileInput = () =>
+      document.querySelector('input[type="file"]') as HTMLElement;
+
+    // A refused drop names its reason instead of flashing an icon.
+    await userEvent.upload(
+      page.elementLocator(fileInput()),
+      new File(["x"], "image.png", { type: "image/png" }),
+    );
+    await expect
+      .element(page.getByText("not a supported file type", { exact: false }))
+      .toBeInTheDocument();
+
+    // While a parse is in flight Continue stays gated and the read carries an
+    // abort signal; unmounting aborts it so the worker tears down.
+    csvLoadHarness.defer = true;
+    await userEvent.upload(
+      page.elementLocator(fileInput()),
+      new File(["first_name,last_name,dob\nAnn,Lee,01/02/1990\n"], "a.csv", {
+        type: "text/csv",
+      }),
+    );
+    await expect
+      .element(
+        page.getByRole("button", { name: "Continue to matching & sharing" }),
+      )
+      .toBeDisabled();
+    const signal = csvLoadHarness.lastSignal;
+    expect(signal).toBeDefined();
+    expect((signal as AbortSignal).aborted).toBe(false);
+
+    root?.unmount();
+    root = undefined;
+    expect((signal as AbortSignal).aborted).toBe(true);
   });
 
   test("a failed mint leaves the terms editable and create retryable", async () => {
