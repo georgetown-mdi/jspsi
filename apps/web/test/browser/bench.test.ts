@@ -256,7 +256,7 @@ describe("inviter bench", () => {
     await userEvent.upload(
       page.elementLocator(fileInput as HTMLElement),
       new File(
-        ["id,identifier,last_name,dob\n1,2,Lee,01/02/1990\n"],
+        ["id,identifier,first_name,last_name,dob\n1,2,Ann,Lee,01/02/1990\n"],
         "twoids.csv",
         { type: "text/csv" },
       ),
@@ -279,6 +279,98 @@ describe("inviter bench", () => {
       .element(page.getByLabelText("How identifier is used"))
       .toHaveValue("ignored");
     expect(document.querySelector('section[aria-label="Problems"]')).toBeNull();
+  });
+
+  test("review restates the proposal, gates on problems, and create seals", async () => {
+    mount(createElement(InviterBench));
+
+    await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+    const fileInput = document.querySelector('input[type="file"]');
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      new File(
+        [
+          "client_id,first_name,last_name,dob,program_code\n" +
+            "1,Ann,Lee,01/02/1990,A\n2,Bo,Ray,03/04/1985,B\n",
+        ],
+        "clients.csv",
+        { type: "text/csv" },
+      ),
+    );
+    await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
+    await page
+      .getByRole("button", { name: "Continue to matching & sharing" })
+      .click();
+    await page
+      .getByRole("button", { name: "Continue to review & create" })
+      .click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Review & create");
+
+    // The check-your-answers table restates the proposal, and the CLI
+    // transports are present but disabled with the roadmap tag.
+    await expect
+      .element(page.getByText("clients.csv - 2 rows"))
+      .toBeInTheDocument();
+    const radios = Array.from(
+      document.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
+    );
+    expect(radios).toHaveLength(3);
+    expect(radios[0].checked).toBe(true);
+    expect(radios[0].disabled).toBe(false);
+    expect(radios[1].disabled).toBe(true);
+    expect(radios[2].disabled).toBe(true);
+    expect(document.querySelectorAll(`.${styles.tagRoadmap}`)).toHaveLength(2);
+
+    // An incoherent direction (payload to a partner receiving no results)
+    // surfaces in the rail and refuses to arm the create button.
+    await page
+      .getByLabelText("Who receives the matched results")
+      .selectOptions("inviter");
+    await expect
+      .element(page.getByText("Resolve the problem in the rail to continue."))
+      .toBeInTheDocument();
+    expect(
+      document.querySelector('section[aria-label="Problems"]'),
+    ).not.toBeNull();
+    const createButton = page.getByRole("button", {
+      name: "Create the invitation",
+    });
+    await expect.element(createButton).toBeDisabled();
+
+    await page
+      .getByLabelText("Who receives the matched results")
+      .selectOptions("both");
+    await expect
+      .element(page.getByText("Ready to create."))
+      .toBeInTheDocument();
+
+    // Create mints the real invitation and seals the terms: the rail becomes
+    // the protocol timeline (no step links back into editing) and the
+    // ledger's expiry turns absolute.
+    await createButton.click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Your invitation is ready");
+
+    const rail = document.querySelector('nav[aria-label="Exchange progress"]');
+    expect(rail).not.toBeNull();
+    const current = (rail as Element).querySelector('[aria-current="step"]');
+    expect(current?.textContent).toBe("Share");
+    expect((rail as Element).querySelectorAll("button")).toHaveLength(0);
+
+    const ledger = document.querySelector('aside[aria-label="This exchange"]');
+    const expiresRow = Array.from(
+      (ledger as Element).querySelectorAll(`.${styles.ledgerRow}`),
+    ).find(
+      (row) => row.querySelector("dt")?.childNodes[0].textContent === "Expires",
+    );
+    expect(expiresRow?.querySelector("dd")?.textContent).not.toBe(
+      "1 hour after you share",
+    );
+    expect(expiresRow?.querySelector("dd")?.textContent).toMatch(/20\d\d/);
   });
 
   test("collapses to the single-column layout without rail and ledger", async () => {
