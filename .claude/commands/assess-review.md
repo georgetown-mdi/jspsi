@@ -56,6 +56,10 @@ hunks/files it names, not the whole diff), then decide.
 
 - **Default to fixing.** Drive-by corrections are welcome -- you do not need
   permission to fix something small and clearly right.
+- **A fix that adds behavior gets a test.** When a fix introduces new branching
+  or a new code path (error handling, a guard, a fallback), pin its guarantees
+  with a test in the same pass. No later round re-reviews a fix: another round
+  exists only for the step-back triggers.
 - **Prose findings get a high bar.** Fix a finding that asks for a comment,
   JSDoc, or doc paragraph only when the missing constraint is unrecoverable
   from the code, names, types, and tests AND its absence enables a concrete
