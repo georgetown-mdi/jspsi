@@ -74,6 +74,12 @@ export default function FileDropzone({
     // rejection. Any non-size rejection is a type/format problem against the
     // accept list, and the empty-reasons fallback keeps an unexpected code from
     // producing a silent reject.
+    if (codes.has("too-many-files")) {
+      setRejectionMessage(
+        "Drop a single CSV file; multiple files were not accepted.",
+      );
+      return;
+    }
     const reasons: Array<string> = [];
     if (codes.has("file-too-large"))
       reasons.push(`larger than the ${MAX_CSV_FILE_MB} MB maximum`);
@@ -89,6 +95,7 @@ export default function FileDropzone({
       <Dropzone
         onDrop={handleDrop}
         onReject={handleReject}
+        multiple={false}
         maxSize={MAX_CSV_FILE_BYTES} // see csvIntake.ts for the bound
         accept={["text/plain", MIME_TYPES.csv, "application/vnd.ms-excel"]}
         {...(disabled
@@ -155,7 +162,7 @@ export default function FileDropzone({
             />
           </Dropzone.Idle>
           <Text mt="sm" inline>
-            Drag files here or click to select
+            Drag a file here or click to select
           </Text>
           <Text size="xs" c="dimmed" inline mt={7}>
             (Max file size: {MAX_CSV_FILE_MB} MB)
