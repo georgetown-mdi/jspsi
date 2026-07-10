@@ -2,12 +2,7 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-import { PSIParticipant } from "../src/participant";
-import { linkViaPSI } from "../src/link";
-
-import { createMessagePipe } from "../src/connection/messageConnection";
-import { sortAssociationTable } from "./utils/associationTable";
-import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
+import { runLink } from "./utils/runLink";
 
 // Coverage for the empty-string key value: "" is a present, matchable key
 // distinct from undefined (the "no key" sentinel). The conflation site was
@@ -19,52 +14,12 @@ import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 
 const psiLibrary = await PSI();
 
-async function runLink(
-  serverData: Array<Array<string | undefined>>,
-  clientData: Array<Array<string | undefined>>,
-) {
-  const [serverConn, clientConn] = createMessagePipe();
-  const server = new PSIParticipant(
-    "server",
-    psiLibrary,
-    { role: "starter", verbose: -1 },
-    UNBOUNDED_PSI_ELEMENTS,
-  );
-  const client = new PSIParticipant(
-    "client",
-    psiLibrary,
-    { role: "joiner", verbose: -1 },
-    UNBOUNDED_PSI_ELEMENTS,
-  );
-
-  const [serverResult, clientResult] = await Promise.all([
-    linkViaPSI(
-      { cardinality: "one-to-one" },
-      server,
-      serverConn,
-      serverData,
-      -1,
-    ),
-    linkViaPSI(
-      { cardinality: "one-to-one" },
-      client,
-      clientConn,
-      clientData,
-      -1,
-    ),
-  ]);
-
-  return {
-    server: sortAssociationTable(serverResult),
-    client: sortAssociationTable(clientResult, true),
-  };
-}
-
 test('a singleton "" key matches on each side; undefined/missing keys do not', async () => {
   // Server row 1 and client row 2 are both "" (the only "" on each side, so each
   // is unique within its dataset and matchable). The undefined rows carry no key
   // and the named rows do not match, so the lone "" pair is the only match.
   const { server, client } = await runLink(
+    psiLibrary,
     [[undefined, "", "Alice"]],
     [["Bob", undefined, ""]],
   );
@@ -79,7 +34,11 @@ test('a "" duplicated within a dataset is dropped by the uniqueness rule', async
   // The server has two "" values, so every "" is a within-dataset duplicate and
   // is excluded from the round; the client's singleton "" therefore matches
   // nothing, even though a singleton-vs-singleton "" would match.
-  const { server, client } = await runLink([["", "", "Alice"]], [["", "Bob"]]);
+  const { server, client } = await runLink(
+    psiLibrary,
+    [["", "", "Alice"]],
+    [["", "Bob"]],
+  );
 
   expect(server[0]).toStrictEqual([]);
   expect(server[1]).toStrictEqual([]);
@@ -90,7 +49,11 @@ test('a "" duplicated within a dataset is dropped by the uniqueness rule', async
 test('an all-"" column matches nothing (every "" is a duplicate)', async () => {
   // Every "" on both sides is a within-dataset duplicate, so the round drops
   // them all and produces no match.
-  const { server, client } = await runLink([["", ""]], [["", "", ""]]);
+  const { server, client } = await runLink(
+    psiLibrary,
+    [["", ""]],
+    [["", "", ""]],
+  );
 
   expect(server[0]).toStrictEqual([]);
   expect(server[1]).toStrictEqual([]);
@@ -106,6 +69,7 @@ test('a "" key matches in a later round after a non-match carries the row forwar
   // carries forward like any other rather than being treated as matched or
   // dropped. (Row 0's key-1 values "x"/"y" never participate; it matched first.)
   const { server, client } = await runLink(
+    psiLibrary,
     [
       ["A", "B"],
       ["x", ""],
@@ -129,6 +93,7 @@ test('a duplicated "" is dropped while a unique value in the same round still ma
   // uniqueness rule treats "" exactly like any other value and dropping it does
   // not poison the rest of the round.
   const { server, client } = await runLink(
+    psiLibrary,
     [["", "", "Alice"]],
     [["", "Alice"]],
   );

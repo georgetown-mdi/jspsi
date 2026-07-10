@@ -168,8 +168,7 @@ function Outcome({
  * blocking.
  *
  * Pure over its inputs: it derives the sample and runs core's `runPipeline`, so
- * reordering or editing a step re-runs the pipeline and the preview tracks it. The
- * sample size is provisional ({@link PREVIEW_SAMPLE_SIZE}); Slice 3 settles it.
+ * reordering or editing a step re-runs the pipeline and the preview tracks it.
  */
 export function StandardizationPreview({
   field,

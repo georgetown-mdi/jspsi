@@ -56,6 +56,79 @@ async function defaultRunExchange(): Promise<unknown> {
   return { associationTable: [[], []], partnerPayload: {} };
 }
 
+// Block a mocked runExchange until BOTH key files hold a rotated (non-original)
+// token. The recovery-path tests throw from runExchange to land a synthetic
+// fault in runProtocol's catch; waiting for both rotations first guarantees the
+// key exchange has finished on both sides (and its last message file is off
+// disk) before either party's doCleanup runs, so no cleanup races the peer's
+// still-pending receive. Bounded so a lone arrival cannot hang.
+async function waitForBothKeysRotated(
+  keyFileA: string,
+  keyFileB: string,
+): Promise<void> {
+  const { readFileSync } = await import("node:fs");
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    try {
+      const a = JSON.parse(readFileSync(keyFileA, "utf8")).sharedSecret;
+      const b = JSON.parse(readFileSync(keyFileB, "utf8")).sharedSecret;
+      if (a !== TOKEN_A && b !== TOKEN_A) break;
+    } catch {
+      // file may not exist yet; retry
+    }
+    if (Date.now() > deadline)
+      throw new Error("timed out waiting for both key files to rotate");
+    await new Promise((r) => setTimeout(r, 1));
+  }
+}
+
+// Assert neither of runProtocol's two generic recovery-advisory lines was
+// logged. A tagged (psilinkRecoveryHintEmitted) error must suppress both, since
+// each would contradict the error's own specific hint.
+function expectNoGenericRecoveryAdvisory(errors: readonly string[]): void {
+  expect(errors.every((m) => !m.includes("key exchange was in progress"))).toBe(
+    true,
+  );
+  expect(errors.every((m) => !m.includes("already rotated and saved"))).toBe(
+    true,
+  );
+}
+
+// Poll dropDir until B's rendezvous (-hello) file appears, then backdate every
+// entry's mtime by 3 s. Party B is started first; making its mtime strictly
+// older than A's forces B to be the responder even on coarse-mtime filesystems
+// (FAT/some NFS), where same-bucket timestamps would fall back to UUID
+// comparison and could assign roles unexpectedly. The ENOENT tolerance covers a
+// file that raced ahead of B's synchronize and was already deleted.
+async function backdateDropDirRendezvousFile(dropDir: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(dropDir);
+    } catch (e) {
+      throw new Error(
+        `dropDir became unavailable while polling B's rendezvous: ` +
+          (e as Error).message,
+      );
+    }
+    if (entries.length > 0) {
+      const past = new Date(Date.now() - 3_000);
+      for (const f of entries) {
+        try {
+          fs.utimesSync(path.join(dropDir, f), past, past);
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+        }
+      }
+      return;
+    }
+    if (Date.now() > deadline)
+      throw new Error("timed out waiting for B to write its rendezvous file");
+    await new Promise<void>((r) => setTimeout(r, 5));
+  }
+}
+
 vi.mock("@psilink/core", async (importActual) => {
   const actual = await importActual<typeof import("@psilink/core")>();
   return {
@@ -661,12 +734,7 @@ test("runProtocol rejects an expired token without rotating, and the tagged reco
 
   // Neither generic advisory line in runProtocol's catch must fire: both
   // would contradict the tagged "obtain a new invitation" recovery hint.
-  expect(
-    mockState.errors.every((m) => !m.includes("key exchange was in progress")),
-  ).toBe(true);
-  expect(
-    mockState.errors.every((m) => !m.includes("already rotated and saved")),
-  ).toBe(true);
+  expectNoGenericRecoveryAdvisory(mockState.errors);
 
   // Token must remain unchanged on both sides.
   expect(loadKeyFile(keyFileA)?.sharedSecret).toBe(TOKEN_A);
@@ -715,12 +783,7 @@ test("runProtocol rejects an already-expired token before opening any connection
   expect(fs.readdirSync(dropDir)).toEqual([]);
   // The tagged hint means runProtocol emits neither generic catch advisory, and
   // the credential is left untouched (no rotation on a pre-connect failure).
-  expect(
-    mockState.errors.every((m) => !m.includes("key exchange was in progress")),
-  ).toBe(true);
-  expect(
-    mockState.errors.every((m) => !m.includes("already rotated and saved")),
-  ).toBe(true);
+  expectNoGenericRecoveryAdvisory(mockState.errors);
   expect(loadKeyFile(keyFile)?.sharedSecret).toBe(TOKEN_A);
 });
 
@@ -1035,34 +1098,13 @@ test("runProtocol suppresses the generic advisory when a tagged error is wrapped
   // The runProtocol catch walks the cause chain so the wrap does not lose the
   // suppression. This test simulates that wrap by having runExchange throw a
   // wrapped error whose `cause` carries the tag.
-  //
-  // Both parties must wait for both key files to reach the rotated state
-  // before throwing. Without that synchronization the first party to throw
-  // would close its connection while the second is still completing the key exchange,
-  // causing a key-exchange failure that would log the generic authStarted advisory
-  // (the very thing this test asserts is suppressed). See the
-  // "logs recovery message when an error occurs after tokenRotated=true"
-  // test below for the same pattern.
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
   saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
   saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
   async function waitForRotationThenThrowWrapped(): Promise<never> {
-    const { readFileSync } = await import("node:fs");
-    const deadline = Date.now() + 5_000;
-    for (;;) {
-      try {
-        const a = JSON.parse(readFileSync(keyFileA, "utf8")).sharedSecret;
-        const b = JSON.parse(readFileSync(keyFileB, "utf8")).sharedSecret;
-        if (a !== TOKEN_A && b !== TOKEN_A) break;
-      } catch {
-        // file may not exist yet; retry
-      }
-      if (Date.now() > deadline)
-        throw new Error("timed out waiting for both key files to rotate");
-      await new Promise((r) => setTimeout(r, 1));
-    }
+    await waitForBothKeysRotated(keyFileA, keyFileB);
     const inner = Object.assign(new Error("inner tagged failure"), {
       psilinkRecoveryHintEmitted: true,
     });
@@ -1103,12 +1145,7 @@ test("runProtocol suppresses the generic advisory when a tagged error is wrapped
 
   // Neither generic advisory should fire: the tag is on the inner error,
   // not the outer wrap, but the cause walker finds it anyway.
-  expect(
-    mockState.errors.every((m) => !m.includes("key exchange was in progress")),
-  ).toBe(true);
-  expect(
-    mockState.errors.every((m) => !m.includes("already rotated and saved")),
-  ).toBe(true);
+  expectNoGenericRecoveryAdvisory(mockState.errors);
 }, 15_000);
 
 test("runProtocol suppresses the generic advisory for a terminal FrameSizeExceededError", async () => {
@@ -1119,31 +1156,13 @@ test("runProtocol suppresses the generic advisory for a terminal FrameSizeExceed
   // psilinkRecoveryHintEmitted tag (board item 199419757), so the hint-walker
   // must suppress the generic advisory -- this pins that the new class tag is
   // honored end to end, not just the Object.assign tags the other tests cover.
-  //
-  // Both parties wait for both key files to rotate before throwing, for the same
-  // synchronization reason as the cause-wrap test above: a premature throw would
-  // tear down one connection mid-handshake and surface the very authStarted
-  // advisory this test asserts is absent.
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
   saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
   saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
   async function waitForRotationThenThrowFrameSize(): Promise<never> {
-    const { readFileSync } = await import("node:fs");
-    const deadline = Date.now() + 5_000;
-    for (;;) {
-      try {
-        const a = JSON.parse(readFileSync(keyFileA, "utf8")).sharedSecret;
-        const b = JSON.parse(readFileSync(keyFileB, "utf8")).sharedSecret;
-        if (a !== TOKEN_A && b !== TOKEN_A) break;
-      } catch {
-        // file may not exist yet; retry
-      }
-      if (Date.now() > deadline)
-        throw new Error("timed out waiting for both key files to rotate");
-      await new Promise((r) => setTimeout(r, 1));
-    }
+    await waitForBothKeysRotated(keyFileA, keyFileB);
     throw new FrameSizeExceededError("inbound frame exceeds the cap");
   }
   vi.mocked(runExchange)
@@ -1172,12 +1191,7 @@ test("runProtocol suppresses the generic advisory for a terminal FrameSizeExceed
   expect(resultB.status).toBe("rejected");
 
   // The terminal error's class tag suppresses both generic advisory lines.
-  expect(
-    mockState.errors.every((m) => !m.includes("key exchange was in progress")),
-  ).toBe(true);
-  expect(
-    mockState.errors.every((m) => !m.includes("already rotated and saved")),
-  ).toBe(true);
+  expectNoGenericRecoveryAdvisory(mockState.errors);
 }, 15_000);
 
 test("runProtocol logs recovery message when an error occurs after tokenRotated=true", async () => {
@@ -1186,28 +1200,10 @@ test("runProtocol logs recovery message when an error occurs after tokenRotated=
   saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
   saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
-  // Both runExchange calls wait until both key files reflect the rotated
-  // token, then throw. Waiting for both rotations guarantees that the key exchange has
-  // completed on both sides (and the last key-exchange message file has been consumed
-  // off disk) before either party's doCleanup runs, so neither cleanup can
-  // race with the other party's still-pending key-exchange receive(). Throwing from
-  // both sides keeps the test deterministic: every protocol call exercises
-  // the recovery-log catch branch in runProtocol.
+  // Throwing from both sides keeps the test deterministic: every protocol call
+  // exercises the recovery-log catch branch in runProtocol.
   async function waitForRotationThenThrow(): Promise<never> {
-    const { readFileSync } = await import("node:fs");
-    const deadline = Date.now() + 5_000;
-    for (;;) {
-      try {
-        const a = JSON.parse(readFileSync(keyFileA, "utf8")).sharedSecret;
-        const b = JSON.parse(readFileSync(keyFileB, "utf8")).sharedSecret;
-        if (a !== TOKEN_A && b !== TOKEN_A) break;
-      } catch {
-        // file may not exist yet; retry
-      }
-      if (Date.now() > deadline)
-        throw new Error("timed out waiting for both key files to rotate");
-      await new Promise((r) => setTimeout(r, 1));
-    }
+    await waitForBothKeysRotated(keyFileA, keyFileB);
     throw new Error("simulated transport error after token rotation");
   }
 
@@ -1306,24 +1302,7 @@ test.skipIf(process.platform === "win32")(
     );
 
     // Wait for B to register its hello file so role assignment is deterministic.
-    const deadline = Date.now() + 5_000;
-    for (;;) {
-      const entries = fs.readdirSync(dropDir);
-      if (entries.length > 0) {
-        const past = new Date(Date.now() - 3_000);
-        for (const f of entries) {
-          try {
-            fs.utimesSync(path.join(dropDir, f), past, past);
-          } catch (e) {
-            if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
-          }
-        }
-        break;
-      }
-      if (Date.now() > deadline)
-        throw new Error("timed out waiting for B's hello");
-      await new Promise<void>((r) => setTimeout(r, 5));
-    }
+    await backdateDropDirRendezvousFile(dropDir);
 
     const aPromise = runProtocol(
       {
@@ -1346,14 +1325,7 @@ test.skipIf(process.platform === "win32")(
     expect(msg).toContain("Your partner may already hold the rotated token");
     // Neither generic catch-block advisory must fire: both would contradict the
     // wrapped error message.
-    expect(
-      mockState.errors.every(
-        (m) => !m.includes("key exchange was in progress"),
-      ),
-    ).toBe(true);
-    expect(
-      mockState.errors.every((m) => !m.includes("already rotated and saved")),
-    ).toBe(true);
+    expectNoGenericRecoveryAdvisory(mockState.errors);
   },
 );
 
@@ -1898,48 +1870,9 @@ test.skipIf(process.platform === "win32")(
       "test-b",
     );
 
-    // Poll for B's rendezvous file rather than sleeping a fixed amount. B
-    // writes its -hello.json file to dropDir during open()/synchronize(); its
-    // presence is the deterministic signal that B has reached synchronize() and
-    // is waiting for a peer. A only starts after this loop exits, guaranteeing
-    // B is already in the drop directory before A's open() runs.
-    //
-    // After detecting B's hello file, backdate its mtime by 3 seconds. This
-    // ensures B's mtime is strictly older than A's (written after this loop),
-    // making B the responder even on coarse-mtime filesystems (FAT with 2-
-    // second granularity, some NFS configs with 1-second granularity) where
-    // both writes would otherwise land in the same timestamp bucket and fall
-    // back to UUID comparison for role assignment — which could assign roles
-    // unexpectedly.
-    const deadline = Date.now() + 5_000;
-    for (;;) {
-      let entries: string[];
-      try {
-        entries = fs.readdirSync(dropDir);
-      } catch (e) {
-        throw new Error(
-          `dropDir became unavailable while polling B's rendezvous: ` +
-            (e as Error).message,
-        );
-      }
-      if (entries.length > 0) {
-        const past = new Date(Date.now() - 3_000);
-        for (const f of entries) {
-          try {
-            fs.utimesSync(path.join(dropDir, f), past, past);
-          } catch (e) {
-            // ENOENT: file raced ahead of B's synchronize and was deleted;
-            // harmless. Any other error (e.g. EPERM) indicates a real
-            // filesystem problem.
-            if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
-          }
-        }
-        break;
-      }
-      if (Date.now() > deadline)
-        throw new Error("timed out waiting for B to write its rendezvous file");
-      await new Promise<void>((r) => setTimeout(r, 5));
-    }
+    // Poll for B's rendezvous file rather than sleeping a fixed amount, then
+    // backdate it so B is deterministically the responder before A starts.
+    await backdateDropDirRendezvousFile(dropDir);
 
     // A uses runProtocol so its cleanup runs through the full exchange path.
     // send() in the exchange phase waits for A's last key-exchange message (msg3) to
@@ -2341,9 +2274,7 @@ test("runProtocol persists the onAuthenticated side effect even when the data ex
   // The recurring-exchange guarantee: a handshake success followed by an
   // exchange failure must still leave the hook's persistence on disk (the
   // bootstrap callers write the config here). A marker file stands in for the
-  // config write. Both parties wait until both key files have rotated before
-  // throwing, so the key exchange has completed on both sides before either
-  // cleanup runs.
+  // config write.
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
   saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
@@ -2352,20 +2283,7 @@ test("runProtocol persists the onAuthenticated side effect even when the data ex
   const markerB = path.join(tmpDir, "config-b.marker");
 
   async function waitForRotationThenThrow(): Promise<never> {
-    const { readFileSync } = await import("node:fs");
-    const deadline = Date.now() + 5_000;
-    for (;;) {
-      try {
-        const a = JSON.parse(readFileSync(keyFileA, "utf8")).sharedSecret;
-        const b = JSON.parse(readFileSync(keyFileB, "utf8")).sharedSecret;
-        if (a !== TOKEN_A && b !== TOKEN_A) break;
-      } catch {
-        // file may not exist yet; retry
-      }
-      if (Date.now() > deadline)
-        throw new Error("timed out waiting for both key files to rotate");
-      await new Promise((r) => setTimeout(r, 1));
-    }
+    await waitForBothKeysRotated(keyFileA, keyFileB);
     throw new Error("simulated data-exchange failure after rotation");
   }
   vi.mocked(runExchange)
@@ -2427,20 +2345,7 @@ test("runProtocol's recovery hint does not promise a clean retry when the post-h
   saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
   async function waitForRotationThenThrow(): Promise<never> {
-    const { readFileSync } = await import("node:fs");
-    const deadline = Date.now() + 5_000;
-    for (;;) {
-      try {
-        const a = JSON.parse(readFileSync(keyFileA, "utf8")).sharedSecret;
-        const b = JSON.parse(readFileSync(keyFileB, "utf8")).sharedSecret;
-        if (a !== TOKEN_A && b !== TOKEN_A) break;
-      } catch {
-        // file may not exist yet; retry
-      }
-      if (Date.now() > deadline)
-        throw new Error("timed out waiting for both key files to rotate");
-      await new Promise((r) => setTimeout(r, 1));
-    }
+    await waitForBothKeysRotated(keyFileA, keyFileB);
     throw new Error("simulated data-exchange failure after rotation");
   }
   vi.mocked(runExchange)

@@ -6,38 +6,26 @@ import {
 } from "@psilink/core";
 
 /**
- * Liveness enforcement primitives shared by the SFTP adapter's server-driven
- * operations ({@link ../connection/ssh2SftpAdapter.SSH2SFTPClientAdapter}'s
- * `list()`, `get()`, `createExclusive()`, and the write/stat/delete ops
- * `put()`/`rename()`/`delete()`/`exists()`). Every one of those awaits a callback
- * the remote server controls, so a hostile (or dead) server admin -- an adversary
- * under docs/spec/CHANNEL_SECURITY.md -- can hang it forever by
- * withholding the response. These helpers bound that wait and surface a single
- * typed, terminal {@link TransportOperationStalledError}, the liveness sibling of
- * the memory-size guards in {@link ./frameSizeGuard} and {@link ./listingGuard}:
- * those cap what a hostile file or directory can allocate; this caps the time a
- * hostile server can make an operation consume.
+ * Per-operation liveness bounds for the SFTP adapter's server-driven operations
+ * ({@link ../connection/ssh2SftpAdapter.SSH2SFTPClientAdapter}'s `list()`,
+ * `get()`, `createExclusive()`, and the write/stat/delete ops
+ * `put()`/`rename()`/`delete()`/`exists()`). Each awaits a callback the remote
+ * server controls, so a hostile (or dead) server admin -- an adversary under
+ * docs/spec/CHANNEL_SECURITY.md -- can hang it forever by withholding the response.
+ * These helpers bound that wait and surface a single typed, terminal
+ * {@link TransportOperationStalledError}, the liveness sibling of the memory-size
+ * guards in {@link ./frameSizeGuard} and {@link ./listingGuard}: those cap what a
+ * hostile file or directory can allocate; this caps the time a hostile server can
+ * make an operation consume.
  *
- * These are the per-operation fast-fail layer for the SFTP adapter -- now covering
- * the write/stat/delete ops as well as the reads -- not the universal backstop.
- * Each operation is bounded by the mode its shape allows: the reads
- * (`list`/`get`/`createExclusive`) and the metadata write/stat/delete ops
- * (`rename`/`delete`/`exists`) by a wall-clock deadline
- * ({@link withSftpOperationDeadline}; `list`'s deadline is inlined alongside its
- * round-trip cap), and `put` by a progress-based idle window
- * ({@link createBoundedPutSource}) rather than a flat deadline, because a
- * legitimately large upload over a slow link can exceed 60 s while still making
- * progress -- the same reason the capped `get` sink bounds its idle gap rather than
- * its total time. The local-filesystem adapter has no per-operation bound here: it
- * is covered by the whole-exchange budget in `FileSyncConnection` (`@psilink/core`),
- * which races EVERY transport await -- reads, writes, and the local-filesystem path
- * alike -- against the coarse peer-inactivity budget, the universal backstop
- * beneath this tier. (An earlier framing held the local adapter's reads to a
- * trusted `fs.opendir`/`fs.stat` kernel that withholds nothing, but a stalled
- * NFS/CIFS hard mount breaks that premise; it gets the coarse whole-exchange bound
- * rather than these tight per-operation ones, which stay SFTP-only because only the
- * SFTP path has the server-driven callback this tier exists to catch quickly. The
- * filedrop connect path separately bounds `fs.access` with a timeout.)
+ * Each operation is bounded in the mode its shape allows: the reads and metadata
+ * ops by a wall-clock deadline ({@link withSftpOperationDeadline}), and `put` by a
+ * progress-based idle window ({@link createBoundedPutSource}) that tolerates a
+ * large-but-progressing upload. This is the SFTP fast-fail layer, not the universal
+ * backstop: the local-filesystem adapter has no per-operation bound here (a stalled
+ * NFS/CIFS hard mount can hang its reads too), so it is covered by the
+ * whole-exchange budget in `FileSyncConnection` (`@psilink/core`), which races EVERY
+ * transport await against the coarse peer-inactivity budget beneath this tier.
  *
  * This module also holds the estimate-free, non-fatal slow-operation WARNING
  * ({@link withSlowOperationWarning}) -- observability, not a control, layered
@@ -47,18 +35,7 @@ import {
 /**
  * Wall-clock budget, in milliseconds, for a server response before an SFTP
  * operation is judged stalled. One constant covers the adapter's withheld-response
- * bounds, applied in the mode each operation allows: as a whole-operation deadline
- * for `list()` (catching an `opendir`/`readdir`/`close` callback that never fires),
- * `createExclusive()` (an open/close callback that never fires), the metadata
- * write/stat/delete ops `rename()`/`delete()`/`exists()` (each a single round-trip
- * whose callback never fires), and the rarely used uncapped `get()`; and as a
- * progress-reset idle window for the capped streaming `get()` (reset on each chunk
- * received) and for `put()` (reset on each chunk uploaded, via
- * {@link createBoundedPutSource}), so it bounds a transfer that goes silent rather
- * than one that is merely large. The streamed `list()` read additionally has a
- * round-trip cap ({@link ./listingGuard.MAX_LISTING_READDIR_BATCHES}) for the
- * empty-batch flood the deadline would otherwise catch only after the full budget;
- * the metadata ops have no such progress loop, so the deadline is their sole bound.
+ * bounds, applied in the mode each operation allows (see the module header).
  *
  * Value: 60,000 ms (60 s). A coarse "the server has gone silent" threshold, not a
  * tight latency budget. It sits well above any legitimate operation -- a normal
@@ -285,15 +262,12 @@ export function createBoundedPutSource(
             `withheld write acknowledgement)`,
         ),
       );
-      // Destroy WITH an error, not bare. ssh2-sftp-client keys its write-stream
-      // teardown off the source stream's 'error' event: _put attaches a 'error'
-      // handler that rejects put(), and put()'s `.finally` destroys the write
-      // stream. A bare destroy() emits 'close', not 'error', so the server-side
-      // write would keep running -- it leaks until session teardown. The typed
-      // terminal error is already on `result`; this plain Error exists only to
-      // abort the transfer at the server, exactly as the capped sink's failed write
-      // callback does. The resulting put() rejection lands on the adapter's no-op
-      // `fail`.
+      // Destroy WITH an error, not bare, so ssh2-sftp-client tears the write stream
+      // down at the server (its _put keys teardown off the source's 'error' event;
+      // see createCappedSink in ./frameSizeGuard for why a bare destroy leaks the
+      // transfer). The typed terminal error is already on `result`; this plain Error
+      // exists only to abort at the server, and the resulting put() rejection lands
+      // on the adapter's no-op `fail`.
       source.destroy(new Error("outbound transfer stalled"));
     }, stallDeadlineMs);
     // The idle timer is the safety bound, not real work: every terminal path clears

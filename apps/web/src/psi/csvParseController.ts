@@ -1,5 +1,7 @@
 import { loadCSVFile } from "@psilink/core";
 
+import { errorFromWorkerEvent } from "./workerEventError";
+
 /**
  * Off-main-thread CSV parse for the web app: a browser File above a size threshold
  * is parsed in a Web Worker the app owns, so the parse itself (the dominant CPU:
@@ -267,7 +269,10 @@ function parseInWorker(
         resolve({ data: rows, errors: response.errors, meta: response.meta }),
       );
     };
-    worker.onerror = (event) => settle(() => reject(workerFailure(event)));
+    worker.onerror = (event) =>
+      settle(() =>
+        reject(errorFromWorkerEvent(event, "CSV parse worker failed")),
+      );
     // A reply that fails to deserialize on this thread fires onmessageerror, not
     // onmessage/onerror; without a handler the promise would hang. Unreachable for the
     // current all-primitive reply shape (an all-string CSVRow tree), but wired so the
@@ -309,17 +314,4 @@ function rebuildWorkerError(response: {
   const error = new Error(response.message);
   error.name = response.name;
   return error;
-}
-
-/** Turn a worker `onerror` event into an Error. The event is a browser ErrorEvent
- * whose `message` names the fault; fall back to a fixed message when it carries
- * none. */
-function workerFailure(event: unknown): Error {
-  const message =
-    typeof event === "object" &&
-    event !== null &&
-    typeof (event as { message?: unknown }).message === "string"
-      ? (event as { message: string }).message
-      : "CSV parse worker failed";
-  return new Error(message);
 }

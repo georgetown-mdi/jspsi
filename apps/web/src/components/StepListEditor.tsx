@@ -439,9 +439,7 @@ export function StepListEditor({
       }),
     );
 
-  // One add-menu group: a plain-language heading and its functions, each shown with
-  // the descriptor's own label and consequence blurb. Shared by the standard and the
-  // gated expert groups so both render identically.
+  // Shared by the standard and the gated expert groups so both render identically.
   const renderMenuGroup = (group: StandardizationFunctionGroup) => (
     <div key={group.label}>
       <Menu.Label>{group.label}</Menu.Label>

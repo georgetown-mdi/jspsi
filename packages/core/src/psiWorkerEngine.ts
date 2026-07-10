@@ -84,8 +84,6 @@ export class WorkerPsiEngine implements PsiEngine {
     { resolve: (value: unknown) => void; reject: (error: unknown) => void }
   >();
   private disposed = false;
-  // Set to the worker's failure once `onError` fires, so a later call fails fast
-  // with the real cause instead of posting to a dead worker (see call()).
   private terminalError: Error | undefined;
 
   constructor(handle: PsiWorkerHandle) {

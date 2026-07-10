@@ -135,12 +135,12 @@ const LIFETIME_OPTIONS: Array<{ value: string; label: string }> = [
  * only the unselectable controls are absent. The linkage strategy, by contrast, IS
  * settable (it is honored end-to-end), in the expert "Matching settings" block;
  * single-pass is a consented disclosure tradeoff, so the control spells that
- * tradeoff out in plain language at the point of choice. Output sharing IS settable (the 3-way
- * "who receives the matched results" control), and the invitation's payload is now
- * authored too: the send list is derived from each column's disclosure under "Your
- * columns" (so it cannot over-state what transmits), and receive is reconciled from
- * the partner rather than pre-declared -- both honored end-to-end now that output
- * is one-sided-aware and payload reconciliation is lazy.
+ * tradeoff out in plain language at the point of choice. Output sharing IS settable
+ * (the 3-way "who receives the matched results" control), and the invitation's
+ * payload is authored too: the send list is derived from each column's disclosure
+ * under "Your columns" (so it cannot over-state what transmits), and receive is
+ * reconciled from the partner rather than pre-declared -- both honored end-to-end,
+ * output being one-sided-aware and payload reconciliation lazy.
  *
  * Validation runs through {@link validateAdvancedInvite} (the core schema is the
  * single source); Generate is disabled until the draft parses and at least one key
@@ -228,8 +228,7 @@ export function LinkageTermsEditor({
   // interaction so it does not linger.
   const [announcement, setAnnouncement] = useState("");
 
-  // The cleaning section is now always shown (no longer gated behind expert mode) and
-  // open by default since it is first-class, but collapsible so the rail can be tamed.
+  // Open by default (first-class), but collapsible so the rail stays tame.
   const [cleaningOpen, setCleaningOpen] = useState(true);
 
   // Focus the editor heading once on mount so a keyboard/screen-reader user who
@@ -311,9 +310,6 @@ export function LinkageTermsEditor({
       producibleFieldNames.has(el.field),
     );
 
-  // The fields a key element may reference, metadata-derived (one per `role: linkage`
-  // typed column). The expert field-pickers offer exactly these, so a key authored
-  // in the editor can only reference a declared field.
   // The fields a key element may reference: derived from the authored standardization
   // (not the one-field-per-type default), so when the operator binds two transformations
   // of one semantic type to distinct columns the expert key editor offers BOTH fields.
@@ -324,9 +320,7 @@ export function LinkageTermsEditor({
     [draft.metadata, draft.standardization],
   );
 
-  // Per-party full-CSV coverage for the inviter's OWN cleaning -- parity with the
-  // acceptor, which the inviter previously lacked: an inviter could silently collapse
-  // a field (under-matching its own rows) with no warning. The visible per-field
+  // Per-party full-CSV coverage for the inviter's OWN cleaning. The visible per-field
   // FieldCoverage is rendered inside StandardizationCards; this hook feeds it and the
   // editor-wide announcer below.
   const { rates: nonEmptyRates, pending: ratesPending } = useNonEmptyRates(
@@ -405,8 +399,8 @@ export function LinkageTermsEditor({
     }));
   // Append a same-typed field bound to its first free column, named uniquely off the
   // type's first field and seeded with its steps (so the second field starts from the
-  // same recommended pipeline). Migrated from the deleted StandardizationWorkbench;
-  // it reads the host's authoritative array via the functional updater, so the
+  // same recommended pipeline). It reads the host's authoritative array via the
+  // functional updater, so the
   // affordance the component gates on `addableTypes` and this free-column search stay
   // consistent (the early return never fires while the component shows the button).
   const addFieldForType = (type: LinkageField["type"]) =>
@@ -708,12 +702,10 @@ export function LinkageTermsEditor({
               )}
             </Stack>
 
-            {/* The per-party data-prep cleaning: now ALWAYS shown (no longer gated
-                behind expert mode), open by default since it is first-class, in a
-                collapsible section so the rail stays tame. Per-party and local --
-                never embedded in the token. Adding/removing same-typed fields stays
-                an expert affordance (it is a key-authoring decision); the cleaning
-                STEPS, including raw patterns, are available to everyone. */}
+            {/* The per-party data-prep cleaning: local and never embedded in the
+                token. Adding/removing same-typed fields stays an expert affordance
+                (it is a key-authoring decision); the cleaning STEPS, including raw
+                patterns, are available to everyone. */}
             <DisclosureSection
               label="Clean and bind your fields"
               open={cleaningOpen}

@@ -166,64 +166,84 @@ test("loadCSVColumnSample: an empty input yields an empty header and sample", as
   expect(sample).toEqual([]);
 });
 
-test("loadCSVColumnSample: a no-newline span over the byte ceiling fails fast", async () => {
-  // One logical line with no terminator anywhere: PapaParse can never yield a row
-  // or settle the header, so the read would buffer the whole span. The guard
-  // destroys the stream with an operator-readable error once the run since the last
-  // terminator crosses the limit. Delivered in small chunks, as fs.createReadStream
-  // / stdin would deliver a large file.
-  const ceiling = 512;
-  const giant = "x".repeat(ceiling * 4);
-  await expect(
-    loadCSVColumnSample(chunkedStreamOf(giant, 64), pickDob, 1000, ceiling),
-  ).rejects.toThrow(/single-line limit/);
-});
+// The byte-ceiling guard lives in guardStreamLineByteCeiling, which both
+// loadCSVColumnSample and loadCSVFile wrap, so every "fails fast" shape below
+// must reject identically through either entry point. Each scenario builds the
+// tripping stream once; the wrapper table drives it through both loaders.
+const ceilingTripScenarios: Array<{
+  label: string;
+  makeStream: (ceiling: number) => Readable;
+}> = [
+  {
+    // One logical line with no terminator anywhere: PapaParse can never yield a
+    // row or settle the header, so the read would buffer the whole span. The
+    // guard destroys the stream with an operator-readable error once the run
+    // since the last terminator crosses the limit. Delivered in small chunks, as
+    // fs.createReadStream / stdin would deliver a large file.
+    label: "a no-newline span over the byte ceiling fails fast",
+    makeStream: (ceiling) => chunkedStreamOf("x".repeat(ceiling * 4), 64),
+  },
+  {
+    // The header terminates normally, then one data field grows without a row
+    // terminator. The guard's run resets at the header's newline, then the
+    // unbounded field drives the run past the ceiling, so the read fails fast
+    // rather than buffering the whole field.
+    label: "a single field over the byte ceiling fails fast",
+    makeStream: (ceiling) =>
+      chunkedStreamOf(`name,dob\nAlice,${"y".repeat(ceiling * 4)}`, 64),
+  },
+  {
+    // A header of very many columns with its terminator beyond the ceiling: the
+    // run grows from the first byte with no terminator to reset it, so it crosses
+    // the limit before the header settles -- the giant-header shape.
+    label: "a header over the byte ceiling fails fast",
+    makeStream: (ceiling) => {
+      const cols = Array.from({ length: 400 }, (_v, i) => `col_${i}`);
+      const header = cols.join(",");
+      expect(Buffer.byteLength(header)).toBeGreaterThan(ceiling);
+      const row = cols.map(() => "v").join(",");
+      return chunkedStreamOf(`${header}\n${row}\n`, 64);
+    },
+  },
+  {
+    // Delivery-shape independence: the header and an unterminated giant field
+    // arrive in a SINGLE data event (a lone push, or any source with a read
+    // buffer larger than the span). The guard scans within that one chunk --
+    // resetting the run at the header's newline, then accumulating the field past
+    // the ceiling -- so a chunk carrying both a terminator and an over-ceiling
+    // tail still trips. streamOf pushes the entire content as one event.
+    label: "a giant field arriving in one data event fails fast",
+    makeStream: (ceiling) =>
+      streamOf(`name,dob\nAlice,${"y".repeat(ceiling * 4)}`),
+  },
+];
 
-test("loadCSVColumnSample: a single field over the byte ceiling fails fast", async () => {
-  // The header terminates normally, then one data field grows without a row
-  // terminator. The guard's run resets at the header's newline, then the unbounded
-  // field drives the run past the ceiling, so the read fails fast rather than
-  // buffering the whole field.
-  const ceiling = 512;
-  const giantField = "y".repeat(ceiling * 4);
-  const csv = `name,dob\nAlice,${giantField}`;
-  await expect(
-    loadCSVColumnSample(chunkedStreamOf(csv, 64), pickDob, 1000, ceiling),
-  ).rejects.toThrow(/single-line limit/);
-});
+const ceilingGuardWrappers: Array<{
+  label: string;
+  run: (stream: Readable, ceiling: number) => Promise<unknown>;
+}> = [
+  {
+    label: "loadCSVColumnSample",
+    run: (stream, ceiling) =>
+      loadCSVColumnSample(stream, pickDob, 1000, ceiling),
+  },
+  {
+    label: "loadCSVFile",
+    run: (stream, ceiling) => loadCSVFile(stream, ceiling),
+  },
+];
 
-test("loadCSVColumnSample: a header over the byte ceiling fails fast", async () => {
-  // A header of very many columns with its terminator beyond the ceiling: the run
-  // grows from the first byte with no terminator to reset it, so it crosses the
-  // limit before the header settles -- the giant-header shape.
-  const ceiling = 512;
-  const cols = Array.from({ length: 400 }, (_v, i) => `col_${i}`);
-  const header = cols.join(",");
-  expect(Buffer.byteLength(header)).toBeGreaterThan(ceiling);
-  const row = cols.map(() => "v").join(",");
-  await expect(
-    loadCSVColumnSample(
-      chunkedStreamOf(`${header}\n${row}\n`, 64),
-      pickDob,
-      1000,
-      ceiling,
-    ),
-  ).rejects.toThrow(/single-line limit/);
-});
-
-test("loadCSVColumnSample: a giant field arriving in one data event fails fast", async () => {
-  // Delivery-shape independence: the header and an unterminated giant field arrive
-  // in a SINGLE data event (a lone push, or any source with a read buffer larger
-  // than the span). The guard scans within that one chunk -- resetting the run at
-  // the header's newline, then accumulating the field past the ceiling -- so a
-  // chunk carrying both a terminator and an over-ceiling tail still trips. streamOf
-  // pushes the entire content as one event, reproducing that shape.
-  const ceiling = 512;
-  const csv = `name,dob\nAlice,${"y".repeat(ceiling * 4)}`;
-  await expect(
-    loadCSVColumnSample(streamOf(csv), pickDob, 1000, ceiling),
-  ).rejects.toThrow(/single-line limit/);
-});
+for (const wrapper of ceilingGuardWrappers) {
+  test.each(ceilingTripScenarios)(
+    `${wrapper.label}: $label`,
+    async ({ makeStream }) => {
+      const ceiling = 512;
+      await expect(wrapper.run(makeStream(ceiling), ceiling)).rejects.toThrow(
+        /single-line limit/,
+      );
+    },
+  );
+}
 
 test("loadCSVColumnSample: many short rows whose total exceeds the ceiling do not trip", async () => {
   // The ceiling bounds a single line, not the total bytes pulled: a file of many
@@ -298,60 +318,6 @@ test("loadCSVColumnSample: a header split across stream chunks is read whole", a
   expect(columns).toContain("dob");
   expect(sampledColumn).toBe("dob");
   expect(sample).toEqual(["1990-01-02", "1990-01-02"]);
-});
-
-test("loadCSVFile: a no-newline span over the byte ceiling fails fast", async () => {
-  // One logical line with no terminator anywhere: PapaParse can never yield a row
-  // or settle the header, so without the ceiling the read would buffer the whole
-  // span. The guard destroys the stream with an operator-readable error once the
-  // run since the last terminator crosses the limit. Delivered in small chunks, as
-  // fs.createReadStream / stdin would deliver a large file.
-  const ceiling = 512;
-  const giant = "x".repeat(ceiling * 4);
-  await expect(
-    loadCSVFile(chunkedStreamOf(giant, 64), ceiling),
-  ).rejects.toThrow(/single-line limit/);
-});
-
-test("loadCSVFile: a single field over the byte ceiling fails fast", async () => {
-  // The header terminates normally, then one data field grows without a row
-  // terminator. The guard's run resets at the header's newline, then the unbounded
-  // field drives the run past the ceiling, so the read fails fast rather than
-  // buffering the whole field.
-  const ceiling = 512;
-  const giantField = "y".repeat(ceiling * 4);
-  const csv = `name,dob\nAlice,${giantField}`;
-  await expect(loadCSVFile(chunkedStreamOf(csv, 64), ceiling)).rejects.toThrow(
-    /single-line limit/,
-  );
-});
-
-test("loadCSVFile: a header over the byte ceiling fails fast", async () => {
-  // A header of very many columns with its terminator beyond the ceiling: the run
-  // grows from the first byte with no terminator to reset it, so it crosses the
-  // limit before the header settles -- the giant-header shape.
-  const ceiling = 512;
-  const cols = Array.from({ length: 400 }, (_v, i) => `col_${i}`);
-  const header = cols.join(",");
-  expect(Buffer.byteLength(header)).toBeGreaterThan(ceiling);
-  const row = cols.map(() => "v").join(",");
-  await expect(
-    loadCSVFile(chunkedStreamOf(`${header}\n${row}\n`, 64), ceiling),
-  ).rejects.toThrow(/single-line limit/);
-});
-
-test("loadCSVFile: a giant field arriving in one data event fails fast", async () => {
-  // Delivery-shape independence: the header and an unterminated giant field arrive
-  // in a SINGLE data event (a lone push, or any source with a read buffer larger
-  // than the span). The guard scans within that one chunk -- resetting the run at
-  // the header's newline, then accumulating the field past the ceiling -- so a
-  // chunk carrying both a terminator and an over-ceiling tail still trips. streamOf
-  // pushes the entire content as one event, reproducing that shape.
-  const ceiling = 512;
-  const csv = `name,dob\nAlice,${"y".repeat(ceiling * 4)}`;
-  await expect(loadCSVFile(streamOf(csv), ceiling)).rejects.toThrow(
-    /single-line limit/,
-  );
 });
 
 test("loadCSVFile: destroys the source stream once the ceiling aborts the read", async () => {

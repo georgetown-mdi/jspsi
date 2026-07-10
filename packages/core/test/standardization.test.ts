@@ -32,6 +32,19 @@ import {
   type Standardization,
 } from "../src/config/standardization";
 
+const col = (name: string, type: ColumnMetadata["type"]): ColumnMetadata => ({
+  name,
+  type,
+  role: "linkage",
+  isPayload: false,
+});
+
+const roledCol = (
+  name: string,
+  type: ColumnMetadata["type"],
+  role: ColumnMetadata["role"],
+): ColumnMetadata => ({ name, type, role, isPayload: false });
+
 // --- runPipeline: string functions -------------------------------------------
 
 describe("runPipeline — string functions", () => {
@@ -1617,13 +1630,6 @@ describe("assertStandardizationMatchesTerms", () => {
 // both live divergence bugs in the hand-maintained second copy this primitive
 // replaced (see #201001899).
 describe("resolveFieldColumns", () => {
-  const col = (name: string, type: ColumnMetadata["type"]): ColumnMetadata => ({
-    name,
-    type,
-    role: "linkage",
-    isPayload: false,
-  });
-
   // ssn + lastName fields, named by their semantic type for brevity.
   const terms: LinkageTerms = {
     version: "1.0.0",
@@ -1713,12 +1719,6 @@ describe("resolveFieldColumns", () => {
     ]);
     expect(resolution.get("ssn")?.column).toBeUndefined();
   });
-
-  const roledCol = (
-    name: string,
-    type: ColumnMetadata["type"],
-    role: ColumnMetadata["role"],
-  ): ColumnMetadata => ({ name, type, role, isPayload: false });
 
   test("an ignored column never binds a linkage field, even as the only one of its type", () => {
     // The linkage path keys on `type`, not `role`, so an ignored ssn column would
@@ -2484,13 +2484,6 @@ describe("assessLinkageSatisfiability dead keys", () => {
 // resolution the detector models from the documented shape-vs-values residual
 // (whether a value survives a pipeline), which the detector deliberately ignores.
 describe("assessLinkageSatisfiability matches buildStandardizedDataset", () => {
-  const col = (name: string, type: ColumnMetadata["type"]): ColumnMetadata => ({
-    name,
-    type,
-    role: "linkage",
-    isPayload: false,
-  });
-
   // One ssn key and one lastName key, so a case can satisfy both, one, or neither.
   const diffTerms: LinkageTerms = {
     version: "1.0.0",

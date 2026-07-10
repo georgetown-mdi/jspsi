@@ -113,10 +113,12 @@ const acceptorTerms: LinkageTerms = {
   ],
 };
 
-async function encodeAcceptToken(): Promise<string> {
+async function encodeAcceptToken(
+  linkageTerms: LinkageTerms = acceptorTerms,
+): Promise<string> {
   const token: InvitationToken = {
     version: "1",
-    linkageTerms: acceptorTerms,
+    linkageTerms,
     sharedSecret: generateSharedSecret(),
     connectionEndpoint: {
       channel: "webrtc",
@@ -638,18 +640,7 @@ describe("prepare your data editor (verdict, disclosure, launch)", () => {
       linkageFields: [{ name: "dob", type: "date_of_birth" }],
       linkageKeys: [{ name: "d", elements: [{ field: "dob" }] }],
     };
-    const token: InvitationToken = {
-      version: "1",
-      linkageTerms: dobTerms,
-      sharedSecret: generateSharedSecret(),
-      connectionEndpoint: {
-        channel: "webrtc",
-        host: "127.0.0.1",
-        port: 3000,
-        path: "/api/",
-      },
-    };
-    window.location.hash = await encodeInvitation(token);
+    window.location.hash = await encodeAcceptToken(dobTerms);
     mountAcceptRoute();
     await expect
       .element(page.getByText("Invitation from County Health Department"))

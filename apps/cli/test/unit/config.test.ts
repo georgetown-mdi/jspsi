@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test } from "vitest";
 import YAML from "yaml";
 import {
   getDefaultLinkageTerms,
@@ -38,6 +38,18 @@ const baseWebRTC: ConnectionConfig = {
   channel: "webrtc",
   server: { host: "peer.example.org" },
 };
+
+// A fresh scratch directory per test, removed afterward; the file-writing tests
+// below build their config paths under it.
+let dir: string;
+
+beforeEach(() => {
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+});
+
+afterEach(() => {
+  fs.rmSync(dir, { recursive: true, force: true });
+});
 
 // --- timeout / reconnect overrides -------------------------------------------
 
@@ -593,94 +605,79 @@ test("outboundPath on a webrtc connection is rejected", () => {
 // --- saveConfig --------------------------------------------------------------
 
 test("saveConfig emits snake_case keys and round-trips through parseExchangeSpec", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    const spec: ExchangeSpec = {
-      connection: { channel: "filedrop", path: "/mnt/share" },
-      linkageTerms: getDefaultLinkageTerms("Agency A"),
-    };
-    saveConfig(configPath, spec);
-    const raw = fs.readFileSync(configPath, "utf8");
-    // camelCase TS keys are written in their snake_case YAML form ...
-    expect(raw).toContain("linkage_fields:");
-    expect(raw).toContain("linkage_keys:");
-    expect(raw).toContain("expects_output:");
-    expect(raw).toContain("share_with_partner:");
-    // ... never camelCase.
-    expect(raw).not.toContain("linkageFields");
-    expect(raw).not.toContain("expectsOutput");
-    // Semantic-type VALUES are snake_case too, and stay snake_case across the
-    // round-trip: camelizeKeys/snakeizeKeys transform keys only, so the value is
-    // byte-stable iff it is already snake_case in memory (approach (b)). A
-    // camelCase value (e.g. firstName) here would mean an enum value leaked onto
-    // disk off-convention.
-    expect(raw).toContain("type: first_name");
-    expect(raw).toContain("type: date_of_birth");
-    expect(raw).not.toContain("firstName");
-    expect(raw).not.toContain("dateOfBirth");
-    // The writer is the inverse of the reader's camelizeKeys: parsing the
-    // written file reproduces the original spec exactly.
-    expect(parseExchangeSpec(YAML.parse(raw))).toEqual(spec);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  const spec: ExchangeSpec = {
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkageTerms: getDefaultLinkageTerms("Agency A"),
+  };
+  saveConfig(configPath, spec);
+  const raw = fs.readFileSync(configPath, "utf8");
+  // camelCase TS keys are written in their snake_case YAML form ...
+  expect(raw).toContain("linkage_fields:");
+  expect(raw).toContain("linkage_keys:");
+  expect(raw).toContain("expects_output:");
+  expect(raw).toContain("share_with_partner:");
+  // ... never camelCase.
+  expect(raw).not.toContain("linkageFields");
+  expect(raw).not.toContain("expectsOutput");
+  // Semantic-type VALUES are snake_case too, and stay snake_case across the
+  // round-trip: camelizeKeys/snakeizeKeys transform keys only, so the value is
+  // byte-stable iff it is already snake_case in memory (approach (b)). A
+  // camelCase value (e.g. firstName) here would mean an enum value leaked onto
+  // disk off-convention.
+  expect(raw).toContain("type: first_name");
+  expect(raw).toContain("type: date_of_birth");
+  expect(raw).not.toContain("firstName");
+  expect(raw).not.toContain("dateOfBirth");
+  // The writer is the inverse of the reader's camelizeKeys: parsing the
+  // written file reproduces the original spec exactly.
+  expect(parseExchangeSpec(YAML.parse(raw))).toEqual(spec);
 });
 
 test("saveConfig writes the config owner-read-only (0600)", () => {
   // Windows uses a restricted ACL, not POSIX mode bits; fs.statSync reports a
   // synthetic mode there, so this assertion is Unix-only.
   if (process.platform === "win32") return;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    // A spec carrying an inline SFTP credential is exactly why the config must
-    // be owner-only: the 0600 mode is what keeps the password from other users.
-    const spec: ExchangeSpec = {
-      connection: {
-        channel: "sftp",
-        server: { host: "h", username: "u", password: "s3cret-inline" },
-      },
-      linkageTerms: getDefaultLinkageTerms("Agency A"),
-    };
-    saveConfig(configPath, spec);
-    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
-    expect(fs.readFileSync(configPath, "utf8")).toContain("s3cret-inline");
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  // A spec carrying an inline SFTP credential is exactly why the config must
+  // be owner-only: the 0600 mode is what keeps the password from other users.
+  const spec: ExchangeSpec = {
+    connection: {
+      channel: "sftp",
+      server: { host: "h", username: "u", password: "s3cret-inline" },
+    },
+    linkageTerms: getDefaultLinkageTerms("Agency A"),
+  };
+  saveConfig(configPath, spec);
+  expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+  expect(fs.readFileSync(configPath, "utf8")).toContain("s3cret-inline");
 });
 
 test("saveConfig strips sharedSecret/expires and does not mutate the caller's spec", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    const token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-    const spec = {
-      connection: {
-        channel: "sftp",
-        server: { host: "h" },
-      },
-      authentication: {
-        sharedSecret: token,
-        expires: "2028-01-01T00:00:00.000Z",
-      },
-      linkageTerms: getDefaultLinkageTerms("Agency A"),
-    } as unknown as ExchangeSpec;
-    saveConfig(configPath, spec);
-    const raw = fs.readFileSync(configPath, "utf8");
-    // Key material never lands in the config, even when the caller leaves it set.
-    expect(raw).not.toContain("shared_secret");
-    expect(raw).not.toContain(token);
-    expect(raw).not.toContain("expires");
-    // The now-empty authentication container is pruned, not left as `{}`.
-    expect(raw).not.toContain("authentication");
-    // The strip runs on a clone; the caller's spec is untouched.
-    expect(spec.authentication?.sharedSecret).toBe(token);
-    expect(spec.authentication?.expires).toBe("2028-01-01T00:00:00.000Z");
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  const token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const spec = {
+    connection: {
+      channel: "sftp",
+      server: { host: "h" },
+    },
+    authentication: {
+      sharedSecret: token,
+      expires: "2028-01-01T00:00:00.000Z",
+    },
+    linkageTerms: getDefaultLinkageTerms("Agency A"),
+  } as unknown as ExchangeSpec;
+  saveConfig(configPath, spec);
+  const raw = fs.readFileSync(configPath, "utf8");
+  // Key material never lands in the config, even when the caller leaves it set.
+  expect(raw).not.toContain("shared_secret");
+  expect(raw).not.toContain(token);
+  expect(raw).not.toContain("expires");
+  // The now-empty authentication container is pruned, not left as `{}`.
+  expect(raw).not.toContain("authentication");
+  // The strip runs on a clone; the caller's spec is untouched.
+  expect(spec.authentication?.sharedSecret).toBe(token);
+  expect(spec.authentication?.expires).toBe("2028-01-01T00:00:00.000Z");
 });
 
 // --- persistHostKeyFingerprint -----------------------------------------------
@@ -689,120 +686,93 @@ const FP_A = "SHA256:" + "A".repeat(43);
 const FP_B = "SHA256:" + "B".repeat(42) + "E";
 
 test("persistHostKeyFingerprint adds the pin and preserves comments and other fields", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    fs.writeFileSync(
-      configPath,
-      [
-        "# hand-authored config",
-        "connection:",
-        "  channel: sftp",
-        "  server:",
-        "    host: sftp.example.org # the drop",
-        "    username: alice",
-        "",
-      ].join("\n"),
-    );
-    persistHostKeyFingerprint(configPath, FP_A);
-    const raw = fs.readFileSync(configPath, "utf8");
-    expect(raw).toContain("host_key_fingerprint");
-    expect(raw).toContain(FP_A);
-    // The in-place document edit keeps the operator's comments and other fields.
-    expect(raw).toContain("# hand-authored config");
-    expect(raw).toContain("host: sftp.example.org # the drop");
-    expect(raw).toContain("username: alice");
-    const parsed = YAML.parse(raw) as {
-      connection: { server: { host_key_fingerprint: string } };
-    };
-    expect(parsed.connection.server.host_key_fingerprint).toBe(FP_A);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    [
+      "# hand-authored config",
+      "connection:",
+      "  channel: sftp",
+      "  server:",
+      "    host: sftp.example.org # the drop",
+      "    username: alice",
+      "",
+    ].join("\n"),
+  );
+  persistHostKeyFingerprint(configPath, FP_A);
+  const raw = fs.readFileSync(configPath, "utf8");
+  expect(raw).toContain("host_key_fingerprint");
+  expect(raw).toContain(FP_A);
+  // The in-place document edit keeps the operator's comments and other fields.
+  expect(raw).toContain("# hand-authored config");
+  expect(raw).toContain("host: sftp.example.org # the drop");
+  expect(raw).toContain("username: alice");
+  const parsed = YAML.parse(raw) as {
+    connection: { server: { host_key_fingerprint: string } };
+  };
+  expect(parsed.connection.server.host_key_fingerprint).toBe(FP_A);
 });
 
 test("persistHostKeyFingerprint replaces an existing stored pin (the one-shot re-pin)", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    fs.writeFileSync(
-      configPath,
-      [
-        "connection:",
-        "  channel: sftp",
-        "  server:",
-        "    host: sftp.example.org",
-        `    host_key_fingerprint: ${FP_A}`,
-        "",
-      ].join("\n"),
-    );
-    persistHostKeyFingerprint(configPath, FP_B);
-    const raw = fs.readFileSync(configPath, "utf8");
-    expect(raw).toContain(FP_B);
-    expect(raw).not.toContain(FP_A);
-    const parsed = YAML.parse(raw) as {
-      connection: { server: { host_key_fingerprint: string } };
-    };
-    expect(parsed.connection.server.host_key_fingerprint).toBe(FP_B);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    [
+      "connection:",
+      "  channel: sftp",
+      "  server:",
+      "    host: sftp.example.org",
+      `    host_key_fingerprint: ${FP_A}`,
+      "",
+    ].join("\n"),
+  );
+  persistHostKeyFingerprint(configPath, FP_B);
+  const raw = fs.readFileSync(configPath, "utf8");
+  expect(raw).toContain(FP_B);
+  expect(raw).not.toContain(FP_A);
+  const parsed = YAML.parse(raw) as {
+    connection: { server: { host_key_fingerprint: string } };
+  };
+  expect(parsed.connection.server.host_key_fingerprint).toBe(FP_B);
 });
 
 test("persistHostKeyFingerprint writes the config owner-read-only (0600)", () => {
   if (process.platform === "win32") return;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    fs.writeFileSync(
-      configPath,
-      "connection:\n  channel: sftp\n  server:\n    host: h\n",
-    );
-    persistHostKeyFingerprint(configPath, FP_A);
-    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    "connection:\n  channel: sftp\n  server:\n    host: h\n",
+  );
+  persistHostKeyFingerprint(configPath, FP_A);
+  expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
 });
 
 test("persistHostKeyFingerprint throws (not silently) on a malformed config", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    // A clearly invalid mapping (a value with a bare ':' block-mapping conflict).
-    fs.writeFileSync(configPath, "connection:\n  - a\n  b: c\n");
-    expect(() => persistHostKeyFingerprint(configPath, FP_A)).toThrow(
-      UsageError,
-    );
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  // A clearly invalid mapping (a value with a bare ':' block-mapping conflict).
+  fs.writeFileSync(configPath, "connection:\n  - a\n  b: c\n");
+  expect(() => persistHostKeyFingerprint(configPath, FP_A)).toThrow(UsageError);
 });
 
 test("persistHostKeyFingerprint does not echo an inline credential on a malformed config", () => {
   // parseDocument collects a syntax error in doc.errors, whose message embeds a
   // snippet of the offending source; the path-only guard must not echo it, or an
   // inline credential near the malformed line leaks into the (logged) error.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
   const SECRET = "S3cr3tSFTPPassw0rd";
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    `connection:\n  server:\n\t  password: ${SECRET}\n`,
+  );
+  let caught: unknown;
   try {
-    const configPath = path.join(dir, "psilink.yaml");
-    fs.writeFileSync(
-      configPath,
-      `connection:\n  server:\n\t  password: ${SECRET}\n`,
-    );
-    let caught: unknown;
-    try {
-      persistHostKeyFingerprint(configPath, FP_A);
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(UsageError);
-    expect((caught as Error).message).toContain("could not be parsed as YAML");
-    expect((caught as Error).message).not.toContain(SECRET);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    persistHostKeyFingerprint(configPath, FP_A);
+  } catch (err) {
+    caught = err;
   }
+  expect(caught).toBeInstanceOf(UsageError);
+  expect((caught as Error).message).toContain("could not be parsed as YAML");
+  expect((caught as Error).message).not.toContain(SECRET);
 });
 
 test("persistHostKeyFingerprint does not echo an inline credential via an unresolved alias", () => {
@@ -811,30 +781,25 @@ test("persistHostKeyFingerprint does not echo an inline credential via an unreso
   // doc.toString() materializes the document, throwing an error whose message
   // echoes the alias token. The path-only guard at serialization must not echo
   // it, or an inline credential written as an alias leaks into the error.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
   const SECRET = "S3cr3tSFTPPassw0rd";
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    `connection:\n  channel: sftp\n  server:\n    password: *${SECRET}\n`,
+  );
+  let caught: unknown;
   try {
-    const configPath = path.join(dir, "psilink.yaml");
-    fs.writeFileSync(
-      configPath,
-      `connection:\n  channel: sftp\n  server:\n    password: *${SECRET}\n`,
-    );
-    let caught: unknown;
-    try {
-      persistHostKeyFingerprint(configPath, FP_A);
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(UsageError);
-    expect((caught as Error).message).toContain(
-      "could not be serialized as YAML",
-    );
-    expect((caught as Error).message).not.toContain(SECRET);
-    // The original file is left untouched (the throw precedes the write).
-    expect(fs.readFileSync(configPath, "utf8")).toContain(`*${SECRET}`);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    persistHostKeyFingerprint(configPath, FP_A);
+  } catch (err) {
+    caught = err;
   }
+  expect(caught).toBeInstanceOf(UsageError);
+  expect((caught as Error).message).toContain(
+    "could not be serialized as YAML",
+  );
+  expect((caught as Error).message).not.toContain(SECRET);
+  // The original file is left untouched (the throw precedes the write).
+  expect(fs.readFileSync(configPath, "utf8")).toContain(`*${SECRET}`);
 });
 
 test("persistHostKeyFingerprint raises a UsageError when connection.server is not a mapping", () => {
@@ -843,18 +808,11 @@ test("persistHostKeyFingerprint raises a UsageError when connection.server is no
   // library error; the function must surface it as the actionable UsageError its
   // contract promises, not an opaque stack trace, and must leave the original
   // file untouched (the throw precedes the write).
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    const original = "connection:\n  channel: sftp\n  server: nope\n";
-    fs.writeFileSync(configPath, original);
-    expect(() => persistHostKeyFingerprint(configPath, FP_A)).toThrow(
-      UsageError,
-    );
-    expect(fs.readFileSync(configPath, "utf8")).toBe(original);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  const original = "connection:\n  channel: sftp\n  server: nope\n";
+  fs.writeFileSync(configPath, original);
+  expect(() => persistHostKeyFingerprint(configPath, FP_A)).toThrow(UsageError);
+  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
 });
 
 test("persistHostKeyFingerprint rejects a non-sftp config and leaves the file untouched", () => {
@@ -890,27 +848,22 @@ test("persistHostKeyFingerprint rejects a non-sftp config and leaves the file un
     },
   ];
   for (const { source, expectInMessage } of fixtures) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(configPath, source);
+    let caught: unknown;
     try {
-      const configPath = path.join(dir, "psilink.yaml");
-      fs.writeFileSync(configPath, source);
-      let caught: unknown;
-      try {
-        persistHostKeyFingerprint(configPath, FP_A);
-      } catch (err) {
-        caught = err;
-      }
-      expect(caught).toBeInstanceOf(UsageError);
-      expect((caught as Error).message).toContain(expectInMessage);
-      expect((caught as Error).message).toContain("sftp");
-      // Not mutated: the bytes are exactly what the operator wrote -- no pin
-      // synthesized, no server mapping fabricated on the filedrop config.
-      const after = fs.readFileSync(configPath, "utf8");
-      expect(after).toBe(source);
-      expect(after).not.toContain("host_key_fingerprint");
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
+      persistHostKeyFingerprint(configPath, FP_A);
+    } catch (err) {
+      caught = err;
     }
+    expect(caught).toBeInstanceOf(UsageError);
+    expect((caught as Error).message).toContain(expectInMessage);
+    expect((caught as Error).message).toContain("sftp");
+    // Not mutated: the bytes are exactly what the operator wrote -- no pin
+    // synthesized, no server mapping fabricated on the filedrop config.
+    const after = fs.readFileSync(configPath, "utf8");
+    expect(after).toBe(source);
+    expect(after).not.toContain("host_key_fingerprint");
   }
 });
 
@@ -920,31 +873,26 @@ test("persistHostKeyFingerprint sanitizes the echoed channel for display", () =>
   // drives an ANSI sequence, or a newline usable for log-line spoofing. The
   // error is display-bound (it reaches a terminal/log), so the channel is run
   // through sanitizeForDisplay and emitted escaped, never raw.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  // A double-quoted YAML scalar whose value decodes to x<ESC><LF>y.
+  const source = 'connection:\n  channel: "x\\x1b\\ny"\n';
+  fs.writeFileSync(configPath, source);
+  let caught: unknown;
   try {
-    const configPath = path.join(dir, "psilink.yaml");
-    // A double-quoted YAML scalar whose value decodes to x<ESC><LF>y.
-    const source = 'connection:\n  channel: "x\\x1b\\ny"\n';
-    fs.writeFileSync(configPath, source);
-    let caught: unknown;
-    try {
-      persistHostKeyFingerprint(configPath, FP_A);
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(UsageError);
-    const message = (caught as Error).message;
-    // The raw control bytes never reach the message ...
-    expect(message).not.toContain("\u001b");
-    expect(message).not.toContain("\n");
-    // ... they are shown as visible escapes instead.
-    expect(message).toContain("\\x1b");
-    expect(message).toContain("\\x0a");
-    // The file is left untouched (the throw precedes the write).
-    expect(fs.readFileSync(configPath, "utf8")).toBe(source);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    persistHostKeyFingerprint(configPath, FP_A);
+  } catch (err) {
+    caught = err;
   }
+  expect(caught).toBeInstanceOf(UsageError);
+  const message = (caught as Error).message;
+  // The raw control bytes never reach the message ...
+  expect(message).not.toContain("\u001b");
+  expect(message).not.toContain("\n");
+  // ... they are shown as visible escapes instead.
+  expect(message).toContain("\\x1b");
+  expect(message).toContain("\\x0a");
+  // The file is left untouched (the throw precedes the write).
+  expect(fs.readFileSync(configPath, "utf8")).toBe(source);
 });
 
 test("persistHostKeyFingerprint round-trips a fingerprint containing + and /", () => {
@@ -952,310 +900,255 @@ test("persistHostKeyFingerprint round-trips a fingerprint containing + and /", (
   // quote as needed so the value re-parses byte-for-byte -- a mis-quoted pin
   // would later fail to match and refuse every connection.
   const FP_SPECIAL = "SHA256:" + "a/b+c" + "D".repeat(38);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    fs.writeFileSync(
-      configPath,
-      "connection:\n  channel: sftp\n  server:\n    host: h\n",
-    );
-    persistHostKeyFingerprint(configPath, FP_SPECIAL);
-    const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
-      connection: { server: { host_key_fingerprint: string } };
-    };
-    expect(parsed.connection.server.host_key_fingerprint).toBe(FP_SPECIAL);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    "connection:\n  channel: sftp\n  server:\n    host: h\n",
+  );
+  persistHostKeyFingerprint(configPath, FP_SPECIAL);
+  const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+    connection: { server: { host_key_fingerprint: string } };
+  };
+  expect(parsed.connection.server.host_key_fingerprint).toBe(FP_SPECIAL);
 });
 
 test("saveConfig round-trips provider_options verbatim in both directions", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    // provider_options is opaque: a literal camelCase key (ssh2's readyTimeout)
-    // and a snake_case key must both survive the writer + reader unchanged. The
-    // writer must not snakeize readyTimeout, and the reader must not camelize
-    // keepalive_interval, because core's shared walker treats the providerOptions
-    // subtree as opaque in both directions.
-    const spec: ExchangeSpec = {
-      connection: {
-        channel: "sftp",
-        server: { host: "h" },
-        providerOptions: { readyTimeout: 5000, keepalive_interval: 1000 },
-      },
-      linkageTerms: getDefaultLinkageTerms("Agency A"),
-    };
+  const configPath = path.join(dir, "psilink.yaml");
+  // provider_options is opaque: a literal camelCase key (ssh2's readyTimeout)
+  // and a snake_case key must both survive the writer + reader unchanged. The
+  // writer must not snakeize readyTimeout, and the reader must not camelize
+  // keepalive_interval, because core's shared walker treats the providerOptions
+  // subtree as opaque in both directions.
+  const spec: ExchangeSpec = {
+    connection: {
+      channel: "sftp",
+      server: { host: "h" },
+      providerOptions: { readyTimeout: 5000, keepalive_interval: 1000 },
+    },
+    linkageTerms: getDefaultLinkageTerms("Agency A"),
+  };
 
-    // write: keys land on disk byte-for-byte (camelCase stays camelCase, snake
-    // stays snake) -- not transformed by snakeizeKeys.
-    saveConfig(configPath, spec);
-    const raw1 = fs.readFileSync(configPath, "utf8");
-    expect(raw1).toContain("readyTimeout:");
-    expect(raw1).toContain("keepalive_interval:");
-    expect(raw1).not.toContain("ready_timeout:");
-    expect(raw1).not.toContain("keepaliveInterval:");
+  // write: keys land on disk byte-for-byte (camelCase stays camelCase, snake
+  // stays snake) -- not transformed by snakeizeKeys.
+  saveConfig(configPath, spec);
+  const raw1 = fs.readFileSync(configPath, "utf8");
+  expect(raw1).toContain("readyTimeout:");
+  expect(raw1).toContain("keepalive_interval:");
+  expect(raw1).not.toContain("ready_timeout:");
+  expect(raw1).not.toContain("keepaliveInterval:");
 
-    // read: parsing reproduces the spec exactly, opaque map included.
-    const parsed = parseExchangeSpec(YAML.parse(raw1));
-    expect(parsed).toEqual(spec);
-    if (parsed.connection.channel !== "sftp")
-      throw new Error("expected sftp channel");
-    expect(parsed.connection.providerOptions).toEqual({
-      readyTimeout: 5000,
-      keepalive_interval: 1000,
-    });
+  // read: parsing reproduces the spec exactly, opaque map included.
+  const parsed = parseExchangeSpec(YAML.parse(raw1));
+  expect(parsed).toEqual(spec);
+  if (parsed.connection.channel !== "sftp")
+    throw new Error("expected sftp channel");
+  expect(parsed.connection.providerOptions).toEqual({
+    readyTimeout: 5000,
+    keepalive_interval: 1000,
+  });
 
-    // read -> write: writing the re-read spec produces an identical opaque map,
-    // confirming the round-trip is stable in both directions.
-    saveConfig(configPath, parsed);
-    const raw2 = fs.readFileSync(configPath, "utf8");
-    expect(YAML.parse(raw2).connection.provider_options).toEqual(
-      YAML.parse(raw1).connection.provider_options,
-    );
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  // read -> write: writing the re-read spec produces an identical opaque map,
+  // confirming the round-trip is stable in both directions.
+  saveConfig(configPath, parsed);
+  const raw2 = fs.readFileSync(configPath, "utf8");
+  expect(YAML.parse(raw2).connection.provider_options).toEqual(
+    YAML.parse(raw1).connection.provider_options,
+  );
 });
 
 test("saveConfig round-trips webrtc provider_options verbatim", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    // providerOptions is opaque on webrtc as well as sftp; the writer/reader
-    // key-normalization is channel-agnostic, so a literal camelCase key and a
-    // snake_case key must both survive the round-trip byte-for-byte.
-    const spec: ExchangeSpec = {
-      connection: {
-        channel: "webrtc",
-        server: { host: "api.peerjs.com" },
-        providerOptions: { readyTimeout: 5000, keepalive_interval: 1000 },
-      },
-      linkageTerms: getDefaultLinkageTerms("Agency A"),
-    };
+  const configPath = path.join(dir, "psilink.yaml");
+  // providerOptions is opaque on webrtc as well as sftp; the writer/reader
+  // key-normalization is channel-agnostic, so a literal camelCase key and a
+  // snake_case key must both survive the round-trip byte-for-byte.
+  const spec: ExchangeSpec = {
+    connection: {
+      channel: "webrtc",
+      server: { host: "api.peerjs.com" },
+      providerOptions: { readyTimeout: 5000, keepalive_interval: 1000 },
+    },
+    linkageTerms: getDefaultLinkageTerms("Agency A"),
+  };
 
-    saveConfig(configPath, spec);
-    const raw = fs.readFileSync(configPath, "utf8");
-    expect(raw).toContain("readyTimeout:");
-    expect(raw).toContain("keepalive_interval:");
-    expect(raw).not.toContain("ready_timeout:");
-    expect(raw).not.toContain("keepaliveInterval:");
+  saveConfig(configPath, spec);
+  const raw = fs.readFileSync(configPath, "utf8");
+  expect(raw).toContain("readyTimeout:");
+  expect(raw).toContain("keepalive_interval:");
+  expect(raw).not.toContain("ready_timeout:");
+  expect(raw).not.toContain("keepaliveInterval:");
 
-    const parsed = parseExchangeSpec(YAML.parse(raw));
-    expect(parsed).toEqual(spec);
-    if (parsed.connection.channel !== "webrtc")
-      throw new Error("expected webrtc channel");
-    expect(parsed.connection.providerOptions).toEqual({
-      readyTimeout: 5000,
-      keepalive_interval: 1000,
-    });
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const parsed = parseExchangeSpec(YAML.parse(raw));
+  expect(parsed).toEqual(spec);
+  if (parsed.connection.channel !== "webrtc")
+    throw new Error("expected webrtc channel");
+  expect(parsed.connection.providerOptions).toEqual({
+    readyTimeout: 5000,
+    keepalive_interval: 1000,
+  });
 });
 
 test("saveConfig preserves WebRTC connection.role and prunes the authentication block", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    const token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-    // role now lives on the WebRTC connection config, not under authentication.
-    // saveConfig touches only the top-level authentication block, so role is
-    // preserved while the authentication block (key material only) is pruned.
-    const spec = {
-      connection: {
-        channel: "webrtc",
-        server: { host: "api.peerjs.com" },
-        role: "inviter",
-      },
-      authentication: {
-        sharedSecret: token,
-        expires: "2028-01-01T00:00:00.000Z",
-      },
-      linkageTerms: getDefaultLinkageTerms("Agency A"),
-    } as unknown as ExchangeSpec;
-    saveConfig(configPath, spec);
-    const raw = fs.readFileSync(configPath, "utf8");
-    // connection.role survives (a connection field, never stripped) ...
-    expect(raw).toContain("role: inviter");
-    // ... while the authentication block, holding only key material, is pruned.
-    expect(raw).not.toContain("authentication");
-    expect(raw).not.toContain("shared_secret");
-    expect(raw).not.toContain(token);
-    expect(raw).not.toContain("expires");
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  const token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  // role now lives on the WebRTC connection config, not under authentication.
+  // saveConfig touches only the top-level authentication block, so role is
+  // preserved while the authentication block (key material only) is pruned.
+  const spec = {
+    connection: {
+      channel: "webrtc",
+      server: { host: "api.peerjs.com" },
+      role: "inviter",
+    },
+    authentication: {
+      sharedSecret: token,
+      expires: "2028-01-01T00:00:00.000Z",
+    },
+    linkageTerms: getDefaultLinkageTerms("Agency A"),
+  } as unknown as ExchangeSpec;
+  saveConfig(configPath, spec);
+  const raw = fs.readFileSync(configPath, "utf8");
+  // connection.role survives (a connection field, never stripped) ...
+  expect(raw).toContain("role: inviter");
+  // ... while the authentication block, holding only key material, is pruned.
+  expect(raw).not.toContain("authentication");
+  expect(raw).not.toContain("shared_secret");
+  expect(raw).not.toContain(token);
+  expect(raw).not.toContain("expires");
 });
 
 // --- persistDisclosedPayloadColumns ------------------------------------------
 
 test("persistDisclosedPayloadColumns adds the field and preserves comments and other fields", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    fs.writeFileSync(
-      configPath,
-      [
-        "# hand-authored config",
-        "connection:",
-        "  channel: sftp",
-        "  server:",
-        "    host: sftp.example.org # the drop",
-        "",
-      ].join("\n"),
-    );
-    persistDisclosedPayloadColumns(configPath, ["notes", "member_id"]);
-    const raw = fs.readFileSync(configPath, "utf8");
-    // Operator comments and other fields survive the surgical write.
-    expect(raw).toContain("# hand-authored config");
-    expect(raw).toContain("host: sftp.example.org # the drop");
-    const parsed = YAML.parse(raw) as {
-      disclosed_payload_columns: string[];
-    };
-    expect(parsed.disclosed_payload_columns).toEqual(["notes", "member_id"]);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    [
+      "# hand-authored config",
+      "connection:",
+      "  channel: sftp",
+      "  server:",
+      "    host: sftp.example.org # the drop",
+      "",
+    ].join("\n"),
+  );
+  persistDisclosedPayloadColumns(configPath, ["notes", "member_id"]);
+  const raw = fs.readFileSync(configPath, "utf8");
+  // Operator comments and other fields survive the surgical write.
+  expect(raw).toContain("# hand-authored config");
+  expect(raw).toContain("host: sftp.example.org # the drop");
+  const parsed = YAML.parse(raw) as {
+    disclosed_payload_columns: string[];
+  };
+  expect(parsed.disclosed_payload_columns).toEqual(["notes", "member_id"]);
 });
 
 test("persistDisclosedPayloadColumns refreshes a stale value (the re-invite fix)", () => {
   // A config carrying an OLD commitment, re-minted over changed metadata: the
   // field must be overwritten to the new set, never left stale (else the next
   // exchange false-fires against a promise the partner no longer holds).
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    fs.writeFileSync(
-      configPath,
-      [
-        "connection:",
-        "  channel: sftp",
-        "  server:",
-        "    host: h",
-        "disclosed_payload_columns:",
-        "  - old_col",
-        "",
-      ].join("\n"),
-    );
-    persistDisclosedPayloadColumns(configPath, ["new_col"]);
-    const raw = fs.readFileSync(configPath, "utf8");
-    expect(raw).not.toContain("old_col");
-    const parsed = YAML.parse(raw) as { disclosed_payload_columns: string[] };
-    expect(parsed.disclosed_payload_columns).toEqual(["new_col"]);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    [
+      "connection:",
+      "  channel: sftp",
+      "  server:",
+      "    host: h",
+      "disclosed_payload_columns:",
+      "  - old_col",
+      "",
+    ].join("\n"),
+  );
+  persistDisclosedPayloadColumns(configPath, ["new_col"]);
+  const raw = fs.readFileSync(configPath, "utf8");
+  expect(raw).not.toContain("old_col");
+  const parsed = YAML.parse(raw) as { disclosed_payload_columns: string[] };
+  expect(parsed.disclosed_payload_columns).toEqual(["new_col"]);
 });
 
 test("persistDisclosedPayloadColumns removes the field when the commitment is undefined", () => {
   // A re-invite from a config whose metadata is unknown publishes no subset, so a
   // previously-recorded commitment must be cleared, not retained stale.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    fs.writeFileSync(
-      configPath,
-      [
-        "connection:",
-        "  channel: sftp",
-        "  server:",
-        "    host: h",
-        "disclosed_payload_columns:",
-        "  - old_col",
-        "",
-      ].join("\n"),
-    );
-    persistDisclosedPayloadColumns(configPath, undefined);
-    const raw = fs.readFileSync(configPath, "utf8");
-    expect(raw).not.toContain("disclosed_payload_columns");
-    expect(raw).not.toContain("old_col");
-    // The rest of the config is intact.
-    const parsed = YAML.parse(raw) as {
-      connection: { channel: string };
-      disclosed_payload_columns?: string[];
-    };
-    expect(parsed.connection.channel).toBe("sftp");
-    expect(parsed.disclosed_payload_columns).toBeUndefined();
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    [
+      "connection:",
+      "  channel: sftp",
+      "  server:",
+      "    host: h",
+      "disclosed_payload_columns:",
+      "  - old_col",
+      "",
+    ].join("\n"),
+  );
+  persistDisclosedPayloadColumns(configPath, undefined);
+  const raw = fs.readFileSync(configPath, "utf8");
+  expect(raw).not.toContain("disclosed_payload_columns");
+  expect(raw).not.toContain("old_col");
+  // The rest of the config is intact.
+  const parsed = YAML.parse(raw) as {
+    connection: { channel: string };
+    disclosed_payload_columns?: string[];
+  };
+  expect(parsed.connection.channel).toBe("sftp");
+  expect(parsed.disclosed_payload_columns).toBeUndefined();
 });
 
 test("persistDisclosedPayloadColumns writes an empty array verbatim (strict disclose-nothing)", () => {
   // Empty is a real commitment ("disclose nothing"), distinct from absent; it must
   // be written, not dropped.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    fs.writeFileSync(
-      configPath,
-      "connection:\n  channel: sftp\n  server:\n    host: h\n",
-    );
-    persistDisclosedPayloadColumns(configPath, []);
-    const raw = fs.readFileSync(configPath, "utf8");
-    const parsed = YAML.parse(raw) as { disclosed_payload_columns: string[] };
-    expect(parsed.disclosed_payload_columns).toEqual([]);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    "connection:\n  channel: sftp\n  server:\n    host: h\n",
+  );
+  persistDisclosedPayloadColumns(configPath, []);
+  const raw = fs.readFileSync(configPath, "utf8");
+  const parsed = YAML.parse(raw) as { disclosed_payload_columns: string[] };
+  expect(parsed.disclosed_payload_columns).toEqual([]);
 });
 
 test("persistDisclosedPayloadColumns writes the config owner-read-only (0600)", () => {
   if (process.platform === "win32") return;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    fs.writeFileSync(
-      configPath,
-      "connection:\n  channel: sftp\n  server:\n    host: h\n",
-    );
-    persistDisclosedPayloadColumns(configPath, ["notes"]);
-    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    "connection:\n  channel: sftp\n  server:\n    host: h\n",
+  );
+  persistDisclosedPayloadColumns(configPath, ["notes"]);
+  expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
 });
 
 test("persistDisclosedPayloadColumns throws (not silently) on a malformed config", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    fs.writeFileSync(configPath, "connection: [unbalanced\n");
-    // Classified as a local usage error (exit 64), like persistHostKeyFingerprint,
-    // not a bare Error that would fall through to the generic exit code.
-    expect(() => persistDisclosedPayloadColumns(configPath, ["notes"])).toThrow(
-      UsageError,
-    );
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(configPath, "connection: [unbalanced\n");
+  // Classified as a local usage error (exit 64), like persistHostKeyFingerprint,
+  // not a bare Error that would fall through to the generic exit code.
+  expect(() => persistDisclosedPayloadColumns(configPath, ["notes"])).toThrow(
+    UsageError,
+  );
 });
 
 test("persistDisclosedPayloadColumns does not echo an inline credential on a malformed config", () => {
   // Parity with persistHostKeyFingerprint: a syntax error's message embeds a
   // snippet of the offending source; the shared path-only guard must not echo it,
   // or an inline credential near the malformed line leaks into the (logged) error.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
   const SECRET = "S3cr3tSFTPPassw0rd";
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    `connection:\n  server:\n\t  password: ${SECRET}\n`,
+  );
+  let caught: unknown;
   try {
-    const configPath = path.join(dir, "psilink.yaml");
-    fs.writeFileSync(
-      configPath,
-      `connection:\n  server:\n\t  password: ${SECRET}\n`,
-    );
-    let caught: unknown;
-    try {
-      persistDisclosedPayloadColumns(configPath, ["notes"]);
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(UsageError);
-    expect((caught as Error).message).toContain("could not be parsed as YAML");
-    expect((caught as Error).message).not.toContain(SECRET);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    persistDisclosedPayloadColumns(configPath, ["notes"]);
+  } catch (err) {
+    caught = err;
   }
+  expect(caught).toBeInstanceOf(UsageError);
+  expect((caught as Error).message).toContain("could not be parsed as YAML");
+  expect((caught as Error).message).not.toContain(SECRET);
 });
 
 test("persistDisclosedPayloadColumns does not echo an inline credential via an unresolved alias", () => {
@@ -1263,29 +1156,24 @@ test("persistDisclosedPayloadColumns does not echo an inline credential via an u
   // and setIn succeeds; the failure surfaces only at doc.toString(), whose message
   // echoes the alias token. The path-only guard at serialization must not echo it,
   // and the original file must be left untouched (the throw precedes the write).
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
   const SECRET = "S3cr3tSFTPPassw0rd";
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    `connection:\n  channel: sftp\n  server:\n    password: *${SECRET}\n`,
+  );
+  let caught: unknown;
   try {
-    const configPath = path.join(dir, "psilink.yaml");
-    fs.writeFileSync(
-      configPath,
-      `connection:\n  channel: sftp\n  server:\n    password: *${SECRET}\n`,
-    );
-    let caught: unknown;
-    try {
-      persistDisclosedPayloadColumns(configPath, ["notes"]);
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(UsageError);
-    expect((caught as Error).message).toContain(
-      "could not be serialized as YAML",
-    );
-    expect((caught as Error).message).not.toContain(SECRET);
-    expect(fs.readFileSync(configPath, "utf8")).toContain(`*${SECRET}`);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    persistDisclosedPayloadColumns(configPath, ["notes"]);
+  } catch (err) {
+    caught = err;
   }
+  expect(caught).toBeInstanceOf(UsageError);
+  expect((caught as Error).message).toContain(
+    "could not be serialized as YAML",
+  );
+  expect((caught as Error).message).not.toContain(SECRET);
+  expect(fs.readFileSync(configPath, "utf8")).toContain(`*${SECRET}`);
 });
 
 // --- diffLinkageTerms / formatReconcileDiffs ---------------------------------
@@ -1599,136 +1487,97 @@ test("formatReconcileDiffs: escapes partner-controlled values against terminal i
 // --- loadConfigLinkageSource -------------------------------------------------
 
 test("loadConfigLinkageSource returns undefined when no file exists", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    expect(
-      loadConfigLinkageSource(path.join(dir, "absent.yaml")),
-    ).toBeUndefined();
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  expect(
+    loadConfigLinkageSource(path.join(dir, "absent.yaml")),
+  ).toBeUndefined();
 });
 
 test("loadConfigLinkageSource round-trips the terms a saveConfig wrote", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    const terms = getDefaultLinkageTerms("Agency A");
-    saveConfig(configPath, {
-      connection: { channel: "filedrop", path: "/mnt/share" },
-      linkageTerms: terms,
-    });
-    const source = loadConfigLinkageSource(configPath);
-    expect(source?.linkageTerms).toEqual(terms);
-    // No standardization block was written, so none is returned.
-    expect(source?.standardization).toBeUndefined();
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  const terms = getDefaultLinkageTerms("Agency A");
+  saveConfig(configPath, {
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkageTerms: terms,
+  });
+  const source = loadConfigLinkageSource(configPath);
+  expect(source?.linkageTerms).toEqual(terms);
+  // No standardization block was written, so none is returned.
+  expect(source?.standardization).toBeUndefined();
 });
 
 test("loadConfigLinkageSource round-trips an explicit standardization block", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    const terms = getDefaultLinkageTerms("Agency A");
-    const standardization = [
-      {
-        output: "ssn",
-        input: "tax_id",
-        steps: [{ function: "trim_whitespace" }],
-      },
-    ];
-    saveConfig(configPath, {
-      connection: { channel: "filedrop", path: "/mnt/share" },
-      linkageTerms: terms,
-      standardization,
-    });
-    expect(loadConfigLinkageSource(configPath)?.standardization).toEqual(
-      standardization,
-    );
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  const terms = getDefaultLinkageTerms("Agency A");
+  const standardization = [
+    {
+      output: "ssn",
+      input: "tax_id",
+      steps: [{ function: "trim_whitespace" }],
+    },
+  ];
+  saveConfig(configPath, {
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkageTerms: terms,
+    standardization,
+  });
+  expect(loadConfigLinkageSource(configPath)?.standardization).toEqual(
+    standardization,
+  );
 });
 
 test("loadConfigLinkageSource round-trips an explicit metadata block", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    const terms = getDefaultLinkageTerms("Agency A");
-    const metadata = [
-      {
-        name: "tax_id",
-        type: "ssn" as const,
-        role: "linkage" as const,
-        isPayload: false,
-      },
-    ];
-    saveConfig(configPath, {
-      connection: { channel: "filedrop", path: "/mnt/share" },
-      linkageTerms: terms,
-      metadata,
-    });
-    // saveConfig writes is_payload; loadConfigLinkageSource camelizes it back.
-    expect(loadConfigLinkageSource(configPath)?.metadata).toEqual(metadata);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  const terms = getDefaultLinkageTerms("Agency A");
+  const metadata = [
+    {
+      name: "tax_id",
+      type: "ssn" as const,
+      role: "linkage" as const,
+      isPayload: false,
+    },
+  ];
+  saveConfig(configPath, {
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkageTerms: terms,
+    metadata,
+  });
+  // saveConfig writes is_payload; loadConfigLinkageSource camelizes it back.
+  expect(loadConfigLinkageSource(configPath)?.metadata).toEqual(metadata);
 });
 
 test("loadConfigLinkageSource rejects a config with an invalid metadata block", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    // Valid linkage_terms (so the metadata branch is reached) plus a metadata
-    // entry with an unknown semantic type.
-    const yaml = YAML.stringify({
-      linkageTerms: getDefaultLinkageTerms("Agency A"),
-      metadata: [
-        { name: "X", type: "not_a_type", role: "linkage", isPayload: false },
-      ],
-    });
-    fs.writeFileSync(configPath, yaml);
-    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-    expect(() => loadConfigLinkageSource(configPath)).toThrow(
-      "invalid metadata",
-    );
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  // Valid linkage_terms (so the metadata branch is reached) plus a metadata
+  // entry with an unknown semantic type.
+  const yaml = YAML.stringify({
+    linkageTerms: getDefaultLinkageTerms("Agency A"),
+    metadata: [
+      { name: "X", type: "not_a_type", role: "linkage", isPayload: false },
+    ],
+  });
+  fs.writeFileSync(configPath, yaml);
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+  expect(() => loadConfigLinkageSource(configPath)).toThrow("invalid metadata");
 });
 
 test("loadConfigLinkageSource rejects a config with no linkage_terms", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    fs.writeFileSync(
-      configPath,
-      "connection:\n  channel: filedrop\n  path: /x\n",
-    );
-    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-    expect(() => loadConfigLinkageSource(configPath)).toThrow(
-      "no linkage_terms",
-    );
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    "connection:\n  channel: filedrop\n  path: /x\n",
+  );
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+  expect(() => loadConfigLinkageSource(configPath)).toThrow("no linkage_terms");
 });
 
 test("loadConfigLinkageSource rejects invalid linkage_terms", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    // linkage_terms present but missing the mandatory fields the schema requires.
-    fs.writeFileSync(configPath, "linkage_terms:\n  identity: Agency A\n");
-    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-    expect(() => loadConfigLinkageSource(configPath)).toThrow(
-      "invalid linkage_terms",
-    );
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  // linkage_terms present but missing the mandatory fields the schema requires.
+  fs.writeFileSync(configPath, "linkage_terms:\n  identity: Agency A\n");
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(
+    "invalid linkage_terms",
+  );
 });
 
 // A local config whose linkage_terms trips a camelizeKeys structural bound (here
@@ -1738,51 +1587,40 @@ test("loadConfigLinkageSource rejects invalid linkage_terms", () => {
 // the if(!result.success) branch produces the helpful message rather than the
 // throw skipping straight past it. Still a UsageError (CLI exit 64), as before.
 test("loadConfigLinkageSource file-names a linkage_terms camelize-bound trip", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    // Nest one level past the depth bound so camelizeKeys rejects before Zod.
-    let deepTerms: unknown = { identity: "Agency A" };
-    for (let i = 0; i < MAX_NESTING_DEPTH; i++)
-      deepTerms = { nested: deepTerms };
-    fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: deepTerms }));
-    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-    // The file-named wrap, carrying the bound's fixed message (no input bytes),
-    // not the raw NestingDepthExceededError text that the pre-fix throw produced.
-    expect(() => loadConfigLinkageSource(configPath)).toThrow(
-      `config file ${configPath} has invalid linkage_terms: input nesting ` +
-        `exceeds the maximum depth of ${MAX_NESTING_DEPTH}`,
-    );
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  // Nest one level past the depth bound so camelizeKeys rejects before Zod.
+  let deepTerms: unknown = { identity: "Agency A" };
+  for (let i = 0; i < MAX_NESTING_DEPTH; i++) deepTerms = { nested: deepTerms };
+  fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: deepTerms }));
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+  // The file-named wrap, carrying the bound's fixed message (no input bytes),
+  // not the raw NestingDepthExceededError text that the pre-fix throw produced.
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(
+    `config file ${configPath} has invalid linkage_terms: input nesting ` +
+      `exceeds the maximum depth of ${MAX_NESTING_DEPTH}`,
+  );
 });
 
 // The same for the metadata branch: a valid linkage_terms reaches it, then a
 // camelize-bound-tripping metadata block surfaces the file-named "invalid
 // metadata" wrap rather than throwing the raw bound error.
 test("loadConfigLinkageSource file-names a metadata camelize-bound trip", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    let deepMetadata: unknown = { name: "X" };
-    for (let i = 0; i < MAX_NESTING_DEPTH; i++)
-      deepMetadata = { nested: deepMetadata };
-    fs.writeFileSync(
-      configPath,
-      YAML.stringify({
-        linkage_terms: getDefaultLinkageTerms("Agency A"),
-        metadata: deepMetadata,
-      }),
-    );
-    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-    expect(() => loadConfigLinkageSource(configPath)).toThrow(
-      `config file ${configPath} has invalid metadata: input nesting ` +
-        `exceeds the maximum depth of ${MAX_NESTING_DEPTH}`,
-    );
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  let deepMetadata: unknown = { name: "X" };
+  for (let i = 0; i < MAX_NESTING_DEPTH; i++)
+    deepMetadata = { nested: deepMetadata };
+  fs.writeFileSync(
+    configPath,
+    YAML.stringify({
+      linkage_terms: getDefaultLinkageTerms("Agency A"),
+      metadata: deepMetadata,
+    }),
+  );
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(
+    `config file ${configPath} has invalid metadata: input nesting ` +
+      `exceeds the maximum depth of ${MAX_NESTING_DEPTH}`,
+  );
 });
 
 // The three parse-error formatters route every issue-path segment through
@@ -1795,99 +1633,79 @@ test("loadConfigLinkageSource file-names a metadata camelize-bound trip", () => 
 // over-long key built from control and bidi-override bytes. The guard must escape
 // it; the two tests below pin both the escaping and the absence of over-escaping.
 test("loadConfigLinkageSource escapes control/ANSI bytes in a linkage_terms issue path", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
+  // An ESC-driven ANSI sequence and a right-to-left override (U+202E). The key
+  // must exceed MAX_NAME_LENGTH so the record-key schema rejects it and Zod
+  // surfaces the offending key in the issue path.
+  const badKey = "\x1b[31m‮evil" + "x".repeat(MAX_NAME_LENGTH + 10);
+  terms.linkageKeys[0].elements[0].transform = [
+    { function: "noop", params: { [badKey]: 1 } },
+  ];
+  fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
+  let caught: unknown;
   try {
-    const configPath = path.join(dir, "psilink.yaml");
-    const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
-    // An ESC-driven ANSI sequence and a right-to-left override (U+202E). The key
-    // must exceed MAX_NAME_LENGTH so the record-key schema rejects it and Zod
-    // surfaces the offending key in the issue path.
-    const badKey = "\x1b[31m‮evil" + "x".repeat(MAX_NAME_LENGTH + 10);
-    terms.linkageKeys[0].elements[0].transform = [
-      { function: "noop", params: { [badKey]: 1 } },
-    ];
-    fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
-    let caught: unknown;
-    try {
-      loadConfigLinkageSource(configPath);
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(UsageError);
-    const message = (caught as Error).message;
-    expect(message).toContain("invalid linkage_terms");
-    // The fixed path prefix passes through verbatim; only the partner-style key
-    // segment is escaped.
-    expect(message).toContain("linkageKeys.0.elements.0.transform.0.params.");
-    // The raw bytes are neutralized: their escaped forms appear, never the bytes.
-    expect(message).not.toContain("\x1b");
-    expect(message).not.toContain("‮");
-    expect(message).toContain("\\x1b");
-    expect(message).toContain("\\u202e");
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    loadConfigLinkageSource(configPath);
+  } catch (err) {
+    caught = err;
   }
+  expect(caught).toBeInstanceOf(UsageError);
+  const message = (caught as Error).message;
+  expect(message).toContain("invalid linkage_terms");
+  // The fixed path prefix passes through verbatim; only the partner-style key
+  // segment is escaped.
+  expect(message).toContain("linkageKeys.0.elements.0.transform.0.params.");
+  // The raw bytes are neutralized: their escaped forms appear, never the bytes.
+  expect(message).not.toContain("\x1b");
+  expect(message).not.toContain("‮");
+  expect(message).toContain("\\x1b");
+  expect(message).toContain("\\u202e");
 });
 
 test("loadConfigLinkageSource leaves a schema-fixed linkage_terms issue path unescaped", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+  const configPath = path.join(dir, "psilink.yaml");
+  const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
+  // An empty name fails the linkage-key `name` min-length, locating the issue
+  // at the schema-fixed path linkageKeys.0.name (field names + a numeric index).
+  terms.linkageKeys[0].name = "";
+  fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
+  let caught: unknown;
   try {
-    const configPath = path.join(dir, "psilink.yaml");
-    const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
-    // An empty name fails the linkage-key `name` min-length, locating the issue
-    // at the schema-fixed path linkageKeys.0.name (field names + a numeric index).
-    terms.linkageKeys[0].name = "";
-    fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
-    let caught: unknown;
-    try {
-      loadConfigLinkageSource(configPath);
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(UsageError);
-    // Ordinary path components survive untouched: the `.` separators and the
-    // numeric index are not over-escaped.
-    expect((caught as Error).message).toContain("linkageKeys.0.name");
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    loadConfigLinkageSource(configPath);
+  } catch (err) {
+    caught = err;
   }
+  expect(caught).toBeInstanceOf(UsageError);
+  // Ordinary path components survive untouched: the `.` separators and the
+  // numeric index are not over-escaped.
+  expect((caught as Error).message).toContain("linkageKeys.0.name");
 });
 
 test("loadConfigLinkageSource rejects an invalid standardization block", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    const terms = getDefaultLinkageTerms("Agency A");
-    // Valid linkage_terms but a standardization entry missing its required input.
-    saveConfig(configPath, {
-      connection: { channel: "filedrop", path: "/mnt/share" },
-      linkageTerms: terms,
-    });
-    fs.appendFileSync(
-      configPath,
-      "standardization:\n  - output: ssn\n    steps: []\n",
-    );
-    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-    expect(() => loadConfigLinkageSource(configPath)).toThrow(
-      "invalid standardization",
-    );
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  const terms = getDefaultLinkageTerms("Agency A");
+  // Valid linkage_terms but a standardization entry missing its required input.
+  saveConfig(configPath, {
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkageTerms: terms,
+  });
+  fs.appendFileSync(
+    configPath,
+    "standardization:\n  - output: ssn\n    steps: []\n",
+  );
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(
+    "invalid standardization",
+  );
 });
 
 test("loadConfigLinkageSource rejects malformed YAML", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    fs.writeFileSync(configPath, "linkage_terms: [unclosed\n");
-    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-    expect(() => loadConfigLinkageSource(configPath)).toThrow(
-      "could not be parsed as YAML",
-    );
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(configPath, "linkage_terms: [unclosed\n");
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(
+    "could not be parsed as YAML",
+  );
 });
 
 // A YAML parse failure embeds a snippet of the offending source in its message,
@@ -1902,24 +1720,17 @@ test.each([
   "loadConfigLinkageSource does not echo an inline credential: %s",
   (_, mk) => {
     const SECRET = "S3cr3tSFTPPassw0rd";
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(configPath, mk(SECRET));
+    let caught: unknown;
     try {
-      const configPath = path.join(dir, "psilink.yaml");
-      fs.writeFileSync(configPath, mk(SECRET));
-      let caught: unknown;
-      try {
-        loadConfigLinkageSource(configPath);
-      } catch (err) {
-        caught = err;
-      }
-      expect(caught).toBeInstanceOf(UsageError);
-      expect((caught as Error).message).toContain(
-        "could not be parsed as YAML",
-      );
-      expect((caught as Error).message).not.toContain(SECRET);
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
+      loadConfigLinkageSource(configPath);
+    } catch (err) {
+      caught = err;
     }
+    expect(caught).toBeInstanceOf(UsageError);
+    expect((caught as Error).message).toContain("could not be parsed as YAML");
+    expect((caught as Error).message).not.toContain(SECRET);
   },
 );
 
@@ -1962,42 +1773,32 @@ test.each([
   "loadConfigLinkageSource does not echo a secret in a schema error: %s",
   (_, mk, expectedFragment, expectedPath) => {
     const SECRET = "S3cr3tSFTPPassw0rd";
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(configPath, mk(SECRET));
+    let caught: unknown;
     try {
-      const configPath = path.join(dir, "psilink.yaml");
-      fs.writeFileSync(configPath, mk(SECRET));
-      let caught: unknown;
-      try {
-        loadConfigLinkageSource(configPath);
-      } catch (err) {
-        caught = err;
-      }
-      expect(caught).toBeInstanceOf(UsageError);
-      expect((caught as Error).message).toContain(expectedFragment);
-      // The targeted enum field is the one that rejected -- proves the secret was
-      // the rejected value, so not.toContain below is non-vacuous.
-      expect((caught as Error).message).toContain(expectedPath);
-      expect((caught as Error).message).not.toContain(SECRET);
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
+      loadConfigLinkageSource(configPath);
+    } catch (err) {
+      caught = err;
     }
+    expect(caught).toBeInstanceOf(UsageError);
+    expect((caught as Error).message).toContain(expectedFragment);
+    // The targeted enum field is the one that rejected -- proves the secret was
+    // the rejected value, so not.toContain below is non-vacuous.
+    expect((caught as Error).message).toContain(expectedPath);
+    expect((caught as Error).message).not.toContain(SECRET);
   },
 );
 
 test("loadConfigLinkageSource rejects a non-mapping top-level value", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    // A top-level YAML array parses as an object in JS; it must be reported as a
-    // malformed config, not misattributed to a missing linkage_terms block.
-    fs.writeFileSync(configPath, "- a\n- b\n");
-    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-    expect(() => loadConfigLinkageSource(configPath)).toThrow(
-      "not a valid configuration object",
-    );
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  // A top-level YAML array parses as an object in JS; it must be reported as a
+  // malformed config, not misattributed to a missing linkage_terms block.
+  fs.writeFileSync(configPath, "- a\n- b\n");
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(
+    "not a valid configuration object",
+  );
 });
 
 // --- CLI-only entry-sweep flags (195255994) ----------------------------------
@@ -2006,31 +1807,26 @@ test("connection.options.sweep_exchange_files is not a persistable config field 
   // The entry sweep is invocation-scoped: FileSyncOptionsSchema has no such
   // field, so the snake_case key is stripped at parse rather than flowing into
   // the connection options (where open() would otherwise read it).
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-config-"));
-  try {
-    const configPath = path.join(dir, "psilink.yaml");
-    const spec: ExchangeSpec = {
-      connection: { channel: "filedrop", path: "/mnt/share" },
-      linkageTerms: getDefaultLinkageTerms("Agency A"),
-    };
-    saveConfig(configPath, spec);
-    const raw = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
-      connection: { options?: Record<string, unknown> };
-    };
-    raw.connection.options = {
-      ...(raw.connection.options ?? {}),
-      sweep_exchange_files: true,
-      force_retain_sweep: true,
-    };
-    const parsed = parseExchangeSpec(raw);
-    const options = parsed.connection.options as
-      | Record<string, unknown>
-      | undefined;
-    expect(options?.["sweepExchangeFiles"]).toBeUndefined();
-    expect(options?.["forceRetainSweep"]).toBeUndefined();
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  const configPath = path.join(dir, "psilink.yaml");
+  const spec: ExchangeSpec = {
+    connection: { channel: "filedrop", path: "/mnt/share" },
+    linkageTerms: getDefaultLinkageTerms("Agency A"),
+  };
+  saveConfig(configPath, spec);
+  const raw = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+    connection: { options?: Record<string, unknown> };
+  };
+  raw.connection.options = {
+    ...(raw.connection.options ?? {}),
+    sweep_exchange_files: true,
+    force_retain_sweep: true,
+  };
+  const parsed = parseExchangeSpec(raw);
+  const options = parsed.connection.options as
+    | Record<string, unknown>
+    | undefined;
+  expect(options?.["sweepExchangeFiles"]).toBeUndefined();
+  expect(options?.["forceRetainSweep"]).toBeUndefined();
 });
 
 test("assertRetainSweepGuard: --force-retain-sweep alone is a UsageError; other combinations pass", () => {

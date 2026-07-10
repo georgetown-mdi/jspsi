@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 
-import WebSocket, { WebSocketServer as WsServer } from "ws";
 import { afterEach, describe, expect, test } from "vitest";
+import { WebSocketServer as WsServer } from "ws";
 
 import {
   MAX_SIGNALING_PAYLOAD_BYTES,
@@ -9,81 +9,13 @@ import {
 } from "@peerjs-server/services/webSocketServer/index.ts";
 import { Realm } from "@peerjs-server/models/realm.ts";
 
-import type { AddressInfo } from "node:net";
-import type { Server } from "node:http";
+import {
+  KEY,
+  connectRegistered,
+  createSignalingHarness,
+} from "../utils/signalingHarness.ts";
 
-// The signaling server's default authentication gate: the well-known PeerJS key,
-// id and token being free strings (so this models the unauthenticated client).
-const KEY = "peerjs";
-
-interface Harness {
-  wss: WebSocketServer;
-  httpServer: Server;
-  port: number;
-  errors: Array<Error>;
-}
-
-let harness: Harness | undefined;
-const clients: Array<WebSocket> = [];
-
-afterEach(async () => {
-  for (const ws of clients.splice(0)) {
-    try {
-      ws.terminate();
-    } catch {
-      // already gone
-    }
-  }
-  const server = harness?.httpServer;
-  harness = undefined;
-  if (server)
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-});
-
-/** Stand up the vendored WebSocketServer on a fresh loopback HTTP server. The
- * `error` events the server re-emits (an over-cap frame surfaces as one) are
- * collected rather than left to throw as an unhandled EventEmitter `error`. */
-function startHarness(): Promise<Harness> {
-  const httpServer = createServer();
-  const realm = new Realm();
-  const wss = new WebSocketServer({
-    server: httpServer,
-    realm,
-    config: { path: "/", key: KEY, concurrent_limit: 5000 },
-  });
-  const errors: Array<Error> = [];
-  wss.on("error", (error: Error) => errors.push(error));
-  return new Promise((resolve) => {
-    httpServer.listen(0, "127.0.0.1", () => {
-      const { port } = httpServer.address() as AddressInfo;
-      const h: Harness = { wss, httpServer, port, errors };
-      harness = h;
-      resolve(h);
-    });
-  });
-}
-
-/** Connect a client through the signaling upgrade path and resolve it once it is
- * a registered peer (the server answers OPEN), so the inbound message handler is
- * attached. The path is `/peerjs` -- `config.path` "/" plus the WS_PATH suffix. */
-function connectRegistered(port: number, id: string): Promise<WebSocket> {
-  return new Promise((resolve, reject) => {
-    const url = `ws://127.0.0.1:${port}/peerjs?key=${KEY}&id=${id}&token=tok`;
-    const ws = new WebSocket(url);
-    clients.push(ws);
-    ws.on("message", (data: WebSocket.RawData) => {
-      const type = (JSON.parse(data.toString()) as { type?: unknown }).type;
-      if (type === "OPEN") resolve(ws);
-    });
-    ws.on("error", reject);
-    // A clean server close before OPEN (e.g. the concurrent-limit or invalid-key
-    // path) emits no `error`; reject so a misconfigured registration fails the
-    // test promptly instead of hanging until the vitest timeout.
-    ws.on("close", () =>
-      reject(new Error("signaling socket closed before OPEN")),
-    );
-  });
-}
+const { start: startHarness, clients } = createSignalingHarness(afterEach);
 
 describe("signaling-server inbound frame bound", () => {
   test("an over-budget frame is rejected by ws before it reaches the parser, without crashing the server", async () => {
@@ -94,7 +26,7 @@ describe("signaling-server inbound frame bound", () => {
       messageEmitted = true;
     });
 
-    const ws = await connectRegistered(port, "over-budget");
+    const ws = await connectRegistered(port, clients, { id: "over-budget" });
 
     // One byte past the configured cap: ws rejects it at the frame-length stage
     // (close 1009, WS_ERR_UNSUPPORTED_MESSAGE_LENGTH) before the message handler's
@@ -130,7 +62,7 @@ describe("signaling-server inbound frame bound", () => {
       );
     });
 
-    const ws = await connectRegistered(port, "normal");
+    const ws = await connectRegistered(port, clients, { id: "normal" });
     const offer = { type: "OFFER", dst: "peer-2", payload: "sdp-blob" };
     ws.send(JSON.stringify(offer));
 
@@ -164,7 +96,7 @@ describe("signaling-server inbound frame bound", () => {
       wss.on("error", reject);
     });
 
-    const ws = await connectRegistered(port, "at-limit");
+    const ws = await connectRegistered(port, clients, { id: "at-limit" });
     // A valid-JSON, all-ASCII frame whose byte length is EXACTLY the cap: ASCII
     // means UTF-8 byte length equals string length, so this lands on the boundary
     // ws compares with strictly `>` -- MAX is accepted, MAX + 1 (the over-cap test)

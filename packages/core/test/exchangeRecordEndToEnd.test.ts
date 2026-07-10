@@ -192,11 +192,10 @@ test("both-output: both records agree on terms and carry the result size", async
   ).toBe(true);
 
   // The received-payload commitment also opens against the LIVE payload each
-  // party got (re-canonicalized via toCommittedPayload), not a build-time
-  // snapshot. This is the end-to-end guard the dropped snapshot used to give: a
-  // regression that swapped the sent/received payloads or corrupted the committed
-  // rows -- while leaving the column names intact -- would fail here even though
-  // the governance-name assertions above would not. localPayloadSent is not
+  // party got (re-canonicalized via toCommittedPayload). This is the end-to-end
+  // guard: a regression that swapped the sent/received payloads or corrupted the
+  // committed rows -- while leaving the column names intact -- would fail here even
+  // though the governance-name assertions above would not. localPayloadSent is not
   // surfaced on the result, so only the received side is checkable live.
   expect(
     await verifyCommitmentOpening(

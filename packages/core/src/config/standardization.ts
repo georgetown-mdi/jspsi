@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// ─── Standardizing step ──────────────────────────────────────────────────────
+// --- Standardizing step ------------------------------------------------------
 
 /**
  * A single step in a data standardization pipeline. Function names match the
@@ -8,9 +8,7 @@ import { z } from "zod";
  * camelCase after YAML parsing.
  */
 export interface StandardizationStep {
-  /** Name of the function to apply. */
   function: string;
-  /** Function-specific parameters. */
   params?: Record<string, unknown>;
 }
 
@@ -19,7 +17,7 @@ const StandardizationStepSchema: z.ZodType<StandardizationStep> = z.object({
   params: z.record(z.string(), z.unknown()).optional(),
 });
 
-// ─── Standardizing transformation ────────────────────────────────────────────
+// --- Standardizing transformation --------------------------------------------
 
 /**
  * A single data standardization transformation. Takes one input column from the
@@ -50,7 +48,7 @@ const StandardizationTransformationSchema: z.ZodType<StandardizationTransformati
     steps: z.array(StandardizationStepSchema).optional(),
   });
 
-// ─── Standardization ─────────────────────────────────────────────────────────
+// --- Standardization ---------------------------------------------------------
 
 /**
  * The full set of data standardization transformations for one party's exchange

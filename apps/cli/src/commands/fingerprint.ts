@@ -256,15 +256,9 @@ export function resolveSigningIdentity(input: ResolveSigningIdentityInput): {
   return { identity, action: "Regenerated" };
 }
 
-// Emit the fingerprint result and its surrounding diagnostics. The fingerprint
-// VALUE is the command's sole result, so it goes to stdout (via console.log,
-// regardless of log level, like invite's token) as a bare line; the action
-// banner, the bound identity, the regeneration warning, and the out-of-band
-// sharing instructions are diagnostics and route through the logger to stderr
-// (or --log-file), so `FP=$(psilink fingerprint)` captures a clean value. This
-// brings fingerprint under the same stdout=result-data-only contract the shared
-// diagnostic sink already gives every other command; its console.log lines were
-// outside that sink's reach, which this closes.
+// The fingerprint value is the command's sole result, so it goes to stdout (via
+// console.log, regardless of log level) as a bare line so `FP=$(psilink
+// fingerprint)` captures a clean value; all diagnostics route through the logger.
 function report(
   log: ReturnType<typeof getLogger>,
   action: SigningIdentityAction,

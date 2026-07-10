@@ -1128,6 +1128,21 @@ test("decode error escapes a hostile unrecognized endpoint key name end to end",
   expect(msg).toContain("\\x1b");
 });
 
+// Renders displayInvitation into the joined info-log output, spying on the
+// given logger so each test can assert against its own logger instance.
+function renderDisplayInvitation(
+  log: ReturnType<typeof getLogger>,
+  token: InvitationToken,
+): string {
+  const infoSpy = vi.spyOn(log, "info");
+  try {
+    displayInvitation(token, log);
+    return infoSpy.mock.calls.map((c) => String(c[0])).join("\n");
+  } finally {
+    infoSpy.mockRestore();
+  }
+}
+
 test("displayInvitation escapes a hostile inviter identity and key names", () => {
   const token: InvitationToken = {
     ...sampleToken(FUTURE()),
@@ -1162,15 +1177,8 @@ test("displayInvitation: the carried disclosed subset shows names, '(none)' when
   // lazily) shows no line at all.
   const log = getLogger("accept-display-receive-test");
   log.setLevel("silent");
-  const lines = (token: InvitationToken): string => {
-    const infoSpy = vi.spyOn(log, "info");
-    try {
-      displayInvitation(token, log);
-      return infoSpy.mock.calls.map((c) => String(c[0])).join("\n");
-    } finally {
-      infoSpy.mockRestore();
-    }
-  };
+  const lines = (token: InvitationToken): string =>
+    renderDisplayInvitation(log, token);
   const base = sampleToken(FUTURE());
   expect(
     lines({ ...base, disclosedPayloadColumns: ["diagnosis", "notes"] }),
@@ -1191,15 +1199,8 @@ test("displayInvitation: the inviter's request-from-acceptor receive shows names
   // shows no line at all. CLI counterpart of the web "requests from you" line.
   const log = getLogger("accept-display-request-test");
   log.setLevel("silent");
-  const lines = (token: InvitationToken): string => {
-    const infoSpy = vi.spyOn(log, "info");
-    try {
-      displayInvitation(token, log);
-      return infoSpy.mock.calls.map((c) => String(c[0])).join("\n");
-    } finally {
-      infoSpy.mockRestore();
-    }
-  };
+  const lines = (token: InvitationToken): string =>
+    renderDisplayInvitation(log, token);
   const base = sampleToken(FUTURE());
   const withReceive = (
     receive: { name: string }[] | undefined,
@@ -1221,15 +1222,8 @@ test("displayInvitation: the inviter's request-from-acceptor receive shows names
 test("displayInvitation: shows the linkage strategy and, for single-pass, the disclosure note", () => {
   const log = getLogger("accept-display-strategy-test");
   log.setLevel("silent");
-  const lines = (token: InvitationToken): string => {
-    const infoSpy = vi.spyOn(log, "info");
-    try {
-      displayInvitation(token, log);
-      return infoSpy.mock.calls.map((c) => String(c[0])).join("\n");
-    } finally {
-      infoSpy.mockRestore();
-    }
-  };
+  const lines = (token: InvitationToken): string =>
+    renderDisplayInvitation(log, token);
   const base = sampleToken(FUTURE());
   // The default (cascade) is shown plainly, with no disclosure note.
   const cascade = lines(base);

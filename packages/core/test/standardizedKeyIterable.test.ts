@@ -109,10 +109,9 @@ describe("StandardizedKeyIterable — basic concatenation", () => {
     expect(iter.at(1)).toBe("322842281IORIO19750817");
   });
 
-  test("returns undefined when a required field is empty", () => {
-    // Row 2 has an empty SSN; the field value is "" which buildKeyStrings treats as non-empty.
-    // Verify at least that it does not throw.
-    expect(() => iter.at(2)).not.toThrow();
+  test("treats an empty-string field value as a real value, not exclusion", () => {
+    // Row 2 has an empty SSN; buildKeyStrings concatenates "" like any other value.
+    expect(iter.at(2)).toBe("NOSSN19800101");
   });
 
   test("Symbol.iterator agrees with at()", () => {

@@ -321,10 +321,7 @@ test("prepareForExchange: rejects a config whose payload.send over-declares", ()
 // (deriveAcceptedLinkageTerms): the acceptor's `send` is the inviter's `receive`
 // -- the PARTNER's columns the inviter requested, which are in the ACCEPTOR's own
 // column namespace. Validating that mirrored send against the acceptor's own
-// metadata is therefore the correct, same-namespace comparison. (The earlier
-// verbatim adoption put the inviter's send -- in the INVITER's namespace -- onto
-// the acceptor, so checking it against the acceptor's metadata cross-referenced
-// the wrong namespace; the mirror removes that. Item 203461508.)
+// metadata is therefore the correct, same-namespace comparison.
 
 const inviterBaseTerms: LinkageTerms = {
   version: "1.0.0",

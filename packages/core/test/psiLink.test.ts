@@ -96,7 +96,7 @@ test("results are correct", () => {
   expect(serverResult[1]).toStrictEqual([2, 0, 1]);
 });
 
-// ─── linkViaSinglePassPSI: parity with the cascade ────────────────────────────
+// --- linkViaSinglePassPSI: parity with the cascade ----------------------------
 // Single-pass batches every key into one exchange and has the receiver
 // reconstruct the cascade locally; it must produce the byte-identical association
 // table linkViaPSI would for the same inputs. Run both roles over a fresh pipe and
@@ -151,7 +151,7 @@ test("single-pass yields the byte-identical association table as the cascade", a
   expect(spServerResult[1]).toStrictEqual(spClientResult[0]);
 });
 
-// ─── linkViaSinglePassPSI: survivor-relative (contention) uniqueness ──────────
+// --- linkViaSinglePassPSI: survivor-relative (contention) uniqueness ----------
 // Uniqueness is evaluated over the records still unmatched at each round, not the
 // full dataset, so a value duplicated across the whole data becomes matchable once
 // an earlier key claims its twin. Here the sender's "Z" is duplicated (rows 0, 1),
@@ -219,7 +219,7 @@ test("single-pass reproduces the cascade's survivor-relative uniqueness", async 
   expect(singlePassReceiver).toStrictEqual(cascadeReceiver);
 });
 
-// ─── linkViaSinglePassPSI: withholding the sender's table from a blind helper ──
+// --- linkViaSinglePassPSI: withholding the sender's table from a blind helper --
 // A non-receiving helper (expectsOutput false) disclosing no payload needs nothing
 // back, so the receiver suppresses message 3 (the sender's association-table half)
 // ENTIRELY and the sender skips awaiting it. Both parties derive the same decision
@@ -394,7 +394,7 @@ test("single-pass withholding does not leak the match count by frame presence or
   expect(empty.senderResult).toStrictEqual([[], []]);
 });
 
-// ─── associationAndIterationArray: pathological-count bound ───────────────────
+// --- associationAndIterationArray: pathological-count bound -------------------
 // The mapped-elements frame exchanged in exchangeMappedElements is partner-
 // controlled and rides the ~512 MiB exchange frame; its matched-record count is
 // legitimately in the millions. A flat array of ~4M invalid elements made Zod
@@ -461,7 +461,7 @@ test("a mapped-elements element that is an array (not a plain object) is rejecte
   expect((err as ConnectionError).kind).toBe("protocol");
 });
 
-// ─── single-pass reply codec and the receiver's frame-length tie ──────────────
+// --- single-pass reply codec and the receiver's frame-length tie --------------
 // Message 2 -- setup, response, record count, and the distinct-value index table
 // -- is one binary frame; these pin the codec round-trip and the fail-closed
 // gates that guard it (the channel-hardening controls).
@@ -490,7 +490,7 @@ test("encodeSinglePassReply / decodeSinglePassReply round-trip, and a truncated 
   expect(() => decodeSinglePassReply(full.subarray(0, 5))).toThrow(/truncated/);
 });
 
-// ─── single-pass dataset ceiling: derived from exchanged counts ───────────────
+// --- single-pass dataset ceiling: derived from exchanged counts ---------------
 // The cap is a per-party budget on keyCount * recordCount (the distinct-value
 // upper bound), with the read-gate/send-time byte cap derived from the same
 // quantity. These pin the deterministic arithmetic both parties compute.

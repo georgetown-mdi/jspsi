@@ -41,10 +41,7 @@ export class LocalFSClient implements FileTransportClient {
    * transient failure (e.g. the share or its permissions still settling) is
    * retried up to `options.maxReconnectAttempts` times (default: 3) with a
    * hard-coded 1-second delay; a per-attempt TIMEOUT is terminal and is NOT
-   * retried, because the abandoned `fs.access` keeps its thread-pool worker
-   * until the OS releases the syscall and a retry cannot un-stick it -- so
-   * retrying would only strand a second stalled worker. This bounds concurrent
-   * stalled workers to one.
+   * retried (see the shouldRetry predicate for why).
    */
   async connect(options: Record<string, unknown>): Promise<void> {
     const dirPath = options["path"];
@@ -67,22 +64,8 @@ export class LocalFSClient implements FileTransportClient {
     // fs.access on a stalled NFS/CIFS hard mount blocks a libuv thread-pool
     // worker, not the event loop, so setTimeout fires normally and this race
     // enforces the per-attempt deadline rather than waiting out the OS-level
-    // retry window (which can be several minutes).
-    //
-    // A timed-out attempt is TERMINAL -- the shouldRetry predicate below stops
-    // the retry loop on a TimeoutError. The abandoned fs.access keeps its
-    // thread-pool worker until the OS releases the syscall, and nothing
-    // in-process can cancel an already-dispatched blocking syscall: fs.access
-    // does not honor an AbortSignal, and libuv's uv_cancel only drops
-    // still-queued work, never work a worker is already executing. So retrying
-    // a hang cannot succeed where the first attempt timed out and would only
-    // strand a second stalled worker (and, across maxReconnects, more), risking
-    // exhaustion of the default 4-thread pool. Retries are therefore reserved
-    // for a mount that ANSWERS with a fast transient error (EACCES/ENOENT while
-    // a share or its permissions are still settling); connectTimeoutMs is the
-    // per-attempt wait budget, raised for a legitimately slow mount. This
-    // bounds concurrent stalled workers to one and fails a dead mount in ~one
-    // timeout window instead of maxReconnects of them.
+    // retry window (which can be several minutes). A timed-out attempt is
+    // terminal; see the shouldRetry predicate below for why a retry cannot help.
     await retryPromise(
       () =>
         withTimeout(
@@ -99,16 +82,23 @@ export class LocalFSClient implements FileTransportClient {
         ),
       maxReconnects,
       1_000,
-      // A TimeoutError means the mount did not answer within the budget; a
-      // retry cannot un-stick it and would only stack another stalled worker,
-      // so it is terminal. Every other (fast) error is the transient the retry
-      // budget exists for. The brand-on-name fallback keeps a timeout terminal
-      // even if @psilink/core were ever loaded as two copies in one process (a
-      // future dual-package split), where instanceof across the copies would
-      // silently fail and otherwise re-enable the very worker-stacking retry
-      // this guards against. No non-timeout error this path sees carries that
-      // name (the wrapped access failure below is a fresh Error), so the
-      // fallback cannot make a transient error wrongly terminal.
+      // A TimeoutError means the mount did not answer within the budget. The
+      // abandoned fs.access keeps its thread-pool worker until the OS releases the
+      // syscall, and nothing in-process can cancel an already-dispatched blocking
+      // syscall (fs.access does not honor an AbortSignal, and libuv's uv_cancel only
+      // drops still-queued work), so a retry cannot succeed where the first attempt
+      // timed out and would only strand a second stalled worker (and, across
+      // maxReconnects, more), risking exhaustion of the default 4-thread pool. A
+      // timeout is therefore terminal, bounding concurrent stalled workers to one;
+      // every other (fast) error is the transient the retry budget exists for
+      // (EACCES/ENOENT while a share or its permissions are still settling). The
+      // brand-on-name fallback keeps a timeout terminal even if @psilink/core were
+      // ever loaded as two copies in one process (a future dual-package split),
+      // where instanceof across the copies would silently fail and otherwise
+      // re-enable the very worker-stacking retry this guards against. No non-timeout
+      // error this path sees carries that name (the wrapped access failure below is
+      // a fresh Error), so the fallback cannot make a transient error wrongly
+      // terminal.
       (err) =>
         !(
           err instanceof TimeoutError ||

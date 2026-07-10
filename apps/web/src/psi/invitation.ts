@@ -237,71 +237,28 @@ export function deepLinkFor(origin: string, encoded: string): string {
 }
 
 /**
- * The disclosed-columns subset to carry on the token for this metadata: the
- * column names `disclosedColumnNames` selects (exactly what `preparePayload`
- * transmits). The web inviter always knows its metadata, so the field is always
- * carried -- INCLUDING the empty set when nothing is disclosed, which locks the
- * acceptor in to "receive nothing" so a non-empty payload later aborts. Empty is a
- * constraint, not the absence of one (unlike a CLI config-as-source invite with no
- * metadata block, which omits the field and reconciles lazily). See the
- * InvitationToken field.
- */
-function disclosedColumnsForToken(metadata: Metadata): Array<string> {
-  return disclosedColumnNames(metadata);
-}
-
-/**
  * Generate a fresh single-use invitation from the inviter's CSV: a new shared
  * secret, the linkage terms derived from the file, and this app's PeerJS
  * endpoint, encoded to a string and also wrapped as a deep-link URL. Each call
- * mints a new secret, so calling it again supersedes any prior unsent invitation
- * -- a fresh secret means a fresh derived rendezvous id, and there is no
- * expectation that one invitation supports more than one exchange.
+ * mints a new secret, superseding any prior unsent invitation.
  *
- * This is the inviter's CSV-parse boundary: it parses `file` (via
- * {@link loadCSVFileOffMainThread}, which runs core's `loadCSVFile` off the main
- * thread for a large browser File and inline otherwise), infers column metadata, and
- * derives the linkage terms
- * from it -- {@link getDefaultLinkageTerms} filtered to the keys the columns can
- * satisfy, plus a `payload.send` declaring the columns the inferred metadata
- * discloses -- then embeds exactly those terms in the token AND returns them with
- * the parsed rows. The inviter's own exchange must run on this same returned
- * `linkageTerms` object and `rawRows`/`columns`: a file is required at invite
- * time precisely so the embedded terms (which the acceptor adopts) and the terms
- * the inviter runs on are one and the same. The quick path leaves metadata and
- * standardization to per-CSV inference; the Advanced-options editor may supply
- * both (`metadata`/`standardization`), authored against this file's columns, and
- * they are threaded into the inviter's own exchange and the satisfiability
- * re-check -- never embedded in the token (they are per-party and local).
+ * This is the inviter's CSV-parse boundary. It embeds the derived terms in the
+ * token AND returns them with the parsed rows: the inviter's own exchange must run
+ * on this same returned `linkageTerms` object and `rawRows`/`columns`, so a file is
+ * required at invite time precisely so the embedded terms (which the acceptor
+ * adopts) and the terms the inviter runs on are one and the same. `metadata` and
+ * `standardization` are per-party and local -- never embedded in the token.
  *
- * Fails closed BEFORE minting the secret: a file that cannot be read/parsed, or
- * whose columns satisfy zero linkage keys, throws an {@link InvitationFileError}
- * (the latter mirroring the acceptor pre-flight's `satisfiableKeyCount === 0`
- * block and naming the unproducible fields) so no token is ever produced for an
- * unreadable or unlinkable file.
- *
- * The token carries a bounded `expires` (default {@link INVITATION_LIFETIME_SECONDS},
- * one hour) so an intercepted invitation has a finite misuse window. The acceptor
- * enforces it (`prepareAcceptedInvitation` rejects a token whose `expires` is at
- * or before the accept instant), and both sides read the same ISO-8601 `expires`,
- * so the bound the inviter sets is the bound the acceptor honors.
- *
- * Makes no network request: the encoded invitation is the rendezvous, so the
- * inviter never contacts a session backend (`/api/psi/*`).
+ * Fails closed BEFORE minting the secret (see the @throws below), so no token is
+ * ever produced for an unreadable or unlinkable file.
  *
  * @throws {InvitationFileError} when the file is unreadable or unlinkable (before
  *                               any secret is minted).
  * @throws {UsageError} (from core) when authored terms declare a `payload.send`
- *                      that does not match the edited metadata's disclosed set (a
- *                      named column metadata does not transmit, or a transmitted
- *                      column the dictionary omits), so the token and the partner's
- *                      consent screen cannot misstate what is sent. The Advanced
- *                      editor derives `payload.send` from the disclosed columns, so
- *                      its send equals what metadata transmits and this never fires
- *                      on editor output;
- *                      it is the mint-boundary backstop (against a regression or a
- *                      non-editor caller), since `prepareForExchange`'s identical
- *                      check runs too late for the consent surface.
+ *                      that does not match the edited metadata's disclosed set, so
+ *                      the token and the partner's consent screen cannot misstate
+ *                      what is sent. A mint-boundary backstop -- `prepareForExchange`'s
+ *                      identical check runs too late for the consent surface.
  */
 export async function generateInvitation(params: {
   inviterName: string;
@@ -407,17 +364,10 @@ export async function generateInvitation(params: {
   // filter the inviter's own exchange would otherwise re-derive -- and authors a
   // payload.send for the columns that metadata discloses, below). standardization
   // is left to CSV inference downstream in both cases.
-  // The columns this party will transmit for matched records, carried on the
-  // token so the acceptor's consent screen and runtime lock-in derive from the
-  // wire's own disclosure predicate (disclosedColumnNames) rather than the
-  // separately-authored payload.send dictionary. Computed over the same metadata
-  // the inviter's own exchange uses -- the Advanced editor's edited metadata, or
-  // (quick path, and the editor when it authored none) the metadata inferred from
-  // the columns -- so the declared set equals what preparePayload transmits.
-  // Always carried -- the web inviter always knows its metadata. The disclosed set,
-  // possibly the EMPTY set when nothing is disclosed: an empty set locks the
-  // acceptor in to "receive nothing" (a non-empty payload later aborts), it is not
-  // the absent/lazy case.
+  //
+  // disclosedPayloadColumns is the disclosed set the token carries. Always carried,
+  // including the EMPTY set when nothing is disclosed -- an empty set is a constraint
+  // (it locks the acceptor in to "receive nothing"), not the absent/lazy case.
   let disclosedPayloadColumns: Array<string>;
   let linkageTerms: LinkageTerms;
   if (params.linkageTerms !== undefined) {
@@ -448,7 +398,7 @@ export async function generateInvitation(params: {
     // payload from the inferred metadata and runs the same backstop there.
     if (params.metadata !== undefined)
       assertPayloadSendDisclosed(linkageTerms.payload, params.metadata);
-    disclosedPayloadColumns = disclosedColumnsForToken(
+    disclosedPayloadColumns = disclosedColumnNames(
       params.metadata ?? inferMetadata(columns),
     );
   } else {
@@ -473,26 +423,16 @@ export async function generateInvitation(params: {
     if (satisfiableKeyCount === 0)
       throw new InvitationFileError({ kind: "unlinkable", unsatisfied });
 
-    // Author the payload data dictionary (terms.payload.send) for what the quick
-    // path already transmits -- the columns the inferred metadata discloses -- the
-    // quick-path analogue of the Advanced editor's authored send (item 202741998).
-    // payloadSendForMetadata derives the send from the SAME inferMetadata(columns)
-    // the inviter's own exchange falls back to (no authored metadata travels on the
-    // quick path), so the declaration equals disclosedColumnNames over that metadata
-    // and the partner's consent screen, the token, and the exchange record carry
-    // exactly what leaves the machine. This declares what already flows; it starts
-    // and stops sending nothing. `receive` stays unauthored (the inviter does not
-    // know the partner's schema; reconciliation is lazy). When nothing is disclosed
-    // the helper returns undefined and no empty payload block is minted (assigning
-    // it would leave a `payload: undefined` key, diverging from the default terms).
+    // Author terms.payload.send from the same inferMetadata(columns) the inviter's
+    // own exchange falls back to on the quick path, so the declaration equals the
+    // disclosed set that leaves the machine. When nothing is disclosed the helper
+    // returns undefined and no empty payload block is minted (assigning it would
+    // leave a `payload: undefined` key, diverging from the default terms).
     const payload = payloadSendForMetadata(metadata);
     if (payload !== undefined) linkageTerms.payload = payload;
-    disclosedPayloadColumns = disclosedColumnsForToken(metadata);
-    // Mint-boundary backstop, mirroring the authored path above: the send is a
-    // subset of (equal to) the disclosed set by construction, so this never throws
-    // on quick-path output, but it keeps the consent surface honest as an executable
-    // check rather than a comment, and runs before prepareForExchange (which checks
-    // the same invariant too late for the token's consent screen).
+    disclosedPayloadColumns = disclosedColumnNames(metadata);
+    // Mint-boundary backstop keeping the consent surface honest -- runs before
+    // prepareForExchange, which checks the same invariant too late for the token.
     assertPayloadSendDisclosed(linkageTerms.payload, metadata);
   }
 

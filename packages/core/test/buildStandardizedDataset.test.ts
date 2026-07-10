@@ -7,7 +7,7 @@ import {
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { ColumnMetadata } from "../src/config/metadata";
 
-// ─── Shared fixtures ─────────────────────────────────────────────────────────
+// --- Shared fixtures ---------------------------------------------------------
 
 const metadata: ColumnMetadata[] = [
   { name: "id", type: "identifier", role: "identifier", isPayload: false },
@@ -66,6 +66,23 @@ const terms: LinkageTerms = {
   ],
 };
 
+const twoRows = [
+  {
+    id: "159859483",
+    first_name: "JAMES",
+    last_name: "HEARD",
+    ssn: "559811301",
+    date_of_birth: "19750716",
+  },
+  {
+    id: "165562801",
+    first_name: "ALBERT",
+    last_name: "IORIO",
+    ssn: "322842281",
+    date_of_birth: "19750817",
+  },
+];
+
 function makeIterables(
   rawRows: ReadonlyArray<Record<string, string>>,
 ): StandardizedKeyIterable[] {
@@ -75,7 +92,7 @@ function makeIterables(
   );
 }
 
-// ─── Basic length / shape tests ──────────────────────────────────────────────
+// --- Basic length / shape tests ----------------------------------------------
 
 test("handles trailing newline (row count)", () => {
   const rows = [
@@ -93,46 +110,14 @@ test("handles trailing newline (row count)", () => {
 });
 
 test("handles multiple rows", () => {
-  const rows = [
-    {
-      id: "159859483",
-      first_name: "JAMES",
-      last_name: "HEARD",
-      ssn: "559811301",
-      date_of_birth: "19750716",
-    },
-    {
-      id: "165562801",
-      first_name: "ALBERT",
-      last_name: "IORIO",
-      ssn: "322842281",
-      date_of_birth: "19750817",
-    },
-  ];
-  const iters = makeIterables(rows);
+  const iters = makeIterables(twoRows);
   expect(iters[0].length).toBe(2);
   expect(iters[0].at(0)).toBe("559811301HEARD19750716");
   expect(iters[0].at(1)).toBe("322842281IORIO19750817");
 });
 
 test("second key applies element transforms", () => {
-  const rows = [
-    {
-      id: "159859483",
-      first_name: "JAMES",
-      last_name: "HEARD",
-      ssn: "559811301",
-      date_of_birth: "19750716",
-    },
-    {
-      id: "165562801",
-      first_name: "ALBERT",
-      last_name: "IORIO",
-      ssn: "322842281",
-      date_of_birth: "19750817",
-    },
-  ];
-  const iters = makeIterables(rows);
+  const iters = makeIterables(twoRows);
   expect(iters[1].at(0)).toBe("559811301HJ");
   expect(iters[1].at(1)).toBe("322842281IA");
 });
@@ -154,51 +139,19 @@ test("returns undefined when a required field is absent", () => {
 });
 
 test("indexed access via [] agrees with at()", () => {
-  const rows = [
-    {
-      id: "159859483",
-      first_name: "JAMES",
-      last_name: "HEARD",
-      ssn: "559811301",
-      date_of_birth: "19750716",
-    },
-    {
-      id: "165562801",
-      first_name: "ALBERT",
-      last_name: "IORIO",
-      ssn: "322842281",
-      date_of_birth: "19750817",
-    },
-  ];
-  const iters = makeIterables(rows);
+  const iters = makeIterables(twoRows);
   expect(iters[0][0]).toBe(iters[0].at(0));
   expect(iters[0][1]).toBe(iters[0].at(1));
 });
 
 test("Symbol.iterator yields same values as at()", () => {
-  const rows = [
-    {
-      id: "159859483",
-      first_name: "JAMES",
-      last_name: "HEARD",
-      ssn: "559811301",
-      date_of_birth: "19750716",
-    },
-    {
-      id: "165562801",
-      first_name: "ALBERT",
-      last_name: "IORIO",
-      ssn: "322842281",
-      date_of_birth: "19750817",
-    },
-  ];
-  const iters = makeIterables(rows);
+  const iters = makeIterables(twoRows);
   const spread = [...iters[0]];
   expect(spread[0]).toBe(iters[0].at(0));
   expect(spread[1]).toBe(iters[0].at(1));
 });
 
-// ─── Standardization step integration ────────────────────────────────────────
+// --- Standardization step integration ----------------------------------------
 
 test("identity transform: last_name already upper-case is unchanged", () => {
   const rows = [

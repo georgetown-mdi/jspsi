@@ -10,7 +10,7 @@ function createPeerServer(): PeerServerInstance {
   const server = getHttpServer()!;
 
   const addressInfo = server.address() as AddressInfo;
-  // @ts-ignore performs type guard
+  // @ts-ignore setSecureContext is only on the secure server side of the union
   const protocol = server.setSecureContext === undefined ? "http" : "https";
 
   let origin: boolean | string | Array<string | RegExp> = true;
@@ -27,7 +27,7 @@ function createPeerServer(): PeerServerInstance {
       origin = [
         `${protocol}://localhost:${addressInfo.port}`,
         RegExp(`${protocol}://127\\.0\\.0\\.[0-9]:${addressInfo.port}`),
-        `${protocol}://[::1]${addressInfo.port}`,
+        `${protocol}://[::1]:${addressInfo.port}`,
       ];
     } else if (
       (addressInfo.family === "IPv6" &&

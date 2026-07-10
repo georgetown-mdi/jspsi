@@ -106,7 +106,6 @@ export const setLogPrefixer = (logger: logLibrary.Logger) => {
       const levelLabel = methodName.toUpperCase();
       const context = String(loggerName || "root");
 
-      // The [TIMESTAMP] [LEVEL] [CONTEXT] prefix.
       const prefix = `[${timestamp}] [${levelLabel}] [${context}]`;
 
       // Resolve the sink at CALL time, not at logger-creation time. rawMethod was

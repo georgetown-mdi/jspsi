@@ -69,6 +69,82 @@ function onlyKeyEnabled(
   };
 }
 
+// Two columns of one semantic type (a maiden and a current name) and a date, so
+// the inviter can bind each name column to its own field. MULTI_FIELD_NAME_STEPS
+// uppercases, so a row whose two name columns differ yields two distinct cleaned
+// values.
+const MULTI_FIELD_NAME_STEPS = [{ function: "to_upper_case" }];
+const multiFieldMetadata: Metadata = [
+  { name: "maiden_col", type: "first_name", role: "linkage", isPayload: false },
+  {
+    name: "current_col",
+    type: "first_name",
+    role: "linkage",
+    isPayload: false,
+  },
+  { name: "dob_col", type: "date_of_birth", role: "linkage", isPayload: false },
+];
+const multiFieldColumns = ["maiden_col", "current_col", "dob_col"];
+const multiFieldRawRows = [
+  { maiden_col: "Smith", current_col: "Jones", dob_col: "X" },
+];
+
+// A draft binding the two first_name columns to two distinct fields, each
+// referenced by its own key -- what the workbench's "add another field" + the
+// expert key editor produce, and the exported terms a re-import reconstructs.
+function multiFieldDraft(): AdvancedInviteDraft {
+  return {
+    identity: "Inviter",
+    lifetimeSeconds: 3600,
+    outputDirection: "both",
+    algorithm: "psi",
+    deduplicate: false,
+    linkageStrategy: "cascade",
+    metadata: multiFieldMetadata,
+    standardization: [
+      {
+        output: "first_name",
+        input: "maiden_col",
+        steps: MULTI_FIELD_NAME_STEPS,
+      },
+      {
+        output: "first_name_2",
+        input: "current_col",
+        steps: MULTI_FIELD_NAME_STEPS,
+      },
+    ],
+    keys: [
+      {
+        key: { name: "maiden", elements: [{ field: "first_name" }] },
+        enabled: true,
+      },
+      {
+        key: { name: "current", elements: [{ field: "first_name_2" }] },
+        enabled: true,
+      },
+    ],
+  };
+}
+
+/** Set (or, with `null`, strip) a named field's constraints in a document -- a
+ * hand-edit an external author could make that the editor has no control to
+ * produce. Mutates a clone via a localized cast: the constraint shape is per-type
+ * in the union, which the test deliberately violates to model an arbitrary input. */
+function withFieldConstraints(
+  terms: LinkageTerms,
+  fieldName: string,
+  constraints: Record<string, unknown> | null,
+): LinkageTerms {
+  const clone = structuredClone(terms);
+  for (const field of clone.linkageFields) {
+    if (field.name !== fieldName) continue;
+    if (constraints === null)
+      delete (field as { constraints?: unknown }).constraints;
+    else (field as { constraints?: unknown }).constraints = constraints;
+  }
+  return clone;
+}
+
 describe("seedAdvancedInvite + buildAdvancedTerms", () => {
   test("(a) building an unedited seed equals the auto-derived terms", () => {
     const { draft, seed } = seedAdvancedInvite(
@@ -843,61 +919,10 @@ describe("payload authoring", () => {
 });
 
 describe("inviter standardization: per-field column binding and multi-field", () => {
-  // Two columns of one semantic type (a maiden and a current name) and a date, so
-  // the inviter can bind each name column to its own field. NAME_STEPS uppercases,
-  // so a row whose two name columns differ yields two distinct cleaned values.
-  const NAME_STEPS = [{ function: "to_upper_case" }];
-  const metadata: Metadata = [
-    {
-      name: "maiden_col",
-      type: "first_name",
-      role: "linkage",
-      isPayload: false,
-    },
-    {
-      name: "current_col",
-      type: "first_name",
-      role: "linkage",
-      isPayload: false,
-    },
-    {
-      name: "dob_col",
-      type: "date_of_birth",
-      role: "linkage",
-      isPayload: false,
-    },
-  ];
-  const columns = ["maiden_col", "current_col", "dob_col"];
-  const rawRows = [{ maiden_col: "Smith", current_col: "Jones", dob_col: "X" }];
-
-  // A draft binding the two first_name columns to two distinct fields, each
-  // referenced by its own key -- what the workbench's "add another field" + the
-  // expert key editor produce.
-  function multiFieldDraft(): AdvancedInviteDraft {
-    return {
-      identity: "Inviter",
-      lifetimeSeconds: 3600,
-      outputDirection: "both",
-      algorithm: "psi",
-      deduplicate: false,
-      linkageStrategy: "cascade",
-      metadata,
-      standardization: [
-        { output: "first_name", input: "maiden_col", steps: NAME_STEPS },
-        { output: "first_name_2", input: "current_col", steps: NAME_STEPS },
-      ],
-      keys: [
-        {
-          key: { name: "maiden", elements: [{ field: "first_name" }] },
-          enabled: true,
-        },
-        {
-          key: { name: "current", elements: [{ field: "first_name_2" }] },
-          enabled: true,
-        },
-      ],
-    };
-  }
+  const NAME_STEPS = MULTI_FIELD_NAME_STEPS;
+  const metadata = multiFieldMetadata;
+  const columns = multiFieldColumns;
+  const rawRows = multiFieldRawRows;
 
   test("buildAdvancedTerms declares two distinct fields of the one type", () => {
     const terms = buildAdvancedTerms(multiFieldDraft());
@@ -1039,60 +1064,9 @@ describe("inviter standardization: per-field column binding and multi-field", ()
 });
 
 describe("draftFromTerms reconstructs multi-field bindings on import", () => {
-  // Two first_name columns (a maiden and a current name) and a date: enough for the
-  // inviter to bind two distinct first_name fields. NAME_STEPS uppercases, so two
-  // differing name columns yield two distinct cleaned values.
-  const NAME_STEPS = [{ function: "to_upper_case" }];
-  const metadata: Metadata = [
-    {
-      name: "maiden_col",
-      type: "first_name",
-      role: "linkage",
-      isPayload: false,
-    },
-    {
-      name: "current_col",
-      type: "first_name",
-      role: "linkage",
-      isPayload: false,
-    },
-    {
-      name: "dob_col",
-      type: "date_of_birth",
-      role: "linkage",
-      isPayload: false,
-    },
-  ];
-  const columns = ["maiden_col", "current_col", "dob_col"];
-  const rawRows = [{ maiden_col: "Smith", current_col: "Jones", dob_col: "X" }];
-
-  /** The exported terms a multi-field draft produces: two first_name fields bound
-   * to distinct columns, each referenced by its own key. */
-  function multiFieldDraft(): AdvancedInviteDraft {
-    return {
-      identity: "Inviter",
-      lifetimeSeconds: 3600,
-      outputDirection: "both",
-      algorithm: "psi",
-      deduplicate: false,
-      linkageStrategy: "cascade",
-      metadata,
-      standardization: [
-        { output: "first_name", input: "maiden_col", steps: NAME_STEPS },
-        { output: "first_name_2", input: "current_col", steps: NAME_STEPS },
-      ],
-      keys: [
-        {
-          key: { name: "maiden", elements: [{ field: "first_name" }] },
-          enabled: true,
-        },
-        {
-          key: { name: "current", elements: [{ field: "first_name_2" }] },
-          enabled: true,
-        },
-      ],
-    };
-  }
+  const metadata = multiFieldMetadata;
+  const columns = multiFieldColumns;
+  const rawRows = multiFieldRawRows;
 
   /** A fresh editor seed over the given columns, the import target. */
   function seedFor(forColumns: Array<string>, m: Metadata): AdvancedInviteSeed {
@@ -1406,25 +1380,6 @@ describe("importedConstraintDivergenceMessage refuses a non-representable-constr
     });
   }
 
-  /** Set (or, with `null`, strip) a named field's constraints in a document -- a
-   * hand-edit an external author could make that the editor has no control to
-   * produce. Mutates a clone via a localized cast: the constraint shape is per-type
-   * in the union, which the test deliberately violates to model an arbitrary input. */
-  function withFieldConstraints(
-    terms: LinkageTerms,
-    fieldName: string,
-    constraints: Record<string, unknown> | null,
-  ): LinkageTerms {
-    const clone = structuredClone(terms);
-    for (const field of clone.linkageFields) {
-      if (field.name !== fieldName) continue;
-      if (constraints === null)
-        delete (field as { constraints?: unknown }).constraints;
-      else (field as { constraints?: unknown }).constraints = constraints;
-    }
-    return clone;
-  }
-
   test("a non-default ssn exclude denylist is refused, not silently rebuilt to the default", () => {
     const seed = seedFor();
     // The acceptance-criteria example: a different denylist, validOnly off.
@@ -1646,23 +1601,6 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
       standardization: defaultStandardizationForRows(metadata, terms, rawRows),
       keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),
     });
-  }
-
-  /** Set a named field's constraints in a document -- a hand-edit an external author
-   * could make that the editor has no control to produce. Mutates a clone via a
-   * localized cast: the constraint shape is per-type in the union, which the test
-   * deliberately bends to model an arbitrary input. */
-  function withFieldConstraints(
-    terms: LinkageTerms,
-    fieldName: string,
-    constraints: Record<string, unknown>,
-  ): LinkageTerms {
-    const clone = structuredClone(terms);
-    for (const field of clone.linkageFields) {
-      if (field.name === fieldName)
-        (field as { constraints?: unknown }).constraints = constraints;
-    }
-    return clone;
   }
 
   /** What an import-then-regenerate produces for `terms` against these columns. */

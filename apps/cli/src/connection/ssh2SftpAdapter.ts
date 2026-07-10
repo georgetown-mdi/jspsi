@@ -141,16 +141,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // stack duplicate listeners and eventually trip a MaxListenersExceeded
   // warning. See attachKeyboardInteractive.
   private keyboardInteractiveAttached = false;
-  // The per-operation liveness bound (ms) every server-driven op is held to: the
-  // wall-clock deadline for the reads and the metadata write/stat/delete ops, and
-  // the no-progress idle window for put. Defaults to SFTP_STALL_DEADLINE_MS and is
-  // NOT exposed through
-  // any config or CLI surface -- the bound stays fixed in production for the same
-  // reason the constant is (a configurable budget risks an operator raising it
-  // high enough to reintroduce the denial of service). The only override is the
-  // internal-only test seam on the constructor's options object, which lets a
-  // fault-injection test drive the deadline in milliseconds instead of waiting
-  // the real 60 s; it is never wired to user input.
+  // The per-operation liveness bound (ms) every server-driven op is held to. See
+  // the constructor's stallDeadlineMs doc for the test-seam and
+  // not-operator-configurable rationale.
   private readonly stallDeadlineMs: number;
   // Keeps an idle session alive past a server's SFTP-command idle timeout by
   // issuing a periodic no-op realPath. Created here (never null) so the op-bracket
@@ -320,48 +313,20 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // the liveness guards bound time, but a crash is neither; this listener closes
   // that last hostile-server vector.
   //
-  // Handling the 'error' leaves the session dead but the process alive. ssh2's
-  // doFatalSFTPError emits 'error', destroys the wrapper, then calls
-  // cleanupRequests, which fails every request still in _requests at once. What
-  // that bounds an IN-FLIGHT list()/get() by depends on which request the fatal
-  // packet rode in on:
-  //   - A malformed reply to the in-flight request ITSELF is NOT failed by
-  //     cleanupRequests: ssh2's NAME and DATA handlers do `delete _requests[reqid]`
-  //     unconditionally up front, BEFORE the parse/check that calls
-  //     doFatalSFTPError (node_modules/ssh2/lib/protocol/SFTP.js, NAME ~2939,
-  //     DATA ~2889); the HANDLE handler instead deletes inside its own malformed
-  //     branch, on a defined reqid, immediately before doFatalSFTPError (~2872).
-  //     The deletes differ in placement but have the same net effect: by the time
-  //     cleanupRequests runs there is no entry left for that reqid and its
-  //     callback never fires. The in-flight op therefore hangs until this
-  //     adapter's own 60 s wall-clock deadline (list()'s deadline /
-  //     withSftpOperationDeadline / the capped-sink idle window) fires -- the
-  //     deadline, not cleanupRequests, is what bounds it.
-  //   - A fatal error on a DIFFERENT request id, or a connection-level fault
-  //     (e.g. "Invalid packet length", where no reqid was consumed), leaves the
-  //     in-flight request still in _requests, so cleanupRequests does fail its
-  //     callback promptly.
-  // Either way the op is bounded; the deadline is load-bearing for the first,
-  // realistic case and must not be removed on the assumption that cleanupRequests
-  // covers in-flight ops. Capturing the cause in fatalSftpError then bounds the
-  // NEXT operation (whatever bounded the in-flight one): it consults
+  // Handling the 'error' leaves the session dead but the process alive. A fatal
+  // packet that rides in on the in-flight request itself is not failed by ssh2's
+  // cleanupRequests (that request's entry is already gone by then), so the
+  // in-flight op hangs until this adapter's own 60 s wall-clock deadline fires --
+  // the deadline, not cleanupRequests, is what bounds it, and it must not be
+  // removed on the assumption that cleanupRequests covers in-flight ops. Capturing
+  // the cause in fatalSftpError then bounds the NEXT op: it consults
   // deadSessionError at entry and rejects with the real reason instead of issuing
-  // a request the dead wrapper can never answer. The same 60 s deadline is also
-  // the sole bound for the distinct case of a server that withholds a callback
-  // WITHOUT any fatal error -- no 'error' fires there, so fatalSftpError stays
-  // unset and only elapsed time can fail it.
+  // a request the dead wrapper can never answer.
   //
-  // Idempotency and the reconnect lifecycle: verified against ssh2-sftp-client
-  // 12.1.1 (node_modules/ssh2-sftp-client/src/index.js), `this.sftp` is assigned
-  // exactly once, in the 'ready' handler, and is otherwise only set to undefined
-  // (in the constructor and in end()'s close handler); there is no auto-reconnect
-  // that swaps in a fresh wrapper after connect() resolves, and connect() rejects
-  // outright if `this.sftp` is already set. A new wrapper therefore appears only
-  // when this adapter's own connect() runs again after an end(). Guarding on the
-  // wrapper's object identity attaches once per wrapper: a repeated connect() on
-  // the same live wrapper is a no-op (no duplicate listener, no
-  // MaxListenersExceeded warning), while a fresh wrapper from a reconnect gets
-  // its own listener.
+  // Guarding on the wrapper's object identity attaches exactly once per wrapper: a
+  // repeated connect() on the same live wrapper is a no-op (no duplicate listener,
+  // no MaxListenersExceeded warning), while the fresh wrapper a reconnect mints
+  // gets its own listener.
   private attachFatalErrorListener(
     sftp: NonNullable<Ssh2SftpClientInternals["sftp"]>,
   ): void {
@@ -436,20 +401,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   // A terminal error built from a previously captured fatal SFTP-protocol error,
-  // or undefined if the session has not been killed. Every server-driven
-  // operation consults this at entry so one that runs after a malformed packet
-  // already destroyed the session rejects at once with the real cause, rather
-  // than issuing a request the dead wrapper can never answer. Every server-driven
-  // op now carries its own per-operation bound -- the deadline-bounded reads and
-  // metadata ops (list/get/createExclusive/rename/delete/exists) and put's idle
-  // window -- so this entry guard is no longer the ONLY thing standing between a
-  // dead-session call and an indefinite hang; its job now is to spare the wait. A
-  // request buffered on a destroyed-but-socket-still-alive channel never calls
-  // back, so without this guard each such op would ride its full 60 s bound (or,
-  // for put, the idle window, since the never-opened write stream never pulls the
-  // source) before failing; consulting the captured error rejects at once instead.
-  // safeDelete shares the same fatalSftpError check but RESOLVES (its
-  // never-reject contract); see it for why. A typed
+  // or undefined if the session has not been killed. Every server-driven operation
+  // consults this at entry: a request buffered on a destroyed-but-socket-still-alive
+  // channel never calls back, so without this guard the op would ride its full
+  // per-operation bound before failing; consulting the captured error rejects at
+  // once with the real cause instead. safeDelete shares the same fatalSftpError
+  // check but RESOLVES (its never-reject contract); see it for why. A typed
   // TransportOperationStalledError (a UsageError) so the poll loop and the
   // rendezvous gate treat it as terminal, the same as every other liveness bound.
   private deadSessionError(
@@ -727,13 +684,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
             }
             handle = openedHandle;
             const readNextBatch = (): void => {
-              // Mirror the settled-guards in settle() and the readdir callback below.
-              // Both call sites reach here synchronously after a settled check and the
-              // deadline timer cannot fire between synchronous statements, so settled
-              // is necessarily false today; re-checking at the recursion entry keeps
-              // the driver self-evidently safe against any future change that could
-              // re-enter it after the deadline fired, at the cost of only a skipped
-              // round-trip rather than a double-settle.
+              // Re-check settled at each recursion entry so a future re-entry after
+              // the deadline fired cannot double-settle.
               if (settled) return;
               // Pre-increment: this issues at most MAX_LISTING_READDIR_BATCHES actual
               // readdir round-trips. The (cap + 1)th entry to readNextBatch trips the
@@ -1118,36 +1070,16 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
 
   createExclusive(path: string): Promise<void> {
     // ssh2-sftp-client does not expose exclusive file creation; access the
-    // underlying SFTP session to open with SSH_FXF_WRITE | SSH_FXF_CREAT |
-    // SSH_FXF_EXCL (0x2A). SSH_FXF_EXCL is part of the core SFTPv3 protocol
-    // and requires no server extension. Numeric flags are used directly instead
-    // of a string alias ('wx') because SFTPWrapper's string-to-openmask
-    // translator is not part of the public API contract, and an unrecognized
-    // string would silently degrade to a non-exclusive open.
-    //
-    // On exclusive-create failure, SFTPv4+ servers return
-    // SSH_FX_FILE_ALREADY_EXISTS (status 11), which is unambiguously mapped to
-    // EEXIST. SFTPv3 servers — including OpenSSH in its default mode — return
-    // SSH_FX_FAILURE (status 4), which is the generic SFTPv3 failure code and
-    // does not distinguish "file already exists" from quota, permissions, or
-    // other I/O errors. For code 4 this method calls exists() after the failure:
-    // if the file is present, the exclusive-create lost a genuine lock-file race
-    // (EEXIST); if the file is absent, the failure was a real I/O error and the
-    // original error is propagated unchanged. This preserves correct lock-file
-    // race recovery while surfacing I/O errors at synchronization time rather
-    // than deferring them to the first send().
-    //
-    // ssh2 sets err.code to the numeric SFTP status code, not the POSIX
-    // string "EEXIST". The string form is passed through unchanged in case a
-    // future ssh2 version normalizes it first.
-    //
-    // ssh2-sftp-client stores the underlying ssh2 SFTPWrapper in `this.sftp`.
-    // This has been true throughout the library's history and is true of the
-    // version range in package.json (^12.0.1). There is no public method for
-    // exclusive file creation, so we access this field via the file-scope
-    // Ssh2SftpClientInternals interface. The null check below guards against
-    // a closed or prematurely-ended session; an API rename is caught at
-    // connect time by the check in connect().
+    // underlying SFTP session (via the file-scope Ssh2SftpClientInternals
+    // interface) to open with SSH_FXF_WRITE | SSH_FXF_CREAT | SSH_FXF_EXCL
+    // (0x2A). SSH_FXF_EXCL is part of the core SFTPv3 protocol and requires no
+    // server extension. Numeric flags are used directly instead of a string alias
+    // ('wx') because SFTPWrapper's string-to-openmask translator is not part of
+    // the public API contract, and an unrecognized string would silently degrade
+    // to a non-exclusive open. The null check below guards against a closed or
+    // prematurely-ended session; an API rename is caught at connect time by the
+    // check in connect(). The open-failure status handling is at the point of use
+    // below.
     const { sftp } = this.client as unknown as Ssh2SftpClientInternals;
     if (!sftp)
       return Promise.reject(

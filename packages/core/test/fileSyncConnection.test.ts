@@ -37,15 +37,10 @@ import {
 import { withCapturedLogs } from "../src/testing";
 import logLibrary from "loglevel";
 
-// Reduce a put() src to the on-disk bytes a real transport writes, so every mock
-// transport in this file agrees on the framing. send() now hands put() a
-// [header, payload] chunk list instead of one pre-concatenated Buffer (the
-// peak-shaving change), so a mock store must JOIN the chunks; a lone Buffer and a
-// drained stream are unchanged. A string src is a local file PATH to a real
-// transport (ssh2-sftp-client copies from it; LocalFSClient rejects it), never an
-// in-memory body, so it throws here too -- every mock then rejects a string as the
-// real transports do, rather than silently dropping it and masking a regression
-// that passed one.
+// Reduce a put() src to the on-disk bytes a real transport writes: a chunk-list
+// is joined, a lone Buffer and a drained stream pass through. A string src is a
+// local file PATH to a real transport (never an in-memory body), so it throws
+// here as the real adapters do rather than silently dropping the body.
 async function putSrcBytes(
   src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
 ): Promise<Buffer> {
@@ -59,8 +54,6 @@ async function putSrcBytes(
   return Buffer.concat(chunks);
 }
 
-// Minimal in-memory FileTransportClient mock.  Only the methods called by
-// send() need real implementations; everything else is a no-op.
 function makeMockClient(): {
   client: FileTransportClient;
   files: Map<string, Buffer>;
@@ -170,8 +163,8 @@ function binaryMessage(payload: Uint8Array, seq = 0): Buffer {
 // A valid hello body advertising the default lock/non-retain flags. Tests whose
 // rendezvous reader runs in the default (lock) mode hand-plant this as the peer
 // hello so it passes the HelloEnvelope read gate without a spurious bilateral
-// mismatch. 193901017 made the hello body carry these two required flags, so a
-// bare `{}` no longer satisfies the hello schema.
+// mismatch. The hello body must carry both bilateral flags; a bare `{}` no
+// longer satisfies the hello schema.
 const LOCK_HELLO_BODY = Buffer.from(
   JSON.stringify({ locklessRendezvous: false, retainFiles: false }),
 );
@@ -790,7 +783,7 @@ test("open (sftp) with a matching pin verifies and connects", async () => {
 
 test("open (sftp) with a matching pin records the observed host key", async () => {
   // The observed key is captured on the only success path (pin matched) so the
-  // orchestrator can advertise it for cross-party reconciliation (201058119).
+  // orchestrator can advertise it for cross-party reconciliation.
   const blob = ed25519Blob();
   const pin = await computeHostKeyFingerprint(new Uint8Array(blob));
   const conn = new FileSyncConnection(makeHostKeyMockClient(blob), {
@@ -1968,7 +1961,7 @@ test("synchronize() cleans up hello and lock files when createExclusive() throws
   };
 
   // Plant the peer hello body so the two-hellos branch's HelloEnvelope read
-  // gate (added by 193901017) passes before reaching createExclusive.
+  // gate passes before reaching createExclusive.
   files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
 
   // createExclusive() throws EEXIST; also plant the lock file so
@@ -2666,7 +2659,7 @@ test("synchronize() throws when createExclusive throws EEXIST but lock file is a
   const basePath = conn.path;
   files.set(`${basePath}/${myHelloName}`, Buffer.alloc(0));
   // Peer hello carries a valid HelloEnvelope so the two-hellos read gate passes
-  // before createExclusive (193901017); the own hello is never gate-read.
+  // before createExclusive; the own hello is never gate-read.
   files.set(`${basePath}/${peerHelloName}`, LOCK_HELLO_BODY);
 
   const mtime = Date.now();
@@ -3374,8 +3367,7 @@ test("synchronize() lock starter: aborts on a stuck sentinel even while its own 
   // joiningFiles === 1). The recovery branch is gated only on the sentinel, not
   // on whether our hello is gone, so the bounded-window abort must still fire
   // here -- and the message must NOT claim the joiner already deleted our hello,
-  // because it may have crashed before that step. This pins finding 1's premise
-  // (the recovery branch is reachable before the delete) and its reworded text.
+  // because it may have crashed before that step.
   const idB = "00000000-0000-4000-8000-000000000001";
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, {
@@ -5455,7 +5447,7 @@ test("synchronize() lock starter: malformed joiner hello body is a UsageError", 
   await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
 });
 
-// --- bilateral mode flags: advertise + symmetric fast-fail (193901017) -------
+// --- bilateral mode flags: advertise + symmetric fast-fail -------------------
 
 // Two sortable UUIDs reused across the bilateral-flag tests. idLow < idHigh
 // lexicographically, so the lower one is the "arrived first" party.
@@ -5664,7 +5656,7 @@ test("(c) lock joiner reading a lockless peer hello fails fast and leaves both h
 });
 
 test("(c) lock joiner fast-path retries a transient advertise-hello write, then leaves the durable hello", async () => {
-  // 193901017's symmetric-detection floor is best-effort and contingent on this
+  // The symmetric-detection floor is best-effort and contingent on this
   // one advertising write landing: the lock joiner fast-path is the single
   // mismatch site that needs a NEW write at detection time. A transient put
   // failure here would otherwise leave no durable hello for the lockless peer to
@@ -5870,9 +5862,9 @@ test("(c) lock-detection branch sweeps the lock and leaves both hellos on a mism
   // party always has retain_files=false, so no flag can differ and this branch
   // cannot reach a mismatch for any valid pairing. Drive it with a synthetic
   // directory -- a peer-created lock plus a lockless-advertising peer hello --
-  // to cover the safeDelete(lock)-then-throw code added for the prior review.
-  // The lock is a transient, not an advertisement, so it is swept; both hellos
-  // remain as the directory's terminal state.
+  // to cover the safeDelete(lock)-then-throw code path. The lock is a transient,
+  // not an advertisement, so it is swept; both hellos remain as the directory's
+  // terminal state.
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, {
     pollingFrequency: 10,
@@ -6624,7 +6616,7 @@ test("retain mode + lockless rendezvous: multi-message exchange completes end-to
   expect(deleteCalls).toHaveLength(0);
 });
 
-// --- finding #1: seq advances only after durable rename ----------------------
+// --- send() advances seq only after the durable rename -----------------------
 
 test("retain mode: send() does not advance seq when rename throws", async () => {
   // Regression guard: a write failure must not leave this.seq past the slot of
@@ -6672,7 +6664,7 @@ test("delete mode: send() does not advance seq when rename throws", async () => 
   expect(conn.seq).toBe(seqBefore);
 });
 
-// --- finding #4: retain => timestampInFilename guard in synchronize() --------
+// --- retain => timestampInFilename guard in synchronize() --------------------
 
 test("retain mode: synchronize() throws UsageError when timestampInFilename is false", async () => {
   // Guard fires when retainFiles=true and timestampInFilename=false (even when
@@ -6693,7 +6685,7 @@ test("retain mode: synchronize() throws UsageError when timestampInFilename is f
   await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
 });
 
-// --- finding #5: close() resets session counters -----------------------------
+// --- close() resets session counters -----------------------------------------
 
 test("close() resets seq, recvSeq, and lastAckedNNN to their initial values", async () => {
   // A closed connection must not carry stale counters into a hypothetical
@@ -6718,13 +6710,13 @@ test("close() resets seq, recvSeq, and lastAckedNNN to their initial values", as
   expect((conn as unknown as { lastAckedNNN: number }).lastAckedNNN).toBe(-1);
 });
 
-// --- finding #1/#6: terminal poll errors stop the poller ---------------------
+// --- terminal poll errors stop the poller ------------------------------------
 
 test("retain mode: poll() duplicate-NNN error is a UsageError and stops the poller", async () => {
-  // Finding #6: the duplicate-NNN throw is now UsageError (terminal protocol
-  // violation). Finding #1: a UsageError in the non-TOCTOU catch branch sets
-  // pollerActive=false before emitting, so the finally block does not reschedule
-  // and the error fires exactly once without the handler calling stop().
+  // The duplicate-NNN throw is a UsageError (terminal protocol violation). A
+  // UsageError in the non-TOCTOU catch branch sets pollerActive=false before
+  // emitting, so the finally block does not reschedule and the error fires
+  // exactly once without the handler calling stop().
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
   const id = "receiver-me";
@@ -6834,8 +6826,7 @@ test("delete mode: poll() more-than-one-message error is a UsageError and stops 
 });
 
 test("retain mode: poll() seq-mismatch (UsageError) stops the poller", async () => {
-  // The seq-mismatch UsageError was already a UsageError before this change;
-  // confirm it also stops the poller (finding #1), consistent with the
+  // The seq-mismatch UsageError also stops the poller, consistent with the
   // duplicate-NNN path above.
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
@@ -6891,11 +6882,11 @@ test("retain mode: poll() seq-mismatch (UsageError) stops the poller", async () 
   expect(errors).toHaveLength(1);
 });
 
-// --- finding #4: send() not-synchronized guard applies to non-retain mode ----
+// --- send() not-synchronized guard applies to non-retain mode ----------------
 
 test("non-retain send() before synchronize() (peerId unset) throws 'not synchronized'", async () => {
-  // Finding #4: the not-synchronized guard is hoisted to the top of send() and
-  // now fires for both retain and non-retain modes.
+  // The not-synchronized guard is hoisted to the top of send() and
+  // fires for both retain and non-retain modes.
   const { client } = makeMockClient();
   const conn = new FileSyncConnection(client, {
     pollingFrequency: 10,
@@ -7263,16 +7254,16 @@ const entryPreconditionKinds: Array<{
   },
   // An orphaned in-flight temp file (a crashed send()/writeAck() artifact),
   // named with the protocol's own temp-<uuidv4()>.tmp shape, is swept at the
-  // entry guard (193792285): deleted via safeDelete and added to the guard's
-  // `ignored` set, so it proceeds past the guard rather than being rejected as a
-  // strict-empty violation.
+  // entry guard: deleted via safeDelete and added to the guard's `ignored` set,
+  // so it proceeds past the guard rather than being rejected as a strict-empty
+  // violation.
   {
     kind: "temp file",
     present: ["temp-00000000-0000-4000-8000-00000000abcd.tmp"],
     outcome: "proceed",
   },
   // A foreign temp-*.tmp whose stem is NOT a v4 UUID is not the protocol's temp
-  // shape (198451188): it fails the grammar, so it is snapshotted and tolerated
+  // shape: it fails the grammar, so it is snapshotted and tolerated
   // like any other foreign file rather than swept. It proceeds past the guard
   // (then times out waiting for a peer), exactly as notes.txt does below.
   {
@@ -7280,8 +7271,8 @@ const entryPreconditionKinds: Array<{
     present: ["temp-export.tmp"],
     outcome: "proceed",
   },
-  // A foreign (non-protocol) file is snapshotted and tolerated at entry
-  // (195255994): names that FAIL the protocol grammar are not rejected, so it
+  // A foreign (non-protocol) file is snapshotted and tolerated at entry:
+  // names that FAIL the protocol grammar are not rejected, so it
   // proceeds past the guard (then times out waiting for a peer in this setup).
   // A message-shaped <id>-<digits>.json is NOT foreign -- it matches the grammar
   // and stays in the "reject" rows above.
@@ -7307,7 +7298,7 @@ test.each(entryPreconditionCells)(
   async ({ present, retain, outcome }) => {
     const { client, files } = makeMockClient();
     // A peer hello in the "proceed" row is read through the HelloEnvelope gate,
-    // so it must advertise flags matching this conn's mode (193901017); other
+    // so it must advertise flags matching this conn's mode; other
     // present-file kinds are rejected on filename before any body read, so an
     // empty body is fine for them.
     const helloBody = Buffer.from(
@@ -7346,7 +7337,7 @@ test.each(entryPreconditionCells)(
   },
 );
 
-// --- entry guard: orphaned temp-*.tmp sweep (193792285) ----------------------
+// --- entry guard: orphaned temp-*.tmp sweep ----------------------------------
 // At the I0 strict-empty entry guard the message loop has not started, so any
 // temp-<uuid>.tmp (a send()/writeAck() in-flight write whose process was
 // hard-killed before the rename to <id>.json) is necessarily orphaned. The
@@ -7493,7 +7484,7 @@ test("synchronize() sweeps multiple orphaned temp files at the entry guard", asy
 });
 
 test("synchronize() does NOT sweep a foreign temp-*.tmp whose stem is not a UUID; it is tolerated as foreign", async () => {
-  // 198451188: the entry sweep matches only the protocol's own
+  // The entry sweep matches only the protocol's own
   // temp-<uuidv4()>.tmp shape, so a foreign `temp-export.tmp` (a user or
   // sync-tool file in a namespace collision) is NOT deleted. It fails the
   // protocol grammar, so it is snapshotted and tolerated exactly as notes.txt
@@ -7532,7 +7523,7 @@ test("synchronize() does NOT sweep a foreign temp-*.tmp whose stem is not a UUID
 });
 
 test("synchronize() does NOT sweep a foreign temp whose stem is an UPPERCASE v4 UUID", async () => {
-  // 198451188: the uuid package's validate() carries the /i flag, so an
+  // The uuid package's validate() carries the /i flag, so an
   // uppercase-but-syntactically-valid v4 stem would pass a bare validate(); but
   // uuidv4() only ever emits lowercase, so the protocol's own temp is always
   // lowercase. A foreign temp-<UPPERCASE-v4>.tmp must therefore be treated as
@@ -7575,7 +7566,7 @@ test("synchronize() does NOT sweep a foreign temp whose stem is an UPPERCASE v4 
 });
 
 test("poll(): the loop recognizes a real temp-<uuid>.tmp but treats a non-UUID temp-*.tmp as foreign", async () => {
-  // 198451188: isRecognizedLoopFile narrows its temp branch to the protocol's
+  // isRecognizedLoopFile narrows its temp branch to the protocol's
   // own temp-<uuidv4()>.tmp shape. A real protocol temp appearing mid-loop is
   // recognized (no warning); a foreign `temp-export.tmp` that is not in the
   // entry snapshot is not recognized and falls to the unexpected-file policy
@@ -7746,11 +7737,11 @@ test("poll() terminal: the unparseable-body error neutralizes deceptive Unicode 
 test("poll() terminal: an old-format JSON message surfaces a likely-incompatible-version hint", async () => {
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
-  // An old-format JSON message body from a peer that predates the binary envelope
-  // (#318): its first byte is `{` (0x7b), not the envelope's version marker, so
+  // An old-format JSON message body from a peer that predates the binary
+  // envelope: its first byte is `{` (0x7b), not the envelope's version marker, so
   // the reader keys on that foreign version byte and names the real cause -- a
-  // version-mismatched partner (208014743) -- rather than the raw "malformed
-  // envelope" text. This is the retroactive half: a current-or-newer reader
+  // version-mismatched partner -- rather than the raw "malformed envelope" text.
+  // This is the retroactive half: a current-or-newer reader
   // translates a JSON-text-where-a-binary-envelope-was-expected frame into the
   // actionable hint.
   const body = Buffer.from(JSON.stringify({ not: "a message" }));
@@ -9337,7 +9328,7 @@ test("normalizeFiledropPath: leaves interior segments and case untouched", () =>
   expect(normalizeFiledropPath("/MNT/Share")).toBe("/MNT/Share");
 });
 
-// --- synchronize(): session-start directory hygiene (195255994) --------------
+// --- synchronize(): session-start directory hygiene --------------------------
 //
 // Entry-guard classification (foreign vs protocol), the foreign-file snapshot,
 // the opt-in --sweep-exchange-files sweep, and its pre-sweep retain-signal
@@ -9417,7 +9408,7 @@ test("synchronize() default: a foreign file is tolerated, snapshotted, and not d
   expect(snapshot.has("notes.txt")).toBe(true);
 });
 
-test("poll(): a foreign file snapshotted at entry does not warn, but a new foreign file warns once (195255994 + 194800733)", async () => {
+test("poll(): a foreign file snapshotted at entry does not warn, but a new foreign file warns once", async () => {
   const errors: unknown[] = [];
   let listCount = 0;
   const [, logs] = await withCapturedLogs(async () => {

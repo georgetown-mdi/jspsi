@@ -26,7 +26,7 @@ export interface AcquiredBundle {
 
 /** Props for {@link FileAcquire}. */
 export interface FileAcquireProps {
-  /** Label for the submit button (FileSelect no longer hardcodes "Start"). */
+  /** Label for the submit button. */
   submitLabel: string;
   /** Seed the dropzone selection, e.g. with the file the acceptor already chose on
    * the home page (carried via the accept hand-off) so they need not re-drop it.

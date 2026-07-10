@@ -34,24 +34,21 @@ import { logRuntimeEnv } from "./util/runtimeEnv";
 /**
  * Operator guidance appended to the file-sync peer-silence timeout error.
  *
- * This is the sender-side residue of board item 195173462: when the peer dies
- * mid-exchange -- the canonical case being its exchange directory going
- * read-only so it can never write its next message or ack -- the receiver names
- * its own cause locally (`asConnectionError`), but the remote sender only
- * observes the inactivity deadline and would otherwise fail with a bare "peer
- * went silent". The authenticated cross-party abort marker
- * (`<id>-abort.json`, armed below post-handshake) now upgrades this hedge to a
- * definitive {@link PeerAbortError} for the failure modes where the failing
- * party's directory is still writable. It cannot cover the headline mode (an
+ * When the peer dies mid-exchange -- the canonical case being its exchange
+ * directory going read-only so it can never write its next message or ack --
+ * the remote sender only observes the inactivity deadline and would otherwise
+ * fail with a bare "peer went silent". The authenticated cross-party abort
+ * marker (`<id>-abort.json`, armed below post-handshake) upgrades this hedge to
+ * a definitive {@link PeerAbortError} for the failure modes where the failing
+ * party's directory is still writable, but cannot cover the headline mode (an
  * unwritable directory is exactly what stops the peer from writing any marker)
  * or a hard kill, and a best-effort write can be lost, so this guidance remains
  * the floor whenever no valid marker is present -- absence stays strictly
- * uninformative. The marker carries no cause, so this text still surfaces the
- * likely receiver-side causes and points at the peer's own logs, where the real
- * cause was recorded, rather than overclaiming a specific one. The wording
- * deliberately hedges ("may have") and notes the slow-peer case so the operator
- * is not misdirected. See docs/spec/FILE_SYNC.md ("Sender-side peer-silence
- * attribution").
+ * uninformative. The marker carries no cause, so this text surfaces the likely
+ * receiver-side causes and points at the peer's own logs rather than
+ * overclaiming a specific one, and deliberately hedges ("may have") and notes
+ * the slow-peer case so the operator is not misdirected. See
+ * docs/spec/FILE_SYNC.md ("Sender-side peer-silence attribution").
  */
 export const PEER_SILENCE_GUIDANCE =
   "The peer completed the rendezvous but has sent nothing since. The likely " +
@@ -67,7 +64,7 @@ export const PEER_SILENCE_GUIDANCE =
  * the rotated shared secret is persisted after each successful key exchange.
  * Passed to {@link runProtocol} on its own `auth` parameter, separate from the
  * connection config (the shared secret is a channel-agnostic partner-trust
- * concern, no longer embedded in the connection).
+ * concern, not embedded in the connection).
  *
  * `sharedSecret` is narrowed from optional in {@link Authentication} to required
  * here: every authenticated exchange must supply a valid token before the
@@ -82,10 +79,9 @@ export interface AuthPersist extends Authentication {
  * The connection configs {@link runProtocol} can run: the `sftp` and `filedrop`
  * channels. `Extract` narrows {@link ConnectionConfig} to those channels so
  * passing a WebRTC config requires an explicit `as unknown as` cast and cannot
- * happen by accident. Authentication is no longer part of the connection union
- * (it is a top-level spec block); `runProtocol` takes it on a separate `auth`
- * parameter, so this type is just the channel-narrowed connection with no
- * `Omit`/`null` machinery.
+ * happen by accident. Authentication is not part of the connection union (it is
+ * a top-level spec block); `runProtocol` takes it on a separate `auth`
+ * parameter, so this type is just the channel-narrowed connection.
  */
 export type ProtocolConnectionConfig = Extract<
   ConnectionConfig,
@@ -229,20 +225,12 @@ export async function runProtocol(
 ): Promise<RunProtocolResult> {
   const log = getLogger(loggerName);
 
-  // One-line runtime banner at the top of every exchange log: the Node version
-  // and the memory ceilings (host, V8 heap limit, and any container cgroup limit)
-  // the run operates under. This is permanent support-log hygiene -- when a run is
-  // mailed in after a failure, the ceilings it ran under are already on record,
-  // so an out-of-memory death (heap-OOM error, or a silent container kill) can be
-  // read against the limits without a second attempt to reproduce. Best-effort:
-  // a failure to probe the runtime warns and is swallowed, never aborting the
-  // exchange this line only annotates.
+  // Best-effort: a failure to probe the runtime warns and is swallowed, never
+  // aborting the exchange.
   logRuntimeEnv(log);
 
   if (connection.channel !== "filedrop" && connection.channel !== "sftp")
-    // Inside this branch `connection` narrows to `never`; cast through unknown
-    // to recover the channel name for the error message. This branch is only
-    // reached when the caller bypasses the type system with `as unknown as`.
+    // Only reachable via an unsafe cast past ProtocolConnectionConfig.
     throw new Error(
       `unsupported channel: ` +
         (connection as unknown as { channel: string }).channel,
@@ -550,9 +538,6 @@ export async function runProtocol(
         connection.options,
       );
     }
-    // Authentication is no longer embedded in the connection config, so the
-    // connection is the open() argument type directly (sftp | filedrop) -- no
-    // destructure or cast needed.
     await conn.open(connection);
     opened = true;
 
@@ -1087,9 +1072,7 @@ export async function runProtocol(
     // diagnostic information about a real failure, the user sees it even at
     // a strict `--log-level=error` setting; if it is merely cleanup noise,
     // the surrounding "caught SIG..." context makes it clear that the
-    // process is exiting on the signal regardless. (Was previously `warn`,
-    // which was suppressed by `--log-level=error` and could hide a genuine
-    // protocol failure that happened to coincide with shutdown.)
+    // process is exiting on the signal regardless.
     // Authenticated cross-party abort marker: on a terminal organic fault with
     // the directory still writable, leave a signal so a waiting peer fails fast
     // instead of waiting out its full peer-timeout and then hedging. Gated to

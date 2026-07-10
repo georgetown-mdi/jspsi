@@ -8,9 +8,7 @@ import type { ContainerWidth } from "@theme";
  * {@link resolveContentWidth}) and sizes its single content container to it, so the
  * route renders at the width it asked for. This replaces each route choosing a
  * `Container size` of its own, decoupling the width a route wants from how the
- * shell lays it out. (The seam predates removing the banner/header, which the
- * shell used to size to this same value so its edge aligned with the content;
- * the shell is now a bare `<main>` + container, so the one width sizes only it.)
+ * shell lays it out.
  */
 // Augment the module that DECLARES StaticDataRouteOption (router-core), not the
 // one that merely re-exports it (react-router). Augmenting the re-export happens

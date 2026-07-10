@@ -2,12 +2,10 @@ import { DateTime } from "luxon";
 
 import type { CSVRow } from "../file.js";
 
-// ─── Date format inference ────────────────────────────────────────────────────
-
 /**
  * Candidate date input formats tried by {@link inferDateFormat}, ordered from
  * most- to least-preferred. When two formats parse the same number of values
- * (e.g. all days ≤ 12), the earlier entry wins.
+ * (e.g. all days <= 12), the earlier entry wins.
  */
 export const CANDIDATE_DATE_FORMATS = [
   "MM/DD/YYYY",
@@ -75,9 +73,9 @@ function buildDateParser(format: CandidateDateFormat): (s: string) => boolean {
  * Returns `undefined` when the source yields no non-empty value or when
  * scanning exhausts all candidates.
  *
- * **Tie-breaking**: when more than one candidate survives (e.g. all days ≤ 12
+ * **Tie-breaking**: when more than one candidate survives (e.g. all days <= 12
  * so MM/DD and DD/MM are never disproved), the candidate that appears earliest
- * in {@link CANDIDATE_DATE_FORMATS} is returned — but only because it is
+ * in {@link CANDIDATE_DATE_FORMATS} is returned -- but only because it is
  * consistent with the data, not as a blind default.
  */
 export function inferDateFormat(values: Iterable<string>): string | undefined {
@@ -90,7 +88,7 @@ export function inferDateFormat(values: Iterable<string>): string | undefined {
 
   for (const value of values) {
     // Empty values carry no format signal and do not count toward the cap, so
-    // skip them without spending the scan budget (was a non-empty pre-filter).
+    // skip them without spending the scan budget.
     if (value === undefined || value.trim() === "") continue;
     // Stop once a single candidate remains or the cap is reached; checked before
     // pulling further so the source is consumed only up to INFER_DATE_SCAN_CAP

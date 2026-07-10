@@ -84,7 +84,6 @@ export {
 } from "./utils/date.js";
 export {
   computeHostKeyFingerprint,
-  verifyHostKeyFingerprint,
   keyTypeFromBlob,
 } from "./utils/sshHostKey.js";
 export * from "./exchange";

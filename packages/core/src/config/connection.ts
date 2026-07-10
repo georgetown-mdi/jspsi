@@ -350,13 +350,6 @@ export interface Authentication {
    * `[AEIMQUYcgkosw048]`).  Both invitation secrets and persistent (rotation)
    * secrets use this format; they differ only in the {@link expires} that
    * accompanies them (see that field for how its two sources are treated).
-   *
-   * REQUIRED at the moment {@link authenticateConnection} is invoked, even
-   * though the type marks it optional. The optionality exists only so that
-   * intermediate parse states (config file loaded but key file not yet
-   * injected) typecheck. Callers that bypass the CLI must ensure they
-   * populate this field before calling the runtime API; otherwise
-   * {@link authenticateConnection} throws a tagged validation error.
    */
   sharedSecret?: string;
   /**

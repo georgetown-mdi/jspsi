@@ -289,7 +289,6 @@ function substringFactory(params: Params): StandardizingFn {
   };
 }
 
-// Soundex: standard US English encoding, 4-character result.
 const SOUNDEX: Record<string, string> = {
   B: "1",
   F: "1",

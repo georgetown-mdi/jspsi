@@ -1,5 +1,7 @@
 import { WorkerPsiEngine } from "@psilink/core";
 
+import { errorFromWorkerEvent } from "./workerEventError";
+
 import type {
   PsiEngine,
   PsiWorkerHandle,
@@ -114,19 +116,6 @@ export function createBufferingRequestRouter(
   };
 }
 
-/** Turn a worker `onerror` / `onmessageerror` event into an Error. The event is a
- * browser ErrorEvent whose `message` names the fault; fall back to a fixed message
- * when it carries none. */
-function psiWorkerFailure(event: unknown): Error {
-  const message =
-    typeof event === "object" &&
-    event !== null &&
-    typeof (event as { message?: unknown }).message === "string"
-      ? (event as { message: string }).message
-      : "PSI crypto worker failed";
-  return new Error(message);
-}
-
 /**
  * Wrap a Web Worker as the runtime-agnostic {@link PsiWorkerHandle} a
  * {@link WorkerPsiEngine} drives: post a request, route replies and faults, and
@@ -154,9 +143,10 @@ export function createPsiCryptoWorkerHandle(
     setHandlers: ({ onMessage, onError }) => {
       worker.onmessage = (event: { data: PsiWorkerResponse }) =>
         onMessage(event.data);
-      worker.onerror = (event: unknown) => onError(psiWorkerFailure(event));
+      worker.onerror = (event: unknown) =>
+        onError(errorFromWorkerEvent(event, "PSI crypto worker failed"));
       worker.onmessageerror = (event: unknown) =>
-        onError(psiWorkerFailure(event));
+        onError(errorFromWorkerEvent(event, "PSI crypto worker failed"));
     },
     terminate: () => worker.terminate(),
   };

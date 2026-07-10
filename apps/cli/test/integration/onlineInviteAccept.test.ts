@@ -67,43 +67,13 @@ vi.mock("../../src/util/cli", async (importOriginal) => {
   return { ...actual, promptConfirm: vi.fn(async () => false) };
 });
 
-// Net-new coverage: the ONLINE invite + accept wiring, end to end, with both
-// sides on their real online code path (a live authenticated handshake, not the
-// offline path). The sibling authenticatedExchange.test.ts drives runProtocol
-// directly; this file drives one level up -- validateInvite/validateAccept ->
-// runOnlineBootstrap -- so the assertions cover exactly the untested delta:
-// building the connection from a URL (connectionFromURL), threading the shared
-// secret from the minted invitation through the handshake on both sides, and the
-// saveConfig-after-runProtocol persistence (the onAuthenticated hook) actually
-// firing for both invite and accept.
-//
 // Why this seam and not the yargs handlers: invite/accept's handlers wrap their
 // whole body in runOrExit (which calls process.exit on any thrown error) and
 // accept blocks on a stdin confirmation prompt -- both make running the two
 // parties concurrently in one process unworkable. validate* -> runOnlineBootstrap
-// is the exact sequence each handler runs after parsing (invite.ts handler;
-// accept.ts handler), minus only the stdout token print, the confirm prompt, and
-// the closing log line -- none of which are the online wiring under test.
-//
-// This file covers two concerns over that one seam:
-//   1. The happy-path round trip, run over BOTH transports for parity --
-//      `filedrop` (a file:// URL over a local directory) and `sftp` (the real
-//      SFTP test server). The shared runOnlineRoundTrip helper makes the two
-//      genuinely mirror each other: the assertions are identical and only the URL
-//      and the persisted connection-block shape differ. The sftp run is the only
-//      place credential and server-path threading through connectionFromURL is
-//      exercised end to end (the filedrop transport carries neither).
-//   2. The end-to-end failure paths -- an EXPIRED invitation, a TAMPERED one, and
-//      a shared-secret MISMATCH -- each asserting the security-relevant invariant
-//      that a rejected exchange persists NO config file and NO key file on the
-//      affected side(s). Unit coverage of decodeAndValidateInvitation /
-//      authenticateConnection already exists; these assert the no-write guarantee
-//      at the integration level, where the real validate/handshake code decides
-//      whether anything reaches disk.
-//
-// The CLI integration suite is self-managing: a vitest globalSetup starts the
-// SFTP test server before the suite and stops it after. Run with `npm run
-// test:integration -w apps/cli`.
+// is the exact sequence each handler runs after parsing, minus only the stdout
+// token print, the confirm prompt, and the closing log line -- none of which are
+// the online wiring under test.
 
 let work: string;
 

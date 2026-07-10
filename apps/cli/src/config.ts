@@ -607,8 +607,6 @@ export function diffLinkageTerms(
   // identical.
   if (existing.linkageStrategy !== incoming.linkageStrategy)
     add("linkage_strategy", existing.linkageStrategy, incoming.linkageStrategy);
-  // `output` and `deduplicate` are per-party (see this function's doc comment),
-  // so they are intentionally not compared here.
 
   // Sort linkage fields by name (their order is not significant) before the
   // canonical compare; compare linkage keys in place (their order is). Sort on

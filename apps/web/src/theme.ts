@@ -65,7 +65,6 @@ const CONTAINER_SIZES = {
 export type ContainerWidth = keyof typeof CONTAINER_SIZES;
 
 export const mantineTheme: MantineThemeOverride = createTheme({
-  /** Put your mantine theme override here */
   fontSizes: {
     xs: rem("12px"),
     sm: rem("14px"),
@@ -139,7 +138,6 @@ export const mantineTheme: MantineThemeOverride = createTheme({
   // margin.
   primaryShade: { light: 9, dark: 6 },
   components: {
-    /** Put your mantine component override here */
     // Filled-primary text/icon -> per-scheme contrast color (see
     // FILLED_PRIMARY_CONTRAST). Each names the color through its own CSS variable;
     // the merge keeps the rest of each component's vars (background, sizing).

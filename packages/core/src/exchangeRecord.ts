@@ -492,12 +492,17 @@ const createdAtSchema = z.iso.datetime();
 // non-empty strings; validated at build time alongside createdAt and resultSize.
 const identitySchema = z.string().min(1).max(MAX_TEXT_LENGTH);
 
+// The record's commitments and its verification salts share one base64url-triple
+// shape (both keyed by CommitmentName), so validate both against one schema to
+// keep the field lists from drifting apart.
+const base64UrlCommitmentTripleSchema = z.object({
+  localPayloadSent: base64UrlSchema,
+  partnerPayloadReceived: base64UrlSchema,
+  associationTable: base64UrlSchema.optional(),
+});
+
 const ExchangeRecordCommitmentsSchema: z.ZodType<ExchangeRecordCommitments> =
-  z.object({
-    localPayloadSent: base64UrlSchema,
-    partnerPayloadReceived: base64UrlSchema,
-    associationTable: base64UrlSchema.optional(),
-  });
+  base64UrlCommitmentTripleSchema;
 
 const RecordPayloadColumnSchema: z.ZodType<RecordPayloadColumn> = z.object({
   // Bound the name length: a payloadReceived column name originates from the
@@ -574,11 +579,8 @@ const ExchangeRecordSchema: z.ZodType<ExchangeRecord> = z.object({
   commitments: ExchangeRecordCommitmentsSchema,
 });
 
-const CommitmentSaltsSchema: z.ZodType<CommitmentSalts> = z.object({
-  localPayloadSent: base64UrlSchema,
-  partnerPayloadReceived: base64UrlSchema,
-  associationTable: base64UrlSchema.optional(),
-});
+const CommitmentSaltsSchema: z.ZodType<CommitmentSalts> =
+  base64UrlCommitmentTripleSchema;
 
 const VerificationKeysSchema: z.ZodType<VerificationKeys> = z.object({
   version: z.literal(EXCHANGE_KEYS_VERSION),

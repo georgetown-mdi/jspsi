@@ -1,6 +1,6 @@
-import { envSchema } from "env-schema";
+import { ConfigManager as BaseConfigManager } from "./configManager";
 
-import type { EnvSchemaOpt, JSONSchemaType } from "env-schema";
+import type { JSONSchemaType } from "env-schema";
 
 import type { LogLevel } from "loglevel";
 
@@ -30,20 +30,9 @@ const schema: JSONSchemaType<Env> = {
   },
 };
 
-class ConfigManager {
-  config: Env | null;
-
+class ConfigManager extends BaseConfigManager<Env> {
   constructor() {
-    this.config = null;
-  }
-
-  async load(configOptions: EnvSchemaOpt<Env> = {}) {
-    if (!this.config) {
-      configOptions.schema = configOptions.schema || schema;
-      this.config = await envSchema(configOptions);
-    }
-
-    return this.config;
+    super(schema);
   }
 }
 

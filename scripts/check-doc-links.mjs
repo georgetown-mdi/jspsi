@@ -15,6 +15,8 @@ import { execSync } from "node:child_process";
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
+import { stripFences } from "./lib/markdownFences.mjs";
+
 const root = process.cwd();
 
 // Tracked + untracked-but-not-gitignored .md files (so newly added docs are
@@ -71,22 +73,6 @@ function anchorsFor(absPath) {
   }
   anchorCache.set(absPath, anchors);
   return anchors;
-}
-
-// Strip fenced code blocks so links inside code samples are not checked, while
-// preserving line numbers for accurate error reporting.
-function stripFences(text) {
-  const lines = text.split("\n");
-  let inFence = false;
-  return lines
-    .map((line) => {
-      if (/^\s*(```|~~~)/.test(line)) {
-        inFence = !inFence;
-        return "";
-      }
-      return inFence ? "" : line;
-    })
-    .join("\n");
 }
 
 const linkRe = /\]\(([^)]+)\)/g;

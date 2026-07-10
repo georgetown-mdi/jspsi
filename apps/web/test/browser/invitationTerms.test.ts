@@ -83,12 +83,35 @@ afterEach(() => {
   container = undefined;
 });
 
-function renderTerms() {
+// The single render entry point for every describe block: render InvitationTerms
+// under a MantineProvider with the given terms and any optional props. Each block
+// wraps this thinly for the one or two params it varies. Only props explicitly set
+// are forwarded, so the component sees each optional prop absent (not undefined)
+// exactly as before -- the difference the perspective/outbound gates turn on.
+function renderTerms(
+  linkageTerms: LinkageTerms = terms,
+  options?: {
+    perspective?: "review" | "accepted" | "proposing";
+    condensed?: boolean;
+    disclosedPayloadColumns?: Array<string>;
+    outboundColumns?: Array<string>;
+  },
+) {
   root!.render(
     createElement(
       MantineProvider,
       null,
-      createElement(InvitationTerms, { linkageTerms: terms }),
+      createElement(InvitationTerms, {
+        linkageTerms,
+        ...(options?.perspective ? { perspective: options.perspective } : {}),
+        ...(options?.condensed ? { condensed: true } : {}),
+        ...(options?.disclosedPayloadColumns !== undefined
+          ? { disclosedPayloadColumns: options.disclosedPayloadColumns }
+          : {}),
+        ...(options?.outboundColumns !== undefined
+          ? { outboundColumns: options.outboundColumns }
+          : {}),
+      }),
     ),
   );
 }
@@ -377,16 +400,9 @@ describe("InvitationTerms: the condensed reference view folds the lower tiers", 
   // every other test rendering without it.
   const FOLD = "See the full terms";
   function renderCondensed(overrides?: Partial<LinkageTerms>) {
-    root!.render(
-      createElement(
-        MantineProvider,
-        null,
-        createElement(InvitationTerms, {
-          linkageTerms: { ...terms, ...overrides },
-          perspective: "proposing",
-          condensed: true,
-        }),
-      ),
+    renderTerms(
+      { ...terms, ...overrides },
+      { perspective: "proposing", condensed: true },
     );
   }
 
@@ -589,16 +605,7 @@ describe("InvitationTerms: the counterparty identity is flagged unverified at co
   // handshake authenticates the peer's secret, not that the name is true), and the
   // inviter's "proposing" preview shows its OWN identity (which needs no such note).
   function render(perspective?: "review" | "accepted" | "proposing") {
-    root!.render(
-      createElement(
-        MantineProvider,
-        null,
-        createElement(InvitationTerms, {
-          linkageTerms: terms,
-          ...(perspective ? { perspective } : {}),
-        }),
-      ),
-    );
+    renderTerms(terms, perspective ? { perspective } : undefined);
   }
 
   const noteText =
@@ -674,15 +681,9 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
     output: { expectsOutput: boolean; shareWithPartner: boolean },
     perspective?: "review" | "accepted" | "proposing",
   ) {
-    root!.render(
-      createElement(
-        MantineProvider,
-        null,
-        createElement(InvitationTerms, {
-          linkageTerms: { ...terms, output },
-          ...(perspective ? { perspective } : {}),
-        }),
-      ),
+    renderTerms(
+      { ...terms, output },
+      perspective ? { perspective } : undefined,
     );
   }
 
@@ -802,16 +803,7 @@ describe("InvitationTerms: always-visible egress and legal-agreement facts, tier
     linkageTerms: LinkageTerms,
     perspective?: "review" | "accepted" | "proposing",
   ) {
-    root!.render(
-      createElement(
-        MantineProvider,
-        null,
-        createElement(InvitationTerms, {
-          linkageTerms,
-          ...(perspective ? { perspective } : {}),
-        }),
-      ),
-    );
+    renderTerms(linkageTerms, perspective ? { perspective } : undefined);
   }
 
   test("the egress count lands in the 'What you disclose' tier, outside the 'Other details' disclosure", async () => {
@@ -942,19 +934,7 @@ describe("InvitationTerms: always-visible ingress count in the 'What you receive
       disclosedPayloadColumns?: Array<string>;
     },
   ) {
-    root!.render(
-      createElement(
-        MantineProvider,
-        null,
-        createElement(InvitationTerms, {
-          linkageTerms,
-          ...(options?.perspective ? { perspective: options.perspective } : {}),
-          ...(options?.disclosedPayloadColumns !== undefined
-            ? { disclosedPayloadColumns: options.disclosedPayloadColumns }
-            : {}),
-        }),
-      ),
-    );
+    renderTerms(linkageTerms, options);
   }
 
   test("the ingress count lands in the 'What you receive' tier, outside the 'Other details' disclosure", async () => {
@@ -1067,19 +1047,7 @@ describe("InvitationTerms: the acceptor's outbound-disclosure forward-reference"
     perspective?: "review" | "accepted" | "proposing";
     outboundColumns?: Array<string>;
   }) {
-    root!.render(
-      createElement(
-        MantineProvider,
-        null,
-        createElement(InvitationTerms, {
-          linkageTerms: terms,
-          ...(options?.perspective ? { perspective: options.perspective } : {}),
-          ...(options?.outboundColumns !== undefined
-            ? { outboundColumns: options.outboundColumns }
-            : {}),
-        }),
-      ),
-    );
+    renderTerms(terms, options);
   }
 
   // The full fixed sentence, so a copy edit that drops the "confirm ... after
@@ -1148,19 +1116,7 @@ describe("InvitationTerms: the outbound-send caption does not presuppose a non-e
     perspective: "review" | "accepted";
     outboundColumns?: Array<string>;
   }) {
-    root!.render(
-      createElement(
-        MantineProvider,
-        null,
-        createElement(InvitationTerms, {
-          linkageTerms: terms,
-          perspective: options.perspective,
-          ...(options.outboundColumns !== undefined
-            ? { outboundColumns: options.outboundColumns }
-            : {}),
-        }),
-      ),
-    );
+    renderTerms(terms, options);
   }
 
   const caption = "What you will send to your partner";
@@ -1209,19 +1165,7 @@ describe("InvitationTerms: the always-visible facts are tiered into labelled dir
       disclosedPayloadColumns?: Array<string>;
     },
   ) {
-    root!.render(
-      createElement(
-        MantineProvider,
-        null,
-        createElement(InvitationTerms, {
-          linkageTerms,
-          ...(options?.perspective ? { perspective: options.perspective } : {}),
-          ...(options?.disclosedPayloadColumns !== undefined
-            ? { disclosedPayloadColumns: options.disclosedPayloadColumns }
-            : {}),
-        }),
-      ),
-    );
+    renderTerms(linkageTerms, options);
   }
 
   test("egress, ingress, and legal each land in the correct labelled group", async () => {
@@ -1398,16 +1342,7 @@ describe("InvitationTerms: a declared-empty receive is surfaced, not collapsed w
     linkageTerms: LinkageTerms,
     perspective?: "review" | "accepted" | "proposing",
   ) {
-    root!.render(
-      createElement(
-        MantineProvider,
-        null,
-        createElement(InvitationTerms, {
-          linkageTerms,
-          ...(perspective ? { perspective } : {}),
-        }),
-      ),
-    );
+    renderTerms(linkageTerms, perspective ? { perspective } : undefined);
   }
 
   test("a declared-empty receive shows the request as (none) in the detail", async () => {
@@ -1449,15 +1384,9 @@ describe("InvitationTerms: the linkage strategy is surfaced at the consent point
     linkageStrategy: LinkageStrategy,
     perspective?: "review" | "accepted" | "proposing",
   ) {
-    root!.render(
-      createElement(
-        MantineProvider,
-        null,
-        createElement(InvitationTerms, {
-          linkageTerms: { ...terms, linkageStrategy },
-          ...(perspective ? { perspective } : {}),
-        }),
-      ),
+    renderTerms(
+      { ...terms, linkageStrategy },
+      perspective ? { perspective } : undefined,
     );
   }
 
@@ -1508,15 +1437,7 @@ describe("InvitationTerms: proposed-but-not-applied caveats sit at their headlin
   // caveats sit one expand down together. These assert placement against the
   // accessibility tree (which panel the text lives in), not styling.
   function renderCaveatTerms(overrides?: Partial<LinkageTerms>) {
-    root!.render(
-      createElement(
-        MantineProvider,
-        null,
-        createElement(InvitationTerms, {
-          linkageTerms: { ...terms, ...overrides },
-        }),
-      ),
-    );
+    renderTerms({ ...terms, ...overrides });
   }
 
   // psi-c- and deduplicate-specific caveat tails: both caveats share the "does not
@@ -1641,19 +1562,7 @@ describe("InvitationTerms: the send-columns chip list is named by its visible ca
     perspective?: "review" | "accepted" | "proposing";
     outboundColumns?: Array<string>;
   }) {
-    root!.render(
-      createElement(
-        MantineProvider,
-        null,
-        createElement(InvitationTerms, {
-          linkageTerms: terms,
-          ...(options.perspective ? { perspective: options.perspective } : {}),
-          ...(options.outboundColumns !== undefined
-            ? { outboundColumns: options.outboundColumns }
-            : {}),
-        }),
-      ),
-    );
+    renderTerms(terms, options);
   }
 
   // The list resolves by role + accessible name (so the caption still names it), AND

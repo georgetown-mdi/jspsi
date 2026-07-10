@@ -1,8 +1,3 @@
-// NOTE: `hmacSha256` has been moved here (see below): the exchange-record
-// commitment scheme is its second caller, so per the CONTRIBUTING.md rule that
-// shared cryptographic helpers are extracted as soon as a second caller exists,
-// it now lives in one place rather than being re-implemented.
-
 /** Shared `TextEncoder` instance for encoding strings to UTF-8 bytes. */
 export const enc = new TextEncoder();
 

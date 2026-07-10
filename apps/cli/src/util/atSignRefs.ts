@@ -92,9 +92,7 @@ export function resolveAtSignRefs(obj: unknown): unknown {
  * `retentionDisposition`, ...) is carried through unread rather than exfiltrating
  * a local file into the self-attested exchange record. A local-path field such as
  * `signing.identityFile` is likewise left alone: its consumer opens that path, so
- * resolving it to the file's contents would corrupt it. This replaces a former
- * blanket recursion over the whole config that contradicted the documented
- * exemption.
+ * resolving it to the file's contents would corrupt it.
  *
  * A missing or unreadable referenced file is a {@link UsageError} (exit 64); the
  * caller runs this outside the schema-parse try/catch so the error propagates

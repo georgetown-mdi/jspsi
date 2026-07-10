@@ -652,8 +652,8 @@ describe("governance metadata", () => {
   test("payload category names equal the committed columns (cannot drift from the commitment)", async () => {
     // The load-bearing invariant: payloadSent/payloadReceived names ARE the
     // committed columns, so the readable disclosure cannot diverge from the
-    // committed bytes. The keys no longer carry a data snapshot, so pin it
-    // against the committed inputs the record was built from.
+    // committed bytes. The keys carry only salts, so pin against the committed
+    // inputs the record was built from.
     const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
     expect(record.governance.payloadSent.map((c) => c.name)).toEqual(
       localPayloadSent.columns,

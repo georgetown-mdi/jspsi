@@ -14,6 +14,7 @@ import {
 
 import type { TransportControls } from "../src/connection/messageConnection";
 
+import { expectRejectionKind } from "./utils/expectRejection";
 import { PassthroughConnection } from "./utils/passthroughConnection";
 
 // --- QueuedMessageConnection / pipe ------------------------------------------
@@ -47,9 +48,7 @@ test("a terminal error rejects a parked receive and is sticky", async () => {
   const parked = b.receive();
   await a.close(); // surfaces a transport error on the peer
 
-  const err = await parked.catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("transport");
+  await expectRejectionKind(parked, "transport");
 
   // Subsequent calls observe the same latched error.
   await expect(b.receive()).rejects.toBeInstanceOf(ConnectionError);
@@ -60,18 +59,14 @@ test("close is idempotent and rejects sends afterwards", async () => {
   const [a] = createMessagePipe();
   await a.close();
   await a.close(); // no-op, resolves
-  const err = await a.send("x").catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("usage");
+  await expectRejectionKind(a.send("x"), "usage");
 });
 
 test("close rejects a parked receive as cancelled, not usage", async () => {
   const [a] = createMessagePipe();
   const parked = a.receive();
   await a.close();
-  const err = await parked.catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("closed");
+  await expectRejectionKind(parked, "closed");
 });
 
 test("buffered messages drain before a clean close rejects receive", async () => {
@@ -96,9 +91,7 @@ test("exceeding capacity fails the connection as a protocol violation", async ()
   // error); the protocol violation then surfaces once they are drained.
   expect(await b.receive()).toBe("1");
   expect(await b.receive()).toBe("2");
-  const err = await b.receive().catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("protocol");
+  await expectRejectionKind(b.receive(), "protocol");
 });
 
 // --- finish (drain-then-fail half-close) -------------------------------------
@@ -132,9 +125,7 @@ test("finish drains a buffered frame before surfacing the transport error", asyn
   // The buffered frame is still delivered...
   expect(await conn.receive()).toBe("final");
   // ...and only the next receive surfaces the deferred transport error.
-  const err = await conn.receive().catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("transport");
+  await expectRejectionKind(conn.receive(), "transport");
   // Promotion does not re-run teardown.
   expect(close).toHaveBeenCalledTimes(1);
 });
@@ -157,9 +148,7 @@ test("an abnormal drop drains a buffered frame before the error (deliver->fail)"
   // The abnormal-tail rule applies to fail() too: an already-arrived frame is
   // returned before the abnormal error surfaces.
   expect(await conn.receive()).toBe("tail");
-  const err = await conn.receive().catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("transport");
+  await expectRejectionKind(conn.receive(), "transport");
 });
 
 test("a fail after a pending half-close still drains the frame (deliver->finish->fail)", async () => {
@@ -170,18 +159,14 @@ test("a fail after a pending half-close still drains the frame (deliver->finish-
   // The buffered frame drains, then the first error to latch (the finish) wins;
   // the later fail() is a no-op rather than a frame-dropping override.
   expect(await conn.receive()).toBe("tail");
-  const err = await conn.receive().catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("transport");
-  expect((err as ConnectionError).message).toBe("peer closed");
+  const err = await expectRejectionKind(conn.receive(), "transport");
+  expect(err.message).toBe("peer closed");
 });
 
 test("finish with an empty queue fails immediately, like fail", async () => {
   const { conn, controls, close } = makeQueued();
   controls.finish(new ConnectionError("peer closed", "transport"));
-  const err = await conn.receive().catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("transport");
+  await expectRejectionKind(conn.receive(), "transport");
   expect(close).toHaveBeenCalledTimes(1);
 });
 
@@ -189,9 +174,7 @@ test("finish rejects a parked receive immediately", async () => {
   const { conn, controls } = makeQueued();
   const parked = conn.receive();
   controls.finish(new ConnectionError("peer closed", "transport"));
-  const err = await parked.catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("transport");
+  await expectRejectionKind(parked, "transport");
 });
 
 test("inbound after finish is ignored; the drained frame is the last one", async () => {
@@ -200,8 +183,7 @@ test("inbound after finish is ignored; the drained frame is the last one", async
   controls.finish(new ConnectionError("peer closed", "transport"));
   controls.deliver("dropped"); // a half-close is pending: ignored
   expect(await conn.receive()).toBe("keep");
-  const err = await conn.receive().catch((e: unknown) => e);
-  expect((err as ConnectionError).kind).toBe("transport");
+  await expectRejectionKind(conn.receive(), "transport");
 });
 
 test("a second finish is ignored; the first deferred error wins", async () => {
@@ -211,9 +193,8 @@ test("a second finish is ignored; the first deferred error wins", async () => {
   controls.finish(new ConnectionError("second", "security")); // ignored
 
   expect(await conn.receive()).toBe("final");
-  const err = await conn.receive().catch((e: unknown) => e);
-  expect((err as ConnectionError).kind).toBe("transport");
-  expect((err as ConnectionError).message).toBe("first");
+  const err = await expectRejectionKind(conn.receive(), "transport");
+  expect(err.message).toBe("first");
 });
 
 test("send is rejected while a half-close is pending, without writing", async () => {
@@ -221,9 +202,7 @@ test("send is rejected while a half-close is pending, without writing", async ()
   controls.deliver("final"); // buffered, half-close pending behind it
   controls.finish(new ConnectionError("peer closed", "transport"));
 
-  const err = await conn.send("x").catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("transport");
+  await expectRejectionKind(conn.send("x"), "transport");
   expect(send).not.toHaveBeenCalled();
   // The buffered frame is still drainable after the rejected send.
   expect(await conn.receive()).toBe("final");
@@ -238,9 +217,7 @@ test("a close racing the final drain still surfaces the transport error", async 
   // The buffered frame still drains...
   expect(await conn.receive()).toBe("final");
   // ...and the deferred error surfaces as transport, not a generic close/usage.
-  const err = await conn.receive().catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("transport");
+  await expectRejectionKind(conn.receive(), "transport");
 });
 
 test("a clean close requests a flush; an error teardown does not", async () => {
@@ -293,9 +270,7 @@ test("fromEventConnection: a silent peer trips the inactivity deadline", async (
   const [, eventB] = makeEventConnections();
   // Peer never sends; the parked receive must fail rather than hang forever.
   const connB = fromEventConnection(eventB, { inactivityTimeoutMs: 20 });
-  const err = await connB.receive().catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("transport");
+  await expectRejectionKind(connB.receive(), "transport");
 
   // The deadline latches a terminal state observed by later calls.
   await expect(connB.receive()).rejects.toBeInstanceOf(ConnectionError);
@@ -311,13 +286,9 @@ test("fromEventConnection: a supplied inactivityHint is appended to the silence 
     inactivityTimeoutMs: 20,
     inactivityHint: "check the peer's own logs",
   });
-  const err = await connB.receive().catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("transport");
-  expect((err as ConnectionError).message).toContain("gone silent");
-  expect((err as ConnectionError).message).toContain(
-    "check the peer's own logs",
-  );
+  const err = await expectRejectionKind(connB.receive(), "transport");
+  expect(err.message).toContain("gone silent");
+  expect(err.message).toContain("check the peer's own logs");
 });
 
 test("fromEventConnection: the silence error carries no clause when no hint is supplied", async () => {
@@ -405,9 +376,7 @@ test("data consumer (deliver): inbound overflow latches without throwing into em
   // Once the buffer is drained, the absorbed overflow surfaces as a sticky
   // terminal protocol error -- confirming the consumer latched rather than
   // threw, and that the latch is sticky across further calls.
-  const err = await connB.receive().catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("protocol");
+  const err = await expectRejectionKind(connB.receive(), "protocol");
   await expect(connB.receive()).rejects.toBe(err);
 });
 
@@ -427,9 +396,7 @@ test("data consumer (deliver): a frame after a terminal latch is a non-throwing 
 
   // The connection is unchanged: still the original terminal transport error,
   // with the late frame dropped rather than surfaced.
-  const err = await connB.receive().catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("transport");
+  await expectRejectionKind(connB.receive(), "transport");
 });
 
 // --- send-liveness (the encrypt-then-send window) ----------------------------
@@ -447,12 +414,8 @@ test("send: an orphaned hand-off with no parked receive fails terminally, not si
   // timer armed. Before the guard this call would hang and the loop drain to
   // exit 0; now it must reject terminally.
   send.mockReturnValue(new Promise(() => {}));
-  const err = await conn.send("x").catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("transport");
-  expect((err as ConnectionError).message).toContain(
-    "lost during the exchange",
-  );
+  const err = await expectRejectionKind(conn.send("x"), "transport");
+  expect(err.message).toContain("lost during the exchange");
   // The failure latches terminal: later calls fail fast on the same state.
   await expect(conn.receive()).rejects.toBeInstanceOf(ConnectionError);
   await expect(conn.send("y")).rejects.toBeInstanceOf(ConnectionError);
@@ -464,12 +427,8 @@ test("send: a transport rejection surfaces its own cause, not the liveness backs
   // socket error) rejects the hand-off first with its transport-specific cause,
   // well before the coarse core backstop would; that specific cause must win.
   send.mockRejectedValue(new Error("SFTP file write of /x stalled"));
-  const err = await conn.send("x").catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("transport");
-  expect((err as ConnectionError).message).toContain(
-    "SFTP file write of /x stalled",
-  );
+  const err = await expectRejectionKind(conn.send("x"), "transport");
+  expect(err.message).toContain("SFTP file write of /x stalled");
 });
 
 test("send: a completed hand-off leaves no liveness guard armed", async () => {
@@ -566,11 +525,9 @@ test("send: with no inactivity budget arms no liveness guard", async () => {
 test("receive(timeoutMs) shorter than the connection default fires and latches", async () => {
   const [, eventB] = makeEventConnections();
   const connB = fromEventConnection(eventB, { inactivityTimeoutMs: 10_000 });
-  const err = await connB.receive(20).catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("transport");
+  const err = await expectRejectionKind(connB.receive(20), "transport");
   // min(10000, 20) = 20: the override won.
-  expect((err as ConnectionError).message).toContain("20ms");
+  expect(err.message).toContain("20ms");
   // Latched terminal: later calls fail fast on the same error.
   await expect(connB.receive()).rejects.toBeInstanceOf(ConnectionError);
   await expect(connB.send("x")).rejects.toBeInstanceOf(ConnectionError);
@@ -580,20 +537,16 @@ test("receive(timeoutMs) longer than the connection default is capped by the def
   const [, eventB] = makeEventConnections();
   const connB = fromEventConnection(eventB, { inactivityTimeoutMs: 20 });
   // Override is 10 s, but the 20 ms connection default is the ceiling.
-  const err = await connB.receive(10_000).catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("transport");
-  expect((err as ConnectionError).message).toContain("20ms");
+  const err = await expectRejectionKind(connB.receive(10_000), "transport");
+  expect(err.message).toContain("20ms");
 });
 
 test("receive(timeoutMs) bounds a connection that has no inactivity default", async () => {
   // createMessagePipe is unbounded; the override is the only deadline source,
   // exercising armIdle's undefined-connection-default branch.
   const [, b] = createMessagePipe();
-  const err = await b.receive(20).catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("transport");
-  expect((err as ConnectionError).message).toContain("20ms");
+  const err = await expectRejectionKind(b.receive(20), "transport");
+  expect(err.message).toContain("20ms");
 });
 
 // --- receiveParsed -----------------------------------------------------------
@@ -611,11 +564,9 @@ test("receiveParsed: a malformed message throws a protocol ConnectionError", asy
   const schema = z.object({ n: z.number() });
   const parked = receiveParsed(b, schema);
   await a.send({ n: "not a number" });
-  const err = await parked.catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("protocol");
+  const err = await expectRejectionKind(parked, "protocol");
   // The validator's failure is preserved as the cause.
-  expect((err as ConnectionError).cause).toBeInstanceOf(z.ZodError);
+  expect(err.cause).toBeInstanceOf(z.ZodError);
 });
 
 test("receiveParsed: a transport drop surfaces as transport, not protocol", async () => {
@@ -623,9 +574,7 @@ test("receiveParsed: a transport drop surfaces as transport, not protocol", asyn
   const schema = z.object({ n: z.number() });
   const parked = receiveParsed(b, schema);
   await a.close();
-  const err = await parked.catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("transport");
+  await expectRejectionKind(parked, "transport");
 });
 
 // --- parseOrProtocolError ----------------------------------------------------

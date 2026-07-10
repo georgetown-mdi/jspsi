@@ -131,13 +131,11 @@ export class SftpHeartbeat {
    */
   start(): void {
     this.stopped = false;
-    // A fresh cycle: advance the epoch (so an in-flight ping OR an unsettled op from
-    // the prior cycle is inert) and drop the transient state a torn-down session may
-    // have left set -- a stuck `pinging`, or an `inFlight` an interrupted op never
-    // balanced -- either of which would otherwise make every tick on the new session
-    // skip its beat. The epoch fence covers the complementary case the reset cannot:
-    // a stale op that settles AFTER this start(), which must not decrement the new
-    // session's count (see opSettled).
+    // Fresh cycle: advance the epoch (fencing the prior cycle's stragglers; see the
+    // epoch field) and drop the transient state a torn-down session may have left
+    // set -- a stuck `pinging`, or an `inFlight` an interrupted op never balanced --
+    // either of which would otherwise make every tick on the new session skip its
+    // beat.
     this.epoch += 1;
     this.pinging = false;
     this.inFlight = 0;
@@ -159,12 +157,9 @@ export class SftpHeartbeat {
 
   /**
    * A server-driven adapter operation settled (resolved or rejected). `token` is the
-   * epoch {@link opStarted} returned; a settle from a torn-down or reconnected
-   * session (its epoch has since moved) is ignored, so it neither decrements the new
-   * session's in-flight count nor counts as activity on it. Without this fence a
-   * stale op settling after a reconnect could zero an in-flight count a genuine
-   * new-session op owns, letting a keepalive fire concurrently with it -- the same
-   * reconnect hazard the ping's epoch capture guards (see {@link sendPing}).
+   * epoch {@link opStarted} returned; a settle whose epoch has since moved is ignored
+   * (see the epoch field), so a straggler cannot decrement or count as activity on a
+   * later session.
    */
   opSettled(token: number): void {
     if (token !== this.epoch) return;
@@ -180,9 +175,8 @@ export class SftpHeartbeat {
    */
   stop(): void {
     this.stopped = true;
-    // Advance the epoch so any in-flight ping's -- or unsettled op's -- late
-    // settlement is inert, and drop the transient counters so a later start() begins
-    // from a clean slate.
+    // Advance the epoch (see the epoch field) and drop the transient counters so a
+    // later start() begins from a clean slate.
     this.epoch += 1;
     this.pinging = false;
     this.inFlight = 0;
@@ -223,9 +217,8 @@ export class SftpHeartbeat {
 
   private sendPing(): void {
     this.pinging = true;
-    // Bind this ping to the current cycle; a stop()/start() (teardown or reconnect)
-    // since it was issued advances the epoch, making the settlement below a no-op so
-    // a stale ping cannot clear the new cycle's `pinging` flag or reschedule onto it.
+    // Bind this ping to the current cycle so its late settlement below is fenced off
+    // a later cycle (see the epoch field).
     const epoch = this.epoch;
     void this.ping()
       .then(() => this.log.trace("SFTP keepalive sent"))

@@ -11,19 +11,9 @@
  * size. See docs/spec/CHANNEL_SECURITY.md.
  *
  * Value: 536,870,888 bytes (~512 MiB). This is a chosen memory bound, NOT a
- * derived platform ceiling. It once equalled Node's maximum string length
- * (`buffer.constants.MAX_STRING_LENGTH` on 64-bit) because the read path
- * `.toString()`d each frame before parsing it (through `parseBoundedJson`) and
- * `Buffer.prototype.toString()` throws above that length, so the string limit
- * was the true hard ceiling and anchoring the cap there avoided rejecting any
- * frame the transport could otherwise decode. That anchor is now void: the
- * transport carries a binary frame as raw bytes and never stringifies it (the
- * AEAD envelope and the file-sync message body are both binary; see
- * encryptedMessageConnection.ts and fileSyncConnection.ts), so a frame larger
- * than the former string limit can be read. The numeric value is retained
- * unchanged -- still a reasonable ~512 MiB single-frame memory cap. It is the
- * static backstop for every frame and the upper clamp for the per-exchange
- * single-pass cap below: the single-pass reply read is bounded instead by a
+ * derived platform ceiling. It is the static backstop for every frame and the
+ * upper clamp for the per-exchange single-pass cap below: the single-pass reply
+ * read is bounded instead by a
  * tighter cap derived from the exchanged record counts
  * ({@link singlePassReplyByteCap}), which the receiver threads into this read
  * gate (replacing this constant for that one read) and which can only ever
@@ -103,15 +93,14 @@ export const MAX_PSI_DECODE_ELEMENTS = Math.floor(
  * retained memory is small -- on the order of a few hundred B per distinct value:
  * psilink JS, transport wire-buffer copies, and a grow-only WebAssembly heap floor
  * -- while the peak RSS is dominated by mostly collectable transient allocation
- * churn the OS allocator does not return. Board item 206377899 relieved that churn
- * (a forced GC at the single-pass phase boundaries, active under the CLI's
- * --expose-gc) and re-derived this budget from a fresh near-ceiling measurement;
- * bounding each party's cell count bounds its `D`, and so that peak.
+ * churn the OS allocator does not return. A forced GC at the single-pass phase
+ * boundaries (active under the CLI's --expose-gc) relieves that churn; bounding
+ * each party's cell count bounds its `D`, and so that peak.
  *
- * Value: 3,000,000 cells per party (so at most 3M distinct values per party),
- * raised from 2,000,000 once the churn relief landed. It admits ~214k rows at the
- * ~14-key default template and ~3M rows at a single key. Methodology: a forked
- * measurement of the real linkage with the relief active, at D ~= 2M distinct
+ * Value: 3,000,000 cells per party (so at most 3M distinct values per party). It
+ * admits ~214k rows at the ~14-key default template and ~3M rows at a single key.
+ * Methodology: a forked measurement of the real linkage with the relief active,
+ * at D ~= 2M distinct
  * values near the ceiling (NOT extrapolated from a low-D fit), put the heavier-party
  * (sender) peak at ~3.0 GB and the receiver at ~2.0 GB, over a directly-measured
  * grow-only WASM linear-heap floor of ~0.8 GB and ~0.1 GB of retained JS -- a live

@@ -289,7 +289,7 @@ export interface Output {
   /**
    * Whether the other party should also receive the result. Requires the
    * partner's linkage terms to also have `expectsOutput: true`.
-   * */
+   */
   shareWithPartner: boolean;
 }
 
@@ -299,11 +299,9 @@ const OutputSchema: z.ZodType<Output> = z.object({
 });
 
 // --- Linkage fields ----------------------------------------------------------
-/**
- * TODO:
- * * Semantic type enumeration is incomplete.
- * * Add a generic type.
- */
+// TODO:
+// - Semantic type enumeration is incomplete.
+// - Add a generic type.
 
 /** Constraints on name fields. */
 interface NameConstraints {
@@ -1544,59 +1542,62 @@ export function validateCompatibility(
   const sameColumnSet = (a: Array<string>, b: Array<string>): boolean =>
     a.length === b.length && a.every((name, i) => name === b[i]);
 
+  // One direction of the payload mirror: the receiver's declared `receive` must
+  // match the sender's `send`, byte-exact and element-wise. Both directions share
+  // the sort/compare/sanitize-join logic; only the two message strings vary, so
+  // they are supplied by the caller (emptyReceiveMessage for the strict empty
+  // `receive: []` case, mismatchMessage otherwise).
+  const checkPayloadDirection = (
+    receiverReceive: ReadonlyArray<PayloadColumn>,
+    senderSend: ReadonlyArray<PayloadColumn>,
+    messages: {
+      emptyReceiveMessage: (senderShown: string) => string;
+      mismatchMessage: (receiverShown: string, senderShown: string) => string;
+    },
+  ): void => {
+    const receiverNames = receiverReceive.map((c) => c.name).sort();
+    const senderNames = senderSend.map((c) => c.name).sort();
+    if (sameColumnSet(senderNames, receiverNames)) return;
+    const receiverShown = receiverNames
+      .map((n) => sanitizeForDisplay(n))
+      .join(",");
+    const senderShown = senderNames.map((n) => sanitizeForDisplay(n)).join(",");
+    errors.push(
+      receiverNames.length === 0
+        ? messages.emptyReceiveMessage(senderShown)
+        : messages.mismatchMessage(receiverShown, senderShown),
+    );
+  };
+
   if (partner.payload?.receive !== undefined) {
-    const partnerReceiveNames = partner.payload.receive
-      .map((c) => c.name)
-      .sort();
-    const localSendNames = (local.payload?.send ?? [])
-      .map((c) => c.name)
-      .sort();
-    if (!sameColumnSet(localSendNames, partnerReceiveNames)) {
-      const localShown = localSendNames
-        .map((n) => sanitizeForDisplay(n))
-        .join(",");
-      const partnerShown = partnerReceiveNames
-        .map((n) => sanitizeForDisplay(n))
-        .join(",");
+    checkPayloadDirection(partner.payload.receive, local.payload?.send ?? [], {
       // An empty partner receive is the strict "partner expects no payload"
       // declaration (see the gate comment above); spell that out rather than
       // printing an empty bracket pair that reads like a rendering glitch.
-      errors.push(
-        partnerReceiveNames.length === 0
-          ? `payload mismatch: partner declared an empty payload.receive ` +
-              `(asserting local sends no payload columns), but local sends ` +
-              `[${localShown}]`
-          : `payload mismatch: local send columns [${localShown}] do not match ` +
-              `partner receive columns [${partnerShown}]`,
-      );
-    }
+      emptyReceiveMessage: (localShown) =>
+        `payload mismatch: partner declared an empty payload.receive ` +
+        `(asserting local sends no payload columns), but local sends ` +
+        `[${localShown}]`,
+      mismatchMessage: (partnerShown, localShown) =>
+        `payload mismatch: local send columns [${localShown}] do not match ` +
+        `partner receive columns [${partnerShown}]`,
+    });
   }
 
   if (local.payload?.receive !== undefined) {
-    const localReceiveNames = local.payload.receive.map((c) => c.name).sort();
-    const partnerSendNames = (partner.payload?.send ?? [])
-      .map((c) => c.name)
-      .sort();
-    if (!sameColumnSet(localReceiveNames, partnerSendNames)) {
-      const localShown = localReceiveNames
-        .map((n) => sanitizeForDisplay(n))
-        .join(",");
-      const partnerShown = partnerSendNames
-        .map((n) => sanitizeForDisplay(n))
-        .join(",");
+    checkPayloadDirection(local.payload.receive, partner.payload?.send ?? [], {
       // An empty local receive is the strict "I expect no payload" declaration;
       // name it and point the operator at the lazy alternative (omit the field),
       // since a hand-authored `receive: []` is the most likely way to land here.
-      errors.push(
-        localReceiveNames.length === 0
-          ? `payload mismatch: local declared an empty payload.receive ` +
-              `(asserting partner sends no payload columns), but partner sends ` +
-              `[${partnerShown}]. Omit payload.receive to accept whatever the ` +
-              `partner sends.`
-          : `payload mismatch: local receive columns [${localShown}] do not ` +
-              `match partner send columns [${partnerShown}]`,
-      );
-    }
+      emptyReceiveMessage: (partnerShown) =>
+        `payload mismatch: local declared an empty payload.receive ` +
+        `(asserting partner sends no payload columns), but partner sends ` +
+        `[${partnerShown}]. Omit payload.receive to accept whatever the ` +
+        `partner sends.`,
+      mismatchMessage: (localShown, partnerShown) =>
+        `payload mismatch: local receive columns [${localShown}] do not ` +
+        `match partner send columns [${partnerShown}]`,
+    });
   }
 
   return { errors, warnings };

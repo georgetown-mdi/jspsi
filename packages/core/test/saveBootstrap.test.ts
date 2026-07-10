@@ -13,6 +13,7 @@ import {
   createMessagePipe,
   type MessageConnection,
 } from "../src/connection/messageConnection";
+import { recordingConnection } from "./utils/recordingConnection";
 
 // --- Fixtures ----------------------------------------------------------------
 
@@ -35,25 +36,6 @@ const termsA: LinkageTerms = {
   linkageKeys: sharedKeys,
 };
 const termsB: LinkageTerms = { ...termsA, identity: "Party B" };
-
-/** A connection that records every frame passed to send(), for wire assertions. */
-function recording(conn: MessageConnection): {
-  conn: MessageConnection;
-  sent: unknown[];
-} {
-  const sent: unknown[] = [];
-  return {
-    sent,
-    conn: {
-      send: (data) => {
-        sent.push(data);
-        return conn.send(data);
-      },
-      receive: (timeoutMs?: number) => conn.receive(timeoutMs),
-      close: () => conn.close(),
-    },
-  };
-}
 
 /**
  * Run one side of a zero-setup `--save` exchange: advertise the save intent on
@@ -172,7 +154,7 @@ test("no secret is transmitted when only one party saves", async () => {
 
 test("the save flag rides the terms message when set", async () => {
   const [rawA, b] = createMessagePipe();
-  const { conn: a, sent } = recording(rawA);
+  const { conn: a, sent } = recordingConnection(rawA);
   await Promise.all([
     runSide(a, "initiator", termsA, true),
     runSide(b, "responder", termsB, true),
@@ -183,7 +165,7 @@ test("the save flag rides the terms message when set", async () => {
 
 test("no save field is put on the wire when save intent is omitted", async () => {
   const [rawA, b] = createMessagePipe();
-  const { conn: a, sent } = recording(rawA);
+  const { conn: a, sent } = recordingConnection(rawA);
   await Promise.all([
     // undefined -> the recurring/authenticated path: omit the field entirely.
     runSide(a, "initiator", termsA, undefined),

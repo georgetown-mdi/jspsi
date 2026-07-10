@@ -158,9 +158,6 @@ export interface PreparedExchange {
  * as a usage error (exit 64).
  */
 export function assertAlgorithmImplemented(algorithm: Algorithm): void {
-  // Allowlist the one implemented algorithm rather than denylisting the known
-  // unimplemented one, so a future AlgorithmSchema member is refused by default
-  // (see the JSDoc above).
   if (algorithm === "psi") return;
   throw new UsageError(
     'this linkage-terms algorithm is not yet implemented: only "psi" is ' +
@@ -779,45 +776,10 @@ export async function runExchange(
     : [];
   reconcileReceivedPayload(partnerPayload, expectedReceive);
 
-  // Self-attested record: produced from data both sides already hold, with no
-  // extra round-trip and no private key. Two disclosure figures, gated
-  // differently and deliberately:
-  //
-  // - recordsExposed is each party's own input row count (rowCount): every
-  //   contributed record, not only the rows that resolve to a usable linkage key.
-  //   It is a per-direction statement of what this party put into the exchange,
-  //   known from its own input alone, so it is recorded for every party
-  //   regardless of role and stays meaningful even under a future algorithm that
-  //   discloses neither the result size nor the partner's set size.
-  // - resultSize (the intersection size) is recorded only in the both-output
-  //   case, when both parties' agreed terms have them both receive output -- so it
-  //   is stored only when both sides are entitled to the result. A single-output
-  //   helper can observe its match count during the clean cascade, but the record
-  //   deliberately does not surface it: privacy here is enforced by what the tool
-  //   writes down, not by what is theoretically discoverable. (The record counts
-  //   carried on the terms exchange are total dataset sizes, not the
-  //   intersection, and are not used here.)
-  //
-  // The association table is committed only when this party is entitled to the
-  // result (expectsOutput) -- both parties in a both-output exchange, only the
-  // receiver in a single-output one. A single-output helper holds a table from the
-  // clean cascade too, but, like the match count, the record does not bind it.
-  // Both payloads are normalized to the record's canonical committed form
-  // (toCommittedPayload) so a sender and receiver commit over byte-identical data
-  // for the same logical payload.
-  //
-  // heldAssociationTable is the entitlement predicate for the association TABLE: it
-  // gates BOTH the record's committed table (below) AND the table returned to the
-  // caller (the `associationTable` field of the result). A helper therefore neither
-  // receives the result table from the exchange nor binds it in its record -- the
-  // returned-result gate and the record gate are deliberately one rule (see
-  // ExchangeResult). It scopes the result TABLE only; the payload channel is now
-  // gated consistently with it: the send-gate above transmits payload solely to a
-  // partner entitled to output, and the receive-side check fails closed if a
-  // non-receiving party is sent payload regardless. So a non-receiving helper no
-  // longer receives the partner's disclosed payload values -- the one-sided
-  // disclosure formerly carried on this channel is closed here, not left as a
-  // residual (docs/notes/one-sided-disclosure.md).
+  // resultSize (the intersection size) is bound only when both parties are
+  // entitled to output; heldAssociationTable gates both the record's committed
+  // table and the table returned to the caller, so it is one predicate. See the
+  // ExchangeResult.associationTable JSDoc below for the disclosure rationale.
   const bothExpectOutput =
     linkageTerms.output.expectsOutput && partnerTerms.output.expectsOutput;
   const heldAssociationTable = linkageTerms.output.expectsOutput;

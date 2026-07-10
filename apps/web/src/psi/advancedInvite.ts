@@ -176,20 +176,10 @@ export interface AdvancedInviteDraft {
   standardization: Standardization;
   keys: Array<DraftKey>;
   /**
-   * The `linkageFields` declaration of an IMPORTED terms document, carried verbatim so
-   * an import-then-regenerate round-trip preserves it. Set only by {@link draftFromTerms}
-   * (the one door an externally- or hand-authored document enters by); absent for the
-   * seed, guided, and expert paths, which never carry an external declaration.
-   *
-   * Present, {@link buildAdvancedTerms} re-emits fields in this declaration's ORDER and
-   * keeps any declared-but-unreferenced field (and its constraints) rather than
-   * re-deriving fields in the fixed {@link authoredLinkageFields} order and dropping the
-   * unreferenced ones -- the faithful-round-trip fidelity {@link reconcileImportedFields}
-   * implements. It does NOT defeat {@link importedConstraintDivergenceMessage}: a custom
-   * constraint on a field a key references is still re-stamped to the type default on
-   * rebuild (so that guard still refuses it); only field order, inert unreferenced
-   * fields, and a benign empty `constraints: {}` are preserved. "Reset to recommended"
-   * drops it (a fresh draft has none), returning to the default derivation.
+   * The `linkageFields` declaration of an IMPORTED terms document, carried verbatim
+   * for round-trip fidelity. Set only by {@link draftFromTerms}; absent for the seed,
+   * guided, and expert paths. When present, {@link reconcileImportedFields} governs how
+   * the rebuild reconciles it.
    */
   importedLinkageFields?: Array<LinkageField>;
 }
@@ -510,34 +500,10 @@ function isEmptyConstraints(constraints: unknown): boolean {
 /**
  * The linkage fields an IMPORTED draft re-emits, reconciled against the imported
  * `linkageFields` declaration so an import-then-regenerate round-trip preserves its
- * field ORDER and any declared-but-unreferenced field -- rather than re-deriving fields
- * in the fixed {@link authoredLinkageFields} order and dropping the unreferenced ones.
- * Drives {@link buildAdvancedTerms} only when {@link AdvancedInviteDraft.importedLinkageFields}
- * is set; the guided/expert/seed paths keep the plain referenced-filter derivation.
- *
- * Per imported field, in imported order:
- * - Referenced by an enabled key AND derivable from the inviter's columns: emit the
- *   editor's AUTHORED (type-default-constraints) field, NOT the imported one -- so a
- *   custom constraint the editor cannot represent still diverges from the import and is
- *   caught fail-closed by {@link importedConstraintDivergenceMessage}, which this fix
- *   deliberately does not defeat. The lone exception is a benign empty `constraints: {}`
- *   on a field whose authored type has no default constraint AND whose imported type
- *   matches that authored type ({@link isEmptyConstraints}): preserved verbatim so it
- *   round-trips (a no-op, behaviorally identical to absent) instead of being over-refused.
- *   A type mismatch is NOT preserved -- it falls through to the authored field so the
- *   guard refuses it, since the imported declaration checks a field's name, not its type.
- * - Referenced by an enabled key but NOT derivable: dropped, leaving the key to dangle
- *   the built terms (blocking generation) -- keeping this field set in lockstep with
- *   {@link declarableFieldNames}, the disable/build invariant the import path rests on.
- * - Referenced by NO key at all: an inert declared field (never standardized,
- *   constraint-checked, or matched -- see {@link referencedLinkageFieldNames}), preserved
- *   verbatim so the round-trip keeps the imported declaration and its hash.
- * - Referenced only by DISABLED keys: dropped, matching the disable-and-show handling for
- *   an unsupplyable key (the field is not part of the satisfiable subset being generated).
- *
- * A field a post-import edit newly references that the imported declaration did not carry
- * is appended in the default order with type-default constraints, mirroring the no-import
- * derivation so an edited draft still declares everything its enabled keys reference.
+ * field ORDER and any declared-but-unreferenced field. Drives {@link buildAdvancedTerms}
+ * only when {@link AdvancedInviteDraft.importedLinkageFields} is set; the guided/expert/
+ * seed paths keep the plain referenced-filter derivation. The four branches are handled
+ * inline below; the empty-constraints type guard is the one non-obvious step.
  */
 function reconcileImportedFields(
   imported: ReadonlyArray<LinkageField>,
@@ -612,21 +578,11 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   // overrides identity, the output direction, the enabled keys, and the legal
   // agreement.
   const baseTerms = getDefaultLinkageTerms(draft.identity, draft.metadata);
-  // Gate the matching algorithm and per-element fuzzy expansion behind the
-  // applied-flags: clamp the built terms so they can NEVER carry a setting the run
-  // does not yet honor, regardless of how the draft reached this state (a UI gap,
-  // an import). This is the structural guarantee the gating tests pin -- the
-  // disabled editor controls and the import refusal are the user-facing half, this
-  // is the half that holds even if one of those is bypassed. psi-c is the privacy
-  // footgun (a count-only claim while identifiers are revealed); deduplicate's
-  // worst case is a silent no-op, but the same clamp applies.
-  //
-  // Core independently refuses a `psi-c` run at the exchange boundary
-  // (assertAlgorithmImplemented in @psilink/core), the authoritative backstop for
-  // any mint or accept path; this clamp is the web-mint front line that keeps a
-  // web-minted invitation from ever proposing a setting the run will refuse, so a
-  // web operator is never taken through consent for terms the exchange then
-  // aborts. Both are ungated together when count-only lands (board item 208371871).
+  // Clamp the matching algorithm and per-element fuzzy expansion to the applied
+  // behavior while gated, so the built terms can never carry a setting the run does
+  // not yet honor regardless of how the draft reached this state (a UI gap, an
+  // import) -- the structural half of the gate that holds even if the disabled
+  // controls or import refusal are bypassed.
   const algorithm: Algorithm = APPLIED_SETTINGS.psiC ? draft.algorithm : "psi";
   const deduplicate = APPLIED_SETTINGS.deduplicate ? draft.deduplicate : false;
   const enabledKeys = draft.keys
@@ -664,31 +620,19 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
     identity: normalizeText(draft.identity),
     algorithm,
     deduplicate,
-    // Written straight through, NOT clamped like algorithm/deduplicate above:
-    // single-pass is honored end-to-end (core's exchange runs it and the
-    // mandatory-consistency check governs it), so there is no APPLIED_SETTINGS gate
-    // and no import refusal for it -- the draft's choice is the authored value. A
-    // default draft carries `cascade`, so the built terms are byte-identical to
-    // before the control existed unless the operator selects single-pass.
     linkageStrategy: draft.linkageStrategy,
-    // The chosen 3-way output direction; one of the three valid pairs, so it never
-    // produces the forbidden "neither receives" combination (see OutputDirection).
     output: outputForDirection(draft.outputDirection),
     linkageFields,
     linkageKeys: enabledKeys,
   };
 
-  // Author the payload data dictionary (terms.payload.send) from the columns the
-  // draft metadata DISCLOSES, via the shared payloadSendForMetadata derivation (the
-  // quick path authors the same way over its inferred metadata, so the two cannot
-  // drift). The send equals the disclosed set, so it can never trip core's
-  // assertPayloadSendDisclosed reject (which requires a present send to match the
-  // disclosed set exactly) -- the structural form of the
-  // task's footgun guard; `receive` is left unauthored for lazy reconciliation. The
-  // send is emitted regardless of output direction so the preview states honestly
-  // what transmits; the incoherent "send while only I receive" case is blocked by
-  // validateAdvancedInvite rather than by silently dropping the (still-transmitted)
-  // columns from the declaration.
+  // Author terms.payload.send from the columns the draft metadata discloses, via the
+  // shared payloadSendForMetadata derivation the quick path also uses (so the two
+  // cannot drift). The send equals the disclosed set by construction, so it never
+  // trips core's assertPayloadSendDisclosed. Emitted regardless of output direction so
+  // the preview states honestly what transmits; the incoherent "send while only I
+  // receive" case is blocked by validateAdvancedInvite, not by silently dropping the
+  // still-transmitted columns from the declaration.
   const payload = payloadSendForMetadata(draft.metadata);
   if (payload !== undefined) terms.payload = payload;
 

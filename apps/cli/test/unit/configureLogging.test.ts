@@ -1,16 +1,15 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import logLibrary from "loglevel";
-import {
-  getDiagnosticSink,
-  setDiagnosticSink,
-  UsageError,
-  type DiagnosticSink,
-} from "@psilink/core";
+import { getDiagnosticSink, UsageError } from "@psilink/core";
 
 import { configureLogging } from "../../src/util/cli";
+import {
+  captureStdio,
+  snapshotDiagnosticSinkAndLevel,
+} from "../loggingTestSupport";
 
 // configureLogging is the one logging bootstrap all six command handlers share:
 // it picks the file-or-stderr sink, applies the level, and builds the named
@@ -22,20 +21,14 @@ import { configureLogging } from "../../src/util/cli";
 // tests.
 
 let tmpDir: string;
-let originalSink: DiagnosticSink | undefined;
-let originalLevel: number;
+
+snapshotDiagnosticSinkAndLevel();
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-configlog-"));
-  originalSink = getDiagnosticSink();
-  originalLevel = logLibrary.getLevel();
 });
 
 afterEach(() => {
-  setDiagnosticSink(originalSink);
-  logLibrary.setLevel(
-    originalLevel as Parameters<typeof logLibrary.setLevel>[0],
-  );
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -87,20 +80,7 @@ test("configureLogging: without a logFile, routes diagnostics to stderr, never s
   // The default sink reserves stdout for result data, so info -- which loglevel
   // would otherwise send to stdout -- must land on stderr and stdout must stay
   // clean.
-  const stdoutWrites: string[] = [];
-  const stderrWrites: string[] = [];
-  const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
-    chunk: string | Uint8Array,
-  ) => {
-    stdoutWrites.push(String(chunk));
-    return true;
-  }) as typeof process.stdout.write);
-  const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
-    chunk: string | Uint8Array,
-  ) => {
-    stderrWrites.push(String(chunk));
-    return true;
-  }) as typeof process.stderr.write);
+  const { stdoutWrites, stderrWrites, restore } = captureStdio();
   const { log, close } = configureLogging({
     logLevel: logLibrary.levels.INFO,
     logFile: undefined,
@@ -110,8 +90,7 @@ test("configureLogging: without a logFile, routes diagnostics to stderr, never s
     log.info("an info diagnostic line");
   } finally {
     close();
-    stdoutSpy.mockRestore();
-    stderrSpy.mockRestore();
+    restore();
   }
   expect(stderrWrites.join("")).toContain("an info diagnostic line");
   expect(stderrWrites.join("")).toContain("[INFO]");

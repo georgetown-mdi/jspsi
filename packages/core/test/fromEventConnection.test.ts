@@ -15,6 +15,8 @@ import {
 } from "../src/connection/messageConnection";
 import { withCapturedLogs } from "../src/testing";
 
+import { expectRejectionKind } from "./utils/expectRejection";
+
 // These tests exercise `fromEventConnection` over the *real* FileSyncConnection
 // transport (driven by an in-memory FileTransportClient), rather than the
 // passthrough double used in messageConnection.test.ts. The point is to confirm
@@ -201,10 +203,8 @@ test("fromEventConnection over FileSyncConnection: an error buffered before the 
   conn.emit("error", new Error("early transport failure"));
 
   const mc = fromEventConnection(conn);
-  const err = await mc.receive().catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
-  expect((err as ConnectionError).kind).toBe("transport");
-  expect((err as ConnectionError).message).toContain("early transport failure");
+  const err = await expectRejectionKind(mc.receive(), "transport");
+  expect(err.message).toContain("early transport failure");
 });
 
 test("fromEventConnection over FileSyncConnection: a send-time transport failure becomes a sticky terminal error", async () => {

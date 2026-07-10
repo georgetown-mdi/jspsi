@@ -29,6 +29,8 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { stripFences } from "./lib/markdownFences.mjs";
+
 /** The `##`/`###` sections a pre-contribution quickstart is expected to hold. */
 export const ALLOWED_HEADINGS = [
   "Scope of this document",
@@ -50,22 +52,6 @@ export const ALLOWED_HEADINGS = [
   "Reporting Security Issues",
   "Reporting Other Issues",
 ];
-
-// Blank out fenced code blocks while preserving line numbers, so a `node_modules`
-// path or a `##` inside a code sample is not mistaken for prose.
-function stripFences(text) {
-  let inFence = false;
-  return text
-    .split("\n")
-    .map((line) => {
-      if (/^\s*(```|~~~)/.test(line)) {
-        inFence = !inFence;
-        return "";
-      }
-      return inFence ? "" : line;
-    })
-    .join("\n");
-}
 
 // A path INTO a dependency's source: `node_modules/` + package + at least one
 // more segment. The trailing segment is what distinguishes a source citation

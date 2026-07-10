@@ -1,3 +1,12 @@
+/**
+ * The pure, React-free model behind the web standardization-authoring workbench:
+ * the intent-grouped function menu, the descriptor-driven typed param-field model,
+ * and per-param validation. The single tested boundary -- the function grouping and
+ * the Zod-shape introspection are exercised here rather than through the UI. The
+ * value-level constraint check the workbench renders as badges lives in core's
+ * `checkValueConstraints` (shared with the CLI), not here.
+ */
+
 import {
   STANDARDIZATION_FUNCTION_DESCRIPTORS,
   sanitizeForDisplay,
@@ -85,32 +94,6 @@ export function descriptorFor(
     ? STANDARDIZATION_FUNCTION_DESCRIPTORS[name]
     : undefined;
 }
-
-/**
- * The pure, React-free model behind the web standardization-authoring workbench:
- * the intent-grouped function menu, the descriptor-driven typed param-field model,
- * and per-param validation. The single tested boundary -- the function grouping and
- * the Zod-shape introspection are exercised here rather than through the UI. The
- * value-level constraint check the workbench renders as badges lives in core's
- * `checkValueConstraints` (shared with the CLI), not here.
- *
- * Everything authoring-related is driven from core's
- * {@link STANDARDIZATION_FUNCTION_DESCRIPTORS}, the shared descriptor table, so the
- * editor never re-encodes a function's parameter shape, label, or risk tier. The
- * standard add menu ({@link STANDARDIZATION_FUNCTION_GROUPS}) offers exactly the
- * functions whose descriptor `tier` is `"standard"` (`coalesce` among them). The
- * `tier: "regex"` family (raw-pattern authoring) is excluded from the standard
- * menu, grouped instead under {@link STANDARDIZATION_EXPERT_FUNCTION_GROUPS},
- * never surfaced as a recommended fix. Whether those functions can be added, and
- * whether an existing regex step's pattern is editable, is governed by the shared
- * step editor's `allowRawPatterns` prop (default false): the per-party cleaning
- * editors (the inviter's advanced options and the acceptor's "Prepare your data"
- * screen) pass it true, so raw patterns are authorable there directly with no
- * opt-in switch, while the cross-party, token-embedded element-transform editor
- * leaves it false so a partner-authored regex stays read-only. A default
- * pipeline's existing regex steps are always rendered and reorderable regardless
- * of that prop.
- */
 
 // --- Function intent grouping ------------------------------------------------
 

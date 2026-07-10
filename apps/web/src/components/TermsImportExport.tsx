@@ -28,6 +28,8 @@ import type { AdvancedInviteSeed } from "@psi/advancedInvite";
  * approach (which defers its own revoke by tens of seconds). */
 const REVOKE_DELAY_MS = 60_000;
 
+const IMPORT_SUCCESS = "Imported. Review the loaded terms before generating.";
+
 /** Trigger a client-side download of `content` as `filename`. The terms never
  * leave the browser; this writes them to the user's disk the same way the file is
  * read in (locally). */
@@ -89,8 +91,6 @@ export function TermsImportExport({
   const [text, setText] = useState("");
   const [error, setError] = useState<string>();
   const [imported, setImported] = useState(false);
-
-  const IMPORT_SUCCESS = "Imported. Review the loaded terms before generating.";
 
   const handleImport = () => {
     setImported(false);

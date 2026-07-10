@@ -221,8 +221,8 @@ const SFTPEndpointSchema = z.strictObject(
 // would be meaningless once the acceptor remaps the path. The endpoint's security
 // invariant is "no credentials", not "absolute path". (Distinctness of the split
 // halves, unlike absoluteness, survives the swap, so it IS enforced here by the
-// directory-mode refines.) `path` is optional (it was required before the split
-// pair existed); those refines require exactly one form.
+// directory-mode refines.) `path` is optional; the directory-mode refines
+// require exactly one form (single path or the split pair).
 const FileDropEndpointSchema = z.strictObject(
   {
     channel: z.literal("filedrop"),

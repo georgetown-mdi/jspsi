@@ -8,7 +8,7 @@ import {
 } from "../src/config/metadata";
 import { UsageError } from "../src/errors";
 
-// ─── inferMetadata: linkage columns ──────────────────────────────────────────
+// --- inferMetadata: linkage columns ------------------------------------------
 
 test("ssn: linkage role, not payload by default", () => {
   const [col] = inferMetadata(["ssn"]);
@@ -49,7 +49,7 @@ test("an inferred zip column is excluded from the disclosed set", () => {
   expect(disclosed).toContain("notes");
 });
 
-// ─── inferMetadata: identifier column ────────────────────────────────────────
+// --- inferMetadata: identifier column ----------------------------------------
 
 test("identifier canonical name: identifier role, not linkage", () => {
   const [col] = inferMetadata(["identifier"]);
@@ -65,7 +65,7 @@ test("identifier alias 'id': identifier role, not linkage", () => {
   expect(col.isPayload).toBe(true);
 });
 
-// ─── inferMetadata: _id suffix ──────────────────────────────────────────────
+// --- inferMetadata: _id suffix ----------------------------------------------
 
 test("column ending in _id: inferred as identifier type, isPayload true", () => {
   const [col] = inferMetadata(["client_id"]);
@@ -94,7 +94,7 @@ test("canonical id column alongside _id column: id keeps identifier role, _id st
   expect(clientIdCol?.role).toBe("payload");
 });
 
-// ─── inferMetadata: unknown columns ──────────────────────────────────────────
+// --- inferMetadata: unknown columns ------------------------------------------
 
 test("unknown column: payload role and isPayload true", () => {
   const [col] = inferMetadata(["program_start_date"]);
@@ -103,7 +103,7 @@ test("unknown column: payload role and isPayload true", () => {
   expect(col.isPayload).toBe(true);
 });
 
-// ─── inferMetadata: name is preserved ────────────────────────────────────────
+// --- inferMetadata: name is preserved ----------------------------------------
 
 test("original column name casing is preserved", () => {
   const [upper] = inferMetadata(["LAST_NAME"]);
@@ -112,7 +112,7 @@ test("original column name casing is preserved", () => {
   expect(mixed.name).toBe("First_Name");
 });
 
-// ─── inferMetadata: alias resolution ─────────────────────────────────────────
+// --- inferMetadata: alias resolution -----------------------------------------
 
 test.each([
   ["first_name", "first_name"],
@@ -147,7 +147,7 @@ test.each([
   expect(col.type).toBe(expectedType);
 });
 
-// ─── inferMetadata: case-insensitive lookup ───────────────────────────────────
+// --- inferMetadata: case-insensitive lookup -----------------------------------
 
 test.each([
   ["SSN", "ssn"],
@@ -162,7 +162,7 @@ test.each([
   },
 );
 
-// ─── inferMetadata: mixed columns ────────────────────────────────────────────
+// --- inferMetadata: mixed columns --------------------------------------------
 
 test("known and unknown columns are inferred correctly in a single call", () => {
   const result = inferMetadata(["ssn", "program_start_date", "first_name"]);
@@ -183,7 +183,7 @@ test("known and unknown columns are inferred correctly in a single call", () => 
   });
 });
 
-// ─── ALIAS_TYPE_META_MAP ──────────────────────────────────────────────────────
+// --- ALIAS_TYPE_META_MAP ------------------------------------------------------
 
 test("ALIAS_TYPE_META_MAP entries have type, role, and isPayload", () => {
   const entry = ALIAS_TYPE_META_MAP["ssn"];
@@ -197,7 +197,7 @@ test("ALIAS_TYPE_META_MAP identifier entry has role identifier, not linkage", ()
   expect(entry.role).toBe("identifier");
 });
 
-// ─── safeParseMetadata ────────────────────────────────────────────────────────
+// --- safeParseMetadata --------------------------------------------------------
 
 test("safeParseMetadata camelizes the on-disk snake_case keys", () => {
   // The form saveConfig writes (is_payload, not isPayload).
@@ -261,7 +261,7 @@ test.each([
   expect(result.success).toBe(false);
 });
 
-// ─── column-name uniqueness ───────────────────────────────────────────────────
+// --- column-name uniqueness ---------------------------------------------------
 
 test("safeParseMetadata rejects duplicate column names", () => {
   const result = safeParseMetadata([
@@ -297,7 +297,7 @@ test("safeParseMetadata accepts names differing only in case (matching is exact)
   expect(result.success).toBe(true);
 });
 
-// ─── column-name length bound ─────────────────────────────────────────────────
+// --- column-name length bound -------------------------------------------------
 
 test("safeParseMetadata rejects an empty column name", () => {
   // An empty name is now rejected at config parse rather than parsing cleanly and
@@ -309,7 +309,6 @@ test("safeParseMetadata rejects an empty column name", () => {
 });
 
 test("safeParseMetadata rejects a column name over the length bound", () => {
-  // MAX_NAME_LENGTH is 256; 257 characters exceeds it.
   const result = safeParseMetadata([
     { name: "a".repeat(257), type: "other", role: "payload", is_payload: true },
   ]);
@@ -345,7 +344,7 @@ test("safeParseMetadata does not echo an over-long name in the error", () => {
   }
 });
 
-// ─── role: ignored ────────────────────────────────────────────────────────────
+// --- role: ignored ------------------------------------------------------------
 
 test("safeParseMetadata accepts role: ignored", () => {
   const result = safeParseMetadata([
@@ -395,7 +394,7 @@ test("inferMetadata never assigns role: ignored", () => {
   expect(result.every((c) => c.role !== "ignored")).toBe(true);
 });
 
-// ─── inferMetadata: empty column name ─────────────────────────────────────────
+// --- inferMetadata: empty column name -----------------------------------------
 
 test("inferMetadata rejects an empty column name at intake", () => {
   // An empty (zero-length) name -- a trailing comma, a blank cell, or a leading

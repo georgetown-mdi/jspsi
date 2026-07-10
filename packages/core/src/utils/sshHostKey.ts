@@ -81,8 +81,7 @@ export async function computeHostKeyFingerprint(
 
 /**
  * Return the first fingerprint in `pins` that the raw SSH host-key blob matches,
- * or `undefined` when it matches none. The set extension of
- * {@link verifyHostKeyFingerprint}: the blob is hashed once and its digest
+ * or `undefined` when it matches none. The blob is hashed once and its digest
  * compared against each pin, so a server presenting a host key matching ANY pin
  * is accepted. This is what lets a rotated host key be staged alongside the
  * current one during a rekey window -- pin both and either is accepted, with no
@@ -126,33 +125,6 @@ export async function matchHostKeyFingerprint(
       return pin;
   }
   return undefined;
-}
-
-/**
- * Verify that a raw SSH host-key blob matches a single pinned fingerprint
- * string. Returns `true` only when the SHA-256 digest of `keyBlob` exactly
- * equals the digest encoded in `pin`, and `false` otherwise -- including when
- * `pin` is malformed (a body `atob` cannot decode), so a bad pin fails closed
- * rather than throwing. A malformed pin names no key, so refusing it is the safe
- * answer for any caller that reaches this exported primitive with a value that
- * did not pass {@link HOST_KEY_FINGERPRINT_REGEX}.
- *
- * The single-pin form of {@link matchHostKeyFingerprint}; both share that one
- * decode-and-compare implementation rather than re-deriving it -- host-key
- * matching is a security primitive, and a silent second implementation would be
- * the failure mode the shared-helper convention guards against.
- *
- * @param keyBlob - raw host-key blob from ssh2's `hostVerifier`
- * @param pin - pinned fingerprint in OpenSSH SHA256 format, e.g.
- *   `SHA256:abc...xyz` (50 characters total: the 7-character `SHA256:` prefix
- *   plus 43 unpadded standard-base64 characters for the 32-byte digest;
- *   validated at config-parse time by {@link HOST_KEY_FINGERPRINT_REGEX})
- */
-export async function verifyHostKeyFingerprint(
-  keyBlob: Uint8Array<ArrayBuffer>,
-  pin: string,
-): Promise<boolean> {
-  return (await matchHostKeyFingerprint(keyBlob, [pin])) !== undefined;
 }
 
 /**

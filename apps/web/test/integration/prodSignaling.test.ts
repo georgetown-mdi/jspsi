@@ -1,8 +1,6 @@
 import { dirname, resolve } from "node:path";
-import { createServer } from "node:net";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
 
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
@@ -10,6 +8,13 @@ import {
   probeUnmatchedUpgrade,
   waitForColdSignaling,
 } from "../devServer/signalingProbe";
+
+import {
+  getFreePort,
+  spawnProdServer,
+  stopProdServer,
+  waitForRoot,
+} from "./prodServer.js";
 
 import type { ChildProcess } from "node:child_process";
 
@@ -45,76 +50,6 @@ const hasBuild = existsSync(prodEntry);
 const READY_TIMEOUT_MS = 30_000;
 const COLD_PROBE_DEADLINE_MS = 20_000;
 const UNMATCHED_PROBE_MS = 3_000;
-const STOP_TIMEOUT_MS = 5_000;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-/** Ask the OS for a free loopback TCP port so this server never collides with
- * the shared globalSetup dev server (or anything else). There is a small,
- * accepted TOCTOU window between closing this probe and the spawned server's own
- * bind; nothing here contends for ephemeral ports (the dev server uses a fixed
- * port), so a collision is improbable, and waitForRoot surfaces it promptly as an
- * early-exit error rather than a confusing readiness timeout. */
-function getFreePort(): Promise<number> {
-  return new Promise((resolvePort, reject) => {
-    const probe = createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-      if (typeof address !== "object" || address === null) {
-        probe.close(() =>
-          reject(new Error("could not determine a free port from the probe")),
-        );
-        return;
-      }
-      const port = address.port;
-      probe.close(() => resolvePort(port));
-    });
-  });
-}
-
-async function httpAccepts(url: string, timeoutMs: number): Promise<boolean> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    // Release the socket: this polls every 250ms and we read neither body.
-    await res.body?.cancel();
-    return true;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function waitForRoot(
-  url: string,
-  proc: ChildProcess,
-  getLaunchError: () => Error | undefined,
-): Promise<void> {
-  const deadline = Date.now() + READY_TIMEOUT_MS;
-  for (;;) {
-    // Surface an early exit (a port collision, a missing/broken build) with its
-    // real cause, instead of polling a server that is never coming up until the
-    // readiness deadline and then reporting a misleading timeout. A spawn/exec
-    // failure that surfaces as a child `error` event (rather than an exit) leaves
-    // exitCode/signalCode null, so also re-throw a captured launch error here.
-    const launchError = getLaunchError();
-    if (launchError) throw launchError;
-    if (proc.exitCode !== null || proc.signalCode !== null)
-      throw new Error(
-        `production server exited before becoming ready ` +
-          `(code ${proc.exitCode}, signal ${proc.signalCode})`,
-      );
-    if (await httpAccepts(url, 1_000)) return;
-    if (Date.now() >= deadline)
-      throw new Error(`production server did not answer ${url} in time`);
-    await sleep(250);
-  }
-}
 
 describe.skipIf(!hasBuild)(
   "the production server warms PeerJS signaling at startup",
@@ -124,76 +59,20 @@ describe.skipIf(!hasBuild)(
 
     beforeAll(async () => {
       port = await getFreePort();
-      // node .output/server/index.mjs is a single process, but spawn it as its
-      // own group so teardown can SIGTERM the whole tree. NITRO_HOST pins the
-      // loopback bind; PORT pins the free port (the nitro entry reads it straight
-      // from process.env, no dotenv override).
-      const env: NodeJS.ProcessEnv = {
-        ...process.env,
-        PORT: String(port),
-        NITRO_HOST: "127.0.0.1",
-      };
-      const proc = spawn("node", [prodEntry], {
-        cwd: webRoot,
-        env,
-        detached: true,
-        stdio: "ignore",
-      });
+      const { child: proc, getLaunchError } = await spawnProdServer(
+        prodEntry,
+        webRoot,
+        port,
+      );
       child = proc;
-      proc.unref();
-
-      // Capture child `error` events for the process's whole life (not just the
-      // launch tick): a persistent listener both lets waitForRoot surface a
-      // post-launch spawn/exec failure and prevents a stray child error from
-      // throwing as an unhandled EventEmitter `error` and crashing the worker.
-      let launchError: Error | undefined;
-      proc.on("error", (err) => {
-        launchError = err;
-      });
-      await new Promise<void>((r) => setImmediate(r));
-      if (launchError) throw launchError;
 
       // Readiness is the ROOT route only -- deliberately not /api/peerjs/*, which
       // would warm signaling and defeat the test.
-      await waitForRoot(`http://127.0.0.1:${port}/`, proc, () => launchError);
+      await waitForRoot(`http://127.0.0.1:${port}/`, proc, getLaunchError);
     }, READY_TIMEOUT_MS + 10_000);
 
     afterAll(async () => {
-      const c = child;
-      // Already gone if it exited (exitCode) or was signalled (signalCode);
-      // checking only exitCode would miss a SIGKILLed child and kill a dead group.
-      if (
-        !c ||
-        c.pid === undefined ||
-        c.exitCode !== null ||
-        c.signalCode !== null
-      )
-        return;
-      const pid = c.pid;
-      // Re-ref the child (unref'd at spawn) while awaiting its exit, so the event
-      // loop cannot drain mid-teardown and leave an orphaned server -- the same
-      // guard the dev-server globalSetup uses on its stop path.
-      c.ref();
-      await new Promise<void>((resolveStop) => {
-        const timer = setTimeout(() => {
-          try {
-            process.kill(-pid, "SIGKILL");
-          } catch {
-            // already gone
-          }
-        }, STOP_TIMEOUT_MS);
-        timer.unref();
-        c.once("exit", () => {
-          clearTimeout(timer);
-          resolveStop();
-        });
-        try {
-          process.kill(-pid, "SIGTERM");
-        } catch {
-          clearTimeout(timer);
-          resolveStop();
-        }
-      });
+      await stopProdServer(child);
     });
 
     test(

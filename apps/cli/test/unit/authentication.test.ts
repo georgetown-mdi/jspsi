@@ -76,6 +76,18 @@ async function teardown(
   await Promise.allSettled([connA.close(), connB.close()]);
 }
 
+function roles(
+  connA: FileSyncConnection,
+  connB: FileSyncConnection,
+): [HandshakeRole, HandshakeRole] {
+  expect(connA.handshakeRole).toBeDefined();
+  expect(connB.handshakeRole).toBeDefined();
+  return [
+    connA.handshakeRole as HandshakeRole,
+    connB.handshakeRole as HandshakeRole,
+  ];
+}
+
 // --- Token rotation ----------------------------------------------------------
 
 test("both parties derive the same rotated token over a real connection", async () => {
@@ -83,11 +95,7 @@ test("both parties derive the same rotated token over a real connection", async 
   const connB = makeConn();
 
   const [mcA, mcB] = await openAndSync(connA, connB);
-
-  expect(connA.handshakeRole).toBeDefined();
-  const roleA = connA.handshakeRole as HandshakeRole;
-  expect(connB.handshakeRole).toBeDefined();
-  const roleB = connB.handshakeRole as HandshakeRole;
+  const [roleA, roleB] = roles(connA, connB);
 
   const [a, b] = await Promise.all([
     authenticateConnection(mcA, { sharedSecret: TOKEN_A }, roleA, true),
@@ -144,11 +152,7 @@ test("rotated token written to the key file carries no expiry", async () => {
   const connB = makeConn();
 
   const [mcA, mcB] = await openAndSync(connA, connB);
-
-  expect(connA.handshakeRole).toBeDefined();
-  const roleA = connA.handshakeRole as HandshakeRole;
-  expect(connB.handshakeRole).toBeDefined();
-  const roleB = connB.handshakeRole as HandshakeRole;
+  const [roleA, roleB] = roles(connA, connB);
 
   const [{ rotatedSecret }] = await Promise.all([
     authenticateConnection(mcA, { sharedSecret: TOKEN_A }, roleA, true),
@@ -252,11 +256,7 @@ test("authentication throws when tokens differ", async () => {
   const connB = makeConn();
 
   const [mcA, mcB] = await openAndSync(connA, connB);
-
-  expect(connA.handshakeRole).toBeDefined();
-  const roleA = connA.handshakeRole as HandshakeRole;
-  expect(connB.handshakeRole).toBeDefined();
-  const roleB = connB.handshakeRole as HandshakeRole;
+  const [roleA, roleB] = roles(connA, connB);
 
   const [resultA, resultB] = await Promise.allSettled([
     authenticateConnection(mcA, { sharedSecret: TOKEN_A }, roleA, true),
