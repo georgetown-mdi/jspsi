@@ -1662,7 +1662,8 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // above, never this write -- the write carries its own per-op budget (see
     // the marker write's own per-op budget). The await MUST precede client.end():
     // the marker write rides the same underlying transport, so an earlier end()
-    // would kill an in-flight write -- the captured abortWriteInputs immunize only
+    // would kill an in-flight write -- the write inputs the abort subsystem captured
+    // at arm time immunize only
     // against the path/config nulling, not against end(). Gated on abortArmed &&
     // decision-unresolved so the idempotent second/third close() from doCleanup
     // re-enters as a clean no-op. That no-op cannot race the write even though it
