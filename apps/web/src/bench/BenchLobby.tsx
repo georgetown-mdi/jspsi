@@ -1,5 +1,9 @@
+import { useState } from "react";
+
 import { Button, Textarea, VisuallyHidden } from "@mantine/core";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
+
+import { tokenFromInput } from "@components/AcceptForm";
 
 import { BenchPage } from "./BenchPage";
 import styles from "./bench.module.css";
@@ -12,6 +16,25 @@ import styles from "./bench.module.css";
  * built out, and the current app at `/` remains the way to run an exchange.
  */
 export function BenchLobby() {
+  const navigate = useNavigate();
+  const [invitation, setInvitation] = useState("");
+  const [invitationError, setInvitationError] = useState<string>();
+
+  // "Review invitation" peels the token out of whatever was pasted -- a bare
+  // code or a deep-link URL -- via the shared AcceptForm rule, and routes to the
+  // accept bench with the token in the URL fragment, never a search param (the
+  // same confidential-value handling the inviter's deep-link and the legacy
+  // accept form use). An empty extraction shows the inline field error and does
+  // not navigate.
+  function reviewInvitation() {
+    const token = tokenFromInput(invitation);
+    if (token === "") {
+      setInvitationError("An invitation is required");
+      return;
+    }
+    void navigate({ to: "/bench/accept", hash: token });
+  }
+
   return (
     <BenchPage>
       <main className={styles.lobby}>
@@ -50,14 +73,17 @@ export function BenchLobby() {
               placeholder="https://...#... or the bare code"
               autosize
               minRows={2}
+              value={invitation}
+              error={invitationError}
+              errorProps={{ role: "alert" }}
+              onChange={(event) => {
+                setInvitation(event.currentTarget.value);
+                if (invitationError !== undefined)
+                  setInvitationError(undefined);
+              }}
             />
             <p>
-              <Button
-                variant="outline"
-                component={Link}
-                to="/bench/accept"
-                mt="sm"
-              >
+              <Button variant="outline" mt="sm" onClick={reviewInvitation}>
                 Review invitation
               </Button>
             </p>

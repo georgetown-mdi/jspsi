@@ -15,7 +15,7 @@ import {
  * Taking the fragment keeps the confidential token out of any query string, the
  * same reason the inviter places it in the fragment.
  */
-function tokenFromInput(input: string): string {
+export function tokenFromInput(input: string): string {
   const trimmed = input.trim();
   const hash = trimmed.indexOf("#");
   return hash === -1 ? trimmed : trimmed.slice(hash + 1);
