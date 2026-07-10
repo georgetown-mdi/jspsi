@@ -120,8 +120,7 @@ function readTextFile(pathValue: string, kind: string): string {
 // Reject an unrecognized version with a clear, specific message BEFORE the schema
 // parse -- so a future-format or hand-edited file is not mis-reported as a generic
 // shape error. The version literal is also enforced by the schema; this only makes
-// the failure legible. recordedVersionMatches (core) reads the raw version; this
-// wraps a mismatch in the CLI's UsageError.
+// the failure legible.
 function assertRecognizedVersion(
   raw: unknown,
   expected: string,
@@ -197,9 +196,9 @@ function firstIssue(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-// toRetainedResult and deriveOurIdColumn are the browser-safe shaping helpers,
-// lifted to @psilink/core next to reconstructCommittedData; re-exported here so
-// this command and its tests keep a single import site.
+// toRetainedResult and deriveOurIdColumn are browser-safe shaping helpers that
+// live in @psilink/core; re-exported here so this command and its tests keep a
+// single import site.
 export { deriveOurIdColumn, toRetainedResult };
 
 // --- Report formatting -------------------------------------------------------

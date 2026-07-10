@@ -78,6 +78,17 @@ interface ParsedKeysState {
   alert?: string;
 }
 
+/** The re-supply section's own re-run button gates on this, but a one-CSV state
+ * also silently starves the top-level Verify button of the file it needs, so
+ * both the gating and this warning are shared between the two call sites. */
+function OneCsvWarning() {
+  return (
+    <Text role="alert" c="yellow.8" size="sm">
+      Supply both the input and the result to open the commitments, or neither.
+    </Text>
+  );
+}
+
 const TONE_COLOR: Record<VerdictTone, string> = {
   verified: "green",
   failed: "red",
@@ -279,11 +290,22 @@ export function VerifyReceiptBench() {
       verdictRef.current?.focus();
   }, [verdict, verifyError]);
 
+  // A newly loaded record or keys file starts a possibly different exchange, so
+  // any re-supplied files, pasted terms, and verdict from the previous one must
+  // not carry forward into the next verify.
+  function clearResupply() {
+    setInputCsv(undefined);
+    setResultCsv(undefined);
+    setLocalTerms(undefined);
+    setPartnerTerms(undefined);
+  }
+
   async function onRecordFile(file: File) {
     const supplied = await readSupplied(file);
     const parsed = parseRecordDocument(supplied.text);
     setVerdict(undefined);
     setVerifyError(undefined);
+    clearResupply();
     if (parsed.kind === "ok")
       setRecord({ file: supplied, record: parsed.record });
     else setRecord({ file: supplied, alert: parsed.message });
@@ -294,6 +316,7 @@ export function VerifyReceiptBench() {
     const parsed = parseKeysDocument(supplied.text);
     setVerdict(undefined);
     setVerifyError(undefined);
+    clearResupply();
     if (parsed.kind === "ok") setKeys({ file: supplied, keys: parsed.keys });
     else setKeys({ file: supplied, alert: parsed.message });
   }
@@ -400,7 +423,10 @@ export function VerifyReceiptBench() {
       </Stack>
 
       <div className={styles.workFoot}>
-        <Button disabled={!canVerify} onClick={() => void runVerify()}>
+        <Button
+          disabled={!canVerify || oneCsvSupplied}
+          onClick={() => void runVerify()}
+        >
           Verify
         </Button>
         <p className={styles.statusLine}>
@@ -408,6 +434,7 @@ export function VerifyReceiptBench() {
             ? "Ready to verify."
             : "Load the record and its keys to verify."}
         </p>
+        {oneCsvSupplied && <OneCsvWarning />}
       </div>
 
       {/* The verdict and any verify-time fault share one stable focus target. */}
@@ -484,12 +511,7 @@ export function VerifyReceiptBench() {
               chosen={resultCsv}
               onFile={(file) => void onCsvFile(file, setResultCsv)}
             />
-            {oneCsvSupplied && (
-              <Text role="alert" c="yellow.8" size="sm">
-                Supply both the input and the result to open the commitments, or
-                neither.
-              </Text>
-            )}
+            {oneCsvSupplied && <OneCsvWarning />}
             <TermsInput
               label="Your linkage terms"
               description="Paste your exchange config or exported linkage-terms document."

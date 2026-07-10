@@ -337,4 +337,104 @@ describe("verify receipt bench", () => {
       .element(page.getByRole("button", { name: "Verify" }))
       .toBeEnabled();
   });
+
+  test("re-supplying only one of the input/result CSVs disables the top Verify button and warns", async () => {
+    const { record, keys } = await buildFixture();
+    await mountVerifyBench();
+
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(0)),
+      jsonFile("rec.json", serializeExchangeRecord(record)),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(1)),
+      jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
+    );
+    await expect
+      .element(page.getByRole("button", { name: "Verify" }))
+      .toBeEnabled();
+
+    await userEvent.click(
+      page.getByRole("button", {
+        name: "Re-supply your files to open the commitments",
+      }),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(2)),
+      csvFile("input.csv", INPUT_CSV),
+    );
+
+    // One of the two re-supply files is present: the top-level Verify button
+    // must not silently ignore it, and the warning must be visible outside the
+    // (still-open) re-supply section too. Both Verify buttons are on screen
+    // now, so disambiguate from "Verify with these files" by exact name.
+    await expect
+      .element(page.getByRole("button", { name: "Verify", exact: true }))
+      .toBeDisabled();
+    await expect
+      .element(
+        page
+          .getByText(
+            "Supply both the input and the result to open the commitments",
+            { exact: false },
+          )
+          .first(),
+      )
+      .toBeInTheDocument();
+
+    // Supplying the second CSV clears the warning and re-enables the button.
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(3)),
+      csvFile("result.csv", RESULT_CSV),
+    );
+    await expect
+      .element(page.getByRole("button", { name: "Verify", exact: true }))
+      .toBeEnabled();
+    await expect
+      .element(
+        page.getByText(
+          "Supply both the input and the result to open the commitments",
+          { exact: false },
+        ),
+      )
+      .not.toBeInTheDocument();
+  });
+
+  test("loading a new record file clears previously re-supplied files and terms", async () => {
+    const { record, keys } = await buildFixture();
+    await mountVerifyBench();
+
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(0)),
+      jsonFile("rec.json", serializeExchangeRecord(record)),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(1)),
+      jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
+    );
+    await userEvent.click(
+      page.getByRole("button", {
+        name: "Re-supply your files to open the commitments",
+      }),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(2)),
+      csvFile("input.csv", INPUT_CSV),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(3)),
+      csvFile("result.csv", RESULT_CSV),
+    );
+    await expect.element(page.getByText("input.csv")).toBeInTheDocument();
+    await expect.element(page.getByText("result.csv")).toBeInTheDocument();
+
+    // Swap in a different (still valid) record: the stale re-supply state from
+    // the previous exchange must not silently feed the next verify.
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(0)),
+      jsonFile("rec2.json", serializeExchangeRecord(record)),
+    );
+    await expect.element(page.getByText("input.csv")).not.toBeInTheDocument();
+    await expect.element(page.getByText("result.csv")).not.toBeInTheDocument();
+  });
 });
