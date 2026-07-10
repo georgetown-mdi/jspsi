@@ -331,6 +331,7 @@ export function setDraftMetadata(
     metadata,
     standardization: reconcileStandardization(
       draft.standardization,
+      draft.metadata,
       metadata,
       draft.identity,
       rawRows,
@@ -342,26 +343,41 @@ export function setDraftMetadata(
 /**
  * Reconcile the draft's standardization against a freshly-edited metadata, the
  * standardization analogue of {@link reconcileKeys}. A transformation is kept when
- * its input column is still present and `role: linkage` (so an operator's authored
- * cleaning and any second-column binding it added survive a metadata edit), and
- * dropped when its column was removed or re-roled off linkage -- so a stale
+ * its input column is still present, `role: linkage`, and of the same semantic type
+ * it had before the edit (so an operator's authored cleaning and any second-column
+ * binding it added survive a metadata edit), and dropped when its column was
+ * removed, re-roled off linkage, or RETYPED to a different type -- so a stale
  * transformation never cleans a column the core would refuse to bind (matching
- * participation requires `role: linkage`). A semantic type the kept set no longer
- * covers (e.g. a newly-typed column) gains the recommended default cleaning, mirroring
- * how {@link reconcileKeys} appends a newly-offerable key. With no edits this returns
- * the unchanged default standardization (every default transformation is kept and
- * every type covered), so a metadata-untouched draft stays byte-identical.
+ * participation requires `role: linkage`) nor declares a field whose type no longer
+ * matches its column ({@link authoredLinkageFields} types a field by its column, so
+ * a kept `first_name`-column transformation on a column retyped to `last_name` would
+ * emit a `first_name`-named `last_name` field). The type change is read from the
+ * column's `prevMetadata` type versus its `metadata` type, not from the
+ * transformation's `output` name, so an imported field whose name does not match its
+ * type (declarations name and type fields independently) is judged by its column
+ * alone. A semantic type the kept set no longer covers (a newly-typed column, or one
+ * whose only transformation was just dropped for a type change) gains the recommended
+ * default cleaning, mirroring how {@link reconcileKeys} appends a newly-offerable key.
+ * With no edits this returns the unchanged default standardization (every default
+ * transformation is kept and every type covered), so a metadata-untouched draft stays
+ * byte-identical.
  */
 function reconcileStandardization(
   prev: Standardization,
+  prevMetadata: Metadata,
   metadata: Metadata,
   identity: string,
   rawRows: ReadonlyArray<CSVRow>,
 ): Standardization {
   const columnByName = new Map(metadata.map((column) => [column.name, column]));
+  const prevTypeByName = new Map(
+    prevMetadata.map((column) => [column.name, column.type]),
+  );
   const kept = prev.filter((transformation) => {
     const column = columnByName.get(transformation.input);
-    return column !== undefined && column.role === "linkage";
+    if (column === undefined || column.role !== "linkage") return false;
+    const prevType = prevTypeByName.get(transformation.input);
+    return prevType === undefined || prevType === column.type;
   });
   const coveredTypes = new Set(
     kept

@@ -449,6 +449,143 @@ describe("setDraftMetadata re-derives offerable keys", () => {
       false,
     );
   });
+
+  test("retyping a column between two linkage types re-derives its cleaning", () => {
+    // The first_name column seeds a first_name-named transformation cleaned with
+    // the name pipeline. Retyping it to ssn (a distinct linkage type with a
+    // distinct pipeline, and no other ssn column present) must drop that stale
+    // transformation and re-derive the ssn default, so the column's committed
+    // cleaning and field type follow its new type rather than lingering as a
+    // first_name-named field typed ssn.
+    const { draft } = seedAdvancedInvite("Org", COLS);
+    const seeded = draft.standardization.find((t) => t.input === "first_name");
+    expect(seeded?.output).toBe("first_name");
+
+    const retyped = setColumnType(draft.metadata, "first_name", "ssn").metadata;
+    const next = setDraftMetadata(draft, retyped);
+
+    const rederived = next.standardization.find(
+      (t) => t.input === "first_name",
+    );
+    expect(rederived?.output).toBe("ssn");
+    // The stale name-typed field name is gone, so the built terms declare the
+    // column as ssn, not as a first_name-named field typed ssn.
+    expect(
+      next.standardization.some(
+        (t) => t.output === "first_name" && t.input === "first_name",
+      ),
+    ).toBe(false);
+    const fields = authoredLinkageFields(next.metadata, next.standardization);
+    expect(
+      fields.some((f) => f.name === "first_name" && f.type === "ssn"),
+    ).toBe(false);
+    expect(fields.some((f) => f.name === "ssn" && f.type === "ssn")).toBe(true);
+  });
+
+  test("retyping between two name types commits no name/type-mismatched field", () => {
+    // Retyping the first_name column to last_name: both share the name pipeline, so
+    // a step comparison would miss the change. A last_name column is already
+    // present, so the retyped column's type is covered and its stale first_name
+    // transformation clears rather than re-deriving a second field -- either way no
+    // first_name-named field typed last_name reaches the committed terms.
+    const { draft } = seedAdvancedInvite("Org", COLS);
+    const retyped = setColumnType(
+      draft.metadata,
+      "first_name",
+      "last_name",
+    ).metadata;
+    const next = setDraftMetadata(draft, retyped);
+
+    expect(
+      next.standardization.some(
+        (t) => t.output === "first_name" && t.input === "first_name",
+      ),
+    ).toBe(false);
+    const terms = buildAdvancedTerms(next);
+    expect(
+      terms.linkageFields.some(
+        (f) => f.name === "first_name" && f.type === "last_name",
+      ),
+    ).toBe(false);
+    expect(terms.linkageFields.some((f) => f.name === "first_name")).toBe(
+      false,
+    );
+  });
+
+  test("a non-type metadata edit re-derives byte-identical standardization", () => {
+    // Guard the byte-identity criterion: an edit that does NOT change any column's
+    // type (here toggling extra's disclosure) leaves every kept transformation's
+    // type in agreement with its column, so the reconcile drops nothing new and
+    // reproduces the standardization unchanged.
+    const { draft } = seedAdvancedInvite("Org", COLS);
+    const toggled = setColumnDisclosure(
+      draft.metadata,
+      "extra",
+      "ignored",
+    ).metadata;
+    const next = setDraftMetadata(draft, toggled);
+    expect(next.standardization).toStrictEqual(draft.standardization);
+  });
+
+  test("a non-type edit keeps an imported field whose name mismatches its type", () => {
+    // An imported field's name and type are independent (the schema names and types
+    // fields separately), so an operator can import a second first_name field NAMED
+    // `ssn_2`. A non-type edit (toggling extra's disclosure) must not read the type
+    // out of that name and drop the still-first_name binding: the reconcile compares
+    // each column's type across the edit, and this column's type did not change, so
+    // its transformation and its authored name-pipeline cleaning both survive.
+    const metadata: Metadata = [
+      { name: "fn_a", type: "first_name", role: "linkage", isPayload: false },
+      { name: "fn_b", type: "first_name", role: "linkage", isPayload: false },
+      {
+        name: "dob_col",
+        type: "date_of_birth",
+        role: "linkage",
+        isPayload: false,
+      },
+      { name: "extra", type: "other", role: "payload", isPayload: true },
+    ];
+    const columns = ["fn_a", "fn_b", "dob_col", "extra"];
+    const seed: AdvancedInviteSeed = {
+      terms: getDefaultLinkageTerms("Org", metadata),
+      metadata,
+      columns,
+    };
+    const nameConstraints = {
+      affixesAllowed: false,
+      allowedCharacters: "A-Z ",
+    };
+    const imported: LinkageTerms = {
+      ...getDefaultLinkageTerms("Org", metadata),
+      linkageFields: [
+        {
+          name: "first_name",
+          type: "first_name",
+          constraints: nameConstraints,
+        },
+        { name: "ssn_2", type: "first_name", constraints: nameConstraints },
+        { name: "date_of_birth", type: "date_of_birth" },
+      ],
+      linkageKeys: [
+        {
+          name: "K",
+          elements: [{ field: "ssn_2" }, { field: "date_of_birth" }],
+        },
+      ],
+    };
+    const draft = draftFromTerms(imported, seed);
+    const before = draft.standardization.find((t) => t.output === "ssn_2");
+    expect(before).toBeDefined();
+
+    const toggled = setColumnDisclosure(
+      draft.metadata,
+      "extra",
+      "ignored",
+    ).metadata;
+    const next = setDraftMetadata(draft, toggled);
+    const after = next.standardization.find((t) => t.output === "ssn_2");
+    expect(after).toStrictEqual(before);
+  });
 });
 
 describe("validateAdvancedInvite", () => {
