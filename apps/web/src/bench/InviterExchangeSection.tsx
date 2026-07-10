@@ -130,11 +130,13 @@ export function InviterExchangeSection({
 
   // The phase-level focus throughline. The bench host moves focus to the h1
   // when the section mounts; within the section, focus moves again when the
-  // partner connects -- the share block (which may hold focus on a copy
+  // partner connects or a retry clears the alert -- the share block or the
+  // alert (either of which may hold focus, on a copy button or the Try again
   // button) unmounts, so without this the browser drops focus to <body> --
-  // and at completion, so the results are read. The connect move fires only
+  // and at completion, so the results are read. The recovery moves fire only
   // when focus was actually orphaned onto <body>, so focus the user placed on
-  // a live element is not stolen; completion always moves it.
+  // a live element is not stolen; completion always moves it. While a failure
+  // is showing, the alert-focus effect below owns the moment.
   const headingRef = useRef<HTMLHeadingElement>(null);
   const mounted = useRef(false);
   useEffect(() => {
@@ -146,9 +148,10 @@ export function InviterExchangeSection({
       headingRef.current?.focus();
       return;
     }
+    if (failure !== undefined) return;
     const active = document.activeElement;
     if (!active || active === document.body) headingRef.current?.focus();
-  }, [phase]);
+  }, [phase, failure]);
 
   // A failure alert receives focus when it appears, so the message is read
   // before anything else. Failure and completion are mutually exclusive (a

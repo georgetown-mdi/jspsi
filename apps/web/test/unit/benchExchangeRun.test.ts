@@ -136,6 +136,9 @@ describe("the timeline advances on stage events", () => {
     ]);
     expect(done.finishedAt).toEqual(at(47));
     expect(progressPercent(done)).toBe(100);
+    // The lifecycle never emits a "done" stage event, so completion must
+    // synthesize the final label the live region announces.
+    expect(currentStageLabel(done)).toBe("Done");
   });
 
   test("under single-pass, Link keys completes without ever being current", () => {
@@ -197,6 +200,18 @@ describe("the visit history", () => {
     const run = runWithStage(initialRun(), "surprise stage", at(32));
     expect(currentStageLabel(run)).toBe("surprise stage");
     expect(states(run)[3]).toBe("Link keys:current");
+  });
+
+  test("a stage id outside the tree holds the bar at the last known stage", () => {
+    const seeded = runWithStages(
+      initialRun(),
+      stagesFor(preparedWith("cascade", 2)),
+    );
+    const waiting = runWithStage(seeded, WAITING_STAGE_ID, at(32));
+    expect(progressPercent(waiting)).toBe(20);
+    expect(
+      progressPercent(runWithStage(waiting, "surprise stage", at(33))),
+    ).toBe(20);
   });
 
   test("failure freezes the run where it stands", () => {

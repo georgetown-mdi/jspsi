@@ -957,6 +957,10 @@ describe("inviter bench", () => {
       .element(page.getByText(/1,847.*matched records/))
       .toBeInTheDocument();
     await expect.element(page.getByText(/^Finished /)).toBeInTheDocument();
+    // The status label's live region reaches the final "Done".
+    expect(document.querySelector(`.${styles.stageLabel}`)?.textContent).toBe(
+      "Done",
+    );
 
     // Three artifacts, three verbs: the result, the shareable record, the
     // private keys -- each caveat on the download row itself.
@@ -1054,6 +1058,13 @@ describe("inviter bench", () => {
     await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(2));
     expect(lifecycleCall(1).sharedSecret).toBe(lifecycleCall(0).sharedSecret);
     expect(page.getByText("Exchange failed").query()).toBeNull();
+    // The clicked Try again unmounted with its alert, orphaning focus onto
+    // <body>; the recovery lands it back on the heading.
+    await vi.waitFor(() => {
+      expect(document.activeElement?.textContent).toBe(
+        "Your invitation is ready",
+      );
+    });
   });
 
   test("post-create: an output failure offers no re-run, only a fresh setup", async () => {

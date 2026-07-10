@@ -29,6 +29,15 @@ export function StatusPanel({
 }) {
   const percent = progressPercent(run);
   const lastVisit = run.visits[run.visits.length - 1];
+  // Cannot happen by construction -- runExchange emits stage ids from the same
+  // prepared exchange the tree was built from -- so a mismatch is a desync bug
+  // worth a development-time signal (the model still renders defensively: the
+  // raw id as the label, the bar held at the last known stage).
+  if (
+    import.meta.env.DEV &&
+    !run.stages.some((stage) => stage.id === run.stageId)
+  )
+    console.warn(`StatusPanel: unknown stageId "${run.stageId}"`);
   return (
     <section
       className={

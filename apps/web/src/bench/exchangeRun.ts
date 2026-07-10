@@ -130,13 +130,19 @@ export function runWithStage(
   };
 }
 
-/** Complete the run: the open visit closes, the stage becomes the terminal
- * done stage, and the finish instant is recorded for the completion header. */
+/** Complete the run: the open visit closes, the terminal done stage is
+ * entered as its own (already-closed) visit -- the lifecycle never emits a
+ * "done" stage event, so the completion synthesizes it here and the status
+ * label's live region announces the final "Done" -- and the finish instant is
+ * recorded for the completion header. */
 export function runWithCompletion(run: ExchangeRun, at: Date): ExchangeRun {
   return {
     ...run,
     stageId: DONE_STAGE_ID,
-    visits: closedVisits(run.visits, at),
+    visits: [
+      ...closedVisits(run.visits, at),
+      { id: DONE_STAGE_ID, label: "Done", completedAt: at },
+    ],
     finishedAt: at,
   };
 }
@@ -184,12 +190,19 @@ export function timelineSteps(run: ExchangeRun): Array<TimelineStep> {
 }
 
 /** The status panel's progress, as the current stage's position through the
- * stage tree (0 before start, 100 at done). */
+ * stage tree (0 before start, 100 at done). A stage id outside the tree
+ * asserts nothing new: the bar holds at the last stage the tree knows rather
+ * than regressing to zero. */
 export function progressPercent(run: ExchangeRun): number {
   if (run.stageId === DONE_STAGE_ID) return 100;
-  const index = run.stages.findIndex((stage) => stage.id === run.stageId);
-  if (index <= 0 || run.stages.length < 2) return 0;
-  return Math.round((index / (run.stages.length - 1)) * 100);
+  if (run.stages.length < 2) return 0;
+  for (let visit = run.visits.length - 1; visit >= 0; visit--) {
+    const index = run.stages.findIndex(
+      (stage) => stage.id === run.visits[visit].id,
+    );
+    if (index > 0) return Math.round((index / (run.stages.length - 1)) * 100);
+  }
+  return 0;
 }
 
 /** The status panel's current stage label -- the open visit's, which tracked
