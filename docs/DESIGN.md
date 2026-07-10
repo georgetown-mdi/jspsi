@@ -104,7 +104,7 @@ It may be beneficial to be able to build the web application as a desktop Electr
 - [SECURITY_DESIGN.md](SECURITY_DESIGN.md) - threat model, authentication design, and channel security
 - [COMMUNICATION.md](COMMUNICATION.md) - communication channels and supporting services
 - [CLI.md](CLI.md) - full CLI command reference and configuration guide
-- [EXCHANGE_REFERENCE.md](EXCHANGE_REFERENCE.md) - complete exchange specification reference
+- [EXCHANGE_REFERENCE.md](EXCHANGE_REFERENCE.md) - complete exchange reference
 - [COMPLIANCE.md](COMPLIANCE.md) - regulatory framings, data classification, and compliance considerations
 
 # License and disclaimer

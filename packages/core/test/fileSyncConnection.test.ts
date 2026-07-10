@@ -54,34 +54,11 @@ async function putSrcBytes(
   return Buffer.concat(chunks);
 }
 
-// A no-delete transport is the primary production target (sync-mediated stores
-// with no deletion visibility): delete()/createExclusive() either throw or
-// silently no-op, so the message loop must not depend on them. `deleteBehavior`
-// and `createExclusiveBehavior` pick that per test; a shared `files` store is
-// passed when two conns must see one directory; `onDelete`/`onGet` record calls
-// a test asserts on.
-type TransportOpBehavior =
-  | { mode: "real" }
-  | { mode: "throw"; message: string }
-  | { mode: "noop" };
-
-interface MockClientOptions {
-  files?: Map<string, Buffer>;
-  deleteBehavior?: TransportOpBehavior;
-  createExclusiveBehavior?: TransportOpBehavior;
-  onDelete?: (path: string) => void;
-  onGet?: (path: string) => void;
-}
-
-function makeMockClient(options: MockClientOptions = {}): {
+function makeMockClient(): {
   client: FileTransportClient;
   files: Map<string, Buffer>;
 } {
-  const files = options.files ?? new Map<string, Buffer>();
-  const deleteBehavior = options.deleteBehavior ?? { mode: "real" };
-  const createExclusiveBehavior = options.createExclusiveBehavior ?? {
-    mode: "real",
-  };
+  const files = new Map<string, Buffer>();
 
   const client: FileTransportClient = {
     connect: async () => {},
@@ -103,7 +80,6 @@ function makeMockClient(options: MockClientOptions = {}): {
         }));
     },
     get: async (path: string) => {
-      options.onGet?.(path);
       const data = files.get(path);
       if (!data) throw new Error(`${path}: not found`);
       return data as Buffer<ArrayBufferLike>;
@@ -112,15 +88,9 @@ function makeMockClient(options: MockClientOptions = {}): {
       files.set(dest, await putSrcBytes(src));
     },
     delete: async (path: string) => {
-      options.onDelete?.(path);
-      if (deleteBehavior.mode === "throw")
-        throw new Error(deleteBehavior.message);
-      if (deleteBehavior.mode === "noop") return;
       files.delete(path);
     },
     safeDelete: async (path: string) => {
-      // A no-delete transport swallows safeDelete silently rather than removing.
-      if (deleteBehavior.mode !== "real") return;
       files.delete(path);
     },
     rename: async (from: string, to: string) => {
@@ -130,9 +100,6 @@ function makeMockClient(options: MockClientOptions = {}): {
       files.set(to, data);
     },
     createExclusive: async (path: string) => {
-      if (createExclusiveBehavior.mode === "throw")
-        throw new Error(createExclusiveBehavior.message);
-      if (createExclusiveBehavior.mode === "noop") return;
       if (files.has(path))
         throw Object.assign(new Error(`${path}: file already exists`), {
           code: "EEXIST",
