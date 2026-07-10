@@ -165,7 +165,7 @@ function removeAffixes(s: string): string {
   return s
     .replaceAll(suffixPattern, "")
     .replaceAll(titlePattern, "")
-    .replaceAll(/\s\+/g, " ")
+    .replaceAll(/\s\s+/g, " ")
     .trim();
 }
 
