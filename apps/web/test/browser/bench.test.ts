@@ -2,18 +2,16 @@
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
 import { MantineProvider } from "@mantine/core";
 
-import {
-  AcceptUnderConstruction,
-  ExchangeUnderConstruction,
-} from "@bench/placeholders";
+import { AcceptUnderConstruction } from "@bench/placeholders";
 import { BenchLobby } from "@bench/BenchLobby";
+import { InviterBench } from "@bench/InviterBench";
 import styles from "@bench/bench.module.css";
 
 import type { ReactNode } from "react";
@@ -116,9 +114,9 @@ describe("bench lobby", () => {
   });
 });
 
-describe("bench shell", () => {
-  test("renders rail, work, and ledger as labeled landmarks", async () => {
-    mount(createElement(ExchangeUnderConstruction));
+describe("inviter bench", () => {
+  test("renders the empty spine: landmarks, placeholder ledger, quiet facts", async () => {
+    mount(createElement(InviterBench));
 
     await expect
       .element(page.getByRole("heading", { level: 1 }))
@@ -134,7 +132,7 @@ describe("bench shell", () => {
     );
     expect(currentSteps.map((step) => step.textContent)).toEqual(["Your file"]);
 
-    // Customize facts with no state yet render the em-dash quiet fact.
+    // Customize facts with no file yet render the em-dash quiet fact.
     const facts = Array.from(
       (rail as Element).querySelectorAll(`.${styles.val}`),
     );
@@ -160,22 +158,127 @@ describe("bench shell", () => {
       "Transport",
     ]);
 
-    const references = Array.from(
-      (ledger as Element).querySelectorAll(`.${styles.ledgerRef}`),
-    ).map((reference) => reference.textContent);
-    expect(references).toEqual([
-      "Step 2",
-      "Step 2",
-      "Step 3",
-      "Step 3",
-      "Step 3",
-    ]);
-
     // Every undecided ledger value is the muted em-dash mark.
     const values = Array.from((ledger as Element).querySelectorAll("dd")).map(
       (value) => value.textContent,
     );
     expect(values).toEqual(Array.from({ length: 7 }, () => EM_DASH));
+  });
+
+  test("derives terms on read and tracks step-2 edits in the ledger", async () => {
+    mount(createElement(InviterBench));
+
+    await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+
+    const fileInput = document.querySelector('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      new File(
+        [
+          "client_id,first_name,last_name,dob,program_code\n" +
+            "1,Ann,Lee,01/02/1990,A\n2,Bo,Ray,03/04/1985,B\n",
+        ],
+        "clients.csv",
+        { type: "text/csv" },
+      ),
+    );
+
+    // The file card and the recommended-terms callout appear on read, and the
+    // ledger fills in while still on step 1: derivation happens at read time.
+    await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
+    await expect
+      .element(page.getByText("Recommended terms are ready", { exact: false }))
+      .toBeInTheDocument();
+
+    const ledger = () =>
+      document.querySelector('aside[aria-label="This exchange"]') as Element;
+    const ledgerRow = (label: string) =>
+      Array.from(ledger().querySelectorAll(`.${styles.ledgerRow}`)).find(
+        (row) => row.querySelector("dt")?.childNodes[0].textContent === label,
+      );
+    expect(ledgerRow("You will send")?.querySelector("dd")?.textContent).toBe(
+      "program_code",
+    );
+    expect(ledgerRow("Expires")?.querySelector("dd")?.textContent).toBe(
+      "1 hour after you share",
+    );
+
+    await page
+      .getByRole("button", { name: "Continue to matching & sharing" })
+      .click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Matching & sharing");
+
+    // Undiscloses the only sent column: the ledger and the empty-state inset
+    // track the edit.
+    await page
+      .getByLabelText("How program_code is used")
+      .selectOptions("ignored");
+    await expect
+      .element(page.getByText("Nothing - matching only"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("No values will be sent to your partner", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+
+    // Retyping the ignored column to the row identifier displaces the inferred
+    // one; the displacement is announced.
+    await page
+      .getByLabelText("Type for program_code")
+      .selectOptions("identifier");
+    await expect
+      .element(
+        page.getByText(
+          "client_id changed to Ignored - only one column can be the row identifier.",
+        ),
+      )
+      .toBeInTheDocument();
+
+    // The layout holds at 400px: no horizontal document overflow.
+    await page.viewport(400, 800);
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(400);
+  });
+
+  test("surfaces a two-identifier file in the rail's Problems block", async () => {
+    mount(createElement(InviterBench));
+
+    await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana");
+
+    const fileInput = document.querySelector('input[type="file"]');
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      new File(
+        ["id,identifier,last_name,dob\n1,2,Lee,01/02/1990\n"],
+        "twoids.csv",
+        { type: "text/csv" },
+      ),
+    );
+    await expect.element(page.getByText("twoids.csv")).toBeInTheDocument();
+
+    // The inferred two-identifier conflict is a rail problem from the moment
+    // the file is read, and its entry navigates into step 2 to fix it.
+    await page
+      .getByRole("button", { name: "Choose a single row identifier" })
+      .click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Matching & sharing");
+
+    await page
+      .getByLabelText("How identifier is used")
+      .selectOptions("ignored");
+    await expect
+      .element(page.getByLabelText("How identifier is used"))
+      .toHaveValue("ignored");
+    expect(document.querySelector('section[aria-label="Problems"]')).toBeNull();
   });
 
   test("collapses to the single-column layout without rail and ledger", async () => {

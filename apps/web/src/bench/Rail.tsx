@@ -9,10 +9,14 @@ import type { ReactNode } from "react";
  */
 export type RailStepState = "done" | "current" | "pending";
 
-/** One entry in a {@link RailSteps} spine or timeline list. */
+/** One entry in a {@link RailSteps} spine or timeline list. A completed step
+ * with `onSelect` renders as a link back to that step, per the mockup's
+ * done-steps-are-links rule; the current and pending steps are not
+ * navigable. */
 export interface RailStep {
   label: string;
   state: RailStepState;
+  onSelect?: () => void;
 }
 
 /**
@@ -85,12 +89,63 @@ export function RailSteps({ steps }: { steps: ReadonlyArray<RailStep> }) {
     <ol className={styles.railSteps}>
       {steps.map((step) => (
         <li key={step.label} className={STEP_STATE_CLASS[step.state]}>
-          <span aria-current={step.state === "current" ? "step" : undefined}>
-            {step.label}
-          </span>
+          {step.state === "done" && step.onSelect !== undefined ? (
+            <button
+              type="button"
+              className={styles.stepLink}
+              onClick={step.onSelect}
+            >
+              {step.label}
+            </button>
+          ) : (
+            <span aria-current={step.state === "current" ? "step" : undefined}>
+              {step.label}
+            </span>
+          )}
         </li>
       ))}
     </ol>
+  );
+}
+
+/** One entry in the rail's {@link RailProblems} block. */
+export interface RailProblem {
+  label: string;
+  onSelect?: () => void;
+}
+
+/**
+ * The rail's Problems block -- the design's error summary: it appears only
+ * when something actually needs attention, and each entry links into the
+ * surface that can fix it.
+ */
+export function RailProblems({
+  problems,
+}: {
+  problems: ReadonlyArray<RailProblem>;
+}) {
+  if (problems.length === 0) return null;
+  return (
+    <section className={styles.problems} aria-label="Problems">
+      <h2>Problems</h2>
+      <ul>
+        {problems.map((problem) => (
+          <li key={problem.label}>
+            {problem.onSelect !== undefined ? (
+              <button
+                type="button"
+                className={styles.stepLink}
+                onClick={problem.onSelect}
+              >
+                {problem.label}
+              </button>
+            ) : (
+              problem.label
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
