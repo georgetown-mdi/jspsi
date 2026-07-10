@@ -504,9 +504,7 @@ const LinkageFieldSchema: z.ZodType<LinkageField> = z.discriminatedUnion(
 // --- Linkage key elements ----------------------------------------------------
 
 type GenerateFuzzyComparisons =
-  | "transpositions"
-  | "edit_distances"
-  | "adjacent_years";
+  "transpositions" | "edit_distances" | "adjacent_years";
 
 const GenerateFuzzyComparisonsSchema: z.ZodType<GenerateFuzzyComparisons> =
   z.enum(["transpositions", "edit_distances", "adjacent_years"]);

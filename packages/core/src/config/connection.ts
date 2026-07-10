@@ -855,9 +855,7 @@ export interface FileDropConnectionConfig {
 
 /** Connection configuration for an exchange. Discriminated by `channel`. */
 export type ConnectionConfig =
-  | WebRTCConnectionConfig
-  | SFTPConnectionConfig
-  | FileDropConnectionConfig;
+  WebRTCConnectionConfig | SFTPConnectionConfig | FileDropConnectionConfig;
 
 // These intermediate schemas are intentionally left without z.ZodType<T>
 // annotations: z.discriminatedUnion requires a concrete ZodObject, and the

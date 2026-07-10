@@ -168,9 +168,7 @@ export class PSIParticipant {
   config: Config;
   private setStage: (id: ProtocolId) => void;
   private stages:
-    | typeof joinerProtocolStages
-    | typeof starterProtocolStages
-    | undefined;
+    typeof joinerProtocolStages | typeof starterProtocolStages | undefined;
   private log: ReturnType<typeof getLoggerForVerbosity>;
   private elementBounds: PsiElementBounds;
   private engine: PsiEngine;

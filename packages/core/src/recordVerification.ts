@@ -46,10 +46,7 @@ import type { AssociationTable } from "./types.js";
  *   or drifted keys file), or a mandatory commitment is absent from the record.
  */
 export type CommitmentStatus =
-  | "verified"
-  | "mismatch"
-  | "not-supplied"
-  | "unopenable";
+  "verified" | "mismatch" | "not-supplied" | "unopenable";
 
 /**
  * The outcome of the agreed-terms-hash check. `not-checked` when either party's

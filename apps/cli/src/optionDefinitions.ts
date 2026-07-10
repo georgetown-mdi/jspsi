@@ -290,8 +290,7 @@ export function parseCommonBootstrapArgs(
     // resolved secret.
     serverPassword: singleValue(argv, "server-password") as string | undefined,
     serverPrivateKey: singleValue(argv, "server-private-key") as
-      | string
-      | undefined,
+      string | undefined,
     serverPrivateKeyPassphrase: singleValue(
       argv,
       "server-private-key-passphrase",
@@ -299,8 +298,7 @@ export function parseCommonBootstrapArgs(
     // Boolean toggle, so it keeps a plain cast (a repeat is valid, like the other
     // boolean flags); yargs yields true only when the enabling form is passed.
     serverKeyboardInteractive: argv["server-keyboard-interactive"] as
-      | boolean
-      | undefined,
+      boolean | undefined,
     connectionTimeout: durationFlagSeconds(
       argv,
       "connection-timeout",

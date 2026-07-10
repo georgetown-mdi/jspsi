@@ -313,8 +313,7 @@ export async function handler(argv: Arguments): Promise<void> {
     const keysArg = singleValue(argv, "keys") as string | undefined;
     const configFile = singleValue(argv, "config-file") as string | undefined;
     const partnerTermsFile = singleValue(argv, "partner-terms") as
-      | string
-      | undefined;
+      string | undefined;
 
     if ((inputFile === undefined) !== (resultFile === undefined))
       throw new UsageError(

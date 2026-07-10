@@ -22,11 +22,7 @@ import type { Connection } from "../types";
  *   docs/COMMUNICATION.md ("Error handling") for the rationale.
  */
 export type ConnectionErrorKind =
-  | "transport"
-  | "security"
-  | "usage"
-  | "protocol"
-  | "closed";
+  "transport" | "security" | "usage" | "protocol" | "closed";
 
 /** A terminal connection failure, tagged with a {@link ConnectionErrorKind}. */
 export class ConnectionError extends Error {

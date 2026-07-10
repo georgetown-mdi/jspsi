@@ -75,8 +75,7 @@ export interface LinkageTermsImportFailure {
 }
 
 export type LinkageTermsImportResult =
-  | LinkageTermsImportSuccess
-  | LinkageTermsImportFailure;
+  LinkageTermsImportSuccess | LinkageTermsImportFailure;
 
 /**
  * Serialize linkage terms to a snake_case `format` document. JSON is pretty-

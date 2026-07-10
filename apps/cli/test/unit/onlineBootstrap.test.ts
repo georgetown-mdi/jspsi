@@ -1682,8 +1682,7 @@ test("observedReceivedColumnsForSave drops an over-cap observation (stays loadab
 function mockSuccessfulExchange(observed: string[] | undefined): void {
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
     const onAuthenticated = callArgs.find((a) => typeof a === "function") as
-      | (() => void | Promise<void>)
-      | undefined;
+      (() => void | Promise<void>) | undefined;
     await onAuthenticated?.();
     return { observedReceivedPayloadColumns: observed };
   }) as never);
@@ -1774,8 +1773,7 @@ test("runOnlineBootstrap keeps a failed observed-payload write non-fatal", async
   const configPath = path.join(dir, "psilink.yaml");
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
     const onAuthenticated = callArgs.find((a) => typeof a === "function") as
-      | (() => void | Promise<void>)
-      | undefined;
+      (() => void | Promise<void>) | undefined;
     await onAuthenticated?.(); // hook writes configPath as a file
     fs.rmSync(configPath); // swap it for a directory so the second
     fs.mkdirSync(configPath); // saveConfig's rename throws (EISDIR)
@@ -1984,8 +1982,7 @@ test("runOnlineBootstrap persists an @path credential as the reference while con
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
     connectionPassedToRunProtocol = callArgs[0] as SFTPConnectionConfig;
     const onAuthenticated = callArgs.find((a) => typeof a === "function") as
-      | (() => void | Promise<void>)
-      | undefined;
+      (() => void | Promise<void>) | undefined;
     await onAuthenticated?.();
     return {};
   }) as never);
@@ -2039,8 +2036,7 @@ test("runOnlineBootstrap persists an @path private-key passphrase as the referen
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
     connectionPassedToRunProtocol = callArgs[0] as SFTPConnectionConfig;
     const onAuthenticated = callArgs.find((a) => typeof a === "function") as
-      | (() => void | Promise<void>)
-      | undefined;
+      (() => void | Promise<void>) | undefined;
     await onAuthenticated?.();
     return {};
   }) as never);

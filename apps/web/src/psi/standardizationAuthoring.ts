@@ -246,11 +246,7 @@ export function functionDisplay(functionName: string): {
  *   dialect-and-length schema).
  */
 export type ParamFieldKind =
-  | "number"
-  | "string"
-  | "enum"
-  | "stringArray"
-  | "boolean";
+  "number" | "string" | "enum" | "stringArray" | "boolean";
 
 /**
  * One parameter of a standardization function, reduced to what the editor needs to

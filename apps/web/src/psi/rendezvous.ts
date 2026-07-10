@@ -227,8 +227,7 @@ export async function listenAsInviter(
 /** The result of one dial attempt: an opened channel, or a recoverable
  * "the inviter is not registered yet" that the caller backs off and re-dials. */
 type DialAttempt =
-  | { outcome: "open"; conn: DataConnection }
-  | { outcome: "unavailable" };
+  { outcome: "open"; conn: DataConnection } | { outcome: "unavailable" };
 
 /** Is `err` PeerJS's non-fatal `peer-unavailable`? The dialed id is not
  * registered yet, but the dialing peer survives, so the caller may re-dial. */

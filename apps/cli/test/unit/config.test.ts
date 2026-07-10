@@ -1851,8 +1851,7 @@ test("connection.options.sweep_exchange_files is not a persistable config field 
   };
   const parsed = parseExchangeSpec(raw);
   const options = parsed.connection.options as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   expect(options?.["sweepExchangeFiles"]).toBeUndefined();
   expect(options?.["forceRetainSweep"]).toBeUndefined();
 });

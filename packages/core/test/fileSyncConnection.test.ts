@@ -1544,11 +1544,7 @@ test("send streams the header and payload as two chunks, without a concat copy",
   conn.peerId = "stub-peer";
 
   let putSrc:
-    | string
-    | Buffer
-    | Uint8Array[]
-    | NodeJS.ReadableStream
-    | undefined;
+    string | Buffer | Uint8Array[] | NodeJS.ReadableStream | undefined;
   const origPut = client.put.bind(client);
   client.put = async (src, dest, opts) => {
     putSrc = src;

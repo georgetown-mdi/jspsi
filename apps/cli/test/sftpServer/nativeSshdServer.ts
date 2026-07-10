@@ -60,11 +60,7 @@ const VALIDATE_ONLY_PORT = 22222;
  *   - `allowlist`: an explicit user@host allow matrix.
  */
 export type NativeProfile =
-  | "baseline"
-  | "chroot"
-  | "restricted-crypto"
-  | "rate-limited"
-  | "allowlist";
+  "baseline" | "chroot" | "restricted-crypto" | "rate-limited" | "allowlist";
 
 export const NATIVE_PROFILES: readonly NativeProfile[] = [
   "baseline",

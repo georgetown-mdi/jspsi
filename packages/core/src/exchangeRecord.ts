@@ -77,9 +77,7 @@ export const SALT_BYTES = 32;
  * as another, and the key under which the commitment and its salt are stored
  * in the record and verification-keys files. */
 export type CommitmentName =
-  | "associationTable"
-  | "localPayloadSent"
-  | "partnerPayloadReceived";
+  "associationTable" | "localPayloadSent" | "partnerPayloadReceived";
 
 // Domain-separation labels, one per commitment kind. Folded into the committed
 // message (not the salt) so the three kinds are cryptographically distinct even
