@@ -1056,6 +1056,67 @@ describe("inviter bench", () => {
     expect(page.getByText("Exchange failed").query()).toBeNull();
   });
 
+  test("post-create: an output failure offers no re-run, only a fresh setup", async () => {
+    await createSealedInvitation();
+    lifecycleCall(0).onStage("waiting for peer");
+    lifecycleCall(0).onStage("confirming protocol");
+    lifecycleCall(0).onError({
+      category: "output",
+      error: new Error("blob quota exceeded"),
+    });
+
+    // The exchange already succeeded, so the alert must not invite running it
+    // again: no Try again, no start-over-and-remint -- only the sanitized
+    // detail and the way out to a new exchange.
+    await expect
+      .element(page.getByText("Results unavailable"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText(
+          /generating the results file failed: blob quota exceeded/,
+        ),
+      )
+      .toBeInTheDocument();
+    expect(page.getByRole("button", { name: "Try again" }).query()).toBeNull();
+    expect(
+      page
+        .getByRole("button", { name: "Start over with a fresh invitation" })
+        .query(),
+    ).toBeNull();
+    const another = Array.from(document.querySelectorAll("a")).find(
+      (anchor) => anchor.textContent === "Set up another exchange",
+    );
+    expect(another?.getAttribute("href")).toBe("/bench");
+  });
+
+  test("post-create: a config failure surfaces its message and starts over", async () => {
+    await createSealedInvitation();
+    lifecycleCall(0).onError({
+      category: "config",
+      error: new Error("standardization output name contradicts the terms"),
+    });
+
+    // The prepare-time fault names only local config, so the actionable
+    // message is surfaced, and the recovery is the start-over path (a retry
+    // would fail identically).
+    await expect
+      .element(page.getByText("Could not prepare the exchange"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("standardization output name contradicts the terms"),
+      )
+      .toBeInTheDocument();
+    expect(page.getByRole("button", { name: "Try again" }).query()).toBeNull();
+    await page
+      .getByRole("button", { name: "Start over with a fresh invitation" })
+      .click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Review & create");
+  });
+
   test("post-create: a security failure forces a fresh invitation, inputs intact", async () => {
     await createSealedInvitation();
     lifecycleCall(0).onStage("waiting for peer");
