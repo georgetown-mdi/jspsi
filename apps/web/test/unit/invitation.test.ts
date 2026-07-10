@@ -82,6 +82,65 @@ describe("generateInvitation", () => {
     });
   });
 
+  test("defaults to a webrtc endpoint when no connectionEndpoint is requested", async () => {
+    // The existing call sites omit connectionEndpoint, so the default path must
+    // still embed the app's own webrtc signaling locator, unchanged.
+    const { encoded } = await generateInvitation({
+      inviterName: "County Health Dept",
+      file: csvStream(),
+      location,
+    });
+    const token = await decodeInvitation(encoded);
+    expect(token.connectionEndpoint).toStrictEqual({
+      channel: "webrtc",
+      host: "example.org",
+      port: 8443,
+      path: "/api/",
+    });
+  });
+
+  test("embeds a credential-free sftp endpoint when one is requested", async () => {
+    const { encoded } = await generateInvitation({
+      inviterName: "County Health Dept",
+      file: csvStream(),
+      location,
+      connectionEndpoint: {
+        channel: "sftp",
+        host: "sftp.example.org",
+        port: 2222,
+        path: "/exchanges/drop",
+      },
+    });
+    const token = await decodeInvitation(encoded);
+    // The requested sftp locator rides the token, not the location's webrtc one.
+    expect(token.connectionEndpoint).toStrictEqual({
+      channel: "sftp",
+      host: "sftp.example.org",
+      port: 2222,
+      path: "/exchanges/drop",
+    });
+    // No credential rides along: the endpoint carries only the public locator
+    // keys (the type admits no credential field; the strict schema rejects one).
+    const serialized = JSON.stringify(token.connectionEndpoint);
+    expect(serialized).not.toContain("username");
+    expect(serialized).not.toContain("password");
+    expect(serialized).not.toContain("private_key");
+  });
+
+  test("embeds a filedrop endpoint when one is requested", async () => {
+    const { encoded } = await generateInvitation({
+      inviterName: "County Health Dept",
+      file: csvStream(),
+      location,
+      connectionEndpoint: { channel: "filedrop", path: "/mnt/share/drop" },
+    });
+    const token = await decodeInvitation(encoded);
+    expect(token.connectionEndpoint).toStrictEqual({
+      channel: "filedrop",
+      path: "/mnt/share/drop",
+    });
+  });
+
   test("derives and embeds terms filtered to the keys the file can satisfy", async () => {
     const inviterName = "County Health Dept";
     const result = await generateInvitation({
