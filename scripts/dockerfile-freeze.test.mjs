@@ -105,14 +105,6 @@ describe("Dockerfile dependency freeze", () => {
     expect(allRuntimeDests).toContain("/app/packages/core/package.json");
     expect(allRuntimeDests).toContain("/app/apps/cli/package.json");
   });
-
-  it("keeps a manifest with the CLI's version directly above node_modules for --version", () => {
-    const copy = runtimeCopies.find(({ dests }) =>
-      dests.includes("/app/package.json"),
-    );
-    expect(copy).toBeDefined();
-    expect(copy.sources).toEqual(["/build/apps/cli/package.json"]);
-  });
 });
 
 describe("Dockerfile runtime layout", () => {

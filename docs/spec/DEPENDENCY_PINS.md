@@ -74,8 +74,8 @@ The structural invariants are enforced by `scripts/dockerfile-freeze.test.mjs`
 (run by `npm run test:scripts`, a CI static check): every install is `npm ci`,
 the lockfile is copied into the builder before the first install, the shipped
 tree is the `--omit=dev` one, the runtime stage runs no npm at all, and the
-copied layout keeps the workspace links, the version manifest, and the PSI
-worker entry where the CLI resolves them.
+copied layout keeps the workspace links and the PSI worker entry where the
+CLI resolves them.
 
 Residual float: the `node:26-alpine` base image tag is deliberately not
 digest-pinned, so the Node runtime and Alpine userland beneath the frozen

@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import * as path from "node:path";
+
 import yargs from "yargs";
 import type { Argv } from "yargs";
 
@@ -33,6 +36,27 @@ import {
 } from "./commands/verifyReceipt";
 
 /**
+ * Read this package's own version from its co-located package.json, resolved
+ * relative to this module's own file rather than left to yargs' `.version()`
+ * default. yargs' own heuristic walks up from ITS install directory (not this
+ * CLI's), which in an npm-workspaces monorepo lands on the hoisted
+ * node_modules' enclosing directory -- the repo root -- and reports the root
+ * manifest's version instead of the CLI's. Resolving from `__dirname` instead
+ * is correct both from the built dist (dist/index.js, one level below
+ * apps/cli) and from this source file under a test runner (src/cliParser.ts,
+ * also one level below apps/cli): package.json sits at the same relative
+ * `../package.json` in both.
+ */
+function readCliVersion(): string {
+  const pkgPath = path.join(__dirname, "..", "package.json");
+  // Non-sensitive: this package's own manifest, not a credential file, so there
+  // is no secret for a parse error to leak.
+  // eslint-disable-next-line no-restricted-syntax -- non-credential parse, see above
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
+  return pkg.version;
+}
+
+/**
  * Build the configured psilink yargs parser for `argv`, up to but NOT including
  * `.parseAsync()`. Kept separate from the entry point (`index.ts`) so importing
  * it has no side effect: the entry point drives it against the real process argv,
@@ -44,6 +68,7 @@ export function buildCli(argv: string[]): Argv {
   return (
     yargs(argv)
       .scriptName("psilink")
+      .version(readCliVersion())
       .command(
         "$0",
         "Quick exchange: psilink [--save] URL INPUT_FILE [OUTPUT_FILE]",

@@ -46,10 +46,6 @@ COPY --from=builder /build/apps/cli/dist/index.js apps/cli/dist/index.js
 # loop being free during a round) would not run in the shipped image. Keep its
 # name; it is spawned as a worker, never executed, so no shebang/chmod.
 COPY --from=builder /build/apps/cli/dist/psiWorker.worker.js apps/cli/dist/psiWorker.worker.js
-# yargs derives `--version` from the first package.json above its own install
-# directory (its path up to `node_modules`), so the CLI manifest must also sit
-# at /app or the image reports "unknown".
-COPY --from=builder /build/apps/cli/package.json package.json
 
 WORKDIR /work
 
