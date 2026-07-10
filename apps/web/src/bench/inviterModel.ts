@@ -77,6 +77,16 @@ export function sealEditor(editor: InviterEditor): InviterEditor {
   return { ...editor, sealed: true };
 }
 
+/** Reopen the session -- the "start over with a fresh invitation" recovery
+ * after a failed run. Every input survives (a failure never clears what the
+ * operator authored); only the seal lifts, and the invitation it certified is
+ * discarded by the caller, so the next create mints a fresh secret. */
+export function unsealEditor(editor: InviterEditor): InviterEditor {
+  if (editor.sealed !== true) return editor;
+  const { sealed: _sealed, ...unsealed } = editor;
+  return unsealed;
+}
+
 /** Seed the editing session from the read file -- the "default terms derive
  * from the file the moment it is read" moment of the design. */
 export function editorFromCsv(
@@ -471,6 +481,13 @@ export function expiryLabel(lifetimeSeconds: number, now: Date): string {
   return dateTimeLabel(new Date(now.getTime() + lifetimeSeconds * 1000));
 }
 
+/** Whether a minted invitation's ISO `expires` moment is still ahead of `now`
+ * -- past it, no partner can pass the credential, so a retry is pointless and
+ * the link must stop being offered. */
+export function invitationUsable(expiresIso: string, now: Date): boolean {
+  return new Date(expiresIso).getTime() > now.getTime();
+}
+
 /** Ledger phrasing for who receives the matched results. */
 export const RESULTS_DIRECTION_LABELS: Record<OutputDirection, string> = {
   both: "You and your partner",
@@ -488,16 +505,27 @@ export interface InviterLedgerRow {
   muted?: string;
 }
 
+/** What a completed exchange settled, folded into the ledger: the invitation
+ * is consumed (its expiry no longer means anything), and the receive row can
+ * state what actually arrived -- the matched-row count, or that the agreed
+ * terms withheld the result table from this party. */
+export interface LedgerOutcome {
+  matchedRecordCount?: number;
+  resultWithheld?: boolean;
+}
+
 /**
  * The disclosure ledger for the spine, filling in as the exchange takes shape:
  * before a file is read every value is the em-dash placeholder; once a session
  * exists the send list, matched-on keys, expiry, and result direction are read
  * live from the draft. Once the invitation is minted its absolute `expires`
- * moment replaces the relative lifetime phrase.
+ * moment replaces the relative lifetime phrase, and once the exchange
+ * completes `outcome` replaces the forward-looking rows with what happened.
  */
 export function inviterLedgerRows(
   editor: InviterEditor | undefined,
   expiresIso?: string,
+  outcome?: LedgerOutcome,
 ): Array<InviterLedgerRow> {
   if (editor === undefined) {
     return [
@@ -523,7 +551,12 @@ export function inviterLedgerRows(
     {
       label: "You will receive",
       reference: "Step 2",
-      value: "Matched rows + your partner's shared columns",
+      value:
+        outcome === undefined
+          ? "Matched rows + your partner's shared columns"
+          : outcome.resultWithheld === true
+            ? "No result table - withheld by the agreed terms"
+            : `${new Intl.NumberFormat("en-US").format(outcome.matchedRecordCount ?? 0)} matched rows + shared columns`,
     },
     keys.length > 0
       ? {
@@ -536,9 +569,11 @@ export function inviterLedgerRows(
       label: "Expires",
       reference: "Step 3",
       value:
-        expiresIso !== undefined
-          ? dateTimeLabel(new Date(expiresIso))
-          : lifetimeLabel(editor.draft.lifetimeSeconds),
+        outcome !== undefined
+          ? "Invitation used"
+          : expiresIso !== undefined
+            ? dateTimeLabel(new Date(expiresIso))
+            : lifetimeLabel(editor.draft.lifetimeSeconds),
     },
     {
       label: "Results go to",

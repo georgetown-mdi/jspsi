@@ -169,9 +169,11 @@ function hasNonTrustConnectionError(error: unknown): boolean {
 }
 
 /** Whether `error` carries authenticateConnection's `psilinkRecoveryHintEmitted`
- * tag (set on its credential-validation and expiry errors, whose messages
- * already include recovery instructions). */
-function hasRecoveryHint(error: unknown): boolean {
+ * tag, set on its credential-validation and expiry errors. Per core's contract a
+ * tagged message is composed only from local values and already includes its
+ * recovery instructions, so a display layer may surface it (sanitized) instead
+ * of fixed copy, and must not add a second, generic advisory. */
+export function hasRecoveryHint(error: unknown): boolean {
   return (
     typeof error === "object" &&
     error !== null &&

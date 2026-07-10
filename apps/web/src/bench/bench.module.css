@@ -640,6 +640,232 @@
   font-weight: 600;
 }
 
+/* ---------- post-create: share, run, completion ---------- */
+
+.sealedTag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--bench-accent);
+  border: 1px solid var(--bench-accent);
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-bottom: 6px;
+}
+
+.copyRow {
+  margin: 1.1rem 0;
+  max-width: 640px;
+}
+
+.copyBox {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.copyLabel {
+  font-weight: 650;
+  display: block;
+}
+
+.copyHint {
+  display: block;
+  color: var(--bench-secondary);
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.codeBlock {
+  flex: 1;
+  background: var(--bench-code-bg);
+  border: 1px solid var(--bench-rule);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.copyBtn {
+  flex: none;
+  align-self: center;
+}
+
+.statusPanel {
+  border: 1px solid var(--bench-rule);
+  border-radius: 8px;
+  padding: 16px 20px;
+  max-width: 640px;
+  margin: 1.2rem 0;
+}
+
+.statusPanelDone {
+  border: none;
+  padding: 0;
+}
+
+.statusPanel h2 {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--bench-secondary);
+}
+
+.stageLabel {
+  text-align: center;
+  font-weight: 650;
+  font-size: 1.05rem;
+  margin: 6px 0 12px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 3px solid var(--bench-rule);
+  border-top-color: var(--bench-accent);
+  animation: spin 0.9s linear infinite;
+  flex: none;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.progress {
+  height: 14px;
+  border: 1px solid var(--bench-rule);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--bench-code-bg);
+}
+
+.progressBar {
+  height: 100%;
+  background: repeating-linear-gradient(
+    45deg,
+    var(--bench-accent) 0 10px,
+    var(--bench-stripe) 10px 20px
+  );
+  background-size: 28.28px 28.28px;
+  animation: slide 1.1s linear infinite;
+}
+
+.progressHalted .progressBar,
+.progressDone .progressBar {
+  animation: none;
+  background: var(--bench-accent);
+}
+
+@keyframes slide {
+  to {
+    background-position: 28.28px 0;
+  }
+}
+
+.stageHistory {
+  list-style: none;
+  margin: 0.8rem 0 0 0;
+  padding: 0;
+  font-size: 14.5px;
+}
+
+.stageHistory li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  color: var(--bench-secondary);
+}
+
+.stageHistory li.historyNow {
+  color: var(--bench-ink);
+  font-weight: 650;
+}
+
+.tick {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bench-ok) var(--bench-check) center / 10px no-repeat;
+}
+
+.historyNow .tick {
+  background: var(--bench-accent);
+}
+
+.donePanel {
+  border: 1px solid var(--bench-rule);
+  border-left: 6px solid var(--bench-accent);
+  border-radius: 8px;
+  padding: 20px 24px;
+  max-width: 640px;
+  margin: 1.2rem 0;
+}
+
+.bigCount {
+  font-size: 1.5rem;
+  font-weight: 650;
+  margin: 0;
+}
+
+.dlRow {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--bench-rule-soft);
+  max-width: 640px;
+  flex-wrap: wrap;
+}
+
+.dlLabel {
+  flex: 1 1 220px;
+  font-weight: 600;
+}
+
+.keepPrivate {
+  color: var(--bench-danger);
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 12.5px;
+  letter-spacing: 0.05em;
+}
+
+.linkLike {
+  background: none;
+  border: none;
+  padding: 0;
+  font-weight: 600;
+  color: var(--bench-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+    border-top-color: var(--bench-rule);
+    border-left-color: var(--bench-accent);
+  }
+
+  .progressBar {
+    animation: none;
+    background: var(--bench-accent);
+  }
+}
+
 /* ---------- lobby ---------- */
 
 .lobby {

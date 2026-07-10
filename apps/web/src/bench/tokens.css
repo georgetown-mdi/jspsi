@@ -27,6 +27,7 @@
   --bench-code-bg: #efede4;
   --bench-stripe: #4fa2af;
   --bench-shadow: 0 1px 3px rgba(26, 28, 26, 0.1);
+  --bench-check: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill="none" stroke="%23FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M3 8.5 6.5 12 13 4.5"/></svg>');
 }
 
 :root[data-mantine-color-scheme="dark"] {
@@ -53,4 +54,5 @@
   --bench-code-bg: #171a14;
   --bench-stripe: #2e8c9c;
   --bench-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  --bench-check: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill="none" stroke="%230B2A30" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M3 8.5 6.5 12 13 4.5"/></svg>');
 }
