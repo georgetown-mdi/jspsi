@@ -2,12 +2,15 @@ FROM node:26-alpine AS builder
 
 WORKDIR /build
 
-COPY package*.json ./
+COPY package.json package-lock.json ./
 COPY packages/core/package.json packages/core/
 COPY apps/cli/package.json apps/cli/
 COPY lib lib
+# npm ci resolves nothing: it installs exactly the committed lockfile (including
+# each registry package's integrity hash) and fails if a manifest disagrees with
+# it, so an image rebuild cannot drift from the tree CI tested.
 RUN --mount=type=cache,target=/root/.npm \
-  npm install . -w packages/core -w apps/cli
+  npm ci -w packages/core -w apps/cli
 
 COPY tsconfig.base.json tsconfig.json ./
 COPY packages/core/*.ts packages/core/tsconfig.json packages/core/
@@ -16,32 +19,37 @@ COPY apps/cli/tsconfig.json apps/cli/*.ts apps/cli/
 COPY apps/cli/src apps/cli/src/
 RUN npm run build -w packages/core -w apps/cli
 
+# Rebuild node_modules production-only (npm ci empties it first): the identical
+# lockfile-exact resolution minus devDependencies, ready to ship as-is.
+RUN --mount=type=cache,target=/root/.npm \
+  npm ci --omit=dev -w packages/core -w apps/cli
+
 FROM node:26-alpine
 
+# The runtime stage performs no dependency resolution: it copies the builder's
+# production node_modules and mirrors the workspace layout around it so the
+# node_modules/@psilink/core and node_modules/psilink workspace links resolve.
+# Every runtime dependency and transitive is thereby frozen to the committed
+# package-lock.json -- re2js in particular runs partner-supplied transform
+# regexes and must behave byte-identically on both parties or PSI keys silently
+# mismatch. Rationale and residual float: docs/spec/DEPENDENCY_PINS.md.
 WORKDIR /app
-COPY --from=builder /build/apps/cli/package.json .
-COPY --from=builder /build/lib lib
-COPY --from=builder /build/packages/core/package.json lib/core/
-RUN \
-  sed -i -e 's|file:\.\./\.\./lib/|file:../|' lib/core/package.json
-COPY --from=builder /build/packages/core/dist lib/core/dist/
-RUN \
-  sed -i \
-    -e 's|file:\.\./\.\./packages/core|file:./lib/core|' \
-    -e 's|file:\.\./\.\./lib/|file:./lib/|' \
-    package.json
-RUN --mount=type=cache,target=/root/.npm \
-  npm install --omit=dev
-
-COPY --from=builder /build/apps/cli/dist/index.js ./psi-link
-RUN chmod +x ./psi-link
+COPY --from=builder /build/node_modules node_modules
+COPY --from=builder /build/packages/core/package.json packages/core/
+COPY --from=builder /build/packages/core/dist packages/core/dist/
+COPY --from=builder /build/apps/cli/package.json apps/cli/
+COPY --from=builder /build/apps/cli/dist/index.js apps/cli/dist/index.js
 # The PSI crypto worker entry must sit beside the CLI entry: psiWorkerHost.ts
-# resolves it as `<__dirname>/psiWorker.worker.js` (here /app), and without it
-# createPsiEngine silently falls back to the in-process engine -- so the whole
-# off-thread offload (and the SFTP heartbeat that depends on the event loop being
-# free during a round) would not run in the shipped image (board item 208035324).
-# Keep its name; it is spawned as a worker, never executed, so no shebang/chmod.
-COPY --from=builder /build/apps/cli/dist/psiWorker.worker.js ./psiWorker.worker.js
+# resolves it as `<__dirname>/psiWorker.worker.js` (here /app/apps/cli/dist), and
+# without it createPsiEngine silently falls back to the in-process engine -- so
+# the whole off-thread offload (and the SFTP heartbeat that depends on the event
+# loop being free during a round) would not run in the shipped image. Keep its
+# name; it is spawned as a worker, never executed, so no shebang/chmod.
+COPY --from=builder /build/apps/cli/dist/psiWorker.worker.js apps/cli/dist/psiWorker.worker.js
+# yargs derives `--version` from the first package.json above its own install
+# directory (its path up to `node_modules`), so the CLI manifest must also sit
+# at /app or the image reports "unknown".
+COPY --from=builder /build/apps/cli/package.json package.json
 
 WORKDIR /work
 
@@ -49,4 +57,4 @@ WORKDIR /work
 # allocation peak at the phase boundaries (relieveTransientMemory in
 # packages/core/src/link.ts), lowering the receiver's peak RSS; a no-op for every
 # other command. Node consumes the flag, so it does not reach the CLI's argv.
-ENTRYPOINT ["node", "--expose-gc", "/app/psi-link"]
+ENTRYPOINT ["node", "--expose-gc", "/app/apps/cli/dist/index.js"]
