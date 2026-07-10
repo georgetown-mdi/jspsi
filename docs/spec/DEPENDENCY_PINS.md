@@ -56,7 +56,8 @@ runtime stage copies that `node_modules` unchanged. Every runtime dependency and
 transitive in the image is therefore the exact version in the committed
 lockfile: a rebuild without a lockfile change cannot re-resolve a caret range,
 and the image ships the same tree CI tested and the release SBOM records
-(`npm sbom --package-lock-only`, see [RELEASES.md](../RELEASES.md)).
+(`npm sbom --package-lock-only --omit=dev -w packages/core -w apps/cli`, scoped
+to match this same install; see [RELEASES.md](../RELEASES.md)).
 
 Why this is correctness-critical rather than hygiene: `re2js` executes the
 agreed linkage transforms' regexes that standardize values before PSI key
@@ -77,10 +78,14 @@ tree is the `--omit=dev` one, the runtime stage runs no npm at all, and the
 copied layout keeps the workspace links and the PSI worker entry where the
 CLI resolves them.
 
-Residual float: the `node:26-alpine` base image tag is deliberately not
-digest-pinned, so the Node runtime and Alpine userland beneath the frozen
-`node_modules` can still drift between rebuilds. Pinning the base is a separate
-decision with its own upgrade cadence; this freeze does not address it.
+The `node:26-alpine` base image is digest-pinned in both stages to its
+multi-arch index digest, so the Node runtime and Alpine userland beneath the
+frozen `node_modules` no longer drift between rebuilds. The tradeoff is that a
+base patch (a Node or musl fix) no longer arrives automatically on a rebuild:
+bumping the base is a deliberate digest update. Pin the multi-arch index digest,
+not a platform-specific one, or the multi-platform release build cannot resolve
+every architecture; obtain it with `docker buildx imagetools inspect
+node:26-alpine`.
 
 ## Upgrading the SFTP Stack (ssh2 / ssh2-sftp-client)
 

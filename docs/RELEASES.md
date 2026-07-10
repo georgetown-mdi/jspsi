@@ -101,7 +101,7 @@ If you must build and push by hand -- for a workflow outage or a local test -- f
 From the workspace root:
 
 ```sh
-npm sbom --sbom-format cyclonedx --package-lock-only > psilink-X.Y.Z.cdx.json
+npm sbom --sbom-format cyclonedx --package-lock-only --omit=dev -w packages/core -w apps/cli > psilink-X.Y.Z.cdx.json
 ```
 
 ### 10. Publish the GitHub Release
@@ -163,4 +163,4 @@ git verify-tag vX.Y.Z
 
 ## Software Bill of Materials (SBOM)
 
-An SBOM in CycloneDX format is generated as part of the release checklist (step 9) and attached to each GitHub Release. It lists every direct and transitive dependency with versions and licenses, making it straightforward for downstream users to audit their exposure when a vulnerability is announced in a dependency. Because the container image installs from the same committed lockfile the SBOM is generated from, every dependency the shipped image runs appears in the SBOM at the exact resolved version. The SBOM is a superset of the image, however: it also enumerates development dependencies and the `apps/web` workspace, which the production image does not ship (see `docs/spec/DEPENDENCY_PINS.md`).
+An SBOM in CycloneDX format is generated as part of the release checklist (step 9) and attached to each GitHub Release. The `--omit=dev -w packages/core -w apps/cli` scoping matches the Dockerfile's runtime install (`npm ci --omit=dev -w packages/core -w apps/cli`), so the SBOM describes the production dependency tree of the shipped image rather than the whole workspace: it excludes devDependencies and the `apps/web` workspace, which the image does not ship. Because both the SBOM and the image resolve from the same committed lockfile, every dependency it does list appears at the exact resolved version the image runs. The one known residual: `npm sbom` omits a small number of packages that are hoisted to a single `node_modules` entry shared with a dev-only consumer elsewhere in the workspace (for example `yaml` and `tslib`, both installed in the shipped tree but currently absent from the SBOM's component list) -- confirm against `npm ls <pkg> --omit=dev -w packages/core -w apps/cli` if a specific package's presence in the image needs checking and it is missing from the SBOM. See `docs/spec/DEPENDENCY_PINS.md`.

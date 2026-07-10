@@ -1,4 +1,7 @@
-FROM node:26-alpine AS builder
+# Base pinned to node:26-alpine's multi-arch index digest (both stages) so builds
+# resolve one exact image; a base bump for a node or musl patch is a deliberate
+# digest update, not an automatic float. See docs/spec/DEPENDENCY_PINS.md.
+FROM node:26-alpine@sha256:e88a35be04478413b7c71c455cd9865de9b9360e1f43456be5951032d7ac1a66 AS builder
 
 WORKDIR /build
 
@@ -24,7 +27,7 @@ RUN npm run build -w packages/core -w apps/cli
 RUN --mount=type=cache,target=/root/.npm \
   npm ci --omit=dev -w packages/core -w apps/cli
 
-FROM node:26-alpine
+FROM node:26-alpine@sha256:e88a35be04478413b7c71c455cd9865de9b9360e1f43456be5951032d7ac1a66
 
 # The runtime stage performs no dependency resolution: it copies the builder's
 # production node_modules and mirrors the workspace layout around it so the
