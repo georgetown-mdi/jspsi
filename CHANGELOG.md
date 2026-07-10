@@ -144,6 +144,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 - The web inviter's "Advanced options" import now re-generates the rest of an imported linkage-terms document faithfully: linkage-field order and any declared-but-unreferenced field (with its constraints) are preserved rather than reordered or dropped, and a benign empty `constraints: {}` is kept rather than refused, so the regenerated invitation commits the same cross-party agreement. A custom constraint on a field a key uses is still refused. See `docs/COMMUNICATION.md`.
 - The web app parses a dropped CSV in a Web Worker, so a large (near-10MB) file no longer freezes the interface -- input and painting stay responsive -- while it is read.
 - The invitation consent displays now show the inviter's requested-from-you payload columns consistently on the web and the CLI, with a declared-empty `payload.receive` rendered "(none) -- any payload column would abort the exchange" rather than hidden: previously the web showed only a non-empty request and the CLI showed this direction not at all, so a declared-empty receive read identically to an unstated (lazy) one with the opposite runtime meaning. The empty-vs-absent behavior itself is unchanged. See `docs/EXCHANGE_REFERENCE.md`.
+- The `parse_date` standardization step now drops a record whose date is calendar-impossible (for example 02/29 in a non-leap year, or 04/31), instead of silently rolling it over to the next valid day and hashing the wrong value into the linkage key.
 
 ### Security
 
