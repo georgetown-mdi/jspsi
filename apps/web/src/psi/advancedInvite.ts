@@ -2,6 +2,7 @@ import {
   CanonicalEncodingError,
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
+  SEMANTIC_TYPES,
   assessLinkageSatisfiability,
   authoredLinkageFields,
   canonicalString,
@@ -30,7 +31,9 @@ import type {
   LinkageTerms,
   Metadata,
   Output,
+  SemanticType,
   Standardization,
+  StandardizationTransformation,
 } from "@psilink/core";
 
 /** The per-element fuzzy-comparison expansion, derived from the core element type
@@ -339,18 +342,40 @@ export function setDraftMetadata(
   };
 }
 
+/** The semantic type a transformation was authored for, or `undefined` when its
+ * `output` name does not resolve to one. Every default, seeded, and synthetic
+ * field is named exactly for its type ({@link authoredLinkageFields}); a
+ * second-or-later same-typed field appends `_<n>` ({@link draftWithFieldAdded}).
+ * So the base name -- the `output` with a trailing `_<digits>` stripped -- is the
+ * authored type when it names one, letting {@link reconcileStandardization}
+ * compare it against the input column's CURRENT type. An `output` outside this set
+ * (an arbitrarily-named imported field) returns `undefined` and is judged on
+ * presence and role alone, as before. */
+function transformationExpectedType(
+  transformation: StandardizationTransformation,
+): SemanticType | undefined {
+  const base = transformation.output.replace(/_\d+$/, "");
+  return SEMANTIC_TYPES.find((type) => type === base);
+}
+
 /**
  * Reconcile the draft's standardization against a freshly-edited metadata, the
  * standardization analogue of {@link reconcileKeys}. A transformation is kept when
- * its input column is still present and `role: linkage` (so an operator's authored
- * cleaning and any second-column binding it added survive a metadata edit), and
- * dropped when its column was removed or re-roled off linkage -- so a stale
- * transformation never cleans a column the core would refuse to bind (matching
- * participation requires `role: linkage`). A semantic type the kept set no longer
- * covers (e.g. a newly-typed column) gains the recommended default cleaning, mirroring
- * how {@link reconcileKeys} appends a newly-offerable key. With no edits this returns
- * the unchanged default standardization (every default transformation is kept and
- * every type covered), so a metadata-untouched draft stays byte-identical.
+ * its input column is still present, `role: linkage`, and of the type the
+ * transformation was authored for (so an operator's authored cleaning and any
+ * second-column binding it added survive a metadata edit), and dropped when its
+ * column was removed, re-roled off linkage, or RETYPED to a different
+ * linkage-participating type -- so a stale transformation never cleans a column the
+ * core would refuse to bind (matching participation requires `role: linkage`) nor
+ * declares a field whose type no longer matches its column ({@link authoredLinkageFields}
+ * types a field by its column, so a kept `first_name`-authored transformation on a
+ * column retyped to `last_name` would emit a `first_name`-named `last_name` field).
+ * A semantic type the kept set no longer covers (a newly-typed column, or one whose
+ * only transformation was just dropped for a type change) gains the recommended
+ * default cleaning, mirroring how {@link reconcileKeys} appends a newly-offerable key.
+ * With no edits this returns the unchanged default standardization (every default
+ * transformation is kept and every type covered), so a metadata-untouched draft stays
+ * byte-identical.
  */
 function reconcileStandardization(
   prev: Standardization,
@@ -361,7 +386,9 @@ function reconcileStandardization(
   const columnByName = new Map(metadata.map((column) => [column.name, column]));
   const kept = prev.filter((transformation) => {
     const column = columnByName.get(transformation.input);
-    return column !== undefined && column.role === "linkage";
+    if (column === undefined || column.role !== "linkage") return false;
+    const expectedType = transformationExpectedType(transformation);
+    return expectedType === undefined || expectedType === column.type;
   });
   const coveredTypes = new Set(
     kept
