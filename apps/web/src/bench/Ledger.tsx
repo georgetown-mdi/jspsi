@@ -23,16 +23,21 @@ export interface LedgerRow {
  */
 export function Ledger({
   title = "This exchange",
+  tag,
   rows,
   footer,
 }: {
   title?: string;
+  /** A standing state marker under the title -- "Terms sealed at create" once
+   * the invitation is minted and the ledger stops being editable. */
+  tag?: string;
   rows: ReadonlyArray<LedgerRow>;
   footer?: ReactNode;
 }) {
   return (
     <aside className={styles.ledger} aria-label={title}>
       <h2>{title}</h2>
+      {tag !== undefined && <span className={styles.sealedTag}>{tag}</span>}
       <dl>
         {rows.map((row) => (
           <div key={row.label} className={styles.ledgerRow}>
