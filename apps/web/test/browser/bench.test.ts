@@ -61,11 +61,13 @@ vi.mock("@psi/invitation", async (importOriginal) => {
   };
 });
 
-// Defer the CSV parse per-test to observe in-flight state (the Continue
-// gate, the abort signal). With `defer` unset it delegates to the real
-// loader.
+// Defer or fail the CSV parse per-test to observe in-flight state (the
+// Continue gate, the abort signal) and the read-failure path, which a real
+// parse of an inline File cannot reach deterministically. With both knobs
+// unset it delegates to the real loader.
 const csvLoadHarness = vi.hoisted(() => ({
   defer: false,
+  fail: undefined as Error | undefined,
   lastSignal: undefined as AbortSignal | undefined,
   resolve: undefined as ((value: unknown) => void) | undefined,
 }));
@@ -78,6 +80,8 @@ vi.mock("@psi/csvParseController", async (importOriginal) => {
       options?: { signal?: AbortSignal },
     ) => {
       csvLoadHarness.lastSignal = options?.signal;
+      if (csvLoadHarness.fail !== undefined)
+        return Promise.reject(csvLoadHarness.fail);
       if (!csvLoadHarness.defer)
         return (
           actual.loadCSVFileOffMainThread as (
@@ -111,6 +115,7 @@ afterEach(() => {
   container = undefined;
   mintHarness.fail = undefined;
   csvLoadHarness.defer = false;
+  csvLoadHarness.fail = undefined;
   csvLoadHarness.lastSignal = undefined;
   csvLoadHarness.resolve = undefined;
 });
@@ -656,6 +661,72 @@ describe("inviter bench", () => {
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Your invitation is ready");
+  });
+
+  test("a failed re-read discards the prior file; a good re-read swaps it", async () => {
+    mount(createElement(InviterBench));
+
+    await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana");
+    const fileInput = () =>
+      document.querySelector('input[type="file"]') as HTMLElement;
+    const continueButton = page.getByRole("button", {
+      name: "Continue to matching & sharing",
+    });
+    const goodFile = (name: string) =>
+      new File(["first_name,last_name,dob\nAnn,Lee,01/02/1990\n"], name, {
+        type: "text/csv",
+      });
+
+    await userEvent.upload(page.elementLocator(fileInput()), goodFile("a.csv"));
+    await expect.element(page.getByText("a.csv")).toBeInTheDocument();
+    await expect.element(continueButton).toBeEnabled();
+
+    // A good re-read swaps to the new file.
+    await userEvent.upload(page.elementLocator(fileInput()), goodFile("b.csv"));
+    await expect.element(page.getByText("b.csv")).toBeInTheDocument();
+    expect(document.querySelector(`.${styles.fileName}`)?.textContent).toBe(
+      "b.csv",
+    );
+    await expect.element(continueButton).toBeEnabled();
+
+    // An unnameable-columns re-read discards the prior read: no file card, no
+    // recommended-terms callout, Continue disabled, facts back to quiet.
+    await userEvent.upload(
+      page.elementLocator(fileInput()),
+      new File(["a,,b\n1,2,3\n"], "unnamed.csv", { type: "text/csv" }),
+    );
+    await expect
+      .element(page.getByText("This file has an unnamed column"))
+      .toBeInTheDocument();
+    expect(document.querySelector(`.${styles.fileCard}`)).toBeNull();
+    expect(document.querySelector(`.${styles.callout}`)).toBeNull();
+    await expect.element(continueButton).toBeDisabled();
+    const facts = Array.from(
+      document.querySelectorAll(
+        `nav[aria-label="Exchange setup"] .${styles.val}`,
+      ),
+    );
+    expect(facts.map((fact) => fact.textContent)).toEqual([
+      EM_DASH,
+      EM_DASH,
+      EM_DASH,
+    ]);
+
+    // Readiness comes back with the next good read.
+    await userEvent.upload(page.elementLocator(fileInput()), goodFile("c.csv"));
+    await expect.element(page.getByText("c.csv")).toBeInTheDocument();
+    await expect.element(continueButton).toBeEnabled();
+
+    // A parse failure discards the prior read the same way.
+    csvLoadHarness.fail = new Error("torn mid-read");
+    await userEvent.upload(page.elementLocator(fileInput()), goodFile("d.csv"));
+    await expect
+      .element(page.getByText("The file could not be read"))
+      .toBeInTheDocument();
+    expect(document.querySelector(`.${styles.fileCard}`)).toBeNull();
+    expect(document.querySelector(`.${styles.callout}`)).toBeNull();
+    await expect.element(continueButton).toBeDisabled();
   });
 
   test("collapses to the single-column layout without rail and ledger", async () => {
