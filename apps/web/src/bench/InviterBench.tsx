@@ -5,8 +5,14 @@ import { Link } from "@tanstack/react-router";
 
 import { sanitizeErrorForDisplay } from "@psilink/core";
 
+import { InvitationFileError, generateInvitation } from "@psi/invitation";
 import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
+import { invitationLocation } from "@psi/invitationLocation";
 import { loadCSVFileOffMainThread } from "@psi/csvParseController";
+
+import { whenDiagnostic } from "@utils/diagnostics";
+
+import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 
 import { Rail, RailFacts, RailGroup, RailProblems, RailSteps } from "./Rail";
 import {
@@ -14,31 +20,41 @@ import {
   editorWithColumnDisclosure,
   editorWithColumnType,
   editorWithIdentity,
-  identifierProblem,
+  editorWithLifetime,
+  editorWithOutputDirection,
   inviterLedgerRows,
   inviterRailFacts,
+  resetToRecommended,
+  reviewValidation,
+  sealEditor,
+  spineProblems,
 } from "./inviterModel";
 import { BenchShell } from "./BenchShell";
 import { Ledger } from "./Ledger";
 import { MatchingSharingSection } from "./MatchingSharingSection";
+import { ReviewCreateSection } from "./ReviewCreateSection";
 import { YourFileSection } from "./YourFileSection";
-import styles from "./bench.module.css";
 
 import type { AcquiredCsv, InviterEditor } from "./inviterModel";
 import type { DisclosureChoice } from "@psi/metadataEditing";
+import type { GeneratedInvitation } from "@psi/invitation";
 import type { IntakeAlert } from "./YourFileSection";
 import type { RailStep } from "./Rail";
 import type { SemanticType } from "@psilink/core";
 
-type SpineSection = "file" | "columns" | "review";
+type SpineSection = "file" | "columns" | "review" | "share";
 
-const SPINE_LABELS: Record<SpineSection, string> = {
+const SPINE_LABELS: Record<Exclude<SpineSection, "share">, string> = {
   file: "Your file",
   columns: "Matching & sharing",
   review: "Review & create",
 };
 
-const SPINE_ORDER: ReadonlyArray<SpineSection> = ["file", "columns", "review"];
+const SPINE_ORDER: ReadonlyArray<Exclude<SpineSection, "share">> = [
+  "file",
+  "columns",
+  "review",
+];
 
 function demotionNotice(demoted: ReadonlyArray<string>): string {
   if (demoted.length === 0) return "";
@@ -56,10 +72,14 @@ export function InviterBench() {
   const [name, setName] = useState("");
   const [section, setSection] = useState<SpineSection>("file");
   const [acquired, setAcquired] = useState<AcquiredCsv>();
+  const [sourceFile, setSourceFile] = useState<File>();
   const [editor, setEditor] = useState<InviterEditor>();
   const [intakeAlert, setIntakeAlert] = useState<IntakeAlert>();
   const [reading, setReading] = useState(false);
   const [announcement, setAnnouncement] = useState("");
+  const [invitation, setInvitation] = useState<GeneratedInvitation>();
+  const [minting, setMinting] = useState(false);
+  const [createAlert, setCreateAlert] = useState<IntakeAlert>();
 
   // A parse may still be in flight when the surface unmounts or a newer file
   // is dropped; the id lets the stale resolution fall on the floor instead of
@@ -104,6 +124,7 @@ export function InviterBench() {
       };
       const seeded = editorFromCsv(name, csv);
       setAcquired(csv);
+      setSourceFile(file);
       setEditor(seeded);
       if (seeded.draft.keys.length === 0)
         setIntakeAlert({
@@ -137,50 +158,128 @@ export function InviterBench() {
     setAnnouncement(demotionNotice(result.demotedIdentifiers));
   }
 
+  // Minting re-parses the retained source file through generateInvitation --
+  // the same fail-closed parse boundary the current app mints at -- so the
+  // embedded terms, the returned rows, and the satisfiability re-check all
+  // bind to one read of the file.
+  async function createInvitation() {
+    if (editor === undefined || sourceFile === undefined) return;
+    const validation = reviewValidation(editor);
+    if (!validation.canGenerate || validation.terms === undefined) return;
+    setMinting(true);
+    setCreateAlert(undefined);
+    try {
+      const minted = await generateInvitation({
+        inviterName: editor.draft.identity,
+        file: sourceFile,
+        location: invitationLocation(),
+        lifetimeSeconds: editor.draft.lifetimeSeconds,
+        linkageTerms: validation.terms,
+        metadata: editor.draft.metadata,
+        standardization: editor.draft.standardization,
+      });
+      setEditor(sealEditor(editor));
+      setInvitation(minted);
+      setSection("share");
+    } catch (error) {
+      if (error instanceof InvitationFileError) {
+        // The mint re-parses the retained file, so it can fail in the same
+        // user-actionable ways step 1 gates on (the file changed on disk, or
+        // its satisfiability shifted with the edited terms); surface the same
+        // shared alerts rather than a generic failure.
+        setCreateAlert(
+          error.failure.kind === "unreadable"
+            ? {
+                title: "Could not read your file",
+                message: sanitizeErrorForDisplay(error.failure.cause),
+              }
+            : error.failure.kind === "unnameable"
+              ? unnameableColumnsAlert(error.failure.positions)
+              : unlinkableFileAlert(error.failure.unsatisfied),
+        );
+      } else {
+        // Internal and non-user-actionable: a fixed message avoids echoing
+        // internals into a secret-bearing flow, the default log carries only
+        // the error type, and the detail reaches the console only under
+        // diagnostic mode -- the InvitePanel rule, applied literally.
+        console.error(
+          "invitation creation failed:",
+          error instanceof Error ? error.name : typeof error,
+        );
+        whenDiagnostic(() =>
+          console.error("invitation creation failed (detail):", error),
+        );
+        setCreateAlert({
+          title: "Could not create the invitation",
+          message:
+            "Something went wrong while creating the invitation. Your terms are unchanged - try again.",
+        });
+      }
+    } finally {
+      setMinting(false);
+    }
+  }
+
   const linkable = editor !== undefined && editor.draft.keys.length > 0;
   const fileReady = name.trim().length > 0 && linkable;
+  const sealed = editor?.sealed === true;
 
-  const currentPosition = SPINE_ORDER.indexOf(section);
-  const steps: Array<RailStep> = SPINE_ORDER.map((step, position) => {
-    const state =
-      step === section
-        ? "current"
-        : position < currentPosition
-          ? "done"
-          : "pending";
-    return {
-      label: SPINE_LABELS[step],
-      state,
-      onSelect: state === "done" ? () => setSection(step) : undefined,
-    };
-  });
-
-  const problems =
-    editor !== undefined && identifierProblem(editor.draft)
+  const currentPosition = SPINE_ORDER.indexOf(
+    section === "share" ? "review" : section,
+  );
+  const steps: Array<RailStep> =
+    section === "share"
       ? [
-          {
-            label: "Choose a single row identifier",
-            onSelect: () => setSection("columns"),
-          },
+          { label: "Share", state: "current" },
+          { label: "Partner accepts", state: "pending" },
+          { label: "Exchange runs", state: "pending" },
+          { label: "Results", state: "pending" },
         ]
-      : [];
+      : SPINE_ORDER.map((step, position) => {
+          const state =
+            step === section
+              ? "current"
+              : position < currentPosition
+                ? "done"
+                : "pending";
+          return {
+            label: SPINE_LABELS[step],
+            state,
+            onSelect: state === "done" ? () => setSection(step) : undefined,
+          };
+        });
+
+  const problems = sealed
+    ? []
+    : spineProblems(editor).map((problem) => ({
+        label: problem.message,
+        onSelect: () => setSection(problem.target),
+      }));
 
   return (
     <BenchShell
       rail={
-        <Rail label="Exchange setup">
-          <RailGroup label="Set up">
-            <RailSteps steps={steps} />
-          </RailGroup>
-          <RailGroup label="Customize" note="Filled in from your file.">
-            <RailFacts facts={inviterRailFacts(editor)} />
-          </RailGroup>
-          <RailProblems problems={problems} />
-        </Rail>
+        section === "share" ? (
+          <Rail label="Exchange progress">
+            <RailGroup label="This exchange" note="Browser">
+              <RailSteps steps={steps} />
+            </RailGroup>
+          </Rail>
+        ) : (
+          <Rail label="Exchange setup">
+            <RailGroup label="Set up">
+              <RailSteps steps={steps} />
+            </RailGroup>
+            <RailGroup label="Customize" note="Filled in from your file.">
+              <RailFacts facts={inviterRailFacts(editor)} />
+            </RailGroup>
+            <RailProblems problems={problems} />
+          </Rail>
+        )
       }
       ledger={
         <Ledger
-          rows={inviterLedgerRows(editor).map((row) => ({
+          rows={inviterLedgerRows(editor, invitation?.expires).map((row) => ({
             label: row.label,
             reference: row.reference,
             muted: row.muted,
@@ -243,14 +342,44 @@ export function InviterBench() {
               onContinue={() => setSection("review")}
             />
           )}
-        {section === "review" && (
+        {section === "review" &&
+          editor !== undefined &&
+          acquired !== undefined && (
+            <>
+              <ReviewCreateSection
+                editor={editor}
+                csv={acquired}
+                problems={spineProblems(editor)}
+                minting={minting}
+                onLifetime={(seconds) =>
+                  setEditor(editorWithLifetime(editor, seconds))
+                }
+                onDirection={(direction) =>
+                  setEditor(editorWithOutputDirection(editor, direction))
+                }
+                onReset={() => setEditor(resetToRecommended(editor, acquired))}
+                onCreate={() => void createInvitation()}
+                onNavigate={setSection}
+              />
+              {createAlert !== undefined && (
+                <Alert color="red" title={createAlert.title} mt="md">
+                  {createAlert.message}
+                </Alert>
+              )}
+            </>
+          )}
+        {section === "share" && (
           <>
-            <p className={styles.eyebrow}>Step 3 of 3</p>
-            <h1 tabIndex={-1}>Review &amp; create</h1>
+            <h1 tabIndex={-1}>Your invitation is ready</h1>
+            <p>
+              The terms are sealed: the invitation your partner consents to is
+              exactly the proposal you just reviewed.
+            </p>
             <Alert color="yellow" title="Under construction" mt="md">
-              This step is not built yet: the check-your-answers review, the
-              transport choice, and the create action arrive with the next bench
-              screens. To run an exchange today, use the{" "}
+              The share screen - the invitation link and code with their copy
+              actions - arrives with the next bench screens. Nothing has been
+              shared: the invitation exists only in this browser and expires on
+              its own. To run an exchange today, use the{" "}
               <Anchor component={Link} to="/">
                 current app
               </Anchor>

@@ -1,16 +1,23 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  answersRows,
   editorFromCsv,
   editorWithColumnDisclosure,
   editorWithColumnType,
   editorWithIdentity,
+  editorWithLifetime,
+  editorWithOutputDirection,
   enabledKeys,
   fileCardMeta,
   identifierProblem,
   inviterLedgerRows,
   inviterRailFacts,
   lifetimeLabel,
+  resetToRecommended,
+  reviewValidation,
+  sealEditor,
+  spineProblems,
 } from "@bench/inviterModel";
 
 import type { AcquiredCsv } from "@bench/inviterModel";
@@ -164,5 +171,91 @@ describe("display helpers", () => {
       "12,408 rows - 8.4 MB",
     );
     expect(fileCardMeta(3, 2048)).toBe("3 rows - 2 KB");
+  });
+});
+
+describe("review and create", () => {
+  test("a fresh seed has no problems and can mint", () => {
+    const editor = editorFromCsv("Dana", csv);
+    expect(spineProblems(editor)).toEqual([]);
+    const validation = reviewValidation(editor);
+    expect(validation.canGenerate).toBe(true);
+    expect(validation.terms).toBeDefined();
+  });
+
+  test("an invalid term surfaces a problem that targets its source", () => {
+    const seeded = editorFromCsv("Dana", csv);
+    // Sending a column to a partner that receives no results is the
+    // incoherent pair validateAdvancedInvite refuses; the column table owns
+    // the disclosed set, so the problem points at step 2.
+    const editor = editorWithOutputDirection(seeded, "inviter");
+    const problems = spineProblems(editor);
+    expect(problems.length).toBeGreaterThan(0);
+    expect(problems[0].target).toBe("columns");
+    expect(reviewValidation(editor).canGenerate).toBe(false);
+
+    const resolved = editorWithOutputDirection(editor, "both");
+    expect(spineProblems(resolved)).toEqual([]);
+  });
+
+  test("the two-identifier conflict is a problem targeting step 2", () => {
+    const twoIds: AcquiredCsv = {
+      ...csv,
+      columns: ["id", "identifier", "last_name", "dob"],
+      rawRows: [{ id: "1", identifier: "2", last_name: "Lee", dob: "x" }],
+    };
+    const problems = spineProblems(editorFromCsv("Dana", twoIds));
+    expect(
+      problems.some(
+        (problem) =>
+          problem.message === "Choose a single row identifier" &&
+          problem.target === "columns",
+      ),
+    ).toBe(true);
+  });
+
+  test("terms are immutable after create seals the session", () => {
+    const sealedEditor = sealEditor(editorFromCsv("Dana", csv));
+    expect(
+      editorWithColumnDisclosure(sealedEditor, csv, "program_code", "ignored")
+        .editor,
+    ).toBe(sealedEditor);
+    expect(editorWithColumnType(sealedEditor, csv, "dob", "other").editor).toBe(
+      sealedEditor,
+    );
+    expect(editorWithIdentity(sealedEditor, "Other")).toBe(sealedEditor);
+    expect(editorWithLifetime(sealedEditor, 86400)).toBe(sealedEditor);
+    expect(editorWithOutputDirection(sealedEditor, "inviter")).toBe(
+      sealedEditor,
+    );
+    expect(resetToRecommended(sealedEditor, csv)).toBe(sealedEditor);
+  });
+
+  test("check-your-answers restates the proposal with change targets", () => {
+    const editor = editorWithLifetime(editorFromCsv("Dana Okafor", csv), 86400);
+    const rows = answersRows(editor, csv);
+    const byLabel = new Map(rows.map((row) => [row.label, row]));
+    expect(byLabel.get("Your name")?.value).toBe("Dana Okafor");
+    expect(byLabel.get("Your name")?.changeTarget).toBe("file");
+    expect(byLabel.get("Your file")?.value).toBe("clients.csv - 1 rows");
+    expect(byLabel.get("Columns shared")?.value).toBe("program_code");
+    expect(byLabel.get("Columns shared")?.changeTarget).toBe("columns");
+    expect(byLabel.get("Cleaning")?.value).toMatch(
+      /^\d+ fields?, filled in from your file$/,
+    );
+    expect(byLabel.get("Matching keys")?.value).toMatch(
+      /^\d+ keys?, recommended order$/,
+    );
+    expect(byLabel.get("Invitation lifetime")?.value).toBe("1 day");
+    expect(byLabel.get("Invitation lifetime")?.setAbove).toBe(true);
+    expect(byLabel.get("Results go to")?.value).toBe("You and your partner");
+    expect(byLabel.get("Transport")?.value).toBe("Live, in this browser");
+  });
+
+  test("a minted expiry replaces the relative lifetime in the ledger", () => {
+    const editor = editorFromCsv("Dana", csv);
+    const rows = inviterLedgerRows(editor, "2026-07-08T19:32:00.000Z");
+    const expires = rows.find((row) => row.label === "Expires");
+    expect(expires?.value).toContain("July 8, 2026");
   });
 });
