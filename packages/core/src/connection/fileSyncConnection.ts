@@ -5,7 +5,6 @@ import { v4 as uuidv4 } from "uuid";
 import { getLoggerForVerbosity } from "../utils/logger";
 import { pathsResolveToSameDir } from "../utils/pathCompare";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
-import { toBase64Url, fromBase64Url, bytesEqual } from "../utils/crypto";
 import {
   parseBoundedJson,
   JsonStructureBoundError,
@@ -65,6 +64,7 @@ import {
   SFTP_ALGORITHMS_ALLOWED_SUBKEYS,
 } from "./sftpConnect";
 import type { PresentedHostKey } from "./sftpConnect";
+import { AbortMarkerSubsystem } from "./abortMarker";
 // Re-export PresentedHostKey, which was part of this module's public surface
 // before the SFTP connect/host-key concern was split out to sftpConnect.ts
 // (which main.ts does not barrel). This keeps it importable from
@@ -251,50 +251,6 @@ const RETAIN_INSPECTION_POLL_CYCLES = 2;
 // peer's cleanup may briefly overlap with our next poll; a larger threshold
 // (>5) approaches the peer timeout and gives no practical benefit.
 const MAX_CONSECUTIVE_ENOENT = 3;
-
-// Hard cap on the abort marker read. The envelope is ~80 bytes; 1 KiB is
-// generous slack. Deliberately NOT MAX_FRAME_SIZE_BYTES (~512 MB): the
-// recognizer is unconditional and the admin controls the bytes, and the marker
-// is re-read every poll cycle, so a large cap on an admin-plantable file would
-// be an availability vector. Both the pre-get() listed-size refusal and the
-// bounded get() use this.
-const ABORT_MARKER_MAX_BYTES = 1024;
-
-// Short per-operation budget (put + rename) for the abort marker write. The
-// marker write must NOT inherit boundTransport's fresh-peerTimeoutMs (default 1
-// hour) budget: a faulted write -- the sick-directory case the marker exists for
-// -- would otherwise hang teardown. The SFTP adapter self-bounds reads at ~60 s,
-// but the local-FS/filedrop adapter has no per-op bound, so the marker write
-// rides the 1h wrap there unless given its own short bound. A few seconds is
-// generous for an ~80-byte control file on a healthy transport and fast-fails a
-// sick one.
-const ABORT_MARKER_WRITE_BUDGET_MS = 5000;
-
-// Backstop grace bounding how long close() waits for the abort DECISION to
-// resolve (write vs seal) -- NOT a bound on the marker write. Modeled on
-// withTransportBudgetVoid: unref'd and resolve-on-timeout, so it neither hangs
-// close() nor holds a failing process open. Normally the decision resolves
-// sub-second: the orchestrator spends an exchange parked on receive(), so a
-// fault rejects that await and its catch runs writeAbortMarker() (or doCleanup
-// runs sealAbort()) right away, well inside the grace. The timeout is reached
-// only in the uncommon case where the orchestrator is busy with a long LOCAL
-// step (e.g. a large match) when the connection faults in the background, so it
-// does not observe the fault -- and thus does not resolve the decision -- within
-// the grace. That path is benign by construction, NOT a correctness gap: the
-// marker write is best-effort and every write op is bounded by
-// ABORT_MARKER_WRITE_BUDGET_MS, so however this close() interleaves with a late
-// catch (which may even find abortArmed already cleared and skip the write
-// entirely), the marker either lands or it does not, and a no-marker outcome
-// just degrades to the peer-silence hedge -- no interleaving corrupts state or
-// hangs. No finite grace can guarantee the catch always wins (a long-enough
-// local step beats any bound), and a longer grace only holds a failing process
-// open longer, so the bounded-grace-plus-best-effort-write trade is deliberate.
-// Once the decision IS "write", close() awaits the bounded write in FULL and
-// separately (the grace timer is already cleared by then), so the grace never
-// truncates an in-flight write whatever its value; reusing the write budget as
-// the magnitude is just a generous bound for the decision wait, not a coupling
-// to the write duration.
-const ABORT_DECISION_GRACE_MS = ABORT_MARKER_WRITE_BUDGET_MS;
 
 // Bounded window the lock-path peer waits for a joiner that has begun arriving
 // (its `<id>-joining.json` sentinel is visible) to finish renaming the sentinel
@@ -694,26 +650,6 @@ export interface FileTransportClient {
   exists: (remotePath: string) => Promise<boolean>;
 }
 
-// Everything writeAbortMarker() needs, captured by armAbort() post-handshake so
-// the write never reads this.path (which close() nulls during teardown). The
-// client is the raw, unwrapped transport: the marker write is short-bounded by
-// withTransportBudget directly (see ABORT_MARKER_WRITE_BUDGET_MS) rather than
-// riding boundTransport's 1h per-op budget.
-interface AbortWriteInputs {
-  path: string;
-  finalName: string;
-  // A Buffer, NOT a string: FileTransportClient.put treats a string src as a
-  // local file PATH to copy from (ssh2-sftp-client semantics; LocalFSClient
-  // rejects it outright), so every body this codebase writes is a Buffer or a
-  // header+payload chunk list -- hellos via serializeEnvelope, the zero-length
-  // ack, and this single-Buffer abort marker; only a data-plane message uses the
-  // two-chunk [header, payload] list (see send()). The marker body must be one of
-  // those or the write throws (and, being best-effort, is silently swallowed,
-  // leaving no marker); it is a single Buffer.
-  body: Buffer;
-  client: FileTransportClient;
-}
-
 /**
  * File-based rendezvous and message-passing connection. Implements the
  * `-hello.json`/`-lock.json` handshake (or the lockless ack-handshake barrier) and
@@ -819,38 +755,27 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
   // The raw, unwrapped transport (this.client is its boundTransport wrap). Held
   // so the abort marker write can be short-bounded directly (see
-  // writeAbortMarker / ABORT_MARKER_WRITE_BUDGET_MS) instead of inheriting the
+  // writeAbortMarker / the abortMarker subsystem) instead of inheriting the
   // 1h per-op budget the wrap applies. It is the same underlying transport as
   // this.client, so what protects the marker write from client.end() killing it
   // is the await-before-end() ordering in close(), not this separate reference.
   private rawClient: FileTransportClient;
 
-  // Authenticated cross-party abort state, armed by armAbort() post-handshake
-  // (the only point with a session key) and cleared with the handshake identity
-  // it derives from (clearAbortState, at close() and the rendezvous recovery
-  // sites). The two tokens are role-derived, hence identity-scoped; they are NOT
-  // reset in resetSessionState (which resets only per-session message counters).
-  private selfAbortToken: Uint8Array<ArrayBuffer> | undefined;
-  private peerAbortToken: Uint8Array<ArrayBuffer> | undefined;
-  // Captured write inputs (immunizes the write against close()'s path/config
-  // nulling) and write idempotency/memoization.
-  private abortWriteInputs: AbortWriteInputs | undefined;
-  private abortMarkerWritten = false;
-  private pendingAbortWrite: Promise<void> | undefined;
-  // Abort-decision one-shot: resolves to "write" (writeAbortMarker pre-empts a
-  // later seal) or "seal" (no marker coming). close() parks on it before
-  // tearing down so a fault-path marker write riding the shared transport
-  // completes before client.end() destroys it. abortDecisionResolved is the
-  // gate the idempotent second/third close() reads to re-enter as a no-op.
-  private abortDecision: Promise<"write" | "seal"> | undefined;
-  private resolveAbortDecision: ((d: "write" | "seal") => void) | undefined;
-  private abortDecisionResolved = false;
+  // The authenticated cross-party abort-marker subsystem (armed post-handshake,
+  // cleared with the handshake identity). It owns the abort state (the two
+  // role-derived tokens, the captured write inputs, and the write-vs-seal
+  // decision one-shot) that this class used to hold inline; the delegating
+  // members below (armAbort / writeAbortMarker / sealAbort / abortArmed and the
+  // internal close()/poll() seams) forward to it, keeping the connection's
+  // public and test surface unchanged. See ./abortMarker and
+  // docs/spec/CHANNEL_SECURITY.md ("Authenticated abort marker").
+  private readonly abortMarker: AbortMarkerSubsystem;
 
   // True once armAbort() has run (derived, not stored): only an armed connection
   // writes or verifies abort markers. Read by the orchestrator's catch gate and
   // by close()/poll().
   get abortArmed(): boolean {
-    return this.selfAbortToken !== undefined;
+    return this.abortMarker.armed;
   }
 
   // Bound the next inbound frame the poll loop reads to `maxBytes`, replacing
@@ -916,6 +841,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       `filesync-${this.id.substring(0, 8)}`,
       this.options.verbose,
     );
+    // Inject the transport-budget primitives (owned here, shared with
+    // boundTransport and close()'s drain) and the log/role accessors; the
+    // subsystem holds the rest of the abort state itself. `role` is read live so
+    // a post-construction role assignment is reflected in the marker's log lines.
+    this.abortMarker = new AbortMarkerSubsystem({
+      log: this.log,
+      role: () => this.role,
+      runBudgeted: withTransportBudget,
+      stalledError: transportBudgetExceededError,
+    });
   }
 
   // Override emit so that an error fired with no listener is retained rather
@@ -1635,118 +1570,38 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
    * Arms the authenticated cross-party abort marker, called by the orchestrator
    * once post-handshake with the two derived per-direction tokens (self = the
    * token written into `<myId>-abort.json` on a fault; peer = the token a
-   * `<peerId>-abort.json` is verified against). Captures everything the marker
-   * write needs NOW -- the directory path and a precomputed envelope body -- so
-   * the write never reads `this.path` (which close() nulls during teardown), and
-   * initializes the write-vs-seal decision one-shot the teardown sequencing
-   * parks on. Must be called after open() so a path is available; if it is not,
-   * the write degrades to a no-op rather than throwing.
+   * `<peerId>-abort.json` is verified against). Delegates to the abortMarker
+   * subsystem, threading this party's id and the current OUTBOUND write directory
+   * (the abort marker is a self-write; see the subsystem's arm() capture comment)
+   * plus the raw transport the short-bounded write rides. Must be called after
+   * open() so a path is available; if it is not, the write degrades to a no-op
+   * rather than throwing.
    */
   armAbort(
     selfToken: Uint8Array<ArrayBuffer>,
     peerToken: Uint8Array<ArrayBuffer>,
   ): void {
-    this.selfAbortToken = selfToken;
-    this.peerAbortToken = peerToken;
-    this.abortMarkerWritten = false;
-    this.abortDecisionResolved = false;
-    this.pendingAbortWrite = undefined;
-    this.abortDecision = new Promise<"write" | "seal">((resolve) => {
-      this.resolveAbortDecision = resolve;
-    });
-    // The abort marker is a self-write (`<myId>-abort.json`), so it is captured
-    // for the OUTBOUND directory; the peer reads its own `<peerId>-abort.json`
-    // from its inbound, which is this party's outbound. In shared mode this is
-    // just `path`.
-    const writeDir = this.outboundPath;
-    this.abortWriteInputs =
-      writeDir === undefined
-        ? undefined
-        : {
-            path: writeDir,
-            finalName: `${this.id}${ABORT_SUFFIX}`,
-            // The on-disk envelope: { version, token }. `version` is spelled out
-            // to match the full-word control-body convention (locklessRendezvous
-            // / retainFiles). ~80 bytes serialized. Buffer-wrapped (see
-            // AbortWriteInputs.body) so put() writes the bytes rather than
-            // treating the string as a source path.
-            body: Buffer.from(
-              JSON.stringify({
-                version: 1,
-                token: toBase64Url(selfToken),
-              }),
-              "utf-8",
-            ),
-            client: this.rawClient,
-          };
-  }
-
-  // Resolve the abort decision exactly once. The first caller wins: a catch-path
-  // writeAbortMarker() ("write") pre-empts the doCleanup seal ("seal"), and vice
-  // versa. abortDecisionResolved latches so the parked close() unblocks and the
-  // idempotent later close() re-enters as a no-op.
-  private resolveAbortDecisionOnce(decision: "write" | "seal"): void {
-    if (this.abortDecisionResolved) return;
-    this.abortDecisionResolved = true;
-    this.resolveAbortDecision?.(decision);
+    this.abortMarker.arm(
+      selfToken,
+      peerToken,
+      this.id,
+      this.outboundPath,
+      this.rawClient,
+    );
   }
 
   /**
    * Triggered by the orchestrator's catch on a terminal organic fault (directory
-   * still writable). Resolves the abort decision to "write" (pre-empting a later
-   * sealAbort) and memoizes the bounded marker write, returning the same promise
-   * to every caller -- the parked close() and the catch both await it. Idempotent
-   * and best-effort: a faulted write simply leaves no marker, and the peer falls
-   * back to the existing peer-silence hedge. Rejection is absorbed by both
-   * awaiters (close() must stay non-throwing).
+   * still writable). Delegates to the abortMarker subsystem, which resolves the
+   * abort decision to "write" (pre-empting a later sealAbort) and memoizes the
+   * bounded marker write, returning the same promise to every caller -- the
+   * parked close() and the catch both await it. Idempotent and best-effort: a
+   * faulted write simply leaves no marker, and the peer falls back to the
+   * existing peer-silence hedge. Rejection is absorbed by both awaiters (close()
+   * must stay non-throwing).
    */
   writeAbortMarker(): Promise<void> {
-    this.resolveAbortDecisionOnce("write");
-    if (this.pendingAbortWrite === undefined)
-      this.pendingAbortWrite = this.runAbortMarkerWrite();
-    return this.pendingAbortWrite;
-  }
-
-  // The actual temp-then-rename write (atomic appearance), short-bounded on BOTH
-  // ops so a sick directory cannot hang teardown. The marker is not tracked in
-  // responsibleFiles, so this party's own cleanup() never sweeps it and it
-  // persists for the peer to read. On timeout/failure (put succeeds but rename
-  // rejects) the budget rejects and the op is abandoned, leaving a temp-*.tmp.
-  // No safeDelete is attempted here: the next exchange's entry-time orphaned-temp
-  // sweep removes it (in BOTH modes -- that sweep is not retain-gated, since a
-  // temp is a failed in-flight write, never transcript), and that sweep runs at
-  // entry BEFORE any poll-loop unexpected-files policy, so the orphan never
-  // reaches the policy. Attempting a delete on the already-sick transport that
-  // just failed the rename would only add another bounded wait to teardown for no
-  // gain over the self-heal.
-  private async runAbortMarkerWrite(): Promise<void> {
-    const inputs = this.abortWriteInputs;
-    if (inputs === undefined || this.abortMarkerWritten) return;
-    const tempPath = `${inputs.path}/temp-${uuidv4()}.tmp`;
-    const finalPath = `${inputs.path}/${inputs.finalName}`;
-    await withTransportBudget(
-      inputs.client.put(inputs.body, tempPath, {
-        flags: "w",
-        encoding: "utf-8",
-      }),
-      ABORT_MARKER_WRITE_BUDGET_MS,
-      () =>
-        transportBudgetExceededError(
-          `abort marker write to ${tempPath}`,
-          ABORT_MARKER_WRITE_BUDGET_MS,
-        ),
-    );
-    await withTransportBudget(
-      inputs.client.rename(tempPath, finalPath),
-      ABORT_MARKER_WRITE_BUDGET_MS,
-      () =>
-        transportBudgetExceededError(
-          `abort marker rename to ${finalPath}`,
-          ABORT_MARKER_WRITE_BUDGET_MS,
-        ),
-    );
-    this.abortMarkerWritten = true;
-    this.log.debug(`[${this.role}] wrote abort marker ${inputs.finalName}`);
+    return this.abortMarker.writeMarker();
   }
 
   /**
@@ -1758,45 +1613,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
    * (it just latches the resolution that the skipped close() gate never reads).
    */
   sealAbort(): void {
-    this.resolveAbortDecisionOnce("seal");
-  }
-
-  // Bounds close()'s wait for the abort decision. Resolves with the decision if
-  // it lands first, or "timeout" once the unref'd backstop grace elapses. The
-  // local `decision` reference is captured so a concurrent clearAbortState
-  // nulling this.abortDecision cannot strand this wait.
-  private awaitAbortDecisionOrGrace(): Promise<"write" | "seal" | "timeout"> {
-    const decision =
-      this.abortDecision ?? Promise.resolve<"write" | "seal">("seal");
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const grace = new Promise<"timeout">((resolve) => {
-      timer = setTimeout(() => resolve("timeout"), ABORT_DECISION_GRACE_MS);
-      timer.unref();
-    });
-    return Promise.race([decision.finally(() => clearTimeout(timer)), grace]);
-  }
-
-  // Clears the identity-scoped abort state, mirroring the peerId/handshakeRole
-  // clears: the tokens are role-derived, so they live and die with the handshake
-  // identity. Belt-and-suspenders -- the session-keyed token is the real
-  // cross-session barrier -- so the exact placement (close() and the two
-  // rendezvous recovery sites) is tidiness, not security.
-  //
-  // abortDecisionResolved is reset to false (its unarmed/initial value, the same
-  // value armAbort sets). This is safe even though false is also the close() gate's
-  // re-entry condition because every reader gates on abortArmed FIRST, and clearing
-  // selfAbortToken here makes abortArmed false -- so the cleared, unarmed state never
-  // re-enters the gate regardless of abortDecisionResolved. Any future reader of
-  // abortDecisionResolved must preserve that ordering (check abortArmed first).
-  private clearAbortState(): void {
-    this.selfAbortToken = undefined;
-    this.peerAbortToken = undefined;
-    this.abortWriteInputs = undefined;
-    this.abortMarkerWritten = false;
-    this.pendingAbortWrite = undefined;
-    this.abortDecision = undefined;
-    this.resolveAbortDecision = undefined;
-    this.abortDecisionResolved = false;
+    this.abortMarker.seal();
   }
 
   /**
@@ -1827,10 +1644,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // "write", await the bounded marker write IN FULL (rejection-safe -- close()
     // must stay non-throwing). The grace bounded only the wait for the decision
     // above, never this write -- the write carries its own per-op budget (see
-    // ABORT_DECISION_GRACE_MS). The await MUST precede client.end(): the marker write
-    // rides the same underlying transport, so an earlier end() would kill an
-    // in-flight write -- the captured abortWriteInputs immunize only against the
-    // path/config nulling, not against end(). Gated on abortArmed &&
+    // the marker write's own per-op budget). The await MUST precede client.end():
+    // the marker write rides the same underlying transport, so an earlier end()
+    // would kill an in-flight write -- the captured abortWriteInputs immunize only
+    // against the path/config nulling, not against end(). Gated on abortArmed &&
     // decision-unresolved so the idempotent second/third close() from doCleanup
     // re-enters as a clean no-op. That no-op cannot race the write even though it
     // skips this await: the orchestrator's catch awaits writeAbortMarker() to
@@ -1840,10 +1657,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // teardown only in the fault window (process already failing); the
     // clean/echo/signal paths seal the decision in doCleanup before this runs, so
     // they proceed without the grace delay.
-    if (this.abortArmed && !this.abortDecisionResolved) {
-      const decision = await this.awaitAbortDecisionOrGrace();
-      if (decision === "write" && this.pendingAbortWrite !== undefined)
-        await this.pendingAbortWrite.catch(() => {
+    if (this.abortArmed && !this.abortMarker.decisionResolved) {
+      const decision = await this.abortMarker.awaitDecisionOrGrace();
+      const pendingWrite = this.abortMarker.pendingWrite;
+      if (decision === "write" && pendingWrite !== undefined)
+        await pendingWrite.catch(() => {
           /* best-effort; teardown proceeds regardless of write outcome */
         });
     }
@@ -2009,7 +1827,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // a new line, not an addition to an existing clear. resetSessionState resets
     // only per-session message counters, so the abort fields are cleared here
     // (and at the two rendezvous recovery sites), NOT there.
-    this.clearAbortState();
+    this.abortMarker.clear();
     this.resetSessionState();
   }
 
@@ -2800,7 +2618,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         this.peerId = undefined;
         this.role = "unknown role";
         this.handshakeRole = undefined;
-        this.clearAbortState();
+        this.abortMarker.clear();
         this.resetSessionState();
         throw mismatch;
       }
@@ -3634,7 +3452,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         this.peerId = undefined;
         this.role = "unknown role";
         this.handshakeRole = undefined;
-        this.clearAbortState();
+        this.abortMarker.clear();
         this.resetSessionState();
         throw err instanceof Error ? err : new Error(errMessage(err));
       }
@@ -4057,72 +3875,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     }
   }
 
-  // Reads and verifies a present `<peerId>-abort.json` against the
-  // locally-derived peer abort token. Returns true ONLY on an authenticated
-  // match (the caller then fast-fails with a PeerAbortError); every other
-  // outcome -- absent, oversized, unreadable, malformed, wrong version, decode
-  // failure, or non-match -- returns false so the loop keeps polling and
-  // eventually falls back to the peer-silence hedge. Self-contained and
-  // non-throwing: the admin controls these bytes, so a read failure must never
-  // surface as anything but "ignore".
-  private async verifyPeerAbortMarker(
-    allFiles: Array<FileInfo>,
-    path: string,
-    peerId: string,
-  ): Promise<boolean> {
-    const peerToken = this.peerAbortToken;
-    if (peerToken === undefined) return false;
-    const markerName = `${peerId}${ABORT_SUFFIX}`;
-    const listed = allFiles.find((file) => file.name === markerName);
-    if (listed === undefined) return false;
-    // Pre-get() listed-size refusal: never get() a file the listing already
-    // reports as over the cap, mirroring the message path's pre-get size gate.
-    // The marker is re-read every cycle, so a large read here would be the
-    // availability vector ABORT_MARKER_MAX_BYTES exists to bound.
-    if (listed.size > ABORT_MARKER_MAX_BYTES) {
-      this.log.debug(
-        `[${this.role}] ignoring oversized abort marker ` +
-          `${sanitizeForDisplay(markerName)} (${listed.size} bytes)`,
-      );
-      return false;
-    }
-    try {
-      // Bounded get() with the small cap (NOT MAX_FRAME_SIZE_BYTES, which the
-      // message path uses) as the hard backstop against a server under-reporting
-      // the listed size above. This rides this.client (the boundTransport
-      // poll-loop budget) deliberately, NOT the short rawClient budget the write
-      // uses: it is one read among the cycle's list() and message get(), all on
-      // that shared budget, and on SFTP the adapter self-bounds reads. The short
-      // rawClient budget is reserved for the teardown WRITE, which must fast-fail
-      // so a faulting process is not held open; a stalled read here only defers
-      // detection by one cycle (caught below -> false -> keep polling), and the
-      // list() that opens every cycle already gates on this same budget, so a
-      // tighter bound here would close nothing that list() does not already leave open.
-      const raw = await this.client.get(`${path}/${markerName}`, {
-        encoding: "utf-8",
-        maxBytes: ABORT_MARKER_MAX_BYTES,
-      });
-      const parsed = parseBoundedJson(raw.toString());
-      if (
-        typeof parsed !== "object" ||
-        parsed === null ||
-        (parsed as { version?: unknown }).version !== 1 ||
-        typeof (parsed as { token?: unknown }).token !== "string"
-      )
-        return false;
-      const decoded = fromBase64Url((parsed as { token: string }).token);
-      // Constant-time, length-mismatch-safe: a wrong-length decode returns false
-      // without a separate length check.
-      return bytesEqual(decoded, peerToken);
-    } catch {
-      // Oversize (a server that under-reported the size), JSON/parse failure,
-      // base64url decode failure, or a transient read error: ignore and keep
-      // polling. Re-reading the tiny file each cycle lets a delayed atomic write
-      // (or a torn read on a sync-mediated transport) self-heal on a later cycle.
-      return false;
-    }
-  }
-
   private async poll() {
     if (!this.pollerActive) return;
 
@@ -4277,7 +4029,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // I/O is negligible.
       if (
         this.abortArmed &&
-        (await this.verifyPeerAbortMarker(allFiles, path, peerId))
+        (await this.abortMarker.verifyPeerMarker(
+          this.client,
+          allFiles,
+          path,
+          peerId,
+        ))
       ) {
         this.pollerActive = false;
         this.emit("error", new PeerAbortError());
