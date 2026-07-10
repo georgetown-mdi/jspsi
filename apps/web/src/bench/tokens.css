@@ -1,0 +1,56 @@
+/* Design tokens for the linkage bench, lifted from the approved mockup
+   (design/web-redesign/proposal-c.html) and namespaced --bench-* so they
+   cannot collide with Mantine's variables. The dark set keys off Mantine's
+   color-scheme attribute rather than prefers-color-scheme so the bench
+   follows whatever scheme the app resolves (including a future toggle). */
+:root {
+  --bench-surface: #f6f5f1;
+  --bench-column: #ffffff;
+  --bench-rail-bg: #ebe9e2;
+  --bench-ink: #1a1c1a;
+  --bench-secondary: #565b57;
+  --bench-faint: #767b73;
+  --bench-accent: #0c7a8a;
+  --bench-accent-glow: rgba(12, 122, 138, 0.22);
+  --bench-on-accent: #ffffff;
+  --bench-rule: #d4d1c6;
+  --bench-rule-soft: #e5e2d8;
+  --bench-ok: #2e6e45;
+  --bench-warn: #8a5b06;
+  --bench-danger: #b23a26;
+  --bench-ok-bg: #e9f1eb;
+  --bench-warn-bg: #f6eedc;
+  --bench-danger-bg: #f5e5e0;
+  --bench-accent-bg: #e3eef0;
+  --bench-field-bg: #ffffff;
+  --bench-field-border: #83887f;
+  --bench-code-bg: #efede4;
+  --bench-stripe: #4fa2af;
+  --bench-shadow: 0 1px 3px rgba(26, 28, 26, 0.1);
+}
+
+:root[data-mantine-color-scheme="dark"] {
+  --bench-surface: #131512;
+  --bench-column: #1b1e1b;
+  --bench-rail-bg: #101210;
+  --bench-ink: #e8eae4;
+  --bench-secondary: #a3a89f;
+  --bench-faint: #878d83;
+  --bench-accent: #3fb6c9;
+  --bench-accent-glow: rgba(63, 182, 201, 0.28);
+  --bench-on-accent: #0b2a30;
+  --bench-rule: #31342e;
+  --bench-rule-soft: #272a24;
+  --bench-ok: #7cc79a;
+  --bench-warn: #d9a860;
+  --bench-danger: #e08972;
+  --bench-ok-bg: #17281d;
+  --bench-warn-bg: #2b2213;
+  --bench-danger-bg: #2e1913;
+  --bench-accent-bg: #102a2f;
+  --bench-field-bg: #161915;
+  --bench-field-border: #5a6057;
+  --bench-code-bg: #171a14;
+  --bench-stripe: #2e8c9c;
+  --bench-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
