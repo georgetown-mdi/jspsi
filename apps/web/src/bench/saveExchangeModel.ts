@@ -60,13 +60,18 @@ export function saveLeadCopy(transport: CliTransport): string {
   );
 }
 
-/** The info-alert copy about credentials: SFTP credentials come from the tool's
- * key file at run time and never enter the file; a shared-directory exchange
- * carries no credentials at all, only the directory both parties can reach. */
+/** The info-alert copy about credentials: SFTP credentials are never stored in
+ * this file -- the operator fills in the SSH username and points the config at
+ * a key or password (an `@file` reference) before running; the psilink key
+ * file the printed command provisions carries only the exchange's shared
+ * secret. A shared-directory exchange carries no credentials at all, only the
+ * directory both parties can reach. */
 export function credentialAlertCopy(transport: CliTransport): string {
   return transport === "sftp"
-    ? "Credentials are never stored in this file. The command-line tool " +
-        "supplies them at run time from its own key file."
+    ? "Credentials are never stored in this file. You fill in the SSH " +
+        "username and point the config at your key or password (an @file " +
+        "reference) before running - the psilink key file carries only the " +
+        "exchange secret, provisioned by the command below."
     : "A shared-directory exchange carries no credentials at all. The file " +
         "names only the directory both parties can reach.";
 }
@@ -234,7 +239,16 @@ export function exchangeFileInputFor(
   };
 }
 
-/** The one copyable run command the surface offers: saving the code to a file
- * keeps it out of the shell history (the `@file` reference reads it back). */
-export const RUN_COMMAND =
-  "psilink exchange your-data.csv --invitation @invitation-code.txt";
+/** The one copyable run command the surface offers, naming the JUST-minted
+ * exchange file so the command runs as printed instead of falling back to the
+ * CLI's default `./psilink.yaml`. Takes the filename rather than a `Date` so a
+ * re-save's new date always flows through {@link exchangeFileName} once, at
+ * the mint site, rather than being recomputed (and risking drift) here.
+ * Saving the invitation code to a file keeps it out of the shell history (the
+ * `@file` reference reads it back). */
+export function runCommand(fileName: string): string {
+  return (
+    `psilink exchange your-data.csv --config-file ${fileName} ` +
+    "--invitation @invitation-code.txt"
+  );
+}

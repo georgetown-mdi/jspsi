@@ -2,8 +2,8 @@ import { Alert, Button, TextInput } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 
 import {
-  RUN_COMMAND,
   credentialAlertCopy,
+  runCommand,
   saveCapabilityCopy,
   saveClosingCopy,
   saveExchangeError,
@@ -177,12 +177,14 @@ export function SaveExchangeSection({
 
           <p className={styles.small}>{saveClosingCopy(fields, transport)}</p>
           <p className={styles.small}>
-            Run it with this one command. Saving the invitation code to a file
-            (here <span className={styles.mono}>invitation-code.txt</span>)
-            keeps it out of your shell history.
+            Run it with this one command. Save the invitation code into a file
+            named <span className={styles.mono}>invitation-code.txt</span>{" "}
+            beside the exchange file - this keeps it out of your shell history,
+            and the command below reads it back with{" "}
+            <span className={styles.mono}>@invitation-code.txt</span>.
           </p>
           <div className={`${styles.codeBlock} ${styles.mono}`}>
-            {RUN_COMMAND}
+            {runCommand(saved.fileName)}
           </div>
         </>
       )}

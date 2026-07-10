@@ -2,9 +2,11 @@ import { describe, expect, test } from "vitest";
 
 import {
   EMPTY_SAVE_FIELDS,
+  credentialAlertCopy,
   endpointRequestFor,
   exchangeFileInputFor,
   exchangeFileName,
+  runCommand,
   saveCapabilityCopy,
   saveExchangeError,
   saveLeadCopy,
@@ -106,6 +108,40 @@ describe("copy is transport-specific", () => {
     expect(saveCapabilityCopy("sftp")).toContain("does not run SFTP");
     expect(saveCapabilityCopy("filedrop")).toContain(
       "does not run shared-directory",
+    );
+  });
+
+  test("the SFTP credential alert names what the operator actually supplies", () => {
+    const copy = credentialAlertCopy("sftp");
+    expect(copy).toContain("Credentials are never stored in this file");
+    expect(copy).toContain("SSH username");
+    expect(copy).toContain("@file reference");
+    expect(copy).toContain("exchange secret");
+    // Truthful about what the psilink key file carries -- no longer claims
+    // the CLI supplies SSH credentials from its own key file.
+    expect(copy).not.toMatch(/supplies them at run time from its own key/);
+  });
+
+  test("the filedrop credential alert is untouched: no credentials at all", () => {
+    expect(credentialAlertCopy("filedrop")).toBe(
+      "A shared-directory exchange carries no credentials at all. The file " +
+        "names only the directory both parties can reach.",
+    );
+  });
+});
+
+describe("the run command names the minted config file", () => {
+  test("interpolates the exact filename with --config-file, ahead of --invitation", () => {
+    expect(runCommand("psilink-exchange-2026-07-10.yaml")).toBe(
+      "psilink exchange your-data.csv --config-file " +
+        "psilink-exchange-2026-07-10.yaml --invitation @invitation-code.txt",
+    );
+  });
+
+  test("a re-save's new date-derived filename flows straight through", () => {
+    expect(runCommand(exchangeFileName(new Date(2026, 11, 25)))).toBe(
+      "psilink exchange your-data.csv --config-file " +
+        "psilink-exchange-2026-12-25.yaml --invitation @invitation-code.txt",
     );
   });
 });

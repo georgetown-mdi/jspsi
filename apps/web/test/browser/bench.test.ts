@@ -1383,6 +1383,19 @@ describe("inviter bench", () => {
         .element(page.getByRole("heading", { level: 1 }))
         .toHaveTextContent("Save your exchange file");
 
+      // The credential alert describes what the operator actually supplies --
+      // an SSH username and an @file key/password reference in the config --
+      // not a nonexistent CLI-managed key file.
+      await expect
+        .element(
+          page.getByText(
+            "You fill in the SSH username and point the config at your key " +
+              "or password (an @file reference) before running",
+            { exact: false },
+          ),
+        )
+        .toBeInTheDocument();
+
       // Save is gated on the required host until it is filled.
       const save = page.getByRole("button", { name: "Save exchange file" });
       await expect.element(save).toBeDisabled();
@@ -1408,11 +1421,14 @@ describe("inviter bench", () => {
       await expect
         .element(page.getByRole("button", { name: "Copy invitation code" }))
         .toBeInTheDocument();
-      // The one copyable run command carries the --invitation flag.
+      // The one copyable run command names the JUST-minted file with
+      // --config-file (the default `./psilink.yaml` would not match it) and
+      // carries the --invitation flag.
       await expect
         .element(
           page.getByText(
-            "psilink exchange your-data.csv --invitation @invitation-code.txt",
+            `psilink exchange your-data.csv --config-file ${fileName} ` +
+              "--invitation @invitation-code.txt",
           ),
         )
         .toBeInTheDocument();
