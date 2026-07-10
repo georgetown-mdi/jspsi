@@ -673,6 +673,40 @@ function declarableFieldNames(
   );
 }
 
+/**
+ * The authored field names the operator's columns can actually PRODUCE -- the
+ * satisfiability universe a key's badge is judged against. Derived from the
+ * authored fields (not the one-field-per-type default) and resolved through
+ * the given standardization -- the same inputs the Generate gate uses -- so an
+ * authored same-typed second field (e.g. first_name_2) reads as satisfiable.
+ * The probe restates the authored fields onto default terms; only its
+ * linkageFields are read (resolveFieldColumns ignores linkageKeys), and the
+ * identity is a constant because it never affects the field or key set.
+ */
+export function producibleFieldNames(
+  metadata: Metadata,
+  standardization: Standardization,
+  columns: ReadonlyArray<string>,
+): Set<string> {
+  const fields = authoredLinkageFields(metadata, standardization);
+  const probe: LinkageTerms = {
+    ...getDefaultLinkageTerms("", metadata),
+    linkageFields: fields,
+  };
+  const { unsatisfied } = assessLinkageSatisfiability(
+    [...columns],
+    probe,
+    standardization,
+    metadata,
+  );
+  const unsatisfiedNames = new Set(unsatisfied.map((field) => field.name));
+  return new Set(
+    fields
+      .map((field) => field.name)
+      .filter((name) => !unsatisfiedNames.has(name)),
+  );
+}
+
 /** Whether the inviter's columns can supply every field `key` references (each
  * element's `field` is declarable -- see {@link declarableFieldNames}). A key that
  * is not supplyable dangles the built terms, so the import disables it

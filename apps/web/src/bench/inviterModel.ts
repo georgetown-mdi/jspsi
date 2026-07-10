@@ -1,27 +1,40 @@
 import {
   MAX_INVITATION_LIFETIME_SECONDS,
+  authoredLinkageFields,
   disclosedColumnNames,
+  getDefaultLinkageTerms,
 } from "@psilink/core";
 
+import {
+  defaultStandardizationForRows,
+  draftFromTerms,
+  producibleFieldNames,
+  seedAdvancedInvite,
+  setDraftMetadata,
+  validateAdvancedInvite,
+} from "@psi/advancedInvite";
 import {
   hasMultipleIdentifiers,
   setColumnDisclosure,
   setColumnType,
 } from "@psi/metadataEditing";
-import {
-  seedAdvancedInvite,
-  setDraftMetadata,
-  validateAdvancedInvite,
-} from "@psi/advancedInvite";
 
 import type {
   AdvancedField,
   AdvancedInviteDraft,
   AdvancedInviteSeed,
   AdvancedValidation,
+  DraftLegalAgreement,
   OutputDirection,
 } from "@psi/advancedInvite";
-import type { CSVRow, LinkageKey, SemanticType } from "@psilink/core";
+import type {
+  CSVRow,
+  LinkageField,
+  LinkageKey,
+  LinkageStrategy,
+  LinkageTerms,
+  SemanticType,
+} from "@psilink/core";
 import type { DisclosureChoice } from "@psi/metadataEditing";
 
 /**
@@ -47,11 +60,15 @@ export interface AcquiredCsv {
 /** An editing session over the read file: the live draft and the fixed seed it
  * derived from ({@link seedAdvancedInvite}). Once `sealed` (the invitation was
  * created), every mutator in this module returns the session unchanged -- the
- * terms a partner is consenting to can never drift from what was minted. */
+ * terms a partner is consenting to can never drift from what was minted.
+ * `keysAuthored` marks the key set as author-controlled (an expert edit or an
+ * import): a later column edit then updates only the metadata, because the
+ * template-driven key reconciliation would silently drop authored keys. */
 export interface InviterEditor {
   draft: AdvancedInviteDraft;
   seed: AdvancedInviteSeed;
   sealed?: boolean;
+  keysAuthored?: boolean;
 }
 
 /** Seal the session at create time; see {@link InviterEditor.sealed}. */
@@ -97,6 +114,231 @@ export function editorWithOutputDirection(
   return { ...editor, draft: { ...editor.draft, outputDirection } };
 }
 
+/** Replace the whole draft -- the expert key editor's change channel. Marks
+ * the key set author-controlled, so later column edits stop reconciling it
+ * away ({@link InviterEditor.keysAuthored}). */
+export function editorWithAuthoredDraft(
+  editor: InviterEditor,
+  draft: AdvancedInviteDraft,
+): InviterEditor {
+  if (editor.sealed === true) return editor;
+  return { ...editor, draft, keysAuthored: true };
+}
+
+/** Enable or disable the key at `index` in the guided list. */
+export function editorWithKeyEnabled(
+  editor: InviterEditor,
+  index: number,
+  enabled: boolean,
+): InviterEditor {
+  if (editor.sealed === true) return editor;
+  return {
+    ...editor,
+    draft: {
+      ...editor.draft,
+      keys: editor.draft.keys.map((entry, at) =>
+        at === index ? { ...entry, enabled } : entry,
+      ),
+    },
+  };
+}
+
+/** Move the key at `index` one place earlier (`-1`) or later (`+1`); a move
+ * past either end is a no-op. Key order is match order, so this is the guided
+ * list's reorder control. */
+export function editorWithKeyMoved(
+  editor: InviterEditor,
+  index: number,
+  offset: -1 | 1,
+): InviterEditor {
+  if (editor.sealed === true) return editor;
+  const target = index + offset;
+  if (target < 0 || target >= editor.draft.keys.length) return editor;
+  const keys = [...editor.draft.keys];
+  [keys[index], keys[target]] = [keys[target], keys[index]];
+  return { ...editor, draft: { ...editor.draft, keys } };
+}
+
+/** Set how the agreed keys are exchanged (cascade or single-pass). */
+export function editorWithLinkageStrategy(
+  editor: InviterEditor,
+  linkageStrategy: LinkageStrategy,
+): InviterEditor {
+  if (editor.sealed === true) return editor;
+  return { ...editor, draft: { ...editor.draft, linkageStrategy } };
+}
+
+/** Attach, edit, or (with `undefined`) detach the legal agreement. */
+export function editorWithLegalAgreement(
+  editor: InviterEditor,
+  legalAgreement: DraftLegalAgreement | undefined,
+): InviterEditor {
+  if (editor.sealed === true) return editor;
+  return { ...editor, draft: { ...editor.draft, legalAgreement } };
+}
+
+/** Load an imported, validated terms document into the session, keeping the
+ * inviter's own columns and lifetime -- an unsupplyable imported key arrives
+ * disabled with its badge, never dropped ({@link draftFromTerms}). Imported
+ * keys are author-controlled. */
+export function editorWithImportedTerms(
+  editor: InviterEditor,
+  csv: AcquiredCsv,
+  terms: LinkageTerms,
+): InviterEditor {
+  if (editor.sealed === true) return editor;
+  return {
+    ...editor,
+    draft: draftFromTerms(
+      terms,
+      editor.seed,
+      editor.draft.lifetimeSeconds,
+      csv.rawRows,
+    ),
+    keysAuthored: true,
+  };
+}
+
+/** Set one cleaned field's ordered steps. */
+export function editorWithFieldSteps(
+  editor: InviterEditor,
+  output: string,
+  steps: AdvancedInviteDraft["standardization"][number]["steps"],
+): InviterEditor {
+  if (editor.sealed === true) return editor;
+  return {
+    ...editor,
+    draft: {
+      ...editor.draft,
+      standardization: editor.draft.standardization.map((transformation) =>
+        transformation.output === output
+          ? { ...transformation, steps }
+          : transformation,
+      ),
+    },
+  };
+}
+
+/** Rebind a cleaned field to a different input column. */
+export function editorWithFieldInput(
+  editor: InviterEditor,
+  output: string,
+  input: string,
+): InviterEditor {
+  if (editor.sealed === true) return editor;
+  return {
+    ...editor,
+    draft: {
+      ...editor.draft,
+      standardization: editor.draft.standardization.map((transformation) =>
+        transformation.output === output
+          ? { ...transformation, input }
+          : transformation,
+      ),
+    },
+  };
+}
+
+/** Remove an authored same-typed field's transformation. */
+export function editorWithFieldRemoved(
+  editor: InviterEditor,
+  output: string,
+): InviterEditor {
+  if (editor.sealed === true) return editor;
+  return {
+    ...editor,
+    draft: {
+      ...editor.draft,
+      standardization: editor.draft.standardization.filter(
+        (transformation) => transformation.output !== output,
+      ),
+    },
+  };
+}
+
+/** Append a same-typed field bound to its first free column, named uniquely
+ * off the type's first field and seeded with its steps, so the second field
+ * starts from the same recommended pipeline. A type with no free column is a
+ * no-op (the affordance is gated on one existing). */
+export function editorWithFieldAdded(
+  editor: InviterEditor,
+  type: LinkageField["type"],
+): InviterEditor {
+  if (editor.sealed === true) return editor;
+  const draft = editor.draft;
+  const bound = new Set(draft.standardization.map((t) => t.input));
+  const freeColumn = draft.metadata
+    .filter((column) => column.role === "linkage" && column.type === type)
+    .map((column) => column.name)
+    .find((column) => !bound.has(column));
+  if (freeColumn === undefined) return editor;
+  const typeByOutput = new Map(
+    declaredFieldsFor(draft).map((field) => [field.name, field.type]),
+  );
+  const sibling = draft.standardization.find(
+    (transformation) => typeByOutput.get(transformation.output) === type,
+  );
+  const base = sibling?.output ?? type;
+  const taken = new Set(draft.standardization.map((t) => t.output));
+  let n = 2;
+  let output = `${base}_${n}`;
+  while (taken.has(output)) output = `${base}_${++n}`;
+  return {
+    ...editor,
+    draft: {
+      ...draft,
+      standardization: [
+        ...draft.standardization,
+        { output, input: freeColumn, steps: sibling?.steps ?? [] },
+      ],
+    },
+  };
+}
+
+/** Restore the recommended cleaning for the current metadata -- the cleaning
+ * error boundary's recovery, scoped to the cleaning alone. */
+export function editorWithRecommendedCleaning(
+  editor: InviterEditor,
+  csv: AcquiredCsv,
+): InviterEditor {
+  if (editor.sealed === true) return editor;
+  return {
+    ...editor,
+    draft: {
+      ...editor.draft,
+      standardization: defaultStandardizationForRows(
+        editor.draft.metadata,
+        getDefaultLinkageTerms(editor.draft.identity, editor.draft.metadata),
+        csv.rawRows,
+      ),
+    },
+  };
+}
+
+/** The fields a key element may reference, in offer order -- the authored
+ * field set, so a second same-typed field is offerable. */
+export function declaredFieldsFor(
+  draft: AdvancedInviteDraft,
+): Array<LinkageField> {
+  return authoredLinkageFields(draft.metadata, draft.standardization);
+}
+
+/** Per-key satisfiability for the guided list's and expert editor's badges:
+ * whether the columns can produce every field the key references. */
+export function keySatisfiabilityFor(
+  editor: InviterEditor,
+): (index: number) => boolean {
+  const producible = producibleFieldNames(
+    editor.draft.metadata,
+    editor.draft.standardization,
+    editor.seed.columns,
+  );
+  return (index) =>
+    editor.draft.keys[index].key.elements.every((element) =>
+      producible.has(element.field),
+    );
+}
+
 /** Discard every edit and re-derive the recommended draft from the file,
  * keeping only the inviter's name -- step 3's "Reset to recommended". */
 export function resetToRecommended(
@@ -124,7 +366,10 @@ function withMetadata(
   return {
     editor: {
       ...editor,
-      draft: setDraftMetadata(editor.draft, metadata, csv.rawRows),
+      draft:
+        editor.keysAuthored === true
+          ? { ...editor.draft, metadata }
+          : setDraftMetadata(editor.draft, metadata, csv.rawRows),
     },
     demotedIdentifiers,
   };
@@ -316,10 +561,12 @@ export function inviterLedgerRows(
   ];
 }
 
-/** One rail quiet fact for the Customize group. */
+/** One rail quiet fact for the Customize group; `target` is the tab the
+ * fact's label opens. */
 export interface InviterRailFact {
   label: string;
   fact?: string;
+  target: Extract<SpineTarget, "cleaning" | "keys" | "agreement">;
 }
 
 function plural(count: number, noun: string): string {
@@ -348,34 +595,42 @@ export function inviterRailFacts(
     {
       label: "Cleaning",
       fact: editor === undefined ? undefined : cleaningFact(editor.draft),
+      target: "cleaning",
     },
     {
       label: "Matching keys",
       fact: editor === undefined ? undefined : keysFact(editor.draft),
+      target: "keys",
     },
     {
       label: "Legal agreement",
       fact: editor?.draft.legalAgreement?.reference,
+      target: "agreement",
     },
   ];
 }
 
-/** A bench section a Problems entry or a Change link can navigate to. */
-export type SpineTarget = "file" | "columns" | "review";
+/** A bench section a Problems entry or a Change link can navigate to: a spine
+ * step or a Customize tab. */
+export type SpineTarget =
+  | "file"
+  | "columns"
+  | "review"
+  | "cleaning"
+  | "keys"
+  | "agreement";
 
 /** The section that owns each validation field, so a Problems entry can link
- * to where the fix lives. Key, cleaning, and agreement fields point at step 2
- * until their Customize tabs exist -- the column table is where those terms
- * are shaped today. */
+ * to where the fix lives. */
 const FIELD_TARGETS: Record<AdvancedField, SpineTarget> = {
   identity: "file",
   payload: "columns",
-  keys: "columns",
-  standardization: "columns",
+  keys: "keys",
+  standardization: "cleaning",
   lifetime: "review",
-  legalReference: "review",
-  legalPurpose: "review",
-  legalExpiration: "review",
+  legalReference: "agreement",
+  legalPurpose: "agreement",
+  legalExpiration: "agreement",
 };
 
 /** One entry in the rail's Problems block: the message and the section that
@@ -457,15 +712,18 @@ export function answersRows(
     {
       label: "Cleaning",
       value: `${cleaningFact(editor.draft)}, filled in from your file`,
+      changeTarget: "cleaning",
     },
     {
       label: "Matching keys",
-      value: `${keysFact(editor.draft)}, recommended order`,
+      value: `${keysFact(editor.draft)}, tried in order`,
+      changeTarget: "keys",
     },
     {
       label: "Legal agreement",
       value: editor.draft.legalAgreement?.reference ?? "None",
       mono: editor.draft.legalAgreement?.reference !== undefined,
+      changeTarget: "agreement",
     },
     {
       label: "Invitation lifetime",

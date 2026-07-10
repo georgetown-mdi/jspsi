@@ -396,6 +396,94 @@ describe("inviter bench", () => {
     expect(expiresRow?.querySelector("dd")?.textContent).toMatch(/20\d\d/);
   });
 
+  test("customize tabs: reorder keys, author an agreement, gated settings stay inert", async () => {
+    mount(createElement(InviterBench));
+
+    await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana");
+    const fileInput = document.querySelector('input[type="file"]');
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      new File(
+        [
+          "client_id,first_name,last_name,dob,program_code\n" +
+            "1,Ann,Lee,01/02/1990,A\n",
+        ],
+        "clients.csv",
+        { type: "text/csv" },
+      ),
+    );
+    await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
+
+    const ledgerRow = (label: string) =>
+      Array.from(
+        document.querySelectorAll(
+          `aside[aria-label="This exchange"] .${styles.ledgerRow}`,
+        ),
+      ).find(
+        (row) => row.querySelector("dt")?.childNodes[0].textContent === label,
+      );
+
+    // The rail's Customize facts are links once the file is read.
+    await page.getByRole("button", { name: "Matching keys" }).click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Matching keys");
+
+    // Reordering the guided list reorders the ledger's matched-on keys.
+    const orderBefore = ledgerRow("Matched on")?.querySelector("dd")
+      ?.textContent as string;
+    await page
+      .getByRole("button", { name: /^Move .+ later$/ })
+      .first()
+      .click();
+    const orderAfter = ledgerRow("Matched on")?.querySelector("dd")
+      ?.textContent as string;
+    expect(orderAfter).not.toBe(orderBefore);
+
+    // The gated method and deduplication controls are visible but inert.
+    await expect.element(page.getByLabelText("Matching method")).toBeDisabled();
+    await expect
+      .element(
+        page.getByLabelText(
+          "Allow several of your records to match one partner record",
+        ),
+      )
+      .toBeDisabled();
+
+    // The agreement authored in its tab reaches the ledger and the review
+    // table.
+    await page.getByRole("button", { name: "Legal agreement" }).click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Legal agreement");
+    await page.getByLabelText("Attach a legal agreement").click();
+    await userEvent.fill(
+      page.getByLabelText("Agreement reference"),
+      "MOU-2025-0042",
+    );
+    await userEvent.fill(
+      page.getByLabelText("Purpose of the disclosure"),
+      "Program evaluation",
+    );
+    await userEvent.fill(page.getByLabelText("Expiration date"), "2099-12-31");
+    expect(ledgerRow("Agreement")?.querySelector("dd")?.textContent).toBe(
+      "MOU-2025-0042",
+    );
+
+    await page.getByRole("button", { name: /Back to Review & create/ }).click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Review & create");
+    await expect
+      .element(page.getByText("Ready to create."))
+      .toBeInTheDocument();
+    const agreementRow = Array.from(document.querySelectorAll("th")).find(
+      (heading) => heading.textContent === "Legal agreement",
+    )?.parentElement;
+    expect(agreementRow?.textContent).toContain("MOU-2025-0042");
+  });
+
   test("a failed mint leaves the terms editable and create retryable", async () => {
     mount(createElement(InviterBench));
 
