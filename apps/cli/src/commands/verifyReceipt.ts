@@ -3,13 +3,16 @@ import fs from "node:fs";
 import logLibrary from "loglevel";
 
 import {
+  deriveOurIdColumn,
   EXCHANGE_KEYS_VERSION,
   EXCHANGE_RECORD_VERSION,
   loadCSVFile,
   parseExchangeRecord,
   parseVerificationKeys,
   reconstructCommittedData,
+  recordedVersionMatches,
   sanitizeForDisplay,
+  toRetainedResult,
   UsageError,
   verifyExchangeRecord,
 } from "@psilink/core";
@@ -18,7 +21,6 @@ import type {
   ExchangeRecord,
   LinkageTerms,
   RecordVerificationReport,
-  RetainedResult,
   TermsHashStatus,
   VerificationKeys,
 } from "@psilink/core";
@@ -118,23 +120,25 @@ function readTextFile(pathValue: string, kind: string): string {
 // Reject an unrecognized version with a clear, specific message BEFORE the schema
 // parse -- so a future-format or hand-edited file is not mis-reported as a generic
 // shape error. The version literal is also enforced by the schema; this only makes
-// the failure legible.
+// the failure legible. recordedVersionMatches (core) reads the raw version; this
+// wraps a mismatch in the CLI's UsageError.
 function assertRecognizedVersion(
   raw: unknown,
   expected: string,
   pathValue: string,
   kind: string,
 ): void {
-  const version =
-    raw !== null && typeof raw === "object"
-      ? (raw as Record<string, unknown>)["version"]
-      : undefined;
-  if (version !== expected)
+  if (!recordedVersionMatches(raw, expected)) {
+    const version =
+      raw !== null && typeof raw === "object"
+        ? (raw as Record<string, unknown>)["version"]
+        : undefined;
     throw new UsageError(
       `${kind} file ${pathValue} has an unrecognized version ` +
         `(${typeof version === "string" ? version : "missing"}); this build ` +
         `recognizes ${expected}`,
     );
+  }
 }
 
 /** @internal exported for testing */
@@ -193,38 +197,10 @@ function firstIssue(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-// --- Result parsing / id-column derivation -----------------------------------
-
-/** Turn a parsed result CSV into positional headers + string rows (the shape the
- * reconstruction consumes: our id, the partner index, then payload values).
- * @internal exported for testing */
-export function toRetainedResult(parsed: {
-  meta: { fields?: string[] };
-  data: Array<Record<string, string | undefined>>;
-}): RetainedResult {
-  const headers = parsed.meta.fields ?? [];
-  const rows = parsed.data.map((row) => headers.map((h) => row[h] ?? ""));
-  return { headers, rows };
-}
-
-/**
- * Derive the identifier column the exchange keyed on from the result's first
- * header: buildOutputTable heads the first column with the identifier column's
- * name, or `row_id` when the exchange keyed on row indices. When the input has a
- * column of that name it is the identifier (the result's first column is an
- * identifier value to map back to a row); otherwise the first column is the row
- * index itself. The lone ambiguity -- an input that has a data column literally
- * named `row_id` while the exchange used no identifier -- would open no commitment
- * (a reported mismatch), never a false verification.
- * @internal exported for testing
- */
-export function deriveOurIdColumn(
-  resultHeaders: string[],
-  inputColumns: ReadonlySet<string>,
-): string | undefined {
-  const first = resultHeaders[0];
-  return first !== undefined && inputColumns.has(first) ? first : undefined;
-}
+// toRetainedResult and deriveOurIdColumn are the browser-safe shaping helpers,
+// lifted to @psilink/core next to reconstructCommittedData; re-exported here so
+// this command and its tests keep a single import site.
+export { deriveOurIdColumn, toRetainedResult };
 
 // --- Report formatting -------------------------------------------------------
 

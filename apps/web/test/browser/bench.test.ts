@@ -313,6 +313,7 @@ describe("bench lobby", () => {
     expect(cardHeadings).toEqual([
       "Set up an exchange",
       "Accept an invitation you were sent",
+      "Verify a receipt",
     ]);
 
     // The in-browser processing assurance is a preserved invariant of the

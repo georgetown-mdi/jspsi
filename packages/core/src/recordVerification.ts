@@ -386,3 +386,60 @@ export function reconstructCommittedData(
 
   return { data, warnings };
 }
+
+// --- Re-supply input shaping -------------------------------------------------
+
+/**
+ * Whether a raw parsed record or keys value carries the one recognized format
+ * version. A pre-parse legibility check: `parseExchangeRecord` /
+ * `parseVerificationKeys` also reject an unrecognized version (the schema pins the
+ * literal), but a caller can run this first to report a future-format or
+ * hand-edited file as an unrecognized-version outcome rather than a generic shape
+ * error. Reads only the top-level `version`; the schema parse is still the
+ * authority for the rest of the shape.
+ */
+export function recordedVersionMatches(
+  raw: unknown,
+  expected: string,
+): boolean {
+  const version =
+    raw !== null && typeof raw === "object"
+      ? (raw as Record<string, unknown>)["version"]
+      : undefined;
+  return version === expected;
+}
+
+/**
+ * Turn a parsed result CSV (header-keyed rows, the shape a CSV parser returns)
+ * into the positional {@link RetainedResult} {@link reconstructCommittedData}
+ * consumes: the header row and each data row projected onto it, with a missing
+ * cell read as the empty string. The result's fixed leading columns are our
+ * matched record id then the partner row index, with payload value columns after.
+ */
+export function toRetainedResult(parsed: {
+  meta: { fields?: string[] };
+  data: Array<Record<string, string | undefined>>;
+}): RetainedResult {
+  const headers = parsed.meta.fields ?? [];
+  const rows = parsed.data.map((row) => headers.map((h) => row[h] ?? ""));
+  return { headers, rows };
+}
+
+/**
+ * Derive the identifier column the exchange keyed on from the result's first
+ * header. `buildOutputTable` heads the first result column with the identifier
+ * column's name, or `row_id` when the exchange keyed on row indices. When the
+ * input has a column of that name it is the identifier (the result's first column
+ * holds identifier values to map back to input rows); otherwise the first column
+ * is the row index itself, and this returns `undefined`. The lone ambiguity -- an
+ * input with a data column literally named `row_id` while the exchange used no
+ * identifier -- would open no commitment (a reported mismatch), never a false
+ * verification.
+ */
+export function deriveOurIdColumn(
+  resultHeaders: string[],
+  inputColumns: ReadonlySet<string>,
+): string | undefined {
+  const first = resultHeaders[0];
+  return first !== undefined && inputColumns.has(first) ? first : undefined;
+}
