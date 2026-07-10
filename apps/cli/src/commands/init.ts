@@ -15,13 +15,10 @@ import {
   configureLogging,
   LOG_LEVELS,
   promptConfirm,
+  runOrExit,
   singleValue,
 } from "../util/cli";
-import {
-  buildDataSpec,
-  loadInputRowsForInference,
-  runOrExit,
-} from "./bootstrap";
+import { buildDataSpec, loadInputRowsForInference } from "../onlineBootstrap";
 
 // The identity written into a fresh template when --identity is not given. A
 // placeholder, like the connection's host/username -- init produces a scaffold to

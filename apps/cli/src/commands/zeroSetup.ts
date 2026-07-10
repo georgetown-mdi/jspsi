@@ -1,6 +1,5 @@
 import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
-import { fileURLToPath } from "node:url";
 import { userInfo } from "node:os";
 
 import {
@@ -13,14 +12,11 @@ import type {
   ConnectionConfig,
   ExchangeBootstrapResult,
   ExchangeSpec,
-  FileDropConnectionConfig,
   LinkageStrategy,
-  SFTPConnectionConfig,
   PreparedExchange,
 } from "@psilink/core";
 
 import {
-  applyConnectionOverrides,
   announceRetainMode,
   assertRetainSweepGuard,
   saveConfig,
@@ -37,25 +33,29 @@ import {
   parseOrExit,
   openInputSource,
 } from "../util/cli";
+import { channelFromURL, connectionFromURL } from "../connectionFromUrl";
 import {
   addCommonBootstrapOptions,
   connectionOverridesFrom,
-  observedReceivedColumnsForSave,
   parseCommonBootstrapArgs,
-  parseLinkageStrategyFlag,
-  singlePassDisclosureNotice,
   warnLowPollingFrequency,
   warnUnsupportedFileSyncFlags,
-  withLinkageStrategy,
   type CommonBootstrapOptions,
-} from "./bootstrap";
+  type ConnectionOverrideOptions,
+} from "../optionDefinitions";
+import {
+  observedReceivedColumnsForSave,
+  parseLinkageStrategyFlag,
+  singlePassDisclosureNotice,
+  withLinkageStrategy,
+} from "../onlineBootstrap";
 import { runProtocol, type ProtocolConnectionConfig } from "../protocol";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 import { warnOnValueConstraints } from "./valueConstraintWarnings";
-import {
-  decodeUrlComponent,
-  redactUrlCredentials,
-} from "../util/connectionUrl";
+
+// channelFromURL is used by the handler's pre-connection flag-warning path (and
+// by zeroSetup.test.ts); re-export it so both keep importing it from this module.
+export { channelFromURL };
 
 export function builder(cmd: Argv): Argv {
   return addCommonBootstrapOptions(
@@ -142,37 +142,23 @@ export function builder(cmd: Argv): Argv {
     .demand(1);
 }
 
-// --- Argument parsing --------------------------------------------------------
-
 // The common bootstrap options plus the zero-setup-specific positionals, the
 // --save flag, and the CLI-only sweep controls. record/recordFile/logLevel/
-// verbosity come from CommonBootstrapOptions.
+// verbosity come from CommonBootstrapOptions. The connection-override subset the
+// handler feeds to createConnection is CommonBootstrapOptions' server-*/tuning
+// fields (a superset of ConnectionOverrideOptions); the fields below are excluded
+// from that path -- the CLI-only sweep controls never reach the config schema,
+// and --linkage-strategy shapes the linkage terms, not the connection.
 interface ZeroSetupArgs extends CommonBootstrapOptions {
   positionals: Array<string | number>;
   save: boolean;
-  // CLI-only sweep controls (see protocol.FileSyncRuntimeOptions). Excluded from
-  // ZeroSetupOptions below so they never reach createConnection / the config
-  // schema.
+  // CLI-only sweep controls (see protocol.FileSyncRuntimeOptions).
   sweepExchangeFiles: boolean;
   forceRetainSweep: boolean;
   // The operator's --linkage-strategy selection, applied to the terms this
-  // command authors from its input (see prepareDataset). Excluded from
-  // ZeroSetupOptions below: it shapes the linkage terms, not the connection.
+  // command authors from its input (see prepareDataset).
   linkageStrategy?: LinkageStrategy;
 }
-
-type ZeroSetupOptions = Omit<
-  ZeroSetupArgs,
-  | "positionals"
-  | "logLevel"
-  | "logFile"
-  | "verbosity"
-  | "sweepExchangeFiles"
-  | "forceRetainSweep"
-  | "linkageStrategy"
-  | "record"
-  | "recordFile"
->;
 
 function parseArgs(argv: Arguments): ZeroSetupArgs {
   // Parse the common options through the shared parser (the same singleValue
@@ -203,8 +189,6 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
     linkageStrategy: parseLinkageStrategyFlag(argv),
   };
 }
-
-// --- Positional parsing ------------------------------------------------------
 
 function tryParseURL(raw: string, errorMsg: string): URL {
   try {
@@ -260,83 +244,25 @@ export function resolvePositionals(positionals: Array<unknown>): {
   return { server, input: arg1, output: arg2 };
 }
 
-// --- Connection config from URL ----------------------------------------------
-
 /**
- * Maps a server URL protocol to a connection channel identifier.
+ * Build the zero-setup connection from a server URL. A thin adapter over the
+ * shared {@link connectionFromURL} domain builder: it fans this command's parsed
+ * options into the structured {@link ConnectionOverrides} shape at the call site
+ * (the domain builder takes the pre-built overrides, never the CLI option bag),
+ * so the URL-to-config mapping -- percent-decoding, the bare-host path guard, the
+ * filedrop non-localhost and host-less-sftp rejections -- lives in one place
+ * shared with invite/accept. Widens the builder's {@link RunnableConnectionConfig}
+ * back to {@link ConnectionConfig} for the handler, which casts to
+ * {@link ProtocolConnectionConfig} at the runProtocol boundary.
+ *
  * @internal exported for testing
  */
-export function channelFromURL(url: URL): ConnectionConfig["channel"] {
-  switch (url.protocol) {
-    case "sftp:":
-    case "ssh:":
-      return "sftp";
-    case "ws:":
-    case "wss:":
-      return "webrtc";
-    case "file:":
-      return "filedrop";
-    default:
-      // Invalid caller input (exit 64), not a transport failure.
-      throw new UsageError(
-        `unsupported URL scheme: ${url.protocol}; expected sftp://, ` +
-          "ssh://, ws://, wss://, or file://",
-      );
-  }
-}
-
-/** @internal */
 export function createConnection(
   server: URL,
-  options: ZeroSetupOptions,
+  options: ConnectionOverrideOptions,
 ): ConnectionConfig {
-  const channel = channelFromURL(server);
-
-  if (channel === "filedrop") {
-    if (server.hostname && server.hostname !== "localhost") {
-      throw new UsageError(
-        `file:// URLs must use three slashes (e.g. file:///mnt/share/drop) ` +
-          `or file://localhost/path; got: ${redactUrlCredentials(server)}`,
-      );
-    }
-    const base: FileDropConnectionConfig = {
-      channel: "filedrop",
-      path: fileURLToPath(server),
-    };
-    // applyConnectionOverrides ignores the server-* fields on a filedrop
-    // connection, so the full override set from connectionOverridesFrom is safe
-    // here -- only the shared and file-sync options take effect.
-    return applyConnectionOverrides(base, connectionOverridesFrom(options));
-  }
-
-  if (channel !== "sftp")
-    throw new UsageError(`${channel} channel not yet supported in the CLI`);
-
-  const base: SFTPConnectionConfig = {
-    channel: "sftp",
-    server: {
-      host: decodeUrlComponent(server.hostname, server),
-      port: server.port ? Number(server.port) : undefined,
-      username: server.username
-        ? decodeUrlComponent(server.username, server)
-        : undefined,
-      password: server.password
-        ? decodeUrlComponent(server.password, server)
-        : undefined,
-      // A bare-host URL (sftp://host or sftp://host/) leaves the remote path
-      // unset, matching connectionFromURL so both URL-to-config builders agree
-      // on the same input rather than this twin pinning the filesystem root.
-      path:
-        server.pathname && server.pathname !== "/"
-          ? decodeUrlComponent(server.pathname, server)
-          : undefined,
-    },
-  };
-
-  return applyConnectionOverrides(base, connectionOverridesFrom(options));
+  return connectionFromURL(server, connectionOverridesFrom(options));
 }
-
-// --- Data preparation --------------------------------------------------------
 
 async function prepareDataset(
   identity: string,
@@ -370,8 +296,6 @@ async function prepareDataset(
   warnOnValueConstraints(prepared, log);
   return prepared;
 }
-
-// --- Save bootstrap ----------------------------------------------------------
 
 /**
  * Build the {@link ExchangeSpec} a `--save` zero-setup exchange persists: the
@@ -505,8 +429,6 @@ export function finalizeBootstrap(params: {
       "with your partner to re-run with --save.",
   );
 }
-
-// --- Handler -----------------------------------------------------------------
 
 export async function handler(argv: Arguments): Promise<void> {
   // parseArgs resolves the log level and reads every option, so it runs before

@@ -33,16 +33,27 @@ import {
   configureLogging,
   durationFlagSeconds,
   MAX_TIMEOUT_SECONDS,
+  runOrExit,
   singleValue,
 } from "../util/cli";
 import { redactUrlCredentials } from "../util/connectionUrl";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 import {
+  connectionFromURL,
+  type RunnableConnectionConfig,
+} from "../connectionFromUrl";
+import {
   addCommonBootstrapOptions,
+  connectionOverridesFrom,
+  parseCommonBootstrapArgs,
+  warnLowPollingFrequency,
+  warnOptionsOverridesIgnoredOffline,
+  warnServerOverridesIgnoredOffline,
+  type CommonBootstrapOptions,
+} from "../optionDefinitions";
+import {
   buildDataSpec,
   connectionFromEndpoint,
-  connectionFromURL,
-  connectionOverridesFrom,
   endpointFromConnection,
   DEFAULT_ACCEPT_TIMEOUT_SECONDS,
   expiresFromNow,
@@ -50,20 +61,13 @@ import {
   loadInputRows,
   logOnlineBootstrapOutcome,
   looksLikeUrl,
-  parseCommonBootstrapArgs,
   parseLinkageStrategyFlag,
   prepareForOnlineExchange,
   runOnlineBootstrap,
-  runOrExit,
   singlePassDisclosureNotice,
   unsatisfiedLinkageFields,
-  warnLowPollingFrequency,
-  warnOptionsOverridesIgnoredOffline,
-  warnServerOverridesIgnoredOffline,
-  type CommonBootstrapOptions,
   type ResolvedDataSpec,
-  type RunnableConnectionConfig,
-} from "./bootstrap";
+} from "../onlineBootstrap";
 
 // The invitation lifetime default and one-year ceiling are shared from
 // @psilink/core (INVITATION_LIFETIME_SECONDS, MAX_INVITATION_LIFETIME_SECONDS) so

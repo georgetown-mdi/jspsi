@@ -29,7 +29,7 @@ import {
 import { detectFileConflicts } from "../fileUtils";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { resolveAtSignRefs } from "../util/atSignRefs";
-import { configureLogging, promptConfirm } from "../util/cli";
+import { configureLogging, promptConfirm, runOrExit } from "../util/cli";
 import { resolveRecordOutput } from "../recordFile";
 import {
   checkLinkageSatisfiability,
@@ -37,28 +37,31 @@ import {
 } from "./linkagePreflight";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 import {
-  addCommonBootstrapOptions,
-  applyEndpointSplitDirectories,
-  buildDataSpec,
-  connectionFromEndpoint,
   connectionFromURL,
+  type RunnableConnectionConfig,
+} from "../connectionFromUrl";
+import { diffConnectionAgainstTarget } from "../reconcile";
+import {
+  addCommonBootstrapOptions,
   connectionOverridesFrom,
-  diffConnectionAgainstTarget,
-  loadInputRows,
-  logOnlineBootstrapOutcome,
-  looksLikeUrl,
   parseCommonBootstrapArgs,
-  prepareForOnlineExchange,
-  runOnlineBootstrap,
-  runOrExit,
-  singlePassDisclosureNotice,
   warnLowPollingFrequency,
   warnOptionsOverridesIgnoredOffline,
   warnServerOverridesIgnoredOffline,
   type CommonBootstrapOptions,
+} from "../optionDefinitions";
+import {
+  applyEndpointSplitDirectories,
+  buildDataSpec,
+  connectionFromEndpoint,
+  loadInputRows,
+  logOnlineBootstrapOutcome,
+  looksLikeUrl,
+  prepareForOnlineExchange,
+  runOnlineBootstrap,
+  singlePassDisclosureNotice,
   type ResolvedDataSpec,
-  type RunnableConnectionConfig,
-} from "./bootstrap";
+} from "../onlineBootstrap";
 
 export function builder(cmd: Argv): Argv {
   return addCommonBootstrapOptions(

@@ -226,6 +226,40 @@ export function exitWithError(
   process.exit(code);
 }
 
+/**
+ * Run a command body, mapping any thrown error to a process exit: a
+ * {@link UsageError} to EX_USAGE (64), otherwise the error's own numeric
+ * `exitCode` or EX_UNAVAILABLE (69). This is the single error->exit boundary for
+ * the bootstrap-style commands; routing the whole handler body through it --
+ * including option parsing and the accept confirmation prompt -- means a thrown
+ * or rejected step exits cleanly rather than crashing with an unhandled
+ * rejection. The `?? exitCode` rung is load-bearing: `openInputSource` and
+ * `buildDataSpec` throw plain `Error`s carrying `exitCode`, so a missing input
+ * file keeps its own exit code rather than collapsing to 69.
+ *
+ * The error logger is created from `loggerName` lazily in the catch, so the body
+ * is free to apply the configured log level (via `setDefaultLevel`) before
+ * creating its own logger -- loglevel binds a logger's level at creation, so the
+ * body's logger must be made after the level is set. `process.exit` is typed
+ * `never`, so values produced inside `body` keep their definite-assignment
+ * narrowing.
+ */
+export async function runOrExit(
+  loggerName: string,
+  body: () => Promise<void>,
+): Promise<void> {
+  try {
+    await body();
+  } catch (err) {
+    getLogger(loggerName).error(sanitizeErrorForDisplay(err));
+    process.exit(
+      err instanceof UsageError
+        ? 64
+        : ((err as { exitCode?: number }).exitCode ?? 69),
+    );
+  }
+}
+
 /** Mapping from log-level name to loglevel numeric constant. */
 export const LOG_LEVELS: Record<string, logLibrary.LogLevelNumbers> = {
   silent: logLibrary.levels.SILENT,

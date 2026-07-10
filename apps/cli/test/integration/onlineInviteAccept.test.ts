@@ -36,10 +36,8 @@ import {
   resolveAcceptPositionals,
   validateAccept,
 } from "../../src/commands/accept";
-import {
-  runOnlineBootstrap,
-  type CommonBootstrapOptions,
-} from "../../src/commands/bootstrap";
+import { runOnlineBootstrap } from "../../src/onlineBootstrap";
+import type { CommonBootstrapOptions } from "../../src/optionDefinitions";
 import { loadKeyFile } from "../../src/keyFile";
 import { keysPathFor, resolveRecordOutput } from "../../src/recordFile";
 import { promptConfirm } from "../../src/util/cli";

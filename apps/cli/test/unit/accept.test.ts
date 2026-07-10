@@ -32,14 +32,14 @@ vi.mock("../../src/util/cli", async () => {
 });
 
 // Mock only runOnlineBootstrap, so the online-handler wiring can be asserted
-// without opening a connection or running a real exchange; every other bootstrap
-// export (generateSharedSecret, and the buildDataSpec/connectionFromURL/
+// without opening a connection or running a real exchange; every other
+// onlineBootstrap export (generateSharedSecret, and the buildDataSpec/
 // prepareForOnlineExchange chain validateAccept drives) is the genuine
 // implementation.
-vi.mock("../../src/commands/bootstrap", async () => {
+vi.mock("../../src/onlineBootstrap", async () => {
   const actual = await vi.importActual<
-    typeof import("../../src/commands/bootstrap")
-  >("../../src/commands/bootstrap");
+    typeof import("../../src/onlineBootstrap")
+  >("../../src/onlineBootstrap");
   return { ...actual, runOnlineBootstrap: vi.fn() };
 });
 
@@ -53,8 +53,8 @@ import {
 import {
   generateSharedSecret,
   runOnlineBootstrap,
-} from "../../src/commands/bootstrap";
-import type { CommonBootstrapOptions } from "../../src/commands/bootstrap";
+} from "../../src/onlineBootstrap";
+import type { CommonBootstrapOptions } from "../../src/optionDefinitions";
 import { saveConfig } from "../../src/config";
 import { promptConfirm } from "../../src/util/cli";
 

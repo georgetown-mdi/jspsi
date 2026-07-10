@@ -19,6 +19,7 @@ import {
   handler,
   resolvePositionals,
 } from "../../src/commands/zeroSetup";
+import type { ConnectionOverrideOptions } from "../../src/optionDefinitions";
 import { resolveConnectionCredentials } from "../../src/util/atSignRefs";
 import { redactUrlCredentials } from "../../src/util/connectionUrl";
 import { runProtocol } from "../../src/protocol";
@@ -160,11 +161,10 @@ test("a malformed credential-bearing server URL does not echo the credential", (
 
 // --- createConnection --------------------------------------------------------
 
-const baseOptions = {
-  save: false,
-  configFile: "./psilink.yaml",
-  keyFile: "./.psilink.key",
-};
+// createConnection now adapts a ConnectionOverrideOptions bag to the shared
+// domain builder's ConnectionOverrides shape; a bare bag (no overrides set) maps
+// to a connection built from the URL alone, which is what these base cases want.
+const baseOptions: ConnectionOverrideOptions = {};
 
 test("createConnection filedrop: channel and path are set", () => {
   const result = createConnection(
@@ -302,6 +302,21 @@ test("createConnection sftp: a bare-host URL leaves the path unset", () => {
     ) as SFTPConnectionConfig;
     expect(result.server.path).toBeUndefined();
   }
+});
+
+test("createConnection sftp: a host-less URL is a usage error", () => {
+  // Now that zero-setup builds its connection through the shared connectionFromURL
+  // domain builder, a credential-less/host-less sftp URL (e.g. sftp:///drop) is
+  // rejected here with a clean UsageError -- the same fast, exit-64 failure the
+  // invite/accept paths already gave -- rather than letting host: "" flow through
+  // to an obscure downstream connect failure. Pins the normalize-to-bootstrap
+  // fix so zero-setup can never regress to the looser (untested) behavior it had.
+  expect(() => createConnection(new URL("sftp:///drop"), baseOptions)).toThrow(
+    UsageError,
+  );
+  expect(() => createConnection(new URL("sftp:///drop"), baseOptions)).toThrow(
+    /must include a host/,
+  );
 });
 
 test("createConnection sftp: a malformed percent-escape is a redacted usage error", () => {
