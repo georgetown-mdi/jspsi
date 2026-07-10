@@ -198,6 +198,71 @@ export function invitingPartyName(token: InvitationToken): string {
   return sanitizeForDisplay(token.linkageTerms.identity);
 }
 
+/** The completion trust line under the settled ledger, stated exactly as the
+ * mockup: the file never left, and the ledger names all the partner received. */
+export const ACCEPTOR_DONE_LEDGER_FOOTER =
+  "Your file never left this browser. The results above are all your partner " +
+  "received about your data.";
+
+/** What a completed exchange settled for the acceptor's ledger: the matched-row
+ * count that actually arrived, or that the agreed terms withheld the result table
+ * from this party. */
+export interface AcceptorLedgerOutcome {
+  matchedRecordCount?: number;
+  resultWithheld?: boolean;
+}
+
+/** The settled ledger tag once the exchange completes, naming the partner it was
+ * agreed with. The identity is already sanitized ({@link invitingPartyName}). */
+export function acceptorDoneLedgerTag(invitingParty: string): string {
+  return `Agreed with ${invitingParty}`;
+}
+
+/**
+ * The acceptor's disclosure ledger after the exchange settles: the forward-looking
+ * rows are relabelled past tense ("You sent", "You received", "Results went to"),
+ * the expiry row drops (the invitation is consumed), and the receive row reports
+ * what actually arrived -- the matched-row count, or that the terms withheld the
+ * result table. Every partner string is sanitized by {@link summarizeInvitation}.
+ */
+export function acceptorDoneLedgerRows(
+  token: InvitationToken,
+  outcome: AcceptorLedgerOutcome,
+): Array<AcceptorLedgerRow> {
+  const summary = summarizeInvitation(token);
+  const sent = summary.payload?.receive ?? [];
+  const received = summary.payload?.send ?? [];
+  const receivedSuffix = received.length > 0 ? ` + ${received.join(", ")}` : "";
+  const receivedValue =
+    outcome.resultWithheld === true
+      ? "No result table - withheld by the agreed terms"
+      : `${new Intl.NumberFormat("en-US").format(
+          outcome.matchedRecordCount ?? 0,
+        )} matched rows${receivedSuffix}`;
+  return [
+    sent.length > 0
+      ? { label: "You sent", value: sent.join(", ") }
+      : { label: "You sent", muted: "No additional columns" },
+    { label: "You received", value: receivedValue },
+    summary.linkageKeys.length > 0
+      ? {
+          label: "Matched on",
+          value: summary.linkageKeys.map(
+            (key, index) => `${index + 1}. ${key.name}`,
+          ),
+        }
+      : { label: "Matched on", muted: "No keys" },
+    {
+      label: "Results went to",
+      value: acceptorResultsGoTo(token.linkageTerms.output),
+    },
+    summary.legalAgreement !== undefined
+      ? { label: "Agreement", value: summary.legalAgreement.reference }
+      : { label: "Agreement", muted: "None" },
+    { label: "Transport", value: "Browser" },
+  ];
+}
+
 /**
  * The consent gate the consent step submits through: {@link commitAcceptance}
  * returns the trimmed name to record only when the checkbox is checked AND a

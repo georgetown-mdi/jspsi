@@ -3,6 +3,8 @@ import { describe, expect, test } from "vitest";
 import {
   acceptorConsentName,
   acceptorConsentReady,
+  acceptorDoneLedgerRows,
+  acceptorDoneLedgerTag,
   acceptorLedgerRows,
   acceptorLedgerTag,
   acceptorRailFacts,
@@ -197,6 +199,58 @@ describe("acceptor ledger rows", () => {
   test("an absent legal agreement mutes the Agreement row", () => {
     const rows = acceptorLedgerRows(makeToken({ legalAgreement: undefined }));
     expect(rowMuted(rows, "Agreement")).toBe("None");
+  });
+});
+
+describe("acceptor completion ledger", () => {
+  test("the settled tag names who it was agreed with, identity sanitized", () => {
+    const token = makeToken();
+    const tag = acceptorDoneLedgerTag(invitingPartyName(token));
+    expect(tag).not.toContain(ESC);
+    expect(tag).not.toContain(RLO);
+    expect(tag).toContain("Agreed with ");
+    expect(tag).toContain("Okafor");
+  });
+
+  test("rows relabel past tense, drop the expiry, and report the matched count", () => {
+    const rows = acceptorDoneLedgerRows(makeToken(), {
+      matchedRecordCount: 1847,
+    });
+    expect(rows.map((row) => row.label)).toEqual([
+      "You sent",
+      "You received",
+      "Matched on",
+      "Results went to",
+      "Agreement",
+      "Transport",
+    ]);
+    // The inviter requests nothing from the acceptor, so it sent no extra
+    // columns; the receive row reports the actual count plus the received set.
+    expect(rowMuted(rows, "You sent")).toBe("No additional columns");
+    expect(rowValue(rows, "You received")).toBe(
+      "1,847 matched rows + enrollment_date, program_code",
+    );
+    expect(rowValue(rows, "Results went to")).toBe("You and your partner");
+    expect(rowValue(rows, "Agreement")).toBe("MOU-2025-0042");
+    expect(rowValue(rows, "Transport")).toBe("Browser");
+    // The consumed invitation drops the forward-looking expiry row.
+    expect(rows.some((row) => row.label === "Expires")).toBe(false);
+  });
+
+  test("a withheld result states the caveat instead of a count", () => {
+    const rows = acceptorDoneLedgerRows(makeToken(), { resultWithheld: true });
+    expect(rowValue(rows, "You received")).toBe(
+      "No result table - withheld by the agreed terms",
+    );
+  });
+
+  test("a zero-count result reads as zero matched rows", () => {
+    const rows = acceptorDoneLedgerRows(
+      makeToken({ payload: { send: [], receive: [] } }),
+      { matchedRecordCount: 0 },
+    );
+    // No received columns, so no suffix -- just the count.
+    expect(rowValue(rows, "You received")).toBe("0 matched rows");
   });
 });
 

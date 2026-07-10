@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert, Button, Checkbox, Text, TextInput } from "@mantine/core";
 import { Dropzone } from "@mantine/dropzone";
@@ -18,16 +18,19 @@ import { useNonEmptyRates } from "@components/useNonEmptyRates";
 
 import {
   ACCEPTOR_COLUMNS_LEDGER_FOOTER,
+  ACCEPTOR_DONE_LEDGER_FOOTER,
   ACCEPTOR_LEDGER_FOOTER,
   acceptorConsentName,
   acceptorConsentReady,
+  acceptorDoneLedgerRows,
+  acceptorDoneLedgerTag,
   acceptorLedgerRows,
   acceptorLedgerTag,
   acceptorRailFacts,
   acceptorSpine,
   invitingPartyName,
 } from "./acceptorModel";
-import { Rail, RailFacts, RailGroup, RailSteps } from "./Rail";
+import { Rail, RailFacts, RailGroup, RailProblems, RailSteps } from "./Rail";
 import {
   acceptorCleaningAttention,
   acceptorColumnsEditorState,
@@ -37,9 +40,12 @@ import {
 } from "./acceptorColumnsModel";
 import { AcceptorCleaningStep } from "./AcceptorCleaningStep";
 import { AcceptorColumnsStep } from "./AcceptorColumnsStep";
+import { AcceptorExchangeSection } from "./AcceptorExchangeSection";
 import { BenchShell } from "./BenchShell";
 import { Ledger } from "./Ledger";
+import { acceptorTimelineSteps } from "./exchangeRun";
 import styles from "./bench.module.css";
+import { useAcceptorExchange } from "./useAcceptorExchange";
 
 import type {
   AcceptableInvitation,
@@ -73,9 +79,9 @@ const EMPTY_STANDARDIZATION: Standardization = [];
  * CleaningTab). Only meaningful while {@link AcceptorStep} is `columns`. */
 type AcceptorColumnsSection = "columns" | "cleaning";
 
-/** The exchange the acceptor launched: the assembled per-party edits and the optional
- * partial-coverage advisory the run package surfaces. The columns package renders a
- * minimal run stub for this; the next package replaces it. */
+/** The exchange the acceptor launched: the assembled per-party edits and the
+ * optional partial-coverage advisory the run surface carries forward. The run
+ * hook keys on the derived launch object, so a fresh launch restarts the run. */
 interface AcceptorLaunched {
   edits: AcceptorDataEdits;
   warning?: AlertContent;
@@ -130,6 +136,10 @@ export function AcceptorBench() {
   // "Accept and continue" fires and passes the gate.
   const [consented, setConsented] = useState(false);
   const [acceptorName, setAcceptorName] = useState("");
+  // The name recorded in the exchange record, committed through the consent gate
+  // at "Accept and continue" and fixed thereafter -- the run adopts the terms
+  // under this identity, so it must not drift with a later edit to the input.
+  const [committedName, setCommittedName] = useState("");
   const [file, setFile] = useState<File>();
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [rejectionMessage, setRejectionMessage] = useState<string>();
@@ -278,7 +288,10 @@ export function AcceptorBench() {
         return;
       }
       // Store the parsed CSV (not discard it) and seed the columns-step editor from
-      // its columns; the verdict and launch payload derive from this state.
+      // its columns; the verdict and launch payload derive from this state. Commit
+      // the gate-checked name here so the run records it even if the input is later
+      // edited (the input stays editable; the committed identity does not drift).
+      setCommittedName(name);
       setAcquired({
         fileName: file.name,
         sizeBytes: file.size,
@@ -321,6 +334,33 @@ export function AcceptorBench() {
       ? acceptorVerdict(acquired.columns, linkageTerms, editorState)
       : undefined;
 
+  // The run's launch, assembled once when the columns step commits: the decoded
+  // invitation, the committed name, the acquired CSV, and the edited spec. Keyed
+  // on `launched` so the run hook restarts only on a fresh launch, not on every
+  // render. `launched` is set only when `acquired`, the ready decode, and the
+  // committed name all exist (launchExchange gates on the verdict), so the guard
+  // just narrows their types.
+  const launch = useMemo(() => {
+    if (
+      launched === undefined ||
+      decode.status !== "ready" ||
+      acquired === undefined
+    )
+      return undefined;
+    return {
+      invitation: decode.invitation,
+      acceptorName: committedName,
+      rawRows: acquired.rawRows,
+      columns: acquired.columns,
+      edits: launched.edits,
+    };
+    // `launched` is the launch key: it is set once, from the same render that
+    // fixes the acquired CSV, committed name, and ready decode, so keying the
+    // memo on it alone cannot go stale.
+  }, [launched]);
+
+  const { run, outputs, failure, tryAgain } = useAcceptorExchange({ launch });
+
   // Full-CSV coverage for the cleaning tab and the rail's Cleaning-attention value,
   // one sweep shared by both. The hook must run every render, so it takes empty
   // inputs until a file is acquired.
@@ -355,10 +395,18 @@ export function AcceptorBench() {
     step === "launched" ? (
       <Rail label="Exchange progress">
         <RailGroup label="This exchange" note="Browser">
-          <RailSteps
-            steps={[{ label: "Exchange in progress", state: "current" }]}
-          />
+          <RailSteps steps={acceptorTimelineSteps(run)} />
         </RailGroup>
+        {/* The confirm-columns partial-coverage advisory surfaces in the rail's
+            Problems block as well as the work column's amber alert, while the run
+            has not failed (a failure clears it so it cannot read as the cause). */}
+        <RailProblems
+          problems={
+            launched?.warning !== undefined && failure === undefined
+              ? [{ label: launched.warning.title }]
+              : []
+          }
+        />
       </Rail>
     ) : (
       <Rail label="Accept an invitation">
@@ -385,11 +433,26 @@ export function AcceptorBench() {
       </Rail>
     );
 
+  // The ledger settles once the exchange completes: the tag names who it was
+  // agreed with, the rows relabel past tense with the actual outcome, and the
+  // footer states the file never left. Until then it mirrors the partner's
+  // proposal, with the columns step's local-only footer swapped in.
+  const settled = outputs !== undefined;
   const ledger =
     token === undefined ? undefined : (
       <Ledger
-        tag={acceptorLedgerTag(invitingPartyName(token))}
-        rows={acceptorLedgerRows(token).map((row) => ({
+        tag={
+          settled
+            ? acceptorDoneLedgerTag(invitingPartyName(token))
+            : acceptorLedgerTag(invitingPartyName(token))
+        }
+        rows={(settled
+          ? acceptorDoneLedgerRows(token, {
+              matchedRecordCount: outputs.matchedRecordCount,
+              resultWithheld: outputs.resultWithheld,
+            })
+          : acceptorLedgerRows(token)
+        ).map((row) => ({
           label: row.label,
           muted: row.muted,
           value: Array.isArray(row.value) ? (
@@ -406,9 +469,11 @@ export function AcceptorBench() {
           ),
         }))}
         footer={
-          step === "columns"
-            ? ACCEPTOR_COLUMNS_LEDGER_FOOTER
-            : ACCEPTOR_LEDGER_FOOTER
+          settled
+            ? ACCEPTOR_DONE_LEDGER_FOOTER
+            : step === "columns"
+              ? ACCEPTOR_COLUMNS_LEDGER_FOOTER
+              : ACCEPTOR_LEDGER_FOOTER
         }
       />
     );
@@ -473,6 +538,15 @@ export function AcceptorBench() {
     if (verdict === undefined || editorState === undefined) return;
     setLaunched(acceptorLaunchPayload(verdict, editorState));
     setStep("launched");
+  };
+
+  // The config-failure recovery: discard the launch (which aborts the run via the
+  // hook's effect cleanup and resets it) and return to the confirm-columns step
+  // with every column-step input intact, where the acceptor fixes its settings.
+  const backToColumns = () => {
+    setLaunched(undefined);
+    setColumnsSection("columns");
+    setStep("columns");
   };
 
   const cleaningResetKey =
@@ -685,38 +759,17 @@ export function AcceptorBench() {
             />
           )}
         {decode.status === "ready" && step === "launched" && (
-          <AcceptorRunStub warning={launched?.warning} />
+          <AcceptorExchangeSection
+            invitation={decode.invitation}
+            run={run}
+            outputs={outputs}
+            failure={failure}
+            warning={launched?.warning}
+            onTryAgain={tryAgain}
+            onFixColumns={backToColumns}
+          />
         )}
       </div>
     </BenchShell>
-  );
-}
-
-/**
- * The minimal run stub the columns step commits to on launch: a heading placeholder
- * the next package replaces with the real exchange screen. It carries the launched
- * partial-coverage advisory forward so the warning the gate raised stays visible.
- */
-function AcceptorRunStub({ warning }: { warning?: AlertContent }) {
-  const headingRef = useRef<HTMLHeadingElement>(null);
-  useEffect(() => {
-    headingRef.current?.focus();
-  }, []);
-  return (
-    <>
-      <h1 tabIndex={-1} ref={headingRef}>
-        Exchange in progress
-      </h1>
-      {warning !== undefined && (
-        <Alert
-          color="yellow"
-          icon={<IconAlertCircle aria-hidden />}
-          title={warning.title}
-          mt="md"
-        >
-          {warning.message}
-        </Alert>
-      )}
-    </>
   );
 }
