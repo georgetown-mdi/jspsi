@@ -5,12 +5,14 @@ import type { ReactNode } from "react";
 /**
  * One row of the disclosure ledger: an uppercase label, the value in the
  * bench's monospace data voice, and an optional reference to the spine step
- * that owns the value ("Step 2"). An absent value renders as a muted em-dash,
- * the ledger's "not decided yet" mark.
+ * that owns the value ("Step 2"). `muted` is the named empty state ("None",
+ * "Nothing - matching only"), rendered in the placeholder voice; with neither
+ * the row shows the em-dash "not decided yet" mark.
  */
 export interface LedgerRow {
   label: string;
   value?: ReactNode;
+  muted?: string;
   reference?: string;
 }
 
@@ -41,7 +43,9 @@ export function Ledger({
               )}
             </dt>
             <dd>
-              {row.value ?? <span className={styles.dash}>{"\u2014"}</span>}
+              {row.value ?? (
+                <span className={styles.dash}>{row.muted ?? "\u2014"}</span>
+              )}
             </dd>
           </div>
         ))}
