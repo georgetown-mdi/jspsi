@@ -188,11 +188,14 @@ async function makeConnectedConn(
 }
 
 // Drive conn.start()'s background poller until its first error and return the
-// collected errors so the caller keeps its own type/message/count/counter/
-// pollerActive assertions inline. Installs the error handler, starts the poller,
-// races the first error against a timeoutMs reject (the message only surfaces on
-// a real hang), optionally waits settleMs (to let a wrong reschedule bump a
-// counter the caller re-asserts), then stops the poller in a finally.
+// collected errors so the caller keeps its own type/message/count/counter
+// assertions inline. Installs the error handler, starts the poller, races the
+// first error against a timeoutMs reject (the message only surfaces on a real
+// hang), optionally waits settleMs (to let a wrong reschedule bump a counter
+// the caller re-asserts), then stops the poller in a finally.
+// pollerActiveBeforeDriverStop is captured just before that stop: asserting it
+// false proves a terminal error stopped the poller on its own, which the live
+// pollerActive flag cannot show once the driver has stopped it.
 // stopInHandler makes the handler call conn.stop() itself, for the tests that
 // prove the error handler -- not the poller's self-stop -- halts the loop.
 async function driveUntilError(
@@ -203,8 +206,9 @@ async function driveUntilError(
     timeoutMessage?: string;
     stopInHandler?: boolean;
   },
-): Promise<{ errors: unknown[] }> {
+): Promise<{ errors: unknown[]; pollerActiveBeforeDriverStop: boolean }> {
   const errors: unknown[] = [];
+  let pollerActiveBeforeDriverStop!: boolean;
   let notifyError!: () => void;
   const errorArrived = new Promise<void>((resolve) => (notifyError = resolve));
   conn.on("error", (err) => {
@@ -231,9 +235,12 @@ async function driveUntilError(
     if (opts?.settleMs !== undefined)
       await new Promise((resolve) => setTimeout(resolve, opts.settleMs));
   } finally {
+    pollerActiveBeforeDriverStop = (
+      conn as unknown as { pollerActive: boolean }
+    ).pollerActive;
     conn.stop();
   }
-  return { errors };
+  return { errors, pollerActiveBeforeDriverStop };
 }
 
 // Build a peer message file's on-disk bytes in the binary envelope the transport
@@ -6406,7 +6413,9 @@ test("retain mode: poll() duplicate-NNN error is a UsageError and stops the poll
   // Do NOT stop the poller in the handler: it must stop itself before the emit
   // so the finally block does not reschedule. The settle gives a wrong
   // reschedule two poll intervals to surface as a second error.
-  const { errors } = await driveUntilError(conn, { settleMs: 50 });
+  const { errors, pollerActiveBeforeDriverStop } = await driveUntilError(conn, {
+    settleMs: 50,
+  });
 
   // Error fired exactly once.
   expect(errors).toHaveLength(1);
@@ -6415,9 +6424,7 @@ test("retain mode: poll() duplicate-NNN error is a UsageError and stops the poll
   expect((errors[0] as Error).message).toContain("more than one message file");
 
   // pollerActive must be false: the poller stopped itself before emitting.
-  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
-    false,
-  );
+  expect(pollerActiveBeforeDriverStop).toBe(false);
 
   // No second error arrived during the settle (poller did not reschedule).
   expect(errors).toHaveLength(1);
@@ -6440,14 +6447,14 @@ test("delete mode: poll() more-than-one-message error is a UsageError and stops 
 
   // Do NOT stop the poller in the handler: a terminal error must stop it on its
   // own. The settle gives a wrong reschedule time to surface a second error.
-  const { errors } = await driveUntilError(conn, { settleMs: 50 });
+  const { errors, pollerActiveBeforeDriverStop } = await driveUntilError(conn, {
+    settleMs: 50,
+  });
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
   expect((errors[0] as Error).message).toContain("more than one message file");
-  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
-    false,
-  );
+  expect(pollerActiveBeforeDriverStop).toBe(false);
   // No second error: the poller did not reschedule.
   expect(errors).toHaveLength(1);
 });
@@ -6479,15 +6486,15 @@ test("retain mode: poll() seq-mismatch (UsageError) stops the poller", async () 
 
   // Do NOT stop the poller in the handler: it must stop itself. The settle gives
   // a wrong reschedule time to surface a second error.
-  const { errors } = await driveUntilError(conn, { settleMs: 50 });
+  const { errors, pollerActiveBeforeDriverStop } = await driveUntilError(conn, {
+    settleMs: 50,
+  });
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
   expect((errors[0] as Error).message).toContain("seq=");
 
-  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
-    false,
-  );
+  expect(pollerActiveBeforeDriverStop).toBe(false);
 
   expect(errors).toHaveLength(1);
 });
@@ -7235,15 +7242,15 @@ test("poll() terminal: a fully-synced message with an unparseable body stops the
   conn.on("data", (msg) => received.push(msg));
   // Do NOT stop the poller in the handler: a terminal error must stop it on its
   // own. The settle gives a wrong reschedule time to surface a second error.
-  const { errors } = await driveUntilError(conn, { settleMs: 50 });
+  const { errors, pollerActiveBeforeDriverStop } = await driveUntilError(conn, {
+    settleMs: 50,
+  });
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
   expect((errors[0] as Error).message).toContain("not valid JSON");
   // The poller stopped itself; no payload delivered and no ack written.
-  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
-    false,
-  );
+  expect(pollerActiveBeforeDriverStop).toBe(false);
   expect(received).toHaveLength(0);
   expect([...files.keys()].some((p) => p.endsWith("-ack.json"))).toBe(false);
   // No second error arrives (the finally block did not reschedule).
@@ -7308,7 +7315,7 @@ test("poll() terminal: an old-format JSON message surfaces a likely-incompatible
 
   const received: unknown[] = [];
   conn.on("data", (msg) => received.push(msg));
-  const { errors } = await driveUntilError(conn);
+  const { errors, pollerActiveBeforeDriverStop } = await driveUntilError(conn);
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
@@ -7317,9 +7324,7 @@ test("poll() terminal: an old-format JSON message surfaces a likely-incompatible
   expect(message).toContain("both parties must run the same version");
   // The reframed message replaces the raw envelope-corruption text, not appends.
   expect(message).not.toContain("malformed envelope");
-  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
-    false,
-  );
+  expect(pollerActiveBeforeDriverStop).toBe(false);
   expect(received).toHaveLength(0);
   expect([...files.keys()].some((p) => p.endsWith("-ack.json"))).toBe(false);
 });
@@ -7495,14 +7500,14 @@ test("poll() terminal: delete mode also stops the poller on a fully-synced corru
   const received: unknown[] = [];
   conn.on("data", (msg) => received.push(msg));
   // The settle gives a wrong reschedule time to surface a second error.
-  const { errors } = await driveUntilError(conn, { settleMs: 50 });
+  const { errors, pollerActiveBeforeDriverStop } = await driveUntilError(conn, {
+    settleMs: 50,
+  });
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
   expect((errors[0] as Error).message).toContain("not valid JSON");
-  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
-    false,
-  );
+  expect(pollerActiveBeforeDriverStop).toBe(false);
   expect(received).toHaveLength(0);
   // parse-before-delete: the corrupt file is left on disk for inspection.
   expect(files.has(`/test/${msgName}`)).toBe(true);
@@ -7827,16 +7832,14 @@ test("poll(): an unrecognized file mid-loop is a terminal UsageError under the d
 
   // Do NOT stop the poller in the handler: a terminal error must stop it on its
   // own.
-  const { errors } = await driveUntilError(conn);
+  const { errors, pollerActiveBeforeDriverStop } = await driveUntilError(conn);
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
   expect((errors[0] as Error).message).toContain("intruder.json");
   expect((errors[0] as Error).message).toContain("/test");
   // The poller stopped itself before emitting (UsageError is terminal).
-  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
-    false,
-  );
+  expect(pollerActiveBeforeDriverStop).toBe(false);
 });
 
 // The foreign/unexpected-file handler is the highest-priority live injection
@@ -8119,9 +8122,12 @@ test("retain mode: a peer message with a valid byte count but unparseable NNN is
     // Byte-count terminal (5) but the NNN segment ("foo") is non-numeric.
     files.set("/test/peer-foo-5.json", Buffer.from("xxxxx"));
 
-    const { errors } = await driveUntilError(conn, {
-      timeoutMessage: `timed out (policy=${policy})`,
-    });
+    const { errors, pollerActiveBeforeDriverStop } = await driveUntilError(
+      conn,
+      {
+        timeoutMessage: `timed out (policy=${policy})`,
+      },
+    );
 
     expect(errors).toHaveLength(1);
     // A malformed-protocol UsageError, NOT a bilateral-mismatch: both sides
@@ -8131,9 +8137,7 @@ test("retain mode: a peer message with a valid byte count but unparseable NNN is
     expect(errors[0]).not.toBeInstanceOf(BilateralModeMismatchError);
     expect((errors[0] as Error).message).toContain("peer-foo-5.json");
     expect((errors[0] as Error).message).toContain("NNN");
-    expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
-      false,
-    );
+    expect(pollerActiveBeforeDriverStop).toBe(false);
   }
 });
 
@@ -8266,14 +8270,12 @@ test("poll(): an ack-shaped foreign file whose target is not a real protocol fil
   conn.peerId = "peer";
   files.set("/test/me-peer-x-ack.json", Buffer.alloc(0));
 
-  const { errors } = await driveUntilError(conn);
+  const { errors, pollerActiveBeforeDriverStop } = await driveUntilError(conn);
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
   expect((errors[0] as Error).message).toContain("me-peer-x-ack.json");
-  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
-    false,
-  );
+  expect(pollerActiveBeforeDriverStop).toBe(false);
 });
 
 // --- cancellable waits: close() cancels in-flight waits (D1-D6) ---------------
@@ -8592,10 +8594,10 @@ test("poll refuses an over-cap message before reading it into memory", async () 
     // reschedule -- which would re-list the still-present over-cap file and
     // re-emit every pollingFrequency -- surfaces during the settle instead of
     // being hidden by an immediate stop().
-    ({ errors } = await driveUntilError(conn, { settleMs: 50 }));
-    expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
-      false,
-    );
+    const { errors: driveErrors, pollerActiveBeforeDriverStop } =
+      await driveUntilError(conn, { settleMs: 50 });
+    errors = driveErrors;
+    expect(pollerActiveBeforeDriverStop).toBe(false);
   });
 
   expect(getCount).toBe(0);
