@@ -482,10 +482,20 @@ describe("inviter bench", () => {
       "MOU-2025-0042",
     );
 
+    // The ported input contracts survive the bench: the expiry is a real
+    // date input and the reference keeps its length bound.
+    const expiration = document.querySelector('input[type="date"]');
+    expect(expiration).not.toBeNull();
+    const reference = document.querySelector(
+      'input[placeholder="MOU-2025-0042"]',
+    );
+    expect(reference?.getAttribute("maxlength")).toBe("256");
+
     await page.getByRole("button", { name: /Back to Review & create/ }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Review & create");
+
     await expect
       .element(page.getByText("Ready to create."))
       .toBeInTheDocument();
@@ -493,6 +503,17 @@ describe("inviter bench", () => {
       (heading) => heading.textContent === "Legal agreement",
     )?.parentElement;
     expect(agreementRow?.textContent).toContain("MOU-2025-0042");
+
+    // Reset discards the authored terms and announces it politely.
+    await page.getByRole("button", { name: "Reset to recommended" }).click();
+    await expect
+      .element(page.getByText("Reset to the recommended settings."))
+      .toBeInTheDocument();
+    expect(
+      Array.from(document.querySelectorAll("th")).find(
+        (heading) => heading.textContent === "Legal agreement",
+      )?.parentElement?.textContent,
+    ).toContain("None");
   });
 
   test("a failed mint leaves the terms editable and create retryable", async () => {

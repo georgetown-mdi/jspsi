@@ -106,6 +106,14 @@ export function InviterBench() {
     setSection(next);
   }
 
+  // Non-announcing edits clear the live region (the old editor's
+  // cleared-by-the-next-interaction rule), so a stale notice never lingers
+  // and a repeated identical notice re-announces.
+  function applyEditor(next: InviterEditor) {
+    setEditor(next);
+    setEditorAnnouncement("");
+  }
+
   // A parse may still be in flight when the surface unmounts or a newer file
   // is dropped; the id lets the stale resolution fall on the floor instead of
   // clobbering current state (the FileAcquire pattern).
@@ -386,12 +394,15 @@ export function InviterBench() {
                 problems={spineProblems(editor)}
                 minting={minting}
                 onLifetime={(seconds) =>
-                  setEditor(editorWithLifetime(editor, seconds))
+                  applyEditor(editorWithLifetime(editor, seconds))
                 }
                 onDirection={(direction) =>
-                  setEditor(editorWithOutputDirection(editor, direction))
+                  applyEditor(editorWithOutputDirection(editor, direction))
                 }
-                onReset={() => setEditor(resetToRecommended(editor, acquired))}
+                onReset={() => {
+                  setEditor(resetToRecommended(editor, acquired));
+                  setEditorAnnouncement("Reset to the recommended settings.");
+                }}
                 onCreate={() => void createInvitation()}
                 onNavigate={goTo}
               />
@@ -410,20 +421,24 @@ export function InviterBench() {
               csv={acquired}
               expertMode={expertMode}
               onFieldSteps={(output, fieldSteps) =>
-                setEditor(editorWithFieldSteps(editor, output, fieldSteps))
+                applyEditor(editorWithFieldSteps(editor, output, fieldSteps))
               }
               onFieldInput={(output, input) =>
-                setEditor(editorWithFieldInput(editor, output, input))
+                applyEditor(editorWithFieldInput(editor, output, input))
               }
               onFieldAdded={(type) =>
-                setEditor(editorWithFieldAdded(editor, type))
+                applyEditor(editorWithFieldAdded(editor, type))
               }
               onFieldRemoved={(output) =>
-                setEditor(editorWithFieldRemoved(editor, output))
+                applyEditor(editorWithFieldRemoved(editor, output))
               }
-              onResetCleaning={() =>
-                setEditor(editorWithRecommendedCleaning(editor, acquired))
-              }
+              onResetCleaning={() => {
+                setEditor(editorWithRecommendedCleaning(editor, acquired));
+                setEditorAnnouncement(
+                  "Cleaning reset to the recommended steps.",
+                );
+              }}
+              cleaningError={reviewValidation(editor).errors.standardization}
               onBack={() => goTo("review")}
             />
           )}
@@ -436,7 +451,7 @@ export function InviterBench() {
               expertMode={expertMode}
               onExpertMode={setExpertMode}
               onKeyEnabled={(index, enabled) =>
-                setEditor(editorWithKeyEnabled(editor, index, enabled))
+                applyEditor(editorWithKeyEnabled(editor, index, enabled))
               }
               onKeyMoved={(index, offset) => {
                 const moved = editorWithKeyMoved(editor, index, offset);
@@ -449,16 +464,16 @@ export function InviterBench() {
                 }
               }}
               onAuthoredDraft={(draft) =>
-                setEditor(editorWithAuthoredDraft(editor, draft))
+                applyEditor(editorWithAuthoredDraft(editor, draft))
               }
               onStrategy={(strategy) =>
-                setEditor(editorWithLinkageStrategy(editor, strategy))
+                applyEditor(editorWithLinkageStrategy(editor, strategy))
               }
               onAlgorithm={(algorithm) =>
-                setEditor(editorWithAlgorithm(editor, algorithm))
+                applyEditor(editorWithAlgorithm(editor, algorithm))
               }
               onDeduplicate={(deduplicate) =>
-                setEditor(editorWithDeduplicate(editor, deduplicate))
+                applyEditor(editorWithDeduplicate(editor, deduplicate))
               }
               onImport={(terms) => {
                 setEditor(editorWithImportedTerms(editor, acquired, terms));
@@ -466,6 +481,7 @@ export function InviterBench() {
                   "Imported. Review the loaded terms before creating.",
                 );
               }}
+              keysError={reviewValidation(editor).errors.keys}
               announce={setEditorAnnouncement}
               onBack={() => goTo("review")}
             />
@@ -475,7 +491,7 @@ export function InviterBench() {
             editor={editor}
             validation={reviewValidation(editor)}
             onAgreement={(agreement) =>
-              setEditor(editorWithLegalAgreement(editor, agreement))
+              applyEditor(editorWithLegalAgreement(editor, agreement))
             }
             onBack={() => goTo("review")}
           />

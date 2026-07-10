@@ -1,4 +1,6 @@
-import { Button, NativeSelect, Radio } from "@mantine/core";
+import { Button, NativeSelect, Radio, VisuallyHidden } from "@mantine/core";
+
+import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
 import {
   LIFETIME_CHOICES,
@@ -56,6 +58,13 @@ export function ReviewCreateSection({
   onNavigate: (target: SpineTarget) => void;
 }) {
   const canCreate = problems.length === 0 && !minting;
+  // Voiced when the create gate flips either way; deferred so a blocked state
+  // present when the section mounts still announces.
+  const readiness = useDeferredAnnouncement(
+    problems.length === 0
+      ? "Ready to create the invitation."
+      : `${problems.length === 1 ? "A problem" : `${problems.length} problems`} in the rail must be resolved before you can create.`,
+  );
   return (
     <>
       <p className={styles.eyebrow}>Step 3 of 3</p>
@@ -176,6 +185,11 @@ export function ReviewCreateSection({
           </tbody>
         </table>
       </div>
+      <VisuallyHidden>
+        <p role="status" aria-live="polite" aria-atomic="true">
+          {readiness}
+        </p>
+      </VisuallyHidden>
       <div className={styles.workFoot}>
         <Button disabled={!canCreate} loading={minting} onClick={onCreate}>
           Create the invitation

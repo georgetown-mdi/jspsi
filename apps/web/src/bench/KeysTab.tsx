@@ -48,6 +48,7 @@ export function KeysTab({
   onAlgorithm,
   onDeduplicate,
   onImport,
+  keysError,
   announce,
   onBack,
 }: {
@@ -62,6 +63,9 @@ export function KeysTab({
   onAlgorithm: (algorithm: Algorithm) => void;
   onDeduplicate: (deduplicate: boolean) => void;
   onImport: (terms: LinkageTerms) => void;
+  /** The validation message for the key set, rendered inline beside the list
+   * it names (the rail's Problems block carries it too). */
+  keysError: string | undefined;
   announce: (message: string) => void;
   onBack: () => void;
 }) {
@@ -85,11 +89,11 @@ export function KeysTab({
       </button>
       <p className={styles.eyebrow}>Customize</p>
       <h1 tabIndex={-1}>Matching keys</h1>
-      <p>
+      <p id="bench-key-order-help">
         Records are matched on these keys, tried in order. Earlier keys match
         first, so order the most precise keys first.
       </p>
-      <ol className={styles.guidedKeys}>
+      <ol className={styles.guidedKeys} aria-describedby="bench-key-order-help">
         {editor.draft.keys.map((entry, index) => {
           const displayName = sanitizeForDisplay(entry.key.name);
           const satisfiable = keyIsSatisfiable(index);
@@ -138,6 +142,14 @@ export function KeysTab({
           );
         })}
       </ol>
+      {keysError !== undefined && (
+        <p
+          role="alert"
+          className={`${styles.small} ${styles.statusLine} ${styles.statusLineDanger}`}
+        >
+          {keysError}
+        </p>
+      )}
       <Switch
         label="Expert authoring"
         description="Build linkage keys element by element, edit transforms and swaps, and import or export the terms as JSON or YAML."
@@ -185,6 +197,9 @@ export function KeysTab({
         <Alert
           color="yellow"
           title="Single-pass widens what one of you can observe"
+          // Pinned so the consent-critical warning is announced on selection
+          // even if Mantine's default role changes.
+          role="alert"
           mt="sm"
         >
           Every record meets every key, so a partner can learn more about
