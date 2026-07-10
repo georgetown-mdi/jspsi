@@ -1026,13 +1026,16 @@ export function InvitationTerms({
               (name + derived field one-liner), its rule detail one further expand
               down. role=list/listitem (not Mantine List.Item, whose inline span body
               cannot hold the disclosure's flow content) so AT announces the set;
-              keyed by index -- the list is static and key names are not unique once
-              sanitized. */}
+              keyed by each key's stable id (InvitationKeySummary.id, the raw key
+              name) rather than array index or the sanitized display name, so a
+              key's own MatchKeyDisclosure -- and the expanded/collapsed state its
+              local useState holds -- follows the key when the inviter reorders the
+              list rather than staying pinned to the array position. */}
             <div id={matchingPanelId}>
               <Collapse expanded={matchingOpen}>
                 <Stack gap="xs" role="list" aria-labelledby={matchedOnLabelId}>
-                  {summary.linkageKeys.map((key, index) => (
-                    <MatchKeyDisclosure key={index} summary={key} />
+                  {summary.linkageKeys.map((key) => (
+                    <MatchKeyDisclosure key={key.id} summary={key} />
                   ))}
                 </Stack>
               </Collapse>
