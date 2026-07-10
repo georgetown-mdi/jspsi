@@ -1,12 +1,13 @@
 import { useEffect, useRef } from "react";
 
-import { Button, CopyButton } from "@mantine/core";
+import { Button } from "@mantine/core";
 
 import { dateTimeLabel, invitationUsable } from "./inviterModel";
 import { awaitingPartner } from "./exchangeRun";
 
 import {
   AnotherExchangeFoot,
+  CopyRow,
   DonePanel,
   DownloadRow,
   FailureAlert,
@@ -19,53 +20,6 @@ import type { ExchangeRun } from "./exchangeRun";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { InviterRunOutputs } from "./inviterRunOutputs";
 import type { RunFailure } from "./useInviterExchange";
-
-/** A labelled, copy-to-clipboard view of one shareable artifact. Client-only
- * by construction (the post-create section mounts from the create handler, so
- * it never server-renders); the `typeof navigator` check is defence-in-depth
- * and hides the button on non-secure origins, where `navigator.clipboard` is
- * undefined -- the text itself stays selectable for a manual copy. */
-function CopyRow({
-  label,
-  hint,
-  value,
-}: {
-  label: string;
-  hint: string;
-  value: string;
-}) {
-  return (
-    <div className={styles.copyRow}>
-      <span className={styles.copyLabel}>{label}</span>
-      <span className={styles.copyHint}>{hint}</span>
-      <div className={styles.copyBox}>
-        <div className={`${styles.codeBlock} ${styles.mono}`}>{value}</div>
-        {
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-          typeof navigator !== "undefined" && navigator.clipboard ? (
-            <CopyButton value={value} timeout={1000}>
-              {({ copied, copy }) => (
-                <Button
-                  className={styles.copyBtn}
-                  variant="default"
-                  onClick={copy}
-                  // Name reflects the copied state so a screen reader announces
-                  // the success (the label swap alone is not reliably conveyed
-                  // to assistive tech).
-                  aria-label={
-                    copied ? `${label} copied` : `Copy ${label.toLowerCase()}`
-                  }
-                >
-                  {copied ? "Copied" : "Copy"}
-                </Button>
-              )}
-            </CopyButton>
-          ) : null
-        }
-      </div>
-    </div>
-  );
-}
 
 /**
  * The inviter's post-create work column, through the run's three phases: the

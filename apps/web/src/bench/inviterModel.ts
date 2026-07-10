@@ -39,6 +39,40 @@ import type {
 import type { DisclosureChoice } from "@psi/metadataEditing";
 
 /**
+ * The transport an exchange runs over, chosen at Review & create. `browser`
+ * runs the live WebRTC exchange in this tab; `sftp` and `filedrop` are the two
+ * command-line transports whose Create routes to the save-exchange-file surface
+ * instead of listening for a partner. The value is editor state so it survives
+ * a trip into a Customize tab and reflects into the ledger's Transport row and
+ * the review answers.
+ */
+export type Transport = "browser" | "sftp" | "filedrop";
+
+/** The ledger's Transport row phrasing for each {@link Transport}. */
+export const TRANSPORT_LEDGER_LABELS: Record<Transport, string> = {
+  browser: "Browser",
+  sftp: "SFTP (command-line tool)",
+  filedrop: "Shared directory (command-line tool)",
+};
+
+/** The review answers-table phrasing for each {@link Transport}. */
+export const TRANSPORT_ANSWER_LABELS: Record<Transport, string> = {
+  browser: "Live, in this browser",
+  sftp: "SFTP (command-line tool)",
+  filedrop: "Shared directory (command-line tool)",
+};
+
+/** Whether a transport runs in the command-line tool rather than this browser
+ * -- the discriminant Create branches on: a CLI transport mints nothing and
+ * routes to the save surface, and the browser must never listen for it. A type
+ * guard so a narrowed transport reaches the save surface's CLI-only model. */
+export function isCliTransport(
+  transport: Transport,
+): transport is Exclude<Transport, "browser"> {
+  return transport !== "browser";
+}
+
+/**
  * The pure model behind the inviter bench's required spine: seeding the draft
  * from the read file, applying the two column edits step 2 offers, and the
  * view-model builders the rail facts and the disclosure ledger render from.
@@ -70,6 +104,10 @@ export interface InviterEditor {
   seed: AdvancedInviteSeed;
   sealed?: boolean;
   keysAuthored?: boolean;
+  /** The transport chosen at Review & create ({@link Transport}); defaults to
+   * `browser` until the chooser sets it. Survives a trip into a Customize tab
+   * and reflects into the ledger and the review answers. */
+  transport?: Transport;
 }
 
 /** Seal the session at create time; see {@link InviterEditor.sealed}. */
@@ -123,6 +161,17 @@ export function editorWithOutputDirection(
 ): InviterEditor {
   if (editor.sealed === true) return editor;
   return { ...editor, draft: { ...editor.draft, outputDirection } };
+}
+
+/** Set the transport the exchange runs over ({@link Transport}), chosen at
+ * Review & create. Editor state so it survives a Customize-tab trip and drives
+ * both Create's branch and the ledger/answers Transport rows. */
+export function editorWithTransport(
+  editor: InviterEditor,
+  transport: Transport,
+): InviterEditor {
+  if (editor.sealed === true) return editor;
+  return { ...editor, transport };
 }
 
 /** Replace the whole draft -- the expert key editor's change channel. Marks
@@ -584,7 +633,11 @@ export function inviterLedgerRows(
     editor.draft.legalAgreement.reference !== ""
       ? { label: "Agreement", value: editor.draft.legalAgreement.reference }
       : { label: "Agreement", muted: "None" },
-    { label: "Transport", reference: "Step 3", value: "Browser" },
+    {
+      label: "Transport",
+      reference: "Step 3",
+      value: TRANSPORT_LEDGER_LABELS[editor.transport ?? "browser"],
+    },
   ];
 }
 
@@ -759,7 +812,7 @@ export function answersRows(
     },
     {
       label: "Transport",
-      value: "Live, in this browser",
+      value: TRANSPORT_ANSWER_LABELS[editor.transport ?? "browser"],
       setAbove: true,
     },
   ];
