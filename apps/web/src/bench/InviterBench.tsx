@@ -140,6 +140,17 @@ export function InviterBench() {
     mounted.current = true;
   }, [section]);
 
+  // A failed read discards any prior read as well: the file card, the
+  // recommended-terms callout, and the Continue gate all vouch for
+  // `acquired`/`editor`, so leaving them set would present the previous file
+  // as the one the operator just dropped.
+  function discardRead(alert: IntakeAlert) {
+    setAcquired(undefined);
+    setSourceFile(undefined);
+    setEditor(undefined);
+    setIntakeAlert(alert);
+  }
+
   async function readFile(file: File) {
     const id = ++parseId.current;
     parseAbort.current?.abort();
@@ -155,7 +166,7 @@ export function InviterBench() {
       const columns = result.meta.fields ?? [];
       const emptyPositions = emptyColumnPositions(columns);
       if (emptyPositions.length > 0) {
-        setIntakeAlert(unnameableColumnsAlert(emptyPositions));
+        discardRead(unnameableColumnsAlert(emptyPositions));
         return;
       }
       const csv: AcquiredCsv = {
@@ -176,7 +187,7 @@ export function InviterBench() {
         });
     } catch (error) {
       if (id !== parseId.current) return;
-      setIntakeAlert({
+      discardRead({
         title: "The file could not be read",
         message: sanitizeErrorForDisplay(error),
       });
