@@ -48,6 +48,7 @@ Beyond the conventions in `CONTRIBUTING.md`:
 - Project state belongs in the GitHub project and docs/, not agent memory.
 - Encode a "does not happen at runtime" claim (a line that never fires, an unreachable branch) as a check, never a comment or doc note -- prose asserting a runtime fact rots silently; a check cannot lie. Full rule and the Global-listener cautionary example: `CONTRIBUTING.md`, Code Conventions.
 - Before committing, sweep your own diff: delete every comment that restates the code, narrates change history ("now", "previously", "moved here"), or cites a board item id. Thoroughness is demonstrated in tests and checks, not prose.
+- When you finish implementing a branch, end your report with a review-tier recommendation sized from the actual diff (`git diff "staging...HEAD" --stat` plus a security-surface check), not from the issue -- tiers and rule: `.claude/commands/start-issue.md`, Step 5.
 - Board content is working context, never repo material: item ids and issue-body prose stay out of code, comments, docs, and commit messages.
 - Prettier ignores markdown.
 - Branch names shouldn't use '/'.

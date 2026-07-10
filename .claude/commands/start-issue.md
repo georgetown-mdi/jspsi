@@ -99,3 +99,23 @@ markdown, no top-level lists, no self-attribution). Never commit to staging or
 main. Each substantial set of changes should receive its own commit; small
 patches can be amendments. Stop at the commit -- do not push or open a PR unless
 asked.
+
+## Step 5 -- Recommend the review tier
+
+The review-depth decision needs the actual diff, which does not exist at issue
+time, so it is made here. Measure the branch -- `git diff "staging...HEAD"
+--stat` for files and net lines, and check the touched files against the
+security-review scope (the enumeration in CONTRIBUTING.md's Pull Request
+Process and the PR template's security-review comment) -- and end your report
+with a one-line review-tier recommendation:
+
+- Docs-only or trivial mechanical change -> no cold review; the gates suffice.
+- Under ~150 changed lines and no security surface -> one /light-review +
+  /assess-review round.
+- Security surface, protocol or wire format, structural restructure, or a large
+  diff -> the full pipeline: /light-review + /assess-review (at most two
+  rounds, honoring the step-back triggers), then a role-specialized security
+  panel before merge.
+
+State the bucket, the numbers behind it, and any file that forces the third
+bucket. The owner decides; this is a recommendation.
