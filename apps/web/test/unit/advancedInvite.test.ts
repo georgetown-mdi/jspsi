@@ -17,9 +17,11 @@ import {
 } from "@psilink/core";
 
 import {
+  addKey,
   buildAdvancedTerms,
   defaultStandardizationForRows,
   draftFromTerms,
+  draftWithFieldAdded,
   gatedActiveSettingMessage,
   importedConstraintDivergenceMessage,
   inviterExchangeDataSpec,
@@ -2286,5 +2288,192 @@ describe("matchable columns the default keys omit are pickable as linkage fields
     );
     expect(satisfiableKeyCount).toBe(1);
     expect(validateAdvancedInvite(withZipKey, seed).canGenerate).toBe(true);
+  });
+});
+
+// Linkage key elements reference a field by its bare NAME STRING, and core resolves
+// that reference by last-wins name lookup, so two linkage fields sharing one name
+// would silently rebind a key to whichever field's column happens to win -- a
+// cross-party mismatch with no error. safeParseLinkageTerms' name-uniqueness refine
+// (linkageFields names must be unique) blocks the collision at Generate, but only
+// once the draft already carries the duplicate; these lock the editor mutators that
+// must never PRODUCE one in the first place, across the realistic sequences an
+// operator can actually drive.
+describe("no two linkage fields ever share a name (reconcileImportedFields dedup guard)", () => {
+  // ssn_col2 and extra_col are free role: linkage columns of types the default keys
+  // do not bind by default, letting a retype or an added field pick up a second
+  // same-typed binding without disturbing the other default-key types' offerable
+  // set.
+  const metadata: Metadata = [
+    { name: "ssn_col", type: "ssn", role: "linkage", isPayload: false },
+    { name: "fn_col", type: "first_name", role: "linkage", isPayload: false },
+    { name: "ln_col", type: "last_name", role: "linkage", isPayload: false },
+    {
+      name: "dob_col",
+      type: "date_of_birth",
+      role: "linkage",
+      isPayload: false,
+    },
+    { name: "extra_col", type: "ssn4", role: "linkage", isPayload: false },
+    { name: "ssn_col2", type: "ssn", role: "linkage", isPayload: false },
+  ];
+  const columns = [
+    "ssn_col",
+    "fn_col",
+    "ln_col",
+    "dob_col",
+    "extra_col",
+    "ssn_col2",
+  ];
+
+  function seedFor(): AdvancedInviteSeed {
+    return {
+      terms: getDefaultLinkageTerms("Inviter", metadata),
+      metadata,
+      columns,
+    };
+  }
+
+  /** The editor's own default export for these columns -- the baseline an operator
+   * (or a partner reflecting terms back) would import. */
+  function defaultExport(): LinkageTerms {
+    const terms = getDefaultLinkageTerms("Inviter", metadata);
+    const standardization = defaultStandardizationForRows(metadata, terms, []);
+    return buildAdvancedTerms({
+      identity: "Inviter",
+      lifetimeSeconds: 3600,
+      outputDirection: "both",
+      algorithm: "psi",
+      deduplicate: false,
+      linkageStrategy: "cascade",
+      metadata,
+      standardization,
+      keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),
+    });
+  }
+
+  /** The adversarial import: a schema-valid document where the field named "ssn" is
+   * TYPED first_name instead -- a name/type-confused field, still referenced by its
+   * key -- while the columns also carry a genuine ssn-typed linkage column
+   * (ssn_col). Distinct from the existing name/type-confusion tests (which assert
+   * the confused field is refused or falls back): this document is the one shape
+   * where the confused import name and the inviter's own authored field name
+   * collide, which is exactly what reconcileImportedFields' `emitted` guard must
+   * resolve to a single field, not two. */
+  function typeConfusedSsnImport(): LinkageTerms {
+    const exported = defaultExport();
+    const crafted = structuredClone(exported);
+    crafted.linkageFields = crafted.linkageFields.map((field) =>
+      field.name === "ssn" ? { name: "ssn", type: "first_name" } : field,
+    );
+    expect(safeParseLinkageTerms(crafted).success).toBe(true);
+    return crafted;
+  }
+
+  /** No two fields in built terms share a name -- equivalently, the terms parse
+   * (the schema's own name-uniqueness refine would otherwise reject them). */
+  function assertNoDuplicateFieldNames(terms: LinkageTerms): void {
+    const names = terms.linkageFields.map((field) => field.name);
+    expect(names.length).toEqual(new Set(names).size);
+    expect(safeParseLinkageTerms(terms).success).toBe(true);
+  }
+
+  test("importing the type-confused document alone never yields a duplicate name", () => {
+    const imported = draftFromTerms(
+      typeConfusedSsnImport(),
+      seedFor(),
+      3600,
+      [],
+    );
+    assertNoDuplicateFieldNames(buildAdvancedTerms(imported));
+  });
+
+  test("import, then retype a second column to the confused field's type (setDraftMetadata)", () => {
+    // importedLinkageFields is set by draftFromTerms and never cleared by any
+    // mutator (setDraftMetadata included), so the draft stays on the
+    // reconcileImportedFields path through the retype -- the case this guard exists
+    // for.
+    const imported = draftFromTerms(
+      typeConfusedSsnImport(),
+      seedFor(),
+      3600,
+      [],
+    );
+    expect(imported.importedLinkageFields).toBeDefined();
+
+    const retypedMetadata = metadata.map((column) =>
+      column.name === "extra_col"
+        ? { ...column, type: "ssn" as const }
+        : column,
+    );
+    const retyped = setDraftMetadata(imported, retypedMetadata, []);
+    expect(retyped.importedLinkageFields).toBeDefined();
+    assertNoDuplicateFieldNames(buildAdvancedTerms(retyped));
+  });
+
+  test("import, retype, then add a same-typed field and key it (draftWithFieldAdded + addKey)", () => {
+    const imported = draftFromTerms(
+      typeConfusedSsnImport(),
+      seedFor(),
+      3600,
+      [],
+    );
+    const retypedMetadata = metadata.map((column) =>
+      column.name === "extra_col"
+        ? { ...column, type: "ssn" as const }
+        : column,
+    );
+    const retyped = setDraftMetadata(imported, retypedMetadata, []);
+    const withAddedField = draftWithFieldAdded(retyped, "ssn");
+    // The added field's output/name is bound to extra_col; find it so a key can
+    // reference it and it actually materializes in the built linkageFields (an
+    // unreferenced added field would otherwise be filtered out, which would not
+    // exercise the collision this guard prevents).
+    const addedOutput = withAddedField.standardization.find(
+      (t) => t.input === "extra_col",
+    )?.output;
+    expect(addedOutput).toBeDefined();
+    const keyed = addKey(withAddedField, addedOutput!);
+    assertNoDuplicateFieldNames(buildAdvancedTerms(keyed));
+  });
+
+  test("re-importing the same adversarial document over an already-imported draft", () => {
+    const crafted = typeConfusedSsnImport();
+    const firstImport = draftFromTerms(crafted, seedFor(), 3600, []);
+    assertNoDuplicateFieldNames(buildAdvancedTerms(firstImport));
+    // A second import replaces importedLinkageFields wholesale (draftFromTerms is
+    // not incremental), but re-runs the same reconciliation -- re-importing must be
+    // as safe as the first import.
+    const secondImport = draftFromTerms(crafted, seedFor(), 3600, []);
+    assertNoDuplicateFieldNames(buildAdvancedTerms(secondImport));
+  });
+
+  test("a fresh (non-imported) draft that adds and keys a same-typed field never collides either", () => {
+    // The non-import path: draftWithFieldAdded's uniquified `${base}_${n}` naming is
+    // the guard that keeps this path collision-free (buildAdvancedTerms'
+    // importedLinkageFields === undefined branch, so reconcileImportedFields never
+    // runs). Built directly from the typed metadata (not seedAdvancedInvite's
+    // inferMetadata, which reads column NAMES and would not recognize these as
+    // linkage types), the same pattern the multi-field draft fixture above uses.
+    const terms = getDefaultLinkageTerms("Inviter", metadata);
+    const draft: AdvancedInviteDraft = {
+      identity: "Inviter",
+      lifetimeSeconds: 3600,
+      outputDirection: "both",
+      algorithm: "psi",
+      deduplicate: false,
+      linkageStrategy: "cascade",
+      metadata,
+      standardization: defaultStandardizationForRows(metadata, terms, []),
+      keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),
+    };
+    expect(draft.importedLinkageFields).toBeUndefined();
+    const withAddedField = draftWithFieldAdded(draft, "ssn");
+    const addedOutput = withAddedField.standardization.find(
+      (t) => t.input === "ssn_col2",
+    )?.output;
+    expect(addedOutput).toBeDefined();
+    const keyed = addKey(withAddedField, addedOutput!);
+    assertNoDuplicateFieldNames(buildAdvancedTerms(keyed));
   });
 });
