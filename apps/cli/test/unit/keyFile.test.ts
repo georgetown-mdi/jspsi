@@ -199,6 +199,50 @@ test("provisionKeyFileFromInvitation errors when a key file already exists and l
   expect(fs.readFileSync(keyPath, "utf8")).toBe(existing);
 });
 
+test("provisionKeyFileFromInvitation refuses even when a concurrent writer wins the race after the pre-check passes", async () => {
+  // Defeat detectFileConflicts's pre-check by making its lstatSync report ENOENT
+  // exactly once (the path is genuinely free at that instant), then create the
+  // real key file -- simulating a second process that provisions between the
+  // pre-check and this call's write -- before letting lstatSync behave normally
+  // again. The write-side guard (the exclusive create in saveKeyFile) must be the
+  // one that catches this: it should refuse with the identical "already exists"
+  // UsageError the pre-check itself raises, and must not overwrite the
+  // concurrent writer's content.
+  const keyPath = path.join(dir, ".psilink.key");
+  const concurrentWriterContent =
+    JSON.stringify({ sharedSecret: TOKEN }) + "\n";
+  const realLstatSync = fs.lstatSync;
+  let bypassedOnce = false;
+  const lstatSpy = vi
+    .spyOn(fs, "lstatSync")
+    .mockImplementation((p: fs.PathLike, opts?: object) => {
+      if (!bypassedOnce && p === keyPath) {
+        bypassedOnce = true;
+        fs.writeFileSync(keyPath, concurrentWriterContent);
+        fs.chmodSync(keyPath, 0o600);
+        const err = new Error(
+          "ENOENT: no such file or directory",
+        ) as NodeJS.ErrnoException;
+        err.code = "ENOENT";
+        throw err;
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- forwarding to the real overload
+      return (realLstatSync as any)(p, opts);
+    });
+  try {
+    const encoded = await encodeInvitation(inviteToken());
+    await expect(
+      provisionKeyFileFromInvitation(encoded, keyPath),
+    ).rejects.toThrow("already exists");
+    expect(bypassedOnce).toBe(true);
+    // The concurrent writer's content survives untouched -- the invitation's
+    // secret was never written over it.
+    expect(fs.readFileSync(keyPath, "utf8")).toBe(concurrentWriterContent);
+  } finally {
+    lstatSpy.mockRestore();
+  }
+});
+
 test("provisionKeyFileFromInvitation fails closed on a malformed code, writing nothing", async () => {
   const keyPath = path.join(dir, ".psilink.key");
   await expect(
