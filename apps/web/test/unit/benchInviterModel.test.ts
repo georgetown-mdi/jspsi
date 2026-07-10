@@ -240,6 +240,12 @@ describe("review and create", () => {
     expect(byLabel.get("Your file")?.value).toBe("clients.csv - 1 rows");
     expect(byLabel.get("Columns shared")?.value).toBe("program_code");
     expect(byLabel.get("Columns shared")?.changeTarget).toBe("columns");
+    expect(byLabel.get("Cleaning")?.value).toMatch(
+      /^\d+ fields?, filled in from your file$/,
+    );
+    expect(byLabel.get("Matching keys")?.value).toMatch(
+      /^\d+ keys?, recommended order$/,
+    );
     expect(byLabel.get("Invitation lifetime")?.value).toBe("1 day");
     expect(byLabel.get("Invitation lifetime")?.setAbove).toBe(true);
     expect(byLabel.get("Results go to")?.value).toBe("You and your partner");

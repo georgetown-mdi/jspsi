@@ -5,10 +5,14 @@ import { Link } from "@tanstack/react-router";
 
 import { sanitizeErrorForDisplay } from "@psilink/core";
 
+import { InvitationFileError, generateInvitation } from "@psi/invitation";
 import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
-import { generateInvitation } from "@psi/invitation";
 import { invitationLocation } from "@psi/invitationLocation";
 import { loadCSVFileOffMainThread } from "@psi/csvParseController";
+
+import { whenDiagnostic } from "@utils/diagnostics";
+
+import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 
 import { Rail, RailFacts, RailGroup, RailProblems, RailSteps } from "./Rail";
 import {
@@ -177,15 +181,40 @@ export function InviterBench() {
       setEditor(sealEditor(editor));
       setInvitation(minted);
       setSection("share");
-    } catch {
-      // Everything user-actionable was validated before the button armed, so
-      // a failure here is internal; a fixed message avoids echoing internals
-      // into a secret-bearing flow (the InvitePanel rule).
-      setCreateAlert({
-        title: "Could not create the invitation",
-        message:
-          "Something went wrong while creating the invitation. Your terms are unchanged - try again.",
-      });
+    } catch (error) {
+      if (error instanceof InvitationFileError) {
+        // The mint re-parses the retained file, so it can fail in the same
+        // user-actionable ways step 1 gates on (the file changed on disk, or
+        // its satisfiability shifted with the edited terms); surface the same
+        // shared alerts rather than a generic failure.
+        setCreateAlert(
+          error.failure.kind === "unreadable"
+            ? {
+                title: "Could not read your file",
+                message: sanitizeErrorForDisplay(error.failure.cause),
+              }
+            : error.failure.kind === "unnameable"
+              ? unnameableColumnsAlert(error.failure.positions)
+              : unlinkableFileAlert(error.failure.unsatisfied),
+        );
+      } else {
+        // Internal and non-user-actionable: a fixed message avoids echoing
+        // internals into a secret-bearing flow, the default log carries only
+        // the error type, and the detail reaches the console only under
+        // diagnostic mode -- the InvitePanel rule, applied literally.
+        console.error(
+          "invitation creation failed:",
+          error instanceof Error ? error.name : typeof error,
+        );
+        whenDiagnostic(() =>
+          console.error("invitation creation failed (detail):", error),
+        );
+        setCreateAlert({
+          title: "Could not create the invitation",
+          message:
+            "Something went wrong while creating the invitation. Your terms are unchanged - try again.",
+        });
+      }
     } finally {
       setMinting(false);
     }

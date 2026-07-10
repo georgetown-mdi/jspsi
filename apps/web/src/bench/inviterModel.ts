@@ -215,9 +215,9 @@ export const LIFETIME_CHOICES: ReadonlyArray<{
   { seconds: MAX_INVITATION_LIFETIME_SECONDS, label: "1 year" },
 ];
 
-/** The absolute moment an invitation shared `now` would expire, phrased for
- * the live expiry hint, e.g. `July 8, 2026, 3:32 PM EDT`. */
-export function expiryLabel(lifetimeSeconds: number, now: Date): string {
+/** An absolute moment phrased for display, e.g. `July 8, 2026, 3:32 PM EDT`
+ * -- the minted expiry in the ledger. */
+export function dateTimeLabel(moment: Date): string {
   return new Intl.DateTimeFormat("en-US", {
     month: "long",
     day: "numeric",
@@ -225,7 +225,13 @@ export function expiryLabel(lifetimeSeconds: number, now: Date): string {
     hour: "numeric",
     minute: "2-digit",
     timeZoneName: "short",
-  }).format(new Date(now.getTime() + lifetimeSeconds * 1000));
+  }).format(moment);
+}
+
+/** The absolute moment an invitation shared `now` would expire, phrased for
+ * the live expiry hint. */
+export function expiryLabel(lifetimeSeconds: number, now: Date): string {
+  return dateTimeLabel(new Date(now.getTime() + lifetimeSeconds * 1000));
 }
 
 /** Ledger phrasing for who receives the matched results. */
@@ -294,7 +300,7 @@ export function inviterLedgerRows(
       reference: "Step 3",
       value:
         expiresIso !== undefined
-          ? expiryLabel(0, new Date(expiresIso))
+          ? dateTimeLabel(new Date(expiresIso))
           : lifetimeLabel(editor.draft.lifetimeSeconds),
     },
     {
@@ -316,28 +322,36 @@ export interface InviterRailFact {
   fact?: string;
 }
 
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+/** The cleaning summary ("3 fields") shared by the rail fact and the
+ * check-your-answers row, so the two surfaces cannot disagree. */
+export function cleaningFact(draft: AdvancedInviteDraft): string {
+  return plural(draft.standardization.length, "field");
+}
+
+/** The key-count summary ("2 keys") shared by the rail fact and the
+ * check-your-answers row. */
+export function keysFact(draft: AdvancedInviteDraft): string {
+  return plural(enabledKeys(draft).length, "key");
+}
+
 /** The Customize group's quiet facts, read live from the draft: cleaning
  * pipeline count, authored key count, and the agreement reference. Undefined
  * facts render as the em-dash "nothing yet" mark. */
 export function inviterRailFacts(
   editor: InviterEditor | undefined,
 ): Array<InviterRailFact> {
-  const plural = (count: number, noun: string) =>
-    `${count} ${noun}${count === 1 ? "" : "s"}`;
   return [
     {
       label: "Cleaning",
-      fact:
-        editor === undefined
-          ? undefined
-          : plural(editor.draft.standardization.length, "field"),
+      fact: editor === undefined ? undefined : cleaningFact(editor.draft),
     },
     {
       label: "Matching keys",
-      fact:
-        editor === undefined
-          ? undefined
-          : plural(enabledKeys(editor.draft).length, "key"),
+      fact: editor === undefined ? undefined : keysFact(editor.draft),
     },
     {
       label: "Legal agreement",
@@ -391,7 +405,7 @@ export function spineProblems(
 ): Array<SpineProblem> {
   if (editor === undefined) return [];
   const problems: Array<SpineProblem> = [];
-  if (hasMultipleIdentifiers(editor.draft.metadata))
+  if (identifierProblem(editor.draft))
     problems.push({
       message: "Choose a single row identifier",
       target: "columns",
@@ -442,11 +456,11 @@ export function answersRows(
     },
     {
       label: "Cleaning",
-      value: `${inviterRailFacts(editor)[0].fact ?? ""}, filled in from your file`,
+      value: `${cleaningFact(editor.draft)}, filled in from your file`,
     },
     {
       label: "Matching keys",
-      value: `${inviterRailFacts(editor)[1].fact ?? ""}, recommended order`,
+      value: `${keysFact(editor.draft)}, recommended order`,
     },
     {
       label: "Legal agreement",
