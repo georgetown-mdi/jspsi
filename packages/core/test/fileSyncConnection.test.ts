@@ -54,11 +54,52 @@ async function putSrcBytes(
   return Buffer.concat(chunks);
 }
 
-function makeMockClient(): {
+// A mock-transport operation's behavior: "real" runs against the in-memory
+// store, "throw" always rejects (models a transport that lacks the operation),
+// "noop" resolves without touching the store (a silent no-op).
+type MockBehavior = "real" | "throw" | "noop";
+
+interface MockClientOptions {
+  // Share one store across two clients (the two-party single-directory model);
+  // omitted, each client gets a fresh Map.
+  files?: Map<string, Buffer>;
+  // Default "real". "throw" models a no-delete transport whose delete() always
+  // rejects; the ack-handshake barrier must complete rendezvous anyway.
+  deleteBehavior?: MockBehavior;
+  // Default "real" (a working EEXIST atomic create). "throw" models a lockless
+  // transport that lacks atomic exclusive-create, forcing the ack-handshake
+  // barrier instead of the lock/EEXIST fast-path.
+  createExclusiveBehavior?: "real" | "throw";
+  // Defaults to mirror deleteBehavior ("real" -> real, "throw"/"noop" -> noop),
+  // since a throwing-delete transport pairs with a swallowing safeDelete; pass
+  // it only to override that pairing.
+  safeDeleteBehavior?: MockBehavior;
+  // Spy fired before delete's behavior runs (proves delete was/was not called).
+  onDelete?: (path: string) => void;
+  // Spy fired at the start of get() (proves an ack body was/was not read).
+  onGet?: (path: string) => void;
+}
+
+function makeMockClient(opts?: MockClientOptions): {
   client: FileTransportClient;
   files: Map<string, Buffer>;
 } {
-  const files = new Map<string, Buffer>();
+  const files = opts?.files ?? new Map<string, Buffer>();
+  const deleteBehavior = opts?.deleteBehavior ?? "real";
+  const createExclusiveBehavior = opts?.createExclusiveBehavior ?? "real";
+  const safeDeleteBehavior =
+    opts?.safeDeleteBehavior ?? (deleteBehavior === "real" ? "real" : "noop");
+
+  const realDelete = (path: string): void => {
+    files.delete(path);
+  };
+  const deleteFor =
+    (behavior: MockBehavior) =>
+    async (path: string): Promise<void> => {
+      if (behavior === "throw")
+        throw new Error("delete not supported on this transport");
+      if (behavior === "real") realDelete(path);
+    };
 
   const client: FileTransportClient = {
     connect: async () => {},
@@ -80,6 +121,7 @@ function makeMockClient(): {
         }));
     },
     get: async (path: string) => {
+      opts?.onGet?.(path);
       const data = files.get(path);
       if (!data) throw new Error(`${path}: not found`);
       return data as Buffer<ArrayBufferLike>;
@@ -88,11 +130,10 @@ function makeMockClient(): {
       files.set(dest, await putSrcBytes(src));
     },
     delete: async (path: string) => {
-      files.delete(path);
+      opts?.onDelete?.(path);
+      return deleteFor(deleteBehavior)(path);
     },
-    safeDelete: async (path: string) => {
-      files.delete(path);
-    },
+    safeDelete: deleteFor(safeDeleteBehavior),
     rename: async (from: string, to: string) => {
       const data = files.get(from);
       if (data === undefined) throw new Error(`${from}: no such file`);
@@ -100,6 +141,8 @@ function makeMockClient(): {
       files.set(to, data);
     },
     createExclusive: async (path: string) => {
+      if (createExclusiveBehavior === "throw")
+        throw new Error("createExclusive not supported on this transport");
       if (files.has(path))
         throw Object.assign(new Error(`${path}: file already exists`), {
           code: "EEXIST",
@@ -142,6 +185,55 @@ async function makeConnectedConn(
   };
   await conn.open(fakeConfig);
   return conn;
+}
+
+// Drive conn.start()'s background poller until its first error and return the
+// collected errors so the caller keeps its own type/message/count/counter/
+// pollerActive assertions inline. Installs the error handler, starts the poller,
+// races the first error against a timeoutMs reject (the message only surfaces on
+// a real hang), optionally waits settleMs (to let a wrong reschedule bump a
+// counter the caller re-asserts), then stops the poller in a finally.
+// stopInHandler makes the handler call conn.stop() itself, for the tests that
+// prove the error handler -- not the poller's self-stop -- halts the loop.
+async function driveUntilError(
+  conn: FileSyncConnection,
+  opts?: {
+    settleMs?: number;
+    timeoutMs?: number;
+    timeoutMessage?: string;
+    stopInHandler?: boolean;
+  },
+): Promise<{ errors: unknown[] }> {
+  const errors: unknown[] = [];
+  let notifyError!: () => void;
+  const errorArrived = new Promise<void>((resolve) => (notifyError = resolve));
+  conn.on("error", (err) => {
+    errors.push(err);
+    if (opts?.stopInHandler) conn.stop();
+    notifyError();
+  });
+  conn.start();
+  try {
+    await Promise.race([
+      errorArrived,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                opts?.timeoutMessage ?? "timed out waiting for poll error",
+              ),
+            ),
+          opts?.timeoutMs ?? 2_000,
+        ),
+      ),
+    ]);
+    if (opts?.settleMs !== undefined)
+      await new Promise((resolve) => setTimeout(resolve, opts.settleMs));
+  } finally {
+    conn.stop();
+  }
+  return { errors };
 }
 
 // Build a peer message file's on-disk bytes in the binary envelope the transport
@@ -1822,11 +1914,7 @@ test("poll emits error when ENOENT threshold is reached on consecutive poll cycl
   // get() always throws ENOENT. After 3 consecutive ENOENT cycles the poller
   // must emit an error instead of warning indefinitely.
   const peerId = "peer-test";
-  const errors: unknown[] = [];
-  // Resolved by the error handler so the test waits only as long as necessary
-  // rather than sleeping a fixed amount of wall time.
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((resolve) => (notifyError = resolve));
+  let errors: unknown[] = [];
 
   const [, logs] = await withCapturedLogs(async () => {
     const { client } = makeMockClient();
@@ -1841,24 +1929,9 @@ test("poll emits error when ENOENT threshold is reached on consecutive poll cycl
     };
     const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
     conn.peerId = peerId;
-    // Stop the poller on the first error, mirroring real protocol behavior where
-    // the error handler calls doCleanup()/conn.stop().
-    conn.on("error", (err) => {
-      errors.push(err);
-      conn.stop();
-      notifyError();
-    });
-    conn.start();
-    await Promise.race([
-      errorArrived,
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () =>
-            reject(new Error("timed out waiting for ENOENT threshold error")),
-          2_000,
-        ),
-      ),
-    ]);
+    // Stop the poller in the handler, mirroring real protocol behavior where the
+    // error handler calls doCleanup()/conn.stop().
+    ({ errors } = await driveUntilError(conn, { stopInHandler: true }));
   });
   expect(logs).toHaveLength(2);
   expect(logs[0].message).toContain("disappeared between list and get");
@@ -1881,26 +1954,7 @@ test("poll emits error immediately when list() throws ENOENT (not a TOCTOU race)
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.peerId = "peer-test";
 
-  const errors: unknown[] = [];
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((resolve) => (notifyError = resolve));
-
-  conn.on("error", (err) => {
-    errors.push(err);
-    conn.stop();
-    notifyError();
-  });
-
-  conn.start();
-  await Promise.race([
-    errorArrived,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("timed out waiting for exists() ENOENT error")),
-        2_000,
-      ),
-    ),
-  ]);
+  const { errors } = await driveUntilError(conn, { stopInHandler: true });
 
   expect(errors).toHaveLength(1);
 });
@@ -2248,10 +2302,7 @@ test("poll() stops the poller on a UsageError from a transport read, not retried
   // cover that half.) With readControlFileWithGate's gate tests, this pins
   // terminal-on-UsageError behaviorally at both real consumers of a transport read.
   const peerId = "peer-test";
-  const errors: unknown[] = [];
   let getCount = 0;
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((resolve) => (notifyError = resolve));
 
   const { client } = makeMockClient();
   // A peer message whose on-disk size matches its declared byte count, so poll()
@@ -2268,29 +2319,12 @@ test("poll() stops the poller on a UsageError from a transport read, not retried
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.peerId = peerId;
   // Deliberately do NOT stop the poller in the handler: the poller must stop
-  // itself on a UsageError. Were it to reschedule instead, get() would be
-  // re-called every pollingFrequency and getCount would climb past 1.
-  conn.on("error", (err) => {
-    errors.push(err);
-    notifyError();
-  });
-  conn.start();
-  await Promise.race([
-    errorArrived,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("timed out waiting for poll error")),
-        2000,
-      ),
-    ),
-  ]);
-  // A terminal poller schedules no next cycle, so getCount is already final at 1
-  // the moment the error fires -- this wait cannot make a stopped poller fail. It
-  // only gives a WRONG reschedule (which fires every pollingFrequency = 10 ms)
-  // several intervals to surface and bump getCount past 1, mirroring the margin
-  // the "close() stops a running poller" test above uses for the same assertion.
-  await new Promise((r) => setTimeout(r, 60));
-  conn.stop();
+  // itself on a UsageError. A terminal poller schedules no next cycle, so
+  // getCount is already final at 1 the moment the error fires -- the settle
+  // cannot make a stopped poller fail. It only gives a WRONG reschedule (which
+  // fires every pollingFrequency = 10 ms) several intervals to surface and bump
+  // getCount past 1.
+  const { errors } = await driveUntilError(conn, { settleMs: 60 });
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
@@ -2314,11 +2348,8 @@ test("poll() stops the poller on a stalled consume-delete, not swallowed-and-re-
   const peerName = `${peerId}-${validMessage.length}.json`;
   const peerPath = `/test/${peerName}`;
 
-  const errors: unknown[] = [];
   const received: unknown[] = [];
   let deleteCount = 0;
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((resolve) => (notifyError = resolve));
 
   const { client, files } = makeMockClient();
   // Pre-seed the message so the default get() reads it; it parses and validates,
@@ -2337,26 +2368,11 @@ test("poll() stops the poller on a stalled consume-delete, not swallowed-and-re-
   };
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.peerId = peerId;
-  // Do NOT stop the poller in the handler: it must stop itself on the UsageError.
-  conn.on("error", (err) => {
-    errors.push(err);
-    notifyError();
-  });
   conn.on("data", (msg) => received.push(msg));
-  conn.start();
-  await Promise.race([
-    errorArrived,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("timed out waiting for poll error")),
-        2000,
-      ),
-    ),
-  ]);
-  // Give a wrong reschedule several poll intervals to surface (bump deleteCount or
-  // deliver a duplicate); a terminal poller does neither.
-  await new Promise((r) => setTimeout(r, 60));
-  conn.stop();
+  // Do NOT stop the poller in the handler: it must stop itself on the UsageError.
+  // The settle gives a wrong reschedule several poll intervals to surface (bump
+  // deleteCount or deliver a duplicate); a terminal poller does neither.
+  const { errors } = await driveUntilError(conn, { settleMs: 60 });
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
@@ -2391,11 +2407,8 @@ test("poll() stops the poller on a stalled retain-mode ack-write, not advanced-a
   const peerName = `${peerId}-20260101T000000-000-${validMessage.length}.json`;
   const peerPath = `/test/${peerName}`;
 
-  const errors: unknown[] = [];
   const received: unknown[] = [];
   let putCount = 0;
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((resolve) => (notifyError = resolve));
 
   const { client, files } = makeMockClient();
   // Pre-seed the message so the default get() reads it; it parses and validates
@@ -2428,26 +2441,11 @@ test("poll() stops the poller on a stalled retain-mode ack-write, not advanced-a
   conn.connected = true;
   conn.path = "/test";
   conn.peerId = peerId;
-  // Do NOT stop the poller in the handler: it must stop itself on the UsageError.
-  conn.on("error", (err) => {
-    errors.push(err);
-    notifyError();
-  });
   conn.on("data", (msg) => received.push(msg));
-  conn.start();
-  await Promise.race([
-    errorArrived,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("timed out waiting for poll error")),
-        2000,
-      ),
-    ),
-  ]);
-  // Give a wrong reschedule several poll intervals to surface (bump putCount or
-  // deliver the message); a terminal poller does neither.
-  await new Promise((r) => setTimeout(r, 60));
-  conn.stop();
+  // Do NOT stop the poller in the handler: it must stop itself on the UsageError.
+  // The settle gives a wrong reschedule several poll intervals to surface (bump
+  // putCount or deliver the message); a terminal poller does neither.
+  const { errors } = await driveUntilError(conn, { settleMs: 60 });
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
@@ -4364,82 +4362,23 @@ test("synchronize() lock path writes hello as <id>-hello.json and self-hello det
 
 test("synchronize() lockless mode completes rendezvous when createExclusive and delete both throw", async () => {
   // Robustness proof: the ack-handshake barrier must complete rendezvous even
-  // when createExclusive and delete both throw. This is the most extreme
-  // constraint possible and is here to prove the protocol is sound under it.
-  // Real lockless deployments target sync-mediated transports where
-  // createExclusive lacks atomicity or deletion has high propagation latency
-  // -- delete itself works, just asynchronously. Cleanup therefore succeeds
-  // eventually on real transports; the pure no-op safeDelete here is not
-  // representative of a real storage backend.
+  // when createExclusive and delete both throw (the deleteBehavior/
+  // createExclusiveBehavior "throw" below). This is the most extreme constraint
+  // possible and is here to prove the protocol is sound under it.
   const idA = "00000000-0000-4000-8000-000000000001"; // sorts lower
   const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff"; // sorts higher
 
-  const sharedFiles = new Map<string, Buffer>();
-
-  const makeThrowingClient = (): FileTransportClient => ({
-    connect: async () => {},
-    end: async () => {},
-    list: async (dir: string): Promise<FileInfo[]> => {
-      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
-      return [...sharedFiles.entries()]
-        .filter(
-          ([p]) =>
-            p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
-        )
-        .map(([p, buf]) => ({
-          name: p.slice(prefix.length),
-          modifyTime: 0,
-          size: buf.length,
-        }));
+  const { connA, connB } = makeRendezvousPair(
+    idA,
+    { locklessRendezvous: true },
+    idB,
+    { locklessRendezvous: true },
+    {
+      client: { deleteBehavior: "throw", createExclusiveBehavior: "throw" },
+      timeToLiveMs: 5_000,
+      pollingFrequency: 10,
     },
-    get: async (path: string) => {
-      const data = sharedFiles.get(path);
-      if (!data) throw new Error(`${path}: not found`);
-      return data as Buffer<ArrayBufferLike>;
-    },
-    put: async (
-      src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
-      dest: string,
-    ) => {
-      sharedFiles.set(dest, await putSrcBytes(src));
-    },
-    delete: async () => {
-      throw new Error("delete not supported on this transport");
-    },
-    safeDelete: async () => {
-      // Swallow silently: transport cannot delete.
-    },
-    rename: async (from: string, to: string) => {
-      const data = sharedFiles.get(from);
-      if (data === undefined) throw new Error(`${from}: no such file`);
-      sharedFiles.delete(from);
-      sharedFiles.set(to, data);
-    },
-    createExclusive: async () => {
-      throw new Error("createExclusive not supported on this transport");
-    },
-    exists: async (path: string) => sharedFiles.has(path),
-  });
-
-  const connA = new FileSyncConnection(makeThrowingClient(), {
-    pollingFrequency: 10,
-    timeToLive: new Date(Date.now() + 5_000),
-    verbose: -1,
-    locklessRendezvous: true,
-  });
-  connA.id = idA;
-  connA.connected = true;
-  connA.path = "/shared";
-
-  const connB = new FileSyncConnection(makeThrowingClient(), {
-    pollingFrequency: 10,
-    timeToLive: new Date(Date.now() + 5_000),
-    verbose: -1,
-    locklessRendezvous: true,
-  });
-  connB.id = idB;
-  connB.connected = true;
-  connB.path = "/shared";
+  );
 
   await Promise.all([connA.synchronize(), connB.synchronize()]);
 
@@ -4454,70 +4393,18 @@ test("synchronize() lockless mode role assignment matches the lexicographic rule
   // (see the previous test); real lockless transports support delete.
   const idA = "00000000-0000-4000-8000-000000000001";
   const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff";
-  const sharedFiles = new Map<string, Buffer>();
 
-  const makeClient = (): FileTransportClient => ({
-    connect: async () => {},
-    end: async () => {},
-    list: async (dir: string): Promise<FileInfo[]> => {
-      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
-      return [...sharedFiles.entries()]
-        .filter(
-          ([p]) =>
-            p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
-        )
-        .map(([p, buf]) => ({
-          name: p.slice(prefix.length),
-          modifyTime: 0,
-          size: buf.length,
-        }));
+  const { connA, connB } = makeRendezvousPair(
+    idA,
+    { locklessRendezvous: true },
+    idB,
+    { locklessRendezvous: true },
+    {
+      client: { deleteBehavior: "throw", createExclusiveBehavior: "throw" },
+      timeToLiveMs: 5_000,
+      pollingFrequency: 10,
     },
-    get: async (path: string) => {
-      const data = sharedFiles.get(path);
-      if (!data) throw new Error(`${path}: not found`);
-      return data as Buffer<ArrayBufferLike>;
-    },
-    put: async (
-      src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
-      dest: string,
-    ) => {
-      sharedFiles.set(dest, await putSrcBytes(src));
-    },
-    delete: async () => {
-      throw new Error("delete not supported");
-    },
-    safeDelete: async () => {},
-    rename: async (from: string, to: string) => {
-      const data = sharedFiles.get(from);
-      if (!data) throw new Error(`${from}: no such file`);
-      sharedFiles.delete(from);
-      sharedFiles.set(to, data);
-    },
-    createExclusive: async () => {
-      throw new Error("not supported");
-    },
-    exists: async (path: string) => sharedFiles.has(path),
-  });
-
-  const connA = new FileSyncConnection(makeClient(), {
-    pollingFrequency: 10,
-    timeToLive: new Date(Date.now() + 5_000),
-    verbose: -1,
-    locklessRendezvous: true,
-  });
-  connA.id = idA;
-  connA.connected = true;
-  connA.path = "/shared";
-
-  const connB = new FileSyncConnection(makeClient(), {
-    pollingFrequency: 10,
-    timeToLive: new Date(Date.now() + 5_000),
-    verbose: -1,
-    locklessRendezvous: true,
-  });
-  connB.id = idB;
-  connB.connected = true;
-  connB.path = "/shared";
+  );
 
   await Promise.all([connA.synchronize(), connB.synchronize()]);
 
@@ -4546,72 +4433,25 @@ test("synchronize() lockless mode joiner fast-path is skipped; lockless barrier 
   // self-hello and rejected by the entry precondition).
   const idA = "00000000-0000-4000-8000-000000000001";
   const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff";
-  const sharedFiles = new Map<string, Buffer>();
 
   let deleteCalled = false;
-  const makeClient = (): FileTransportClient => ({
-    connect: async () => {},
-    end: async () => {},
-    list: async (dir: string): Promise<FileInfo[]> => {
-      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
-      return [...sharedFiles.entries()]
-        .filter(
-          ([p]) =>
-            p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
-        )
-        .map(([p, buf]) => ({
-          name: p.slice(prefix.length),
-          modifyTime: 0,
-          size: buf.length,
-        }));
+  const { connA, connB, files } = makeRendezvousPair(
+    idA,
+    { locklessRendezvous: true },
+    idB,
+    { locklessRendezvous: true },
+    {
+      client: {
+        deleteBehavior: "throw",
+        createExclusiveBehavior: "throw",
+        onDelete: () => {
+          deleteCalled = true;
+        },
+      },
+      timeToLiveMs: 5_000,
+      pollingFrequency: 10,
     },
-    get: async (path: string) => {
-      const data = sharedFiles.get(path);
-      if (!data) throw new Error(`${path}: not found`);
-      return data as Buffer<ArrayBufferLike>;
-    },
-    put: async (
-      src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
-      dest: string,
-    ) => {
-      sharedFiles.set(dest, await putSrcBytes(src));
-    },
-    delete: async () => {
-      deleteCalled = true;
-      throw new Error("delete not supported");
-    },
-    safeDelete: async () => {},
-    rename: async (from: string, to: string) => {
-      const data = sharedFiles.get(from);
-      if (!data) throw new Error(`${from}: no such file`);
-      sharedFiles.delete(from);
-      sharedFiles.set(to, data);
-    },
-    createExclusive: async () => {
-      throw new Error("createExclusive not supported");
-    },
-    exists: async (path: string) => sharedFiles.has(path),
-  });
-
-  const connA = new FileSyncConnection(makeClient(), {
-    pollingFrequency: 10,
-    timeToLive: new Date(Date.now() + 5_000),
-    verbose: -1,
-    locklessRendezvous: true,
-  });
-  connA.id = idA;
-  connA.connected = true;
-  connA.path = "/shared";
-
-  const connB = new FileSyncConnection(makeClient(), {
-    pollingFrequency: 10,
-    timeToLive: new Date(Date.now() + 5_000),
-    verbose: -1,
-    locklessRendezvous: true,
-  });
-  connB.id = idB;
-  connB.connected = true;
-  connB.path = "/shared";
+  );
 
   // Run A and B concurrently against the empty directory: each writes its own
   // hello and enters the lockless barrier, and the slower-to-list party sees
@@ -4624,8 +4464,8 @@ test("synchronize() lockless mode joiner fast-path is skipped; lockless barrier 
   expect(connA.peerId).toBe(idB);
   expect(connB.peerId).toBe(idA);
   // Lockless never deletes a hello: both remain in the directory.
-  expect(sharedFiles.has(`/shared/${idA}-hello.json`)).toBe(true);
-  expect(sharedFiles.has(`/shared/${idB}-hello.json`)).toBe(true);
+  expect(files.has(`/test/${idA}-hello.json`)).toBe(true);
+  expect(files.has(`/test/${idB}-hello.json`)).toBe(true);
 });
 
 // --- send(): hasOutstandingMessage excludes typed protocol files ---------------
@@ -5070,79 +4910,26 @@ test("synchronize() lockless mode: round-trip hello body and zero-length ack mar
   // hello is read through the gate; the ack is matched by name existence only.
   const idA = "00000000-0000-4000-8000-000000000001";
   const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff";
-  const sharedFiles = new Map<string, Buffer>();
-
-  const makeClient = (): FileTransportClient => ({
-    connect: async () => {},
-    end: async () => {},
-    list: async (dir: string): Promise<FileInfo[]> => {
-      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
-      return [...sharedFiles.entries()]
-        .filter(
-          ([p]) =>
-            p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
-        )
-        .map(([p, buf]) => ({
-          name: p.slice(prefix.length),
-          modifyTime: 0,
-          size: buf.length,
-        }));
+  // Throwing createExclusive forces the lockless ack-handshake barrier instead
+  // of the lock/EEXIST fast-path; delete stays real (baseline).
+  const { connA, connB, files } = makeRendezvousPair(
+    idA,
+    { locklessRendezvous: true },
+    idB,
+    { locklessRendezvous: true },
+    {
+      client: { createExclusiveBehavior: "throw" },
+      timeToLiveMs: 5_000,
+      pollingFrequency: 10,
     },
-    get: async (path: string) => {
-      const data = sharedFiles.get(path);
-      if (!data) throw new Error(`${path}: not found`);
-      return data as Buffer<ArrayBufferLike>;
-    },
-    put: async (
-      src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
-      dest: string,
-    ) => {
-      sharedFiles.set(dest, await putSrcBytes(src));
-    },
-    delete: async (path: string) => {
-      sharedFiles.delete(path);
-    },
-    safeDelete: async (path: string) => {
-      sharedFiles.delete(path);
-    },
-    rename: async (from: string, to: string) => {
-      const data = sharedFiles.get(from);
-      if (!data) throw new Error(`${from}: no such file`);
-      sharedFiles.delete(from);
-      sharedFiles.set(to, data);
-    },
-    createExclusive: async () => {
-      throw new Error("not supported");
-    },
-    exists: async (path: string) => sharedFiles.has(path),
-  });
-
-  const connA = new FileSyncConnection(makeClient(), {
-    pollingFrequency: 10,
-    timeToLive: new Date(Date.now() + 5_000),
-    verbose: -1,
-    locklessRendezvous: true,
-  });
-  connA.id = idA;
-  connA.connected = true;
-  connA.path = "/shared";
-
-  const connB = new FileSyncConnection(makeClient(), {
-    pollingFrequency: 10,
-    timeToLive: new Date(Date.now() + 5_000),
-    verbose: -1,
-    locklessRendezvous: true,
-  });
-  connB.id = idB;
-  connB.connected = true;
-  connB.path = "/shared";
+  );
 
   await Promise.all([connA.synchronize(), connB.synchronize()]);
 
   // Both hellos carry the bilateral-flag envelope body.
   for (const id of [idA, idB]) {
     const helloBody = JSON.parse(
-      sharedFiles.get(`/shared/${id}-hello.json`)!.toString(),
+      files.get(`/test/${id}-hello.json`)!.toString(),
     );
     expect(helloBody).toMatchObject({
       locklessRendezvous: true,
@@ -5151,10 +4938,10 @@ test("synchronize() lockless mode: round-trip hello body and zero-length ack mar
   }
   // A acked B's hello; B acked A's hello. Each marker is named after the
   // acknowledged hello and is zero bytes (no envelope body).
-  const ackAofB = sharedFiles.get(`/shared/${idA}-${idB}-hello-ack.json`);
+  const ackAofB = files.get(`/test/${idA}-${idB}-hello-ack.json`);
   expect(ackAofB).toBeDefined();
   expect(ackAofB!.length).toBe(0);
-  const ackBofA = sharedFiles.get(`/shared/${idB}-${idA}-hello-ack.json`);
+  const ackBofA = files.get(`/test/${idB}-${idA}-hello-ack.json`);
   expect(ackBofA).toBeDefined();
   expect(ackBofA!.length).toBe(0);
   expect(connA.peerId).toBe(idB);
@@ -5226,74 +5013,25 @@ test("synchronize() lockless: rendezvous completes on ack existence; ack body is
   // the unified zero-byte marker no longer has.
   const idA = "00000000-0000-4000-8000-000000000001";
   const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff";
-  const sharedFiles = new Map<string, Buffer>();
   const ackGets: string[] = [];
-
-  const makeClient = (): FileTransportClient => ({
-    connect: async () => {},
-    end: async () => {},
-    list: async (dir: string): Promise<FileInfo[]> => {
-      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
-      return [...sharedFiles.entries()]
-        .filter(
-          ([p]) =>
-            p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
-        )
-        .map(([p, buf]) => ({
-          name: p.slice(prefix.length),
-          modifyTime: 0,
-          size: buf.length,
-        }));
+  // Record only ack-file reads through get(); throwing createExclusive forces
+  // the lockless barrier so the ack path is exercised.
+  const { connA, connB } = makeRendezvousPair(
+    idA,
+    { locklessRendezvous: true },
+    idB,
+    { locklessRendezvous: true },
+    {
+      client: {
+        createExclusiveBehavior: "throw",
+        onGet: (path) => {
+          if (path.endsWith("-ack.json")) ackGets.push(path);
+        },
+      },
+      timeToLiveMs: 5_000,
+      pollingFrequency: 10,
     },
-    get: async (path: string) => {
-      if (path.endsWith("-ack.json")) ackGets.push(path);
-      const data = sharedFiles.get(path);
-      if (data === undefined) throw new Error(`${path}: not found`);
-      return data as Buffer<ArrayBufferLike>;
-    },
-    put: async (
-      src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
-      dest: string,
-    ) => {
-      sharedFiles.set(dest, await putSrcBytes(src));
-    },
-    delete: async (path: string) => {
-      sharedFiles.delete(path);
-    },
-    safeDelete: async (path: string) => {
-      sharedFiles.delete(path);
-    },
-    rename: async (from: string, to: string) => {
-      const data = sharedFiles.get(from);
-      if (data === undefined) throw new Error(`${from}: no such file`);
-      sharedFiles.delete(from);
-      sharedFiles.set(to, data);
-    },
-    createExclusive: async () => {
-      throw new Error("not supported");
-    },
-    exists: async (path: string) => sharedFiles.has(path),
-  });
-
-  const connA = new FileSyncConnection(makeClient(), {
-    pollingFrequency: 10,
-    timeToLive: new Date(Date.now() + 5_000),
-    verbose: -1,
-    locklessRendezvous: true,
-  });
-  connA.id = idA;
-  connA.connected = true;
-  connA.path = "/shared";
-
-  const connB = new FileSyncConnection(makeClient(), {
-    pollingFrequency: 10,
-    timeToLive: new Date(Date.now() + 5_000),
-    verbose: -1,
-    locklessRendezvous: true,
-  });
-  connB.id = idB;
-  connB.connected = true;
-  connB.path = "/shared";
+  );
 
   await Promise.all([connA.synchronize(), connB.synchronize()]);
 
@@ -5472,25 +5210,35 @@ function makeRendezvousPair(
   optsA: Partial<ConstructorParameters<typeof FileSyncConnection>[1]>,
   idB: string,
   optsB: Partial<ConstructorParameters<typeof FileSyncConnection>[1]>,
+  setup?: {
+    // Passed to makeMockClient so a pair can run against a throwing/no-op
+    // transport or install a spy; the two conns share the resulting client and
+    // its store, matching the single-directory two-party model.
+    client?: MockClientOptions;
+    path?: string;
+    timeToLiveMs?: number;
+    pollingFrequency?: number;
+  },
 ): {
   connA: FileSyncConnection;
   connB: FileSyncConnection;
   files: Map<string, Buffer>;
 } {
-  const { client, files } = makeMockClient();
+  const { client, files } = makeMockClient(setup?.client);
+  const path = setup?.path ?? "/test";
   const make = (
     id: string,
     opts: Partial<ConstructorParameters<typeof FileSyncConnection>[1]>,
   ): FileSyncConnection => {
     const conn = new FileSyncConnection(client, {
-      pollingFrequency: 5,
-      timeToLive: new Date(Date.now() + 30_000),
+      pollingFrequency: setup?.pollingFrequency ?? 5,
+      timeToLive: new Date(Date.now() + (setup?.timeToLiveMs ?? 30_000)),
       verbose: -1,
       ...opts,
     });
     conn.id = id;
     conn.connected = true;
-    conn.path = "/test";
+    conn.path = path;
     return conn;
   };
   return { connA: make(idA, optsA), connB: make(idB, optsB), files };
@@ -6085,52 +5833,16 @@ test("retain mode: multi-message exchange completes when delete() always fails",
   // Acceptance: two-party unit test demonstrating a full multi-message cycle
   // when the mock's delete() is stubbed to always throw.
   const sharedFiles = new Map<string, Buffer>();
-
-  const makeClient = (): FileTransportClient => ({
-    connect: async () => {},
-    end: async () => {},
-    list: async (dir: string): Promise<FileInfo[]> => {
-      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
-      return [...sharedFiles.entries()]
-        .filter(
-          ([p]) =>
-            p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
-        )
-        .map(([p, buf]) => ({
-          name: p.slice(prefix.length),
-          modifyTime: 0,
-          size: buf.length,
-        }));
-    },
-    get: async (path: string) => {
-      const data = sharedFiles.get(path);
-      if (!data) throw new Error(`${path}: not found`);
-      return data as Buffer<ArrayBufferLike>;
-    },
-    put: async (
-      src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
-      dest: string,
-    ) => {
-      sharedFiles.set(dest, await putSrcBytes(src));
-    },
-    delete: async () => {
-      throw new Error("delete not supported on this transport");
-    },
-    safeDelete: async () => {},
-    rename: async (from: string, to: string) => {
-      const data = sharedFiles.get(from);
-      if (data === undefined) throw new Error(`${from}: no such file`);
-      sharedFiles.delete(from);
-      sharedFiles.set(to, data);
-    },
-    createExclusive: async () => {},
-    exists: async (path: string) => sharedFiles.has(path),
-  });
+  const clientOpts: MockClientOptions = {
+    files: sharedFiles,
+    deleteBehavior: "throw",
+    createExclusiveBehavior: "throw",
+  };
 
   const idA = "sender-a";
   const idB = "receiver-b";
-  const connA = makeRetainConn(makeClient(), idA, idB);
-  const connB = makeRetainConn(makeClient(), idB, idA);
+  const connA = makeRetainConn(makeMockClient(clientOpts).client, idA, idB);
+  const connB = makeRetainConn(makeMockClient(clientOpts).client, idB, idA);
 
   const received: unknown[] = [];
   let resolveAll!: () => void;
@@ -6515,76 +6227,27 @@ test("retain mode + lockless rendezvous: multi-message exchange completes end-to
   const idA = "00000000-0000-4000-8000-000000000001"; // sorts lower
   const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff"; // sorts higher
 
-  const sharedFiles = new Map<string, Buffer>();
   const deleteCalls: string[] = [];
-
-  const makeClient = (): FileTransportClient => ({
-    connect: async () => {},
-    end: async () => {},
-    list: async (dir: string): Promise<FileInfo[]> => {
-      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
-      return [...sharedFiles.entries()]
-        .filter(
-          ([p]) =>
-            p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
-        )
-        .map(([p, buf]) => ({
-          name: p.slice(prefix.length),
-          modifyTime: 0,
-          size: buf.length,
-        }));
-    },
-    get: async (path: string) => {
-      const data = sharedFiles.get(path);
-      if (!data) throw new Error(`${path}: not found`);
-      return data as Buffer<ArrayBufferLike>;
-    },
-    put: async (
-      src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
-      dest: string,
-    ) => {
-      sharedFiles.set(dest, await putSrcBytes(src));
-    },
-    delete: async (path: string) => {
-      deleteCalls.push(path);
-      throw new Error("delete not supported on this transport");
-    },
-    safeDelete: async () => {},
-    rename: async (from: string, to: string) => {
-      const data = sharedFiles.get(from);
-      if (data === undefined) throw new Error(`${from}: no such file`);
-      sharedFiles.delete(from);
-      sharedFiles.set(to, data);
-    },
-    createExclusive: async () => {
-      throw new Error("createExclusive not supported on this transport");
-    },
-    exists: async (path: string) => sharedFiles.has(path),
-  });
-
-  const connA = new FileSyncConnection(makeClient(), {
-    pollingFrequency: 10,
-    timeToLive: new Date(Date.now() + 5_000),
-    verbose: -1,
+  const retainOpts = {
     locklessRendezvous: true,
     timestampInFilename: true,
     retainFiles: true,
-  });
-  connA.id = idA;
-  connA.connected = true;
-  connA.path = "/shared";
-
-  const connB = new FileSyncConnection(makeClient(), {
-    pollingFrequency: 10,
-    timeToLive: new Date(Date.now() + 5_000),
-    verbose: -1,
-    locklessRendezvous: true,
-    timestampInFilename: true,
-    retainFiles: true,
-  });
-  connB.id = idB;
-  connB.connected = true;
-  connB.path = "/shared";
+  };
+  const { connA, connB } = makeRendezvousPair(
+    idA,
+    retainOpts,
+    idB,
+    retainOpts,
+    {
+      client: {
+        deleteBehavior: "throw",
+        createExclusiveBehavior: "throw",
+        onDelete: (path) => deleteCalls.push(path),
+      },
+      timeToLiveMs: 5_000,
+      pollingFrequency: 10,
+    },
+  );
 
   await Promise.all([connA.synchronize(), connB.synchronize()]);
   expect(connA.peerId).toBe(idB);
@@ -6740,26 +6403,10 @@ test("retain mode: poll() duplicate-NNN error is a UsageError and stops the poll
   conn.path = "/test";
   conn.peerId = peerId;
 
-  const errors: unknown[] = [];
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((r) => (notifyError = r));
-  conn.on("error", (err) => {
-    errors.push(err);
-    notifyError();
-    // Intentionally do NOT call conn.stop() -- the poller must have already
-    // stopped itself before the emit so the finally block does not reschedule.
-  });
-
-  conn.start();
-  await Promise.race([
-    errorArrived,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("timed out waiting for poll error")),
-        2_000,
-      ),
-    ),
-  ]);
+  // Do NOT stop the poller in the handler: it must stop itself before the emit
+  // so the finally block does not reschedule. The settle gives a wrong
+  // reschedule two poll intervals to surface as a second error.
+  const { errors } = await driveUntilError(conn, { settleMs: 50 });
 
   // Error fired exactly once.
   expect(errors).toHaveLength(1);
@@ -6772,10 +6419,7 @@ test("retain mode: poll() duplicate-NNN error is a UsageError and stops the poll
     false,
   );
 
-  // Wait two poll intervals and confirm no second error arrives (poller did not
-  // reschedule). If the finally block had rescheduled, a second error would
-  // arrive almost immediately.
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  // No second error arrived during the settle (poller did not reschedule).
   expect(errors).toHaveLength(1);
 });
 
@@ -6794,25 +6438,9 @@ test("delete mode: poll() more-than-one-message error is a UsageError and stops 
   files.set(`/test/${peerId}-10.json`, Buffer.from("a".repeat(10)));
   files.set(`/test/${peerId}-20.json`, Buffer.from("b".repeat(20)));
 
-  const errors: unknown[] = [];
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((r) => (notifyError = r));
-  // Do NOT call stop() -- a terminal error must stop the poller on its own.
-  conn.on("error", (err) => {
-    errors.push(err);
-    notifyError();
-  });
-
-  conn.start();
-  await Promise.race([
-    errorArrived,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("timed out waiting for poll error")),
-        2_000,
-      ),
-    ),
-  ]);
+  // Do NOT stop the poller in the handler: a terminal error must stop it on its
+  // own. The settle gives a wrong reschedule time to surface a second error.
+  const { errors } = await driveUntilError(conn, { settleMs: 50 });
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
@@ -6821,7 +6449,6 @@ test("delete mode: poll() more-than-one-message error is a UsageError and stops 
     false,
   );
   // No second error: the poller did not reschedule.
-  await new Promise((resolve) => setTimeout(resolve, 50));
   expect(errors).toHaveLength(1);
 });
 
@@ -6850,25 +6477,9 @@ test("retain mode: poll() seq-mismatch (UsageError) stops the poller", async () 
   conn.path = "/test";
   conn.peerId = peerId;
 
-  const errors: unknown[] = [];
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((r) => (notifyError = r));
-  conn.on("error", (err) => {
-    errors.push(err);
-    notifyError();
-    // Do NOT call stop() -- the poller must stop itself.
-  });
-
-  conn.start();
-  await Promise.race([
-    errorArrived,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("timed out waiting for poll error")),
-        2_000,
-      ),
-    ),
-  ]);
+  // Do NOT stop the poller in the handler: it must stop itself. The settle gives
+  // a wrong reschedule time to surface a second error.
+  const { errors } = await driveUntilError(conn, { settleMs: 50 });
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
@@ -6878,7 +6489,6 @@ test("retain mode: poll() seq-mismatch (UsageError) stops the poller", async () 
     false,
   );
 
-  await new Promise((resolve) => setTimeout(resolve, 50));
   expect(errors).toHaveLength(1);
 });
 
@@ -7054,27 +6664,9 @@ test("I8: poll() list throws -- error reaches the error event, recvSeq unchanged
   conn.id = "receiver-me";
   conn.peerId = peerId;
 
-  const errors: unknown[] = [];
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((r) => (notifyError = r));
-  conn.on("error", (err) => {
-    errors.push(err);
-    conn.stop();
-    notifyError();
-  });
-
   const recvSeqBefore = (conn as unknown as { recvSeq: number }).recvSeq;
 
-  conn.start();
-  await Promise.race([
-    errorArrived,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("timed out waiting for poll error")),
-        2_000,
-      ),
-    ),
-  ]);
+  const { errors } = await driveUntilError(conn, { stopInHandler: true });
 
   // Error must have been emitted.
   expect(errors).toHaveLength(1);
@@ -7639,27 +7231,11 @@ test("poll() terminal: a fully-synced message with an unparseable body stops the
   files.set(`/shared/${peerId}-20260101T000000-000-${body.length}.json`, body);
   const conn = makeRetainConn(client, "receiver-me", peerId);
 
-  const errors: unknown[] = [];
   const received: unknown[] = [];
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((r) => (notifyError = r));
   conn.on("data", (msg) => received.push(msg));
-  // Do NOT call stop() -- a terminal error must stop the poller on its own.
-  conn.on("error", (err) => {
-    errors.push(err);
-    notifyError();
-  });
-
-  conn.start();
-  await Promise.race([
-    errorArrived,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("timed out waiting for poll error")),
-        2_000,
-      ),
-    ),
-  ]);
+  // Do NOT stop the poller in the handler: a terminal error must stop it on its
+  // own. The settle gives a wrong reschedule time to surface a second error.
+  const { errors } = await driveUntilError(conn, { settleMs: 50 });
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
@@ -7671,7 +7247,6 @@ test("poll() terminal: a fully-synced message with an unparseable body stops the
   expect(received).toHaveLength(0);
   expect([...files.keys()].some((p) => p.endsWith("-ack.json"))).toBe(false);
   // No second error arrives (the finally block did not reschedule).
-  await new Promise((resolve) => setTimeout(resolve, 50));
   expect(errors).toHaveLength(1);
 });
 
@@ -7690,24 +7265,7 @@ async function pollUnparseableBodyError(payload: Buffer): Promise<Error> {
   files.set(`/shared/${peerId}-20260101T000000-000-${body.length}.json`, body);
   const conn = makeRetainConn(client, "receiver-me", peerId);
 
-  const errors: unknown[] = [];
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((r) => (notifyError = r));
-  conn.on("error", (err) => {
-    errors.push(err);
-    notifyError();
-  });
-  conn.start();
-  await Promise.race([
-    errorArrived,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("timed out waiting for poll error")),
-        2_000,
-      ),
-    ),
-  ]);
-  conn.stop();
+  const { errors } = await driveUntilError(conn);
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
   return errors[0] as Error;
@@ -7748,26 +7306,9 @@ test("poll() terminal: an old-format JSON message surfaces a likely-incompatible
   files.set(`/shared/${peerId}-20260101T000000-000-${body.length}.json`, body);
   const conn = makeRetainConn(client, "receiver-me", peerId);
 
-  const errors: unknown[] = [];
   const received: unknown[] = [];
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((r) => (notifyError = r));
   conn.on("data", (msg) => received.push(msg));
-  conn.on("error", (err) => {
-    errors.push(err);
-    notifyError();
-  });
-
-  conn.start();
-  await Promise.race([
-    errorArrived,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("timed out waiting for poll error")),
-        2_000,
-      ),
-    ),
-  ]);
+  const { errors } = await driveUntilError(conn);
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
@@ -7800,25 +7341,7 @@ test("poll() terminal: a foreign envelope version byte surfaces the same version
   files.set(`/shared/${peerId}-20260101T000000-000-${body.length}.json`, body);
   const conn = makeRetainConn(client, "receiver-me", peerId);
 
-  const errors: unknown[] = [];
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((r) => (notifyError = r));
-  conn.on("error", (err) => {
-    errors.push(err);
-    notifyError();
-  });
-
-  conn.start();
-  await Promise.race([
-    errorArrived,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("timed out waiting for poll error")),
-        2_000,
-      ),
-    ),
-  ]);
-  conn.stop();
+  const { errors } = await driveUntilError(conn);
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
@@ -7969,26 +7492,10 @@ test("poll() terminal: delete mode also stops the poller on a fully-synced corru
   const msgName = `${peerId}-${body.length}.json`;
   files.set(`/test/${msgName}`, body);
 
-  const errors: unknown[] = [];
   const received: unknown[] = [];
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((r) => (notifyError = r));
   conn.on("data", (msg) => received.push(msg));
-  conn.on("error", (err) => {
-    errors.push(err);
-    notifyError();
-  });
-
-  conn.start();
-  await Promise.race([
-    errorArrived,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("timed out waiting for poll error")),
-        2_000,
-      ),
-    ),
-  ]);
+  // The settle gives a wrong reschedule time to surface a second error.
+  const { errors } = await driveUntilError(conn, { settleMs: 50 });
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
@@ -8000,7 +7507,6 @@ test("poll() terminal: delete mode also stops the poller on a fully-synced corru
   // parse-before-delete: the corrupt file is left on disk for inspection.
   expect(files.has(`/test/${msgName}`)).toBe(true);
   // No second error: the finally block did not reschedule.
-  await new Promise((resolve) => setTimeout(resolve, 50));
   expect(errors).toHaveLength(1);
 });
 
@@ -8248,51 +7754,14 @@ test.each([
     // splitting the two concatenated ids out of a marker. A hyphen-containing id
     // (`site-a`) and an id equal to a type word (`ack`) both round-trip.
     const sharedFiles = new Map<string, Buffer>();
-    const makeClient = (): FileTransportClient => ({
-      connect: async () => {},
-      end: async () => {},
-      list: async (dir: string): Promise<FileInfo[]> => {
-        const prefix = dir.endsWith("/") ? dir : `${dir}/`;
-        return [...sharedFiles.entries()]
-          .filter(
-            ([p]) =>
-              p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
-          )
-          .map(([p, buf]) => ({
-            name: p.slice(prefix.length),
-            modifyTime: 0,
-            size: buf.length,
-          }));
-      },
-      get: async (path: string) => {
-        const data = sharedFiles.get(path);
-        if (data === undefined) throw new Error(`${path}: not found`);
-        return data as Buffer<ArrayBufferLike>;
-      },
-      put: async (
-        src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
-        dest: string,
-      ) => {
-        sharedFiles.set(dest, await putSrcBytes(src));
-      },
-      delete: async () => {
-        throw new Error("delete not supported on this transport");
-      },
-      safeDelete: async () => {},
-      rename: async (from: string, to: string) => {
-        const data = sharedFiles.get(from);
-        if (data === undefined) throw new Error(`${from}: no such file`);
-        sharedFiles.delete(from);
-        sharedFiles.set(to, data);
-      },
-      createExclusive: async () => {
-        throw new Error("createExclusive not supported on this transport");
-      },
-      exists: async (path: string) => sharedFiles.has(path),
-    });
+    const clientOpts: MockClientOptions = {
+      files: sharedFiles,
+      deleteBehavior: "throw",
+      createExclusiveBehavior: "throw",
+    };
 
     const makeConn = (id: string) => {
-      const c = new FileSyncConnection(makeClient(), {
+      const c = new FileSyncConnection(makeMockClient(clientOpts).client, {
         pollingFrequency: 10,
         timeToLive: new Date(Date.now() + 5_000),
         verbose: -1,
@@ -8356,25 +7825,9 @@ test("poll(): an unrecognized file mid-loop is a terminal UsageError under the d
   // A net-new foreign file appears during the loop.
   files.set("/test/intruder.json", Buffer.from("x"));
 
-  const errors: unknown[] = [];
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((r) => (notifyError = r));
-  // Do NOT call stop() -- a terminal error must stop the poller on its own.
-  conn.on("error", (err) => {
-    errors.push(err);
-    notifyError();
-  });
-
-  conn.start();
-  await Promise.race([
-    errorArrived,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("timed out waiting for poll error")),
-        2_000,
-      ),
-    ),
-  ]);
+  // Do NOT stop the poller in the handler: a terminal error must stop it on its
+  // own.
+  const { errors } = await driveUntilError(conn);
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
@@ -8398,24 +7851,7 @@ async function pollForeignFileError(hostileName: string): Promise<Error> {
   conn.peerId = "peer-test";
   files.set(`/test/${hostileName}`, Buffer.from("x"));
 
-  const errors: unknown[] = [];
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((r) => (notifyError = r));
-  conn.on("error", (err) => {
-    errors.push(err);
-    notifyError();
-  });
-  conn.start();
-  await Promise.race([
-    errorArrived,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("timed out waiting for poll error")),
-        2_000,
-      ),
-    ),
-  ]);
-  conn.stop();
+  const { errors } = await driveUntilError(conn);
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
   return errors[0] as Error;
@@ -8465,23 +7901,7 @@ test("poll(): a peer-derived peerId with control/ANSI is escaped in a terminal e
   files.set(`/test/${hostilePeerId}-5.json`, Buffer.from("12345"));
   files.set(`/test/${hostilePeerId}-6.json`, Buffer.from("123456"));
 
-  const errors: unknown[] = [];
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((r) => (notifyError = r));
-  conn.on("error", (err) => {
-    errors.push(err);
-    notifyError();
-  });
-  conn.start();
-  await Promise.race([
-    errorArrived,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("timed out waiting for poll error")),
-        2_000,
-      ),
-    ),
-  ]);
+  const { errors } = await driveUntilError(conn);
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
@@ -8699,24 +8119,9 @@ test("retain mode: a peer message with a valid byte count but unparseable NNN is
     // Byte-count terminal (5) but the NNN segment ("foo") is non-numeric.
     files.set("/test/peer-foo-5.json", Buffer.from("xxxxx"));
 
-    const errors: unknown[] = [];
-    let notifyError!: () => void;
-    const errorArrived = new Promise<void>((r) => (notifyError = r));
-    conn.on("error", (err) => {
-      errors.push(err);
-      notifyError();
+    const { errors } = await driveUntilError(conn, {
+      timeoutMessage: `timed out (policy=${policy})`,
     });
-
-    conn.start();
-    await Promise.race([
-      errorArrived,
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`timed out (policy=${policy})`)),
-          2_000,
-        ),
-      ),
-    ]);
 
     expect(errors).toHaveLength(1);
     // A malformed-protocol UsageError, NOT a bilateral-mismatch: both sides
@@ -8861,25 +8266,7 @@ test("poll(): an ack-shaped foreign file whose target is not a real protocol fil
   conn.peerId = "peer";
   files.set("/test/me-peer-x-ack.json", Buffer.alloc(0));
 
-  const errors: unknown[] = [];
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((r) => (notifyError = r));
-  conn.on("error", (err) => {
-    errors.push(err);
-    notifyError();
-  });
-
-  conn.start();
-  try {
-    await Promise.race([
-      errorArrived,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("timed out")), 2_000),
-      ),
-    ]);
-  } finally {
-    conn.stop();
-  }
+  const { errors } = await driveUntilError(conn);
 
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
@@ -9185,9 +8572,7 @@ test("poll refuses an over-cap message before reading it into memory", async () 
   const peerId = "peer-test";
   const oversize = MAX_FRAME_SIZE_BYTES + 1;
   let getCount = 0;
-  const errors: unknown[] = [];
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((resolve) => (notifyError = resolve));
+  let errors: unknown[] = [];
 
   await withCapturedLogs(async () => {
     const { client } = makeMockClient();
@@ -9202,30 +8587,15 @@ test("poll refuses an over-cap message before reading it into memory", async () 
     };
     const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
     conn.peerId = peerId;
-    conn.on("error", (err) => {
-      errors.push(err);
-      notifyError();
-    });
-    conn.start();
-    await Promise.race([
-      errorArrived,
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error("timed out waiting for error")),
-          2_000,
-        ),
-      ),
-    ]);
     // The over-cap refusal must be terminal, not just typed: the poller stops
-    // itself before emitting. Do NOT stop it here, so a wrong reschedule -- which
-    // would re-list the still-present over-cap file and re-emit every
-    // pollingFrequency -- surfaces instead of being hidden by an immediate stop().
+    // itself before emitting. Do NOT stop it in the handler, so a wrong
+    // reschedule -- which would re-list the still-present over-cap file and
+    // re-emit every pollingFrequency -- surfaces during the settle instead of
+    // being hidden by an immediate stop().
+    ({ errors } = await driveUntilError(conn, { settleMs: 50 }));
     expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
       false,
     );
-    // Several poll intervals; a rescheduled poll would emit a second error.
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    conn.stop();
   });
 
   expect(getCount).toBe(0);
@@ -9247,9 +8617,7 @@ test("poll surfaces an adapter frame-size cap as a terminal error", async () => 
   // allocation the cap prevents).
   const peerId = "peer-test";
   let getCount = 0;
-  const errors: unknown[] = [];
-  let notifyError!: () => void;
-  const errorArrived = new Promise<void>((resolve) => (notifyError = resolve));
+  let errors: unknown[] = [];
 
   await withCapturedLogs(async () => {
     const { client } = makeMockClient();
@@ -9266,24 +8634,9 @@ test("poll surfaces an adapter frame-size cap as a terminal error", async () => 
     };
     const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
     conn.peerId = peerId;
-    conn.on("error", (err) => {
-      errors.push(err);
-      notifyError();
-    });
-    conn.start();
-    await Promise.race([
-      errorArrived,
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error("timed out waiting for error")),
-          2_000,
-        ),
-      ),
-    ]);
-    // Give the poller a chance to (wrongly) reschedule before asserting it did
-    // not: wait a few polling intervals and confirm get() ran exactly once.
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    conn.stop();
+    // The settle gives the poller a chance to (wrongly) reschedule before the
+    // assertions below confirm it did not (get() ran exactly once).
+    ({ errors } = await driveUntilError(conn, { settleMs: 60 }));
   });
 
   expect(errors).toHaveLength(1);
@@ -10024,56 +9377,20 @@ test("split directories: a full retain-mode exchange between two bridged parties
   // send/ack cycle, and a clean close end to end -- every peer read coming from
   // a party's inbound and every self write landing in its outbound.
   const store = new Map<string, Buffer>();
-  const makeClient = (): FileTransportClient => ({
-    connect: async () => {},
-    end: async () => {},
-    list: async (dir: string): Promise<FileInfo[]> => {
-      const prefix = dir.endsWith("/") ? dir : `${dir}/`;
-      return [...store.entries()]
-        .filter(
-          ([p]) =>
-            p.startsWith(prefix) && !p.slice(prefix.length).includes("/"),
-        )
-        .map(([p, buf]) => ({
-          name: p.slice(prefix.length),
-          modifyTime: 0,
-          size: buf.length,
-        }));
-    },
-    get: async (p: string) => {
-      const data = store.get(p);
-      if (!data)
-        throw Object.assign(new Error(`${p}: not found`), { code: "ENOENT" });
-      return data as Buffer<ArrayBufferLike>;
-    },
-    put: async (
-      src: string | Buffer | Uint8Array[] | NodeJS.ReadableStream,
-      dest: string,
-    ) => {
-      store.set(dest, await putSrcBytes(src));
-    },
-    delete: async (p: string) => {
-      store.delete(p);
-    },
-    safeDelete: async (p: string) => {
-      store.delete(p);
-    },
-    rename: async (from: string, to: string) => {
-      const data = store.get(from);
-      if (data === undefined) throw new Error(`${from}: no such file`);
-      store.delete(from);
-      store.set(to, data);
-    },
-    createExclusive: async () => {},
-    exists: async (p: string) => store.has(p),
-  });
+  // Throwing createExclusive forces the lockless ack-handshake barrier; the two
+  // parties share one store keyed by directory (each reads its inbound, writes
+  // its outbound).
+  const clientOpts: MockClientOptions = {
+    files: store,
+    createExclusiveBehavior: "throw",
+  };
 
   const mk = (
     id: string,
     inbound: string,
     outbound: string,
   ): FileSyncConnection => {
-    const conn = new FileSyncConnection(makeClient(), {
+    const conn = new FileSyncConnection(makeMockClient(clientOpts).client, {
       pollingFrequency: 5,
       timeToLive: new Date(Date.now() + 5_000),
       verbose: -1,
