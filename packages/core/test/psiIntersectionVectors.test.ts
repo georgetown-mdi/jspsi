@@ -37,10 +37,7 @@ import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 
 type Table = [number[], number[]];
 type Cardinality =
-  | "one-to-one"
-  | "one-to-many"
-  | "many-to-one"
-  | "many-to-many";
+  "one-to-one" | "one-to-many" | "many-to-one" | "many-to-many";
 
 interface IdentifyVector {
   name: string;

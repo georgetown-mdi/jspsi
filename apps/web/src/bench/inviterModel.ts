@@ -640,12 +640,7 @@ export function inviterRailFacts(
 /** A bench section a Problems entry or a Change link can navigate to: a spine
  * step or a Customize tab. */
 export type SpineTarget =
-  | "file"
-  | "columns"
-  | "review"
-  | "cleaning"
-  | "keys"
-  | "agreement";
+  "file" | "columns" | "review" | "cleaning" | "keys" | "agreement";
 
 /** The section that owns each validation field, so a Problems entry can link
  * to where the fix lives. */

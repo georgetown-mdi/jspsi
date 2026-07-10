@@ -183,11 +183,9 @@ export function parseArgs(argv: Arguments): ExchangeArgs {
     keyFile: expandTilde(common.keyFile),
     recordFile: expandTilde(common.recordFile),
     serverPassword: resolveAtSignRefs(common.serverPassword) as
-      | string
-      | undefined,
+      string | undefined,
     serverPrivateKey: resolveAtSignRefs(common.serverPrivateKey) as
-      | string
-      | undefined,
+      string | undefined,
     // Resolved here for the same reason as the sibling credentials above: the
     // override is layered on after resolveExchangeSpecRefs, so a @path passphrase
     // would otherwise reach the live connection unresolved.

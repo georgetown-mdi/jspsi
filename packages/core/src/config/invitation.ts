@@ -94,9 +94,7 @@ export interface FileDropEndpoint {
  * invitation; see docs/SECURITY_DESIGN.md.
  */
 export type ConnectionEndpoint =
-  | WebRTCEndpoint
-  | SFTPEndpoint
-  | FileDropEndpoint;
+  WebRTCEndpoint | SFTPEndpoint | FileDropEndpoint;
 
 // Custom error for the strict-object guard below: any field outside a channel's
 // locator allowlist is rejected rather than silently stripped. The message

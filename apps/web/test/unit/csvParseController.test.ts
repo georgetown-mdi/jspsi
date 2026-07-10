@@ -46,9 +46,11 @@ function streamedReply(
   batches: Array<CSVParseRows>,
 ): Array<CSVParseResponse> {
   return [
-    ...batches.map(
-      (rows): CSVParseResponse => ({ ok: true, done: false, rows }),
-    ),
+    ...batches.map((rows): CSVParseResponse => ({
+      ok: true,
+      done: false,
+      rows,
+    })),
     { ok: true, done: true, errors: result.errors, meta: result.meta },
   ];
 }
@@ -70,10 +72,7 @@ class FakeCSVParseWorker implements CSVParseWorker {
   // "messageerror" fires the undeserializable-reply path.
   constructor(
     private readonly reply:
-      | Array<CSVParseResponse>
-      | "error"
-      | "never"
-      | "messageerror",
+      Array<CSVParseResponse> | "error" | "never" | "messageerror",
   ) {}
 
   postMessage(message: CSVParseRequest): void {

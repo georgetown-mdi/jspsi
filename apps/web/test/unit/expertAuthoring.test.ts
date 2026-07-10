@@ -77,11 +77,10 @@ describe("gated settings cannot reach the built terms", () => {
               ...entry,
               key: {
                 ...entry.key,
-                elements: entry.key.elements.map(
-                  (el, j): LinkageKeyElement =>
-                    j === 0
-                      ? { ...el, generateFuzzyComparisons: "edit_distances" }
-                      : el,
+                elements: entry.key.elements.map((el, j): LinkageKeyElement =>
+                  j === 0
+                    ? { ...el, generateFuzzyComparisons: "edit_distances" }
+                    : el,
                 ),
               },
             }

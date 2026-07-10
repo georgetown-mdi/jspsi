@@ -337,15 +337,12 @@ export async function handler(argv: Arguments): Promise<void> {
     // `force` is a boolean (last-one-wins on repeat), so it keeps a plain cast.
     const identityArg = singleValue(argv, "identity") as string | undefined;
     const identityFileArg = singleValue(argv, "identity-file") as
-      | string
-      | undefined;
+      string | undefined;
     const configFileArg = singleValue(argv, "config-file") as
-      | string
-      | undefined;
+      string | undefined;
     const force = argv["force"] as boolean;
     const exportCertificate = singleValue(argv, "export-certificate") as
-      | string
-      | undefined;
+      string | undefined;
     const hints = readConfigHints(configFileArg, configFileArg !== undefined);
     const identityPath = expandTilde(
       identityFileArg ?? hints.identityFile ?? defaultSigningIdentityPath(),

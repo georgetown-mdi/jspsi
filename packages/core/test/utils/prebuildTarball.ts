@@ -52,7 +52,7 @@ export function readTgz(tarballPath: string): TarEntry[] {
     maxOutputLength: MAX_DECOMPRESSED_BYTES,
   });
   const entries: TarEntry[] = [];
-  for (let off = 0; off + 512 <= buf.length; ) {
+  for (let off = 0; off + 512 <= buf.length;) {
     const header = buf.subarray(off, off + 512);
     // The archive ends with (at least) one zero-filled block.
     if (header.every((byte) => byte === 0)) break;

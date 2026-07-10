@@ -54,10 +54,7 @@ export interface StageDefinition {
  * owner-local discriminants (an output-generation failure is not a connection
  * error). */
 export type ExchangeErrorCategory =
-  | "exchange"
-  | "output"
-  | "security"
-  | "config";
+  "exchange" | "output" | "security" | "config";
 
 /** Maps a lifecycle failure to the alert {@link ExchangeErrorCategory} the UI
  * shows, given the `phase` it came from. A `security`-kind {@link ConnectionError}
