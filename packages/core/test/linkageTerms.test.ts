@@ -2010,6 +2010,32 @@ test("rejects an over-long allowedCharacters constraint", () => {
   ).toThrow(ZodError);
 });
 
+test("over-long allowedCharacters is rejected without compiling the class", () => {
+  // "z-a" is an invalid (reversed) range: had the refine compiled this value it
+  // would have produced the class-validity message. The value is also over the
+  // length cap, so the refine's length short-circuit rejects on length alone and
+  // never reaches the compiler. The absence of the class-validity message proves
+  // the value was not compiled.
+  const result = safeParseLinkageTerms({
+    ...base,
+    linkageFields: [
+      {
+        name: "firstName",
+        type: "first_name",
+        constraints: {
+          allowedCharacters: "z-a" + "a".repeat(MAX_NAME_LENGTH),
+        },
+      },
+    ],
+    linkageKeys: [{ name: "FN", elements: [{ field: "firstName" }] }],
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(
+    result.error.issues.some((issue) => /character class/.test(issue.message)),
+  ).toBe(false);
+});
+
 test("rejects an over-long transform params key", () => {
   expect(() =>
     parseLinkageTerms({
