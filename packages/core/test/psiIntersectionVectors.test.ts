@@ -8,7 +8,7 @@ import { PSIParticipant } from "../src/participant";
 import { linkViaPSI } from "../src/link";
 import { createMessagePipe } from "../src/connection/messageConnection";
 import type { AssociationTable } from "../src/types";
-import { sortAssociationTable } from "./utils/associationTable";
+import { sortAssociationTable } from "../src/testing";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 
 // Resolved intersection-and-association known-answer anchor for the vendored

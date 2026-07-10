@@ -4,7 +4,7 @@ import { PSIParticipant } from "../../src/participant";
 import { linkViaPSI } from "../../src/link";
 
 import { createMessagePipe } from "../../src/connection/messageConnection";
-import { sortAssociationTable } from "./associationTable";
+import { sortAssociationTable } from "../../src/testing";
 import { UNBOUNDED_PSI_ELEMENTS } from "./psiElementBounds";
 
 export async function runLink(

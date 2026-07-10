@@ -7,6 +7,7 @@ import {
   generateSharedSecret,
   prepareForExchange,
 } from "@psilink/core";
+import { sortAssociationTable } from "@psilink/core/testing";
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
@@ -19,7 +20,6 @@ import {
   serverRows,
 } from "../utils/pspiFixtures.js";
 import { connectRendezvousPair } from "../utils/rendezvousPair.js";
-import { sortAssociationTable } from "../utils/associationTable.js";
 
 import type {
   ExchangeErrorCategory,

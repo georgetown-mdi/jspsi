@@ -1,5 +1,37 @@
 import logLibrary from "loglevel";
 
+import type { AssociationTable } from "./types";
+
+/** @internal */
+export function sortAssociationTable(
+  value: AssociationTable,
+  reverse?: boolean,
+): AssociationTable {
+  return reverse
+    ? value[1]
+        .map((x, i) => ({ x: x, y: value[0][i] }))
+        .sort((a, b) => a.x - b.x)
+        .reduce(
+          (acc, v) => {
+            acc[1].push(v.x);
+            acc[0].push(v.y);
+            return acc;
+          },
+          [[], []] as [Array<number>, Array<number>],
+        )
+    : value[0]
+        .map((x, i) => ({ x: x, y: value[1][i] }))
+        .sort((a, b) => a.x - b.x)
+        .reduce(
+          (acc, v) => {
+            acc[0].push(v.x);
+            acc[1].push(v.y);
+            return acc;
+          },
+          [[], []] as [Array<number>, Array<number>],
+        );
+}
+
 /** Suppresses log output below `minLevel` for the duration of `fn`; restores the previous level when done. */
 export function withSuppressedLogs<T>(
   fn: () => Promise<T>,
