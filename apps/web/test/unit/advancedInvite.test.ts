@@ -526,6 +526,66 @@ describe("setDraftMetadata re-derives offerable keys", () => {
     const next = setDraftMetadata(draft, toggled);
     expect(next.standardization).toStrictEqual(draft.standardization);
   });
+
+  test("a non-type edit keeps an imported field whose name mismatches its type", () => {
+    // An imported field's name and type are independent (the schema names and types
+    // fields separately), so an operator can import a second first_name field NAMED
+    // `ssn_2`. A non-type edit (toggling extra's disclosure) must not read the type
+    // out of that name and drop the still-first_name binding: the reconcile compares
+    // each column's type across the edit, and this column's type did not change, so
+    // its transformation and its authored name-pipeline cleaning both survive.
+    const metadata: Metadata = [
+      { name: "fn_a", type: "first_name", role: "linkage", isPayload: false },
+      { name: "fn_b", type: "first_name", role: "linkage", isPayload: false },
+      {
+        name: "dob_col",
+        type: "date_of_birth",
+        role: "linkage",
+        isPayload: false,
+      },
+      { name: "extra", type: "other", role: "payload", isPayload: true },
+    ];
+    const columns = ["fn_a", "fn_b", "dob_col", "extra"];
+    const seed: AdvancedInviteSeed = {
+      terms: getDefaultLinkageTerms("Org", metadata),
+      metadata,
+      columns,
+    };
+    const nameConstraints = {
+      affixesAllowed: false,
+      allowedCharacters: "A-Z ",
+    };
+    const imported: LinkageTerms = {
+      ...getDefaultLinkageTerms("Org", metadata),
+      linkageFields: [
+        {
+          name: "first_name",
+          type: "first_name",
+          constraints: nameConstraints,
+        },
+        { name: "ssn_2", type: "first_name", constraints: nameConstraints },
+        { name: "date_of_birth", type: "date_of_birth" },
+      ],
+      linkageKeys: [
+        {
+          name: "K",
+          elements: [{ field: "ssn_2" }, { field: "date_of_birth" }],
+        },
+      ],
+    };
+    const draft = draftFromTerms(imported, seed);
+    const before = draft.standardization.find((t) => t.output === "ssn_2");
+    expect(before).toBeDefined();
+
+    const toggled = setColumnDisclosure(
+      draft.metadata,
+      "extra",
+      "ignored",
+    ).metadata;
+    const next = setDraftMetadata(draft, toggled);
+    const after = next.standardization.find((t) => t.output === "ssn_2");
+    expect(after).toStrictEqual(before);
+  });
 });
 
 describe("validateAdvancedInvite", () => {
