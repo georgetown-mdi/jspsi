@@ -23,6 +23,7 @@ import { establishHostKeyTrust } from "../hostKeyTrust";
 import {
   loadKeyFile,
   checkKeyFileExpiry,
+  provisionKeyFileFromInvitation,
   DEFAULT_KEY_PATH,
   type KeyFile,
   type KeyFileExpiryStatus,
@@ -35,6 +36,7 @@ import {
   exitWithError,
   parseOrExit,
   openInputSource,
+  singleValue,
 } from "../util/cli";
 import {
   addCommonBootstrapOptions,
@@ -134,6 +136,20 @@ export function builder(cmd: Argv): Argv {
         "prior transcript is permanently lost. Requires --sweep-exchange-files " +
         "-- on its own it is rejected. Only use when you intend to discard the " +
         "transcript",
+    })
+    .option("invitation", {
+      type: "string",
+      describe:
+        "provision the key file from an invitation code (use @path -- " +
+        "`--invitation @code.txt` -- to keep the code out of shell history), the " +
+        "same code `psilink accept` takes. For the party that composed the " +
+        "exchange in the web app and downloaded a config that carries no secret: " +
+        "this completes local provisioning from the invitation and runs the " +
+        "exchange in one command. The code is decoded and validated (checksum, " +
+        "schema, expiry) before anything is written; a malformed or expired code " +
+        "fails with nothing written. Errors if a key file already exists at the " +
+        "key path -- after the first exchange the secret rotates, so the original " +
+        "code must not resurrect a stale secret",
     });
 }
 
@@ -148,6 +164,10 @@ interface ExchangeArgs extends CommonBootstrapOptions {
   // ExchangeOptions below so they never reach loadConfig / the config schema.
   sweepExchangeFiles: boolean;
   forceRetainSweep: boolean;
+  // The invitation code that provisions the key file before it is read. Excluded
+  // from ExchangeOptions so it never reaches loadConfig; the handler consumes it
+  // in the provisioning step ahead of the config/key load.
+  invitation?: string;
 }
 
 type ExchangeOptions = Omit<
@@ -159,6 +179,7 @@ type ExchangeOptions = Omit<
   | "verbosity"
   | "sweepExchangeFiles"
   | "forceRetainSweep"
+  | "invitation"
   | "record"
   | "recordFile"
 >;
@@ -201,6 +222,11 @@ export function parseArgs(argv: Arguments): ExchangeArgs {
       (argv["sweep-exchange-files"] as boolean | undefined) ?? false,
     forceRetainSweep:
       (argv["force-retain-sweep"] as boolean | undefined) ?? false,
+    // Carried through verbatim: unlike the server-* credential flags above, the
+    // invitation is NOT @-resolved here. Its @-file form is read at decode time
+    // by decodeAndValidateInvitation (via provisionKeyFileFromInvitation), so the
+    // code stays out of process argv even when supplied as `@code.txt`.
+    invitation: singleValue(argv, "invitation") as string | undefined,
   };
 }
 
@@ -630,6 +656,7 @@ export async function handler(argv: Arguments): Promise<void> {
     verbosity,
     sweepExchangeFiles,
     forceRetainSweep,
+    invitation,
     ...options
   } = parsed;
 
@@ -647,6 +674,21 @@ export async function handler(argv: Arguments): Promise<void> {
       assertRetainSweepGuard(sweepExchangeFiles, forceRetainSweep);
     } catch (err) {
       exitWithError(log, err, 64);
+    }
+
+    // Provision the key file from --invitation before loadConfig reads it: the
+    // party that composed the exchange in the web app has a config with no
+    // secret, so this decodes the invitation code (fail-closed on checksum,
+    // schema, or expiry) and writes its own key-file copy -- shared secret and
+    // expiry -- then the exchange proceeds as usual, injecting the secret from
+    // that key file. A malformed/expired code or a pre-existing key file is a
+    // usage error (exit 64), raised before anything is written or connected.
+    if (invitation !== undefined) {
+      try {
+        await provisionKeyFileFromInvitation(invitation, options.keyFile);
+      } catch (err) {
+        exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+      }
     }
 
     let configResult: ReturnType<typeof loadConfig>;

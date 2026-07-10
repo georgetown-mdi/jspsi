@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-import { Alert, Button } from "@mantine/core";
+import { Alert, Button, CopyButton } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 
@@ -9,6 +9,56 @@ import styles from "./bench.module.css";
 
 import type { ReactNode } from "react";
 import type { RunFailure } from "./useInviterExchange";
+
+/**
+ * A labelled, copy-to-clipboard view of one shareable artifact -- the invitation
+ * link/code on the share screen and the save surface. Client-only by
+ * construction (both surfaces mount from a handler, so neither server-renders);
+ * the `typeof navigator` check is defence-in-depth and hides the button on
+ * non-secure origins, where `navigator.clipboard` is undefined -- the text
+ * itself stays selectable for a manual copy.
+ */
+export function CopyRow({
+  label,
+  hint,
+  value,
+}: {
+  label: string;
+  hint: string;
+  value: string;
+}) {
+  return (
+    <div className={styles.copyRow}>
+      <span className={styles.copyLabel}>{label}</span>
+      <span className={styles.copyHint}>{hint}</span>
+      <div className={styles.copyBox}>
+        <div className={`${styles.codeBlock} ${styles.mono}`}>{value}</div>
+        {
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          typeof navigator !== "undefined" && navigator.clipboard ? (
+            <CopyButton value={value} timeout={1000}>
+              {({ copied, copy }) => (
+                <Button
+                  className={styles.copyBtn}
+                  variant="default"
+                  onClick={copy}
+                  // Name reflects the copied state so a screen reader announces
+                  // the success (the label swap alone is not reliably conveyed
+                  // to assistive tech).
+                  aria-label={
+                    copied ? `${label} copied` : `Copy ${label.toLowerCase()}`
+                  }
+                >
+                  {copied ? "Copied" : "Copy"}
+                </Button>
+              )}
+            </CopyButton>
+          ) : null
+        }
+      </div>
+    </div>
+  );
+}
 
 /**
  * The role-neutral run/completion furniture shared by both bench seats' run

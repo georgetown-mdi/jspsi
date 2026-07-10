@@ -2,7 +2,13 @@ import fs from "node:fs";
 import { z } from "zod";
 import { SHARED_SECRET_REGEX, UsageError } from "@psilink/core";
 
-import { warnIfFileOverPermissive, writeFileOwnerOnly } from "./fileUtils";
+import {
+  detectFileConflicts,
+  FileExistsError,
+  warnIfFileOverPermissive,
+  writeFileOwnerOnly,
+} from "./fileUtils";
+import { decodeAndValidateInvitation } from "./invitationDecode";
 import { parseSensitiveJson } from "./sensitiveFile";
 
 /**
@@ -158,8 +164,20 @@ export function checkKeyFileExpiry(
   return "ok";
 }
 
-/** Serialize and write a {@link KeyFile} to disk, owner-read-only. */
-export function saveKeyFile(keyFilePath: string, data: KeyFile): void {
+/**
+ * Serialize and write a {@link KeyFile} to disk, owner-read-only. Overwrites an
+ * existing file by default, as key rotation (`buildRotatedKeyFile` and its
+ * callers) requires. Pass `exclusive: true` to instead refuse -- atomically,
+ * closing the window a separate existence pre-check would leave open -- when a
+ * key file already exists at `keyFilePath`; the caller maps the resulting
+ * {@link FileExistsError} to its own user-facing message (see
+ * {@link provisionKeyFileFromInvitation}).
+ */
+export function saveKeyFile(
+  keyFilePath: string,
+  data: KeyFile,
+  options: { exclusive?: boolean } = {},
+): void {
   // Belt-and-suspenders runtime validation: the type system already requires
   // `sharedSecret` to be a string, and today's only caller (runProtocol) derives
   // it from HKDF and so always produces a valid base64url-encoded 32-byte
@@ -173,5 +191,70 @@ export function saveKeyFile(keyFilePath: string, data: KeyFile): void {
   // provisionConfigAndKey makes this the reachable write path.
   if (!SHARED_SECRET_REGEX.test(data.sharedSecret))
     throw new UsageError("saveKeyFile: " + SHARED_SECRET_FORMAT_MESSAGE);
-  writeFileOwnerOnly(keyFilePath, JSON.stringify(data, null, 2) + "\n");
+  writeFileOwnerOnly(
+    keyFilePath,
+    JSON.stringify(data, null, 2) + "\n",
+    options,
+  );
+}
+
+/**
+ * The already-provisioned refusal, shared by the pre-check and the write-side
+ * guard in {@link provisionKeyFileFromInvitation} so both refuse with the
+ * identical message regardless of which one catches the conflict.
+ */
+function alreadyProvisionedError(keyFilePath: string): UsageError {
+  return new UsageError(
+    `--invitation cannot provision the key file at ${keyFilePath} because ` +
+      "one already exists: it is already provisioned. After the first " +
+      "exchange the shared secret rotates, so the original invitation code " +
+      "can no longer establish a valid key. Remove the file to re-provision " +
+      "(both parties must re-invite), or drop --invitation to run with the " +
+      "existing key.",
+  );
+}
+
+/**
+ * Provision the key file at `keyFilePath` from an invitation code (the same
+ * encoded token `psilink accept` takes; `@path`-capable), for the party that
+ * composed an exchange in the web app and downloaded a config that never carried
+ * the secret. The code is decoded and validated fail-closed (checksum, schema,
+ * expiry) through {@link decodeAndValidateInvitation} before anything is written,
+ * so a malformed or expired code raises its {@link UsageError} and leaves the
+ * filesystem untouched.
+ *
+ * The written key file carries the token's shared secret AND its expiry -- the
+ * composing (inviter-side) party's own copy, matching what `psilink invite`
+ * writes, so the invitation's bounded lifetime is enforced at exchange time
+ * (contrast `accept`'s acceptor copy, which strips the expiry). The write uses
+ * the owner-only key-file path.
+ *
+ * A key file already present at `keyFilePath` is a {@link UsageError}, not an
+ * overwrite: after the first exchange the secret rotates, so re-supplying the
+ * original code must never resurrect a stale secret. Provisioning is a first-time
+ * step; a provisioned key is re-established only by re-inviting. The upfront
+ * {@link detectFileConflicts} check gives the common case a fast, friendly
+ * refusal before any decode work or network activity; the write itself is
+ * additionally `exclusive`, so a file created concurrently between that check
+ * and the write is never silently overwritten -- it hits the same refusal via
+ * the {@link FileExistsError} mapped below, closing the check-then-write race.
+ */
+export async function provisionKeyFileFromInvitation(
+  invitation: string,
+  keyFilePath: string,
+): Promise<void> {
+  if (detectFileConflicts([keyFilePath]).length > 0)
+    throw alreadyProvisionedError(keyFilePath);
+  const token = await decodeAndValidateInvitation(invitation);
+  try {
+    saveKeyFile(
+      keyFilePath,
+      { sharedSecret: token.sharedSecret, expires: token.expires },
+      { exclusive: true },
+    );
+  } catch (err) {
+    if (err instanceof FileExistsError)
+      throw alreadyProvisionedError(keyFilePath);
+    throw err;
+  }
 }

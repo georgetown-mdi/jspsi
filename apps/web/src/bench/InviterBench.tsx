@@ -3,7 +3,11 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { Alert, VisuallyHidden } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 
-import { sanitizeErrorForDisplay, sanitizeForDisplay } from "@psilink/core";
+import {
+  mintExchangeFile,
+  sanitizeErrorForDisplay,
+  sanitizeForDisplay,
+} from "@psilink/core";
 
 import { InvitationFileError, generateInvitation } from "@psi/invitation";
 import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
@@ -14,6 +18,15 @@ import { whenDiagnostic } from "@utils/diagnostics";
 
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 
+import {
+  EMPTY_SAVE_FIELDS,
+  endpointRequestFor,
+  exchangeFileInputFor,
+  exchangeFileName,
+  saveExchangeError,
+  saveRailNote,
+  saveTrustFooter,
+} from "./saveExchangeModel";
 import { Rail, RailFacts, RailGroup, RailProblems, RailSteps } from "./Rail";
 import {
   editorFromCsv,
@@ -35,8 +48,10 @@ import {
   editorWithLinkageStrategy,
   editorWithOutputDirection,
   editorWithRecommendedCleaning,
+  editorWithTransport,
   inviterLedgerRows,
   inviterRailFacts,
+  isCliTransport,
   resetToRecommended,
   reviewValidation,
   sealEditor,
@@ -51,18 +66,21 @@ import { KeysTab } from "./KeysTab";
 import { Ledger } from "./Ledger";
 import { MatchingSharingSection } from "./MatchingSharingSection";
 import { ReviewCreateSection } from "./ReviewCreateSection";
+import { SaveExchangeSection } from "./SaveExchangeSection";
 import { YourFileSection } from "./YourFileSection";
 import { timelineSteps } from "./exchangeRun";
 import { useInviterExchange } from "./useInviterExchange";
 
 import type { AcquiredCsv, InviterEditor, SpineTarget } from "./inviterModel";
+import type { CliTransport, SaveExchangeFields } from "./saveExchangeModel";
 import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { IntakeAlert } from "./YourFileSection";
 import type { RailStep } from "./Rail";
+import type { SavedExchange } from "./SaveExchangeSection";
 import type { SemanticType } from "@psilink/core";
 
-type Section = SpineTarget | "share";
+type Section = SpineTarget | "share" | "save";
 type SpineStep = "file" | "columns" | "review";
 
 const SPINE_LABELS: Record<SpineStep, string> = {
@@ -80,6 +98,28 @@ function isSpineStep(section: Section): section is SpineStep {
 function demotionNotice(demoted: ReadonlyArray<string>): string {
   if (demoted.length === 0) return "";
   return `${demoted.join(", ")} changed to Ignored - only one column can be the row identifier.`;
+}
+
+// Deferred well past the click so a browser copying the blob asynchronously is
+// not cut off; matches TermsImportExport's download discipline.
+const DOWNLOAD_REVOKE_DELAY_MS = 40_000;
+
+/** Trigger a client-side download of `content` as `fileName`. The exchange file
+ * never leaves the browser; this writes it to the operator's disk the same way
+ * the CSV is read in (locally). */
+function triggerDownload(fileName: string, content: string): void {
+  const blob = new Blob([content], { type: "application/yaml" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  try {
+    anchor.click();
+  } finally {
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_REVOKE_DELAY_MS);
+  }
 }
 
 /**
@@ -104,12 +144,22 @@ export function InviterBench() {
   const [createAlert, setCreateAlert] = useState<IntakeAlert>();
   const [expertMode, setExpertMode] = useState(false);
   const [editorAnnouncement, setEditorAnnouncement] = useState("");
+  const [saveFields, setSaveFields] =
+    useState<SaveExchangeFields>(EMPTY_SAVE_FIELDS);
+  const [savedExchange, setSavedExchange] = useState<SavedExchange>();
+  const [saving, setSaving] = useState(false);
+  const [saveAlert, setSaveAlert] = useState<IntakeAlert>();
 
-  // The run starts the moment the invitation exists (the hook listens for the
-  // partner right away) and is torn down when the invitation is discarded or
-  // the bench unmounts.
+  const transport = editor?.transport ?? "browser";
+
+  // The live run starts the moment a BROWSER invitation exists (the hook
+  // listens for the partner right away) and is torn down when the invitation is
+  // discarded or the bench unmounts. A command-line transport never listens:
+  // its invitation is minted for the save surface, so it is withheld from the
+  // hook and `invitation` alone (not the withheld value) proves the browser
+  // never dials for a CLI transport.
   const { run, outputs, failure, tryAgain } = useInviterExchange({
-    invitation,
+    invitation: transport === "browser" ? invitation : undefined,
     inviterName: editor?.draft.identity ?? "",
   });
 
@@ -122,6 +172,7 @@ export function InviterBench() {
       current === undefined ? current : unsealEditor(current),
     );
     setInvitation(undefined);
+    setSavedExchange(undefined);
     goTo("review");
   }
 
@@ -202,6 +253,9 @@ export function InviterBench() {
       setAcquired(csv);
       setSourceFile(file);
       setEditor(seeded);
+      // A fresh file re-seeds the terms and resets the transport to browser;
+      // any exchange file saved for the prior read no longer describes them.
+      setSavedExchange(undefined);
       if (seeded.draft.keys.length === 0)
         setIntakeAlert({
           title: "This file cannot be matched",
@@ -246,6 +300,17 @@ export function InviterBench() {
     if (spineProblems(editor).length > 0) return;
     const validation = reviewValidation(editor);
     if (!validation.canGenerate || validation.terms === undefined) return;
+    // A command-line transport seals the terms exactly as the browser path
+    // does but mints NOTHING here: the code and the config YAML are minted
+    // together on the save surface, from the authored locator. Seal, discard
+    // any prior saved artifacts, and route to save.
+    if (isCliTransport(transport)) {
+      setEditor(sealEditor(editor));
+      setSavedExchange(undefined);
+      setSaveAlert(undefined);
+      goTo("save");
+      return;
+    }
     setMinting(true);
     setCreateAlert(undefined);
     try {
@@ -300,13 +365,84 @@ export function InviterBench() {
     }
   }
 
+  // Mint the invitation code and the CLI config YAML together and trigger the
+  // download. The invitation carries the authored sftp/filedrop locator; the
+  // YAML is derived from that same minted invitation and the same locator, so
+  // the code and the file point at one rendezvous. Re-saving after an edit
+  // re-mints both: the atomic savedExchange update replaces the old code and
+  // file in one step, so a stale code can never sit beside a new file.
+  async function saveExchangeFile() {
+    if (editor === undefined || sourceFile === undefined) return;
+    if (!isCliTransport(transport)) return;
+    const cliTransport: CliTransport = transport;
+    if (saveExchangeError(cliTransport, saveFields) !== undefined) return;
+    const validation = reviewValidation(editor);
+    if (!validation.canGenerate || validation.terms === undefined) return;
+    setSaving(true);
+    setSaveAlert(undefined);
+    try {
+      const minted = await generateInvitation({
+        inviterName: editor.draft.identity,
+        file: sourceFile,
+        location: invitationLocation(),
+        lifetimeSeconds: editor.draft.lifetimeSeconds,
+        linkageTerms: validation.terms,
+        metadata: editor.draft.metadata,
+        standardization: editor.draft.standardization,
+        connectionEndpoint: endpointRequestFor(cliTransport, saveFields),
+      });
+      // Mint the config from the SAME invitation the code came from; a
+      // ZodError here (a malformed locator the endpoint schema also rejects)
+      // aborts before any download, so a code is never displayed with no file.
+      const yaml = mintExchangeFile(
+        exchangeFileInputFor(cliTransport, saveFields, minted),
+      );
+      const fileName = exchangeFileName(new Date());
+      triggerDownload(fileName, yaml);
+      setSavedExchange({ invitation: minted, fileName });
+    } catch (error) {
+      if (error instanceof InvitationFileError) {
+        setSaveAlert(
+          error.failure.kind === "unreadable"
+            ? {
+                title: "Could not read your file",
+                message: sanitizeErrorForDisplay(error.failure.cause),
+              }
+            : error.failure.kind === "unnameable"
+              ? unnameableColumnsAlert(error.failure.positions)
+              : unlinkableFileAlert(error.failure.unsatisfied),
+        );
+      } else {
+        // Internal and non-user-actionable (a schema/encoding fault): a fixed
+        // message keeps internals out of a secret-bearing flow, the default
+        // log carries only the error type, and the detail is diagnostic-gated.
+        console.error(
+          "exchange file save failed:",
+          error instanceof Error ? error.name : typeof error,
+        );
+        whenDiagnostic(() =>
+          console.error("exchange file save failed (detail):", error),
+        );
+        setSaveAlert({
+          title: "Could not save the exchange file",
+          message:
+            "Something went wrong while saving. Your terms are unchanged - try again.",
+        });
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const linkable = editor !== undefined && editor.draft.keys.length > 0;
   const fileReady = name.trim().length > 0 && linkable;
   const sealed = editor?.sealed === true;
 
   // Inside a Customize tab no spine step is current; the step the operator
-  // came from stays navigable like any completed step.
-  const inTab = !isSpineStep(section) && section !== "share";
+  // came from stays navigable like any completed step. The share and save
+  // sections carry their own rails, so neither is a Customize tab.
+  const inTab =
+    !isSpineStep(section) && section !== "share" && section !== "save";
   const currentPosition = SPINE_ORDER.indexOf(
     isSpineStep(section) ? section : lastSpineStep,
   );
@@ -326,6 +462,19 @@ export function InviterBench() {
             onSelect: state === "done" ? () => goTo(step) : undefined,
           };
         });
+
+  // The save surface's static timeline: Save file is current before the save
+  // and done after it; the browser never observes the later steps, so Partner
+  // accepts, CLI runs, and Results stay pending throughout.
+  const saveSteps: Array<RailStep> = [
+    {
+      label: "Save file",
+      state: savedExchange === undefined ? "current" : "done",
+    },
+    { label: "Partner accepts", state: "pending" },
+    { label: "CLI runs", state: "pending" },
+    { label: "Results", state: "pending" },
+  ];
 
   const facts = inviterRailFacts(editor).map((fact) => ({
     ...fact,
@@ -349,6 +498,12 @@ export function InviterBench() {
               <RailSteps steps={steps} />
             </RailGroup>
           </Rail>
+        ) : section === "save" && isCliTransport(transport) ? (
+          <Rail label="Exchange progress">
+            <RailGroup label="This exchange" note={saveRailNote(transport)}>
+              <RailSteps steps={saveSteps} />
+            </RailGroup>
+          </Rail>
         ) : (
           <Rail label="Exchange setup">
             <RailGroup label="Set up">
@@ -366,7 +521,7 @@ export function InviterBench() {
           tag={sealed ? "Terms sealed at create" : undefined}
           rows={inviterLedgerRows(
             editor,
-            invitation?.expires,
+            savedExchange?.invitation.expires ?? invitation?.expires,
             outputs === undefined
               ? undefined
               : {
@@ -391,9 +546,11 @@ export function InviterBench() {
             ),
           }))}
           footer={
-            outputs === undefined
-              ? "Your file stays in this browser. Nothing is uploaded; your partner receives only what this ledger names."
-              : "Your file never left this browser. The results above are all your partner received about your data."
+            section === "save" && isCliTransport(transport)
+              ? saveTrustFooter(transport)
+              : outputs === undefined
+                ? "Your file stays in this browser. Nothing is uploaded; your partner receives only what this ledger names."
+                : "Your file never left this browser. The results above are all your partner received about your data."
           }
         />
       }
@@ -454,6 +611,9 @@ export function InviterBench() {
                 }
                 onDirection={(direction) =>
                   applyEditor(editorWithOutputDirection(editor, direction))
+                }
+                onTransport={(next) =>
+                  applyEditor(editorWithTransport(editor, next))
                 }
                 onReset={() => {
                   setEditor(resetToRecommended(editor, acquired));
@@ -567,6 +727,18 @@ export function InviterBench() {
             failure={failure}
             onTryAgain={tryAgain}
             onStartOver={startOver}
+          />
+        )}
+        {section === "save" && isCliTransport(transport) && (
+          <SaveExchangeSection
+            transport={transport}
+            fields={saveFields}
+            saved={savedExchange}
+            saving={saving}
+            alert={saveAlert}
+            onFields={setSaveFields}
+            onSave={() => void saveExchangeFile()}
+            onBack={() => goTo("review")}
           />
         )}
         <VisuallyHidden>

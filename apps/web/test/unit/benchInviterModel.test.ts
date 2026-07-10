@@ -18,12 +18,14 @@ import {
   editorWithLifetime,
   editorWithLinkageStrategy,
   editorWithOutputDirection,
+  editorWithTransport,
   enabledKeys,
   fileCardMeta,
   identifierProblem,
   invitationUsable,
   inviterLedgerRows,
   inviterRailFacts,
+  isCliTransport,
   keySatisfiabilityFor,
   lifetimeLabel,
   resetToRecommended,
@@ -276,6 +278,55 @@ describe("review and create", () => {
     const rows = inviterLedgerRows(editor, "2026-07-08T19:32:00.000Z");
     const expires = rows.find((row) => row.label === "Expires");
     expect(expires?.value).toContain("July 8, 2026");
+  });
+});
+
+describe("transport choice", () => {
+  function transportRow<T extends { label: string }>(
+    rows: ReadonlyArray<T>,
+  ): T {
+    const row = rows.find((entry) => entry.label === "Transport");
+    if (row === undefined) throw new Error("no Transport row");
+    return row;
+  }
+
+  test("defaults to browser and reflects in the ledger and answers", () => {
+    const editor = editorFromCsv("Dana", csv);
+    expect(editor.transport).toBeUndefined();
+    expect(isCliTransport(editor.transport ?? "browser")).toBe(false);
+    expect(transportRow(inviterLedgerRows(editor)).value).toBe("Browser");
+    expect(transportRow(answersRows(editor, csv)).value).toBe(
+      "Live, in this browser",
+    );
+  });
+
+  test("choosing SFTP reflects the CLI transport in both surfaces", () => {
+    const editor = editorWithTransport(editorFromCsv("Dana", csv), "sftp");
+    expect(editor.transport).toBe("sftp");
+    expect(isCliTransport("sftp")).toBe(true);
+    expect(transportRow(inviterLedgerRows(editor)).value).toBe(
+      "SFTP (command-line tool)",
+    );
+    expect(transportRow(answersRows(editor, csv)).value).toBe(
+      "SFTP (command-line tool)",
+    );
+  });
+
+  test("choosing a shared directory reflects the CLI transport", () => {
+    const editor = editorWithTransport(editorFromCsv("Dana", csv), "filedrop");
+    expect(editor.transport).toBe("filedrop");
+    expect(isCliTransport("filedrop")).toBe(true);
+    expect(transportRow(inviterLedgerRows(editor)).value).toBe(
+      "Shared directory (command-line tool)",
+    );
+    expect(transportRow(answersRows(editor, csv)).value).toBe(
+      "Shared directory (command-line tool)",
+    );
+  });
+
+  test("a sealed session refuses the transport mutator", () => {
+    const sealed = sealEditor(editorFromCsv("Dana", csv));
+    expect(editorWithTransport(sealed, "sftp")).toBe(sealed);
   });
 });
 

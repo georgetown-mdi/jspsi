@@ -8,7 +8,7 @@ This document is the complete field-level reference for PSI-Link exchange specif
 
 > Adding to this doc? Keep it conceptual and operational. Constant values, byte/wire layouts, algorithm steps, and the rationale behind them belong in the spec tier -- see [docs/spec/](spec/README.md), "Where does my content go?".
 
-Exchange specifications are JSON or YAML documents that fully describe a PSI-Link exchange between two parties. They are consumed by both the web application and the CLI application. The web application provides an interactive editor for creating them; the CLI application accepts them as configuration files.
+Exchange specifications are JSON or YAML documents that fully describe a PSI-Link exchange between two parties. They are consumed by both the web application and the CLI application. The web application provides an interactive editor for creating them; the CLI application accepts them as configuration files. A file the web app mints for download is an ordinary `psilink.yaml` validated against this same shared schema -- there is no web-specific format, no secret in the file, and the compatibility contract between a continuously-deployed web app and a pinned CLI is specified in [EXCHANGE_FILE.md](spec/EXCHANGE_FILE.md).
 
 An exchange specification has four top-level components:
 
@@ -725,6 +725,8 @@ Optional top-level block, a sibling of [`signing`](#signing). It holds the partn
 - **Operator-policy fields**: settable in `psilink.yaml`. `token_max_age_days` is the first (see the field table below). The loader leaves these for schema validation; the schema honors a recognized policy field and rejects an unrecognized key (see the unknown-key note below).
 
 `shared_secret` is required for recurring exchanges run via the `exchange` command. If the key file (`.psilink.key`) is absent, the CLI aborts before any connection is attempted. Zero-setup exchanges (the default, subcommand-less invocation) rely on transport-layer authentication instead and do not use a key file.
+
+**Provisioning the key file from an invitation.** When you compose an exchange in the web application, you download a configuration file that -- like every `psilink.yaml` -- never carries the secret. Pass `--invitation CODE` to `psilink exchange` to complete your local provisioning from the invitation code (the same code `psilink accept` takes) in the same command that runs the exchange: the CLI decodes and validates the code (checksum, schema, and expiry), writes your key file with the invitation's shared secret and expiry, and then runs the exchange normally. Keep the code out of shell history with the `@`-file form, `--invitation @code.txt`. A malformed or expired code fails before anything is written. `--invitation` is refused if a key file already exists at the key path: the secret rotates after your first exchange, so the original code can no longer establish a valid key -- run without `--invitation` to use the existing one, or re-invite to establish a new secret. The secret rides only the invitation code and never the downloaded file; the fail-closed provisioning ordering and the channel-binding rule an accepting tool honors are specified in [EXCHANGE_FILE.md](spec/EXCHANGE_FILE.md).
 
 Taken together, the `authentication` block is never required in a configuration file -- its only fields today are key-file-injected. It is required for the in-memory objects used for recurring exchanges, and it is optional for zero-setup exchanges.
 

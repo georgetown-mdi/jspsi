@@ -15,6 +15,7 @@ import type {
   InviterEditor,
   SpineProblem,
   SpineTarget,
+  Transport,
 } from "./inviterModel";
 import type { OutputDirection } from "@psi/advancedInvite";
 
@@ -31,10 +32,11 @@ const DIRECTION_CHOICES: ReadonlyArray<{
  * Step 3 of the inviter spine: the review-time decisions (lifetime, result
  * direction, transport), the check-your-answers restatement of the whole
  * proposal, and the create action -- the point of no return whose copy says
- * so. The transport cards for SFTP and a shared directory are present but
- * disabled until exchange-file download ships; their copy carries the
- * channel-capability rule (browsers run live WebRTC exchanges; SFTP and
- * shared-directory exchanges run in the command-line tool).
+ * so. The transport chooser offers the live-browser exchange and the two
+ * command-line transports (SFTP and a shared directory); the card copy carries
+ * the channel-capability rule (this browser runs live exchanges only; SFTP and
+ * shared-directory exchanges run in the command-line tool). Choosing a
+ * command-line transport routes Create to the save-exchange-file surface.
  */
 export function ReviewCreateSection({
   editor,
@@ -43,6 +45,7 @@ export function ReviewCreateSection({
   minting,
   onLifetime,
   onDirection,
+  onTransport,
   onReset,
   onCreate,
   onNavigate,
@@ -53,10 +56,12 @@ export function ReviewCreateSection({
   minting: boolean;
   onLifetime: (seconds: number) => void;
   onDirection: (direction: OutputDirection) => void;
+  onTransport: (transport: Transport) => void;
   onReset: () => void;
   onCreate: () => void;
   onNavigate: (target: SpineTarget) => void;
 }) {
+  const transport = editor.transport ?? "browser";
   const canCreate = problems.length === 0 && !minting;
   // Voiced when the create gate flips either way; deferred so a blocked state
   // present when the section mounts still announces.
@@ -101,40 +106,49 @@ export function ReviewCreateSection({
       />
       <fieldset className={styles.fieldset}>
         <legend>How will this exchange run?</legend>
-        <div className={`${styles.radioCard} ${styles.radioCardSelected}`}>
+        <div
+          className={
+            transport === "browser"
+              ? `${styles.radioCard} ${styles.radioCardSelected}`
+              : styles.radioCard
+          }
+        >
           <Radio
-            checked
-            readOnly
+            name="transport"
+            checked={transport === "browser"}
+            onChange={() => onTransport("browser")}
             label="Live, in this browser (recommended)"
             description="Your browsers connect directly. You get an invitation link and code to share; keep this tab open while your partner accepts."
           />
         </div>
-        <div className={styles.radioCard}>
+        <div
+          className={
+            transport === "sftp"
+              ? `${styles.radioCard} ${styles.radioCardSelected}`
+              : styles.radioCard
+          }
+        >
           <Radio
-            disabled
-            checked={false}
-            readOnly
-            label={
-              <>
-                Over SFTP, run by the psilink command-line tool
-                <span className={styles.tagRoadmap}>On the roadmap</span>
-              </>
-            }
-            description="Will save an exchange file that automates the command-line tool over your SFTP server. Your partner accepts with the same invitation code."
+            name="transport"
+            checked={transport === "sftp"}
+            onChange={() => onTransport("sftp")}
+            label="Over SFTP, run by the psilink command-line tool"
+            description="Saves an exchange file that runs the command-line tool over your SFTP server. Your partner accepts with the same invitation code."
           />
         </div>
-        <div className={styles.radioCard}>
+        <div
+          className={
+            transport === "filedrop"
+              ? `${styles.radioCard} ${styles.radioCardSelected}`
+              : styles.radioCard
+          }
+        >
           <Radio
-            disabled
-            checked={false}
-            readOnly
-            label={
-              <>
-                Over a shared directory, run by the command-line tool
-                <span className={styles.tagRoadmap}>On the roadmap</span>
-              </>
-            }
-            description="Will save an exchange file the command-line tool runs against a directory both parties can reach."
+            name="transport"
+            checked={transport === "filedrop"}
+            onChange={() => onTransport("filedrop")}
+            label="Over a shared directory, run by the command-line tool"
+            description="Saves an exchange file the command-line tool runs against a directory both parties can reach."
           />
         </div>
         <p className={`${styles.small} ${styles.sub}`}>

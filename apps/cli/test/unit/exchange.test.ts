@@ -5,9 +5,13 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import yargs, { type Arguments } from "yargs";
 import YAML from "yaml";
 import { UsageError } from "@psilink/core";
-import { getLogger } from "@psilink/core";
-import type { LinkageTerms } from "@psilink/core";
-import { saveKeyFile } from "../../src/keyFile";
+import {
+  encodeInvitation,
+  getDefaultLinkageTerms,
+  getLogger,
+} from "@psilink/core";
+import type { InvitationToken, LinkageTerms } from "@psilink/core";
+import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
 import { runProtocol } from "../../src/protocol";
 import {
   builder,
@@ -870,6 +874,132 @@ test("handler suppresses the advisory when a successful exchange refreshes the t
       false,
     );
     expect(exitSpy).not.toHaveBeenCalled();
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+// --- handler: --invitation provisioning --------------------------------------
+// These drive the handler's provisioning step, which runs before the key file is
+// read: --invitation decodes an invitation code and writes the composing party's
+// key-file copy (secret AND expiry), then the exchange proceeds as usual. The
+// full decode/write path is unit-tested in keyFile.test.ts; these cover the
+// handler wiring -- that provisioning happens ahead of loadConfig, that the run
+// then proceeds, and the pre-existing-key and fail-closed exit paths.
+
+// A 43-char base64url secret distinct from TOKEN_A/TOKEN_B, to prove the
+// provisioned key carries the invitation's secret.
+const INVITE_SECRET = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAg";
+
+function inviteToken(expires?: string): InvitationToken {
+  return {
+    version: "1",
+    linkageTerms: getDefaultLinkageTerms("Inviter Org"),
+    sharedSecret: INVITE_SECRET,
+    expires,
+  };
+}
+
+test("handler: --invitation provisions the key file when none exists and the exchange proceeds", async () => {
+  // No key file at the key path: provisioning writes the composing party's copy
+  // (secret and expiry) and the exchange reaches runProtocol, which is mocked to
+  // resolve. The written key must carry the invitation's secret and expiry.
+  const expires = new Date(Date.now() + 3_600_000).toISOString();
+  const encoded = await encodeInvitation(inviteToken(expires));
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  expect(fs.existsSync(keyFile)).toBe(false);
+
+  vi.mocked(runProtocol).mockReset();
+  vi.mocked(runProtocol).mockResolvedValueOnce({});
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await handler({
+      _: [],
+      $0: "psilink",
+      input,
+      "config-file": configFile,
+      "key-file": keyFile,
+      invitation: encoded,
+      "log-level": "silent",
+    } as unknown as Arguments);
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(vi.mocked(runProtocol)).toHaveBeenCalledTimes(1);
+    const key = loadKeyFile(keyFile);
+    expect(key?.sharedSecret).toBe(INVITE_SECRET);
+    expect(key?.expires).toBe(expires);
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+test("handler: --invitation errors (exit 64) when a key file already exists and leaves it untouched", async () => {
+  // A pre-existing key file is a clean usage error, never an overwrite: the
+  // secret rotates after the first exchange, so re-supplying the original code
+  // must not resurrect a stale secret. runProtocol must not run.
+  const encoded = await encodeInvitation(inviteToken());
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  const existing = JSON.stringify({ sharedSecret: TOKEN_A }) + "\n";
+  fs.writeFileSync(keyFile, existing);
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+
+  vi.mocked(runProtocol).mockReset();
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        input,
+        "config-file": configFile,
+        "key-file": keyFile,
+        invitation: encoded,
+        "log-level": "silent",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+    // The pre-existing key file is byte-for-byte unchanged.
+    expect(fs.readFileSync(keyFile, "utf8")).toBe(existing);
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+test("handler: --invitation with a malformed code fails closed (exit 64), writing no key file", async () => {
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+
+  vi.mocked(runProtocol).mockReset();
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+    code?: number,
+  ) => {
+    throw new Error(`exit:${code ?? 0}`);
+  }) as never);
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "psilink",
+        input,
+        "config-file": configFile,
+        "key-file": keyFile,
+        invitation: "not-a-valid-invitation",
+        "log-level": "silent",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+    expect(fs.existsSync(keyFile)).toBe(false);
   } finally {
     exitSpy.mockRestore();
   }

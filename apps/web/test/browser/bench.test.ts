@@ -9,6 +9,8 @@ import { createRoot } from "react-dom/client";
 
 import { MantineProvider } from "@mantine/core";
 
+import { decodeInvitation } from "@psilink/core";
+
 import { BenchLobby } from "@bench/BenchLobby";
 import { InvitationFileError } from "@psi/invitation";
 import { InviterBench } from "@bench/InviterBench";
@@ -205,6 +207,76 @@ async function createSealedInvitation() {
   // The run starts from an effect after the invitation lands; wait for it so
   // callers can drive the captured lifecycle seams right away.
   await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(1));
+}
+
+// Walk the spine to Review & create WITHOUT creating: name, file, straight
+// through to the review step, ready to choose a transport. Shared by the
+// command-line-transport tests below.
+async function reachReviewCreate() {
+  mount(createElement(InviterBench));
+  await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+  await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+  const fileInput = document.querySelector('input[type="file"]');
+  await userEvent.upload(
+    page.elementLocator(fileInput as HTMLElement),
+    new File(
+      [
+        "client_id,first_name,last_name,dob,program_code\n" +
+          "1,Ann,Lee,01/02/1990,A\n2,Bo,Ray,03/04/1985,B\n",
+      ],
+      "clients.csv",
+      { type: "text/csv" },
+    ),
+  );
+  await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
+  await page
+    .getByRole("button", { name: "Continue to matching & sharing" })
+    .click();
+  await page
+    .getByRole("button", { name: "Continue to review & create" })
+    .click();
+  await expect
+    .element(page.getByRole("heading", { level: 1 }))
+    .toHaveTextContent("Review & create");
+}
+
+// The download the save handler triggers: a synthetic anchor is created,
+// clicked, and removed within one turn, so a DOM query cannot catch it. Capture
+// it at click time -- the download filename and the blob text the object URL
+// points at, read back before the deferred revoke.
+interface CapturedDownload {
+  fileName: string;
+  text: string;
+}
+function captureDownloads(): {
+  captured: Array<CapturedDownload>;
+  restore: () => void;
+} {
+  const captured: Array<CapturedDownload> = [];
+  const original = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function click(this: HTMLAnchorElement) {
+    if (this.download !== "" && this.href.startsWith("blob:")) {
+      const href = this.href;
+      const fileName = this.download;
+      // The blob is still alive here (revoke is deferred well past the click);
+      // pull its text synchronously enough via the object URL.
+      captured.push({ fileName, text: "" });
+      const index = captured.length - 1;
+      void fetch(href)
+        .then((response) => response.text())
+        .then((text) => {
+          captured[index].text = text;
+        });
+    }
+    // Do not invoke the real click: a jsdom/browser navigation to a blob URL is
+    // pointless here and can warn. The capture above is the whole point.
+  };
+  return {
+    captured,
+    restore: () => {
+      HTMLAnchorElement.prototype.click = original;
+    },
+  };
 }
 
 // stagesFor reads only the linkage terms off the prepared exchange (the unit
@@ -485,8 +557,9 @@ describe("inviter bench", () => {
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Review & create");
 
-    // The check-your-answers table restates the proposal, and the CLI
-    // transports are present but disabled with the roadmap tag.
+    // The check-your-answers table restates the proposal, and all three
+    // transports (browser plus the two command-line transports) are now
+    // selectable -- no disabled cards, no roadmap tags.
     await expect
       .element(page.getByText("clients.csv - 2 rows"))
       .toBeInTheDocument();
@@ -495,10 +568,17 @@ describe("inviter bench", () => {
     );
     expect(radios).toHaveLength(3);
     expect(radios[0].checked).toBe(true);
-    expect(radios[0].disabled).toBe(false);
-    expect(radios[1].disabled).toBe(true);
-    expect(radios[2].disabled).toBe(true);
-    expect(document.querySelectorAll(`.${styles.tagRoadmap}`)).toHaveLength(2);
+    expect(radios.every((radio) => !radio.disabled)).toBe(true);
+    expect(document.querySelectorAll(`.${styles.tagRoadmap}`)).toHaveLength(0);
+    // The channel-capability rule stays on the chooser fine print.
+    await expect
+      .element(
+        page.getByText(
+          "This browser runs live exchanges only; SFTP and shared-directory",
+          { exact: false },
+        ),
+      )
+      .toBeInTheDocument();
 
     // An incoherent direction (payload to a partner receiving no results)
     // surfaces in the rail and refuses to arm the create button.
@@ -1249,5 +1329,246 @@ describe("inviter bench", () => {
       .element(page.getByText("Ready to create."))
       .toBeInTheDocument();
     expect(page.getByText("Terms sealed at create").query()).toBeNull();
+  });
+
+  test("choosing SFTP routes Create to the save surface without listening", async () => {
+    await reachReviewCreate();
+
+    // Choosing the SFTP transport reflects in the ledger's Transport row and
+    // the answers table before Create.
+    await page
+      .getByLabelText("Over SFTP, run by the psilink command-line tool")
+      .click();
+    const ledger = document.querySelector(
+      'aside[aria-label="This exchange"]',
+    ) as Element;
+    expect(ledger.textContent).toContain("SFTP (command-line tool)");
+
+    // Create seals the terms and routes to the save surface -- no roadmap tag,
+    // and the browser NEVER started a run for a command-line transport.
+    await page.getByRole("button", { name: "Create the invitation" }).click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Save your exchange file");
+    expect(document.querySelectorAll(`.${styles.tagRoadmap}`)).toHaveLength(0);
+    expect(lifecycleHarness.calls).toHaveLength(0);
+    // The save rail shows the four-step timeline with Save file current.
+    const rail = document.querySelector('nav[aria-label="Exchange progress"]');
+    expect(
+      (rail as Element).querySelector('[aria-current="step"]')?.textContent,
+    ).toBe("Save file");
+    // The capability statement is explicit on the surface and in the ledger.
+    await expect
+      .element(
+        page.getByText(
+          "This browser does not run SFTP exchanges; this file runs in the",
+          { exact: false },
+        ),
+      )
+      .toBeInTheDocument();
+    expect(ledger.textContent).toContain(
+      "The SFTP server carries only encrypted protocol messages",
+    );
+  });
+
+  test("saving an SFTP exchange downloads a credential-free file and populates the code", async () => {
+    const downloads = captureDownloads();
+    try {
+      await reachReviewCreate();
+      await page
+        .getByLabelText("Over SFTP, run by the psilink command-line tool")
+        .click();
+      await page.getByRole("button", { name: "Create the invitation" }).click();
+      await expect
+        .element(page.getByRole("heading", { level: 1 }))
+        .toHaveTextContent("Save your exchange file");
+
+      // The credential alert describes what the operator actually supplies --
+      // an SSH username and an @file key/password reference in the config --
+      // not a nonexistent CLI-managed key file.
+      await expect
+        .element(
+          page.getByText(
+            "You fill in the SSH username and point the config at your key " +
+              "or password (an @file reference) before running",
+            { exact: false },
+          ),
+        )
+        .toBeInTheDocument();
+
+      // Save is gated on the required host until it is filled.
+      const save = page.getByRole("button", { name: "Save exchange file" });
+      await expect.element(save).toBeDisabled();
+      await userEvent.fill(
+        page.getByLabelText("SFTP server host"),
+        "sftp.riverbend.example.gov",
+      );
+      await userEvent.fill(
+        page.getByLabelText("Remote directory"),
+        "/exchanges/psilink",
+      );
+      await expect.element(save).toBeEnabled();
+      await save.click();
+
+      // The file card and the invitation-code copy row appear together.
+      await expect
+        .element(page.getByText("Saved to your downloads"))
+        .toBeInTheDocument();
+      const fileName = document.querySelector(
+        `.${styles.fileName}`,
+      )?.textContent;
+      expect(fileName).toMatch(/^psilink-exchange-\d{4}-\d{2}-\d{2}\.yaml$/);
+      await expect
+        .element(page.getByRole("button", { name: "Copy invitation code" }))
+        .toBeInTheDocument();
+      // The one copyable run command names the JUST-minted file with
+      // --config-file (the default `./psilink.yaml` would not match it) and
+      // carries the --invitation flag.
+      await expect
+        .element(
+          page.getByText(
+            `psilink exchange your-data.csv --config-file ${fileName} ` +
+              "--invitation @invitation-code.txt",
+          ),
+        )
+        .toBeInTheDocument();
+
+      // The downloaded YAML names the SFTP host and path and carries NO
+      // credential material -- the file locates the rendezvous, never
+      // authenticates to it.
+      await vi.waitFor(() => {
+        const download = downloads.captured.find((entry) =>
+          entry.fileName.endsWith(".yaml"),
+        );
+        expect(download?.text.length).toBeGreaterThan(0);
+      });
+      const yaml = downloads.captured.find((entry) =>
+        entry.fileName.endsWith(".yaml"),
+      )?.text as string;
+      expect(yaml).toContain("channel: sftp");
+      expect(yaml).toContain("sftp.riverbend.example.gov");
+      expect(yaml).toContain("/exchanges/psilink");
+      expect(yaml).not.toMatch(/password/i);
+      expect(yaml).not.toMatch(/private_key/i);
+      expect(yaml).not.toMatch(/authentication/i);
+
+      // The minted code re-parses through decodeInvitation with the SAME sftp
+      // endpoint the file names -- the code and the config point at one
+      // rendezvous.
+      const encoded = document.querySelector(
+        `.${styles.copyRow} .${styles.codeBlock}`,
+      )?.textContent as string;
+      const token = await decodeInvitation(encoded);
+      const endpoint = token.connectionEndpoint;
+      expect(endpoint?.channel).toBe("sftp");
+      expect((endpoint as { host?: string }).host).toBe(
+        "sftp.riverbend.example.gov",
+      );
+
+      // Back to Review & create preserves state (terms stay sealed), and the
+      // saved artifacts survive the round trip.
+      await page
+        .getByRole("button", { name: /Back to Review & create/ })
+        .click();
+      await expect
+        .element(page.getByRole("heading", { level: 1 }))
+        .toHaveTextContent("Review & create");
+      await expect
+        .element(page.getByText("Terms sealed at create"))
+        .toBeInTheDocument();
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  test("a shared-directory exchange saves end to end", async () => {
+    const downloads = captureDownloads();
+    try {
+      await reachReviewCreate();
+      await page
+        .getByLabelText("Over a shared directory, run by the command-line tool")
+        .click();
+      await page.getByRole("button", { name: "Create the invitation" }).click();
+      await expect
+        .element(page.getByRole("heading", { level: 1 }))
+        .toHaveTextContent("Save your exchange file");
+      expect(lifecycleHarness.calls).toHaveLength(0);
+
+      // The filedrop field requires an absolute path.
+      const save = page.getByRole("button", { name: "Save exchange file" });
+      await userEvent.fill(
+        page.getByLabelText("Shared directory"),
+        "/exchanges/psilink",
+      );
+      await expect.element(save).toBeEnabled();
+      await save.click();
+
+      await expect
+        .element(page.getByText("Saved to your downloads"))
+        .toBeInTheDocument();
+      await vi.waitFor(() => {
+        const download = downloads.captured.find((entry) =>
+          entry.fileName.endsWith(".yaml"),
+        );
+        expect(download?.text.length).toBeGreaterThan(0);
+      });
+      const yaml = downloads.captured.find((entry) =>
+        entry.fileName.endsWith(".yaml"),
+      )?.text as string;
+      expect(yaml).toContain("channel: filedrop");
+      expect(yaml).toContain("/exchanges/psilink");
+      expect(yaml).not.toMatch(/password/i);
+      expect(yaml).not.toMatch(/authentication/i);
+
+      const encoded = document.querySelector(
+        `.${styles.copyRow} .${styles.codeBlock}`,
+      )?.textContent as string;
+      const token = await decodeInvitation(encoded);
+      expect(token.connectionEndpoint?.channel).toBe("filedrop");
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  test("re-saving after an edit re-mints the code and file atomically", async () => {
+    const downloads = captureDownloads();
+    try {
+      await reachReviewCreate();
+      await page
+        .getByLabelText("Over SFTP, run by the psilink command-line tool")
+        .click();
+      await page.getByRole("button", { name: "Create the invitation" }).click();
+      await userEvent.fill(
+        page.getByLabelText("SFTP server host"),
+        "first.example.gov",
+      );
+      await page.getByRole("button", { name: "Save exchange file" }).click();
+      await expect
+        .element(page.getByText("Saved to your downloads"))
+        .toBeInTheDocument();
+      const codeSelector = `.${styles.copyRow} .${styles.codeBlock}`;
+      const firstCode = document.querySelector(codeSelector)?.textContent;
+      expect(firstCode?.length).toBeGreaterThan(0);
+
+      // Edit the host and save again: the code re-mints, so the old code is
+      // gone -- the code and file update together.
+      await userEvent.fill(
+        page.getByLabelText("SFTP server host"),
+        "second.example.gov",
+      );
+      await page.getByRole("button", { name: "Save exchange file" }).click();
+      await vi.waitFor(() => {
+        const nextCode = document.querySelector(codeSelector)?.textContent;
+        expect(nextCode).not.toBe(firstCode);
+      });
+      const secondCode = document.querySelector(codeSelector)
+        ?.textContent as string;
+      const token = await decodeInvitation(secondCode);
+      expect(
+        (token.connectionEndpoint as { host?: string } | undefined)?.host,
+      ).toBe("second.example.gov");
+    } finally {
+      downloads.restore();
+    }
   });
 });

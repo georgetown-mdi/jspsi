@@ -16,10 +16,13 @@ import { payloadSendForMetadata } from "./metadataEditing";
 
 import type {
   CSVRow,
+  ConnectionEndpoint,
+  FileDropEndpoint,
   InvitationToken,
   LinkageField,
   LinkageTerms,
   Metadata,
+  SFTPEndpoint,
   Standardization,
   WebRTCEndpoint,
 } from "@psilink/core";
@@ -237,6 +240,39 @@ export function deepLinkFor(origin: string, encoded: string): string {
 }
 
 /**
+ * The connection-endpoint an invitation should carry. Defaults to the app's own
+ * WebRTC signaling locator, built from {@link InvitationLocation}; a caller
+ * composing a file-drop or SFTP exchange instead supplies an explicit
+ * {@link SFTPEndpoint} or {@link FileDropEndpoint} carrying only authored locator
+ * fields.
+ *
+ * The channel-specific variants carry only locator fields by construction (the
+ * endpoint types have no credential field), so the credential-free invariant
+ * holds no matter which channel is requested. `encodeInvitation` re-validates the
+ * whole token through the strict endpoint schema, so a malformed locator (an
+ * empty host, an out-of-range port, a half split-directory pair) or any smuggled
+ * unknown key is rejected at mint -- this request is not a second, weaker gate.
+ */
+export type ConnectionEndpointRequest =
+  { channel: "webrtc" } | SFTPEndpoint | FileDropEndpoint;
+
+/**
+ * Resolve a {@link ConnectionEndpointRequest} to the {@link ConnectionEndpoint}
+ * the token carries. The webrtc request is built from the inviter's browser
+ * {@link InvitationLocation}; an sftp/filedrop request is carried verbatim (its
+ * locator fields were authored by the caller). No credential can appear in any
+ * branch -- the endpoint types admit none -- and `encodeInvitation` validates the
+ * result through the strict endpoint schema regardless.
+ */
+function resolveConnectionEndpoint(
+  request: ConnectionEndpointRequest,
+  location: InvitationLocation,
+): ConnectionEndpoint {
+  if (request.channel === "webrtc") return webrtcEndpointFromLocation(location);
+  return request;
+}
+
+/**
  * Generate a fresh single-use invitation from the inviter's CSV: a new shared
  * secret, the linkage terms derived from the file, and this app's PeerJS
  * endpoint, encoded to a string and also wrapped as a deep-link URL. Each call
@@ -304,12 +340,23 @@ export async function generateInvitation(params: {
    * where standardization is inferred downstream.
    */
   standardization?: Standardization;
+  /**
+   * The connection endpoint the token carries. Defaults to `{ channel: "webrtc"
+   * }`, which builds this app's PeerJS signaling locator from `location` -- the
+   * existing behavior, so a caller that omits this mints a webrtc invitation
+   * unchanged. A caller composing a file-drop or SFTP exchange supplies an
+   * explicit sftp/filedrop endpoint carrying only authored locator fields; the
+   * credential-free invariant holds either way (see
+   * {@link ConnectionEndpointRequest}).
+   */
+  connectionEndpoint?: ConnectionEndpointRequest;
 }): Promise<GeneratedInvitation> {
   const {
     inviterName,
     file,
     location,
     lifetimeSeconds = INVITATION_LIFETIME_SECONDS,
+    connectionEndpoint = { channel: "webrtc" },
   } = params;
 
   // Bound the selected lifetime up front, where the cause is clear, rather than
@@ -448,7 +495,7 @@ export async function generateInvitation(params: {
     linkageTerms,
     sharedSecret,
     expires,
-    connectionEndpoint: webrtcEndpointFromLocation(location),
+    connectionEndpoint: resolveConnectionEndpoint(connectionEndpoint, location),
     disclosedPayloadColumns,
   };
 
