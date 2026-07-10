@@ -746,6 +746,37 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
       .toBeInTheDocument();
   });
 
+  test("the ledger's You will send names the extra disclosed column, not the invitation's request", async () => {
+    // The invitation requests no payload from the acceptor (acceptorTerms has no
+    // payload.receive), so its terms name nothing to send. But the file carries an
+    // unrecognized `comment` column, which infers to role: payload -- the acceptor
+    // transmits it for matched rows. The ledger's "You will send" must name that
+    // column (what actually leaves), not read "No additional columns" off the
+    // inviter's empty request. This is the consent-truthfulness defect the security
+    // panel proved false on the ledger.
+    await reachColumns("first_name,last_name,comment\nAlice,Smith,ok\n");
+    const ledger = document.querySelector(
+      'aside[aria-label="This exchange"]',
+    ) as Element;
+    // Assert the disclosed column appears in the send row's OWN value cell, not
+    // merely somewhere in the ledger: find the ledger row whose label is "You will
+    // send" and read its <dd>.
+    const sendRow = Array.from(ledger.querySelectorAll("div")).find(
+      (row) => row.querySelector("dt")?.textContent === "You will send",
+    );
+    expect(sendRow).toBeDefined();
+    expect(sendRow?.querySelector("dd")?.textContent).toContain("comment");
+    // The old bug read the empty invitation request as "No additional columns".
+    expect(sendRow?.querySelector("dd")?.textContent).not.toContain(
+      "No additional columns",
+    );
+    // And the confirm step's own summary, the surface that already told the truth,
+    // agrees -- the two no longer contradict.
+    await expect
+      .element(page.getByText("For each matched row: comment."))
+      .toBeInTheDocument();
+  });
+
   test("the step-3 ledger footer swaps to the local-only line", async () => {
     await reachColumns("first_name,last_name\nAlice,Smith\n");
     const ledger = document.querySelector('aside[aria-label="This exchange"]');
@@ -1023,6 +1054,67 @@ describe("acceptor bench: run and completion", () => {
       (anchor) => anchor.textContent === "Set up another exchange",
     );
     expect(another?.getAttribute("href")).toBe("/bench");
+  });
+
+  test("the settled ledger's You sent names the launched disclosed column", async () => {
+    // The full flow with an extra unrecognized `comment` column against a run token
+    // whose terms request no payload from the acceptor. The column transmits (infers
+    // to role: payload), so the settled "You sent" row must name it -- the completion
+    // footer attests "the results above are all your partner received about your
+    // data," so a ledger that hid this column would make that attestation false.
+    window.location.hash = await encodeRunToken();
+    mount(createElement(AcceptorBench));
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+    await userEvent.click(
+      page.getByRole("button", { name: "Continue: consent & your file" }),
+    );
+    await consentAndName();
+    const fileInput = document.querySelector('input[type="file"]');
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      csvFile("first_name,last_name,comment\nAlice,Smith,ok\n"),
+    );
+    await expect
+      .element(page.getByText("cohort_intake.csv"))
+      .toBeInTheDocument();
+    await userEvent.click(
+      page.getByRole("button", { name: "Accept and continue" }),
+    );
+    await expect
+      .element(page.getByRole("heading", { name: "Confirm your columns" }))
+      .toBeInTheDocument();
+    await userEvent.click(
+      page.getByRole("button", { name: "Start the exchange" }),
+    );
+    await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(1));
+
+    lifecycleCall(0).onResult({
+      resultsUrl: URL.createObjectURL(new Blob(["a,b\n"])),
+      matchedRecordCount: 12,
+      record: {
+        recordUrl: URL.createObjectURL(new Blob(["{}"])),
+        recordFileName: "psilink-record.json",
+        keysUrl: URL.createObjectURL(new Blob(["{}"])),
+        keysFileName: "psilink-record.keys.json",
+      },
+    });
+
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange complete");
+    const ledger = document.querySelector(
+      'aside[aria-label="This exchange"]',
+    ) as Element;
+    const sentRow = Array.from(ledger.querySelectorAll("div")).find(
+      (row) => row.querySelector("dt")?.textContent === "You sent",
+    );
+    expect(sentRow).toBeDefined();
+    expect(sentRow?.querySelector("dd")?.textContent).toContain("comment");
+    expect(sentRow?.querySelector("dd")?.textContent).not.toContain(
+      "No additional columns",
+    );
   });
 
   test("a withheld result states the caveat and offers only the record downloads", async () => {

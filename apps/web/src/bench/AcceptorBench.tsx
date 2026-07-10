@@ -447,12 +447,20 @@ export function AcceptorBench() {
             ? acceptorDoneLedgerTag(invitingPartyName(token))
             : acceptorLedgerTag(invitingPartyName(token))
         }
-        rows={(settled
-          ? acceptorDoneLedgerRows(token, {
-              matchedRecordCount: outputs.matchedRecordCount,
-              resultWithheld: outputs.resultWithheld,
-            })
-          : acceptorLedgerRows(token)
+        rows={(settled && launched !== undefined
+          ? acceptorDoneLedgerRows(
+              token,
+              {
+                matchedRecordCount: outputs.matchedRecordCount,
+                resultWithheld: outputs.resultWithheld,
+              },
+              launched.edits.metadata,
+            )
+          : // From the confirm-columns step onward the live metadata governs what
+            // leaves this browser, so the send row names exactly that; before a
+            // file exists (`editorState` undefined) the row forward-references the
+            // confirm-columns step.
+            acceptorLedgerRows(token, editorState?.metadata)
         ).map((row) => ({
           label: row.label,
           muted: row.muted,

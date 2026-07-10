@@ -1,24 +1,35 @@
-import { sanitizeForDisplay } from "@psilink/core";
+import { disclosedColumnNames, sanitizeForDisplay } from "@psilink/core";
 
 import { commitAcceptance } from "@psi/acceptConsent";
 import { summarizeInvitation } from "@psi/invitationSummary";
 
 import { dateTimeLabel } from "./inviterModel";
 
-import type { InvitationToken, LinkageTerms } from "@psilink/core";
+import type { InvitationToken, LinkageTerms, Metadata } from "@psilink/core";
 
 import type { RailFact, RailStepState } from "./Rail";
 
 /**
  * The pure model behind the acceptor bench's three-step spine: the step
  * progression the rail walks, the disclosure ledger built from the decoded
- * invitation's terms, the single Customize fact, and the consent-gate helper
- * the consent step submits through. No React and no I/O -- the tested boundary
- * for "the spine derives done/current/pending", "the ledger mirrors the
- * inviter's proposal", and "the consent gate blocks until both the checkbox and
- * a non-empty name are supplied". Every partner-controlled string reaches the
- * ledger through {@link summarizeInvitation}, the one sanitizing boundary, so
- * the model never re-derives that escaping.
+ * invitation's terms and the acceptor's own live metadata disclosure, the single
+ * Customize fact, and the consent-gate helper the consent step submits through. No
+ * React and no I/O -- the tested boundary for "the spine derives
+ * done/current/pending", "the ledger names exactly what the acceptor sends", and
+ * "the consent gate blocks until both the checkbox and a non-empty name are
+ * supplied".
+ *
+ * The send rows state what actually leaves this browser, which is governed by the
+ * acceptor's OWN metadata ({@link disclosedColumnNames}, the set core's
+ * `preparePayload` transmits), never by the inviter's authored request. The
+ * inviter's `payload.receive` mirrors only to a data-dictionary CLAIM on the
+ * acceptor's `payload.send`, which core holds equal to the disclosed set (or the
+ * run aborts) -- so the disclosed metadata is the one honest source in every state.
+ * Before a file exists there is no metadata, so the send rows use the invitation's
+ * forward-reference wording (the exact set is confirmed after choosing a file),
+ * matching {@link InvitationTerms}. Partner-controlled strings reach the ledger
+ * through {@link summarizeInvitation}, the one sanitizing boundary; the acceptor's
+ * own column names are sanitized per name here, as the columns-step summary does.
  */
 
 /** The acceptor's three spine steps, in order -- the steps the rail walks. */
@@ -119,6 +130,32 @@ export interface AcceptorLedgerRow {
   muted?: string;
 }
 
+/** The forward-reference wording the pre-file send rows carry, before any file is
+ * chosen and so before any metadata exists: the exact send set is not yet known,
+ * so the row points ahead to the confirm-columns step rather than overclaiming a
+ * count. Mirrors {@link InvitationTerms}'s pre-file outbound forward-reference. */
+export const ACCEPTOR_SEND_FORWARD_REFERENCE =
+  "Confirmed after you choose your file";
+
+/** The acceptor's outbound send row, keyed to the ledger's tense. `disclosure` is
+ * the acceptor's OWN live disclosed column names ({@link disclosedColumnNames} over
+ * its metadata) once a file exists -- the exact set core transmits -- each
+ * sanitized for display since they are operator-file strings. Undefined before a
+ * file is chosen (no metadata yet), where the row carries the invitation's
+ * forward-reference rather than a claim it cannot yet make. */
+function acceptorSendRow(
+  label: string,
+  disclosure: ReadonlyArray<string> | undefined,
+): AcceptorLedgerRow {
+  if (disclosure === undefined)
+    return { label, muted: ACCEPTOR_SEND_FORWARD_REFERENCE };
+  if (disclosure.length === 0) return { label, muted: "No additional columns" };
+  return {
+    label,
+    value: disclosure.map((name) => sanitizeForDisplay(name)).join(", "),
+  };
+}
+
 /** The trust line under the acceptor's ledger, stated exactly as the mockup. */
 export const ACCEPTOR_LEDGER_FOOTER =
   "These terms are your partner's proposal, read-only. Accepting never sends " +
@@ -137,28 +174,28 @@ export function acceptorLedgerTag(invitingParty: string): string {
 }
 
 /**
- * The acceptor's disclosure ledger, read from the decoded invitation's terms:
- * what the acceptor sends and receives, the per-key matched-on list, the absolute
- * expiry, where the results go, the agreement reference, and the browser
- * transport. Every partner string is sanitized by {@link summarizeInvitation}.
- * The proposal is read-only here -- there is nothing to edit -- so the rows never
+ * The acceptor's disclosure ledger: the receive/matched-on/expiry/results/agreement/
+ * transport rows read from the decoded invitation (every partner string sanitized by
+ * {@link summarizeInvitation}), and the "You will send" row from the acceptor's OWN
+ * metadata once a file exists. `metadata` is the acceptor's live column metadata from
+ * the confirm-columns step onward; its disclosed set ({@link disclosedColumnNames}) is
+ * exactly what core transmits, so the ledger cannot overclaim. Undefined on the
+ * review/consent steps (no file yet), where the send row forward-references the
+ * confirm-columns step. The proposal's non-send rows are read-only here, so they never
  * carry a spine-step reference.
  */
 export function acceptorLedgerRows(
   token: InvitationToken,
+  metadata?: Metadata,
 ): Array<AcceptorLedgerRow> {
   const summary = summarizeInvitation(token);
-  // What the acceptor sends is the inviter's egress request of it
-  // (summary.payload.receive). An empty or undeclared request sends no extra
-  // columns beyond the matching fingerprints.
-  const sent = summary.payload?.receive ?? [];
   // What the acceptor receives for matched records is the inviter's send set
   // (summary.payload.send), which derives from the carried disclosedPayloadColumns.
   const received = summary.payload?.send ?? [];
+  const disclosure =
+    metadata === undefined ? undefined : disclosedColumnNames(metadata);
   return [
-    sent.length > 0
-      ? { label: "You will send", value: sent.join(", ") }
-      : { label: "You will send", muted: "No additional columns" },
+    acceptorSendRow("You will send", disclosure),
     {
       label: "You will receive",
       value:
@@ -224,13 +261,18 @@ export function acceptorDoneLedgerTag(invitingParty: string): string {
  * the expiry row drops (the invitation is consumed), and the receive row reports
  * what actually arrived -- the matched-row count, or that the terms withheld the
  * result table. Every partner string is sanitized by {@link summarizeInvitation}.
+ *
+ * `metadata` is the LAUNCHED metadata -- the frozen pair that actually ran -- so the
+ * "You sent" row names the exact disclosed set ({@link disclosedColumnNames}) core
+ * transmitted, sanitized per name. A settled ledger always has a launched pair, so
+ * unlike {@link acceptorLedgerRows} it is required here.
  */
 export function acceptorDoneLedgerRows(
   token: InvitationToken,
   outcome: AcceptorLedgerOutcome,
+  metadata: Metadata,
 ): Array<AcceptorLedgerRow> {
   const summary = summarizeInvitation(token);
-  const sent = summary.payload?.receive ?? [];
   const received = summary.payload?.send ?? [];
   const receivedSuffix = received.length > 0 ? ` + ${received.join(", ")}` : "";
   const receivedValue =
@@ -240,9 +282,7 @@ export function acceptorDoneLedgerRows(
           outcome.matchedRecordCount ?? 0,
         )} matched rows${receivedSuffix}`;
   return [
-    sent.length > 0
-      ? { label: "You sent", value: sent.join(", ") }
-      : { label: "You sent", muted: "No additional columns" },
+    acceptorSendRow("You sent", disclosedColumnNames(metadata)),
     { label: "You received", value: receivedValue },
     summary.linkageKeys.length > 0
       ? {
