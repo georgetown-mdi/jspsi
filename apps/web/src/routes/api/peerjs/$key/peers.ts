@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { json } from "@tanstack/react-start";
-import { setResponseStatus } from "@tanstack/react-start/server";
 
 import { usePeerServer } from "@peerServer";
 
@@ -15,8 +14,7 @@ export const Route = createFileRoute("/api/peerjs/$key/peers")({
           return json(clientsIds);
         }
 
-        setResponseStatus(401);
-        return new Response();
+        return new Response(null, { status: 401 });
       },
     },
   },
