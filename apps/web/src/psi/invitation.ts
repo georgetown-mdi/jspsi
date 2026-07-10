@@ -254,9 +254,7 @@ export function deepLinkFor(origin: string, encoded: string): string {
  * unknown key is rejected at mint -- this request is not a second, weaker gate.
  */
 export type ConnectionEndpointRequest =
-  | { channel: "webrtc" }
-  | SFTPEndpoint
-  | FileDropEndpoint;
+  { channel: "webrtc" } | SFTPEndpoint | FileDropEndpoint;
 
 /**
  * Resolve a {@link ConnectionEndpointRequest} to the {@link ConnectionEndpoint}

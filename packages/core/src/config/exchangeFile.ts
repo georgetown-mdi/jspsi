@@ -74,8 +74,7 @@ export interface FiledropExchangeLocator {
  * `filedrop`); a webrtc exchange is coordinated live, not from a minted file.
  */
 export type ExchangeFileConnection =
-  | SftpExchangeLocator
-  | FiledropExchangeLocator;
+  SftpExchangeLocator | FiledropExchangeLocator;
 
 // --- Mint --------------------------------------------------------------------
 
