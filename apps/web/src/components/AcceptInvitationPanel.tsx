@@ -74,8 +74,9 @@ export function AcceptInvitationPanel({
   onAcquireError: (alert: AlertContent | undefined) => void;
   /** Receive the parsed CSV; wired to the file-acquire phase's `onAcquired`. The
    * route commits consent and transitions to the "Prepare your data" editor from
-   * here. */
-  onAcquired: (bundle: AcquiredBundle) => void;
+   * here, returning whether the commit was accepted so the acquire phase can
+   * reset and let the operator retry a blocked handoff in place. */
+  onAcquired: (bundle: AcquiredBundle) => boolean;
 }) {
   return (
     <>

@@ -151,6 +151,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 - The web app's peer-discovery endpoint (`/api/peerjs/:key/peers`) now actually responds 401 when discovery is disabled (the default), instead of a 200 with an empty client list -- a caller relying on the status code to distinguish the two previously could not.
 - The web file dropzone now restricts a drop or file-picker selection to a single file, warning when more than one is chosen, instead of accepting the batch into the UI while silently linking only the first.
 - The `parse_date` standardization step now drops a record whose date is calendar-impossible (for example 02/29 in a non-leap year, or 04/31), instead of silently rolling it over to the next valid day and hashing the wrong value into the linkage key.
+- The web accept screen recovers when consent is revoked (or the name cleared) while a chosen file is still parsing: the acceptor can re-consent and resubmit the same file in place, instead of the "Accept and continue" button staying stuck disabled until a page reload.
 
 ### Security
 
