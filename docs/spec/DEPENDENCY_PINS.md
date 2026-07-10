@@ -56,7 +56,8 @@ runtime stage copies that `node_modules` unchanged. Every runtime dependency and
 transitive in the image is therefore the exact version in the committed
 lockfile: a rebuild without a lockfile change cannot re-resolve a caret range,
 and the image ships the same tree CI tested and the release SBOM records
-(`npm sbom --package-lock-only`, see [RELEASES.md](../RELEASES.md)).
+(`npm sbom --package-lock-only --omit=dev -w packages/core -w apps/cli`, scoped
+to match this same install; see [RELEASES.md](../RELEASES.md)).
 
 Why this is correctness-critical rather than hygiene: `re2js` executes the
 agreed linkage transforms' regexes that standardize values before PSI key

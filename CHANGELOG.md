@@ -105,6 +105,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 - Documentation is reorganized into `docs/` (overview) and `docs/spec/` (wire formats, byte encodings, constants); some files moved or were renamed, so links to old paths break. See `docs/spec/README.md`.
 - The web app now accepts CSV uploads up to 100 MB (was 10 MB), and a file larger than one parser chunk parses to its complete row set instead of risking a silently truncated subset. See `docs/spec/PROTOCOL.md`.
 - The web app again parses a large CSV (above a 4 MB threshold) off the main thread in a Web Worker it bundles itself, streaming rows back in batches, so the tab stays interactive during a large invite/accept parse; a smaller file still parses inline. This restores the off-main-thread parse dropped when PapaParse's self-hosted worker corrupted the parse under a production build. Parse results and error reporting are unchanged. See `docs/spec/PROTOCOL.md`.
+- The release SBOM attached to each GitHub Release now describes only the CLI Docker image's shipped production tree (`packages/core` and `apps/cli`, `devDependencies` omitted), matching the Dockerfile's runtime install; it previously also listed `devDependencies` and the `apps/web` workspace, which the image does not ship. See `docs/RELEASES.md`.
 
 ### Removed
 
