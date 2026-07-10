@@ -82,7 +82,7 @@ function csvFile(content: string): File {
 function makeSpies() {
   return {
     onError: vi.fn((_alert: AlertContent | undefined): void => {}),
-    onAcquired: vi.fn((_bundle: AcquiredBundle): void => {}),
+    onAcquired: vi.fn((_bundle: AcquiredBundle): boolean => true),
   };
 }
 type Spies = ReturnType<typeof makeSpies>;

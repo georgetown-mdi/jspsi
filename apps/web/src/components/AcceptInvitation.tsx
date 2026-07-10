@@ -160,7 +160,7 @@ export function AcceptInvitation() {
     else if (decode.status === "error") errorRef.current?.focus();
   }, [decode.status, phase.status]);
 
-  const handleAcquired = (bundle: AcquiredBundle) => {
+  const handleAcquired = (bundle: AcquiredBundle): boolean => {
     // The authoritative consent gate: no name is committed -- and so the prepare
     // editor never mounts -- unless the user has consented and named themselves.
     // The acquire phase already gates its submit on the same check
@@ -170,11 +170,15 @@ export function AcceptInvitation() {
       consented: consentedRef.current,
       name: acceptorNameRef.current,
     });
-    if (name === undefined) return;
+    // Consent (or the name) no longer holds at handoff time: refuse the commit and
+    // tell the acquire phase, which resets its submit state so the operator can
+    // re-consent and resubmit the same file in place.
+    if (name === undefined) return false;
     // The seed has now done its job; a back edge to reviewing must not resurrect it
     // over the file just acquired (see handoffConsumedRef).
     handoffConsumedRef.current = true;
     setPhase({ status: "preparing", name, bundle });
+    return true;
   };
 
   return (

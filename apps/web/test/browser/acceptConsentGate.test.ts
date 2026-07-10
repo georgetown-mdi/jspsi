@@ -369,6 +369,47 @@ describe("accept review screen (consent + file before any connection)", () => {
     expect(exchangeMounted()).toBe(false);
   });
 
+  test("re-consenting after a blocked commit lets the operator resubmit the same file in place", async () => {
+    window.location.hash = await encodeAcceptToken();
+    csvLoadHarness.defer = true;
+    mountAcceptRoute();
+
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+
+    await reviewAndChoose(csvFile("first_name,last_name\nAlice,Smith\n"));
+    await userEvent.click(page.getByTestId("accept"));
+
+    // Revoke consent while the parse is in flight, then let it resolve: the
+    // re-check reads the revoked consent, so the commit is blocked and the acquire
+    // phase must reset -- otherwise "accept" stays stuck disabled below.
+    await expect.poll(() => csvLoadHarness.resolve !== undefined).toBe(true);
+    await userEvent.click(page.getByRole("checkbox"));
+    await expect.element(page.getByRole("checkbox")).not.toBeChecked();
+    resolveParse();
+
+    // The blocked handoff must not dead-end the control: consent is still off here,
+    // so "accept" stays disabled by the live consent gate (submitDisabled), not by
+    // a stuck `submitted` -- re-consenting (the name is untouched throughout) makes
+    // it interactive again with no remount and no page reload.
+    const accept = page.getByTestId("accept");
+    await userEvent.click(page.getByRole("checkbox"));
+    await expect.element(page.getByRole("checkbox")).toBeChecked();
+    await expect.element(accept).toBeEnabled();
+
+    // Resubmitting the SAME file (still selected; reviewAndChoose is not called
+    // again) now commits and reaches the prepare editor. Let this second parse
+    // resolve inline (the first is already spent) so the resubmit does not hang on
+    // another deferred promise the test would otherwise have to resolve.
+    csvLoadHarness.defer = false;
+    await userEvent.click(accept);
+    await expect
+      .element(page.getByRole("heading", { name: "Prepare your data" }))
+      .toBeInTheDocument();
+    expect(exchangeMounted()).toBe(false);
+  });
+
   test("consent kept through the parse commits and reaches the prepare editor", async () => {
     window.location.hash = await encodeAcceptToken();
     csvLoadHarness.defer = true;

@@ -43,12 +43,17 @@ export interface FileAcquireProps {
    * attempt. The review screen owns the alert state; the acquire phase only writes
    * its read-failure case. */
   onError: (alert: AlertContent | undefined) => void;
-  /** Hand the parsed CSV to the review screen, which moves on to the "Prepare your
-   * data" editor. Called at most once per mount: a fresh acquire comes from a
-   * fresh mount. The linkage-satisfiability verdict is NOT computed here -- it
-   * lives in the editor, over the operator's edited metadata/standardization, so
-   * the gate and the editor agree. */
-  onAcquired: (bundle: AcquiredBundle) => void;
+  /** Hand the parsed CSV to the review screen, which re-checks its own commit
+   * precondition (e.g. consent, still live at handoff time) before advancing to
+   * the "Prepare your data" editor. Returns whether the owner accepted the
+   * handoff: `true` advances, and this phase stays submitted (a fresh acquire
+   * comes from a fresh mount); `false` means the owner's precondition was no
+   * longer met, so this phase resets `submitted` and the abort controller,
+   * letting the operator fix the precondition and resubmit the SAME file in
+   * place. The linkage-satisfiability verdict is NOT computed here -- it lives in
+   * the editor, over the operator's edited metadata/standardization, so the gate
+   * and the editor agree. */
+  onAcquired: (bundle: AcquiredBundle) => boolean;
 }
 
 /**
@@ -136,7 +141,17 @@ export default function FileAcquire(props: FileAcquireProps) {
         return;
       }
 
-      onAcquired({ rawRows, columns });
+      // The owner re-checks its own commit precondition (e.g. live consent) at
+      // handoff time and may refuse it even though the parse succeeded. Mirror the
+      // read-failure and empty-header resets above so a blocked handoff leaves the
+      // operator able to fix the precondition and resubmit this same file, rather
+      // than dead-ended with submit stuck disabled.
+      const accepted = onAcquired({ rawRows, columns });
+      if (!accepted) {
+        controller.abort();
+        abortRef.current = undefined;
+        setSubmitted(false);
+      }
     })();
   };
 

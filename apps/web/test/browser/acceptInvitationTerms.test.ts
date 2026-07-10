@@ -149,7 +149,7 @@ function renderPanel(
       acceptorName: "",
       onAcceptorNameChange: () => {},
       onAcquireError: () => {},
-      onAcquired: () => {},
+      onAcquired: () => true,
       ...overrides,
     }),
   );
@@ -191,7 +191,7 @@ describe("accept screen: terms render from a decoded token", () => {
             acceptorName: "",
             onAcceptorNameChange: () => {},
             onAcquireError: () => {},
-            onAcquired: () => {},
+            onAcquired: () => true,
           }),
         ),
       ),
