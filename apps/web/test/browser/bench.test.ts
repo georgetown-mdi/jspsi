@@ -424,11 +424,15 @@ describe("inviter bench", () => {
         (row) => row.querySelector("dt")?.childNodes[0].textContent === label,
       );
 
-    // The rail's Customize facts are links once the file is read.
+    // The rail's Customize facts are links once the file is read; the open
+    // tab carries aria-current="true" (spine steps use "step").
     await page.getByRole("button", { name: "Matching keys" }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Matching keys");
+    expect(document.querySelector('[aria-current="true"]')?.textContent).toBe(
+      "Matching keys",
+    );
 
     // Reordering the guided list reorders the ledger's matched-on keys.
     const orderBefore = ledgerRow("Matched on")?.querySelector("dd")
@@ -440,6 +444,13 @@ describe("inviter bench", () => {
     const orderAfter = ledgerRow("Matched on")?.querySelector("dd")
       ?.textContent as string;
     expect(orderAfter).not.toBe(orderBefore);
+
+    // Selecting single-pass flows through the schema-parse guard and
+    // surfaces the disclosure warning at the point of choice.
+    await page.getByLabelText("Single-pass").click();
+    await expect
+      .element(page.getByText("Single-pass widens what one of you can observe"))
+      .toBeInTheDocument();
 
     // The gated method and deduplication controls are visible but inert.
     await expect.element(page.getByLabelText("Matching method")).toBeDisabled();

@@ -8,6 +8,7 @@ import {
 import {
   defaultStandardizationForRows,
   draftFromTerms,
+  draftWithFieldAdded,
   producibleFieldNames,
   seedAdvancedInvite,
   setDraftMetadata,
@@ -256,43 +257,34 @@ export function editorWithFieldRemoved(
   };
 }
 
-/** Append a same-typed field bound to its first free column, named uniquely
- * off the type's first field and seeded with its steps, so the second field
- * starts from the same recommended pipeline. A type with no free column is a
- * no-op (the affordance is gated on one existing). */
+/** Append a same-typed field via the shared {@link draftWithFieldAdded}. */
 export function editorWithFieldAdded(
   editor: InviterEditor,
   type: LinkageField["type"],
 ): InviterEditor {
   if (editor.sealed === true) return editor;
-  const draft = editor.draft;
-  const bound = new Set(draft.standardization.map((t) => t.input));
-  const freeColumn = draft.metadata
-    .filter((column) => column.role === "linkage" && column.type === type)
-    .map((column) => column.name)
-    .find((column) => !bound.has(column));
-  if (freeColumn === undefined) return editor;
-  const typeByOutput = new Map(
-    declaredFieldsFor(draft).map((field) => [field.name, field.type]),
-  );
-  const sibling = draft.standardization.find(
-    (transformation) => typeByOutput.get(transformation.output) === type,
-  );
-  const base = sibling?.output ?? type;
-  const taken = new Set(draft.standardization.map((t) => t.output));
-  let n = 2;
-  let output = `${base}_${n}`;
-  while (taken.has(output)) output = `${base}_${++n}`;
-  return {
-    ...editor,
-    draft: {
-      ...draft,
-      standardization: [
-        ...draft.standardization,
-        { output, input: freeColumn, steps: sibling?.steps ?? [] },
-      ],
-    },
-  };
+  return { ...editor, draft: draftWithFieldAdded(editor.draft, type) };
+}
+
+/** Set the matching algorithm. Gated: while the run does not honor psi-c the
+ * control stays disabled and {@link validateAdvancedInvite}'s build clamps the
+ * minted terms to `psi` regardless of this draft state. */
+export function editorWithAlgorithm(
+  editor: InviterEditor,
+  algorithm: AdvancedInviteDraft["algorithm"],
+): InviterEditor {
+  if (editor.sealed === true) return editor;
+  return { ...editor, draft: { ...editor.draft, algorithm } };
+}
+
+/** Set input deduplication. Gated exactly as {@link editorWithAlgorithm}: the
+ * build clamps minted terms to no-dedup until the run honors it. */
+export function editorWithDeduplicate(
+  editor: InviterEditor,
+  deduplicate: boolean,
+): InviterEditor {
+  if (editor.sealed === true) return editor;
+  return { ...editor, draft: { ...editor.draft, deduplicate } };
 }
 
 /** Restore the recommended cleaning for the current metadata -- the cleaning
@@ -684,8 +676,8 @@ export interface AnswersRow {
 }
 
 /** The check-your-answers table: the full proposal restated before the point
- * of no return. Cleaning, key, and agreement rows carry no Change link until
- * their Customize tabs exist. */
+ * of no return, each row's Change link navigating to the spine step or
+ * Customize tab that owns the term. */
 export function answersRows(
   editor: InviterEditor,
   csv: AcquiredCsv,

@@ -10,7 +10,11 @@ import {
 } from "@mantine/core";
 import { IconArrowDown, IconArrowUp } from "@tabler/icons-react";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import {
+  AlgorithmSchema,
+  LinkageStrategySchema,
+  sanitizeForDisplay,
+} from "@psilink/core";
 
 import { APPLIED_SETTINGS } from "@psi/appliedSettings";
 import { buildAdvancedTerms } from "@psi/advancedInvite";
@@ -22,7 +26,7 @@ import { declaredFieldsFor, keySatisfiabilityFor } from "./inviterModel";
 import styles from "./bench.module.css";
 
 import type { AcquiredCsv, InviterEditor } from "./inviterModel";
-import type { LinkageStrategy, LinkageTerms } from "@psilink/core";
+import type { Algorithm, LinkageStrategy, LinkageTerms } from "@psilink/core";
 import type { AdvancedInviteDraft } from "@psi/advancedInvite";
 
 /**
@@ -41,6 +45,8 @@ export function KeysTab({
   onKeyMoved,
   onAuthoredDraft,
   onStrategy,
+  onAlgorithm,
+  onDeduplicate,
   onImport,
   announce,
   onBack,
@@ -53,6 +59,8 @@ export function KeysTab({
   onKeyMoved: (index: number, offset: -1 | 1) => void;
   onAuthoredDraft: (draft: AdvancedInviteDraft) => void;
   onStrategy: (strategy: LinkageStrategy) => void;
+  onAlgorithm: (algorithm: Algorithm) => void;
+  onDeduplicate: (deduplicate: boolean) => void;
   onImport: (terms: LinkageTerms) => void;
   announce: (message: string) => void;
   onBack: () => void;
@@ -156,7 +164,9 @@ export function KeysTab({
       <Radio.Group
         label="Linkage strategy"
         value={editor.draft.linkageStrategy}
-        onChange={(value) => onStrategy(value)}
+        // Parsed rather than trusted so a Radio value literal drifting from
+        // the enum throws loudly instead of typechecking clean.
+        onChange={(value) => onStrategy(LinkageStrategySchema.parse(value))}
       >
         <Radio
           value="cascade"
@@ -184,22 +194,32 @@ export function KeysTab({
       )}
       <NativeSelect
         label="Matching method"
-        description='"Reveal only the count (psi-c)" is not available yet; the standard method applies.'
+        description={
+          APPLIED_SETTINGS.psiC
+            ? "Reveal the matched identifiers, or only the count."
+            : '"Reveal only the count (psi-c)" is not available yet; the standard method applies.'
+        }
         disabled={!APPLIED_SETTINGS.psiC}
         value={editor.draft.algorithm}
         data={[
           { value: "psi", label: "Reveal the matched identifiers (standard)" },
           { value: "psi-c", label: "Reveal only the count (psi-c)" },
         ]}
-        onChange={() => undefined}
+        onChange={(event) =>
+          onAlgorithm(AlgorithmSchema.parse(event.currentTarget.value))
+        }
         mt="md"
       />
       <Checkbox
         label="Allow several of your records to match one partner record"
-        description="Deduplication of your own inputs is not available yet; each record matches at most once."
+        description={
+          APPLIED_SETTINGS.deduplicate
+            ? undefined
+            : "Deduplication of your own inputs is not available yet; each record matches at most once."
+        }
         disabled={!APPLIED_SETTINGS.deduplicate}
         checked={editor.draft.deduplicate}
-        onChange={() => undefined}
+        onChange={(event) => onDeduplicate(event.currentTarget.checked)}
         mt="md"
       />
       {expertMode && (

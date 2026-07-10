@@ -17,9 +17,11 @@ import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 import { Rail, RailFacts, RailGroup, RailProblems, RailSteps } from "./Rail";
 import {
   editorFromCsv,
+  editorWithAlgorithm,
   editorWithAuthoredDraft,
   editorWithColumnDisclosure,
   editorWithColumnType,
+  editorWithDeduplicate,
   editorWithFieldAdded,
   editorWithFieldInput,
   editorWithFieldRemoved,
@@ -451,6 +453,12 @@ export function InviterBench() {
               }
               onStrategy={(strategy) =>
                 setEditor(editorWithLinkageStrategy(editor, strategy))
+              }
+              onAlgorithm={(algorithm) =>
+                setEditor(editorWithAlgorithm(editor, algorithm))
+              }
+              onDeduplicate={(deduplicate) =>
+                setEditor(editorWithDeduplicate(editor, deduplicate))
               }
               onImport={(terms) => {
                 setEditor(editorWithImportedTerms(editor, acquired, terms));

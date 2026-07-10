@@ -3,9 +3,12 @@ import { describe, expect, test } from "vitest";
 import {
   answersRows,
   editorFromCsv,
+  editorWithAlgorithm,
   editorWithAuthoredDraft,
   editorWithColumnDisclosure,
   editorWithColumnType,
+  editorWithDeduplicate,
+  editorWithFieldAdded,
   editorWithFieldSteps,
   editorWithIdentity,
   editorWithImportedTerms,
@@ -290,14 +293,45 @@ describe("customize tabs", () => {
 
   test("gated settings cannot alter minted terms", () => {
     const seeded = editorFromCsv("Dana", csv);
-    const forced = editorWithAuthoredDraft(seeded, {
-      ...seeded.draft,
-      algorithm: "psi-c",
-      deduplicate: true,
-    });
+    const forced = editorWithDeduplicate(
+      editorWithAlgorithm(seeded, "psi-c"),
+      true,
+    );
+    expect(forced.draft.algorithm).toBe("psi-c");
+    expect(forced.draft.deduplicate).toBe(true);
     const terms = mintedTerms(forced);
     expect(terms.algorithm).toBe("psi");
     expect(terms.deduplicate).toBe(false);
+  });
+
+  test("adding a same-typed field binds the free column uniquely", () => {
+    const seeded = editorFromCsv("Dana", csv);
+    // Retype the payload column to a second first_name, then bind it: the new
+    // field takes the type's recommended pipeline under a unique name.
+    const { editor: retypedOnly } = editorWithColumnType(
+      seeded,
+      csv,
+      "program_code",
+      "first_name",
+    );
+    // A retype preserves the sent disclosure, so the column must also be set
+    // to match before it is a bindable linkage column.
+    const { editor: retyped } = editorWithColumnDisclosure(
+      retypedOnly,
+      csv,
+      "program_code",
+      "match",
+    );
+    const added = editorWithFieldAdded(retyped, "first_name");
+    const grown = added.draft.standardization.length;
+    expect(grown).toBe(retyped.draft.standardization.length + 1);
+    const appended = added.draft.standardization[grown - 1];
+    expect(appended.input).toBe("program_code");
+    expect(appended.output).toMatch(/_2$/);
+
+    // No free column of the type: the draft is untouched.
+    const noop = editorWithFieldAdded(seeded, "zip_code");
+    expect(noop.draft).toBe(seeded.draft);
   });
 
   test("importing terms with an unsupplyable field degrades gracefully", () => {
