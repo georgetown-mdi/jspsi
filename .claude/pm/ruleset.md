@@ -76,7 +76,7 @@ List any assumptions you made or questions still unresolved. Empty if everything
 
 - Titles: imperative mood, under 70 characters. "Add WebRTC reconnect on transient failure", not "WebRTC reconnect would be nice".
 - Match the project's voice: terse, technical, no marketing language.
-- Reference the codebase's own conventions (snake_case in YAML, camelCase in TS, Zod-first schemas, `connection.channel` discriminant, `@`-file refs, Windows path handling). Cite `CLAUDE.local.md` rather than restating its rules in full.
+- Reference the codebase's own conventions (snake_case in YAML, camelCase in TS, Zod-first schemas, `connection.channel` discriminant, `@`-file refs, Windows path handling). Cite `CLAUDE.md` rather than restating its rules in full.
 - Single space after periods.
 - Do not invent file paths. If you are not sure a file exists, grep first.
 - Do not pad acceptance criteria with obvious items ("code compiles", "tests pass") unless the task is specifically about CI/build. Explicit unit-test requirements for specific named behaviors are not padding -- they are checkable deliverables.
@@ -95,7 +95,7 @@ missing answers are usually:
 Good questions: ask the highest-leverage one first; phrase each so it can be
 answered in one line; offer 2-3 plausible options where useful rather than
 leaving it open-ended; never ask what is already in the request or in
-`CLAUDE.local.md`. Ask at most three at once, and do not ask filler. *How* you
+`CLAUDE.md`. Ask at most three at once, and do not ask filler. *How* you
 surface these differs by front door -- the consult agent returns them as a
 NEEDS INPUT result; the `/pm` persona asks them directly in conversation.
 

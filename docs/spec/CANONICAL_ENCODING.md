@@ -271,8 +271,10 @@ artifacts rather than resolved at runtime, because from 3.0.0 it ships ESM-only
 and a bare `require` of it fails in the CJS bundle. One operational consequence:
 a future `canonicalize` security advisory cannot be remediated by a transitive
 dependency bump alone -- it requires bumping the dependency and rebuilding and
-re-releasing `@psilink/core`. This matches the other bundled dependencies
-(`@openmined/psi.js`, `re2js`, `yaml`).
+re-releasing `@psilink/core`. This matches `@openmined/psi.js`, which is
+likewise inlined into every build. (`re2js` and `yaml` are inlined only into the
+standalone UMD browser build; the ESM and CJS builds keep them external, so a
+transitive bump does remediate them for the CJS-based CLI.)
 
 ## See also
 

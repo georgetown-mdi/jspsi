@@ -12,25 +12,21 @@ Update a draft item on a psilink GitHub project board without learning the scrip
 
 Provide:
 
-- **project**: The project name or number. Use a friendly name like `"product"`, `"product board"`, `"release"`, or `"operations"`. Or use the numeric project ID (9, 10, etc.).
+- **project**: The numeric project ID -- `9` for the product board, `10` for release & operations. The script takes a number only; a friendly name is rejected, so map the board the user names to its number.
 - **itemId**: The numeric draft item ID (the `?itemId=N` URL parameter)
 - **At least one field to update**: `status`, `title`, or `body`
 
 ### Project mapping
 
-Common projects:
-
-- **Product board** (project 9): `product`, `product board`, `psilink-product`, or `9`
-- **Release & Operations board** (project 10): `release`, `operations`, `release and operations`, `psilink-release`, or `10`
+- **Product board**: `9`
+- **Release & Operations board**: `10`
 
 ## Common fields and values
 
-**Status** — one of:
+**Status** — the valid options differ by board (the board's field is the source of truth):
 
-- `"Todo"`
-- `"In Progress"`
-- `"In Review"`
-- `"Done"`
+- **Product board (9)**: `"Backlog"`, `"In Progress"`, `"Review"`, `"Done"`
+- **Release & Operations board (10)**: `"Todo"`, `"In Progress"`, `"Done"`
 
 **Title** — any string (will be trimmed)
 
@@ -51,7 +47,7 @@ Only the fields you provide are included in the command. If the edit succeeds, t
 **Update status:**
 
 ```
-Project: product
+Project: 9
 ItemId: 193732227
 Status: In Progress
 ```
@@ -59,7 +55,7 @@ Status: In Progress
 **Update title and body:**
 
 ```
-Project: release
+Project: 10
 ItemId: 194023493
 Title: Fix WebRTC teardown on disconnect
 Body: Close peer connections cleanly without leaving dangling listeners.
@@ -69,6 +65,6 @@ Body: Close peer connections cleanly without leaving dangling listeners.
 
 If the command fails (e.g., invalid itemId, missing project), the script's error output is shown. Check:
 
-- Project name is correct
+- Project number is correct (`9` or `10`)
 - ItemId is a valid number (no `?itemId=` prefix)
 - You have permissions to edit the board (usually automatic for team members)
