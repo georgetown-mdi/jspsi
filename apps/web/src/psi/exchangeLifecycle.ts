@@ -178,14 +178,16 @@ export type ExchangeOutputs = ReceivedExchangeOutputs | WithheldExchangeOutputs;
 /** Pure output-generation step: build the local results file plus the
  * exchange-record artifacts (record + verification keys) from the exchange result
  * and return their URLs. May throw (classified as `"output"`); runs inside the
- * owner after the exchange and before teardown. */
-export type GenerateOutput = (
-  result: ExchangeResult,
-  prepared: PreparedExchange,
-) => ExchangeOutputs;
+ * owner after the exchange and before teardown. `TOutputs` lets an owner return
+ * a widened {@link ExchangeOutputs} (extra owner-local fields such as a matched
+ * count) and receive the same type back in `onResult` without a cast. */
+export type GenerateOutput<TOutputs extends ExchangeOutputs = ExchangeOutputs> =
+  (result: ExchangeResult, prepared: PreparedExchange) => TOutputs;
 
 /** Options for {@link runExchangeLifecycle}. */
-export interface RunExchangeLifecycleOptions {
+export interface RunExchangeLifecycleOptions<
+  TOutputs extends ExchangeOutputs = ExchangeOutputs,
+> {
   acquire: Acquire;
   /** This party's PSI handshake role: the web client is the `"initiator"`, the
    * web server the `"responder"`. The same role drives the pre-exchange
@@ -203,10 +205,10 @@ export interface RunExchangeLifecycleOptions {
    * for an unbounded credential, leaving the guards no-op. */
   expires?: string;
   signal: AbortSignal;
-  generateOutput: GenerateOutput;
+  generateOutput: GenerateOutput<TOutputs>;
   onStages: (stages: Array<StageDefinition>) => void;
   onStage: (stageId: string) => void;
-  onResult: (outputs: ExchangeOutputs) => void;
+  onResult: (outputs: TOutputs) => void;
   onError: (failure: {
     category: ExchangeErrorCategory;
     error: unknown;
@@ -239,9 +241,9 @@ export interface RunExchangeLifecycleOptions {
  *   owner-driven seam no-ops once aborted, so no setState fires after unmount on
  *   any path (success, progress, or error).
  */
-export async function runExchangeLifecycle(
-  options: RunExchangeLifecycleOptions,
-): Promise<void> {
+export async function runExchangeLifecycle<
+  TOutputs extends ExchangeOutputs = ExchangeOutputs,
+>(options: RunExchangeLifecycleOptions<TOutputs>): Promise<void> {
   const {
     acquire,
     exchangeRole,
@@ -393,7 +395,7 @@ export async function runExchangeLifecycle(
     // The privacy-sensitive exchange has succeeded here. A failure building the
     // local results file is an "output" failure, never an "exchange" one, so the
     // user is not told to re-run a PSI exchange that in fact already completed.
-    let outputs: ExchangeOutputs;
+    let outputs: TOutputs;
     try {
       outputs = generateOutput(result, prepared);
     } catch (error) {

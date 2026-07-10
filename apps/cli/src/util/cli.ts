@@ -163,8 +163,8 @@ export function durationFlagMs(
  * Route only non-secret count flags through this helper: a rejected value is
  * echoed verbatim in the usage error (`got <value>`), and
  * {@link sanitizeErrorForDisplay} redacts PEM key blocks, not a bare token, so a
- * secret-valued flag would leak into stderr and any log. The sole caller today
- * (`--max-reconnect-attempts`) is a non-secret tuning count.
+ * secret-valued flag would leak into stderr and any log. The callers today
+ * (`--max-reconnect-attempts`, `--server-port`) are non-secret tuning counts.
  */
 export function nonNegativeIntFlag(
   argv: Arguments,
