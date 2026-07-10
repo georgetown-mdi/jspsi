@@ -13,8 +13,11 @@ import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
 import { InvitationTerms } from "@components/InvitationTerms";
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
+import { setColumnTypeForMatching } from "@psi/metadataEditing";
+import { useNonEmptyRates } from "@components/useNonEmptyRates";
 
 import {
+  ACCEPTOR_COLUMNS_LEDGER_FOOTER,
   ACCEPTOR_LEDGER_FOOTER,
   acceptorConsentName,
   acceptorConsentReady,
@@ -25,15 +28,58 @@ import {
   invitingPartyName,
 } from "./acceptorModel";
 import { Rail, RailFacts, RailGroup, RailSteps } from "./Rail";
+import {
+  acceptorCleaningAttention,
+  acceptorColumnsEditorState,
+  acceptorInitialColumnsState,
+  acceptorLaunchPayload,
+  acceptorVerdict,
+} from "./acceptorColumnsModel";
+import { AcceptorCleaningStep } from "./AcceptorCleaningStep";
+import { AcceptorColumnsStep } from "./AcceptorColumnsStep";
 import { BenchShell } from "./BenchShell";
 import { Ledger } from "./Ledger";
 import styles from "./bench.module.css";
 
-import type { AcceptableInvitation } from "@psi/acceptInvitation";
+import type {
+  AcceptableInvitation,
+  AcceptorDataEdits,
+} from "@psi/acceptInvitation";
+import type {
+  AcceptorAcquiredCsv,
+  AcceptorColumnsState,
+} from "./acceptorColumnsModel";
+import type {
+  CSVRow,
+  Metadata,
+  SemanticType,
+  Standardization,
+  StandardizationStep,
+} from "@psilink/core";
 import type { AcceptorStep } from "./acceptorModel";
+import type { AlertContent } from "@components/FileAcquire";
+import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 import type { FileRejection } from "@mantine/dropzone";
 import type { IntakeAlert } from "./YourFileSection";
 import type { RailStep } from "./Rail";
+
+/** Stable empty inputs for {@link useNonEmptyRates} before a file is acquired, so the
+ * hook's controller is not rebuilt every render on a fresh `[]` identity. */
+const EMPTY_ROWS: ReadonlyArray<CSVRow> = [];
+const EMPTY_STANDARDIZATION: Standardization = [];
+
+/** The columns-step sub-section: the main confirm surface, or the Cleaning tab the
+ * Customize rail group navigates to (mirroring how InviterBench mounts its
+ * CleaningTab). Only meaningful while {@link AcceptorStep} is `columns`. */
+type AcceptorColumnsSection = "columns" | "cleaning";
+
+/** The exchange the acceptor launched: the assembled per-party edits and the optional
+ * partial-coverage advisory the run package surfaces. The columns package renders a
+ * minimal run stub for this; the next package replaces it. */
+interface AcceptorLaunched {
+  edits: AcceptorDataEdits;
+  warning?: AlertContent;
+}
 
 /** The async decode's outcome: pending while it runs, an error message on a bad
  * or expired invitation, or the validated invitation ready to review. Mirrors the
@@ -76,6 +122,10 @@ function fileSizeLabel(sizeBytes: number): string {
 export function AcceptorBench() {
   const [decode, setDecode] = useState<DecodeState>({ status: "pending" });
   const [step, setStep] = useState<AcceptorStep>("review");
+  // The columns-step sub-section: the confirm surface, or the Cleaning tab the
+  // Customize rail group navigates to. Only meaningful while `step` is `columns`.
+  const [columnsSection, setColumnsSection] =
+    useState<AcceptorColumnsSection>("columns");
   // The consent gate's two inputs; the file is held as an unparsed handle until
   // "Accept and continue" fires and passes the gate.
   const [consented, setConsented] = useState(false);
@@ -85,6 +135,14 @@ export function AcceptorBench() {
   const [rejectionMessage, setRejectionMessage] = useState<string>();
   const [parseAlert, setParseAlert] = useState<IntakeAlert>();
   const [parsing, setParsing] = useState(false);
+  // The acceptor's own parsed CSV, stored on a passing parse (not discarded) so the
+  // columns step and its verdict derive from it; and the layered column-step editor
+  // state (metadata + override layers), seeded once from the acquired columns.
+  const [acquired, setAcquired] = useState<AcceptorAcquiredCsv>();
+  const [columnsState, setColumnsState] = useState<AcceptorColumnsState>();
+  // The launched exchange (the assembled edits + optional advisory); rendering the
+  // minimal run stub the next package replaces.
+  const [launched, setLaunched] = useState<AcceptorLaunched>();
 
   // Decode the fragment token once, failing closed: an empty fragment, a bad
   // checksum/schema, an expired token, or a non-WebRTC endpoint each throws in
@@ -129,14 +187,15 @@ export function AcceptorBench() {
     else if (decode.status === "error") errorRef.current?.focus();
   }, [decode.status, step]);
 
-  // Moving between the consent and columns steps replaces the work column, so
-  // focus is sent to the incoming h1 (they carry tabIndex -1) or a screen-reader
-  // user is left on a control that no longer exists. Skipped on mount and on the
-  // review step, whose focus the decode effect above owns.
+  // Moving to the consent step replaces the work column, so focus is sent to the
+  // incoming h1 (it carries tabIndex -1) or a screen-reader user is left on a control
+  // that no longer exists. Skipped on mount and on the review step (the decode effect
+  // owns its focus); the columns, cleaning, and launched surfaces each focus their
+  // own heading on entry, so this effect covers only the consent step.
   const stepHeadingRef = useRef<HTMLDivElement>(null);
   const mounted = useRef(false);
   useEffect(() => {
-    if (mounted.current && step !== "review")
+    if (mounted.current && step === "consent")
       stepHeadingRef.current?.querySelector("h1")?.focus();
     mounted.current = true;
   }, [step]);
@@ -218,6 +277,16 @@ export function AcceptorBench() {
         setParseAlert(unnameableColumnsAlert(emptyPositions));
         return;
       }
+      // Store the parsed CSV (not discard it) and seed the columns-step editor from
+      // its columns; the verdict and launch payload derive from this state.
+      setAcquired({
+        fileName: file.name,
+        sizeBytes: file.size,
+        columns,
+        rawRows: result.data,
+      });
+      setColumnsState(acceptorInitialColumnsState(columns));
+      setColumnsSection("columns");
       setStep("columns");
     } catch (error) {
       if (id !== parseId.current) return;
@@ -234,23 +303,87 @@ export function AcceptorBench() {
 
   const ready = decode.status === "ready";
   const token = ready ? decode.invitation.token : undefined;
+  const linkageTerms = token?.linkageTerms;
 
-  const spineSteps: Array<RailStep> = acceptorSpine(step).map((entry) => ({
-    label: entry.label,
-    state: entry.state,
-    onSelect: entry.navigable ? () => setStep(entry.step) : undefined,
-  }));
+  // The effective { metadata, standardization } the verdict and launch both consume,
+  // derived from the columns-step state exactly as PrepareData derives it (see
+  // acceptorColumnsEditorState). Undefined until a file is acquired.
+  const editorState =
+    columnsState !== undefined &&
+    acquired !== undefined &&
+    linkageTerms !== undefined
+      ? acceptorColumnsEditorState(columnsState, linkageTerms, acquired.rawRows)
+      : undefined;
+  const verdict =
+    editorState !== undefined &&
+    acquired !== undefined &&
+    linkageTerms !== undefined
+      ? acceptorVerdict(acquired.columns, linkageTerms, editorState)
+      : undefined;
 
-  const rail = (
-    <Rail label="Accept an invitation">
-      <RailGroup label="Accept an invitation">
-        <RailSteps steps={spineSteps} />
-      </RailGroup>
-      <RailGroup label="Customize">
-        <RailFacts facts={acceptorRailFacts()} />
-      </RailGroup>
-    </Rail>
+  // Full-CSV coverage for the cleaning tab and the rail's Cleaning-attention value,
+  // one sweep shared by both. The hook must run every render, so it takes empty
+  // inputs until a file is acquired.
+  const { rates, pending: ratesPending } = useNonEmptyRates(
+    acquired?.rawRows ?? EMPTY_ROWS,
+    editorState?.standardization ?? EMPTY_STANDARDIZATION,
   );
+  const cleaningAttention =
+    editorState !== undefined && verdict !== undefined
+      ? acceptorCleaningAttention(
+          editorState.standardization,
+          rates,
+          verdict.deadKeyCount,
+        )
+      : undefined;
+
+  const spineSteps: Array<RailStep> =
+    step === "launched"
+      ? []
+      : acceptorSpine(step).map((entry) => ({
+          label: entry.label,
+          state: entry.state,
+          onSelect: entry.navigable
+            ? () => {
+                setColumnsSection("columns");
+                setStep(entry.step);
+              }
+            : undefined,
+        }));
+
+  const rail =
+    step === "launched" ? (
+      <Rail label="Exchange progress">
+        <RailGroup label="This exchange" note="Browser">
+          <RailSteps
+            steps={[{ label: "Exchange in progress", state: "current" }]}
+          />
+        </RailGroup>
+      </Rail>
+    ) : (
+      <Rail label="Accept an invitation">
+        <RailGroup label="Accept an invitation">
+          <RailSteps steps={spineSteps} />
+        </RailGroup>
+        <RailGroup label="Customize">
+          <RailFacts
+            facts={acceptorRailFacts(cleaningAttention?.railValue).map(
+              (fact) => ({
+                ...fact,
+                // The Cleaning tab is reachable only once a file is acquired (the
+                // columns step exists). Selecting it navigates the columns
+                // sub-section, as InviterBench mounts its CleaningTab.
+                onSelect:
+                  editorState !== undefined && step === "columns"
+                    ? () => setColumnsSection("cleaning")
+                    : undefined,
+                current: step === "columns" && columnsSection === "cleaning",
+              }),
+            )}
+          />
+        </RailGroup>
+      </Rail>
+    );
 
   const ledger =
     token === undefined ? undefined : (
@@ -272,7 +405,11 @@ export function AcceptorBench() {
             row.value
           ),
         }))}
-        footer={ACCEPTOR_LEDGER_FOOTER}
+        footer={
+          step === "columns"
+            ? ACCEPTOR_COLUMNS_LEDGER_FOOTER
+            : ACCEPTOR_LEDGER_FOOTER
+        }
       />
     );
 
@@ -280,6 +417,70 @@ export function AcceptorBench() {
     consented,
     name: acceptorName,
   });
+
+  // The columns-step edit callbacks over the shared layered state, ported from
+  // PrepareData: a metadata edit replaces the metadata layer; a remap re-roles the
+  // chosen column for matching (setColumnTypeForMatching, forcing role linkage, not a
+  // bare retype); a cleaning edit sets an override layer; reset returns to the seed.
+  const changeMetadata = (next: Metadata) =>
+    setColumnsState((prev) =>
+      prev === undefined ? prev : { ...prev, metadata: next },
+    );
+  const remapColumn = (type: SemanticType, columnName: string) =>
+    setColumnsState((prev) =>
+      prev === undefined
+        ? prev
+        : {
+            ...prev,
+            metadata: setColumnTypeForMatching(prev.metadata, columnName, type),
+          },
+    );
+  const setFieldSteps = (output: string, steps: Array<StandardizationStep>) => {
+    const input = editorState?.standardization.find(
+      (transformation) => transformation.output === output,
+    )?.input;
+    if (input === undefined) return;
+    setColumnsState((prev) =>
+      prev === undefined
+        ? prev
+        : {
+            ...prev,
+            stepOverrides: new Map<string, FieldStepOverride>(
+              prev.stepOverrides,
+            ).set(output, { input, steps }),
+          },
+    );
+  };
+  const setFieldInput = (output: string, column: string) =>
+    setColumnsState((prev) =>
+      prev === undefined
+        ? prev
+        : {
+            ...prev,
+            inputOverrides: new Map<string, string>(prev.inputOverrides).set(
+              output,
+              column,
+            ),
+          },
+    );
+  const resetColumns = () =>
+    setColumnsState((prev) =>
+      prev === undefined || acquired === undefined
+        ? prev
+        : acceptorInitialColumnsState(acquired.columns),
+    );
+  const launchExchange = () => {
+    if (verdict === undefined || editorState === undefined) return;
+    setLaunched(acceptorLaunchPayload(verdict, editorState));
+    setStep("launched");
+  };
+
+  const cleaningResetKey =
+    editorState?.standardization
+      .map(
+        (transformation) => `${transformation.output}=${transformation.input}`,
+      )
+      .join(",") ?? "";
 
   return (
     <BenchShell rail={ready ? rail : undefined} ledger={ledger}>
@@ -440,17 +641,82 @@ export function AcceptorBench() {
             </div>
           </>
         )}
-        {decode.status === "ready" && step === "columns" && (
-          <>
-            <p className={styles.eyebrow}>Step 3 of 3</p>
-            <h1 tabIndex={-1}>Confirm your columns</h1>
-            <p className={`${styles.small} ${styles.sub}`}>
-              This step is the next package: it confirms which of your columns
-              map to the agreed matching keys, then runs the exchange.
-            </p>
-          </>
+        {decode.status === "ready" &&
+          step === "columns" &&
+          columnsSection === "columns" &&
+          acquired !== undefined &&
+          columnsState !== undefined &&
+          editorState !== undefined &&
+          verdict !== undefined &&
+          linkageTerms !== undefined && (
+            <AcceptorColumnsStep
+              linkageTerms={linkageTerms}
+              columns={acquired.columns}
+              columnsState={columnsState}
+              editorState={editorState}
+              verdict={verdict}
+              onMetadataChange={changeMetadata}
+              onRemap={remapColumn}
+              onReset={resetColumns}
+              onLaunch={launchExchange}
+              onBack={() => setStep("consent")}
+            />
+          )}
+        {decode.status === "ready" &&
+          step === "columns" &&
+          columnsSection === "cleaning" &&
+          acquired !== undefined &&
+          editorState !== undefined &&
+          verdict !== undefined &&
+          linkageTerms !== undefined && (
+            <AcceptorCleaningStep
+              declaredFields={linkageTerms.linkageFields}
+              metadata={editorState.metadata}
+              standardization={editorState.standardization}
+              rawRows={acquired.rawRows}
+              rates={rates}
+              ratesPending={ratesPending}
+              deadKeyCount={verdict.deadKeyCount}
+              cleaningResetKey={cleaningResetKey}
+              onFieldSteps={setFieldSteps}
+              onFieldInput={setFieldInput}
+              onReset={resetColumns}
+              onBack={() => setColumnsSection("columns")}
+            />
+          )}
+        {decode.status === "ready" && step === "launched" && (
+          <AcceptorRunStub warning={launched?.warning} />
         )}
       </div>
     </BenchShell>
+  );
+}
+
+/**
+ * The minimal run stub the columns step commits to on launch: a heading placeholder
+ * the next package replaces with the real exchange screen. It carries the launched
+ * partial-coverage advisory forward so the warning the gate raised stays visible.
+ */
+function AcceptorRunStub({ warning }: { warning?: AlertContent }) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
+  return (
+    <>
+      <h1 tabIndex={-1} ref={headingRef}>
+        Exchange in progress
+      </h1>
+      {warning !== undefined && (
+        <Alert
+          color="yellow"
+          icon={<IconAlertCircle aria-hidden />}
+          title={warning.title}
+          mt="md"
+        >
+          {warning.message}
+        </Alert>
+      )}
+    </>
   );
 }

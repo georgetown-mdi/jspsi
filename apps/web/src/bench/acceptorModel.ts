@@ -21,19 +21,23 @@ import type { RailFact, RailStepState } from "./Rail";
  * the model never re-derives that escaping.
  */
 
-/** The acceptor spine's three steps, in order. `columns` is the confirm step a
- * later package fills; this slice stubs it. */
-export type AcceptorStep = "review" | "consent" | "columns";
+/** The acceptor's three spine steps, in order -- the steps the rail walks. */
+export type AcceptorSpineStepName = "review" | "consent" | "columns";
+
+/** The acceptor's working states: the three spine steps plus the terminal `launched`
+ * state the columns step commits to (a minimal run stub the next package replaces).
+ * `launched` is not a spine step -- the rail switches to the run timeline there. */
+export type AcceptorStep = AcceptorSpineStepName | "launched";
 
 /** The spine step labels, exactly as the mockup names them. */
-export const ACCEPTOR_STEP_LABELS: Record<AcceptorStep, string> = {
+export const ACCEPTOR_STEP_LABELS: Record<AcceptorSpineStepName, string> = {
   review: "Review terms",
   consent: "Consent & your file",
   columns: "Confirm your columns",
 };
 
 /** The spine order the rail renders and the step-state derivation walks. */
-export const ACCEPTOR_STEP_ORDER: ReadonlyArray<AcceptorStep> = [
+export const ACCEPTOR_STEP_ORDER: ReadonlyArray<AcceptorSpineStepName> = [
   "review",
   "consent",
   "columns",
@@ -43,7 +47,7 @@ export const ACCEPTOR_STEP_ORDER: ReadonlyArray<AcceptorStep> = [
  * is navigable back (a done step is, per the mockup's done-steps-are-links
  * rule). */
 export interface AcceptorSpineStep {
-  step: AcceptorStep;
+  step: AcceptorSpineStepName;
   label: string;
   state: RailStepState;
   navigable: boolean;
@@ -53,9 +57,12 @@ export interface AcceptorSpineStep {
  * Derive the spine's done/current/pending states for the step the acceptor is
  * on: steps before the current one are done (and navigable back), the current
  * one is current, and later ones are pending -- the inviterModel spine pattern,
- * over the acceptor's fixed three-step order.
+ * over the acceptor's fixed three-step order. Only the spine steps are passed; the
+ * terminal `launched` state swaps the rail for the run timeline instead.
  */
-export function acceptorSpine(current: AcceptorStep): Array<AcceptorSpineStep> {
+export function acceptorSpine(
+  current: AcceptorSpineStepName,
+): Array<AcceptorSpineStep> {
   const currentPosition = ACCEPTOR_STEP_ORDER.indexOf(current);
   return ACCEPTOR_STEP_ORDER.map((step, position) => {
     const state: RailStepState =
@@ -73,11 +80,19 @@ export function acceptorSpine(current: AcceptorStep): Array<AcceptorSpineStep> {
   });
 }
 
-/** The Customize group's single fact for this slice: a Cleaning tab whose value
- * is the em-dash placeholder until the columns package wires its attention
- * state. Renders like the inviter's quiet facts. */
-export function acceptorRailFacts(): Array<RailFact> {
-  return [{ label: "Cleaning" }];
+/** The Customize group's single fact: a Cleaning tab whose value is the em-dash
+ * placeholder until the columns step surfaces a reason to review cleaning
+ * (silent-empty fields, dead keys, invalid steps), then an amber attention value
+ * naming the count. Renders like the inviter's quiet facts. `attention` is the
+ * derived fact string (undefined -> em-dash); its presence colors the row amber. */
+export function acceptorRailFacts(attention?: string): Array<RailFact> {
+  return [
+    {
+      label: "Cleaning",
+      fact: attention,
+      tone: attention === undefined ? undefined : "attention",
+    },
+  ];
 }
 
 /**
@@ -108,6 +123,12 @@ export interface AcceptorLedgerRow {
 export const ACCEPTOR_LEDGER_FOOTER =
   "These terms are your partner's proposal, read-only. Accepting never sends " +
   "more than this ledger names.";
+
+/** The step-3 ledger footer, swapped in on the columns step: local-only column
+ * typing and cleaning, stated exactly as the mockup. */
+export const ACCEPTOR_COLUMNS_LEDGER_FOOTER =
+  "Column typing and cleaning stay on your device. Your partner sees matches, " +
+  "never these settings.";
 
 /** The ledger tag naming who proposed the terms, with the partner's
  * self-asserted name sanitized for display. */

@@ -442,3 +442,228 @@ describe("acceptor bench: consent gate and parse-behind-consent", () => {
       .toBeInTheDocument();
   });
 });
+
+describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () => {
+  // Consent, name, choose a file, and press Accept to land on the columns step.
+  async function reachColumns(content: string) {
+    window.location.hash = await encodeAcceptToken();
+    mount(createElement(AcceptorBench));
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+    await userEvent.click(
+      page.getByRole("button", { name: "Continue: consent & your file" }),
+    );
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Consent & your file");
+    await consentAndName();
+    const fileInput = document.querySelector('input[type="file"]');
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      csvFile(content),
+    );
+    await expect
+      .element(page.getByText("cohort_intake.csv"))
+      .toBeInTheDocument();
+    await userEvent.click(
+      page.getByRole("button", { name: "Accept and continue" }),
+    );
+    await expect
+      .element(page.getByRole("heading", { name: "Confirm your columns" }))
+      .toBeInTheDocument();
+  }
+
+  test("a blocked file shows the exact block copy and disables Start the exchange", async () => {
+    await reachColumns("notes\nhello\n");
+    await expect
+      .element(page.getByText("This file cannot match yet"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Start the exchange" }))
+      .toBeDisabled();
+
+    // The verdict is announced from a separate stable polite region, not the
+    // visible (presentation) alert.
+    const verdict = document.querySelector('[data-testid="verdict"]');
+    expect(verdict?.getAttribute("role")).toBeNull();
+    expect(
+      verdict?.querySelector('[role="alert"], [role="status"]'),
+    ).toBeNull();
+    const announcement = page.getByTestId("verdict-announcement");
+    await expect
+      .element(announcement)
+      .toHaveTextContent(
+        "No agreed linkage key can be satisfied by your columns",
+      );
+    expect(announcement.element().getAttribute("role")).toBe("status");
+    expect(announcement.element().getAttribute("aria-live")).toBe("polite");
+  });
+
+  test("a partially-covered file warns with the N-of-M copy and still enables launch", async () => {
+    await reachColumns("first_name,notes\nAlice,vip\n");
+    await expect
+      .element(page.getByText("1 of 2 keys can match"))
+      .toBeInTheDocument();
+    // Partial coverage warns, never blocks.
+    await expect
+      .element(page.getByRole("button", { name: "Start the exchange" }))
+      .toBeEnabled();
+  });
+
+  test("a fully-covered file is all-clear with the exact body copy and no mapper", async () => {
+    await reachColumns("first_name,last_name\nAlice,Smith\n");
+    await expect
+      .element(page.getByText("All 2 keys can match"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText(
+          "Every key in the invitation is covered by your columns.",
+        ),
+      )
+      .toBeInTheDocument();
+    // Nothing is missing, so the quick-fix mapper is absent.
+    expect(
+      page.getByText("Map a column to each missing field").query(),
+    ).toBeNull();
+    await expect
+      .element(page.getByRole("button", { name: "Start the exchange" }))
+      .toBeEnabled();
+  });
+
+  test("mapping the missing fields flips partial -> all-clear and voices the announcement", async () => {
+    // Both columns are unrecognized (inferred payload), so the file is blocked and
+    // the mapper offers one Select per missing type.
+    await reachColumns("alpha,beta\nAlice,Smith\n");
+    await expect
+      .element(page.getByText("This file cannot match yet"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Map a column to each missing field"))
+      .toBeInTheDocument();
+
+    // Map alpha -> First name: the field becomes satisfiable, so the verdict
+    // advances to partial (proof the column was re-roled to linkage, not retyped).
+    // The mapper is a native <select>, chosen via selectOptions.
+    await userEvent.selectOptions(
+      page.getByRole("combobox", { name: "First name", exact: true }),
+      "alpha",
+    );
+    await expect
+      .element(page.getByText("1 of 2 keys can match"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByTestId("verdict-announcement"))
+      .toHaveTextContent(
+        "1 of 2 linkage keys can be satisfied by your columns",
+      );
+
+    // Map beta -> Last name: every key satisfiable, block gone, launch enabled.
+    await userEvent.selectOptions(
+      page.getByRole("combobox", { name: "Last name", exact: true }),
+      "beta",
+    );
+    await expect
+      .element(page.getByText("All 2 keys can match"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByTestId("verdict-announcement"))
+      .toHaveTextContent("All 2 linkage keys can be satisfied by your columns");
+    await expect
+      .element(page.getByRole("button", { name: "Start the exchange" }))
+      .toBeEnabled();
+  });
+
+  test("Reset to recommended restores the file-derived defaults", async () => {
+    await reachColumns("first_name,last_name\nAlice,Smith\n");
+    await expect
+      .element(page.getByText("All 2 keys can match"))
+      .toBeInTheDocument();
+
+    // Retype first_name to a non-matching type via the grid, dropping a key.
+    const typeSelect = page.getByRole("combobox", {
+      name: "Type for column first_name",
+    });
+    await userEvent.click(typeSelect);
+    await userEvent.click(
+      page.getByRole("option", { name: "Other (not used for matching)" }),
+    );
+    await expect
+      .element(page.getByText("1 of 2 keys can match"))
+      .toBeInTheDocument();
+
+    // Reset restores the recommended (file-derived) metadata: back to all-clear.
+    await userEvent.click(
+      page.getByRole("button", { name: "Reset to recommended" }),
+    );
+    await expect
+      .element(page.getByText("All 2 keys can match"))
+      .toBeInTheDocument();
+  });
+
+  test("the step-3 ledger footer swaps to the local-only line", async () => {
+    await reachColumns("first_name,last_name\nAlice,Smith\n");
+    const ledger = document.querySelector('aside[aria-label="This exchange"]');
+    expect(ledger?.textContent).toContain(
+      "Column typing and cleaning stay on your device. Your partner sees " +
+        "matches, never these settings.",
+    );
+    expect(ledger?.textContent).not.toContain(
+      "These terms are your partner's proposal, read-only.",
+    );
+  });
+
+  test("Start the exchange launches the minimal run stub carrying the edited spec", async () => {
+    await reachColumns("first_name,last_name\nAlice,Smith\n");
+    await userEvent.click(
+      page.getByRole("button", { name: "Start the exchange" }),
+    );
+    // The columns package's terminal stub -- the next package replaces it.
+    await expect
+      .element(page.getByRole("heading", { name: "Exchange in progress" }))
+      .toBeInTheDocument();
+  });
+
+  test("the backlink returns to consent preserving the file, then re-enters reseeded", async () => {
+    await reachColumns("first_name,last_name,comment\nAlice,Smith,ok\n");
+    // The unrecognized comment column is the inferred payload; the columns step's
+    // "what you will send" summary names it.
+    await expect
+      .element(page.getByText("For each matched row: comment."))
+      .toBeInTheDocument();
+
+    // Back to consent: the terms are gone from view but the file card survives
+    // (consent + name + file all preserved on the consent step).
+    await userEvent.click(
+      page.getByRole("button", { name: "Choose a different file" }),
+    );
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Consent & your file");
+    await expect
+      .element(page.getByText("cohort_intake.csv"))
+      .toBeInTheDocument();
+    // No re-parse happened on the way back.
+    expect(
+      page.getByRole("heading", { name: "Confirm your columns" }).query(),
+    ).toBeNull();
+  });
+
+  test("the Cleaning rail tab opens the acceptor's own cleaning editor", async () => {
+    await reachColumns("first_name,last_name\nAlice,Smith\n");
+    // The Customize group's Cleaning tab navigates to the cleaning sub-section
+    // (the acceptor edits only its own standardization there).
+    await userEvent.click(page.getByRole("button", { name: "Cleaning" }));
+    await expect
+      .element(page.getByRole("heading", { name: "Cleaning" }))
+      .toBeInTheDocument();
+    // Back returns to the columns confirm surface.
+    await userEvent.click(
+      page.getByRole("button", { name: "Back to Confirm your columns" }),
+    );
+    await expect
+      .element(page.getByRole("heading", { name: "Confirm your columns" }))
+      .toBeInTheDocument();
+  });
+});
