@@ -1,17 +1,36 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
-import { UsageError } from "@psilink/core";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import {
+  encodeInvitation,
+  getDefaultLinkageTerms,
+  UsageError,
+} from "@psilink/core";
+import type { InvitationToken } from "@psilink/core";
 import {
   buildRotatedKeyFile,
   checkKeyFileExpiry,
   loadKeyFile,
+  provisionKeyFileFromInvitation,
   saveKeyFile,
 } from "../../src/keyFile";
 
 // 43-char base64url token satisfying the sharedSecret format constraint.
 const TOKEN = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+// A distinct 43-char base64url secret, to prove the provisioned key carries the
+// token's secret rather than a coincidental default.
+const INVITE_SECRET = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM";
+
+function inviteToken(expires?: string): InvitationToken {
+  return {
+    version: "1",
+    linkageTerms: getDefaultLinkageTerms("Inviter Org"),
+    sharedSecret: INVITE_SECRET,
+    expires,
+  };
+}
 
 let dir: string;
 
@@ -131,6 +150,79 @@ test("saveKeyFile rejects a malformed sharedSecret before writing to disk", () =
     "base64url-encoded 32-byte value",
   );
   // No file should have been written.
+  expect(fs.existsSync(keyPath)).toBe(false);
+});
+
+// --- provisionKeyFileFromInvitation ------------------------------------------
+
+test("provisionKeyFileFromInvitation writes the token's secret and expiry, owner-only", async () => {
+  // The inviter-side (composing-party) copy carries BOTH the shared secret and
+  // the invitation's expiry -- matching `psilink invite`, contrast accept's copy
+  // which strips the expiry. Owner-only permissions match saveKeyFile's write.
+  const keyPath = path.join(dir, ".psilink.key");
+  const expires = new Date(Date.now() + 3_600_000).toISOString();
+  const encoded = await encodeInvitation(inviteToken(expires));
+  await provisionKeyFileFromInvitation(encoded, keyPath);
+  const key = loadKeyFile(keyPath);
+  expect(key?.sharedSecret).toBe(INVITE_SECRET);
+  expect(key?.expires).toBe(expires);
+  if (process.platform !== "win32")
+    expect(fs.statSync(keyPath).mode & 0o777).toBe(0o600);
+});
+
+test("provisionKeyFileFromInvitation resolves an @path invitation reference", async () => {
+  // The @-file form (`--invitation @code.txt`) reads the code from a file so it
+  // stays out of shell history; the resolved code provisions identically.
+  const keyPath = path.join(dir, ".psilink.key");
+  const codePath = path.join(dir, "code.txt");
+  const encoded = await encodeInvitation(inviteToken());
+  fs.writeFileSync(codePath, `${encoded}\n`);
+  await provisionKeyFileFromInvitation(`@${codePath}`, keyPath);
+  expect(loadKeyFile(keyPath)?.sharedSecret).toBe(INVITE_SECRET);
+});
+
+test("provisionKeyFileFromInvitation errors when a key file already exists and leaves it untouched", async () => {
+  // A pre-existing key file is a clean, actionable error, never an overwrite:
+  // the secret rotates after the first exchange, so re-supplying the original
+  // code must not resurrect a stale secret.
+  const keyPath = path.join(dir, ".psilink.key");
+  const existing = JSON.stringify({ sharedSecret: TOKEN }) + "\n";
+  fs.writeFileSync(keyPath, existing);
+  const encoded = await encodeInvitation(inviteToken());
+  await expect(
+    provisionKeyFileFromInvitation(encoded, keyPath),
+  ).rejects.toBeInstanceOf(UsageError);
+  await expect(
+    provisionKeyFileFromInvitation(encoded, keyPath),
+  ).rejects.toThrow("already exists");
+  // The pre-existing file is byte-for-byte unchanged.
+  expect(fs.readFileSync(keyPath, "utf8")).toBe(existing);
+});
+
+test("provisionKeyFileFromInvitation fails closed on a malformed code, writing nothing", async () => {
+  const keyPath = path.join(dir, ".psilink.key");
+  await expect(
+    provisionKeyFileFromInvitation("not-a-valid-invitation", keyPath),
+  ).rejects.toBeInstanceOf(UsageError);
+  expect(fs.existsSync(keyPath)).toBe(false);
+});
+
+test("provisionKeyFileFromInvitation fails closed on an expired code, writing nothing", async () => {
+  const keyPath = path.join(dir, ".psilink.key");
+  const realNow = Date.now();
+  const expires = new Date(realNow + 60_000).toISOString();
+  // Encode while still in the future (encodeInvitation requires it), then advance
+  // past the expiry so the decode rejects it by name.
+  const encoded = await encodeInvitation(inviteToken(expires));
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date(realNow + 120_000));
+    await expect(
+      provisionKeyFileFromInvitation(encoded, keyPath),
+    ).rejects.toThrow(expires);
+  } finally {
+    vi.useRealTimers();
+  }
   expect(fs.existsSync(keyPath)).toBe(false);
 });
 

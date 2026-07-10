@@ -7,8 +7,6 @@ import {
   describeDecodeError,
   deriveAcceptedLinkageTerms,
   getLogger,
-  decodeInvitation,
-  isInvitationExpired,
   parseExchangeSpec,
   sanitizeForDisplay,
   UsageError,
@@ -28,7 +26,7 @@ import {
 } from "../config";
 import { detectFileConflicts } from "../fileUtils";
 import { parseSensitiveYaml } from "../sensitiveFile";
-import { resolveAtSignRefs } from "../util/atSignRefs";
+import { decodeAndValidateInvitation } from "../invitationDecode";
 import { configureLogging, promptConfirm, runOrExit } from "../util/cli";
 import { resolveRecordOutput } from "../recordFile";
 import {
@@ -167,47 +165,7 @@ export function resolveAcceptPositionals(positionals: Array<unknown>):
 
 // --- Invitation decode + validation ------------------------------------------
 
-/**
- * Resolve an `@path` reference, decode the invitation (verifying the 4-byte
- * checksum and the Zod schema), and reject an expired token by name. All
- * failures are raised as {@link UsageError} (so the CLI exits 64) and -- being
- * thrown before any prompt -- guarantee the user is never asked to accept an
- * invitation that did not validate.
- *
- * @internal exported for testing
- */
-export async function decodeAndValidateInvitation(
-  rawArg: string,
-): Promise<InvitationToken> {
-  let encoded: unknown;
-  try {
-    encoded = resolveAtSignRefs(rawArg);
-  } catch (err) {
-    throw new UsageError(
-      `could not read invitation from ${rawArg}: ` +
-        (err instanceof Error ? err.message : String(err)),
-    );
-  }
-  if (typeof encoded !== "string")
-    throw new UsageError("invitation must be a string");
-
-  let token: InvitationToken;
-  try {
-    token = await decodeInvitation(encoded);
-  } catch (err) {
-    throw new UsageError(
-      "invalid invitation string: " + describeDecodeError(err),
-    );
-  }
-
-  if (isInvitationExpired(token.expires))
-    throw new UsageError(
-      `invitation expired at ${token.expires}; ask your partner for a new ` +
-        "invitation",
-    );
-
-  return token;
-}
+export { decodeAndValidateInvitation } from "../invitationDecode";
 
 // --- Display -----------------------------------------------------------------
 
