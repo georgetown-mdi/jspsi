@@ -257,9 +257,19 @@ function parseDateFactory(params: Params): StandardizingFn {
 
     if (!parts.YYYY || !parts.MM || !parts.DD) return null;
 
-    // Reject calendar-invalid dates (e.g. month 13).
-    const asDate = new Date(`${parts.YYYY}-${parts.MM}-${parts.DD}`);
-    if (isNaN(asDate.getTime())) return null;
+    // The ISO-string Date constructor rolls an out-of-range day/month over
+    // (e.g. Feb 29 in a non-leap year becomes Mar 1) instead of returning an
+    // Invalid Date, so isNaN alone would accept it; round-trip the parsed UTC
+    // components back against the input to catch rollover, matching
+    // isValidStandardizedDate.
+    const asDate = new Date(`${parts.YYYY}-${parts.MM}-${parts.DD}T00:00:00Z`);
+    if (
+      isNaN(asDate.getTime()) ||
+      asDate.getUTCFullYear() !== Number(parts.YYYY) ||
+      asDate.getUTCMonth() + 1 !== Number(parts.MM) ||
+      asDate.getUTCDate() !== Number(parts.DD)
+    )
+      return null;
 
     return outputFormat
       .replace("YYYY", parts.YYYY)
