@@ -31,7 +31,7 @@ import {
   type MessageConnection,
 } from "../src/connection/messageConnection";
 import type { AssociationTable } from "../src/types";
-import { sortAssociationTable } from "./utils/associationTable";
+import { sortAssociationTable } from "../src/testing";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 
 const psiLibrary = await PSI();

@@ -48,7 +48,7 @@ const UNBOUNDED_PSI_ELEMENTS = {
   response: Number.POSITIVE_INFINITY,
 };
 
-// Mirrors test/utils/associationTable.ts. Normal sort orders the pairs by the
+// Mirrors sortAssociationTable in src/testing.ts. Normal sort orders the pairs by the
 // local index (value[0]); reverse sort orders them by the partner index
 // (value[1]) and keeps the local index alongside, so a joiner sorted in reverse
 // lines up index-for-index with a starter sorted normally.

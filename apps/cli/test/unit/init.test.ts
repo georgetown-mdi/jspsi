@@ -26,7 +26,7 @@ import {
   handler as initHandler,
   resolveInitInput,
 } from "../../src/commands/init";
-import { buildDataSpec, loadInputRows } from "../../src/commands/bootstrap";
+import { buildDataSpec, loadInputRows } from "../../src/onlineBootstrap";
 import { streamOf, ttyStream, withStdin } from "../stdinStream";
 
 // promptConfirm is mocked so the handler's interactive overwrite branch is

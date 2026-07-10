@@ -5,7 +5,7 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
 import { PSIParticipant } from "../src/participant";
 import { createMessagePipe } from "../src/connection/messageConnection";
-import { sortAssociationTable } from "./utils/associationTable";
+import { sortAssociationTable } from "../src/testing";
 import { loadNativeAddonOrSkip } from "./utils/nativeAddon";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 

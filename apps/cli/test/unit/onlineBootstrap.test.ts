@@ -27,12 +27,22 @@ import type {
 } from "@psilink/core";
 
 import {
+  connectionFromURL,
+  type RunnableConnectionConfig,
+} from "../../src/connectionFromUrl";
+import { diffConnectionAgainstTarget } from "../../src/reconcile";
+import {
+  connectionOverridesFrom,
+  parseCommonBootstrapArgs,
+  warnLowPollingFrequency,
+  warnOptionsOverridesIgnoredOffline,
+  warnServerOverridesIgnoredOffline,
+  warnUnsupportedFileSyncFlags,
+} from "../../src/optionDefinitions";
+import {
   applyEndpointSplitDirectories,
   buildDataSpec,
   connectionFromEndpoint,
-  connectionFromURL,
-  connectionOverridesFrom,
-  diffConnectionAgainstTarget,
   endpointFromConnection,
   generateSharedSecret,
   loadInputRows,
@@ -40,19 +50,12 @@ import {
   logOnlineBootstrapOutcome,
   looksLikeUrl,
   observedReceivedColumnsForSave,
-  parseCommonBootstrapArgs,
   parseLinkageStrategyFlag,
   runOnlineBootstrap,
-  runOrExit,
   singlePassDisclosureNotice,
-  warnLowPollingFrequency,
-  warnOptionsOverridesIgnoredOffline,
-  warnServerOverridesIgnoredOffline,
-  warnUnsupportedFileSyncFlags,
-  type RunnableConnectionConfig,
-} from "../../src/commands/bootstrap";
+} from "../../src/onlineBootstrap";
 import { redactUrlCredentials } from "../../src/util/connectionUrl";
-import { MAX_TIMEOUT_SECONDS } from "../../src/util/cli";
+import { MAX_TIMEOUT_SECONDS, runOrExit } from "../../src/util/cli";
 import { runProtocol } from "../../src/protocol";
 import { streamOf, ttyStream, withStdin } from "../stdinStream";
 

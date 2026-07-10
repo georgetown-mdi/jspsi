@@ -15,7 +15,6 @@ import {
   assessLinkageSatisfiability,
   getDefaultLinkageTerms,
   sanitizeErrorForDisplay,
-  sanitizeForDisplay,
 } from "@psilink/core";
 
 import { InvitationFileError, generateInvitation } from "@psi/invitation";
@@ -32,6 +31,7 @@ import { EXCHANGE_READING_WIDTH } from "@components/contentWidth";
 import { ExchangeView } from "@components/ExchangeView";
 import FileSelect from "@components/FileSelect";
 import { LinkageTermsEditor } from "@components/LinkageTermsEditor";
+import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 
 import type {
   CSVRow,
@@ -159,24 +159,7 @@ export function AdvancedInvite() {
       getDefaultLinkageTerms(name),
     );
     if (satisfiableKeyCount === 0) {
-      const detail =
-        unsatisfied.length > 0
-          ? " (missing: " +
-            unsatisfied
-              .map(
-                (f) =>
-                  `${sanitizeForDisplay(f.name)} (${sanitizeForDisplay(f.type)})`,
-              )
-              .join(", ") +
-            ")"
-          : "";
-      setError({
-        title: "This file cannot be linked",
-        message:
-          `Your CSV cannot satisfy any default linkage key${detail}. No ` +
-          "matches would be possible. Choose a file that includes columns for " +
-          "the required field types (for example name, date of birth, or SSN).",
-      });
+      setError(unlinkableFileAlert(unsatisfied));
       setPhase({ status: "acquire" });
       return;
     }

@@ -26,8 +26,8 @@ import {
 } from "../../src/commands/invite";
 import { saveConfig } from "../../src/config";
 import { MAX_TIMEOUT_SECONDS } from "../../src/util/cli";
-import { connectionFromEndpoint } from "../../src/commands/bootstrap";
-import type { CommonBootstrapOptions } from "../../src/commands/bootstrap";
+import { connectionFromEndpoint } from "../../src/onlineBootstrap";
+import type { CommonBootstrapOptions } from "../../src/optionDefinitions";
 
 const silentLog = getLogger("invite-test");
 silentLog.setLevel("silent");

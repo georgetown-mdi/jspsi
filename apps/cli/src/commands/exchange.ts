@@ -43,7 +43,7 @@ import {
   warnLowPollingFrequency,
   warnUnsupportedFileSyncFlags,
   type CommonBootstrapOptions,
-} from "./bootstrap";
+} from "../optionDefinitions";
 import { checkLinkageSatisfiability } from "./linkagePreflight";
 import { warnOnValueConstraints } from "./valueConstraintWarnings";
 import {

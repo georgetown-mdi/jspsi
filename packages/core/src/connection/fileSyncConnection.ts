@@ -1,15 +1,10 @@
 import * as z from "zod";
 import { default as EventEmitter } from "eventemitter3";
-import {
-  v4 as uuidv4,
-  validate as uuidValidate,
-  version as uuidVersion,
-} from "uuid";
+import { v4 as uuidv4 } from "uuid";
 
 import { getLoggerForVerbosity } from "../utils/logger";
 import { pathsResolveToSameDir } from "../utils/pathCompare";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay";
-import { toBase64Url, fromBase64Url, bytesEqual } from "../utils/crypto";
 import {
   parseBoundedJson,
   JsonStructureBoundError,
@@ -42,76 +37,44 @@ import {
   ADVERTISE_HELLO_RETRY_ATTEMPTS,
   cancellableDelay,
 } from "./fileSyncConstants";
+import {
+  HELLO_SUFFIX,
+  LOCK_SUFFIX,
+  JOINING_SUFFIX,
+  ABORT_SUFFIX,
+  parseMessageByteCount,
+  parseTimestampedMessageNNN,
+  ackMarkerName,
+  peerIdFromControlName,
+  isProtocolTempName,
+  isExpectedAbortName,
+  isProtocolGrammarName,
+  isRetainMessageAck,
+} from "./fileSyncNames";
+// Re-export the two grammar recognizers that were part of this module's public
+// surface before the grammar was split out to fileSyncNames.ts (which is not
+// barrelled by main.ts). This keeps them importable from `fileSyncConnection`
+// and in the package barrel exactly as before. isExpectedAbortName is also used
+// internally below (imported above); isAbortMarkerName is re-exported only.
+export { isAbortMarkerName, isExpectedAbortName } from "./fileSyncNames";
+import {
+  hostKeyBlob,
+  settleVerify,
+  SFTP_PROVIDER_OPTIONS_ALLOWLIST,
+  SFTP_ALGORITHMS_ALLOWED_SUBKEYS,
+} from "./sftpConnect";
+import type { PresentedHostKey } from "./sftpConnect";
+import { AbortMarkerSubsystem } from "./abortMarker";
+// Re-export PresentedHostKey, which was part of this module's public surface
+// before the SFTP connect/host-key concern was split out to sftpConnect.ts
+// (which main.ts does not barrel). This keeps it importable from
+// `fileSyncConnection` and in the package barrel exactly as before; it is also
+// used internally below (imported above as a type).
+export type { PresentedHostKey } from "./sftpConnect";
 import { MAX_FRAME_SIZE_BYTES } from "./frameSize";
 
 const errMessage = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
-
-// View an ssh2 hostVerifier `keyBlob` (a Node Buffer) as a Uint8Array over the
-// same bytes, the input type the sshHostKey primitives take. A Buffer is a
-// Uint8Array view onto a (possibly shared, pooled) ArrayBuffer, so the byteOffset
-// and byteLength must be carried through -- a bare `new Uint8Array(buf.buffer)`
-// would read the whole backing pool, not just this key. Shared by all three
-// host-key verifiers (enforce, fail-closed, capture).
-const hostKeyBlob = (keyBlob: Buffer): Uint8Array<ArrayBuffer> =>
-  new Uint8Array(
-    keyBlob.buffer as ArrayBuffer,
-    keyBlob.byteOffset,
-    keyBlob.byteLength,
-  );
-
-// Deliver an ssh2 hostVerifier verdict defensively. Our verifiers return
-// `undefined` (the void async IIFE), so ssh2 parks the handshake and waits for
-// this callback. If the handshake is torn down for an UNRELATED reason while our
-// async check is still pending -- ssh2's readyTimeout firing, or a socket error,
-// during the host-key hash/compare -- ssh2 has already destructed its protocol by
-// the time we call verify(); a late verify() then throws against the dead
-// protocol. The connection is already aborted, so the verdict is moot; swallow
-// the throw, because an escaped one would reject the void-ed IIFE and surface as
-// an unhandled promise rejection (a flaky test or stray process-level rejection),
-// never a wrong verdict. Shared by all three verifiers (enforce, fail-closed,
-// capture).
-const settleVerify = (
-  verify: (permitted: boolean) => void,
-  permitted: boolean,
-): void => {
-  try {
-    verify(permitted);
-  } catch {
-    // swallow: see settleVerify header
-  }
-};
-
-// Extracts the declared byte count from a message filename by reading the last
-// `-`-delimited segment before `.json`. Parsing is right-anchored so an id
-// containing hyphens (a UUID, or a configured peer id) cannot corrupt the
-// result regardless of how many segments precede the count. Returns undefined
-// when that segment is not a non-negative integer.
-const parseMessageByteCount = (name: string): number | undefined => {
-  const stem = name.slice(0, -".json".length);
-  const lastSegment = stem.slice(stem.lastIndexOf("-") + 1);
-  if (!/^\d+$/.test(lastSegment)) return undefined;
-  return Number(lastSegment);
-};
-
-// Right-anchored parse of the NNN (per-session sequence counter) from a
-// timestamped message filename (<id>-<ts>-<NNN>-<byteCount>.json). NNN is
-// the segment immediately before the terminal byte-count segment. Returns
-// undefined when the segment is not a non-negative integer.
-//
-// Caller contract: only meaningful for a timestamped filename, i.e. retain
-// mode, where timestampInFilename is always true. On a non-timestamped name
-// (<id>-<byteCount>.json) the segment before the byte count is part of the id,
-// so this returns a WRONG value rather than undefined. There is no runtime
-// guard (the sole caller, poll() in retain mode, satisfies the contract); a new
-// caller outside retain mode must check timestampInFilename itself.
-const parseTimestampedMessageNNN = (name: string): number | undefined => {
-  const stem = name.slice(0, -".json".length);
-  const withoutByteCount = stem.slice(0, stem.lastIndexOf("-"));
-  const nnnStr = withoutByteCount.slice(withoutByteCount.lastIndexOf("-") + 1);
-  if (!/^\d+$/.test(nnnStr)) return undefined;
-  return Number(nnnStr);
-};
 
 /**
  * Canonicalize a `filedrop` connection path to the form the connection uses on
@@ -132,23 +95,6 @@ export function normalizeFiledropPath(rawPath: string): string {
   const stripped = normalized.replace(/\/+$/, "");
   return /^[A-Za-z]:$/.test(stripped) ? stripped + "/" : stripped || "/";
 }
-
-// Builds the acknowledgment-marker name for the file `<originalName>.json`:
-// `<writerId>-<originalName>-ack.json`. The marker is the single construct that
-// signals "I durably received your file" on transports that cannot delete --
-// the lockless rendezvous ack (acking a peer hello) and the retain-mode message
-// ack (acking a consumed message). `originalName` is the acknowledged file's
-// name minus the `.json` extension.
-//
-// Construct-and-match only: ids may contain `-`, so a two-id marker name is not
-// reverse-parseable into its ids -- and never needs to be, because both ends
-// already hold the exact name of the acknowledged file (the receiver read it
-// from the listing; the author wrote it). The waiter builds the expected name
-// with this function and tests it against the listing; no site splits a marker
-// name back into ids. Routing keys only on the terminal `ack` segment, so the
-// name is safe even when an id contains `-` or equals the word "ack".
-const ackMarkerName = (writerId: string, originalName: string): string =>
-  `${writerId}-${originalName}-ack.json`;
 
 // Builds the terminal error for a transport await that outran the peer-inactivity
 // budget. `operation` names the call and its target (e.g. "file write to
@@ -306,219 +252,6 @@ const RETAIN_INSPECTION_POLL_CYCLES = 2;
 // (>5) approaches the peer timeout and gives no practical benefit.
 const MAX_CONSECUTIVE_ENOENT = 3;
 
-// Suffix shared by all hello files.
-const HELLO_SUFFIX = "-hello.json";
-
-// Suffix of the lock-mode tiebreaker file (`<peer1>-<peer2>-lock.json`). Named
-// for parity with HELLO_SUFFIX/JOINING_SUFFIX so the endsWith filter and both
-// name-construction sites stay in sync under a future rename. Its terminal
-// segment is the type word `lock` (never a `.lock` extension), so the grammar
-// discriminant excludes it from the message scan -- not all-digits -- the same
-// way it excludes hello and joining files.
-const LOCK_SUFFIX = "-lock.json";
-
-// Suffix of the lock-path joiner-arrival sentinel (`<id>-joining.json`). The
-// joiner publishes it before deleting the peer hello and renames it to its own
-// hello once that delete lands, so the peer can tell "joiner mid-arrival" from
-// "joiner crashed" across the window where the peer hello is gone but the
-// joiner hello is not yet written. The terminal segment is the type word
-// `joining` (never a `.joining` extension), so the grammar discriminant already
-// excludes it from the message scan (it is not all-digits).
-const JOINING_SUFFIX = "-joining.json";
-
-// Suffix of the authenticated cross-party abort marker (`<writerId>-abort.json`).
-// The terminal segment before `.json` is the type word `abort`, which is not
-// all-digits, so parseMessageByteCount returns undefined and the marker can
-// never be mis-consumed as a message -- an additive-grammar correctness
-// invariant. Named for parity with HELLO_SUFFIX/LOCK_SUFFIX/JOINING_SUFFIX.
-const ABORT_SUFFIX = "-abort.json";
-
-// Hard cap on the abort marker read. The envelope is ~80 bytes; 1 KiB is
-// generous slack. Deliberately NOT MAX_FRAME_SIZE_BYTES (~512 MB): the
-// recognizer is unconditional and the admin controls the bytes, and the marker
-// is re-read every poll cycle, so a large cap on an admin-plantable file would
-// be an availability vector. Both the pre-get() listed-size refusal and the
-// bounded get() use this.
-const ABORT_MARKER_MAX_BYTES = 1024;
-
-// Short per-operation budget (put + rename) for the abort marker write. The
-// marker write must NOT inherit boundTransport's fresh-peerTimeoutMs (default 1
-// hour) budget: a faulted write -- the sick-directory case the marker exists for
-// -- would otherwise hang teardown. The SFTP adapter self-bounds reads at ~60 s,
-// but the local-FS/filedrop adapter has no per-op bound, so the marker write
-// rides the 1h wrap there unless given its own short bound. A few seconds is
-// generous for an ~80-byte control file on a healthy transport and fast-fails a
-// sick one.
-const ABORT_MARKER_WRITE_BUDGET_MS = 5000;
-
-// Backstop grace bounding how long close() waits for the abort DECISION to
-// resolve (write vs seal) -- NOT a bound on the marker write. Modeled on
-// withTransportBudgetVoid: unref'd and resolve-on-timeout, so it neither hangs
-// close() nor holds a failing process open. Normally the decision resolves
-// sub-second: the orchestrator spends an exchange parked on receive(), so a
-// fault rejects that await and its catch runs writeAbortMarker() (or doCleanup
-// runs sealAbort()) right away, well inside the grace. The timeout is reached
-// only in the uncommon case where the orchestrator is busy with a long LOCAL
-// step (e.g. a large match) when the connection faults in the background, so it
-// does not observe the fault -- and thus does not resolve the decision -- within
-// the grace. That path is benign by construction, NOT a correctness gap: the
-// marker write is best-effort and every write op is bounded by
-// ABORT_MARKER_WRITE_BUDGET_MS, so however this close() interleaves with a late
-// catch (which may even find abortArmed already cleared and skip the write
-// entirely), the marker either lands or it does not, and a no-marker outcome
-// just degrades to the peer-silence hedge -- no interleaving corrupts state or
-// hangs. No finite grace can guarantee the catch always wins (a long-enough
-// local step beats any bound), and a longer grace only holds a failing process
-// open longer, so the bounded-grace-plus-best-effort-write trade is deliberate.
-// Once the decision IS "write", close() awaits the bounded write in FULL and
-// separately (the grace timer is already cleared by then), so the grace never
-// truncates an in-flight write whatever its value; reusing the write budget as
-// the magnitude is just a generous bound for the decision wait, not a coupling
-// to the write duration.
-const ABORT_DECISION_GRACE_MS = ABORT_MARKER_WRITE_BUDGET_MS;
-
-// Recovers the peer id from a `<id><suffix>` rendezvous control name (a hello or
-// a joining sentinel), returning undefined for any name that does not end with
-// `suffix` OR whose recovered id is empty (a bare `<suffix>`, e.g. `-hello.json`
-// or `-joining.json`). An empty recovered id is never a usable peer identity:
-// adopting it would commit rendezvous to peerId="", after which poll() treats
-// every "-"-prefixed file as a peer message and the lockless ack barrier waits
-// for an ack no honest peer writes -- a hang/abort an unauthenticated transport
-// would otherwise let any writer induce by planting a `-hello.json` mid-flight.
-// This is the single notion of "recovered peer id" shared by the entry guard
-// (isPeerHelloName) and every in-flight rendezvous scan, so the non-empty check
-// cannot be present at one slicing site while silently omitted at another (the
-// gap this hardens: the entry guard rejected an empty id, the in-flight scans
-// did not).
-const peerIdFromControlName = (
-  name: string,
-  suffix: string,
-): string | undefined => {
-  if (!name.endsWith(suffix)) return undefined;
-  const id = name.slice(0, -suffix.length);
-  return id.length > 0 ? id : undefined;
-};
-
-// True only for the protocol's OWN in-flight temp file: `temp-<uuidv4()>.tmp`,
-// the exact shape send() and writeAck() write (`temp-${uuidv4()}.tmp`,
-// independent of any id). Validating the stem as a v4 UUID is what lets every
-// other `temp-*.tmp` -- a foreign `temp-export.tmp`, an unrelated sync-tool
-// scratch file -- fall through to the foreign-file policy (tolerated) rather
-// than being deleted by the entry sweep. Matching any `temp-`/`.tmp` name would
-// destroy such a foreign file in a namespace collision; the v4-UUID validation
-// keeps the two notions of "foreign" (here and the foreign-file snapshot) in
-// agreement. uuidVersion() throws on a non-UUID stem, so the uuidValidate()
-// short-circuit must precede it.
-const isProtocolTempName = (name: string): boolean => {
-  if (!name.startsWith("temp-") || !name.endsWith(".tmp")) return false;
-  const stem = name.slice("temp-".length, -".tmp".length);
-  // Match ONLY the canonical lowercase form uuidv4() emits. The uuid package's
-  // validate() carries the /i flag, so without this guard a foreign
-  // temp-<UPPERCASE-but-valid-v4>.tmp would be accepted and swept -- a residual
-  // slice of the very namespace-collision data loss this narrowing removes.
-  // uuidv4() (uuid v14) always emits lowercase, so this rejects no name our own
-  // send()/writeAck() writes. toLowerCase() is locale-independent for a UUID's
-  // ASCII hex/hyphen, so there is no Turkish-I hazard.
-  if (stem !== stem.toLowerCase()) return false;
-  return uuidValidate(stem) && uuidVersion(stem) === 4;
-};
-
-// Grammar-level abort-marker recognizer: any `<id>-abort.json` by suffix, under
-// ANY id. Used by the entry guard's isProtocolGrammarName so a leftover abort
-// marker classifies as a protocol file -- handled by the recognize-and-sweep --
-// rather than failing the directory-clean check as a foreign file. Deliberately
-// broader than isExpectedAbortName; every name isExpectedAbortName accepts also
-// satisfies this (subset invariant, pinned by a unit test). Like the sibling
-// suffix checks in isProtocolGrammarName (HELLO/LOCK/JOINING), this is a bare
-// endsWith with no minimum-prefix guard, so the empty-prefix form `-abort.json`
-// is also grammar-recognized. That form is not sweepable -- isExpectedAbortName
-// and the entry sweep both require a non-empty id -- so it fails closed as an
-// unexpected protocol file (exit 64), the same fate as a bare `-hello.json`, and
-// is never a usable identity any honest party writes.
-export const isAbortMarkerName = (name: string): boolean =>
-  name.endsWith(ABORT_SUFFIX);
-
-// Exact-name abort-marker recognizer: true only for this party's or the peer's
-// marker. Used by the poll loop's isRecognizedLoopFile so the two expected
-// markers are tolerated (recognized, not unexpected) while a foreign
-// `<other>-abort.json` an admin might plant still hits the unexpected-files
-// policy -- exact-name keeps the unexpected-files exemption from silencing a
-// planted foreign marker.
-export const isExpectedAbortName = (
-  name: string,
-  selfId: string,
-  peerId: string,
-): boolean =>
-  name === `${selfId}${ABORT_SUFFIX}` || name === `${peerId}${ABORT_SUFFIX}`;
-
-// Classifies a filename against the protocol filename grammar: true for any
-// protocol artifact (an in-flight temp write, a hello, a lock, a joining
-// sentinel, an ack marker, an abort marker, or a message whose terminal segment
-// is a byte count), false for a "foreign" name that fails the grammar (a
-// conflict copy, a partial download, an unrelated file). This is the single
-// inverse of "foreign"
-// the entry guard and the foreign-file snapshot share, so a name cannot be both
-// snapshotted-as-foreign and a recognized protocol file -- which would silently
-// reintroduce the (rejected) reading where I0 tolerates message-shaped files at
-// entry. A message-shaped <id>-<digits>.json MATCHES here and is therefore a
-// protocol file, never foreign: at the no-flag entry guard it is an unexpected
-// protocol file (rejected), and under --sweep-exchange-files it is swept. A
-// `temp-*.tmp` whose stem is not a v4 UUID is NOT the protocol's temp shape
-// (isProtocolTempName), so it fails the grammar here and is treated as foreign.
-const isProtocolGrammarName = (name: string): boolean => {
-  if (isProtocolTempName(name)) return true;
-  if (!name.endsWith(".json")) return false;
-  if (
-    name.endsWith(HELLO_SUFFIX) ||
-    name.endsWith(LOCK_SUFFIX) ||
-    name.endsWith(JOINING_SUFFIX) ||
-    // Any -abort.json counts (isAbortMarkerName), under any id: a leftover abort
-    // marker is a protocol file, so the entry guard's recognize-and-sweep can
-    // handle it rather than the directory-clean check rejecting it as foreign.
-    isAbortMarkerName(name) ||
-    // Any -ack.json counts, deliberately broad: a foreign name that happens to
-    // end -ack.json is conservatively treated as a protocol file (rejected at
-    // the no-flag guard, swept under the flag) rather than tolerated as foreign.
-    // Erring toward protocol here is the safe side -- the inverse would let a
-    // stray ack-shaped name slip past the entry guard. (isRetainMessageAck below
-    // is the narrower, retain-signal-only test over this same suffix.)
-    name.endsWith("-ack.json")
-  )
-    return true;
-  return parseMessageByteCount(name) !== undefined;
-};
-
-// True for a name SHAPED like a retain-only message ack. A retain message is
-// always timestamped (<id>-<ts>-<NNN>-<byteCount>.json, since retain requires
-// timestamp_in_filename), so a genuine ack
-// <writerId>-<id>-<ts>-<NNN>-<byteCount>-ack.json ends in TWO all-digit dash
-// segments (the NNN and the byte count). Requiring both -- not just the byte
-// count -- trims the common foreign collisions (notes-5-ack.json,
-// report-2024-ack.json) and excludes a rendezvous hello-ack, which ends in
-// `-hello` and is written in lockless-delete mode too.
-//
-// This is a deliberately CONSERVATIVE heuristic, not a precise classifier: a
-// filename alone cannot prove writer-id structure, so a contrived foreign name
-// with two trailing digit segments (e.g. backup-100-200-ack.json) still
-// matches. That is acceptable. It errs toward refusing a DESTRUCTIVE sweep --
-// which the operator clears with --force-retain-sweep -- and the authoritative
-// retain signal is the peer hello's retain_files flag (read below), which a
-// retain directory always carries (I4b). So a miss here is harmless and a false
-// match only over-asks for confirmation; neither risks data. Tightening it
-// further chases false positives a filename can never fully exclude.
-const isRetainMessageAck = (name: string): boolean => {
-  if (!name.endsWith("-ack.json")) return false;
-  // Require at least two dash-separated segments and both trailing ones all
-  // digits. Split rather than walk lastIndexOf back twice: on a single-segment
-  // inner ("100") the arithmetic form mis-slices (slice(0, -1) -> "10") and
-  // wrongly matches; split yields ["100"], length < 2, correctly rejected.
-  const segments = name.slice(0, -"-ack.json".length).split("-");
-  if (segments.length < 2) return false;
-  const nnn = segments[segments.length - 2];
-  const byteCount = segments[segments.length - 1];
-  return /^\d+$/.test(nnn) && /^\d+$/.test(byteCount);
-};
-
 // Bounded window the lock-path peer waits for a joiner that has begun arriving
 // (its `<id>-joining.json` sentinel is visible) to finish renaming the sentinel
 // to its hello. The joiner's remaining work is one delete plus one rename --
@@ -662,6 +395,22 @@ interface Options {
   // surfaced in the public config; defaults to DEFAULT_JOINER_RECOVERY_MS.
   // Tests lower it to exercise the abort path without a real-time wait.
   joinerRecoveryMs: number;
+}
+
+// The path/display locals a single synchronize() call computes once at entry
+// (from this.path/this.outbound, narrowed by the connected guard) and threads
+// through its phase methods. Not instance state: each field is derived per
+// call, so passing this scope by value keeps the phases from re-deriving it and
+// from depending on the order in which the guards ran. `inboundPath` is where
+// this party reads the peer's files; `outboundPath` is where it writes its own
+// (they coincide in shared mode); `split` is true only with a separate outbound
+// directory; `dirsDisplay` is the operator-facing scope naming both halves in
+// split mode.
+interface RendezvousScope {
+  inboundPath: string;
+  outboundPath: string;
+  split: boolean;
+  dirsDisplay: string;
 }
 
 // Binary message-frame envelope. Every data-plane message file -- a JSON control
@@ -829,31 +578,6 @@ const getDefaultOptions = (): Options => {
   };
 };
 
-/**
- * The host key a server presented on the SFTP channel, as observed by
- * {@link FileSyncConnection.probeHostKeyFingerprint}. Both fields are public
- * (a host key and its fingerprint are not secret): the CLI surfaces them to the
- * operator on a first-use trust prompt and persists `fingerprint` as the pin.
- */
-export interface PresentedHostKey {
-  /**
-   * OpenSSH SHA256 fingerprint of the presented key, e.g. `SHA256:abc...xyz`,
-   * byte-identical to what `ssh-keygen -lf` prints and what
-   * `connection.server.host_key_fingerprint` pins.
-   */
-  fingerprint: string;
-  /**
-   * SSH key-type string decoded from the presented blob, e.g. `ssh-ed25519`.
-   * `(unknown)` when the blob is malformed (see {@link keyTypeFromBlob}).
-   *
-   * Server-controlled and stored UNsanitized: route it through
-   * {@link sanitizeForDisplay} before showing it to an operator (terminal, log),
-   * as a hostile server can put control/BIDI bytes in the key type. The sibling
-   * `fingerprint` is base64 and needs no escaping.
-   */
-  keyType: string;
-}
-
 export interface FileInfo {
   name: string;
   // Retained for downstream transport consumers; no longer used by the
@@ -941,78 +665,6 @@ export interface FileTransportClient {
   createExclusive: (path: string) => Promise<void>;
   exists: (remotePath: string) => Promise<boolean>;
 }
-
-// Everything writeAbortMarker() needs, captured by armAbort() post-handshake so
-// the write never reads this.path (which close() nulls during teardown). The
-// client is the raw, unwrapped transport: the marker write is short-bounded by
-// withTransportBudget directly (see ABORT_MARKER_WRITE_BUDGET_MS) rather than
-// riding boundTransport's 1h per-op budget.
-interface AbortWriteInputs {
-  path: string;
-  finalName: string;
-  // A Buffer, NOT a string: FileTransportClient.put treats a string src as a
-  // local file PATH to copy from (ssh2-sftp-client semantics; LocalFSClient
-  // rejects it outright), so every body this codebase writes is a Buffer or a
-  // header+payload chunk list -- hellos via serializeEnvelope, the zero-length
-  // ack, and this single-Buffer abort marker; only a data-plane message uses the
-  // two-chunk [header, payload] list (see send()). The marker body must be one of
-  // those or the write throws (and, being best-effort, is silently swallowed,
-  // leaving no marker); it is a single Buffer.
-  body: Buffer;
-  client: FileTransportClient;
-}
-
-/**
- * `ssh2-sftp-client` connect options an operator may set through the opaque
- * `connection.providerOptions` map for the SFTP channel. Default-deny: only
- * these non-security transport-tuning options pass through; every other key --
- * including ssh2's connection-target, credential, and host-key-verification
- * options, and any option a future ssh2 version adds -- is dropped (with a
- * warning), so `providerOptions` can never override the security-critical
- * connect options psilink derives from the operator's own `connection.server`
- * config. This closes a latent injection sink: were untrusted input ever routed
- * into `providerOptions`, it still could not redirect the host, swap
- * credentials, or disable host-key verification.
- *
- * An allowlist, not a forbid-list, because ssh2's security-sensitive option
- * surface is large and treacherous: `sock` redirects the connection without
- * touching `host`; `authHandler` re-supplies every credential as one callback;
- * `agent`/`agentForward` and `localHostname`/`localUsername` are non-obvious
- * auth vectors; `algorithms.serverHostKey` is sensitive but nested inside an
- * otherwise-benign object; and the set grows across ssh2 versions. A forbid-list
- * fails OPEN whenever it misses one of those (a silent override). The benign
- * tuning set named here is small and stable, so the allowlist fails CLOSED -- a
- * forgotten benign key is a visible, logged functional gap, never a silent
- * security regression.
- *
- * `readyTimeout` is intentionally excluded: psilink derives it from
- * `serverConnectTimeoutMs`, and the structured value must win. `algorithms` is
- * permitted but handled specially (see {@link FileSyncConnection.filterAlgorithms}),
- * filtered to its non-host-key sub-categories. See docs/EXCHANGE_REFERENCE.md
- * (`connection.provider_options`).
- */
-const SFTP_PROVIDER_OPTIONS_ALLOWLIST: ReadonlySet<string> = new Set([
-  "keepaliveInterval",
-  "keepaliveCountMax",
-  "strictVendor",
-  "algorithms",
-]);
-
-/**
- * Sub-categories of ssh2's `algorithms` option an operator may tune through
- * `providerOptions`. `serverHostKey` is deliberately excluded: it constrains
- * which host-key TYPES are accepted -- a host-key-trust decision -- so allowing
- * it would let the opaque map weaken host-key negotiation, exactly what
- * {@link SFTP_PROVIDER_OPTIONS_ALLOWLIST} exists to prevent. The categories here
- * (cipher / HMAC / key-exchange / compression) are transport tuning with no
- * host-identity bearing.
- */
-const SFTP_ALGORITHMS_ALLOWED_SUBKEYS: ReadonlySet<string> = new Set([
-  "cipher",
-  "hmac",
-  "kex",
-  "compress",
-]);
 
 /**
  * File-based rendezvous and message-passing connection. Implements the
@@ -1119,38 +771,27 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
 
   // The raw, unwrapped transport (this.client is its boundTransport wrap). Held
   // so the abort marker write can be short-bounded directly (see
-  // writeAbortMarker / ABORT_MARKER_WRITE_BUDGET_MS) instead of inheriting the
+  // writeAbortMarker / the abortMarker subsystem) instead of inheriting the
   // 1h per-op budget the wrap applies. It is the same underlying transport as
   // this.client, so what protects the marker write from client.end() killing it
   // is the await-before-end() ordering in close(), not this separate reference.
   private rawClient: FileTransportClient;
 
-  // Authenticated cross-party abort state, armed by armAbort() post-handshake
-  // (the only point with a session key) and cleared with the handshake identity
-  // it derives from (clearAbortState, at close() and the rendezvous recovery
-  // sites). The two tokens are role-derived, hence identity-scoped; they are NOT
-  // reset in resetSessionState (which resets only per-session message counters).
-  private selfAbortToken: Uint8Array<ArrayBuffer> | undefined;
-  private peerAbortToken: Uint8Array<ArrayBuffer> | undefined;
-  // Captured write inputs (immunizes the write against close()'s path/config
-  // nulling) and write idempotency/memoization.
-  private abortWriteInputs: AbortWriteInputs | undefined;
-  private abortMarkerWritten = false;
-  private pendingAbortWrite: Promise<void> | undefined;
-  // Abort-decision one-shot: resolves to "write" (writeAbortMarker pre-empts a
-  // later seal) or "seal" (no marker coming). close() parks on it before
-  // tearing down so a fault-path marker write riding the shared transport
-  // completes before client.end() destroys it. abortDecisionResolved is the
-  // gate the idempotent second/third close() reads to re-enter as a no-op.
-  private abortDecision: Promise<"write" | "seal"> | undefined;
-  private resolveAbortDecision: ((d: "write" | "seal") => void) | undefined;
-  private abortDecisionResolved = false;
+  // The authenticated cross-party abort-marker subsystem (armed post-handshake,
+  // cleared with the handshake identity). It owns the abort state (the two
+  // role-derived tokens, the captured write inputs, and the write-vs-seal
+  // decision one-shot) that this class used to hold inline; the delegating
+  // members below (armAbort / writeAbortMarker / sealAbort / abortArmed and the
+  // internal close()/poll() seams) forward to it, keeping the connection's
+  // public and test surface unchanged. See ./abortMarker and
+  // docs/spec/CHANNEL_SECURITY.md ("Authenticated abort marker").
+  private readonly abortMarker: AbortMarkerSubsystem;
 
   // True once armAbort() has run (derived, not stored): only an armed connection
   // writes or verifies abort markers. Read by the orchestrator's catch gate and
   // by close()/poll().
   get abortArmed(): boolean {
-    return this.selfAbortToken !== undefined;
+    return this.abortMarker.armed;
   }
 
   // Bound the next inbound frame the poll loop reads to `maxBytes`, replacing
@@ -1216,6 +857,16 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       `filesync-${this.id.substring(0, 8)}`,
       this.options.verbose,
     );
+    // Inject the transport-budget primitives (owned here, shared with
+    // boundTransport and close()'s drain) and the log/role accessors; the
+    // subsystem holds the rest of the abort state itself. `role` is read live so
+    // a post-construction role assignment is reflected in the marker's log lines.
+    this.abortMarker = new AbortMarkerSubsystem({
+      log: this.log,
+      role: () => this.role,
+      runBudgeted: withTransportBudget,
+      stalledError: transportBudgetExceededError,
+    });
   }
 
   // Override emit so that an error fired with no listener is retained rather
@@ -1935,118 +1586,38 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
    * Arms the authenticated cross-party abort marker, called by the orchestrator
    * once post-handshake with the two derived per-direction tokens (self = the
    * token written into `<myId>-abort.json` on a fault; peer = the token a
-   * `<peerId>-abort.json` is verified against). Captures everything the marker
-   * write needs NOW -- the directory path and a precomputed envelope body -- so
-   * the write never reads `this.path` (which close() nulls during teardown), and
-   * initializes the write-vs-seal decision one-shot the teardown sequencing
-   * parks on. Must be called after open() so a path is available; if it is not,
-   * the write degrades to a no-op rather than throwing.
+   * `<peerId>-abort.json` is verified against). Delegates to the abortMarker
+   * subsystem, threading this party's id and the current OUTBOUND write directory
+   * (the abort marker is a self-write; see the subsystem's arm() capture comment)
+   * plus the raw transport the short-bounded write rides. Must be called after
+   * open() so a path is available; if it is not, the write degrades to a no-op
+   * rather than throwing.
    */
   armAbort(
     selfToken: Uint8Array<ArrayBuffer>,
     peerToken: Uint8Array<ArrayBuffer>,
   ): void {
-    this.selfAbortToken = selfToken;
-    this.peerAbortToken = peerToken;
-    this.abortMarkerWritten = false;
-    this.abortDecisionResolved = false;
-    this.pendingAbortWrite = undefined;
-    this.abortDecision = new Promise<"write" | "seal">((resolve) => {
-      this.resolveAbortDecision = resolve;
-    });
-    // The abort marker is a self-write (`<myId>-abort.json`), so it is captured
-    // for the OUTBOUND directory; the peer reads its own `<peerId>-abort.json`
-    // from its inbound, which is this party's outbound. In shared mode this is
-    // just `path`.
-    const writeDir = this.outboundPath;
-    this.abortWriteInputs =
-      writeDir === undefined
-        ? undefined
-        : {
-            path: writeDir,
-            finalName: `${this.id}${ABORT_SUFFIX}`,
-            // The on-disk envelope: { version, token }. `version` is spelled out
-            // to match the full-word control-body convention (locklessRendezvous
-            // / retainFiles). ~80 bytes serialized. Buffer-wrapped (see
-            // AbortWriteInputs.body) so put() writes the bytes rather than
-            // treating the string as a source path.
-            body: Buffer.from(
-              JSON.stringify({
-                version: 1,
-                token: toBase64Url(selfToken),
-              }),
-              "utf-8",
-            ),
-            client: this.rawClient,
-          };
-  }
-
-  // Resolve the abort decision exactly once. The first caller wins: a catch-path
-  // writeAbortMarker() ("write") pre-empts the doCleanup seal ("seal"), and vice
-  // versa. abortDecisionResolved latches so the parked close() unblocks and the
-  // idempotent later close() re-enters as a no-op.
-  private resolveAbortDecisionOnce(decision: "write" | "seal"): void {
-    if (this.abortDecisionResolved) return;
-    this.abortDecisionResolved = true;
-    this.resolveAbortDecision?.(decision);
+    this.abortMarker.arm(
+      selfToken,
+      peerToken,
+      this.id,
+      this.outboundPath,
+      this.rawClient,
+    );
   }
 
   /**
    * Triggered by the orchestrator's catch on a terminal organic fault (directory
-   * still writable). Resolves the abort decision to "write" (pre-empting a later
-   * sealAbort) and memoizes the bounded marker write, returning the same promise
-   * to every caller -- the parked close() and the catch both await it. Idempotent
-   * and best-effort: a faulted write simply leaves no marker, and the peer falls
-   * back to the existing peer-silence hedge. Rejection is absorbed by both
-   * awaiters (close() must stay non-throwing).
+   * still writable). Delegates to the abortMarker subsystem, which resolves the
+   * abort decision to "write" (pre-empting a later sealAbort) and memoizes the
+   * bounded marker write, returning the same promise to every caller -- the
+   * parked close() and the catch both await it. Idempotent and best-effort: a
+   * faulted write simply leaves no marker, and the peer falls back to the
+   * existing peer-silence hedge. Rejection is absorbed by both awaiters (close()
+   * must stay non-throwing).
    */
   writeAbortMarker(): Promise<void> {
-    this.resolveAbortDecisionOnce("write");
-    if (this.pendingAbortWrite === undefined)
-      this.pendingAbortWrite = this.runAbortMarkerWrite();
-    return this.pendingAbortWrite;
-  }
-
-  // The actual temp-then-rename write (atomic appearance), short-bounded on BOTH
-  // ops so a sick directory cannot hang teardown. The marker is not tracked in
-  // responsibleFiles, so this party's own cleanup() never sweeps it and it
-  // persists for the peer to read. On timeout/failure (put succeeds but rename
-  // rejects) the budget rejects and the op is abandoned, leaving a temp-*.tmp.
-  // No safeDelete is attempted here: the next exchange's entry-time orphaned-temp
-  // sweep removes it (in BOTH modes -- that sweep is not retain-gated, since a
-  // temp is a failed in-flight write, never transcript), and that sweep runs at
-  // entry BEFORE any poll-loop unexpected-files policy, so the orphan never
-  // reaches the policy. Attempting a delete on the already-sick transport that
-  // just failed the rename would only add another bounded wait to teardown for no
-  // gain over the self-heal.
-  private async runAbortMarkerWrite(): Promise<void> {
-    const inputs = this.abortWriteInputs;
-    if (inputs === undefined || this.abortMarkerWritten) return;
-    const tempPath = `${inputs.path}/temp-${uuidv4()}.tmp`;
-    const finalPath = `${inputs.path}/${inputs.finalName}`;
-    await withTransportBudget(
-      inputs.client.put(inputs.body, tempPath, {
-        flags: "w",
-        encoding: "utf-8",
-      }),
-      ABORT_MARKER_WRITE_BUDGET_MS,
-      () =>
-        transportBudgetExceededError(
-          `abort marker write to ${tempPath}`,
-          ABORT_MARKER_WRITE_BUDGET_MS,
-        ),
-    );
-    await withTransportBudget(
-      inputs.client.rename(tempPath, finalPath),
-      ABORT_MARKER_WRITE_BUDGET_MS,
-      () =>
-        transportBudgetExceededError(
-          `abort marker rename to ${finalPath}`,
-          ABORT_MARKER_WRITE_BUDGET_MS,
-        ),
-    );
-    this.abortMarkerWritten = true;
-    this.log.debug(`[${this.role}] wrote abort marker ${inputs.finalName}`);
+    return this.abortMarker.writeMarker();
   }
 
   /**
@@ -2058,45 +1629,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
    * (it just latches the resolution that the skipped close() gate never reads).
    */
   sealAbort(): void {
-    this.resolveAbortDecisionOnce("seal");
-  }
-
-  // Bounds close()'s wait for the abort decision. Resolves with the decision if
-  // it lands first, or "timeout" once the unref'd backstop grace elapses. The
-  // local `decision` reference is captured so a concurrent clearAbortState
-  // nulling this.abortDecision cannot strand this wait.
-  private awaitAbortDecisionOrGrace(): Promise<"write" | "seal" | "timeout"> {
-    const decision =
-      this.abortDecision ?? Promise.resolve<"write" | "seal">("seal");
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const grace = new Promise<"timeout">((resolve) => {
-      timer = setTimeout(() => resolve("timeout"), ABORT_DECISION_GRACE_MS);
-      timer.unref();
-    });
-    return Promise.race([decision.finally(() => clearTimeout(timer)), grace]);
-  }
-
-  // Clears the identity-scoped abort state, mirroring the peerId/handshakeRole
-  // clears: the tokens are role-derived, so they live and die with the handshake
-  // identity. Belt-and-suspenders -- the session-keyed token is the real
-  // cross-session barrier -- so the exact placement (close() and the two
-  // rendezvous recovery sites) is tidiness, not security.
-  //
-  // abortDecisionResolved is reset to false (its unarmed/initial value, the same
-  // value armAbort sets). This is safe even though false is also the close() gate's
-  // re-entry condition because every reader gates on abortArmed FIRST, and clearing
-  // selfAbortToken here makes abortArmed false -- so the cleared, unarmed state never
-  // re-enters the gate regardless of abortDecisionResolved. Any future reader of
-  // abortDecisionResolved must preserve that ordering (check abortArmed first).
-  private clearAbortState(): void {
-    this.selfAbortToken = undefined;
-    this.peerAbortToken = undefined;
-    this.abortWriteInputs = undefined;
-    this.abortMarkerWritten = false;
-    this.pendingAbortWrite = undefined;
-    this.abortDecision = undefined;
-    this.resolveAbortDecision = undefined;
-    this.abortDecisionResolved = false;
+    this.abortMarker.seal();
   }
 
   /**
@@ -2127,10 +1660,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // "write", await the bounded marker write IN FULL (rejection-safe -- close()
     // must stay non-throwing). The grace bounded only the wait for the decision
     // above, never this write -- the write carries its own per-op budget (see
-    // ABORT_DECISION_GRACE_MS). The await MUST precede client.end(): the marker write
-    // rides the same underlying transport, so an earlier end() would kill an
-    // in-flight write -- the captured abortWriteInputs immunize only against the
-    // path/config nulling, not against end(). Gated on abortArmed &&
+    // the marker write's own per-op budget). The await MUST precede client.end():
+    // the marker write rides the same underlying transport, so an earlier end()
+    // would kill an in-flight write -- the write inputs the abort subsystem captured
+    // at arm time immunize only
+    // against the path/config nulling, not against end(). Gated on abortArmed &&
     // decision-unresolved so the idempotent second/third close() from doCleanup
     // re-enters as a clean no-op. That no-op cannot race the write even though it
     // skips this await: the orchestrator's catch awaits writeAbortMarker() to
@@ -2140,10 +1674,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // teardown only in the fault window (process already failing); the
     // clean/echo/signal paths seal the decision in doCleanup before this runs, so
     // they proceed without the grace delay.
-    if (this.abortArmed && !this.abortDecisionResolved) {
-      const decision = await this.awaitAbortDecisionOrGrace();
-      if (decision === "write" && this.pendingAbortWrite !== undefined)
-        await this.pendingAbortWrite.catch(() => {
+    if (this.abortArmed && !this.abortMarker.decisionResolved) {
+      const decision = await this.abortMarker.awaitDecisionOrGrace();
+      const pendingWrite = this.abortMarker.pendingWrite;
+      if (decision === "write" && pendingWrite !== undefined)
+        await pendingWrite.catch(() => {
           /* best-effort; teardown proceeds regardless of write outcome */
         });
     }
@@ -2309,7 +1844,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // a new line, not an addition to an existing clear. resetSessionState resets
     // only per-session message counters, so the abort fields are cleared here
     // (and at the two rendezvous recovery sites), NOT there.
-    this.clearAbortState();
+    this.abortMarker.clear();
     this.resetSessionState();
   }
 
@@ -2576,6 +2111,33 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
    * listener will not observe a synchronize-time failure.
    */
   async synchronize() {
+    // Entry preconditions, cancellation re-arm, and the mode guards; returns the
+    // per-call path/display scope threaded through the phases below.
+    const scope = this.validateSynchronizeEntry();
+
+    // Scan and classify the entry directory (sweep orphaned temps and leftover
+    // abort markers, snapshot foreign files, then sweep-or-reject unexpected
+    // protocol files). Yields the at-most-one tolerated peer hello.
+    const peerHellos = await this.scanEntryDirectory(scope);
+
+    // This party's own hello is a self-write, so it goes to the outbound
+    // directory; the peer reads it from its inbound (which is this outbound). In
+    // shared mode outboundPath === inboundPath. The lock-mode branches that also
+    // reference helloPath only run in shared mode (split requires retain, which
+    // requires lockless), so routing it through outbound is correct there too.
+    const helloPath = `${scope.outboundPath}/${this.id}${HELLO_SUFFIX}`;
+
+    if (peerHellos.length === 1 && !this.options.locklessRendezvous) {
+      await this.rendezvousAsLockJoiner(peerHellos[0], helloPath);
+    } else {
+      await this.rendezvousViaHelloExchange(scope, helloPath);
+    }
+  }
+
+  // Entry preconditions for synchronize(): the connected/re-entry guards, the
+  // per-session cancellation re-arm, and the three mode guards, plus the
+  // entry-time log line. Returns the path/display scope the phases below thread.
+  private validateSynchronizeEntry(): RendezvousScope {
     if (!this.connected || this.path === undefined)
       throw new Error("not connected");
 
@@ -2656,6 +2218,18 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       );
 
     this.log.info(`[${this.role}] synchronizing at path ${dirsDisplay}`);
+
+    return { inboundPath, outboundPath, split, dirsDisplay };
+  }
+
+  // Scans and classifies the entry directory before rendezvous: sweeps orphaned
+  // in-flight temp writes and leftover abort markers, snapshots foreign files,
+  // and either sweeps every protocol file (--sweep-exchange-files) or rejects
+  // any unexpected protocol file. Returns the at-most-one tolerated peer hello.
+  private async scanEntryDirectory(
+    scope: RendezvousScope,
+  ): Promise<Array<FileInfo>> {
+    const { inboundPath, outboundPath, split, dirsDisplay } = scope;
 
     // Reset the foreign-file snapshot up front so it is rebuilt fresh on every
     // synchronize() entry even when the list() below throws: a failed entry must
@@ -2963,446 +2537,288 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         );
     }
 
-    // This party's own hello is a self-write, so it goes to the outbound
-    // directory; the peer reads it from its inbound (which is this outbound). In
-    // shared mode outboundPath === inboundPath. The lock-mode branches that also
-    // reference helloPath only run in shared mode (split requires retain, which
-    // requires lockless), so routing it through outbound is correct there too.
-    const helloPath = `${outboundPath}/${this.id}${HELLO_SUFFIX}`;
+    return peerHellos;
+  }
 
-    if (peerHellos.length === 1 && !this.options.locklessRendezvous) {
-      /**
-       * A list
-       * A hello
-       * B list
-       * B joining                       (sentinel carrying B's hello body)
-       * B delete A hello
-       * B rename joining -> B hello
-       * A list
-       * A delete B hello
-       *
-       * This is B.
-       */
+  // Lock-mode joiner fast-path: a single peer hello is already present and this
+  // party is in lock mode, so it arrives via a `<id>-joining.json` sentinel that
+  // carries its hello body, deletes the discovered peer hello, and renames the
+  // sentinel into place. Commits role/peerId only after both writes succeed.
+  //
+  //   A list
+  //   A hello
+  //   B list
+  //   B joining                       (sentinel carrying B's hello body)
+  //   B delete A hello
+  //   B rename joining -> B hello
+  //   A list
+  //   A delete B hello
+  //
+  // This is B.
+  private async rendezvousAsLockJoiner(
+    peerHello: FileInfo,
+    helloPath: string,
+  ): Promise<void> {
+    const otherFile = peerHello;
+    const otherPath = `${this.path}/${otherFile.name}`;
+    const peerId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
 
-      const otherFile = peerHellos[0];
-      const otherPath = `${this.path}/${otherFile.name}`;
-      const peerId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
+    this.log.debug(
+      `[joiner] arriving via ${this.id}${JOINING_SUFFIX} sentinel, ` +
+        `deleting discovered ${sanitizeForDisplay(otherFile.name)}`,
+    );
 
-      this.log.debug(
-        `[joiner] arriving via ${this.id}${JOINING_SUFFIX} sentinel, ` +
-          `deleting discovered ${sanitizeForDisplay(otherFile.name)}`,
-      );
+    // I5: read the peer hello body through the partial-sync gate before
+    // deleting it, validating the two required bilateral flags. open() sets
+    // timeToLive before synchronize() runs, so the non-null assertion is safe.
+    const peerEnvelope = await readControlFileWithGate(
+      this.client,
+      otherPath,
+      this.options.timeToLive!,
+      this.options.pollingFrequency,
+      HelloEnvelopeSchema,
+      this.abortController.signal,
+    );
 
-      // I5: read the peer hello body through the partial-sync gate before
-      // deleting it, validating the two required bilateral flags. open() sets
-      // timeToLive before synchronize() runs, so the non-null assertion is safe.
-      const peerEnvelope = await readControlFileWithGate(
-        this.client,
-        otherPath,
-        this.options.timeToLive!,
-        this.options.pollingFrequency,
-        HelloEnvelopeSchema,
-        this.abortController.signal,
-      );
-
-      // Bilateral flag check. A mismatch here means the peer runs a different
-      // rendezvous protocol than this (lock) party -- it is lockless, since
-      // only a lockless peer leaves its hello in place for a lock joiner to
-      // discover. For symmetric detection the joiner must write its own
-      // advertised hello BEFORE throwing (so the lockless peer reads it through
-      // its own peer-hello read and fails too) and must NOT delete the peer
-      // hello: both hellos are the directory's terminal state. The hello is
-      // left untracked so close()/cleanup() does not sweep it. This is
-      // detection, not negotiation -- neither side adapts to the other's mode.
-      const mismatch = this.bilateralMismatch(peerEnvelope);
-      if (mismatch) {
-        // Advertise our own hello so the lockless peer reads it and fails
-        // symmetrically. This is the one mismatch site that needs a NEW write at
-        // detection time, so it is the single point of asymmetric failure in the
-        // symmetric-detection guarantee: if the put fails at exactly this moment
-        // there is no durable advertisement for the peer to read -- whatever the
-        // write order -- and the peer degrades to the legacy peer-timeout. Retry
-        // the write up to a small bounded budget at the polling cadence to raise
-        // the odds it lands before the peer would otherwise time out (the peer is
-        // concurrently polling, so the advertisement need not arrive on the first
-        // try). It does not change detection -- see
-        // ADVERTISE_HELLO_RETRY_ATTEMPTS.
-        //
-        // Only after the budget is exhausted do we fall through to the
-        // log-and-degrade path. Whatever the write's outcome, THIS party still
-        // throws the genuine mismatch it detected (a UsageError, CLI exit 64):
-        // the retry must not let a transport rejection escape the catch-less
-        // joiner fast-path and mask the mismatch as a generic Error (exit 69).
-        // The mismatch is the actionable cause; the operator must fix the
-        // diverging flag regardless of the transport.
-        for (
-          let attempt = 1;
-          attempt <= ADVERTISE_HELLO_RETRY_ATTEMPTS;
-          attempt++
-        ) {
-          try {
-            await this.client.put(
-              serializeEnvelope(this.helloEnvelope()),
-              helloPath,
-              {
-                flags: "w",
-                encoding: "utf-8",
-              },
+    // Bilateral flag check. A mismatch here means the peer runs a different
+    // rendezvous protocol than this (lock) party -- it is lockless, since
+    // only a lockless peer leaves its hello in place for a lock joiner to
+    // discover. For symmetric detection the joiner must write its own
+    // advertised hello BEFORE throwing (so the lockless peer reads it through
+    // its own peer-hello read and fails too) and must NOT delete the peer
+    // hello: both hellos are the directory's terminal state. The hello is
+    // left untracked so close()/cleanup() does not sweep it. This is
+    // detection, not negotiation -- neither side adapts to the other's mode.
+    const mismatch = this.bilateralMismatch(peerEnvelope);
+    if (mismatch) {
+      // Advertise our own hello so the lockless peer reads it and fails
+      // symmetrically. This is the one mismatch site that needs a NEW write at
+      // detection time, so it is the single point of asymmetric failure in the
+      // symmetric-detection guarantee: if the put fails at exactly this moment
+      // there is no durable advertisement for the peer to read -- whatever the
+      // write order -- and the peer degrades to the legacy peer-timeout. Retry
+      // the write up to a small bounded budget at the polling cadence to raise
+      // the odds it lands before the peer would otherwise time out (the peer is
+      // concurrently polling, so the advertisement need not arrive on the first
+      // try). It does not change detection -- see
+      // ADVERTISE_HELLO_RETRY_ATTEMPTS.
+      //
+      // Only after the budget is exhausted do we fall through to the
+      // log-and-degrade path. Whatever the write's outcome, THIS party still
+      // throws the genuine mismatch it detected (a UsageError, CLI exit 64):
+      // the retry must not let a transport rejection escape the catch-less
+      // joiner fast-path and mask the mismatch as a generic Error (exit 69).
+      // The mismatch is the actionable cause; the operator must fix the
+      // diverging flag regardless of the transport.
+      for (
+        let attempt = 1;
+        attempt <= ADVERTISE_HELLO_RETRY_ATTEMPTS;
+        attempt++
+      ) {
+        try {
+          await this.client.put(
+            serializeEnvelope(this.helloEnvelope()),
+            helloPath,
+            {
+              flags: "w",
+              encoding: "utf-8",
+            },
+          );
+          break;
+        } catch (writeErr: unknown) {
+          // Label is the literal `joiner`, not `this.role`: the handshake role
+          // this party plays is fixed by reaching this lock-joiner branch, but
+          // `this.role` is not committed until rendezvous succeeds (below the
+          // mismatch gate), so it still holds "unknown role" here. This mirrors
+          // the `[joiner]`/`[starter]` literals used elsewhere in synchronize()
+          // before the role is committed.
+          if (attempt < ADVERTISE_HELLO_RETRY_ATTEMPTS) {
+            this.log.debug(
+              `[joiner] advertise-hello write failed (attempt ` +
+                `${attempt}/${ADVERTISE_HELLO_RETRY_ATTEMPTS}); retrying: ` +
+                `${sanitizeForDisplay(errMessage(writeErr))}`,
             );
-            break;
-          } catch (writeErr: unknown) {
-            // Label is the literal `joiner`, not `this.role`: the handshake role
-            // this party plays is fixed by reaching this lock-joiner branch, but
-            // `this.role` is not committed until rendezvous succeeds (below the
-            // mismatch gate), so it still holds "unknown role" here. This mirrors
-            // the `[joiner]`/`[starter]` literals used elsewhere in synchronize()
-            // before the role is committed.
-            if (attempt < ADVERTISE_HELLO_RETRY_ATTEMPTS) {
+            try {
+              await this.wait(this.options.pollingFrequency);
+            } catch {
+              // The only way this.wait rejects is an abort from a concurrent
+              // close() -- a plain delay never rejects -- so this catch cannot
+              // swallow a real put() failure (those are caught by the inner
+              // try and logged above). Stop retrying and fall through to the
+              // reset + `throw mismatch` below so the genuine
+              // BilateralModeMismatchError (exit 64) stays the surfaced root
+              // cause rather than the close's ConnectionClosedError (exit 69):
+              // the diverging flag is the actionable cause the operator must
+              // fix, and the close-during-mismatch case is unreachable except
+              // under a signal anyway (where neither code is the exit code).
+              // Log the cut-short retry so a close-during-mismatch is
+              // diagnosable in debug logs, mirroring the exhausted-budget
+              // path's degradation message in the else branch below.
               this.log.debug(
-                `[joiner] advertise-hello write failed (attempt ` +
-                  `${attempt}/${ADVERTISE_HELLO_RETRY_ATTEMPTS}); retrying: ` +
-                  `${sanitizeForDisplay(errMessage(writeErr))}`,
+                `[joiner] advertise-hello retry aborted by connection ` +
+                  `close after attempt ${attempt}/` +
+                  `${ADVERTISE_HELLO_RETRY_ATTEMPTS}; peer may time out ` +
+                  `instead of fast-failing`,
               );
-              try {
-                await this.wait(this.options.pollingFrequency);
-              } catch {
-                // The only way this.wait rejects is an abort from a concurrent
-                // close() -- a plain delay never rejects -- so this catch cannot
-                // swallow a real put() failure (those are caught by the inner
-                // try and logged above). Stop retrying and fall through to the
-                // reset + `throw mismatch` below so the genuine
-                // BilateralModeMismatchError (exit 64) stays the surfaced root
-                // cause rather than the close's ConnectionClosedError (exit 69):
-                // the diverging flag is the actionable cause the operator must
-                // fix, and the close-during-mismatch case is unreachable except
-                // under a signal anyway (where neither code is the exit code).
-                // Log the cut-short retry so a close-during-mismatch is
-                // diagnosable in debug logs, mirroring the exhausted-budget
-                // path's degradation message in the else branch below.
-                this.log.debug(
-                  `[joiner] advertise-hello retry aborted by connection ` +
-                    `close after attempt ${attempt}/` +
-                    `${ADVERTISE_HELLO_RETRY_ATTEMPTS}; peer may time out ` +
-                    `instead of fast-failing`,
-                );
-                break;
-              }
-            } else {
-              this.log.debug(
-                `[joiner] could not advertise hello on mismatch after ` +
-                  `${ADVERTISE_HELLO_RETRY_ATTEMPTS} attempts; peer may time out ` +
-                  `instead of fast-failing: ${sanitizeForDisplay(errMessage(writeErr))}`,
-              );
+              break;
             }
+          } else {
+            this.log.debug(
+              `[joiner] could not advertise hello on mismatch after ` +
+                `${ADVERTISE_HELLO_RETRY_ATTEMPTS} attempts; peer may time out ` +
+                `instead of fast-failing: ${sanitizeForDisplay(errMessage(writeErr))}`,
+            );
           }
         }
-        // Reset role/peer fields, mirroring the outer catch.
-        this.peerId = undefined;
-        this.role = "unknown role";
-        this.handshakeRole = undefined;
-        this.clearAbortState();
-        this.resetSessionState();
-        throw mismatch;
       }
+      // Reset role/peer fields, mirroring the outer catch.
+      this.peerId = undefined;
+      this.role = "unknown role";
+      this.handshakeRole = undefined;
+      this.abortMarker.clear();
+      this.resetSessionState();
+      throw mismatch;
+    }
 
-      // Sentinel-mediated arrival (closes the joiner partial-failure window).
-      // A bare delete(peer hello) then put(my hello) is observable as an
-      // inconsistent state: if the delete lands but the put fails, the peer's
-      // hello is gone and ours was never written, and the peer's waitForPeer
-      // cannot tell "joiner mid-write" from "joiner crashed" -- so it polls to
-      // the full peerTimeoutMs. Instead, publish a `<id>-joining.json` sentinel
-      // carrying our hello body, delete the peer hello, then rename the sentinel
-      // to our hello. The rename is atomic, so the sentinel exists across
-      // exactly the window where the peer hello may already be gone but our
-      // hello is not yet present, and the peer recognizes it as a wait signal
-      // (see waitForPeer). We never re-create the peer's hello on failure: that
-      // races the peer's next list() and can trip the two-hello collision check
-      // (I1).
-      const joiningName = `${this.id}${JOINING_SUFFIX}`;
-      const joiningPath = `${this.path}/${joiningName}`;
-      const helloName = `${this.id}${HELLO_SUFFIX}`;
-      try {
-        // The `!this.options.retainFiles` guards below match the file-wide
-        // responsibleFiles idiom (every mutation is `!retainFiles`-guarded, I4a);
-        // retain mode never reaches this lock joiner fast-path.
-        //
-        // The sentinel carries the hello body so the rename below yields a
-        // fully-valid `<id>-hello.json` the peer reads through its gate; the
-        // peer itself matches the sentinel by name existence and never reads it.
-        await this.client.put(
-          serializeEnvelope(this.helloEnvelope()),
-          joiningPath,
-          {
-            flags: "w",
-            encoding: "utf-8",
-          },
-        );
-        // Track the sentinel only until the peer hello is deleted: before that
-        // point a failure leaves the peer hello intact, so cleanup() may safely
-        // sweep the sentinel (the peer is no worse off than if we never
-        // started). The add follows the put with no throwable statement between,
-        // matching the hello write in the else branch.
-        if (!this.options.retainFiles) this.responsibleFiles.add(joiningName);
-
-        await this.client.delete(otherPath);
-
-        // The peer hello is now gone, so the sentinel is the peer's recovery
-        // signal and MUST survive a subsequent failure. Release it from
-        // responsibleFiles so a failure-path cleanup() (conn.close() in the
-        // caller's finally) leaves it on disk for the peer's bounded-window
-        // recovery -- and, if this process dies, for the next run's Phase 0
-        // guard to reject. A crashed joiner cannot clean up after itself; this
-        // is the "best-effort partial-state cleanup" contract.
-        if (!this.options.retainFiles)
-          this.responsibleFiles.delete(joiningName);
-
-        await this.client.rename(joiningPath, helloPath);
-        // The sentinel is now our hello: stop tracking the (gone) sentinel name
-        // and own the hello so cleanup() sweeps it at close().
-        if (!this.options.retainFiles) this.responsibleFiles.add(helloName);
-      } catch (err: unknown) {
-        // No resetSessionState() here: this.role, this.peerId,
-        // this.handshakeRole, and the sequence counters are all committed only
-        // after this try/catch (see below), so a throw leaves the connection in
-        // its pre-synchronize state with nothing to reset.
-        throw err instanceof Error ? err : new Error(errMessage(err));
-      }
-
-      // Commit role and peerId only after both writes have succeeded. If
-      // either write threw above, the connection stays in its
-      // pre-synchronize state: `this.peerId` remains undefined, so the
-      // "already synchronized" guard does not block a retry on the same
-      // instance, and `handshakeRole` does not point at a peer that may
-      // not actually exist.
-      if (
-        peerId.startsWith(this.id + "-") ||
-        this.id.startsWith(peerId + "-")
-      ) {
-        // Remove our hello before throwing: without this, a retry on the
-        // same path (or the same instance) would find the stale file and
-        // either mistake it for the peer's hello or trip the preexisting-
-        // file guard. The throw escapes synchronize() directly (the joiner
-        // fast-path has no enclosing catch), so no outer handler cleans up.
-        await this.client.safeDelete(helloPath);
-        if (!this.options.retainFiles) this.responsibleFiles.delete(helloName);
-        this.resetSessionState();
-        throw new Error(
-          `peer id '${sanitizeForDisplay(peerId)}' and this party's id ` +
-            `'${this.id}' share a prefix at a '-' boundary; ids must not be ` +
-            "prefix-extensions of each other (e.g. 'site' / 'site-2')",
-        );
-      }
-      this.handshakeRole = "initiator";
-      this.role = "joiner";
-      this.peerId = peerId;
-    } else {
-      /**
-       * Either
-       *
-       * A ~ B list
-       * A ~ B hello
-       * A list
-       * A lock
-       *
-       * or
-       *
-       * A ~ B list
-       * A ~ B hello
-       * A ~ B list
-       * A ~ B lock
-       *
-       * or (lockless mode, joiner fast-path bypassed):
-       *
-       * A list
-       * A hello
-       * B list (sees A hello)
-       * B hello (does not delete A hello)
-       * A ~ B ack-handshake barrier
-       */
-
-      this.log.debug(
-        `[${this.role}] creating initial ${this.id}${HELLO_SUFFIX}`,
-      );
+    // Sentinel-mediated arrival (closes the joiner partial-failure window).
+    // A bare delete(peer hello) then put(my hello) is observable as an
+    // inconsistent state: if the delete lands but the put fails, the peer's
+    // hello is gone and ours was never written, and the peer's waitForPeer
+    // cannot tell "joiner mid-write" from "joiner crashed" -- so it polls to
+    // the full peerTimeoutMs. Instead, publish a `<id>-joining.json` sentinel
+    // carrying our hello body, delete the peer hello, then rename the sentinel
+    // to our hello. The rename is atomic, so the sentinel exists across
+    // exactly the window where the peer hello may already be gone but our
+    // hello is not yet present, and the peer recognizes it as a wait signal
+    // (see waitForPeer). We never re-create the peer's hello on failure: that
+    // races the peer's next list() and can trip the two-hello collision check
+    // (I1).
+    const joiningName = `${this.id}${JOINING_SUFFIX}`;
+    const joiningPath = `${this.path}/${joiningName}`;
+    const helloName = `${this.id}${HELLO_SUFFIX}`;
+    try {
+      // The `!this.options.retainFiles` guards below match the file-wide
+      // responsibleFiles idiom (every mutation is `!retainFiles`-guarded, I4a);
+      // retain mode never reaches this lock joiner fast-path.
+      //
+      // The sentinel carries the hello body so the rename below yields a
+      // fully-valid `<id>-hello.json` the peer reads through its gate; the
+      // peer itself matches the sentinel by name existence and never reads it.
       await this.client.put(
         serializeEnvelope(this.helloEnvelope()),
-        helloPath,
+        joiningPath,
         {
           flags: "w",
           encoding: "utf-8",
         },
       );
-      if (!this.options.retainFiles)
-        this.responsibleFiles.add(`${this.id}${HELLO_SUFFIX}`);
-      let lockPath: string | undefined;
-      let ackPath: string | undefined;
+      // Track the sentinel only until the peer hello is deleted: before that
+      // point a failure leaves the peer hello intact, so cleanup() may safely
+      // sweep the sentinel (the peer is no worse off than if we never
+      // started). The add follows the put with no throwable statement between,
+      // matching the hello write in the else branch.
+      if (!this.options.retainFiles) this.responsibleFiles.add(joiningName);
 
-      const waitForPeer = async () => {
-        if (this.options.locklessRendezvous) {
-          // Lockless ack-handshake barrier: completes rendezvous using neither
-          // createExclusive nor delete. Each party writes a hello, then an ack
-          // on seeing the peer's hello, then completes when it sees the peer's
-          // ack. A peer hello already present before entering this loop (joiner
-          // fast-path bypassed) satisfies the condition on the first iteration.
-          //
-          // open() set timeToLive before synchronize() can run, so the
-          // non-null assertion is safe here.
-          while (Date.now() <= this.options.timeToLive!.getTime()) {
-            const currentFiles = await this.client.list(this.path!);
+      await this.client.delete(otherPath);
 
-            const fileNames = currentFiles.map((file) => file.name);
-            if (!this.options.retainFiles)
-              this.responsibleFiles.forEach((fileName) => {
-                if (!fileNames.includes(fileName))
-                  this.responsibleFiles.delete(fileName);
-              });
+      // The peer hello is now gone, so the sentinel is the peer's recovery
+      // signal and MUST survive a subsequent failure. Release it from
+      // responsibleFiles so a failure-path cleanup() (conn.close() in the
+      // caller's finally) leaves it on disk for the peer's bounded-window
+      // recovery -- and, if this process dies, for the next run's Phase 0
+      // guard to reject. A crashed joiner cannot clean up after itself; this
+      // is the "best-effort partial-state cleanup" contract.
+      if (!this.options.retainFiles) this.responsibleFiles.delete(joiningName);
 
-            // isPeerHelloName excludes our own hello and -- the defense this
-            // adds -- a bare `-hello.json` (empty id) injected after entry,
-            // which the previous endsWith-only filter would have adopted as
-            // peerId="".
-            const peerHellos = currentFiles.filter((file) =>
-              this.isPeerHelloName(file.name),
-            );
+      await this.client.rename(joiningPath, helloPath);
+      // The sentinel is now our hello: stop tracking the (gone) sentinel name
+      // and own the hello so cleanup() sweeps it at close().
+      if (!this.options.retainFiles) this.responsibleFiles.add(helloName);
+    } catch (err: unknown) {
+      // No resetSessionState() here: this.role, this.peerId,
+      // this.handshakeRole, and the sequence counters are all committed only
+      // after this try/catch (see below), so a throw leaves the connection in
+      // its pre-synchronize state with nothing to reset.
+      throw err instanceof Error ? err : new Error(errMessage(err));
+    }
 
-            if (peerHellos.length === 0) {
-              this.log.trace(`[${this.role}] no peer hello found; polling`);
-              await this.wait(this.options.pollingFrequency);
-              continue;
-            }
+    // Commit role and peerId only after both writes have succeeded. If
+    // either write threw above, the connection stays in its
+    // pre-synchronize state: `this.peerId` remains undefined, so the
+    // "already synchronized" guard does not block a retry on the same
+    // instance, and `handshakeRole` does not point at a peer that may
+    // not actually exist.
+    if (peerId.startsWith(this.id + "-") || this.id.startsWith(peerId + "-")) {
+      // Remove our hello before throwing: without this, a retry on the
+      // same path (or the same instance) would find the stale file and
+      // either mistake it for the peer's hello or trip the preexisting-
+      // file guard. The throw escapes synchronize() directly (the joiner
+      // fast-path has no enclosing catch), so no outer handler cleans up.
+      await this.client.safeDelete(helloPath);
+      if (!this.options.retainFiles) this.responsibleFiles.delete(helloName);
+      this.resetSessionState();
+      throw new Error(
+        `peer id '${sanitizeForDisplay(peerId)}' and this party's id ` +
+          `'${this.id}' share a prefix at a '-' boundary; ids must not be ` +
+          "prefix-extensions of each other (e.g. 'site' / 'site-2')",
+      );
+    }
+    this.handshakeRole = "initiator";
+    this.role = "joiner";
+    this.peerId = peerId;
+  }
 
-            if (peerHellos.length > 1) {
-              throw new UsageError(
-                `more than one peer hello file in ${this.displayPath} - are there ` +
-                  "other sessions using this path?",
-              );
-            }
+  // Symmetric hello-exchange rendezvous: this party writes its own hello, then
+  // waits for the peer via either the lockless ack-handshake barrier or the lock
+  // poll loop (waitForPeer), committing role/peerId only on completion. Reached
+  // when the joiner fast-path does not apply -- no peer hello yet, or lockless
+  // mode -- covering every rendezvous shape below:
+  //
+  //   A ~ B list
+  //   A ~ B hello
+  //   A list
+  //   A lock
+  //
+  //   or
+  //
+  //   A ~ B list
+  //   A ~ B hello
+  //   A ~ B list
+  //   A ~ B lock
+  //
+  //   or (lockless mode, joiner fast-path bypassed):
+  //
+  //   A list
+  //   A hello
+  //   B list (sees A hello)
+  //   B hello (does not delete A hello)
+  //   A ~ B ack-handshake barrier
+  private async rendezvousViaHelloExchange(
+    scope: RendezvousScope,
+    helloPath: string,
+  ): Promise<void> {
+    const { outboundPath } = scope;
 
-            const peerHello = peerHellos[0];
-            const peerId = peerHello.name.slice(0, -HELLO_SUFFIX.length);
+    this.log.debug(`[${this.role}] creating initial ${this.id}${HELLO_SUFFIX}`);
+    await this.client.put(serializeEnvelope(this.helloEnvelope()), helloPath, {
+      flags: "w",
+      encoding: "utf-8",
+    });
+    if (!this.options.retainFiles)
+      this.responsibleFiles.add(`${this.id}${HELLO_SUFFIX}`);
+    let lockPath: string | undefined;
+    let ackPath: string | undefined;
 
-            // Write our ack once on the first sighting of the peer's hello.
-            if (ackPath === undefined) {
-              // I5: read the peer hello body through the partial-sync gate
-              // before writing our ack, so a truncated body is not treated as
-              // malformed and does not abort the handshake prematurely. The
-              // flag comparison runs on this peer-HELLO read, never the peer-ack
-              // read below.
-              const peerEnvelope = await readControlFileWithGate(
-                this.client,
-                `${this.path!}/${peerHello.name}`,
-                this.options.timeToLive!,
-                this.options.pollingFrequency,
-                HelloEnvelopeSchema,
-                this.abortController.signal,
-              );
-
-              // Bilateral flag check before writing our ack. On mismatch throw:
-              // our hello (written before this loop) stays via the outer catch's
-              // skip-sweep, so the peer reads it through its own peer-hello read
-              // and fails too. We do not write the ack, leaving both hellos as
-              // the directory's terminal state. Covers a retain_files mismatch
-              // (both parties lockless, both in this barrier) as well as a
-              // lockless_rendezvous mismatch (peer is a lock party that read our
-              // hello at its own two-hellos branch).
-              const mismatch = this.bilateralMismatch(peerEnvelope);
-              if (mismatch) throw mismatch;
-
-              // Acknowledge the peer's hello with a zero-length marker named
-              // after it (`<myId>-<peerHelloStem>-ack.json`). This is a
-              // self-write, so it goes to the outbound directory (the peer reads
-              // it from its inbound); in shared mode that is the inbound path.
-              // Published temp-then-rename so its final name never appears before
-              // the file exists; the peer matches it by name existence, never by
-              // reading a body.
-              const peerHelloStem = peerHello.name.slice(0, -".json".length);
-              this.log.debug(
-                `[${this.role}] writing handshake ack for ` +
-                  `${sanitizeForDisplay(peerHello.name)}`,
-              );
-              const ackName = await this.writeAck(outboundPath, peerHelloStem);
-              ackPath = `${outboundPath}/${ackName}`;
-              // Track after the durable rename (delete mode only; retain never
-              // sweeps) so cleanup() removes it at close(), exactly as the
-              // message write in send() does. Both publish temp-then-rename, so
-              // the final name only appears at the atomic rename and the add
-              // immediately follows it with no throwable statement between --
-              // unlike the lock/hello direct-writes, which pre-track because
-              // createExclusive can leave the final name on a throwing call.
-              // The in-flight temp-*.tmp is swept inline by writeAck.
-              if (!this.options.retainFiles) this.responsibleFiles.add(ackName);
-              // Re-enter the loop so hasPeerAck is checked against a fresh
-              // listing; the pre-ack-write snapshot from this iteration may
-              // miss a peer ack that arrived in the window between list() and
-              // the write, adding up to pollIntervalMs of unnecessary latency on
-              // slow-sync transports.
-              continue;
-            }
-
-            // Barrier completes when the peer's ack of THIS party's hello is
-            // visible in the current listing (always fresh because of the
-            // continue above). Construct the expected name from our own hello's
-            // stem and the peer id we already hold, then match by existence: the
-            // marker is zero-length, so its name appearing is completion and no
-            // body is read.
-            const myHelloName = `${this.id}${HELLO_SUFFIX}`;
-            const peerAckName = ackMarkerName(
-              peerId,
-              myHelloName.slice(0, -".json".length),
-            );
-            const hasPeerAck = currentFiles.some(
-              (file) => file.name === peerAckName,
-            );
-
-            if (!hasPeerAck) {
-              this.log.trace(
-                `[${this.role}] waiting for peer ack ` +
-                  `${sanitizeForDisplay(peerAckName)}`,
-              );
-              await this.wait(this.options.pollingFrequency);
-              continue;
-            }
-
-            // Peer ack confirmed -- commit roles and peerId as the last step,
-            // the same invariant as the joiner path (see above): if the ack
-            // write fails before this point, this.peerId stays undefined and
-            // the "already synchronized" guard allows a retry on this instance.
-            const arrivedFirst = `${this.id}${HELLO_SUFFIX}` < peerHello.name;
-            this.handshakeRole = arrivedFirst ? "responder" : "initiator";
-            this.role = arrivedFirst ? "starter" : "joiner";
-            this.peerId = peerId;
-
-            this.log.debug(
-              `[${this.role}] lockless rendezvous complete with ` +
-                `${sanitizeForDisplay(peerId)}`,
-            );
-
-            // Do NOT clear responsibleFiles: hello and ack remain so
-            // cleanup() can sweep them at close() time, the same as the
-            // lock-winner path.
-            return;
-          }
-
-          // No role tag: this lockless timeout can fire after the peer hello
-          // was seen and acked but the peer's return ack never arrived, where
-          // hello-filename order may make this party the joiner. The role is
-          // genuinely indeterminate here, so emit no `[role]` prefix (unlike
-          // the lock timeout below, which is reachable only as the lone
-          // starter).
-          throw new Error("synchronization has timed out");
-        }
-
-        // Lock path.
-        // Wall-clock instant this party first saw the joiner's mid-arrival
-        // sentinel, paired with the sentinel name it belongs to (both undefined
-        // when no sentinel is present). Bounds the joiner-recovery window below;
-        // reset whenever a peer hello appears, the sentinel disappears, or a
-        // sentinel with a different name takes its place, so a later or
-        // different joiner always starts a fresh window rather than inheriting
-        // an earlier one's deadline.
-        let joiningSeenAt: number | undefined;
-        let joiningSeenName: string | undefined;
-        // open() set timeToLive before synchronize() can run, so the non-null
-        // assertion is safe here.
+    const waitForPeer = async () => {
+      if (this.options.locklessRendezvous) {
+        // Lockless ack-handshake barrier: completes rendezvous using neither
+        // createExclusive nor delete. Each party writes a hello, then an ack
+        // on seeing the peer's hello, then completes when it sees the peer's
+        // ack. A peer hello already present before entering this loop (joiner
+        // fast-path bypassed) satisfies the condition on the first iteration.
+        //
+        // open() set timeToLive before synchronize() can run, so the
+        // non-null assertion is safe here.
         while (Date.now() <= this.options.timeToLive!.getTime()) {
           const currentFiles = await this.client.list(this.path!);
 
@@ -3413,531 +2829,686 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
                 this.responsibleFiles.delete(fileName);
             });
 
-          // isPeerHelloName excludes our own hello and a bare `-hello.json`
-          // (empty id) injected after entry, which the previous endsWith-only
-          // filter would have sliced to peerId="" at the role-commit sites below.
-          const otherFiles = currentFiles.filter((file) =>
+          // isPeerHelloName excludes our own hello and -- the defense this
+          // adds -- a bare `-hello.json` (empty id) injected after entry,
+          // which the previous endsWith-only filter would have adopted as
+          // peerId="".
+          const peerHellos = currentFiles.filter((file) =>
             this.isPeerHelloName(file.name),
           );
-          const theseFiles = currentFiles.filter(
-            (file) => file.name === `${this.id}${HELLO_SUFFIX}`,
-          );
-          const lockFiles = currentFiles.filter((file) =>
-            file.name.endsWith(LOCK_SUFFIX),
-          );
-          // A `<peerId>-joining.json` sentinel marks a joiner mid-arrival: it
-          // has begun the put(sentinel) -> delete(our hello) -> rename(sentinel
-          // -> its hello) sequence the lock joiner uses in place of a bare
-          // delete-then-put. Its presence is the signal that distinguishes a
-          // live-but-incomplete joiner from a crashed one, which a bare
-          // otherFiles.length === 0 cannot. isPeerJoiningName excludes a
-          // self-named sentinel (for symmetry with the hello filters, though the
-          // lock starter never writes one) and -- the defense this adds -- a bare
-          // `-joining.json` (empty id), so a planted empty-id sentinel does not
-          // start the joiner-recovery (joinerRecoveryMs) window below.
-          const joiningFiles = currentFiles.filter((file) =>
-            this.isPeerJoiningName(file.name),
-          );
 
-          if (otherFiles.length === 0) {
-            if (joiningFiles.length > 0) {
-              // Exactly one sentinel is the only valid mid-arrival state: one
-              // joiner, one starter, and the starter never writes a sentinel.
-              // A second is contamination from a third party, the same illegal
-              // state the multi-peer-hello and multi-lock guards below reject;
-              // surface it the same way rather than silently timing the first.
-              if (joiningFiles.length > 1) {
-                throw new UsageError(
-                  `more than one joining sentinel in ${this.displayPath} - are ` +
-                    "there other sessions using this path?",
-                );
-              }
-              // Joiner is mid-arrival. Wait a bounded recovery window for the
-              // rename to land -- the joiner then appears as a normal peer hello
-              // and the branches below take over. If the sentinel persists past
-              // the window, the joiner failed mid-arrival -- after writing the
-              // sentinel but before publishing its hello, on either side of the
-              // delete; abort with a distinct transport error (a plain Error,
-              // CLI exit 69) instead of polling to the full peer timeout. We do
-              // NOT re-create our own hello: that races the joiner's rename and
-              // could trip the two-hello collision check (I1).
-              const joiningName = joiningFiles[0].name;
-              const now = Date.now();
-              // Start (or restart) the window on the first sighting, or whenever
-              // the sentinel's name changes: a different peer id is a fresh
-              // arrival, not a continuation of the one being timed, so it must
-              // not inherit the earlier deadline. (Two distinct sentinel names
-              // in one rendezvous likewise require a dedicated-directory
-              // violation, but keying the timer to identity keeps that case from
-              // prematurely aborting a legitimate later joiner.)
-              if (
-                joiningSeenAt === undefined ||
-                joiningSeenName !== joiningName
-              ) {
-                joiningSeenAt = now;
-                joiningSeenName = joiningName;
-                this.log.debug(
-                  `[${this.role}] peer is mid-arrival ` +
-                    `(${sanitizeForDisplay(joiningName)}); awaiting completion`,
-                );
-              } else if (now - joiningSeenAt > this.options.joinerRecoveryMs) {
-                // The window is a lower bound, not exact: the check runs once
-                // per poll after a delay(), so the abort fires somewhere in
-                // (joinerRecoveryMs, joinerRecoveryMs + pollingFrequency]. That
-                // imprecision is deliberate -- this is a bounded recovery
-                // window, not a hard deadline, and one extra poll is immaterial
-                // against the 30 s default. The crash could be on either side
-                // of the joiner's delete, so the message names the bracketing
-                // operations rather than a single step. Labelled [starter]:
-                // this branch is reached only by the party that wrote its hello
-                // first and is waiting for a joiner -- the joiner takes the
-                // entry fast-path and never enters this loop -- even though
-                // `this.role` is not committed until rendezvous succeeds.
-                throw new Error(
-                  `[starter] peer began arriving ` +
-                    `(${sanitizeForDisplay(joiningName)}) but did ` +
-                    "not complete within the recovery window; it appears to " +
-                    "have failed after announcing its arrival but before " +
-                    "publishing its hello. Retry the exchange.",
-                );
-              }
-            } else {
-              // No sentinel: the joiner has not started, or a prior sighting
-              // vanished without producing a hello (only a crash mid-cleanup
-              // does this). Reset so a later sentinel starts a fresh window.
-              joiningSeenAt = undefined;
-              joiningSeenName = undefined;
-              this.log.trace(`[${this.role}] no peer hello found; polling`);
-            }
+          if (peerHellos.length === 0) {
+            this.log.trace(`[${this.role}] no peer hello found; polling`);
             await this.wait(this.options.pollingFrequency);
             continue;
           }
 
-          // A peer hello is present: the joiner's rename landed (or both
-          // parties wrote hellos), so the recovery timer is stale. A sentinel
-          // may still be visible here in exactly one benign case: the peer's
-          // own rename is mid-propagation on a sync-mediated transport, so its
-          // `<peerId>-joining.json` and `<peerId>-hello.json` momentarily
-          // coexist (the rename is atomic at the SFTP layer, not necessarily at
-          // the sync-tool layer). That same-id sentinel is the peer we are
-          // about to rendezvous with, so tolerate it. A sentinel whose id
-          // matches no peer hello is a third party in the directory -- the same
-          // contamination the multi-hello and multi-lock guards reject -- so
-          // surface it as a UsageError rather than completing against an
-          // inconsistent directory.
-          //
-          // No joiningFiles.length > 1 guard is needed here (unlike the
-          // otherFiles === 0 branch above): a sentinel that escapes the
-          // foreign-id check matches a present peer hello, so two such sentinels
-          // would require two distinct peer hellos -- already terminal under the
-          // otherFiles.length > 1 multi-peer-hello guard in the branches below,
-          // which fires before any role is committed.
-          const peerHelloIds = new Set(
-            otherFiles.map((file) => file.name.slice(0, -HELLO_SUFFIX.length)),
-          );
-          const foreignSentinel = joiningFiles.find(
-            (file) =>
-              !peerHelloIds.has(file.name.slice(0, -JOINING_SUFFIX.length)),
-          );
-          if (foreignSentinel) {
-            throw new UsageError(
-              `joining sentinel ${sanitizeForDisplay(foreignSentinel.name)} ` +
-                `in ${this.displayPath} ` +
-                "matches no peer hello - are there other sessions using " +
-                "this path?",
-            );
-          }
-          joiningSeenAt = undefined;
-          joiningSeenName = undefined;
-
-          if (lockFiles.length > 0) {
-            /**
-             * A ~ B list
-             * A ~ B hello
-             * A list
-             * A lock
-             * B list
-             * B delete A hello, B hello, lock
-             *
-             * This is B
-             */
-            if (lockFiles.length > 1) {
-              throw new UsageError(
-                "more than one lock file - are there other sessions using " +
-                  "this path?",
-              );
-            }
-            if (otherFiles.length !== 1) {
-              throw new UsageError(
-                "lock file detected but no peer hello - are there other " +
-                  "sessions using this path?",
-              );
-            }
-            if (theseFiles.length !== 1) {
-              throw new UsageError(
-                "lock file detected but no self hello - are there other " +
-                  "sessions using this path?",
-              );
-            }
-
-            const lockFile = lockFiles[0];
-            const otherFile = otherFiles[0];
-            const thisFile = theseFiles[0];
-
-            const thisId = thisFile.name.slice(0, -HELLO_SUFFIX.length);
-            const otherId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
-
-            // Use hello filename order -- the same tiebreak the lock producer
-            // uses (I7) -- to reconstruct the expected lock name. Do NOT fall
-            // back to a raw `thisId < otherId` compare: for ids where one is a
-            // prefix of the other (e.g. "Agency" / "Agency A"), space (U+0020)
-            // sorts before "-" (U+002D), so hello-filename order and id-order
-            // can diverge, causing a false "lock does not reference this
-            // connection" throw that UUID tests would never catch.
-            const arrivedFirst = thisFile.name < otherFile.name;
-            const expectedLockName = arrivedFirst
-              ? `${thisId}-${otherId}${LOCK_SUFFIX}`
-              : `${otherId}-${thisId}${LOCK_SUFFIX}`;
-
-            // Pair validation via reconstruct-and-compare. A stale lock from a
-            // different id-pair that happens to concatenate to the same
-            // <a>-<b>-lock.json string is a theoretical residual; the single-lock
-            // guard above (lockFiles.length > 1) is the primary protection, so
-            // the peer_id charset is left unrestricted rather than working
-            // around this edge case here.
-            if (lockFile.name !== expectedLockName)
-              throw new Error("lock file does not reference this connection");
-
-            // I5: read the peer hello body through the partial-sync gate
-            // before committing roles. The hello name carries no byte-count
-            // segment, so a half-synced body cannot be caught by a size check.
-            const peerEnvelope = await readControlFileWithGate(
-              this.client,
-              `${this.path}/${otherFile.name}`,
-              this.options.timeToLive!,
-              this.options.pollingFrequency,
-              HelloEnvelopeSchema,
-              this.abortController.signal,
-            );
-
-            // Bilateral flag check before committing roles and before the
-            // sweep below. Defense-in-depth: a lock present in the directory
-            // implies both parties are in lock mode (lockless never creates a
-            // lock) and a lock party always has retain_files=false (retain
-            // requires lockless), so neither flag can differ and a mismatch
-            // cannot reach here for any valid pairing. If a corrupt directory
-            // somehow produced one, leave exactly the two hellos the design
-            // names as the terminal state: delete the peer-written lock first --
-            // it is a transient, not an advertisement the peer must read, and
-            // the outer catch skips every safeDelete on a mismatch. safeDelete
-            // is contractually non-throwing, so it cannot mask the mismatch. Our
-            // own hello stays via that skip-sweep for the peer to read.
-            const mismatch = this.bilateralMismatch(peerEnvelope);
-            if (mismatch) {
-              await this.client.safeDelete(`${this.path}/${lockFile.name}`);
-              throw mismatch;
-            }
-
-            // first to arrive => should wait for first message
-            this.handshakeRole = arrivedFirst ? "responder" : "initiator";
-            this.role =
-              this.handshakeRole === "initiator" ? "joiner" : "starter";
-            this.peerId = otherId;
-
-            this.log.debug(
-              `[${this.role}] parsed ${sanitizeForDisplay(lockFile.name)}`,
-            );
-
-            await this.client.safeDelete(`${this.path}/${lockFile.name}`);
-            await this.client.safeDelete(`${this.path}/${otherFile.name}`);
-            await this.client.safeDelete(helloPath);
-
-            if (!this.options.retainFiles) this.responsibleFiles.clear();
-
-            return;
-          }
-
-          if (otherFiles.length > 1) {
+          if (peerHellos.length > 1) {
             throw new UsageError(
               `more than one peer hello file in ${this.displayPath} - are there ` +
                 "other sessions using this path?",
             );
           }
+
+          const peerHello = peerHellos[0];
+          const peerId = peerHello.name.slice(0, -HELLO_SUFFIX.length);
+
+          // Write our ack once on the first sighting of the peer's hello.
+          if (ackPath === undefined) {
+            // I5: read the peer hello body through the partial-sync gate
+            // before writing our ack, so a truncated body is not treated as
+            // malformed and does not abort the handshake prematurely. The
+            // flag comparison runs on this peer-HELLO read, never the peer-ack
+            // read below.
+            const peerEnvelope = await readControlFileWithGate(
+              this.client,
+              `${this.path!}/${peerHello.name}`,
+              this.options.timeToLive!,
+              this.options.pollingFrequency,
+              HelloEnvelopeSchema,
+              this.abortController.signal,
+            );
+
+            // Bilateral flag check before writing our ack. On mismatch throw:
+            // our hello (written before this loop) stays via the outer catch's
+            // skip-sweep, so the peer reads it through its own peer-hello read
+            // and fails too. We do not write the ack, leaving both hellos as
+            // the directory's terminal state. Covers a retain_files mismatch
+            // (both parties lockless, both in this barrier) as well as a
+            // lockless_rendezvous mismatch (peer is a lock party that read our
+            // hello at its own two-hellos branch).
+            const mismatch = this.bilateralMismatch(peerEnvelope);
+            if (mismatch) throw mismatch;
+
+            // Acknowledge the peer's hello with a zero-length marker named
+            // after it (`<myId>-<peerHelloStem>-ack.json`). This is a
+            // self-write, so it goes to the outbound directory (the peer reads
+            // it from its inbound); in shared mode that is the inbound path.
+            // Published temp-then-rename so its final name never appears before
+            // the file exists; the peer matches it by name existence, never by
+            // reading a body.
+            const peerHelloStem = peerHello.name.slice(0, -".json".length);
+            this.log.debug(
+              `[${this.role}] writing handshake ack for ` +
+                `${sanitizeForDisplay(peerHello.name)}`,
+            );
+            const ackName = await this.writeAck(outboundPath, peerHelloStem);
+            ackPath = `${outboundPath}/${ackName}`;
+            // Track after the durable rename (delete mode only; retain never
+            // sweeps) so cleanup() removes it at close(), exactly as the
+            // message write in send() does. Both publish temp-then-rename, so
+            // the final name only appears at the atomic rename and the add
+            // immediately follows it with no throwable statement between --
+            // unlike the lock/hello direct-writes, which pre-track because
+            // createExclusive can leave the final name on a throwing call.
+            // The in-flight temp-*.tmp is swept inline by writeAck.
+            if (!this.options.retainFiles) this.responsibleFiles.add(ackName);
+            // Re-enter the loop so hasPeerAck is checked against a fresh
+            // listing; the pre-ack-write snapshot from this iteration may
+            // miss a peer ack that arrived in the window between list() and
+            // the write, adding up to pollIntervalMs of unnecessary latency on
+            // slow-sync transports.
+            continue;
+          }
+
+          // Barrier completes when the peer's ack of THIS party's hello is
+          // visible in the current listing (always fresh because of the
+          // continue above). Construct the expected name from our own hello's
+          // stem and the peer id we already hold, then match by existence: the
+          // marker is zero-length, so its name appearing is completion and no
+          // body is read.
+          const myHelloName = `${this.id}${HELLO_SUFFIX}`;
+          const peerAckName = ackMarkerName(
+            peerId,
+            myHelloName.slice(0, -".json".length),
+          );
+          const hasPeerAck = currentFiles.some(
+            (file) => file.name === peerAckName,
+          );
+
+          if (!hasPeerAck) {
+            this.log.trace(
+              `[${this.role}] waiting for peer ack ` +
+                `${sanitizeForDisplay(peerAckName)}`,
+            );
+            await this.wait(this.options.pollingFrequency);
+            continue;
+          }
+
+          // Peer ack confirmed -- commit roles and peerId as the last step,
+          // the same invariant as the joiner path (see above): if the ack
+          // write fails before this point, this.peerId stays undefined and
+          // the "already synchronized" guard allows a retry on this instance.
+          const arrivedFirst = `${this.id}${HELLO_SUFFIX}` < peerHello.name;
+          this.handshakeRole = arrivedFirst ? "responder" : "initiator";
+          this.role = arrivedFirst ? "starter" : "joiner";
+          this.peerId = peerId;
+
+          this.log.debug(
+            `[${this.role}] lockless rendezvous complete with ` +
+              `${sanitizeForDisplay(peerId)}`,
+          );
+
+          // Do NOT clear responsibleFiles: hello and ack remain so
+          // cleanup() can sweep them at close() time, the same as the
+          // lock-winner path.
+          return;
+        }
+
+        // No role tag: this lockless timeout can fire after the peer hello
+        // was seen and acked but the peer's return ack never arrived, where
+        // hello-filename order may make this party the joiner. The role is
+        // genuinely indeterminate here, so emit no `[role]` prefix (unlike
+        // the lock timeout below, which is reachable only as the lone
+        // starter).
+        throw new Error("synchronization has timed out");
+      }
+
+      // Lock path.
+      // Wall-clock instant this party first saw the joiner's mid-arrival
+      // sentinel, paired with the sentinel name it belongs to (both undefined
+      // when no sentinel is present). Bounds the joiner-recovery window below;
+      // reset whenever a peer hello appears, the sentinel disappears, or a
+      // sentinel with a different name takes its place, so a later or
+      // different joiner always starts a fresh window rather than inheriting
+      // an earlier one's deadline.
+      let joiningSeenAt: number | undefined;
+      let joiningSeenName: string | undefined;
+      // open() set timeToLive before synchronize() can run, so the non-null
+      // assertion is safe here.
+      while (Date.now() <= this.options.timeToLive!.getTime()) {
+        const currentFiles = await this.client.list(this.path!);
+
+        const fileNames = currentFiles.map((file) => file.name);
+        if (!this.options.retainFiles)
+          this.responsibleFiles.forEach((fileName) => {
+            if (!fileNames.includes(fileName))
+              this.responsibleFiles.delete(fileName);
+          });
+
+        // isPeerHelloName excludes our own hello and a bare `-hello.json`
+        // (empty id) injected after entry, which the previous endsWith-only
+        // filter would have sliced to peerId="" at the role-commit sites below.
+        const otherFiles = currentFiles.filter((file) =>
+          this.isPeerHelloName(file.name),
+        );
+        const theseFiles = currentFiles.filter(
+          (file) => file.name === `${this.id}${HELLO_SUFFIX}`,
+        );
+        const lockFiles = currentFiles.filter((file) =>
+          file.name.endsWith(LOCK_SUFFIX),
+        );
+        // A `<peerId>-joining.json` sentinel marks a joiner mid-arrival: it
+        // has begun the put(sentinel) -> delete(our hello) -> rename(sentinel
+        // -> its hello) sequence the lock joiner uses in place of a bare
+        // delete-then-put. Its presence is the signal that distinguishes a
+        // live-but-incomplete joiner from a crashed one, which a bare
+        // otherFiles.length === 0 cannot. isPeerJoiningName excludes a
+        // self-named sentinel (for symmetry with the hello filters, though the
+        // lock starter never writes one) and -- the defense this adds -- a bare
+        // `-joining.json` (empty id), so a planted empty-id sentinel does not
+        // start the joiner-recovery (joinerRecoveryMs) window below.
+        const joiningFiles = currentFiles.filter((file) =>
+          this.isPeerJoiningName(file.name),
+        );
+
+        if (otherFiles.length === 0) {
+          if (joiningFiles.length > 0) {
+            // Exactly one sentinel is the only valid mid-arrival state: one
+            // joiner, one starter, and the starter never writes a sentinel.
+            // A second is contamination from a third party, the same illegal
+            // state the multi-peer-hello and multi-lock guards below reject;
+            // surface it the same way rather than silently timing the first.
+            if (joiningFiles.length > 1) {
+              throw new UsageError(
+                `more than one joining sentinel in ${this.displayPath} - are ` +
+                  "there other sessions using this path?",
+              );
+            }
+            // Joiner is mid-arrival. Wait a bounded recovery window for the
+            // rename to land -- the joiner then appears as a normal peer hello
+            // and the branches below take over. If the sentinel persists past
+            // the window, the joiner failed mid-arrival -- after writing the
+            // sentinel but before publishing its hello, on either side of the
+            // delete; abort with a distinct transport error (a plain Error,
+            // CLI exit 69) instead of polling to the full peer timeout. We do
+            // NOT re-create our own hello: that races the joiner's rename and
+            // could trip the two-hello collision check (I1).
+            const joiningName = joiningFiles[0].name;
+            const now = Date.now();
+            // Start (or restart) the window on the first sighting, or whenever
+            // the sentinel's name changes: a different peer id is a fresh
+            // arrival, not a continuation of the one being timed, so it must
+            // not inherit the earlier deadline. (Two distinct sentinel names
+            // in one rendezvous likewise require a dedicated-directory
+            // violation, but keying the timer to identity keeps that case from
+            // prematurely aborting a legitimate later joiner.)
+            if (
+              joiningSeenAt === undefined ||
+              joiningSeenName !== joiningName
+            ) {
+              joiningSeenAt = now;
+              joiningSeenName = joiningName;
+              this.log.debug(
+                `[${this.role}] peer is mid-arrival ` +
+                  `(${sanitizeForDisplay(joiningName)}); awaiting completion`,
+              );
+            } else if (now - joiningSeenAt > this.options.joinerRecoveryMs) {
+              // The window is a lower bound, not exact: the check runs once
+              // per poll after a delay(), so the abort fires somewhere in
+              // (joinerRecoveryMs, joinerRecoveryMs + pollingFrequency]. That
+              // imprecision is deliberate -- this is a bounded recovery
+              // window, not a hard deadline, and one extra poll is immaterial
+              // against the 30 s default. The crash could be on either side
+              // of the joiner's delete, so the message names the bracketing
+              // operations rather than a single step. Labelled [starter]:
+              // this branch is reached only by the party that wrote its hello
+              // first and is waiting for a joiner -- the joiner takes the
+              // entry fast-path and never enters this loop -- even though
+              // `this.role` is not committed until rendezvous succeeds.
+              throw new Error(
+                `[starter] peer began arriving ` +
+                  `(${sanitizeForDisplay(joiningName)}) but did ` +
+                  "not complete within the recovery window; it appears to " +
+                  "have failed after announcing its arrival but before " +
+                  "publishing its hello. Retry the exchange.",
+              );
+            }
+          } else {
+            // No sentinel: the joiner has not started, or a prior sighting
+            // vanished without producing a hello (only a crash mid-cleanup
+            // does this). Reset so a later sentinel starts a fresh window.
+            joiningSeenAt = undefined;
+            joiningSeenName = undefined;
+            this.log.trace(`[${this.role}] no peer hello found; polling`);
+          }
+          await this.wait(this.options.pollingFrequency);
+          continue;
+        }
+
+        // A peer hello is present: the joiner's rename landed (or both
+        // parties wrote hellos), so the recovery timer is stale. A sentinel
+        // may still be visible here in exactly one benign case: the peer's
+        // own rename is mid-propagation on a sync-mediated transport, so its
+        // `<peerId>-joining.json` and `<peerId>-hello.json` momentarily
+        // coexist (the rename is atomic at the SFTP layer, not necessarily at
+        // the sync-tool layer). That same-id sentinel is the peer we are
+        // about to rendezvous with, so tolerate it. A sentinel whose id
+        // matches no peer hello is a third party in the directory -- the same
+        // contamination the multi-hello and multi-lock guards reject -- so
+        // surface it as a UsageError rather than completing against an
+        // inconsistent directory.
+        //
+        // No joiningFiles.length > 1 guard is needed here (unlike the
+        // otherFiles === 0 branch above): a sentinel that escapes the
+        // foreign-id check matches a present peer hello, so two such sentinels
+        // would require two distinct peer hellos -- already terminal under the
+        // otherFiles.length > 1 multi-peer-hello guard in the branches below,
+        // which fires before any role is committed.
+        const peerHelloIds = new Set(
+          otherFiles.map((file) => file.name.slice(0, -HELLO_SUFFIX.length)),
+        );
+        const foreignSentinel = joiningFiles.find(
+          (file) =>
+            !peerHelloIds.has(file.name.slice(0, -JOINING_SUFFIX.length)),
+        );
+        if (foreignSentinel) {
+          throw new UsageError(
+            `joining sentinel ${sanitizeForDisplay(foreignSentinel.name)} ` +
+              `in ${this.displayPath} ` +
+              "matches no peer hello - are there other sessions using " +
+              "this path?",
+          );
+        }
+        joiningSeenAt = undefined;
+        joiningSeenName = undefined;
+
+        if (lockFiles.length > 0) {
+          /**
+           * A ~ B list
+           * A ~ B hello
+           * A list
+           * A lock
+           * B list
+           * B delete A hello, B hello, lock
+           *
+           * This is B
+           */
+          if (lockFiles.length > 1) {
+            throw new UsageError(
+              "more than one lock file - are there other sessions using " +
+                "this path?",
+            );
+          }
+          if (otherFiles.length !== 1) {
+            throw new UsageError(
+              "lock file detected but no peer hello - are there other " +
+                "sessions using this path?",
+            );
+          }
+          if (theseFiles.length !== 1) {
+            throw new UsageError(
+              "lock file detected but no self hello - are there other " +
+                "sessions using this path?",
+            );
+          }
+
+          const lockFile = lockFiles[0];
           const otherFile = otherFiles[0];
-          if (theseFiles.length === 0) {
+          const thisFile = theseFiles[0];
+
+          const thisId = thisFile.name.slice(0, -HELLO_SUFFIX.length);
+          const otherId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
+
+          // Use hello filename order -- the same tiebreak the lock producer
+          // uses (I7) -- to reconstruct the expected lock name. Do NOT fall
+          // back to a raw `thisId < otherId` compare: for ids where one is a
+          // prefix of the other (e.g. "Agency" / "Agency A"), space (U+0020)
+          // sorts before "-" (U+002D), so hello-filename order and id-order
+          // can diverge, causing a false "lock does not reference this
+          // connection" throw that UUID tests would never catch.
+          const arrivedFirst = thisFile.name < otherFile.name;
+          const expectedLockName = arrivedFirst
+            ? `${thisId}-${otherId}${LOCK_SUFFIX}`
+            : `${otherId}-${thisId}${LOCK_SUFFIX}`;
+
+          // Pair validation via reconstruct-and-compare. A stale lock from a
+          // different id-pair that happens to concatenate to the same
+          // <a>-<b>-lock.json string is a theoretical residual; the single-lock
+          // guard above (lockFiles.length > 1) is the primary protection, so
+          // the peer_id charset is left unrestricted rather than working
+          // around this edge case here.
+          if (lockFile.name !== expectedLockName)
+            throw new Error("lock file does not reference this connection");
+
+          // I5: read the peer hello body through the partial-sync gate
+          // before committing roles. The hello name carries no byte-count
+          // segment, so a half-synced body cannot be caught by a size check.
+          const peerEnvelope = await readControlFileWithGate(
+            this.client,
+            `${this.path}/${otherFile.name}`,
+            this.options.timeToLive!,
+            this.options.pollingFrequency,
+            HelloEnvelopeSchema,
+            this.abortController.signal,
+          );
+
+          // Bilateral flag check before committing roles and before the
+          // sweep below. Defense-in-depth: a lock present in the directory
+          // implies both parties are in lock mode (lockless never creates a
+          // lock) and a lock party always has retain_files=false (retain
+          // requires lockless), so neither flag can differ and a mismatch
+          // cannot reach here for any valid pairing. If a corrupt directory
+          // somehow produced one, leave exactly the two hellos the design
+          // names as the terminal state: delete the peer-written lock first --
+          // it is a transient, not an advertisement the peer must read, and
+          // the outer catch skips every safeDelete on a mismatch. safeDelete
+          // is contractually non-throwing, so it cannot mask the mismatch. Our
+          // own hello stays via that skip-sweep for the peer to read.
+          const mismatch = this.bilateralMismatch(peerEnvelope);
+          if (mismatch) {
+            await this.client.safeDelete(`${this.path}/${lockFile.name}`);
+            throw mismatch;
+          }
+
+          // first to arrive => should wait for first message
+          this.handshakeRole = arrivedFirst ? "responder" : "initiator";
+          this.role = this.handshakeRole === "initiator" ? "joiner" : "starter";
+          this.peerId = otherId;
+
+          this.log.debug(
+            `[${this.role}] parsed ${sanitizeForDisplay(lockFile.name)}`,
+          );
+
+          await this.client.safeDelete(`${this.path}/${lockFile.name}`);
+          await this.client.safeDelete(`${this.path}/${otherFile.name}`);
+          await this.client.safeDelete(helloPath);
+
+          if (!this.options.retainFiles) this.responsibleFiles.clear();
+
+          return;
+        }
+
+        if (otherFiles.length > 1) {
+          throw new UsageError(
+            `more than one peer hello file in ${this.displayPath} - are there ` +
+              "other sessions using this path?",
+          );
+        }
+        const otherFile = otherFiles[0];
+        if (theseFiles.length === 0) {
+          /**
+           * A list
+           * A hello
+           * B list
+           * B joining
+           * B delete A hello
+           * B rename joining -> B hello
+           * A delete B hello
+           *
+           * This is A
+           */
+          const otherPath = `${this.path}/${otherFile.name}`;
+
+          // I5: read the joiner's hello body through the partial-sync gate
+          // before deleting it. The joiner's hello carries no byte-count
+          // segment so a half-synced body would be silently misread without
+          // this gate.
+          const peerEnvelope = await readControlFileWithGate(
+            this.client,
+            otherPath,
+            this.options.timeToLive!,
+            this.options.pollingFrequency,
+            HelloEnvelopeSchema,
+            this.abortController.signal,
+          );
+
+          // Bilateral flag check before deleting the peer hello. Defense-in-
+          // depth: reaching this branch means our own hello was deleted, which
+          // only a lock joiner does, so the peer is in lock mode and a
+          // mismatch cannot normally arise; on the throw the peer-hello delete
+          // and the sweep are both skipped.
+          const mismatch = this.bilateralMismatch(peerEnvelope);
+          if (mismatch) throw mismatch;
+
+          // arrived first, should wait for a message
+          this.handshakeRole = "responder";
+          this.role = "starter";
+          this.peerId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
+
+          this.log.debug(
+            `[${this.role}] detected ${sanitizeForDisplay(otherFile.name)}; ` +
+              `deleting it`,
+          );
+
+          await this.client.safeDelete(otherPath);
+
+          if (!this.options.retainFiles) this.responsibleFiles.clear();
+
+          return;
+        } else {
+          if (theseFiles.length > 1) {
+            throw new UsageError(
+              `more than one self hello file in ${this.displayPath} - are there ` +
+                "other sessions using this path?",
+            );
+          }
+
+          const thisFile = theseFiles[0];
+
+          // Tiebreak on hello filename order alone, never modifyTime: both
+          // parties compute the identical hello filenames, so this comparison
+          // is deterministic and symmetric regardless of which party runs it.
+          // modifyTime is unreliable here -- sync tools stamp files with the
+          // transfer time rather than the original creation time, so the two
+          // parties may observe different (even contradictory) timestamps for
+          // the same files.
+          const arrivedFirst = thisFile.name < otherFile.name;
+          this.handshakeRole = arrivedFirst ? "responder" : "initiator";
+          this.role = arrivedFirst ? "starter" : "joiner";
+          this.peerId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
+
+          // I5 (closes the documented two-hellos gap): read the peer hello
+          // body through the partial-sync gate, validating the bilateral
+          // flags, BEFORE racing a lock. A lockless peer's hello can coexist
+          // with our lock hello here, so this is a reachable
+          // lockless_rendezvous mismatch. Running the check before
+          // createExclusive pre-empts both the createExclusive-winner and the
+          // EEXIST-loser sub-paths, so a mismatched pair never races a lock.
+          // On the throw our own hello (already present -- it is one of the
+          // two hellos) is left in place by the outer catch's skip-sweep, so
+          // the lockless peer reads it and fails too.
+          const peerEnvelope = await readControlFileWithGate(
+            this.client,
+            `${this.path}/${otherFile.name}`,
+            this.options.timeToLive!,
+            this.options.pollingFrequency,
+            HelloEnvelopeSchema,
+            this.abortController.signal,
+          );
+          const mismatch = this.bilateralMismatch(peerEnvelope);
+          if (mismatch) throw mismatch;
+
+          const lockName =
+            `${arrivedFirst ? this.id : this.peerId}-` +
+            `${arrivedFirst ? this.peerId : this.id}${LOCK_SUFFIX}`;
+          lockPath = `${this.path}/${lockName}`;
+
+          this.log.debug(
+            `[${this.role}] attempting to create ` +
+              `${sanitizeForDisplay(lockName)}`,
+          );
+
+          // Pre-emptively track lockName in delete mode: if createExclusive
+          // only partially succeeds (file created on server but handle-close
+          // fails with a non-EEXIST error), cleanup() will still attempt
+          // safeDelete even though the EEXIST handler's
+          // responsibleFiles.clear() is never reached. Both EEXIST branches
+          // below call responsibleFiles.clear(), which also removes this
+          // pre-emptive entry. In retain mode cleanup() is a no-op so
+          // tracking serves no purpose.
+          if (!this.options.retainFiles) this.responsibleFiles.add(lockName);
+          try {
+            await this.client.createExclusive(lockPath);
+            this.log.debug(
+              `[${this.role}] created lock file ` +
+                `${sanitizeForDisplay(lockName)}; waiting for ` +
+                "peer to finalize handshake",
+            );
+
             /**
-             * A list
-             * A hello
-             * B list
-             * B joining
-             * B delete A hello
-             * B rename joining -> B hello
-             * A delete B hello
+             * A ~ B list
+             * A ~ B hello
+             * A ~ list
+             * A ~ createExclusive lock
+             * ...
              *
              * This is A
              */
-            const otherPath = `${this.path}/${otherFile.name}`;
+          } catch (err: unknown) {
+            /**
+             * A ~ B list
+             * A ~ B hello
+             * A ~ B list
+             * A createExclusive lock
+             * B createExclusive lock, EEXIST
+             * B delete A hello, B hello, lock
+             *
+             * This is B
+             */
+            if (
+              !(err instanceof Error) ||
+              (err as NodeJS.ErrnoException).code !== "EEXIST"
+            )
+              throw err;
 
-            // I5: read the joiner's hello body through the partial-sync gate
-            // before deleting it. The joiner's hello carries no byte-count
-            // segment so a half-synced body would be silently misread without
-            // this gate.
-            const peerEnvelope = await readControlFileWithGate(
-              this.client,
-              otherPath,
-              this.options.timeToLive!,
-              this.options.pollingFrequency,
-              HelloEnvelopeSchema,
-              this.abortController.signal,
-            );
+            const lockAlreadyExists = await this.client.exists(lockPath);
 
-            // Bilateral flag check before deleting the peer hello. Defense-in-
-            // depth: reaching this branch means our own hello was deleted, which
-            // only a lock joiner does, so the peer is in lock mode and a
-            // mismatch cannot normally arise; on the throw the peer-hello delete
-            // and the sweep are both skipped.
-            const mismatch = this.bilateralMismatch(peerEnvelope);
-            if (mismatch) throw mismatch;
-
-            // arrived first, should wait for a message
-            this.handshakeRole = "responder";
-            this.role = "starter";
-            this.peerId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
-
-            this.log.debug(
-              `[${this.role}] detected ${sanitizeForDisplay(otherFile.name)}; ` +
-                `deleting it`,
-            );
-
-            await this.client.safeDelete(otherPath);
-
-            if (!this.options.retainFiles) this.responsibleFiles.clear();
-
-            return;
-          } else {
-            if (theseFiles.length > 1) {
+            if (!lockAlreadyExists) {
+              // The winner never deletes the lock file in its normal path
+              // (it returns from waitForPeer leaving the lock for the loser
+              // to clean up). If the lock is gone after we received EEXIST,
+              // the winner must have either crashed (their doCleanup ran
+              // during the narrow window where lockName was in
+              // responsibleFiles) or otherwise abandoned the handshake.
+              // Either way, polling for their first protocol message would
+              // stall until peerTimeoutMs. Fail fast with a clear cause so
+              // the user does not wait for a peer that is not coming.
+              // Best-effort tidy of both hellos before throwing so the
+              // directory is left clean for a retry.
+              await this.client.safeDelete(`${this.path}/${otherFile.name}`);
+              await this.client.safeDelete(helloPath);
+              if (!this.options.retainFiles) this.responsibleFiles.clear();
               throw new UsageError(
-                `more than one self hello file in ${this.displayPath} - are there ` +
-                  "other sessions using this path?",
+                "peer appears to have abandoned the handshake: lock file " +
+                  "was claimed by the peer but disappeared before this " +
+                  "side could complete synchronization. Retry the exchange.",
               );
-            }
-
-            const thisFile = theseFiles[0];
-
-            // Tiebreak on hello filename order alone, never modifyTime: both
-            // parties compute the identical hello filenames, so this comparison
-            // is deterministic and symmetric regardless of which party runs it.
-            // modifyTime is unreliable here -- sync tools stamp files with the
-            // transfer time rather than the original creation time, so the two
-            // parties may observe different (even contradictory) timestamps for
-            // the same files.
-            const arrivedFirst = thisFile.name < otherFile.name;
-            this.handshakeRole = arrivedFirst ? "responder" : "initiator";
-            this.role = arrivedFirst ? "starter" : "joiner";
-            this.peerId = otherFile.name.slice(0, -HELLO_SUFFIX.length);
-
-            // I5 (closes the documented two-hellos gap): read the peer hello
-            // body through the partial-sync gate, validating the bilateral
-            // flags, BEFORE racing a lock. A lockless peer's hello can coexist
-            // with our lock hello here, so this is a reachable
-            // lockless_rendezvous mismatch. Running the check before
-            // createExclusive pre-empts both the createExclusive-winner and the
-            // EEXIST-loser sub-paths, so a mismatched pair never races a lock.
-            // On the throw our own hello (already present -- it is one of the
-            // two hellos) is left in place by the outer catch's skip-sweep, so
-            // the lockless peer reads it and fails too.
-            const peerEnvelope = await readControlFileWithGate(
-              this.client,
-              `${this.path}/${otherFile.name}`,
-              this.options.timeToLive!,
-              this.options.pollingFrequency,
-              HelloEnvelopeSchema,
-              this.abortController.signal,
-            );
-            const mismatch = this.bilateralMismatch(peerEnvelope);
-            if (mismatch) throw mismatch;
-
-            const lockName =
-              `${arrivedFirst ? this.id : this.peerId}-` +
-              `${arrivedFirst ? this.peerId : this.id}${LOCK_SUFFIX}`;
-            lockPath = `${this.path}/${lockName}`;
-
-            this.log.debug(
-              `[${this.role}] attempting to create ` +
-                `${sanitizeForDisplay(lockName)}`,
-            );
-
-            // Pre-emptively track lockName in delete mode: if createExclusive
-            // only partially succeeds (file created on server but handle-close
-            // fails with a non-EEXIST error), cleanup() will still attempt
-            // safeDelete even though the EEXIST handler's
-            // responsibleFiles.clear() is never reached. Both EEXIST branches
-            // below call responsibleFiles.clear(), which also removes this
-            // pre-emptive entry. In retain mode cleanup() is a no-op so
-            // tracking serves no purpose.
-            if (!this.options.retainFiles) this.responsibleFiles.add(lockName);
-            try {
-              await this.client.createExclusive(lockPath);
+            } else {
               this.log.debug(
-                `[${this.role}] created lock file ` +
-                  `${sanitizeForDisplay(lockName)}; waiting for ` +
-                  "peer to finalize handshake",
+                `[${this.role}] lock file creation failed, assuming race ` +
+                  "condition",
               );
 
-              /**
-               * A ~ B list
-               * A ~ B hello
-               * A ~ list
-               * A ~ createExclusive lock
-               * ...
-               *
-               * This is A
-               */
-            } catch (err: unknown) {
-              /**
-               * A ~ B list
-               * A ~ B hello
-               * A ~ B list
-               * A createExclusive lock
-               * B createExclusive lock, EEXIST
-               * B delete A hello, B hello, lock
-               *
-               * This is B
-               */
-              if (
-                !(err instanceof Error) ||
-                (err as NodeJS.ErrnoException).code !== "EEXIST"
-              )
-                throw err;
+              await this.client.safeDelete(lockPath);
+              await this.client.safeDelete(`${this.path}/${otherFile.name}`);
+              await this.client.safeDelete(helloPath);
 
-              const lockAlreadyExists = await this.client.exists(lockPath);
-
-              if (!lockAlreadyExists) {
-                // The winner never deletes the lock file in its normal path
-                // (it returns from waitForPeer leaving the lock for the loser
-                // to clean up). If the lock is gone after we received EEXIST,
-                // the winner must have either crashed (their doCleanup ran
-                // during the narrow window where lockName was in
-                // responsibleFiles) or otherwise abandoned the handshake.
-                // Either way, polling for their first protocol message would
-                // stall until peerTimeoutMs. Fail fast with a clear cause so
-                // the user does not wait for a peer that is not coming.
-                // Best-effort tidy of both hellos before throwing so the
-                // directory is left clean for a retry.
-                await this.client.safeDelete(`${this.path}/${otherFile.name}`);
-                await this.client.safeDelete(helloPath);
-                if (!this.options.retainFiles) this.responsibleFiles.clear();
-                throw new UsageError(
-                  "peer appears to have abandoned the handshake: lock file " +
-                    "was claimed by the peer but disappeared before this " +
-                    "side could complete synchronization. Retry the exchange.",
-                );
-              } else {
-                this.log.debug(
-                  `[${this.role}] lock file creation failed, assuming race ` +
-                    "condition",
-                );
-
-                await this.client.safeDelete(lockPath);
-                await this.client.safeDelete(`${this.path}/${otherFile.name}`);
-                await this.client.safeDelete(helloPath);
-
-                if (!this.options.retainFiles) this.responsibleFiles.clear();
-              }
+              if (!this.options.retainFiles) this.responsibleFiles.clear();
             }
-            return;
           }
+          return;
         }
-
-        // TTL expired while still waiting. Both throws below are tagged
-        // [starter]: reaching here means no peer hello was ever seen (every
-        // branch that observes one commits a role and returns), so the waiter is
-        // the lone starter -- never the joiner -- even though `this.role` is not
-        // committed until rendezvous succeeds.
-        //
-        // If a joiner sentinel was visible on the final poll (joiningSeenAt
-        // still set), the actionable cause is a stuck mid-arrival joiner, not a
-        // bare timeout. This happens when the sentinel first appears with less
-        // than joinerRecoveryMs left on the TTL, so the outer loop exits before
-        // the recovery check (above) can fire; prefer the sentinel error so the
-        // user still gets the same diagnosis the bounded window would have.
-        // Check both: the two are set and cleared as a pair, so testing
-        // joiningSeenName as well makes that coupling type-enforced (it narrows
-        // to string inside the block) rather than relied on by convention, and
-        // degrades gracefully to the bare timeout below if they ever diverged.
-        if (joiningSeenAt !== undefined && joiningSeenName !== undefined) {
-          throw new Error(
-            `[starter] peer began arriving ` +
-              `(${sanitizeForDisplay(joiningSeenName)}) but the ` +
-              "exchange timed out before it completed; it appears to have " +
-              "failed after announcing its arrival but before publishing its " +
-              "hello. Retry the exchange.",
-          );
-        }
-        throw new Error("[starter] synchronization has timed out");
-      };
-      try {
-        await waitForPeer();
-        // No clear() here: branches that finish their own cleanup
-        // (responder, lock-detection, EEXIST loser, lockless) clear or retain
-        // explicitly before returning. The createExclusive-winner and lockless
-        // paths are the exception -- they leave hello (and lock or ack) in
-        // responsibleFiles so cleanup() can sweep them if the peer never
-        // arrives (e.g. crash before reaching the handshake files). Clearing
-        // here would lose that safety net.
-        //
-        // Both rendezvous modes have assigned this.peerId by this point.
-        // Reject an empty recovered id, then prefix-at-dash id pairs, before any
-        // message is sent; both parties evaluate these symmetrically. The hello
-        // scans above (isPeerHelloName) already exclude a bare `-hello.json`, so
-        // an empty this.peerId is unreachable for a correct scan -- this is
-        // defense in depth at the last gate before commit: a peerId="" slipping
-        // through would make poll() treat every "-"-prefixed file as a peer
-        // message and the lockless ack barrier wait on an ack no honest peer
-        // writes, so fail closed here rather than proceed.
-        if (this.peerId!.length === 0)
-          throw new UsageError(
-            "rendezvous recovered an empty peer id; a bare " +
-              `'${HELLO_SUFFIX}' is not a usable peer hello`,
-          );
-        if (
-          this.peerId!.startsWith(this.id + "-") ||
-          this.id.startsWith(this.peerId! + "-")
-        )
-          throw new UsageError(
-            `peer id '${sanitizeForDisplay(this.peerId!)}' and this party's ` +
-              `id '${this.id}' share ` +
-              "a prefix at a '-' boundary; ids must not be prefix-extensions " +
-              "of each other (e.g. 'site' / 'site-2')",
-          );
-        return;
-      } catch (err: unknown) {
-        // A bilateral-mode mismatch is the one terminal failure that must NOT
-        // sweep the directory: this party's advertised hello (written before
-        // the loop) is the directory's terminal state, left in place so the
-        // peer reads it through its own peer-hello read and fails too. Skip the
-        // on-disk safeDelete of hello/ack/lock; clearing responsibleFiles (so a
-        // later close()/cleanup() does not delete the advertised hello) and the
-        // in-memory reset still run, so the instance is not wedged. A rerun
-        // against the leftover hellos is rejected by the entry guard (I0) until
-        // the operator clears the directory and fixes the mismatched flag.
-        if (!(err instanceof BilateralModeMismatchError)) {
-          if (lockPath) await this.client.safeDelete(lockPath);
-          if (ackPath) await this.client.safeDelete(ackPath);
-          await this.client.safeDelete(helloPath);
-        }
-        if (!this.options.retainFiles) this.responsibleFiles.clear();
-        // The prefix-at-dash guard fires after waitForPeer() has already
-        // committed this.peerId, this.role, and this.handshakeRole. Reset
-        // them so the "already synchronized" guard does not block a retry
-        // and the stale role does not appear in the retry's first log line.
-        this.peerId = undefined;
-        this.role = "unknown role";
-        this.handshakeRole = undefined;
-        this.clearAbortState();
-        this.resetSessionState();
-        throw err instanceof Error ? err : new Error(errMessage(err));
       }
+
+      // TTL expired while still waiting. Both throws below are tagged
+      // [starter]: reaching here means no peer hello was ever seen (every
+      // branch that observes one commits a role and returns), so the waiter is
+      // the lone starter -- never the joiner -- even though `this.role` is not
+      // committed until rendezvous succeeds.
+      //
+      // If a joiner sentinel was visible on the final poll (joiningSeenAt
+      // still set), the actionable cause is a stuck mid-arrival joiner, not a
+      // bare timeout. This happens when the sentinel first appears with less
+      // than joinerRecoveryMs left on the TTL, so the outer loop exits before
+      // the recovery check (above) can fire; prefer the sentinel error so the
+      // user still gets the same diagnosis the bounded window would have.
+      // Check both: the two are set and cleared as a pair, so testing
+      // joiningSeenName as well makes that coupling type-enforced (it narrows
+      // to string inside the block) rather than relied on by convention, and
+      // degrades gracefully to the bare timeout below if they ever diverged.
+      if (joiningSeenAt !== undefined && joiningSeenName !== undefined) {
+        throw new Error(
+          `[starter] peer began arriving ` +
+            `(${sanitizeForDisplay(joiningSeenName)}) but the ` +
+            "exchange timed out before it completed; it appears to have " +
+            "failed after announcing its arrival but before publishing its " +
+            "hello. Retry the exchange.",
+        );
+      }
+      throw new Error("[starter] synchronization has timed out");
+    };
+    try {
+      await waitForPeer();
+      // No clear() here: branches that finish their own cleanup
+      // (responder, lock-detection, EEXIST loser, lockless) clear or retain
+      // explicitly before returning. The createExclusive-winner and lockless
+      // paths are the exception -- they leave hello (and lock or ack) in
+      // responsibleFiles so cleanup() can sweep them if the peer never
+      // arrives (e.g. crash before reaching the handshake files). Clearing
+      // here would lose that safety net.
+      //
+      // Both rendezvous modes have assigned this.peerId by this point.
+      // Reject an empty recovered id, then prefix-at-dash id pairs, before any
+      // message is sent; both parties evaluate these symmetrically. The hello
+      // scans above (isPeerHelloName) already exclude a bare `-hello.json`, so
+      // an empty this.peerId is unreachable for a correct scan -- this is
+      // defense in depth at the last gate before commit: a peerId="" slipping
+      // through would make poll() treat every "-"-prefixed file as a peer
+      // message and the lockless ack barrier wait on an ack no honest peer
+      // writes, so fail closed here rather than proceed.
+      if (this.peerId!.length === 0)
+        throw new UsageError(
+          "rendezvous recovered an empty peer id; a bare " +
+            `'${HELLO_SUFFIX}' is not a usable peer hello`,
+        );
+      if (
+        this.peerId!.startsWith(this.id + "-") ||
+        this.id.startsWith(this.peerId! + "-")
+      )
+        throw new UsageError(
+          `peer id '${sanitizeForDisplay(this.peerId!)}' and this party's ` +
+            `id '${this.id}' share ` +
+            "a prefix at a '-' boundary; ids must not be prefix-extensions " +
+            "of each other (e.g. 'site' / 'site-2')",
+        );
+      return;
+    } catch (err: unknown) {
+      // A bilateral-mode mismatch is the one terminal failure that must NOT
+      // sweep the directory: this party's advertised hello (written before
+      // the loop) is the directory's terminal state, left in place so the
+      // peer reads it through its own peer-hello read and fails too. Skip the
+      // on-disk safeDelete of hello/ack/lock; clearing responsibleFiles (so a
+      // later close()/cleanup() does not delete the advertised hello) and the
+      // in-memory reset still run, so the instance is not wedged. A rerun
+      // against the leftover hellos is rejected by the entry guard (I0) until
+      // the operator clears the directory and fixes the mismatched flag.
+      if (!(err instanceof BilateralModeMismatchError)) {
+        if (lockPath) await this.client.safeDelete(lockPath);
+        if (ackPath) await this.client.safeDelete(ackPath);
+        await this.client.safeDelete(helloPath);
+      }
+      if (!this.options.retainFiles) this.responsibleFiles.clear();
+      // The prefix-at-dash guard fires after waitForPeer() has already
+      // committed this.peerId, this.role, and this.handshakeRole. Reset
+      // them so the "already synchronized" guard does not block a retry
+      // and the stale role does not appear in the retry's first log line.
+      this.peerId = undefined;
+      this.role = "unknown role";
+      this.handshakeRole = undefined;
+      this.abortMarker.clear();
+      this.resetSessionState();
+      throw err instanceof Error ? err : new Error(errMessage(err));
     }
   }
 
@@ -4357,72 +3928,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     }
   }
 
-  // Reads and verifies a present `<peerId>-abort.json` against the
-  // locally-derived peer abort token. Returns true ONLY on an authenticated
-  // match (the caller then fast-fails with a PeerAbortError); every other
-  // outcome -- absent, oversized, unreadable, malformed, wrong version, decode
-  // failure, or non-match -- returns false so the loop keeps polling and
-  // eventually falls back to the peer-silence hedge. Self-contained and
-  // non-throwing: the admin controls these bytes, so a read failure must never
-  // surface as anything but "ignore".
-  private async verifyPeerAbortMarker(
-    allFiles: Array<FileInfo>,
-    path: string,
-    peerId: string,
-  ): Promise<boolean> {
-    const peerToken = this.peerAbortToken;
-    if (peerToken === undefined) return false;
-    const markerName = `${peerId}${ABORT_SUFFIX}`;
-    const listed = allFiles.find((file) => file.name === markerName);
-    if (listed === undefined) return false;
-    // Pre-get() listed-size refusal: never get() a file the listing already
-    // reports as over the cap, mirroring the message path's pre-get size gate.
-    // The marker is re-read every cycle, so a large read here would be the
-    // availability vector ABORT_MARKER_MAX_BYTES exists to bound.
-    if (listed.size > ABORT_MARKER_MAX_BYTES) {
-      this.log.debug(
-        `[${this.role}] ignoring oversized abort marker ` +
-          `${sanitizeForDisplay(markerName)} (${listed.size} bytes)`,
-      );
-      return false;
-    }
-    try {
-      // Bounded get() with the small cap (NOT MAX_FRAME_SIZE_BYTES, which the
-      // message path uses) as the hard backstop against a server under-reporting
-      // the listed size above. This rides this.client (the boundTransport
-      // poll-loop budget) deliberately, NOT the short rawClient budget the write
-      // uses: it is one read among the cycle's list() and message get(), all on
-      // that shared budget, and on SFTP the adapter self-bounds reads. The short
-      // rawClient budget is reserved for the teardown WRITE, which must fast-fail
-      // so a faulting process is not held open; a stalled read here only defers
-      // detection by one cycle (caught below -> false -> keep polling), and the
-      // list() that opens every cycle already gates on this same budget, so a
-      // tighter bound here would close nothing that list() does not already leave open.
-      const raw = await this.client.get(`${path}/${markerName}`, {
-        encoding: "utf-8",
-        maxBytes: ABORT_MARKER_MAX_BYTES,
-      });
-      const parsed = parseBoundedJson(raw.toString());
-      if (
-        typeof parsed !== "object" ||
-        parsed === null ||
-        (parsed as { version?: unknown }).version !== 1 ||
-        typeof (parsed as { token?: unknown }).token !== "string"
-      )
-        return false;
-      const decoded = fromBase64Url((parsed as { token: string }).token);
-      // Constant-time, length-mismatch-safe: a wrong-length decode returns false
-      // without a separate length check.
-      return bytesEqual(decoded, peerToken);
-    } catch {
-      // Oversize (a server that under-reported the size), JSON/parse failure,
-      // base64url decode failure, or a transient read error: ignore and keep
-      // polling. Re-reading the tiny file each cycle lets a delayed atomic write
-      // (or a torn read on a sync-mediated transport) self-heal on a later cycle.
-      return false;
-    }
-  }
-
   private async poll() {
     if (!this.pollerActive) return;
 
@@ -4577,7 +4082,12 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       // I/O is negligible.
       if (
         this.abortArmed &&
-        (await this.verifyPeerAbortMarker(allFiles, path, peerId))
+        (await this.abortMarker.verifyPeerMarker(
+          this.client,
+          allFiles,
+          path,
+          peerId,
+        ))
       ) {
         this.pollerActive = false;
         this.emit("error", new PeerAbortError());

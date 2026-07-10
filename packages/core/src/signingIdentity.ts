@@ -70,6 +70,8 @@ export type SigningAlgorithm = "ed25519";
  * configuration/usage problem (exit 64), consistent with how a malformed key
  * file is handled.
  */
+// Exit-code mapping and the deferred trust-error split: docs/spec/PROTOCOL.md,
+// Signing identity and certificate pinning.
 export class SigningError extends UsageError {
   constructor(message: string) {
     super(message);

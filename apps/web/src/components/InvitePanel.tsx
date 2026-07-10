@@ -14,7 +14,7 @@ import { IconAlertCircle } from "@tabler/icons-react";
 import { useForm } from "@tanstack/react-form";
 import { useNavigate } from "@tanstack/react-router";
 
-import { sanitizeErrorForDisplay, sanitizeForDisplay } from "@psilink/core";
+import { sanitizeErrorForDisplay } from "@psilink/core";
 
 import { InvitationFileError, generateInvitation } from "@psi/invitation";
 import { invitationLocation } from "@psi/invitationLocation";
@@ -24,6 +24,7 @@ import { whenDiagnostic } from "@utils/diagnostics";
 
 import { ExchangeView } from "@components/ExchangeView";
 import { stashAdvancedHandoff } from "@components/advancedHandoff";
+import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 
 import type { AlertContent } from "@components/FileAcquire";
 import type { GeneratedInvitation } from "@psi/invitation";
@@ -121,29 +122,9 @@ export function InvitePanel({ session, setSession, files }: InvitePanelProps) {
             setError(unnameableColumnsAlert(e.failure.positions));
           } else {
             // Zero satisfiable keys: name the field types the file lacks, the
-            // same wording the acceptor's zero-coverage block uses. The default
-            // field names/types are not partner-controlled, but sanitize anyway
-            // for parity with that path. The detail is omitted when no default
-            // field is named (it should always be present here).
-            const detail =
-              e.failure.unsatisfied.length > 0
-                ? " (missing: " +
-                  e.failure.unsatisfied
-                    .map(
-                      (f) =>
-                        `${sanitizeForDisplay(f.name)} (${sanitizeForDisplay(f.type)})`,
-                    )
-                    .join(", ") +
-                  ")"
-                : "";
-            setError({
-              title: "This file cannot be linked",
-              message:
-                `Your CSV cannot satisfy any default linkage key${detail}. No ` +
-                "matches would be possible. Choose a file that includes columns " +
-                "for the required field types (for example name, date of birth, " +
-                "or SSN).",
-            });
+            // same wording the acceptor's zero-coverage block and the Advanced
+            // editor use (shared through unlinkableFileAlert so it cannot drift).
+            setError(unlinkableFileAlert(e.failure.unsatisfied));
           }
         } else {
           // An internal, non-user-actionable error (a schema ZodError, an SSR
