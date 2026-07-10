@@ -50,6 +50,14 @@ updates:
           - "ssh2-sftp-client"
           - "peerjs"
           - "peerjs-js-binarypack"
+          # Exact-pinned, matching-critical: both parties' runtime behavior for
+          # these must stay byte-identical or PSI key derivation silently
+          # diverges. Excluded so each bump is an individual, reviewable PR
+          # instead of riding along in this batch -- see "Why these are
+          # exact-pinned" in docs/spec/DEPENDENCY_PINS.md.
+          - "re2js"
+          - "yaml"
+          - "canonicalize"
     ignore:
       # The OpenMined PSI module is vendored; updates require manual review
       # of the tarball and NOTICE file before the lock file is updated.
