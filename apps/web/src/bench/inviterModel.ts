@@ -481,6 +481,13 @@ export function expiryLabel(lifetimeSeconds: number, now: Date): string {
   return dateTimeLabel(new Date(now.getTime() + lifetimeSeconds * 1000));
 }
 
+/** Whether a minted invitation's ISO `expires` moment is still ahead of `now`
+ * -- past it, no partner can pass the credential, so a retry is pointless and
+ * the link must stop being offered. */
+export function invitationUsable(expiresIso: string, now: Date): boolean {
+  return new Date(expiresIso).getTime() > now.getTime();
+}
+
 /** Ledger phrasing for who receives the matched results. */
 export const RESULTS_DIRECTION_LABELS: Record<OutputDirection, string> = {
   both: "You and your partner",

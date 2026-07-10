@@ -158,6 +158,9 @@ function mount(content: ReactNode) {
 }
 
 afterEach(() => {
+  // Backstop for the fake-Date test below: a failure between useFakeTimers and
+  // its finally must not leak a frozen clock into the rest of the suite.
+  vi.useRealTimers();
   root?.unmount();
   container?.remove();
   root = undefined;
@@ -1043,7 +1046,9 @@ describe("inviter bench", () => {
     });
 
     // The alert takes focus, states the temporary nature, and keeps the copy
-    // artifacts on screen: the same link stays valid for another attempt.
+    // artifacts on screen: the same link stays valid for another attempt. The
+    // listening callout leaves, though -- the lifecycle tore down, so nothing
+    // is listening while the alert shows.
     await expect.element(page.getByText("Exchange failed")).toBeInTheDocument();
     await vi.waitFor(() => {
       expect(
@@ -1053,11 +1058,16 @@ describe("inviter bench", () => {
     await expect
       .element(page.getByText("Share this invitation"))
       .toBeInTheDocument();
+    expect(page.getByText("Keep this tab open.").query()).toBeNull();
 
     await page.getByRole("button", { name: "Try again" }).click();
     await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(2));
     expect(lifecycleCall(1).sharedSecret).toBe(lifecycleCall(0).sharedSecret);
     expect(page.getByText("Exchange failed").query()).toBeNull();
+    // The retry listens again, so the callout's claim is true once more.
+    await expect
+      .element(page.getByText("Keep this tab open."))
+      .toBeInTheDocument();
     // The clicked Try again unmounted with its alert, orphaning focus onto
     // <body>; the recovery lands it back on the heading.
     await vi.waitFor(() => {
@@ -1110,7 +1120,8 @@ describe("inviter bench", () => {
 
     // The prepare-time fault names only local config, so the actionable
     // message is surfaced, and the recovery is the start-over path (a retry
-    // would fail identically).
+    // would fail identically). Nothing will ever serve the link, so the copy
+    // artifacts and the listening callout leave with the failure.
     await expect
       .element(page.getByText("Could not prepare the exchange"))
       .toBeInTheDocument();
@@ -1119,6 +1130,8 @@ describe("inviter bench", () => {
         page.getByText("standardization output name contradicts the terms"),
       )
       .toBeInTheDocument();
+    expect(page.getByText("Share this invitation").query()).toBeNull();
+    expect(page.getByText("Keep this tab open.").query()).toBeNull();
     expect(page.getByRole("button", { name: "Try again" }).query()).toBeNull();
     await page
       .getByRole("button", { name: "Start over with a fresh invitation" })
@@ -1126,6 +1139,80 @@ describe("inviter bench", () => {
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Review & create");
+  });
+
+  test("post-create: an expired invitation names itself, not the partner", async () => {
+    await createSealedInvitation();
+    lifecycleCall(0).onStage("waiting for peer");
+    // The tagged expiry error core's guards raise (the tag marks its message
+    // as locally-composed recovery guidance, safe to surface).
+    lifecycleCall(0).onError({
+      category: "security",
+      error: Object.assign(
+        new Error(
+          "shared secret expired at 2026-07-08T19:32:00.000Z; obtain a new invitation",
+        ),
+        { psilinkRecoveryHintEmitted: true },
+      ),
+    });
+
+    await expect
+      .element(page.getByText("This invitation can no longer be used"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("expired at 2026-07-08T19:32:00.000Z", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    expect(page.getByRole("button", { name: "Try again" }).query()).toBeNull();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: "Start over with a fresh invitation",
+        }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("post-create: an exchange failure past expiry swaps retry for start-over", async () => {
+    await createSealedInvitation();
+    lifecycleCall(0).onStage("waiting for peer");
+
+    // Jump past the invitation's 1-hour lifetime (Date only: timers stay real
+    // so React scheduling and vi.waitFor's polling keep working), then land a
+    // failure that would otherwise be retryable.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 2 * 3600 * 1000);
+      lifecycleCall(0).onError({
+        category: "exchange",
+        error: new Error("transport"),
+      });
+
+      await vi.waitFor(() => {
+        expect(
+          Array.from(document.querySelectorAll("button")).some(
+            (button) =>
+              button.textContent === "Start over with a fresh invitation",
+          ),
+        ).toBe(true);
+      });
+      expect(
+        Array.from(document.querySelectorAll("button")).some(
+          (button) => button.textContent === "Try again",
+        ),
+      ).toBe(false);
+      // The lapsed link is no longer advertised either.
+      expect(
+        Array.from(document.querySelectorAll("h2")).some(
+          (heading) => heading.textContent === "Share this invitation",
+        ),
+      ).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("post-create: a security failure forces a fresh invitation, inputs intact", async () => {

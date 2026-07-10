@@ -6,15 +6,13 @@ import { useEffect, useRef, useState } from "react";
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
 import {
-  buildOutputTable,
   errorMessage,
   loadPsiBackend,
   prepareForExchange,
   sanitizeForDisplay,
-  serializeExchangeRecord,
-  serializeVerificationKeys,
 } from "@psilink/core";
 
+import { hasRecoveryHint } from "@psi/authenticateExchange";
 import { inviterExchangeDataSpec } from "@psi/advancedInvite";
 import { listenAsInviter } from "@psi/rendezvous";
 import { runExchangeLifecycle } from "@psi/exchangeLifecycle";
@@ -31,24 +29,19 @@ import {
   runWithStages,
   stagesFor,
 } from "./exchangeRun";
+import { buildInviterRunOutputs } from "./inviterRunOutputs";
+import { invitationUsable } from "./inviterModel";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
 import type {
   Acquire,
   ExchangeErrorCategory,
-  ExchangeOutputs,
   GenerateOutput,
 } from "@psi/exchangeLifecycle";
 import type { ExchangeRun } from "./exchangeRun";
 import type { GeneratedInvitation } from "@psi/invitation";
-
-/** The bench run's downloadable artifacts: the lifecycle's outputs widened
- * with the matched-row count the completion header states. Present exactly
- * when the result table is (a withheld result has no count to state). */
-export type InviterRunOutputs = ExchangeOutputs & {
-  matchedRecordCount?: number;
-};
+import type { InviterRunOutputs } from "./inviterRunOutputs";
 
 /** A failed run, ready to render: the lifecycle's category (which decides the
  * recovery the alert offers) and the operator-facing alert content, composed
@@ -60,7 +53,8 @@ export interface RunFailure {
   message: string;
 }
 
-function failureFor(
+/** @internal */
+export function failureFor(
   category: ExchangeErrorCategory,
   error: unknown,
 ): RunFailure {
@@ -93,6 +87,19 @@ function failureFor(
     };
   }
   if (category === "security") {
+    // A tagged credential/expiry error's message is composed only from local
+    // values and carries its own recovery guidance (core's recovery-hint
+    // contract, preserved across authenticateExchange's re-wrap), so it is
+    // safe and more accurate to surface than partner-blame copy: an expired
+    // invitation is not a failed partner check. Still the security category,
+    // so the alert offers only a fresh invitation -- correct for expiry too.
+    if (hasRecoveryHint(error)) {
+      return {
+        category,
+        title: "This invitation can no longer be used",
+        message: sanitizeForDisplay(errorMessage(error)),
+      };
+    }
     // The authenticated key exchange failed closed: this connection could not
     // be confirmed as the invited partner. Not retryable -- a silent retry
     // would re-run into the same wrong secret, or into a peer that is
@@ -112,13 +119,15 @@ function failureFor(
   // Generic, retryable transport/exchange failure. The raw error reads as an
   // internal/developer message and can embed partner-/server-controlled
   // bytes, so the alert uses a fixed, friendly message; the detailed error
-  // stays in the dev-gated console.error for diagnosis.
+  // stays in the dev-gated console.error for diagnosis. A mid-run drop lands
+  // here too, after agreed payload columns may already have flowed to the
+  // authenticated partner, so the copy must not claim the data stayed local.
   return {
     category,
     title: "Exchange failed",
     message:
       "The exchange could not be completed - usually a temporary " +
-      "connection problem. Your data stayed on your device.",
+      "connection problem rather than an issue with your data.",
   };
 }
 
@@ -189,60 +198,18 @@ export function useInviterExchange({
     setOutputs(undefined);
     setFailure(undefined);
 
-    // Pure output-generation half: the current exchange screen's, plus the
-    // matched-row count the completion header states. The object URLs are
-    // revoked when they are replaced or the bench unmounts (effect above).
+    // Output-generation half. The URLs the build creates are revoked when the
+    // outputs are replaced or the bench unmounts (effect above); a throw
+    // mid-build revokes its own partial URLs (see buildInviterRunOutputs).
     const generateOutput: GenerateOutput<InviterRunOutputs> = (
       result,
       prepared,
     ) => {
       log.info("linkage complete, generating results and record files");
-      const jsonUrl = (text: string): string =>
-        window.URL.createObjectURL(
-          new Blob([text], { type: "application/json" }),
-        );
-      // The exchange withholds the result table from a party whose agreed
-      // terms give it no output (a one-sided exchange where this party is the
-      // PSI sender/helper): produce no results file -- the completion panel
-      // shows it contributed but receives no result -- while still offering
-      // the record downloads below.
-      const generated: InviterRunOutputs =
-        result.associationTable === undefined
-          ? { resultWithheld: true }
-          : (() => {
-              const { headers, rows } = buildOutputTable(
-                result.associationTable,
-                prepared.rawRows,
-                prepared.metadata,
-                result.partnerPayload,
-              );
-              const csv =
-                headers.join(",") +
-                "\n" +
-                rows.map((r) => r.join(",") + "\n").join("");
-              return {
-                resultsUrl: window.URL.createObjectURL(
-                  new Blob([csv], { type: "text/csv" }),
-                ),
-                matchedRecordCount: rows.length,
-              };
-            })();
-      // The record downloads are produced only when the audit pair exists;
-      // absent if building the record failed after a successful exchange, in
-      // which case they are intentionally omitted without a blocking alert.
-      // Filenames are timestamped per exchange (the record's own createdAt,
-      // made filesystem-safe) so repeated downloads accumulate rather than
-      // collide.
-      if (result.audit !== undefined) {
-        const stamp = result.audit.record.createdAt.replace(/[:.]/g, "-");
-        generated.record = {
-          recordUrl: jsonUrl(serializeExchangeRecord(result.audit.record)),
-          recordFileName: `psilink-record-${stamp}.json`,
-          keysUrl: jsonUrl(serializeVerificationKeys(result.audit.keys)),
-          keysFileName: `psilink-record-${stamp}.keys.json`,
-        };
-      }
-      return generated;
+      return buildInviterRunOutputs(result, prepared, {
+        create: (blob) => window.URL.createObjectURL(blob),
+        revoke: (url) => window.URL.revokeObjectURL(url),
+      });
     };
 
     // The inviter is the PSI responder: it must attach its inbound listener
@@ -345,9 +312,16 @@ export function useInviterExchange({
   // lifecycle tore down), so a fresh listen on the same invitation cannot race
   // it, and the same secret stays valid for the partner's original link --
   // the security category instead forces a fresh invitation, and an output
-  // failure must not re-run an exchange that already succeeded.
+  // failure must not re-run an exchange that already succeeded. Gated on the
+  // invitation's expiry as well: re-listening on a lapsed credential cannot
+  // succeed (no peer can pass it) and would keep the dead link advertised.
   function tryAgain() {
-    if (invitation === undefined || failure?.category !== "exchange") return;
+    if (
+      invitation === undefined ||
+      failure?.category !== "exchange" ||
+      !invitationUsable(invitation.expires, new Date())
+    )
+      return;
     abortRef.current?.abort();
     abortRef.current = undefined;
     start(invitation);

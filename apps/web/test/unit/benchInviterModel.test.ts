@@ -21,6 +21,7 @@ import {
   enabledKeys,
   fileCardMeta,
   identifierProblem,
+  invitationUsable,
   inviterLedgerRows,
   inviterRailFacts,
   keySatisfiabilityFor,
@@ -183,6 +184,12 @@ describe("display helpers", () => {
       "12,408 rows - 8.4 MB",
     );
     expect(fileCardMeta(3, 2048)).toBe("3 rows - 2 KB");
+  });
+
+  test("invitationUsable is true only before the expiry moment", () => {
+    const now = new Date("2026-07-08T19:00:00.000Z");
+    expect(invitationUsable("2026-07-08T19:32:00.000Z", now)).toBe(true);
+    expect(invitationUsable("2026-07-08T18:32:00.000Z", now)).toBe(false);
   });
 });
 

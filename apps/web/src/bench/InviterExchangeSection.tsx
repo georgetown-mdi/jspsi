@@ -4,16 +4,16 @@ import { Alert, Button, CopyButton } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 
+import { dateTimeLabel, invitationUsable } from "./inviterModel";
 import { awaitingPartner } from "./exchangeRun";
-import { dateTimeLabel } from "./inviterModel";
 
 import { StatusPanel } from "./StatusPanel";
 import styles from "./bench.module.css";
 
-import type { InviterRunOutputs, RunFailure } from "./useInviterExchange";
-
 import type { ExchangeRun } from "./exchangeRun";
 import type { GeneratedInvitation } from "@psi/invitation";
+import type { InviterRunOutputs } from "./inviterRunOutputs";
+import type { RunFailure } from "./useInviterExchange";
 
 /** A labelled, copy-to-clipboard view of one shareable artifact. Client-only
  * by construction (the post-create section mounts from the create handler, so
@@ -128,6 +128,13 @@ export function InviterExchangeSection({
   const phase =
     outputs !== undefined ? "done" : awaitingPartner(run) ? "share" : "running";
 
+  // A retry is genuine only while the invitation can still be accepted:
+  // re-listening on a lapsed credential cannot succeed, so an expired
+  // exchange failure routes to start-over and stops advertising the link.
+  const retryable =
+    failure?.category === "exchange" &&
+    invitationUsable(invitation.expires, new Date());
+
   // The phase-level focus throughline. The bench host moves focus to the h1
   // when the section mounts; within the section, focus moves again when the
   // partner connects or a retry clears the alert -- the share block or the
@@ -183,24 +190,27 @@ export function InviterExchangeSection({
           mb="md"
         >
           <span style={{ whiteSpace: "pre-line" }}>{failure.message}</span>
-          {failure.category === "exchange" && (
+          {retryable && (
             <Button color="red" variant="light" mt="sm" onClick={onTryAgain}>
               Try again
             </Button>
           )}
-          {(failure.category === "security" ||
-            failure.category === "config") && (
+          {/* Every non-retryable failure except "output" (whose exchange
+              already succeeded, so nothing here may invite a re-run) offers
+              exactly one recovery: a fresh invitation. */}
+          {!retryable && failure.category !== "output" && (
             <Button color="red" variant="light" mt="sm" onClick={onStartOver}>
               Start over with a fresh invitation
             </Button>
           )}
         </Alert>
       )}
-      {/* The share block drops out once the partner connects (nothing left to
-          share) and on a security failure (a link that failed authentication
-          must not keep being advertised for copying); a retryable failure
-          keeps it, since the same link stays valid for another attempt. */}
-      {phase === "share" && failure?.category !== "security" && (
+      {/* The copy artifacts drop out once the partner connects (nothing left
+          to share) and on any failure except a retryable one -- a dead
+          invitation (failed authentication, terminal config fault, lapsed
+          expiry) must not keep being advertised for copying, while a
+          retryable failure's link stays valid for another attempt. */}
+      {phase === "share" && (failure === undefined || retryable) && (
         <>
           <h2>Share this invitation</h2>
           <p>
@@ -227,14 +237,19 @@ export function InviterExchangeSection({
               .
             </strong>
           </p>
-          <div className={styles.callout}>
-            <p className={styles.calloutLead}>Keep this tab open.</p>
-            <p className={styles.small}>
-              Your browser is listening for your partner. Closing the tab
-              cancels the invitation; reloading starts over.
-            </p>
-          </div>
         </>
+      )}
+      {/* The "listening" claim is false the moment any failure lands (the
+          lifecycle tore down), so the callout outlives no failure -- not even
+          a retryable one. */}
+      {phase === "share" && failure === undefined && (
+        <div className={styles.callout}>
+          <p className={styles.calloutLead}>Keep this tab open.</p>
+          <p className={styles.small}>
+            Your browser is listening for your partner. Closing the tab cancels
+            the invitation; reloading starts over.
+          </p>
+        </div>
       )}
       {phase === "done" && (
         <div className={styles.donePanel}>
