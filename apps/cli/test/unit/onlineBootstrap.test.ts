@@ -1333,14 +1333,15 @@ test("endpointFromConnection: a bare-host sftp connection emits no path", () => 
 });
 
 test("endpointFromConnection: no credential rides along on the emitted endpoint", () => {
-  // The inviter's connection carries credentials (username/password/private key);
-  // the endpoint must carry only the public locator. This is the producer side of
-  // the invitation's no-credentials invariant.
+  // The inviter's connection carries credentials (username/private key/
+  // passphrase); the endpoint must carry only the public locator. This is the
+  // producer side of the invitation's no-credentials invariant. password is
+  // omitted here since it is mutually exclusive with privateKey.
   const connection = connectionFromURL(new URL("sftp://host:2200/drop"), {
     server: {
       username: "alice",
-      password: "hunter2",
       privateKey: "@/home/alice/.ssh/id_ed25519",
+      privateKeyPassphrase: "hunter2",
     },
   });
   const endpoint = endpointFromConnection(connection);
