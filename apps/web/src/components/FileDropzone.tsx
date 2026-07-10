@@ -69,17 +69,17 @@ export default function FileDropzone({
     // (a cohort or identifier-bearing filename), and the codes are all the
     // diagnostic needs. The count is non-sensitive, so it stays.
     log.warn(`rejected ${rejectedFiles.length} file(s):`, [...codes]);
-    // Report each distinct reason: a batch can mix a too-large file with a
-    // wrong-type one, so checking the size code alone would hide the type
-    // rejection. Any non-size rejection is a type/format problem against the
-    // accept list, and the empty-reasons fallback keeps an unexpected code from
-    // producing a silent reject.
     if (codes.has("too-many-files")) {
       setRejectionMessage(
         "Drop a single CSV file; multiple files were not accepted.",
       );
       return;
     }
+    // Report each distinct reason: a batch can mix a too-large file with a
+    // wrong-type one, so checking the size code alone would hide the type
+    // rejection. Any non-size rejection is a type/format problem against the
+    // accept list, and the empty-reasons fallback keeps an unexpected code from
+    // producing a silent reject.
     const reasons: Array<string> = [];
     if (codes.has("file-too-large"))
       reasons.push(`larger than the ${MAX_CSV_FILE_MB} MB maximum`);
