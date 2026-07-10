@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import * as path from "node:path";
+
 import { afterEach, expect, test, vi } from "vitest";
 
 import { buildCli } from "../../src/cliParser";
@@ -9,17 +12,21 @@ afterEach(() => {
 // Drive the real parser against a synthetic argv with process.exit trapped (so
 // execution stops at the exit instead of tearing down the test runner) and the
 // console captured. Returns the rejection message the trapped exit produced (e.g.
-// "exit:64") and the captured stderr text. No command handler runs in any case
-// here: a strict-option failure fires before the handler, and --help short-
-// circuits, so this drives only the parser, not a real exchange.
+// "exit:64"), the captured stderr text, and the captured stdout/console.log text
+// (where yargs prints --version and --help). No command handler runs in any case
+// here: a strict-option failure fires before the handler, and --help/--version
+// short-circuit, so this drives only the parser, not a real exchange.
 async function parse(
   argv: string[],
-): Promise<{ exit: string; stderr: string }> {
+): Promise<{ exit: string; stderr: string; stdout: string }> {
   const stderr: string[] = [];
+  const stdout: string[] = [];
   vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
     stderr.push(args.map(String).join(" "));
   });
-  vi.spyOn(console, "log").mockImplementation(() => {});
+  vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+    stdout.push(args.map(String).join(" "));
+  });
   vi.spyOn(process.stdout, "write").mockImplementation((() => true) as never);
   vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
     throw new Error(`exit:${code ?? 0}`);
@@ -30,7 +37,7 @@ async function parse(
   } catch (err) {
     exit = err instanceof Error ? err.message : String(err);
   }
-  return { exit, stderr: stderr.join("\n") };
+  return { exit, stderr: stderr.join("\n"), stdout: stdout.join("\n") };
 }
 
 test("a misspelled option on the zero-setup command exits 64, naming the option", async () => {
@@ -78,4 +85,19 @@ test("--help short-circuits without a strict-option failure", async () => {
   const { exit, stderr } = await parse(["exchange", "--help"]);
   expect(exit).toBe("exit:0");
   expect(stderr).not.toContain("Unknown arguments");
+});
+
+test("--version prints the CLI's own package version, not yargs' walk-up guess", async () => {
+  // yargs' default .version() heuristic walks up from ITS OWN install directory,
+  // which in this npm-workspaces monorepo resolves to the repo root's package.json
+  // (version 0.0.0), not apps/cli/package.json -- the bug this test guards against.
+  const { name, version } = JSON.parse(
+    readFileSync(path.join(__dirname, "..", "..", "package.json"), "utf8"),
+  ) as { name: string; version: string };
+  expect(name).toBe("psilink");
+  expect(version).not.toBe("0.0.0");
+
+  const { exit, stdout } = await parse(["--version"]);
+  expect(exit).toBe("exit:0");
+  expect(stdout.trim()).toBe(version);
 });

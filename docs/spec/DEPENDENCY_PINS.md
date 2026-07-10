@@ -44,6 +44,44 @@ complement -- the premises and the procedure.
 
 **Rebuilding or bumping.** The addon is built from the fork's own Docker build image, not from this repo. On any rebuild -- a fork change, an upstream merge, or a version bump -- regenerate the sidecar (`sha256sum <tarball> > <tarball>.sha256`), and if the version string did not change, remove `node_modules/@openmined/psi.js` and reinstall so npm re-fetches the new bytes past its version cache. A rebuild that touches the native crypto is crypto-code review scope (see [CONTRIBUTING.md](../../CONTRIBUTING.md#dependency-policy)).
 
+## The Docker image's dependency freeze
+
+The shipped CLI image resolves no dependency at image-build time and installs
+nothing at container runtime. The Dockerfile's builder stage installs with
+`npm ci` against the committed `package-lock.json` -- which installs exactly the
+locked tree, verifying each registry package against the lockfile's integrity
+hash, and fails the build if a manifest and the lockfile disagree -- then, after
+building, re-runs `npm ci --omit=dev` for the production-only tree, and the
+runtime stage copies that `node_modules` unchanged. Every runtime dependency and
+transitive in the image is therefore the exact version in the committed
+lockfile: a rebuild without a lockfile change cannot re-resolve a caret range,
+and the image ships the same tree CI tested and the release SBOM records
+(`npm sbom --package-lock-only`, see [RELEASES.md](../RELEASES.md)).
+
+Why this is correctness-critical rather than hygiene: `re2js` executes the
+agreed linkage transforms' regexes that standardize values before PSI key
+derivation, so the two parties' regex engines must behave byte-identically or
+the derived keys silently mismatch -- no error, just missed matches. The freeze
+covers it and every other external the core CJS build resolves from
+`node_modules` at runtime (`yaml`, `canonicalize`, `@noble/curves`, ...), which
+their caret manifest ranges would otherwise leave free to re-resolve at image
+build time, letting two images of nominally the same release diverge. The
+vendored `@openmined/psi.js` tarball participates as the committed bytes in
+`lib/`; npm records no integrity hash for a `file:` tarball, so its sha256
+sidecar remains the integrity check (see above).
+
+The structural invariants are enforced by `scripts/dockerfile-freeze.test.mjs`
+(run by `npm run test:scripts`, a CI static check): every install is `npm ci`,
+the lockfile is copied into the builder before the first install, the shipped
+tree is the `--omit=dev` one, the runtime stage runs no npm at all, and the
+copied layout keeps the workspace links and the PSI worker entry where the
+CLI resolves them.
+
+Residual float: the `node:26-alpine` base image tag is deliberately not
+digest-pinned, so the Node runtime and Alpine userland beneath the frozen
+`node_modules` can still drift between rebuilds. Pinning the base is a separate
+decision with its own upgrade cadence; this freeze does not address it.
+
 ## Upgrading the SFTP Stack (ssh2 / ssh2-sftp-client)
 
 The channel-security bounds specified in [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md) reach past the public `ssh2-sftp-client` API and drive ssh2 internals directly (`apps/cli/src/connection/ssh2SftpAdapter.ts`), so they rest on premises about ssh2's internal behavior that an upgrade can silently break. Re-verify the following on any `ssh2` or `ssh2-sftp-client` version bump, before the bump merges.

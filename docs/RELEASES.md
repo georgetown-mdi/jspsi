@@ -163,4 +163,4 @@ git verify-tag vX.Y.Z
 
 ## Software Bill of Materials (SBOM)
 
-An SBOM in CycloneDX format is generated as part of the release checklist (step 9) and attached to each GitHub Release. It lists every direct and transitive dependency with versions and licenses, making it straightforward for downstream users to audit their exposure when a vulnerability is announced in a dependency.
+An SBOM in CycloneDX format is generated as part of the release checklist (step 9) and attached to each GitHub Release. It lists every direct and transitive dependency with versions and licenses, making it straightforward for downstream users to audit their exposure when a vulnerability is announced in a dependency. Because the container image installs from the same committed lockfile the SBOM is generated from, every dependency the shipped image runs appears in the SBOM at the exact resolved version. The SBOM is a superset of the image, however: it also enumerates development dependencies and the `apps/web` workspace, which the production image does not ship (see `docs/spec/DEPENDENCY_PINS.md`).
