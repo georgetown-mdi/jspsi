@@ -14,7 +14,7 @@ PSI-Link uses [semantic versioning](https://semver.org/) (MAJOR.MINOR.PATCH):
 - **MINOR**: backwards-compatible new features or new configuration fields. Exchange specification files written for an earlier MINOR version of the same MAJOR must continue to work.
 - **MAJOR**: breaking changes to the exchange protocol, configuration schema, or CLI interface. A MAJOR bump means existing key files or exchange specs may need to be updated.
 
-Packages version independently. `apps/cli/package.json` is the canonical release version: Docker image tags and GitHub Release tags reflect the CLI version. `packages/core` (and any future sub-packages) version independently -- a patch to the core library does not require a CLI release unless the CLI itself is also affected. `apps/web` is continuously deployed and carries no release version. The root `package.json` version is a monorepo workspace marker and is not independently meaningful.
+`apps/cli/package.json` is the canonical release version: Docker image tags and GitHub Release tags reflect the CLI version. `packages/core` (and any future sub-packages) version independently -- a patch to the core library does not require a CLI release unless the CLI itself is also affected. `apps/web` is continuously deployed and carries no release version. The root `package.json` version is a monorepo workspace marker and is not independently meaningful.
 
 Compatibility between the CLI and its core dependency is recorded by the lockfile and embedded in the Docker image; no separate compatibility matrix is maintained.
 
@@ -91,20 +91,11 @@ git tag -s vX.Y.Z -m "PSI-Link vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-### 8. Build and publish the container image
+### 8. Build and publish the container image `[CI]`
 
-Multi-platform `--push` needs a `docker-container`-driver buildx builder. Select it explicitly with `--builder` so it need not be your default; see the Docker Hub build instructions in `apps/cli/README.md` for creating `multiarch-builder`. Run from the repository root:
+The `vX.Y.Z` tag push in step 7 triggers `.github/workflows/release.yaml`, which builds the multi-platform image and pushes it to Docker Hub. Ensure the `DOCKER_USERNAME` and `DOCKER_TOKEN` repository secrets are set before tagging.
 
-```sh
-docker buildx build --builder multiarch-builder \
-  --platform linux/amd64,linux/arm64 \
-  --tag vdorie/psi-link:X.Y.Z \
-  --tag vdorie/psi-link:X.Y \
-  --tag vdorie/psi-link:latest \
-  --push .
-```
-
-This step is automated by `.github/workflows/release.yaml`, which triggers on any `vX.Y.Z` tag push. Ensure the `DOCKER_USERNAME` and `DOCKER_TOKEN` repository secrets are set before tagging.
+If you must build and push by hand -- for a workflow outage or a local test -- follow the multi-platform buildx instructions in `apps/cli/README.md` (creating `multiarch-builder` and running `docker buildx build --push` from the repository root).
 
 ### 9. Generate and attach the SBOM
 

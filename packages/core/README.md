@@ -1,32 +1,13 @@
+# @psilink/core
+
+The shared PSI-Link library consumed by the CLI and web apps. It is a workspace-internal package; the apps are its only consumers.
+
+## Building
+
+From the repository root:
+
 ```sh
-npm run build
-npm pack
-```
-
-If desired to remove `rollup-plugin-dts`, create a file `tsconfig.build.json`:
-
-```json
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "declaration": true,
-    "declarationMap": true,
-    "emitDeclarationOnly": true,
-    "outDir": "dist/types"
-  },
-  "include": ["src"]
-}
-```
-
-And add these lines to `package.json`:
-
-```json
-{
-  "scripts": {
-    "build:types": "tsc -p tsconfig.build.json",
-    "prepublishOnly": "npm run build && npm run build:types"
-  }
-}
+npm run build -w packages/core
 ```
 
 ## Running tests

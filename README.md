@@ -43,7 +43,7 @@ Replacing each of the following:
 
 The only content accessible to the container will be that in `WORK_PATH`, so you are recommended to make a new directory and place it in the file you wish to transfer.
 
-The output file is a CSV giving the linkage between the two parties' records. Its first column identifies our matched records, headed by our configured identifier column's name (or `row_id` if none is configured); the remaining columns carry the partner's payload columns under their original names, prefixed `their_` only where a name collides with ours. When the partner shares no payload, a single `row_id` column (or `their_row_id` on a name collision) instead holds the partner's 0-based row index.
+The output file is a CSV giving the linkage between the two parties' records. See [Output](docs/spec/PROTOCOL.md#output) for the exact column layout and naming rules.
 
 For more information, see [apps/cli](apps/cli/).
 
@@ -77,8 +77,8 @@ Connection parameters can also be specified individually as command line flags t
    * `--server-port` - port number of the server
    * `--server-username` - username for authentication
    * `--server-password` - password for password-based user authentication; use `@path` to read from file
-   * `--server-private-key` - buffer or string that contains a private key for either key-based or hostbased user authentication (OpenSSH format); use `@path` to read from file
-   * `--server-passphrase` - for an encrypted private key, this is the passphrase used to decrypt it; use `@path` to read from file
+   * `--server-private-key` - an SSH private key (OpenSSH format) for key-based (publickey) authentication; use `@path` to read from file
+   * `--server-private-key-passphrase` - for an encrypted private key, this is the passphrase used to decrypt it; use `@path` to read from file
 
 Using `@path`s specifies that the value should be read from a file. For example, to have the script read a password from the file `passwd` in the working directory, run:
 
@@ -113,17 +113,11 @@ docker run --rm --mount type=bind,src='C:\Users\me\Documents\psi-link',dst=/work
 
 ## Docker run background
 
-The `docker run` command contains two parts. The first part includes instructions purely for Docker, telling it what to run and how:
+The `docker run` command has two parts. The first is the Docker invocation, which mounts `WORK_PATH` at `/work` so the container can read your input and write the output there (see Docker's own docs for [`--rm`](https://docs.docker.com/reference/cli/docker/container/run/#rm) and [`--mount`](https://docs.docker.com/reference/cli/docker/container/run/#mount)):
 
 ```sh
 docker run --rm --mount type=bind,src=WORK_PATH,dst=/work vdorie/psi-link:latest
 ```
-
-This instructs Docker to:
-   * **run** a container
-      * **r**e**m**ove the container when finished, deleting any intermediate artifacts
-      * **mount** a path on the host computer inside the container, where it can be read from and written to
-   * Use the **latest** tag of the **vdorie/psi-link** image as the container
 
 The second part is the invocation of the psi-link script and includes any command line options you wish to use. In the first example above it is:
 

@@ -61,7 +61,7 @@ The following are in scope for this policy:
 
 The following are out of scope:
 
-- Fundamental cryptographic flaws in the PSI primitive itself — report those to [OpenMined/PSI](https://github.com/OpenMined/PSI) directly, then notify us so we can coordinate an update to the vendored copy. Note that `@openmined/psi.js` is vendored in this repository; PSI-Link is responsible for updating it when security patches are released upstream and will do so as part of normal maintenance.
+- Fundamental cryptographic flaws in the PSI primitive itself -- report those to [OpenMined/PSI](https://github.com/OpenMined/PSI) directly, then notify us so we can coordinate an update to the vendored copy.
 - Denial-of-service attacks against shared infrastructure (SFTP servers, STUN/TURN relays, peer coordination servers)
 - Attacks that require an adversary to have already compromised the host running PSI-Link
 - Social engineering
