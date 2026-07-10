@@ -64,6 +64,15 @@ export function AcceptInvitation() {
   // affirmatively checks this and provides a name (see commitAcceptance).
   const [consented, setConsented] = useState(false);
   const [acceptorName, setAcceptorName] = useState("");
+  // handleAcquired fires after an async CSV parse, during which the consent
+  // checkbox and name field stay interactive; a plain closure would re-check the
+  // values captured when the parse started. Refs synced to the latest state on
+  // every render make the re-check read the live consent and name at commit time,
+  // so revoking consent (or clearing the name) mid-parse blocks the commit.
+  const consentedRef = useRef(consented);
+  consentedRef.current = consented;
+  const acceptorNameRef = useRef(acceptorName);
+  acceptorNameRef.current = acceptorName;
   // The post-consent phase: reviewing -> preparing -> exchange, with a back edge
   // preparing -> reviewing so the operator can pick a different file. Its presence
   // (anything past "reviewing") is the in-route transition off the review screen.
@@ -157,7 +166,10 @@ export function AcceptInvitation() {
     // The acquire phase already gates its submit on the same check
     // (submitDisabled), but re-check here so the security-relevant invariant does
     // not rest on the disabled state alone.
-    const name = commitAcceptance({ consented, name: acceptorName });
+    const name = commitAcceptance({
+      consented: consentedRef.current,
+      name: acceptorNameRef.current,
+    });
     if (name === undefined) return;
     // The seed has now done its job; a back edge to reviewing must not resurrect it
     // over the file just acquired (see handoffConsumedRef).

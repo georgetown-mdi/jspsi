@@ -92,6 +92,34 @@ vi.mock("@components/FileSelect", () => ({
     ),
 }));
 
+// Hold the CSV parse open per-test so the consent state can change WHILE the parse
+// is in flight -- the window in which the re-check must read live consent, not the
+// value captured when the parse started. With `defer` unset it delegates to the
+// real inline loader (every other test's synchronous small-file parse); with it set
+// the returned promise settles only when the test calls `resolve`.
+const csvLoadHarness = vi.hoisted(() => ({
+  defer: false,
+  resolve: undefined as ((value: unknown) => void) | undefined,
+}));
+vi.mock("@psi/csvParseController", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    loadCSVFileOffMainThread: (file: unknown, options?: unknown) => {
+      if (!csvLoadHarness.defer)
+        return (
+          actual.loadCSVFileOffMainThread as (
+            f: unknown,
+            o?: unknown,
+          ) => Promise<unknown>
+        )(file, options);
+      return new Promise((resolve) => {
+        csvLoadHarness.resolve = resolve;
+      });
+    },
+  };
+});
+
 // Two single-element linkage keys, one per name field, so a CSV can satisfy both,
 // one, or neither -- the three pre-flight outcomes the acceptor distinguishes. The
 // identity drives the "Invitation from ..." heading the terms render.
@@ -192,6 +220,8 @@ afterEach(() => {
   container = undefined;
   harness.files = [];
   exchange.lastProps = undefined;
+  csvLoadHarness.defer = false;
+  csvLoadHarness.resolve = undefined;
   window.location.hash = "";
   // Drop any accept hand-off a test stashed, so it cannot leak into the next mount.
   clearAcceptHandoff();
@@ -289,6 +319,76 @@ describe("accept review screen (consent + file before any connection)", () => {
       .element(page.getByText("Invitation from County Health Department"))
       .toBeInTheDocument();
     await expect.element(page.getByTestId("file-count")).toHaveTextContent("0");
+  });
+
+  // Settle the deferred parse with a satisfiable two-name result, letting the
+  // acquire handler's consent re-check run against whatever consent state the test
+  // has since set.
+  function resolveParse() {
+    if (csvLoadHarness.resolve === undefined)
+      throw new Error("the deferred parse has not started");
+    csvLoadHarness.resolve({
+      data: [{ first_name: "Alice", last_name: "Smith" }],
+      errors: [],
+      meta: { fields: ["first_name", "last_name"] },
+    });
+  }
+
+  test("revoking consent while the parse is in flight blocks the commit", async () => {
+    window.location.hash = await encodeAcceptToken();
+    csvLoadHarness.defer = true;
+    mountAcceptRoute();
+
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+
+    await reviewAndChoose(csvFile("first_name,last_name\nAlice,Smith\n"));
+    await userEvent.click(page.getByTestId("accept"));
+
+    // The parse is now in flight (its promise is held open). Revoke consent before
+    // it resolves: the checkbox is still live.
+    await expect.poll(() => csvLoadHarness.resolve !== undefined).toBe(true);
+    await userEvent.click(page.getByRole("checkbox"));
+    await expect.element(page.getByRole("checkbox")).not.toBeChecked();
+
+    // The parse now resolves against revoked consent. The re-check reads the live
+    // (revoked) consent, so nothing commits.
+    resolveParse();
+
+    // Committing would swap the review panel for the prepare editor and unmount the
+    // consent checkbox. Assert the POSITIVE, stable signal that the review screen
+    // stands -- the checkbox is still present -- rather than racing the absence of a
+    // heading that a wrong commit would mount only after a further render. Poll long
+    // enough that a mis-fired commit would have transitioned by now.
+    for (let i = 0; i < 20; i++) {
+      expect(page.getByRole("checkbox").elements()).toHaveLength(1);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(document.body.textContent).not.toContain("Prepare your data");
+    expect(exchangeMounted()).toBe(false);
+  });
+
+  test("consent kept through the parse commits and reaches the prepare editor", async () => {
+    window.location.hash = await encodeAcceptToken();
+    csvLoadHarness.defer = true;
+    mountAcceptRoute();
+
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+
+    await reviewAndChoose(csvFile("first_name,last_name\nAlice,Smith\n"));
+    await userEvent.click(page.getByTestId("accept"));
+
+    // Consent is given and kept through the deferred parse; resolving it commits and
+    // advances to the prepare editor.
+    await expect.poll(() => csvLoadHarness.resolve !== undefined).toBe(true);
+    resolveParse();
+    await expect
+      .element(page.getByRole("heading", { name: "Prepare your data" }))
+      .toBeInTheDocument();
+    expect(exchangeMounted()).toBe(false);
   });
 
   test("does not enable accept (or mount anything) without consent", async () => {
