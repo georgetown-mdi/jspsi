@@ -152,6 +152,12 @@ describe("runPipeline — string functions", () => {
     );
   });
 
+  test("remove_affixes collapses the space left by a stripped interior title", () => {
+    expect(runPipeline("JOHN MR SMITH", [{ function: "remove_affixes" }])).toBe(
+      "JOHN SMITH",
+    );
+  });
+
   test("substring extracts the requested slice", () => {
     expect(
       runPipeline("SMITH", [
