@@ -69,6 +69,12 @@ export default function FileDropzone({
     // (a cohort or identifier-bearing filename), and the codes are all the
     // diagnostic needs. The count is non-sensitive, so it stays.
     log.warn(`rejected ${rejectedFiles.length} file(s):`, [...codes]);
+    if (codes.has("too-many-files")) {
+      setRejectionMessage(
+        "Drop a single CSV file; multiple files were not accepted.",
+      );
+      return;
+    }
     // Report each distinct reason: a batch can mix a too-large file with a
     // wrong-type one, so checking the size code alone would hide the type
     // rejection. Any non-size rejection is a type/format problem against the
@@ -89,6 +95,7 @@ export default function FileDropzone({
       <Dropzone
         onDrop={handleDrop}
         onReject={handleReject}
+        multiple={false}
         maxSize={MAX_CSV_FILE_BYTES} // see csvIntake.ts for the bound
         accept={["text/plain", MIME_TYPES.csv, "application/vnd.ms-excel"]}
         {...(disabled
@@ -155,7 +162,7 @@ export default function FileDropzone({
             />
           </Dropzone.Idle>
           <Text mt="sm" inline>
-            Drag files here or click to select
+            Drag a file here or click to select
           </Text>
           <Text size="xs" c="dimmed" inline mt={7}>
             (Max file size: {MAX_CSV_FILE_MB} MB)

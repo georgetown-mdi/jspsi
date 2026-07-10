@@ -17,6 +17,14 @@ import {
 import { DURATION_VALUE_HELP, FINE_DURATION_VALUE_HELP } from "./util/duration";
 
 /**
+ * Upper bound for `--server-port`, matching the config schema's own
+ * `z.int().min(0).max(65535)` bound on `server.port` (see
+ * `packages/core/src/config/connection.ts`) so the CLI parse boundary and the
+ * schema reject the same range.
+ */
+export const MAX_PORT = 65535;
+
+/**
  * Per-command overrides for the descriptions of the common bootstrap options
  * whose accurate wording is command-specific -- chiefly whether the config/key
  * files are written or read, and whether the `server-*` (and `peer-id`)
@@ -274,7 +282,7 @@ export function parseCommonBootstrapArgs(
     keyFile:
       (singleValue(argv, "key-file") as string | undefined) ?? DEFAULT_KEY_PATH,
     identity: singleValue(argv, "identity") as string | undefined,
-    serverPort: singleValue(argv, "server-port") as number | undefined,
+    serverPort: nonNegativeIntFlag(argv, "server-port", MAX_PORT),
     serverUsername: singleValue(argv, "server-username") as string | undefined,
     // Credential values are carried through verbatim; an `@path` ref is read only
     // at the live-use boundary (resolveConnectionCredentials in

@@ -1,8 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 
-import { Alert, Anchor, VisuallyHidden } from "@mantine/core";
+import { Alert, VisuallyHidden } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
-import { Link } from "@tanstack/react-router";
 
 import { sanitizeErrorForDisplay, sanitizeForDisplay } from "@psilink/core";
 
@@ -42,15 +41,19 @@ import {
   reviewValidation,
   sealEditor,
   spineProblems,
+  unsealEditor,
 } from "./inviterModel";
 import { AgreementTab } from "./AgreementTab";
 import { BenchShell } from "./BenchShell";
 import { CleaningTab } from "./CleaningTab";
+import { InviterExchangeSection } from "./InviterExchangeSection";
 import { KeysTab } from "./KeysTab";
 import { Ledger } from "./Ledger";
 import { MatchingSharingSection } from "./MatchingSharingSection";
 import { ReviewCreateSection } from "./ReviewCreateSection";
 import { YourFileSection } from "./YourFileSection";
+import { timelineSteps } from "./exchangeRun";
+import { useInviterExchange } from "./useInviterExchange";
 
 import type { AcquiredCsv, InviterEditor, SpineTarget } from "./inviterModel";
 import type { DisclosureChoice } from "@psi/metadataEditing";
@@ -101,6 +104,26 @@ export function InviterBench() {
   const [createAlert, setCreateAlert] = useState<IntakeAlert>();
   const [expertMode, setExpertMode] = useState(false);
   const [editorAnnouncement, setEditorAnnouncement] = useState("");
+
+  // The run starts the moment the invitation exists (the hook listens for the
+  // partner right away) and is torn down when the invitation is discarded or
+  // the bench unmounts.
+  const { run, outputs, failure, tryAgain } = useInviterExchange({
+    invitation,
+    inviterName: editor?.draft.identity ?? "",
+  });
+
+  // The failure alerts' "start over with a fresh invitation": the seal lifts
+  // with every input intact, the failed invitation is discarded (its run has
+  // already torn down; the hook drops the run state), and the operator lands
+  // back on Review & create, where the next create mints a fresh secret.
+  function startOver() {
+    setEditor((current) =>
+      current === undefined ? current : unsealEditor(current),
+    );
+    setInvitation(undefined);
+    goTo("review");
+  }
 
   function goTo(next: Section) {
     if (isSpineStep(next)) setLastSpineStep(next);
@@ -289,12 +312,7 @@ export function InviterBench() {
   );
   const steps: Array<RailStep> =
     section === "share"
-      ? [
-          { label: "Share", state: "current" },
-          { label: "Partner accepts", state: "pending" },
-          { label: "Exchange runs", state: "pending" },
-          { label: "Results", state: "pending" },
-        ]
+      ? timelineSteps(run)
       : SPINE_ORDER.map((step, position) => {
           const state =
             !inTab && step === section
@@ -345,7 +363,17 @@ export function InviterBench() {
       }
       ledger={
         <Ledger
-          rows={inviterLedgerRows(editor, invitation?.expires).map((row) => ({
+          tag={sealed ? "Terms sealed at create" : undefined}
+          rows={inviterLedgerRows(
+            editor,
+            invitation?.expires,
+            outputs === undefined
+              ? undefined
+              : {
+                  matchedRecordCount: outputs.matchedRecordCount,
+                  resultWithheld: outputs.resultWithheld,
+                },
+          ).map((row) => ({
             label: row.label,
             reference: row.reference,
             muted: row.muted,
@@ -362,7 +390,11 @@ export function InviterBench() {
               row.value
             ),
           }))}
-          footer="Your file stays in this browser. Nothing is uploaded; your partner receives only what this ledger names."
+          footer={
+            outputs === undefined
+              ? "Your file stays in this browser. Nothing is uploaded; your partner receives only what this ledger names."
+              : "Your file never left this browser. The results above are all your partner received about your data."
+          }
         />
       }
     >
@@ -527,24 +559,15 @@ export function InviterBench() {
             onBack={() => goTo("review")}
           />
         )}
-        {section === "share" && (
-          <>
-            <h1 tabIndex={-1}>Your invitation is ready</h1>
-            <p>
-              The terms are sealed: the invitation your partner consents to is
-              exactly the proposal you just reviewed.
-            </p>
-            <Alert color="yellow" title="Under construction" mt="md">
-              The share screen - the invitation link and code with their copy
-              actions - arrives with the next bench screens. Nothing has been
-              shared: the invitation exists only in this browser and expires on
-              its own. To run an exchange today, use the{" "}
-              <Anchor component={Link} to="/">
-                current app
-              </Anchor>
-              .
-            </Alert>
-          </>
+        {section === "share" && invitation !== undefined && (
+          <InviterExchangeSection
+            invitation={invitation}
+            run={run}
+            outputs={outputs}
+            failure={failure}
+            onTryAgain={tryAgain}
+            onStartOver={startOver}
+          />
         )}
         <VisuallyHidden>
           <p aria-live="polite" aria-atomic="true">

@@ -21,6 +21,7 @@ import {
   enabledKeys,
   fileCardMeta,
   identifierProblem,
+  invitationUsable,
   inviterLedgerRows,
   inviterRailFacts,
   keySatisfiabilityFor,
@@ -29,6 +30,7 @@ import {
   reviewValidation,
   sealEditor,
   spineProblems,
+  unsealEditor,
 } from "@bench/inviterModel";
 
 import type { AcquiredCsv } from "@bench/inviterModel";
@@ -183,6 +185,12 @@ describe("display helpers", () => {
     );
     expect(fileCardMeta(3, 2048)).toBe("3 rows - 2 KB");
   });
+
+  test("invitationUsable is true only before the expiry moment", () => {
+    const now = new Date("2026-07-08T19:00:00.000Z");
+    expect(invitationUsable("2026-07-08T19:32:00.000Z", now)).toBe(true);
+    expect(invitationUsable("2026-07-08T18:32:00.000Z", now)).toBe(false);
+  });
 });
 
 describe("review and create", () => {
@@ -268,6 +276,54 @@ describe("review and create", () => {
     const rows = inviterLedgerRows(editor, "2026-07-08T19:32:00.000Z");
     const expires = rows.find((row) => row.label === "Expires");
     expect(expires?.value).toContain("July 8, 2026");
+  });
+});
+
+describe("after the exchange completes", () => {
+  function outcomeRow(
+    outcome: Parameters<typeof inviterLedgerRows>[2],
+    label: string,
+  ) {
+    const rows = inviterLedgerRows(
+      editorFromCsv("Dana", csv),
+      "2026-07-08T19:32:00.000Z",
+      outcome,
+    );
+    return rows.find((row) => row.label === label);
+  }
+
+  test("the ledger reports the invitation used and the matched count", () => {
+    expect(outcomeRow({ matchedRecordCount: 1847 }, "Expires")?.value).toBe(
+      "Invitation used",
+    );
+    expect(
+      outcomeRow({ matchedRecordCount: 1847 }, "You will receive")?.value,
+    ).toBe("1,847 matched rows + shared columns");
+  });
+
+  test("a withheld result states the caveat rather than a count", () => {
+    expect(
+      outcomeRow({ resultWithheld: true }, "You will receive")?.value,
+    ).toBe("No result table - withheld by the agreed terms");
+  });
+
+  test("unsealing reopens the session with every input intact", () => {
+    const authored = editorWithLegalAgreement(editorFromCsv("Dana", csv), {
+      reference: "MOU-1",
+      purpose: "Eval",
+      expirationDate: "2099-12-31",
+    });
+    const sealed = sealEditor(authored);
+    expect(editorWithLifetime(sealed, 86400)).toBe(sealed);
+
+    const reopened = unsealEditor(sealed);
+    expect(reopened.sealed).toBeUndefined();
+    expect(reopened.draft).toBe(authored.draft);
+    expect(editorWithLifetime(reopened, 86400).draft.lifetimeSeconds).toBe(
+      86400,
+    );
+
+    expect(unsealEditor(authored)).toBe(authored);
   });
 });
 

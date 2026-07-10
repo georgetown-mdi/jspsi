@@ -165,7 +165,7 @@ function removeAffixes(s: string): string {
   return s
     .replaceAll(suffixPattern, "")
     .replaceAll(titlePattern, "")
-    .replaceAll(/\s\+/g, " ")
+    .replaceAll(/\s\s+/g, " ")
     .trim();
 }
 
@@ -183,6 +183,24 @@ interface ParsedDateFormat {
   source: string;
   /** Capture-group order, parallel to the regex's groups. */
   order: DateFormatToken[];
+}
+
+// The ISO-string Date constructor rolls an out-of-range day/month over (e.g.
+// Feb 29 in a non-leap year becomes Mar 1) instead of returning an Invalid
+// Date, so isNaN alone would accept it; round-trip the parsed UTC components
+// back against the input to catch rollover.
+function isCalendarDateValid(
+  year: string,
+  month: string,
+  day: string,
+): boolean {
+  const date = new Date(`${year}-${month}-${day}T00:00:00Z`);
+  return (
+    !isNaN(date.getTime()) &&
+    date.getUTCFullYear() === Number(year) &&
+    date.getUTCMonth() + 1 === Number(month) &&
+    date.getUTCDate() === Number(day)
+  );
 }
 
 // Build the anchored regex source and capture order for a parse_date input
@@ -257,9 +275,7 @@ function parseDateFactory(params: Params): StandardizingFn {
 
     if (!parts.YYYY || !parts.MM || !parts.DD) return null;
 
-    // Reject calendar-invalid dates (e.g. month 13).
-    const asDate = new Date(`${parts.YYYY}-${parts.MM}-${parts.DD}`);
-    if (isNaN(asDate.getTime())) return null;
+    if (!isCalendarDateValid(parts.YYYY, parts.MM, parts.DD)) return null;
 
     return outputFormat
       .replace("YYYY", parts.YYYY)
@@ -1981,13 +1997,7 @@ function isValidStandardizedDate(value: string): boolean {
   const match = /^(\d{4})(\d{2})(\d{2})$/.exec(value);
   if (match === null) return true;
   const [, year, month, day] = match;
-  const date = new Date(`${year}-${month}-${day}T00:00:00Z`);
-  return (
-    !Number.isNaN(date.getTime()) &&
-    date.getUTCFullYear() === Number(year) &&
-    date.getUTCMonth() + 1 === Number(month) &&
-    date.getUTCDate() === Number(day)
-  );
+  return isCalendarDateValid(year, month, day);
 }
 
 /** Whether a 9-digit value satisfies the SSA structural rules: area not 000 or

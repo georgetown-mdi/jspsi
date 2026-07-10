@@ -178,6 +178,7 @@ export function TermsImportExport({
         onChange={(e) => {
           setText(e.currentTarget.value);
           setImported(false);
+          setError(undefined);
         }}
         autosize
         minRows={3}

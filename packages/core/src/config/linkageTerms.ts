@@ -333,15 +333,23 @@ const NameConstraintsSchema: z.ZodType<NameConstraints> = z.object({
   // never silently un-checked),
   // so the advisory cannot silently fail open on a class the native engine accepts
   // but re2js rejects (a backreference, a POSIX/Unicode class, or the degenerate
-  // empty class). Note the brackets that get added. The `.max()` precedes the
-  // refine so an oversized value is rejected on length before a large
-  // partner-controlled string is compiled; a real class is short.
+  // empty class).
+  //
+  // The length short-circuit in the refine is a real pre-compile gate, not an
+  // ordering assumption: a failed `.max()` does NOT stop the refine from running
+  // (Zod does not short-circuit chained checks), so without the guard an oversized
+  // partner-controlled value would be interpolated into `[${val}]` and compiled
+  // under re2js -- super-linear in length, a multi-second synchronous stall. An
+  // over-length value passes the refine so `.max()` rejects it on length alone;
+  // only an in-length class reaches patternConformsToDialect.
   allowedCharacters: z
     .string()
     .max(MAX_NAME_LENGTH)
-    .refine((val) => patternConformsToDialect(`[${val}]`), {
-      message: "allowedCharacters must be a valid regex character class",
-    })
+    .refine(
+      (val) =>
+        val.length > MAX_NAME_LENGTH || patternConformsToDialect(`[${val}]`),
+      { message: "allowedCharacters must be a valid regex character class" },
+    )
     .optional(),
   affixesAllowed: z.boolean().optional(),
   exclude: ExcludeSchema.optional(),

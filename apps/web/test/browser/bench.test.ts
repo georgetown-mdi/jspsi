@@ -13,8 +13,10 @@ import { AcceptUnderConstruction } from "@bench/placeholders";
 import { BenchLobby } from "@bench/BenchLobby";
 import { InvitationFileError } from "@psi/invitation";
 import { InviterBench } from "@bench/InviterBench";
+import { stagesFor } from "@bench/exchangeRun";
 import styles from "@bench/bench.module.css";
 
+import type { PreparedExchange } from "@psilink/core";
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
 
@@ -96,6 +98,53 @@ vi.mock("@psi/csvParseController", async (importOriginal) => {
   };
 });
 
+// Stub the rendezvous module: importing it runs a top-level config load that
+// reads `process` (absent in the browser runner). Its listen function only
+// runs inside the run lifecycle's acquire closure, which the lifecycle stub
+// below never invokes (the exchangeView.test.ts pattern).
+vi.mock("@psi/rendezvous", () => ({
+  dialAsAcceptor: vi.fn(),
+  listenAsInviter: vi.fn(),
+}));
+
+// Stub the run lifecycle so creating an invitation never dials: record each
+// invocation's options so a test can drive the captured onStages/onStage/
+// onResult/onError seams -- the same seams the real lifecycle fires -- and
+// assert the bench's post-create screens against them.
+interface CapturedLifecycle {
+  exchangeRole: "initiator" | "responder";
+  sharedSecret: string;
+  expires?: string;
+  signal: AbortSignal;
+  onStages: (stages: Array<unknown>) => void;
+  onStage: (stageId: string) => void;
+  onResult: (outputs: {
+    resultsUrl?: string;
+    resultWithheld?: boolean;
+    matchedRecordCount?: number;
+    record?: {
+      recordUrl: string;
+      recordFileName: string;
+      keysUrl: string;
+      keysFileName: string;
+    };
+  }) => void;
+  onError: (failure: { category: string; error: unknown }) => void;
+}
+const lifecycleHarness = vi.hoisted(() => ({
+  calls: [] as Array<unknown>,
+}));
+vi.mock("@psi/exchangeLifecycle", () => ({
+  runExchangeLifecycle: (options: unknown) => {
+    lifecycleHarness.calls.push(options);
+    return Promise.resolve();
+  },
+}));
+
+function lifecycleCall(index: number): CapturedLifecycle {
+  return lifecycleHarness.calls[index] as CapturedLifecycle;
+}
+
 const EM_DASH = "\u2014";
 
 let container: HTMLElement | undefined;
@@ -109,6 +158,9 @@ function mount(content: ReactNode) {
 }
 
 afterEach(() => {
+  // Backstop for the fake-Date test below: a failure between useFakeTimers and
+  // its finally must not leak a frozen clock into the rest of the suite.
+  vi.useRealTimers();
   root?.unmount();
   container?.remove();
   root = undefined;
@@ -118,7 +170,60 @@ afterEach(() => {
   csvLoadHarness.fail = undefined;
   csvLoadHarness.lastSignal = undefined;
   csvLoadHarness.resolve = undefined;
+  lifecycleHarness.calls.length = 0;
 });
+
+// Walk the spine to a sealed invitation: name, file, straight through to
+// Review & create, then the real mint (the lifecycle beneath it is stubbed,
+// so nothing dials).
+async function createSealedInvitation() {
+  mount(createElement(InviterBench));
+  await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+  await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+  const fileInput = document.querySelector('input[type="file"]');
+  await userEvent.upload(
+    page.elementLocator(fileInput as HTMLElement),
+    new File(
+      [
+        "client_id,first_name,last_name,dob,program_code\n" +
+          "1,Ann,Lee,01/02/1990,A\n2,Bo,Ray,03/04/1985,B\n",
+      ],
+      "clients.csv",
+      { type: "text/csv" },
+    ),
+  );
+  await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
+  await page
+    .getByRole("button", { name: "Continue to matching & sharing" })
+    .click();
+  await page
+    .getByRole("button", { name: "Continue to review & create" })
+    .click();
+  await page.getByRole("button", { name: "Create the invitation" }).click();
+  await expect
+    .element(page.getByRole("heading", { level: 1 }))
+    .toHaveTextContent("Your invitation is ready");
+  // The run starts from an effect after the invitation lands; wait for it so
+  // callers can drive the captured lifecycle seams right away.
+  await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(1));
+}
+
+// stagesFor reads only the linkage terms off the prepared exchange (the unit
+// suite's stand-in), so the tests can hand the captured onStages the real
+// derived tree.
+function preparedWith(
+  linkageStrategy: "cascade" | "single-pass",
+  keyCount: number,
+): PreparedExchange {
+  return {
+    linkageTerms: {
+      linkageStrategy,
+      linkageKeys: Array.from({ length: keyCount }, (_, i) => ({
+        name: `key ${i + 1}`,
+      })),
+    },
+  } as unknown as PreparedExchange;
+}
 
 describe("bench lobby", () => {
   test("renders the landing structure with one main and one h1", async () => {
@@ -727,6 +832,424 @@ describe("inviter bench", () => {
     expect(document.querySelector(`.${styles.fileCard}`)).toBeNull();
     expect(document.querySelector(`.${styles.callout}`)).toBeNull();
     await expect.element(continueButton).toBeDisabled();
+  });
+
+  test("post-create: the share screen offers the artifacts while listening", async () => {
+    await createSealedInvitation();
+
+    // Both copy artifacts render, the link wrapping the code's token, each
+    // with its copy action; the one-time-secret guidance and the expiry sit
+    // on the thing being shared.
+    const codeBlocks = Array.from(
+      document.querySelectorAll(`.${styles.codeBlock}`),
+    ).map((block) => block.textContent);
+    expect(codeBlocks).toHaveLength(2);
+    expect(codeBlocks[0]).toContain("/accept#");
+    expect(codeBlocks[1].length).toBeGreaterThan(0);
+    expect(codeBlocks[0]).toContain(codeBlocks[1]);
+    await expect
+      .element(page.getByRole("button", { name: "Copy invitation link" }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Copy invitation code" }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("It carries a one-time secret", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("This invitation expires", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Keep this tab open."))
+      .toBeInTheDocument();
+
+    // The run started as the responder on the minted secret the moment the
+    // invitation existed, and the sealed ledger marks the frozen terms.
+    expect(lifecycleHarness.calls).toHaveLength(1);
+    const call = lifecycleCall(0);
+    expect(call.exchangeRole).toBe("responder");
+    expect(call.sharedSecret.length).toBeGreaterThan(0);
+    expect(call.expires).toBeDefined();
+    expect(call.signal.aborted).toBe(false);
+    await expect
+      .element(page.getByText("Terms sealed at create"))
+      .toBeInTheDocument();
+
+    // The status panel tracks the lifecycle's stage events; Share stays the
+    // timeline's current step while the browser waits for the partner. (The
+    // label and its history row repeat the text by design, so the assertion
+    // reads the label node.)
+    call.onStage("waiting for peer");
+    await vi.waitFor(() => {
+      expect(document.querySelector(`.${styles.stageLabel}`)?.textContent).toBe(
+        "Waiting for your partner",
+      );
+    });
+    const rail = document.querySelector('nav[aria-label="Exchange progress"]');
+    expect(
+      (rail as Element).querySelector('[aria-current="step"]')?.textContent,
+    ).toBe("Share");
+  });
+
+  test("post-create: the timeline advances with the exchange stages", async () => {
+    await createSealedInvitation();
+    const call = lifecycleCall(0);
+    call.onStages(stagesFor(preparedWith("cascade", 2)));
+    call.onStage("waiting for peer");
+
+    // The partner connecting moves the run into the protocol stages: the
+    // share block leaves (nothing left to share), the heading changes, and
+    // the orphaned focus is recovered onto it.
+    call.onStage("confirming protocol");
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange in progress");
+    expect(page.getByText("Share this invitation").query()).toBeNull();
+    await vi.waitFor(() => {
+      expect(document.activeElement?.textContent).toBe("Exchange in progress");
+    });
+
+    const rail = () =>
+      document.querySelector('nav[aria-label="Exchange progress"]') as Element;
+    expect(rail().querySelector('[aria-current="step"]')?.textContent).toBe(
+      "Confirm protocol",
+    );
+
+    // Per-key stages sit under Link keys; the history keeps the completed
+    // stages with their times, and the progress bar tracks the position.
+    call.onStage("stage 2 / 2");
+    await vi.waitFor(() => {
+      expect(document.querySelector(`.${styles.stageLabel}`)?.textContent).toBe(
+        "Linking key 2 / 2",
+      );
+    });
+    expect(rail().querySelector('[aria-current="step"]')?.textContent).toBe(
+      "Link keys",
+    );
+    await expect
+      .element(page.getByText(/Waiting for your partner - done/))
+      .toBeInTheDocument();
+    expect(
+      document
+        .querySelector('[role="progressbar"]')
+        ?.getAttribute("aria-valuenow"),
+    ).toBe("80");
+  });
+
+  test("post-create: completion offers the three downloads with caveats", async () => {
+    await createSealedInvitation();
+    const call = lifecycleCall(0);
+    call.onStages(stagesFor(preparedWith("cascade", 2)));
+    call.onStage("waiting for peer");
+    call.onStage("confirming protocol");
+    call.onResult({
+      resultsUrl: URL.createObjectURL(new Blob(["a,b\n"])),
+      matchedRecordCount: 1847,
+      record: {
+        recordUrl: URL.createObjectURL(new Blob(["{}"])),
+        recordFileName: "psilink-record-2026-07-08T14-32.json",
+        keysUrl: URL.createObjectURL(new Blob(["{}"])),
+        keysFileName: "psilink-record-2026-07-08T14-32.keys.json",
+      },
+    });
+
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange complete");
+    await expect
+      .element(page.getByText(/1,847.*matched records/))
+      .toBeInTheDocument();
+    await expect.element(page.getByText(/^Finished /)).toBeInTheDocument();
+    // The status label's live region reaches the final "Done".
+    expect(document.querySelector(`.${styles.stageLabel}`)?.textContent).toBe(
+      "Done",
+    );
+
+    // Three artifacts, three verbs: the result, the shareable record, the
+    // private keys -- each caveat on the download row itself.
+    const links = Array.from(
+      document.querySelectorAll<HTMLAnchorElement>("a[download]"),
+    );
+    expect(links.map((link) => link.textContent)).toEqual([
+      "results.csv",
+      "psilink-record-2026-07-08T14-32.json",
+      "psilink-record-2026-07-08T14-32.keys.json",
+    ]);
+    expect(links[2].getAttribute("aria-label")).toBe(
+      "Download verification keys (keep private): " +
+        "psilink-record-2026-07-08T14-32.keys.json",
+    );
+    await expect.element(page.getByText("Keep a record.")).toBeInTheDocument();
+
+    // The timeline finishes whole, and the ledger settles what happened: the
+    // invitation is consumed and the receive row reports the actual count.
+    const rail = document.querySelector('nav[aria-label="Exchange progress"]');
+    expect((rail as Element).querySelector('[aria-current="step"]')).toBeNull();
+    const ledger = document.querySelector(
+      'aside[aria-label="This exchange"]',
+    ) as Element;
+    expect(ledger.textContent).toContain("Invitation used");
+    expect(ledger.textContent).toContain("1,847 matched rows + shared columns");
+    expect(ledger.textContent).toContain("Your file never left this browser.");
+
+    const another = Array.from(document.querySelectorAll("a")).find(
+      (anchor) => anchor.textContent === "Set up another exchange",
+    );
+    expect(another?.getAttribute("href")).toBe("/bench");
+  });
+
+  test("post-create: a one-sided exchange states the withheld-result caveat", async () => {
+    await createSealedInvitation();
+    const call = lifecycleCall(0);
+    call.onStage("waiting for peer");
+    call.onResult({
+      resultWithheld: true,
+      record: {
+        recordUrl: URL.createObjectURL(new Blob(["{}"])),
+        recordFileName: "psilink-record-x.json",
+        keysUrl: URL.createObjectURL(new Blob(["{}"])),
+        keysFileName: "psilink-record-x.keys.json",
+      },
+    });
+
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange complete");
+    // No results download and no count -- the caveat states the terms did
+    // this, while the record downloads are still offered.
+    await expect
+      .element(
+        page.getByText(
+          "Your records contributed to the match. By the agreed terms, you " +
+            "receive no result table, so there is nothing to download here.",
+        ),
+      )
+      .toBeInTheDocument();
+    const links = Array.from(
+      document.querySelectorAll<HTMLAnchorElement>("a[download]"),
+    ).map((link) => link.textContent);
+    expect(links).toEqual([
+      "psilink-record-x.json",
+      "psilink-record-x.keys.json",
+    ]);
+    expect(
+      document.querySelector('aside[aria-label="This exchange"]')?.textContent,
+    ).toContain("No result table - withheld by the agreed terms");
+  });
+
+  test("post-create: a retryable failure offers one more try on the same invitation", async () => {
+    await createSealedInvitation();
+    lifecycleCall(0).onStage("waiting for peer");
+    lifecycleCall(0).onError({
+      category: "exchange",
+      error: new Error("transport"),
+    });
+
+    // The alert takes focus, states the temporary nature, and keeps the copy
+    // artifacts on screen: the same link stays valid for another attempt. The
+    // listening callout leaves, though -- the lifecycle tore down, so nothing
+    // is listening while the alert shows.
+    await expect.element(page.getByText("Exchange failed")).toBeInTheDocument();
+    await vi.waitFor(() => {
+      expect(
+        (document.activeElement as HTMLElement | null)?.textContent,
+      ).toContain("Exchange failed");
+    });
+    await expect
+      .element(page.getByText("Share this invitation"))
+      .toBeInTheDocument();
+    expect(page.getByText("Keep this tab open.").query()).toBeNull();
+
+    await page.getByRole("button", { name: "Try again" }).click();
+    await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(2));
+    expect(lifecycleCall(1).sharedSecret).toBe(lifecycleCall(0).sharedSecret);
+    expect(page.getByText("Exchange failed").query()).toBeNull();
+    // The retry listens again, so the callout's claim is true once more.
+    await expect
+      .element(page.getByText("Keep this tab open."))
+      .toBeInTheDocument();
+    // The clicked Try again unmounted with its alert, orphaning focus onto
+    // <body>; the recovery lands it back on the heading.
+    await vi.waitFor(() => {
+      expect(document.activeElement?.textContent).toBe(
+        "Your invitation is ready",
+      );
+    });
+  });
+
+  test("post-create: an output failure offers no re-run, only a fresh setup", async () => {
+    await createSealedInvitation();
+    lifecycleCall(0).onStage("waiting for peer");
+    lifecycleCall(0).onStage("confirming protocol");
+    lifecycleCall(0).onError({
+      category: "output",
+      error: new Error("blob quota exceeded"),
+    });
+
+    // The exchange already succeeded, so the alert must not invite running it
+    // again: no Try again, no start-over-and-remint -- only the sanitized
+    // detail and the way out to a new exchange.
+    await expect
+      .element(page.getByText("Results unavailable"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText(
+          /generating the results file failed: blob quota exceeded/,
+        ),
+      )
+      .toBeInTheDocument();
+    expect(page.getByRole("button", { name: "Try again" }).query()).toBeNull();
+    expect(
+      page
+        .getByRole("button", { name: "Start over with a fresh invitation" })
+        .query(),
+    ).toBeNull();
+    const another = Array.from(document.querySelectorAll("a")).find(
+      (anchor) => anchor.textContent === "Set up another exchange",
+    );
+    expect(another?.getAttribute("href")).toBe("/bench");
+  });
+
+  test("post-create: a config failure surfaces its message and starts over", async () => {
+    await createSealedInvitation();
+    lifecycleCall(0).onError({
+      category: "config",
+      error: new Error("standardization output name contradicts the terms"),
+    });
+
+    // The prepare-time fault names only local config, so the actionable
+    // message is surfaced, and the recovery is the start-over path (a retry
+    // would fail identically). Nothing will ever serve the link, so the copy
+    // artifacts and the listening callout leave with the failure.
+    await expect
+      .element(page.getByText("Could not prepare the exchange"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("standardization output name contradicts the terms"),
+      )
+      .toBeInTheDocument();
+    expect(page.getByText("Share this invitation").query()).toBeNull();
+    expect(page.getByText("Keep this tab open.").query()).toBeNull();
+    expect(page.getByRole("button", { name: "Try again" }).query()).toBeNull();
+    await page
+      .getByRole("button", { name: "Start over with a fresh invitation" })
+      .click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Review & create");
+  });
+
+  test("post-create: an expired invitation names itself, not the partner", async () => {
+    await createSealedInvitation();
+    lifecycleCall(0).onStage("waiting for peer");
+    // The tagged expiry error core's guards raise (the tag marks its message
+    // as locally-composed recovery guidance, safe to surface).
+    lifecycleCall(0).onError({
+      category: "security",
+      error: Object.assign(
+        new Error(
+          "shared secret expired at 2026-07-08T19:32:00.000Z; obtain a new invitation",
+        ),
+        { psilinkRecoveryHintEmitted: true },
+      ),
+    });
+
+    await expect
+      .element(page.getByText("This invitation can no longer be used"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("expired at 2026-07-08T19:32:00.000Z", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    expect(page.getByRole("button", { name: "Try again" }).query()).toBeNull();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: "Start over with a fresh invitation",
+        }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("post-create: an exchange failure past expiry swaps retry for start-over", async () => {
+    await createSealedInvitation();
+    lifecycleCall(0).onStage("waiting for peer");
+
+    // Jump past the invitation's 1-hour lifetime (Date only: timers stay real
+    // so React scheduling and vi.waitFor's polling keep working), then land a
+    // failure that would otherwise be retryable.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 2 * 3600 * 1000);
+      lifecycleCall(0).onError({
+        category: "exchange",
+        error: new Error("transport"),
+      });
+
+      await vi.waitFor(() => {
+        expect(
+          Array.from(document.querySelectorAll("button")).some(
+            (button) =>
+              button.textContent === "Start over with a fresh invitation",
+          ),
+        ).toBe(true);
+      });
+      expect(
+        Array.from(document.querySelectorAll("button")).some(
+          (button) => button.textContent === "Try again",
+        ),
+      ).toBe(false);
+      // The lapsed link is no longer advertised either.
+      expect(
+        Array.from(document.querySelectorAll("h2")).some(
+          (heading) => heading.textContent === "Share this invitation",
+        ),
+      ).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("post-create: a security failure forces a fresh invitation, inputs intact", async () => {
+    await createSealedInvitation();
+    lifecycleCall(0).onStage("waiting for peer");
+    lifecycleCall(0).onError({
+      category: "security",
+      error: new Error("kex failed"),
+    });
+
+    // The copy artifacts leave the screen -- a link that failed
+    // authentication must not keep being advertised -- and the alert forbids
+    // a retry.
+    await expect
+      .element(page.getByText("Could not verify your partner"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Do not retry", { exact: false }))
+      .toBeInTheDocument();
+    expect(page.getByText("Share this invitation").query()).toBeNull();
+    expect(page.getByRole("button", { name: "Try again" }).query()).toBeNull();
+
+    // Start over lifts the seal with every input intact: back on Review &
+    // create, the spine rail returns and the authored terms still mint.
+    await page
+      .getByRole("button", { name: "Start over with a fresh invitation" })
+      .click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Review & create");
+    expect(
+      document.querySelector('nav[aria-label="Exchange setup"]'),
+    ).not.toBeNull();
+    await expect
+      .element(page.getByText("Ready to create."))
+      .toBeInTheDocument();
+    expect(page.getByText("Terms sealed at create").query()).toBeNull();
   });
 
   test("collapses to the single-column layout without rail and ledger", async () => {

@@ -239,6 +239,34 @@ test("serverPort overrides the connection port", () => {
   expect(result.server.port).toBe(2222);
 });
 
+test("an out-of-range serverPort is rejected on the ordinary path (no outboundPath)", () => {
+  expect(() =>
+    applyConnectionOverrides(baseSFTP, { server: { port: 99_999 } }),
+  ).toThrow(UsageError);
+  expect(() =>
+    applyConnectionOverrides(baseSFTP, { server: { port: 99_999 } }),
+  ).toThrow("65535");
+});
+
+test("a negative serverPort is rejected on the ordinary path", () => {
+  expect(() =>
+    applyConnectionOverrides(baseSFTP, { server: { port: -5 } }),
+  ).toThrow(UsageError);
+});
+
+test("a serverPassword conflicting with a base config's privateKey is rejected on the ordinary path", () => {
+  const base: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "sftp.example.org", privateKey: "@key.pem" },
+  };
+  expect(() =>
+    applyConnectionOverrides(base, { server: { password: "hunter2" } }),
+  ).toThrow(UsageError);
+  expect(() =>
+    applyConnectionOverrides(base, { server: { password: "hunter2" } }),
+  ).toThrow("at most one primary authentication method");
+});
+
 test("serverPrivateKeyPassphrase applies alongside a private-key override", () => {
   const result = applyConnectionOverrides(baseSFTP, {
     server: { privateKey: "@key.pem", privateKeyPassphrase: "@pass.txt" },
