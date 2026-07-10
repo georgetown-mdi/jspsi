@@ -39,7 +39,7 @@ const rawRows: Array<CSVRow> = [
 
 // The confirm-columns edits the run assembles the spec from: the file-derived
 // metadata (normalized for the editor, as acceptorInitialColumnsState seeds it)
-// and its recommended cleaning, standing in for the WP2 launch payload.
+// and its recommended cleaning, standing in for the launch payload.
 function editsFor(metadata: Metadata): AcceptorDataEdits {
   return { metadata, standardization: [] };
 }
@@ -118,7 +118,7 @@ describe("prepareAcceptorExchange", () => {
 
   test("threads the confirm-columns edits into the prepared metadata", () => {
     // Mark last_name ignored: the edited metadata drives the prepared metadata,
-    // proving the WP2 edits (not a CSV-inferred default) reach the run.
+    // proving the confirm-columns edits (not a CSV-inferred default) reach the run.
     const edited = seedMetadata.map((column) =>
       column.name === "last_name"
         ? { ...column, role: "ignored" as const }

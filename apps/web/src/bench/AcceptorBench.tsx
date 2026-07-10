@@ -80,8 +80,9 @@ const EMPTY_STANDARDIZATION: Standardization = [];
 type AcceptorColumnsSection = "columns" | "cleaning";
 
 /** The exchange the acceptor launched: the assembled per-party edits and the
- * optional partial-coverage advisory the run surface carries forward. The run
- * hook keys on the derived launch object, so a fresh launch restarts the run. */
+ * optional partial-coverage advisory the run surface carries forward. Drives
+ * the acceptor's run surface ({@link AcceptorExchangeSection}); the run hook
+ * keys on the derived launch object, so a fresh launch restarts the run. */
 interface AcceptorLaunched {
   edits: AcceptorDataEdits;
   warning?: AlertContent;

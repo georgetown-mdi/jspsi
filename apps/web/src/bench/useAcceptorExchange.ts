@@ -36,8 +36,7 @@ import type { Acquire, GenerateOutput } from "@psi/exchangeLifecycle";
 import type { CSVRow } from "@psilink/core";
 import type { ExchangeRun } from "./exchangeRun";
 // buildInviterRunOutputs and its output type are role-neutral: the download
-// artifacts are the same both seats, so the acceptor reuses them verbatim. The
-// package-level name stays "inviter" for the port-fidelity sweep; see the report.
+// artifacts are the same both seats, so the acceptor reuses them verbatim.
 import type { InviterRunOutputs } from "./inviterRunOutputs";
 import type { RunFailure } from "./useInviterExchange";
 

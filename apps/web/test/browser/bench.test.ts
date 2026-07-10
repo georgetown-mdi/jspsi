@@ -9,7 +9,6 @@ import { createRoot } from "react-dom/client";
 
 import { MantineProvider } from "@mantine/core";
 
-import { AcceptUnderConstruction } from "@bench/placeholders";
 import { BenchLobby } from "@bench/BenchLobby";
 import { InvitationFileError } from "@psi/invitation";
 import { InviterBench } from "@bench/InviterBench";
@@ -20,10 +19,10 @@ import type { PreparedExchange } from "@psilink/core";
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
 
-// Stub the router seam the bench components touch (the lobby's and the
-// placeholders' Links). This suite asserts the bench's structure, landmarks,
-// and tokens, not navigation -- the appShell.test.ts pattern. vitest hoists
-// the mock above the imports, so the components pick up the stub.
+// Stub the router seam the bench components touch (the lobby's Links). This
+// suite asserts the bench's structure, landmarks, and tokens, not navigation
+// -- the appShell.test.ts pattern. vitest hoists the mock above the imports,
+// so the components pick up the stub.
 vi.mock("@tanstack/react-router", () => ({
   Link: ({
     to,
@@ -1250,23 +1249,5 @@ describe("inviter bench", () => {
       .element(page.getByText("Ready to create."))
       .toBeInTheDocument();
     expect(page.getByText("Terms sealed at create").query()).toBeNull();
-  });
-
-  test("collapses to the single-column layout without rail and ledger", async () => {
-    mount(createElement(AcceptUnderConstruction));
-
-    await expect
-      .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Accept an invitation");
-
-    expect(document.querySelectorAll("main").length).toBe(1);
-    expect(document.querySelectorAll("nav").length).toBe(0);
-    expect(document.querySelectorAll("aside").length).toBe(0);
-    expect(document.querySelector(`.${styles.gridPlain}`)).not.toBeNull();
-
-    const homeLink = Array.from(document.querySelectorAll("a")).find(
-      (anchor) => anchor.textContent === "current app",
-    );
-    expect(homeLink?.getAttribute("href")).toBe("/");
   });
 });

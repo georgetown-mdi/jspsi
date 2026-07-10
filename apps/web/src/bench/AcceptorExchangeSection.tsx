@@ -30,7 +30,7 @@ import type { RunFailure } from "./useInviterExchange";
  * panel spans both from one stable mount so its live region persists.
  *
  * The partial-coverage advisory the confirm-columns step raised surfaces here as
- * an amber alert (the run package's half of the WP2 warning; the rail carries the
+ * an amber alert (the run column's half of that advisory; the rail carries the
  * other half). A failed run renders the failure vocabulary's alert for its
  * category, each with its one concrete way forward -- an acceptor seat cannot
  * mint, so every non-retryable recovery is a link back to the lobby to paste a

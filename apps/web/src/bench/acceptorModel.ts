@@ -25,7 +25,7 @@ import type { RailFact, RailStepState } from "./Rail";
 export type AcceptorSpineStepName = "review" | "consent" | "columns";
 
 /** The acceptor's working states: the three spine steps plus the terminal `launched`
- * state the columns step commits to (a minimal run stub the next package replaces).
+ * state the columns step commits to, which drives the acceptor's run surface.
  * `launched` is not a spine step -- the rail switches to the run timeline there. */
 export type AcceptorStep = AcceptorSpineStepName | "launched";
 

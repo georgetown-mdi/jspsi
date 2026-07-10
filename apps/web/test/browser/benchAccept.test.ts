@@ -1126,9 +1126,9 @@ describe("acceptor bench: run and completion", () => {
   });
 
   test("the partial-coverage advisory shows in the rail and the work column", async () => {
-    // A partially-covered file (only first_name recognized) raises the WP2
-    // warning at launch, which the run surfaces in both the rail's Problems
-    // block and a work-column amber alert.
+    // A partially-covered file (only first_name recognized) raises the
+    // partial-coverage advisory at launch, which the run surfaces in both the
+    // rail's Problems block and a work-column amber alert.
     window.location.hash = await encodeRunToken();
     mount(createElement(AcceptorBench));
     await expect
