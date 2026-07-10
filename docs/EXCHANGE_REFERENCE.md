@@ -119,6 +119,8 @@ PSI roles (sender / receiver) are derived from `output` after the terms exchange
 
 Whether or not to deduplicate the inputs of the party holding these terms. Deduplication results in multiple inputs potentially being matched to the same output. Each party independently decides whether to deduplicate its own records; the two values need not agree.
 
+> **Not yet implemented:** deduplication is not honored at run time yet. Every exchange currently matches with one-to-one cardinality regardless of this field, so `deduplicate: true` is validated and carried in the terms but has no effect on matching today. Set `deduplicate: false` until the deduplicating cardinality is implemented.
+
 ```yaml
 linkage_terms:
   deduplicate: false
@@ -203,7 +205,7 @@ A column named `zip`, `zip5`, `zip_5`, `zipcode`, or `zip_code` is inferred as `
 | `allowed_characters` | string | name fields | Regex character class; characters outside it must have been removed |
 | `affixes_allowed` | boolean | name fields | If false, honorifics (Mr., Dr., etc.) and suffixes (Jr., III, etc.) are expected to have been removed |
 
-The table above is the complete set of constraints. Constraints not listed for a given semantic type are not accepted by the schema; for example, `allowed_characters` on an `ssn` field is a validation error.
+The table above is the complete set of constraints. A constraint not listed for a given semantic type is ignored rather than rejected: the schema silently drops the unrecognized key (for example, `allowed_characters` on an `ssn` field is stripped, not flagged as an error).
 
 ---
 
@@ -263,6 +265,8 @@ linkage_terms:
 | `name` | string | no | Optional alias for this element; used when the same field appears more than once in a key, or as the target of a `swap` |
 | `transform` | array | no | Sequence of transformation steps applied to the canonical field value before concatenation into the key |
 | `generate_fuzzy_comparisons` | string | no | Method for generating additional values for fuzzy matching: `transpositions` generates all two-digit transpositions; `edit_distances` generates all single-character deletions up to `max_length`, matching values within one edit distance; `adjacent_years` generates dates +/- 1 year from the input. Applied after any transformation |
+
+> **Not yet implemented:** `generate_fuzzy_comparisons` is accepted by the schema, but the expansion (transpositions, edit distances, adjacent years) is not generated at key-building time yet, so authoring it has no effect on matching today. Working fuzzy keys are targeted for the 1.0 release; see [ROADMAP.md](ROADMAP.md).
 
 #### Transform steps
 
@@ -720,7 +724,7 @@ Optional top-level block, a sibling of [`signing`](#signing). It holds the partn
 - **Runtime-injected secret state** (`shared_secret`, `expires`): loaded from the key file (`.psilink.key`) and added to the in-memory representation before the exchange runs. These never appear in `psilink.yaml` and must not be edited manually. If `shared_secret`, `sharedSecret`, or `expires` are present in the configuration file, the CLI emits a warning and ignores them; values from the key file always take precedence.
 - **Operator-policy fields**: settable in `psilink.yaml`. `token_max_age_days` is the first (see the field table below). The loader leaves these for schema validation; the schema honors a recognized policy field and rejects an unrecognized key (see the unknown-key note below).
 
-`shared_secret` is required for recurring exchanges run via the `exchange` command. If the key file (`.psilink.key`) is absent, the CLI aborts before any connection is attempted. Zero-setup exchanges (the `zero-setup` command) rely on transport-layer authentication instead and do not use a key file.
+`shared_secret` is required for recurring exchanges run via the `exchange` command. If the key file (`.psilink.key`) is absent, the CLI aborts before any connection is attempted. Zero-setup exchanges (the default, subcommand-less invocation) rely on transport-layer authentication instead and do not use a key file.
 
 Taken together, the `authentication` block is never required in a configuration file -- its only fields today are key-file-injected. It is required for the in-memory objects used for recurring exchanges, and it is optional for zero-setup exchanges.
 

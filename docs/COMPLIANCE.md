@@ -80,7 +80,7 @@ PSI-Link incorporates cryptographic software. Distribution may be subject to the
 
 ### HIPAA considerations
 
-PSI-Link does not transmit Protected Health Information (PHI) to any third party. During an exchange, the only data that traverses the network is cryptographic protocol output (elliptic-curve points and AEAD ciphertext) between the two partner agencies; the output written to disk is an association table of row indices, not raw PHI. See [SECURITY_DESIGN.md#data-handling](SECURITY_DESIGN.md#data-handling).
+PSI-Link does not transmit Protected Health Information (PHI) to any third party: the peer-coordination server, STUN/TURN relay, and any shared SFTP server see only connection metadata or opaque ciphertext, never data-channel content. Between the two partner agencies, the identifiers used for linkage (names, dates of birth, Social Security numbers, and the like) serve only to compute the intersection and are never sent to the partner. After matching, each party transmits only the payload columns it has designated for disclosure and consented to -- by default the non-identifying data columns being shared, not the identifiers used for matching -- and the output each party writes to disk pairs its own arbitrary row identifier with the matched partner records and those disclosed columns. Whether a designated payload column itself carries PHI, and the handling of the written output, are the deploying agency's determination. See [SECURITY_DESIGN.md#data-handling](SECURITY_DESIGN.md#data-handling).
 
 For HIPAA-regulated deployments:
 
@@ -146,7 +146,7 @@ PSI-Link does not hold an ATO of its own; an ATO is granted to a specific deploy
 A privacy review of PSI-Link should consider:
 
 - **What data flows.** Across the network during an exchange, only cryptographic protocol messages between the two parties (see [PROTOCOL.md](spec/PROTOCOL.md)). To third-party supporting services, only connection metadata or opaque ciphertext (see [SECURITY_DESIGN.md#channel-security](SECURITY_DESIGN.md#channel-security)).
-- **What is retained.** The shared secret in `.psilink.key` is the only persistent credential. The exchange output is an association table of row indices, not raw PII. See [SECURITY_DESIGN.md#data-handling](SECURITY_DESIGN.md#data-handling) and [SECURITY_DESIGN.md#key-file-security](SECURITY_DESIGN.md#key-file-security).
+- **What is retained.** The shared secret in `.psilink.key` is the only persistent credential. The exchange output pairs each party's own row identifier with the matched partner records and the payload columns the partner designated for disclosure; the identifiers used for linkage are not part of it. Whether a designated payload column carries PII is the operator's determination, surfaced for consent before the exchange. See [SECURITY_DESIGN.md#data-handling](SECURITY_DESIGN.md#data-handling) and [SECURITY_DESIGN.md#key-file-security](SECURITY_DESIGN.md#key-file-security).
 - **What is logged.** PSI-Link does not write PII to log output; see [SECURITY_DESIGN.md#data-handling](SECURITY_DESIGN.md#data-handling).
 - **What third parties see.** Peer-coordination, STUN/TURN, and SFTP operators see metadata only; data-channel content is encrypted. See [SECURITY_DESIGN.md#channel-security](SECURITY_DESIGN.md#channel-security).
 - **Who can attack what.** Documented in [SECURITY_DESIGN.md#threat-model](SECURITY_DESIGN.md#threat-model).

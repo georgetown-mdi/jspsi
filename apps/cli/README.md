@@ -6,6 +6,7 @@ From the repository root, run:
 
 1. `npm i . -w packages/core -w apps/cli`
 2. `npm run -w packages/core build`
+3. `npm run -w apps/cli build`
 
 To connect:
 

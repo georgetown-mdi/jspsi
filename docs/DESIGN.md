@@ -38,7 +38,7 @@ Exchange specifications can be downloaded from the web app for use by the comman
 
 If the browser window is left open, it runs scheduled exchanges at the appropriate time. Note that this is a sub-optimal user experience, as it is easy to accidentally close the application.
 
-The web application includes a feature to invite parties to conduct exchanges. Users can generate a shared secret for their partner, instantiate an ephemeral peer coordination server using a serverless compute platform, generate an additional secret for use with that coordination server, and transfer the necessary information to the other party using an existing communication channel.
+The web application includes a feature to invite parties to conduct exchanges. A user generates a shared secret, and the two parties rendezvous over the peer-coordination (PeerJS) signaling server that the web application itself hosts, deriving their peer identifiers from that single shared secret. The user transfers the shared secret to the other party using an existing communication channel.
 
 # User journey
 

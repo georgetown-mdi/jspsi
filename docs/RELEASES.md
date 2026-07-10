@@ -45,12 +45,11 @@ git checkout -b release/vX.Y.Z
 
 ### 2. Update versions
 
-Update the version field in each `package.json` to `X.Y.Z`:
+Set the release version, following the policy in [Versioning](#versioning):
 
-- `package.json` (root)
-- `packages/core/package.json`
-- `apps/cli/package.json`
-- `apps/web/package.json`
+- `apps/cli/package.json` -- to `X.Y.Z`; it is the canonical release version.
+- `packages/core/package.json` -- only if the core library changed in this release, bumped to its own next version (it versions independently of the CLI, so this need not equal `X.Y.Z`).
+- `apps/web/package.json` and the root `package.json` -- leave unchanged; neither carries a release version.
 
 ### 3. Update CHANGELOG.md
 
