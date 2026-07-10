@@ -258,6 +258,16 @@ export interface InvitationKeyElementSummary {
  * consented to.
  */
 export interface InvitationKeySummary {
+  /**
+   * A stable identity for this key, for a caller that needs to associate
+   * per-key UI state (e.g. an expanded/collapsed disclosure) with the key
+   * across a reorder. The raw (unsanitized) key name: for a schema-validated
+   * `LinkageTerms` this is guaranteed unique across `linkageKeys`, unlike
+   * {@link name}, whose sanitization/truncation can collapse two distinct raw
+   * names to the same displayed string. Never rendered -- carries no display
+   * obligation, so it is not sanitized.
+   */
+  id: string;
   /** The key's name, sanitized for display. */
   name: string;
   /** Ordered elements combined to form the key. */
@@ -914,6 +924,7 @@ function summarizeKey(
   }
 
   return {
+    id: key.name,
     name: sanitizeForDisplay(key.name),
     elements,
     headerFields,

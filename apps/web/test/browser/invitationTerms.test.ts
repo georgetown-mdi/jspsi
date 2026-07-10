@@ -285,6 +285,42 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     ).toBe("true");
   });
 
+  test("reordering the keys moves each key's expanded/collapsed state with it, not with its position", async () => {
+    renderTerms();
+    await userEvent.click(toggle("Matching strategies"));
+
+    // Expand the first key ("SSN + LN + DOB") only.
+    await userEvent.click(toggle("SSN + LN + DOB"));
+    expect(
+      toggle("SSN + LN + DOB").element().getAttribute("aria-expanded"),
+    ).toBe("true");
+    expect(toggle("SSN + FN1").element().getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+
+    // Re-render with the same two keys swapped, as a reorder in the live preview
+    // would produce (moveKey swaps array positions in place). "SSN + FN1" is now
+    // first, "SSN + LN + DOB" second.
+    renderTerms({
+      ...terms,
+      linkageKeys: [terms.linkageKeys[1], terms.linkageKeys[0]],
+    });
+
+    // Wait for the reordered list to commit (its own header text moves first).
+    await expect
+      .poll(() => page.getByRole("list").element().textContent)
+      .toMatch(/SSN \+ FN1.*SSN \+ LN \+ DOB/s);
+
+    // The expanded state follows "SSN + LN + DOB" to its new (second) slot,
+    // rather than staying pinned to the first slot it used to occupy.
+    expect(
+      toggle("SSN + LN + DOB").element().getAttribute("aria-expanded"),
+    ).toBe("true");
+    expect(toggle("SSN + FN1").element().getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+  });
+
   test("the toggle's accessible name is the key name; the field one-liner is its description", async () => {
     renderTerms();
     // Open the matching list so the per-key disclosure is reachable.
