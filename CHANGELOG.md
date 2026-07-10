@@ -121,6 +121,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 - On `sftp` and `filedrop`, a peer that aborts mid-exchange is signaled so the waiting side fails fast instead of waiting out `--peer-timeout`. See `docs/spec/FILE_SYNC.md`.
 - A `filedrop`/local-filesystem connect that times out is now terminal, so a stalled NFS or CIFS mount no longer ties up the process across retries.
 - File-sync rendezvous recovers from a peer that fails mid-arrival, and sweeps an orphaned temp file left by a hard-killed prior run, instead of stalling until the peer timeout or aborting the next run. See `docs/spec/FILE_SYNC.md`.
+- The `remove_affixes` standardization step now collapses the double space left behind when it strips an interior title or suffix (e.g. "JOHN MR SMITH" -> "JOHN SMITH"), instead of leaving it in the linkage key. The default name pipeline was unaffected because a following `squash_spaces` step already cleaned it up; this matters when `remove_affixes` is selected on its own.
 - An already-expired or malformed shared secret now fails before any connection is opened, with the correct re-invite guidance on both parties, instead of a misleading post-rendezvous error.
 - A `peer_timeout_ms` or `server_connect_timeout_ms` of `0` is now rejected at parse time rather than silently disabling the timeout. `max_reconnect_attempts` still accepts `0`.
 - An unset `server_connect_timeout_ms` now applies the documented 30000 ms per-attempt connect deadline on both `sftp` and `filedrop`, instead of letting an `sftp` connect fall back to ssh2's shorter internal default. See `docs/EXCHANGE_REFERENCE.md`.
@@ -132,6 +133,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 - `@path` references resolve only in credential and opaque-options fields; a free-text field beginning with a literal `@` is kept verbatim. See `docs/EXCHANGE_REFERENCE.md`.
 - The key-file pre-flight now rejects a parent directory that is writable but not readable, so a key write cannot fail after the handshake has already rotated the token. See `docs/SECURITY_DESIGN.md`.
 - Repeating a single-value flag (for example `--server-port`) is now a clean usage error (exit 64) instead of misbehaving. See `docs/CLI.md`.
+- `--server-port` outside `0..65535` or non-numeric is now a flag-named usage error (exit 64) before any connection attempt, instead of an opaque transport failure. See `docs/CLI.md`.
 - A malformed message from a peer is reported as a protocol error instead of crashing, and a failed exchange surfaces its original cause instead of a generic connection error.
 - The acceptor at accept time, and a recurring `psilink exchange` run, are warned -- or the run is blocked (exit 64) -- when the CSV cannot satisfy the configured linkage terms, instead of silently producing an empty result. See `docs/CLI.md`.
 - `psilink invite` now reconciles an input CSV against a config's explicit `metadata`, resolving columns to linkage fields exactly as the exchange will, instead of falling back to column-name inference. A config that types a non-standard column explicitly is no longer wrongly rejected at invite time, and an unsatisfiable CSV is caught when the invitation is generated. See `docs/CLI.md`.
@@ -144,6 +146,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 - The web app parses a dropped CSV in a Web Worker, so a large (near-10MB) file no longer freezes the interface -- input and painting stay responsive -- while it is read.
 - The invitation consent displays now show the inviter's requested-from-you payload columns consistently on the web and the CLI, with a declared-empty `payload.receive` rendered "(none) -- any payload column would abort the exchange" rather than hidden: previously the web showed only a non-empty request and the CLI showed this direction not at all, so a declared-empty receive read identically to an unstated (lazy) one with the opposite runtime meaning. The empty-vs-absent behavior itself is unchanged. See `docs/EXCHANGE_REFERENCE.md`.
 - The web file dropzone now restricts a drop or file-picker selection to a single file, warning when more than one is chosen, instead of accepting the batch into the UI while silently linking only the first.
+- The `parse_date` standardization step now drops a record whose date is calendar-impossible (for example 02/29 in a non-leap year, or 04/31), instead of silently rolling it over to the next valid day and hashing the wrong value into the linkage key.
 
 ### Security
 

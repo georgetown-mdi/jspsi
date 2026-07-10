@@ -152,6 +152,12 @@ describe("runPipeline — string functions", () => {
     );
   });
 
+  test("remove_affixes collapses the space left by a stripped interior title", () => {
+    expect(runPipeline("JOHN MR SMITH", [{ function: "remove_affixes" }])).toBe(
+      "JOHN SMITH",
+    );
+  });
+
   test("substring extracts the requested slice", () => {
     expect(
       runPipeline("SMITH", [
@@ -330,6 +336,50 @@ describe("runPipeline — parse_date", () => {
         },
       ]),
     ).toBeNull();
+  });
+
+  test("Feb 29 in a non-leap year returns null (rolls over to Mar 1)", () => {
+    expect(
+      runPipeline("02/29/2021", [
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+        },
+      ]),
+    ).toBeNull();
+  });
+
+  test("Feb 29 in a leap year round-trips", () => {
+    expect(
+      runPipeline("02/29/2020", [
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+        },
+      ]),
+    ).toBe("20200229");
+  });
+
+  test("a day exceeding the month's length returns null (rolls over)", () => {
+    expect(
+      runPipeline("04/31/2021", [
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+        },
+      ]),
+    ).toBeNull();
+  });
+
+  test("a valid ordinary date round-trips", () => {
+    expect(
+      runPipeline("06/15/2021", [
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+        },
+      ]),
+    ).toBe("20210615");
   });
 });
 

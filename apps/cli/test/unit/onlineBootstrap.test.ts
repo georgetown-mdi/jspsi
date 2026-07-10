@@ -33,6 +33,7 @@ import {
 import { diffConnectionAgainstTarget } from "../../src/reconcile";
 import {
   connectionOverridesFrom,
+  MAX_PORT,
   parseCommonBootstrapArgs,
   warnLowPollingFrequency,
   warnOptionsOverridesIgnoredOffline,
@@ -826,6 +827,56 @@ test("parseCommonBootstrapArgs: a max-reconnect-attempts at the ceiling is accep
   expect(parsed.maxReconnectAttempts).toBe(MAX_RECONNECT_ATTEMPTS);
 });
 
+test("parseCommonBootstrapArgs: a non-numeric server-port is a flag-named usage error", () => {
+  // yargs type:"number" coerces a non-numeric token (e.g. "abc") to NaN with no
+  // validation of its own; nonNegativeIntFlag catches it here, at parse (exit 64),
+  // before any connection attempt, rather than letting it reach server.port as an
+  // opaque NaN.
+  const parse = () =>
+    parseCommonBootstrapArgs({
+      _: [],
+      $0: "psilink",
+      "server-port": Number.NaN,
+    } as unknown as Arguments);
+  expect(parse).toThrow(UsageError);
+  expect(parse).toThrow("--server-port");
+});
+
+test("parseCommonBootstrapArgs: an out-of-range server-port is a flag-named usage error", () => {
+  // The schema bound on server.port is z.int().min(0).max(65535); a negative or
+  // above-65535 value is rejected at parse rather than reaching the connection
+  // config unchecked.
+  for (const bad of [-5, MAX_PORT + 1]) {
+    const parse = () =>
+      parseCommonBootstrapArgs({
+        _: [],
+        $0: "psilink",
+        "server-port": bad,
+      } as unknown as Arguments);
+    expect(parse).toThrow(UsageError);
+    expect(parse).toThrow("--server-port");
+  }
+});
+
+test("parseCommonBootstrapArgs: server-port at 0 and at the 65535 ceiling are accepted", () => {
+  // The bound is inclusive on both ends: port 0 (a valid, if unusual, port
+  // number) and the largest valid port both pass through unchanged.
+  expect(
+    parseCommonBootstrapArgs({
+      _: [],
+      $0: "psilink",
+      "server-port": 0,
+    } as unknown as Arguments).serverPort,
+  ).toBe(0);
+  expect(
+    parseCommonBootstrapArgs({
+      _: [],
+      $0: "psilink",
+      "server-port": MAX_PORT,
+    } as unknown as Arguments).serverPort,
+  ).toBe(MAX_PORT);
+});
+
 test("parseCommonBootstrapArgs: a connection-/peer-timeout at the 7d ceiling is accepted", () => {
   // The boundary is inclusive: exactly 7d parses to its seconds value, so the
   // largest in-range value behaves exactly as it does today.
@@ -1282,14 +1333,15 @@ test("endpointFromConnection: a bare-host sftp connection emits no path", () => 
 });
 
 test("endpointFromConnection: no credential rides along on the emitted endpoint", () => {
-  // The inviter's connection carries credentials (username/password/private key);
-  // the endpoint must carry only the public locator. This is the producer side of
-  // the invitation's no-credentials invariant.
+  // The inviter's connection carries credentials (username/private key/
+  // passphrase); the endpoint must carry only the public locator. This is the
+  // producer side of the invitation's no-credentials invariant. password is
+  // omitted here since it is mutually exclusive with privateKey.
   const connection = connectionFromURL(new URL("sftp://host:2200/drop"), {
     server: {
       username: "alice",
-      password: "hunter2",
       privateKey: "@/home/alice/.ssh/id_ed25519",
+      privateKeyPassphrase: "hunter2",
     },
   });
   const endpoint = endpointFromConnection(connection);
