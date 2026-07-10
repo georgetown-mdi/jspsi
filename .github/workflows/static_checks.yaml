@@ -55,6 +55,12 @@ jobs:
       # docs/spec/DEPENDENCY_PINS.md or docs/TESTING.md) crept back in.
       - name: CONTRIBUTING scope
         run: npm run check:contributing
+      # Encodes the CLI command inventory as a check: every subcommand
+      # registered in apps/cli/src/cliParser.ts must be mentioned in
+      # docs/DESIGN.md and docs/CLI.md, so a shipped command cannot leave the
+      # overview enumerations silently stale.
+      - name: Command inventory
+        run: npm run check:command-inventory
       # Scripts project (.claude/scripts/*.mjs) has its own vitest suite. Plain
       # .mjs with no server or Docker dependency, so a stock runner suffices. This
       # is the repo-wide non-path-filtered gate that guarantees the suite is always

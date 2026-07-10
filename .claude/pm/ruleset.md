@@ -57,6 +57,8 @@ Free-form. Capture non-obvious context a contributor would otherwise have to red
 - Known gotchas from the codebase or prior PRs.
 - Pointers to relevant existing patterns (e.g. "follow the FileSyncConnection injection pattern").
 
+Point rather than narrate: reference the mechanism's code or doc home ("see FILE_SYNC.md, Disclosed-columns subset on the token") instead of re-explaining it inline. Implementing agents measurably transcribe issue prose into durable comments and docs; a pointer can only be followed.
+
 When the input already contains an analysis -- options with trade-offs, a problem statement, a scope estimate -- carry that substance forward into the task. You may evaluate it: note risks or gaps in specific approaches, add context the submitter missed, critique assumptions. But do not select an implementation approach on the submitter's behalf when they have not selected one.
 
 Pay particular attention to statements that constrain the solution space: root cause conclusions, architectural invariants, and "any fix must ..." claims. These often appear as framing prose around an options table rather than in a named section, and they are easy to drop when compressing an analysis. Preserve them explicitly -- a contributor who misses a constraint may pursue an approach that cannot satisfy the requirement. Unresolved design decisions belong in **Open questions**, stated clearly so whoever picks up the task knows a decision is still needed. A task that reaches the board with open design choices is not incomplete; it is honest.

@@ -122,6 +122,8 @@ When behavior changes, update the matching tier:
 
 If you are writing a constant value, a byte/wire layout, an HKDF info string or other algorithm step, or the "would only need revisiting if..." rationale behind one of those, it belongs in `docs/spec/` - regardless of which doc you currently have open. Overview docs (`docs/`) stay conceptual and operational, including operational rationale such as the coverage-gate decision.
 
+Overview docs must stay scannable: no multi-hundred-word paragraphs -- use subheadings and lists. When an edit lands in a section that is already a wall of text, restructure the section rather than growing a sentence in place.
+
 Documentation-tier placement is in scope for code review: a reviewer flags spec-level detail written into a `docs/` overview doc.
 
 ## Changelog
