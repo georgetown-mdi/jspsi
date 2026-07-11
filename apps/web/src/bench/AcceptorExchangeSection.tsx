@@ -17,7 +17,7 @@ import { StatusPanel } from "./StatusPanel";
 import styles from "./bench.module.css";
 
 import type { AcceptableInvitation } from "@psi/acceptInvitation";
-import type { AlertContent } from "@components/FileAcquire";
+import type { AlertContent } from "@components/csvIntake";
 import type { ExchangeRun } from "./exchangeRun";
 import type { InviterRunOutputs } from "./inviterRunOutputs";
 import type { RunFailure } from "./useInviterExchange";
@@ -124,7 +124,7 @@ export function AcceptorExchangeSection({
               failure.category === "exchange") && (
               <Button
                 component={Link}
-                to="/bench"
+                to="/"
                 color="red"
                 variant="light"
                 mt="sm"

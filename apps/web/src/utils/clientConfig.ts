@@ -7,6 +7,7 @@ import type { LogLevel } from "loglevel";
 interface Env {
   PEERJS_DEBUG_LEVEL: number;
   LOG_LEVEL: keyof LogLevel;
+  SERVER_RECEIVES_FILES: boolean;
 }
 
 const schema: JSONSchemaType<Env> = {
@@ -26,6 +27,14 @@ const schema: JSONSchemaType<Env> = {
     LOG_LEVEL: {
       type: "string",
       default: "INFO",
+    },
+    SERVER_RECEIVES_FILES: {
+      // False fits the hosted browser-only deployment, where the file-assurance
+      // copy in bench/fileAssurance.ts is true. A deployment whose server
+      // legitimately receives files (the console-container deployment) opts in
+      // via VITE_SERVER_RECEIVES_FILES so that copy stops rendering.
+      type: "boolean",
+      default: false,
     },
   },
 };

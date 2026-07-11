@@ -1,10 +1,11 @@
-import { createFileRoute } from "@tanstack/react-router";
-
-import { VerifyReceiptBench } from "@bench/VerifyReceiptBench";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/bench/verify")({
-  // Verification runs entirely client-side (Web Crypto, local file reads), so
-  // the page is a client component; nothing here needs or wants a server render.
+  // Client-only so beforeLoad runs in the browser, where the URL fragment is
+  // available; the redirect preserves any present hash for uniformity with the
+  // accept leaf (the verify surface carries no fragment).
   ssr: false,
-  component: VerifyReceiptBench,
+  beforeLoad: () => {
+    throw redirect({ to: "/verify", hash: true, replace: true });
+  },
 });

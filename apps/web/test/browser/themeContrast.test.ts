@@ -1,6 +1,6 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import { userEvent } from "vitest/browser";
 
 import { createElement } from "react";
@@ -8,6 +8,7 @@ import { createRoot } from "react-dom/client";
 
 import "@mantine/core/styles.css";
 import {
+  ActionIcon,
   Alert,
   Button,
   Checkbox,
@@ -15,19 +16,17 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
-
-import { ShareBlock } from "@components/ShareBlock";
+import { IconCheck, IconCopy } from "@tabler/icons-react";
 
 import { cssVariablesResolver, mantineTheme } from "@theme";
 
 import type { ComponentType, ReactNode } from "react";
 import type { Root } from "react-dom/client";
 
-// Button / Checkbox / Text / TextInput / Alert are polymorphic factory components;
-// this is a `.ts` file (the browser project globs `.ts`, not `.tsx`, so no JSX), and
-// createElement cannot resolve their overloaded type directly -- cast each to the
-// plain component shape this test renders. ShareBlock is a plain function component
-// and needs no cast.
+// Button / Checkbox / Text / TextInput / Alert / ActionIcon are polymorphic factory
+// components; this is a `.ts` file (the browser project globs `.ts`, not `.tsx`, so no
+// JSX), and createElement cannot resolve their overloaded type directly -- cast each
+// to the plain component shape this test renders.
 const FilledButton = Button as unknown as ComponentType<{
   children?: ReactNode;
 }>;
@@ -50,6 +49,11 @@ const StatusAlert = Alert as unknown as ComponentType<{
   title?: ReactNode;
   children?: ReactNode;
 }>;
+const PrimaryActionIcon = ActionIcon as unknown as ComponentType<{
+  variant?: string;
+  "aria-label"?: string;
+  children?: ReactNode;
+}>;
 
 // Render-level counterpart to test/unit/themeContrast.test.ts. The unit test asserts
 // the palette arithmetic (an idealized model); it cannot prove the browser actually
@@ -60,20 +64,18 @@ const StatusAlert = Alert as unknown as ComponentType<{
 // paints, in both schemes, against the WCAG 2.1 AA floors.
 //
 // Two groups:
-//  - Filled-primary surfaces (1.4.3 text, 4.5:1). The copy ActionIcon glyph is driven
-//    from the REAL component (ShareBlock's CopyRow), in both its filled and its copied
-//    (variant="light", a non-text glyph judged on 1.4.11's 3:1) states, so a
-//    contrast-affecting change authored inside that component -- an added color prop,
-//    a flipped variant conditional, a re-wrapped glyph -- fails here rather than
-//    slipping past a hardcoded stand-in. The Button label and consent Checkbox
-//    checkmark are rendered as bare Mantine defaults on purpose: the app paints those
-//    surfaces with a bare <Button>/<Checkbox> (the theme's default variant, no color)
-//    and no wrapping component, so a bare primitive IS what the app paints -- there is
-//    no component to author a regression into, and the theme's isFilledPrimary scoping
-//    (proven by the unit test) is what routes their contrast color. The focus ring /
-//    input border (a plain per-scheme shade) and the Dropzone drag-icon shades (a
-//    literal inline color shared with the unit test through DROPZONE_DRAG_ICON) stay
-//    in the unit test, which checks them by arithmetic.
+//  - Filled-primary surfaces (1.4.3 text, 4.5:1). The Button label, consent Checkbox
+//    checkmark, and copy ActionIcon glyph are rendered as bare Mantine primitives (the
+//    theme's default variant, no color): the app paints these surfaces with a bare
+//    <Button>/<Checkbox>/<ActionIcon> and no wrapping component, so a bare primitive IS
+//    what the app paints -- there is no component to author a regression into, and the
+//    theme's isFilledPrimary scoping (proven by the unit test) is what routes their
+//    contrast color through --ai-color / --button-color / --checkbox-icon-color. The
+//    ActionIcon glyph is checked in both its filled (resting, 4.5:1 text) and its
+//    variant="light" (a non-text glyph judged on 1.4.11's 3:1) states -- the light
+//    variant's colour is Mantine's own, which no override touches. The focus ring /
+//    input border (a plain per-scheme shade) stays in the unit test, which checks it by
+//    arithmetic.
 //  - Resolver-owned tokens (theme.ts cssVariablesResolver): dimmed, placeholder,
 //    error, and the yellow/red/green light-variant status text (the last also as the
 //    green import-success page text). The harness now mounts under
@@ -87,13 +89,6 @@ const StatusAlert = Alert as unknown as ComponentType<{
 
 let container: HTMLElement | undefined;
 let root: Root | undefined;
-
-// ShareBlock renders a copy control per artifact; the copied color is theme-driven and
-// independent of the value, so any non-empty strings suffice.
-const SHARE = {
-  deepLink: "https://example.test/accept#invitation-token",
-  encoded: "INVITATION-TOKEN",
-};
 
 // Exact computed colours the resolver paints, pinned by the token cases below so a
 // case cannot pass on a coincidental value or a default that happens to clear the
@@ -128,21 +123,11 @@ function mount(scheme: "light" | "dark", node: ReactNode) {
   );
 }
 
-beforeEach(() => {
-  // Drive the real CopyButton without depending on the headless browser's clipboard
-  // permission or secure-context state: CopyRow's guard only needs navigator.clipboard
-  // to exist (it does in the browser project) and useClipboard only flips `copied`
-  // once writeText RESOLVES. Stubbing writeText to resolve makes the copied-state case
-  // deterministic; it is otherwise unused (the other cases never click).
-  vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
-});
-
 afterEach(() => {
   root?.unmount();
   container?.remove();
   root = undefined;
   container = undefined;
-  vi.restoreAllMocks();
 });
 
 /** Wait for a mounted element (createRoot.render is not synchronous), then return
@@ -237,18 +222,26 @@ describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
       ).toBeGreaterThanOrEqual(4.5);
     });
 
-    test(`filled copy icon glyph is AA-legible (${scheme})`, async () => {
-      // The REAL copy control (ShareBlock's CopyRow) in its resting, filled state.
-      // ShareBlock is the app's only filled-primary ActionIcon; its glyph colour is
-      // --ai-color, routed to the per-scheme contrast variable by the theme override.
-      // Query the first of the two copy buttons (the invitation-link row).
-      mount(scheme, createElement(ShareBlock, SHARE));
+    test(`filled-primary action-icon glyph is AA-legible (${scheme})`, async () => {
+      // A bare filled-primary ActionIcon -- the theme's default variant, no colour --
+      // as the app would paint a filled-primary icon button. Its glyph colour is
+      // --ai-color, routed to the per-scheme contrast variable by the theme override
+      // (the wiring the unit test proves for --ai-color; this pins it at the render
+      // level, the half Mantine resolves color-scheme-blind).
+      mount(
+        scheme,
+        createElement(
+          PrimaryActionIcon,
+          { "aria-label": "copy" },
+          createElement(IconCopy),
+        ),
+      );
       const ai = await waitForEl(".mantine-ActionIcon-root");
       // Measure the glyph's OWN paint (its SVG stroke), not the ActionIcon root's
       // color. The root always reports --ai-color, but the glyph only wears that by
       // inheriting currentColor; reading the root would stay green if the glyph were
-      // re-wrapped to hardcode its own colour (the regression this case guards). For
-      // the real control the two agree; the stroke is what the checkmark paints.
+      // re-wrapped to hardcode its own colour. The two agree here; the stroke is what
+      // the icon paints.
       const glyph = await waitForEl(".mantine-ActionIcon-root svg");
       await expect
         .poll(() => getComputedStyle(glyph).stroke)
@@ -258,38 +251,29 @@ describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
       expect(contrast(color, backgroundColor)).toBeGreaterThanOrEqual(4.5);
     });
 
-    test(`copied copy icon glyph is AA-legible (${scheme})`, async () => {
-      // Drive the SAME real control into its copied state: CopyRow swaps the
-      // ActionIcon to variant="light" and the glyph to IconCheck once copied. The
-      // check glyph is a non-text graphic, so the WCAG 1.4.11 3:1 floor. Mantine owns
-      // this colour: --ai-color resolves to --mantine-color-{primary}-light-color on
-      // the --mantine-color-{primary}-light tint, both per scheme (light: cyan-9 on
-      // cyan-1; dark: cyan-0 on darken(cyan-9, .5)) -- no override touches the light
-      // variant, so this reads exactly what Mantine paints, including the dark branch
-      // the unit test's single light case never covered.
-      mount(scheme, createElement(ShareBlock, SHARE));
+    test(`light-variant action-icon glyph is AA-legible (${scheme})`, async () => {
+      // The variant="light" ActionIcon (the copied/secondary state a copy control
+      // swaps to). The check glyph is a non-text graphic, so the WCAG 1.4.11 3:1
+      // floor. Mantine owns this colour: --ai-color resolves to
+      // --mantine-color-{primary}-light-color on the --mantine-color-{primary}-light
+      // tint, both per scheme (light: cyan-9 on cyan-1; dark: cyan-0 on
+      // darken(cyan-9, .5)) -- no override touches the light variant, so this reads
+      // exactly what Mantine paints, including the dark branch.
+      mount(
+        scheme,
+        createElement(
+          PrimaryActionIcon,
+          { variant: "light", "aria-label": "copied" },
+          createElement(IconCheck),
+        ),
+      );
       const ai = await waitForEl(".mantine-ActionIcon-root");
-      await userEvent.click(ai);
-      // The copied state is signalled by the ActionIcon's aria-label flipping to
-      // "<label> copied" (CopyRow); poll it rather than a timer so the read happens
-      // only once the variant has actually flipped to light.
-      await expect
-        .poll(() => ai.getAttribute("aria-label"))
-        .toContain("copied");
-      // Query the glyph AFTER the flip: React swaps IconCopy for IconCheck, so the
-      // pre-click SVG node is stale. Measure the check glyph's own stroke, not the
-      // ActionIcon root (see the filled case).
       const glyph = await waitForEl(".mantine-ActionIcon-root svg");
       // Resting bg via restingBackground so a stale hover (light-variant hover =
       // cyan-2, a darker tint) is not sampled in place of the resting fill.
       const backgroundColor = await restingBackground(ai);
       const color = getComputedStyle(glyph).stroke;
       expect(contrast(color, backgroundColor)).toBeGreaterThanOrEqual(3);
-      // useClipboard reverts `copied` to false 1000ms after writeText resolves, which
-      // would silently restore the (also-passing) filled colours. The reads above run
-      // well inside that window; assert we were still copied at read time so a
-      // pathologically slow run fails loudly rather than measuring the reverted state.
-      expect(ai.getAttribute("aria-label")).toContain("copied");
     });
   }
 

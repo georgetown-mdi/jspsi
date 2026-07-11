@@ -306,7 +306,7 @@ describe("bench lobby: review invitation", () => {
       page.getByRole("button", { name: "Review invitation" }),
     );
 
-    expect(navigation.calls).toEqual([{ to: "/bench/accept", hash: "ABC123" }]);
+    expect(navigation.calls).toEqual([{ to: "/accept", hash: "ABC123" }]);
   });
 
   test("Review invitation is disabled until the field holds a usable token", async () => {
@@ -1136,7 +1136,7 @@ describe("acceptor bench: run and completion", () => {
     const another = Array.from(document.querySelectorAll("a")).find(
       (anchor) => anchor.textContent === "Set up another exchange",
     );
-    expect(another?.getAttribute("href")).toBe("/bench");
+    expect(another?.getAttribute("href")).toBe("/");
   });
 
   test("the settled ledger's You sent names the launched disclosed column", async () => {
@@ -1287,7 +1287,7 @@ describe("acceptor bench: run and completion", () => {
       const link = Array.from(document.querySelectorAll("a")).find(
         (anchor) => anchor.textContent === "Start over with a fresh invitation",
       );
-      expect(link?.getAttribute("href")).toBe("/bench");
+      expect(link?.getAttribute("href")).toBe("/");
       expect(
         Array.from(document.querySelectorAll("button")).some(
           (button) => button.textContent === "Try again",
@@ -1317,7 +1317,7 @@ describe("acceptor bench: run and completion", () => {
     const link = Array.from(document.querySelectorAll("a")).find(
       (anchor) => anchor.textContent === "Start over with a fresh invitation",
     );
-    expect(link?.getAttribute("href")).toBe("/bench");
+    expect(link?.getAttribute("href")).toBe("/");
   });
 
   test("an expired-invitation security failure names itself, not the partner", async () => {
@@ -1345,7 +1345,7 @@ describe("acceptor bench: run and completion", () => {
     const link = Array.from(document.querySelectorAll("a")).find(
       (anchor) => anchor.textContent === "Start over with a fresh invitation",
     );
-    expect(link?.getAttribute("href")).toBe("/bench");
+    expect(link?.getAttribute("href")).toBe("/");
   });
 
   test("a config failure surfaces its message and returns to the columns step", async () => {
@@ -1404,7 +1404,7 @@ describe("acceptor bench: run and completion", () => {
     const another = Array.from(document.querySelectorAll("a")).find(
       (anchor) => anchor.textContent === "Set up another exchange",
     );
-    expect(another?.getAttribute("href")).toBe("/bench");
+    expect(another?.getAttribute("href")).toBe("/");
   });
 
   test("the partial-coverage advisory shows in the rail and the work column", async () => {

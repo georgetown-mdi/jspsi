@@ -1,12 +1,8 @@
 import { describe, expect, test } from "vitest";
 
-import { DEFAULT_THEME, darken, mergeMantineTheme } from "@mantine/core";
+import { DEFAULT_THEME, mergeMantineTheme } from "@mantine/core";
 
 import { cssVariablesResolver, mantineTheme } from "@theme";
-
-import { DROPZONE_DRAG_ICON } from "@components/dropzoneDragIcons";
-
-import type { PaletteShade } from "@components/dropzoneDragIcons";
 
 // Enforces the WCAG 2.1 AA contrast invariants the theme is tuned to: 4.5:1 for
 // normal-weight text (1.4.3) and 3:1 for non-text UI / focus indicators (1.4.11).
@@ -86,28 +82,6 @@ const red1 = theme.colors.red[1];
 const green1 = theme.colors.green[1];
 const dark7 = theme.colors.dark[7];
 const dark6 = theme.colors.dark[6];
-
-// Per-component Dropzone drag-state icon overrides (FileDropzone.tsx), not theme
-// tokens, checked against the Dropzone's light-variant drag-over tints. The icon
-// SHADES are read from DROPZONE_DRAG_ICON -- the same source FileDropzone paints
-// from -- so re-pointing the icon at an inaccessible shade is necessarily an edit
-// to this assertion's input, the gap a hand-copied `theme.colors.blue[8]` left
-// open. The tint inverts with the scheme so the icon shade does too (light shade
-// 8, dark shade 6, via the shared constant's per-scheme branches):
-//   - light tints: accept = primary colour shade 1 (Dropzone's acceptColor
-//     defaults to theme.primaryColor), reject = red-1 (its default rejectColor);
-//   - dark tints: darken(shade-9, .5), Mantine's dark `-light` variant -- the
-//     real darken() so a resolver change re-runs the arithmetic, not a restated
-//     constant.
-const paletteShade = ([name, shade]: PaletteShade): string =>
-  theme.colors[name][shade];
-const dropzoneAcceptIconLight = paletteShade(DROPZONE_DRAG_ICON.accept.light);
-const dropzoneRejectIconLight = paletteShade(DROPZONE_DRAG_ICON.reject.light);
-const dropzoneAcceptIconDark = paletteShade(DROPZONE_DRAG_ICON.accept.dark);
-const dropzoneRejectIconDark = paletteShade(DROPZONE_DRAG_ICON.reject.dark);
-const dropzoneAcceptTintLight = theme.colors[theme.primaryColor][1];
-const dropzoneAcceptTintDark = darken(theme.colors[theme.primaryColor][9], 0.5);
-const dropzoneRejectTintDark = darken(theme.colors.red[9], 0.5);
 
 const warningText = vars.light["--mantine-color-yellow-light-color"];
 const errorText = vars.light["--mantine-color-red-light-color"];
@@ -257,37 +231,6 @@ describe("theme colour contrast (WCAG 2.1 AA)", () => {
         fg: placeholderDark,
         bg: dark6,
         floor: 4.5,
-      },
-      // Dropzone drag-state icons (FileDropzone.tsx per-component overrides) on
-      // their light-variant drag-over tints, both colour schemes -- non-text
-      // graphics, so the 3:1 1.4.11 floor. Light shade 6 was a marginal accept
-      // pass (3.04) and a reject failure (2.71); shade 8 clears both. The dark
-      // tint inverts to a dark surface where shade 8 instead drops below the
-      // floor (2.50 / 2.78), so dark keeps shade 6 (3.53 / 3.83) -- both branches
-      // of the FileDropzone light-dark() pinned here so neither scheme regresses.
-      {
-        name: "dropzone drag-accept icon (light): blue-8 on primary-1 tint",
-        fg: dropzoneAcceptIconLight,
-        bg: dropzoneAcceptTintLight,
-        floor: 3,
-      },
-      {
-        name: "dropzone drag-reject icon (light): red-8 on red-1 tint",
-        fg: dropzoneRejectIconLight,
-        bg: red1,
-        floor: 3,
-      },
-      {
-        name: "dropzone drag-accept icon (dark): blue-6 on darkened primary tint",
-        fg: dropzoneAcceptIconDark,
-        bg: dropzoneAcceptTintDark,
-        floor: 3,
-      },
-      {
-        name: "dropzone drag-reject icon (dark): red-6 on darkened red tint",
-        fg: dropzoneRejectIconDark,
-        bg: dropzoneRejectTintDark,
-        floor: 3,
       },
     ];
 

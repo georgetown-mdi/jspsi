@@ -1,16 +1,9 @@
 import { describe, expect, test } from "vitest";
 
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-
-import { MantineProvider } from "@mantine/core";
-
 import {
   STANDARDIZATION_FUNCTION_NAMES,
   generateSharedSecret,
 } from "@psilink/core";
-
-import { AcceptInvitationPanel } from "@components/AcceptInvitationPanel";
 
 import {
   TRANSFORM_FUNCTION_GLOSSARY,
@@ -18,16 +11,11 @@ import {
 } from "@psi/invitationSummary";
 import { commitAcceptance } from "@psi/acceptConsent";
 
-import type { ReactElement } from "react";
-
 import type {
   InvitationToken,
   LinkageKeyElement,
   LinkageTerms,
 } from "@psilink/core";
-
-import type { AcceptableInvitation } from "@psi/acceptInvitation";
-import type { DecodeState } from "@components/AcceptInvitationPanel";
 
 // Untrusted, inviter-crafted control characters JSX escaping does not
 // neutralize, built from escapes so the source carries no raw control bytes: an
@@ -85,49 +73,6 @@ function makeToken(
     },
   };
 }
-
-function makeInvitation(
-  termsOverrides: Partial<LinkageTerms> = {},
-): AcceptableInvitation {
-  return {
-    token: makeToken(termsOverrides),
-    endpoint: {
-      channel: "webrtc",
-      host: "127.0.0.1",
-      port: 3000,
-      path: "/api/",
-    },
-  };
-}
-
-function render(node: ReactElement): string {
-  return renderToStaticMarkup(createElement(MantineProvider, null, node));
-}
-
-/** Render the accept panel with sensible defaults, overriding only what a test
- * cares about. Handlers are no-ops: static markup runs no events. */
-function renderPanel(
-  overrides: Partial<Parameters<typeof AcceptInvitationPanel>[0]> = {},
-): string {
-  return render(
-    createElement(AcceptInvitationPanel, {
-      decode: { status: "pending" },
-      consented: false,
-      onConsentedChange: () => {},
-      acceptorName: "",
-      onAcceptorNameChange: () => {},
-      onAcquireError: () => {},
-      onAcquired: () => true,
-      ...overrides,
-    }),
-  );
-}
-
-// A distinctive, apostrophe-free fragment of the consent checkbox label (the
-// rendered markup HTML-escapes the apostrophe in "partner's", so match a span
-// without it); unique to the checkbox, absent from the error/exchange states.
-const CONSENT_LABEL = "proposed terms and consent to this exchange";
-const ACCEPT_BUTTON = "Accept and continue";
 
 describe("commitAcceptance (the consent gate)", () => {
   test("does not commit without explicit consent, even with a name", () => {
@@ -1938,53 +1883,5 @@ describe("summarizeInvitation", () => {
     expect(entry).toContain("mystery");
     expect(entry).not.toContain(BEL);
     expect(entry).toContain("\\x07");
-  });
-});
-
-describe("accept screen: the consent gate", () => {
-  test("offers a consent action the gate keeps disabled without consent", () => {
-    const html = renderPanel({
-      decode: { status: "ready", invitation: makeInvitation() },
-      consented: false,
-      acceptorName: "Dana",
-    });
-    expect(html).toContain(CONSENT_LABEL);
-    expect(html).toContain(ACCEPT_BUTTON);
-    // Without consent the affirmative action is disabled, so nothing is parsed or
-    // dialed. (It is also gated on a chosen file, which a static render cannot
-    // supply, so the enabled state -- consent + name + file -- is exercised in
-    // test/browser/acceptConsentGate.test.ts.) Match the real `disabled` HTML
-    // attribute (whitespace-led, then `=`/`>`), not Mantine's `data-disabled`, so
-    // the assertion tracks the button's actual disabled state.
-    expect(html).toMatch(/<button[^>]*\sdisabled[=>]/);
-  });
-
-  test("offers the consent controls and a file drop, not an exchange", () => {
-    // The review screen presents the gate (consent label + name) and the
-    // "Accept and continue" action that selects and pre-flights a file; the
-    // dialing exchange is a separate screen the route swaps in only after a
-    // satisfiable acceptance (covered in the browser test).
-    const html = renderPanel({
-      decode: { status: "ready", invitation: makeInvitation() },
-    });
-    expect(html).toContain(CONSENT_LABEL);
-    expect(html).toContain(ACCEPT_BUTTON);
-    expect(html).toContain("choose your data file");
-  });
-});
-
-describe("accept screen: an invalid or expired invitation", () => {
-  test("shows the error and offers no consent action", () => {
-    const decode: DecodeState = {
-      status: "error",
-      message:
-        "This invitation has expired. Ask your partner to send a new one.",
-    };
-    const html = renderPanel({ decode });
-    expect(html).toContain("Cannot accept this invitation");
-    expect(html).toContain("has expired");
-    // No terms, no consent action: a bad invitation can never be consented to.
-    expect(html).not.toContain(CONSENT_LABEL);
-    expect(html).not.toContain(ACCEPT_BUTTON);
   });
 });

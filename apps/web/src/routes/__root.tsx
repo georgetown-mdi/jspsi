@@ -4,7 +4,6 @@ import {
   Outlet,
   Scripts,
   createRootRoute,
-  useMatches,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 
@@ -19,9 +18,6 @@ import {
 import { cssVariablesResolver, mantineTheme } from "@theme";
 import { DefaultCatchBoundary } from "@components/DefaultCatchBoundary";
 import { NotFound } from "@components/NotFound";
-import { Shell } from "@components/Shell";
-import { resolveChrome } from "@components/chrome";
-import { resolveContentWidth } from "@components/contentWidth";
 import { seo } from "@utils/seo";
 
 import type { ReactNode } from "react";
@@ -70,23 +66,12 @@ export const Route = createRootRoute({
 });
 
 function RootComponent() {
-  // Read the active route's declared content width here, above the shell, so the
-  // shell can size the content column from one value (the route cannot pass it up
-  // from inside the Outlet). select returns a primitive, so the root re-renders
-  // only when the resolved width actually changes. The chrome seam works the same
-  // way: bench routes bring their own page surface and landmarks, so wrapping
-  // them in the legacy Shell would nest two <main> elements.
-  const contentWidth = useMatches({ select: resolveContentWidth });
-  const chrome = useMatches({ select: resolveChrome });
+  // Every route renders on the bench, which brings its own page surface and
+  // landmarks (see BenchPage/BenchShell), so the root hands the whole viewport to
+  // the route Outlet with no shared chrome wrapper.
   return (
     <RootDocument>
-      {chrome === "bench" ? (
-        <Outlet />
-      ) : (
-        <Shell contentWidth={contentWidth}>
-          <Outlet />
-        </Shell>
-      )}
+      <Outlet />
     </RootDocument>
   );
 }
