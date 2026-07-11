@@ -10,11 +10,10 @@ import { FILE_ASSURANCE_LINE } from "./fileAssurance";
 import styles from "./bench.module.css";
 
 /**
- * The bench's landing screen: the two ways into an exchange, side by side --
- * set one up, or accept an invitation you were sent -- above the standing
- * how-it-works explanation. Mirrors the mockup's landing screen; both actions
- * currently lead to under-construction bench screens while the flows are
- * built out, and the current app at `/` remains the way to run an exchange.
+ * The app's landing screen: the three actions side by side -- set up an
+ * exchange, accept an invitation you were sent, or verify a receipt -- above
+ * the standing how-it-works explanation. Mirrors the mockup's landing screen,
+ * with the verify card as its third action.
  */
 export function BenchLobby() {
   const navigate = useNavigate();
