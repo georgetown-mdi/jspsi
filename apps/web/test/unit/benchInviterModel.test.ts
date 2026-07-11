@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vitest";
 
+import { authoredLinkageFields } from "@psilink/core";
+
+import { buildAdvancedTerms } from "@psi/advancedInvite";
+
 import {
   answersRows,
   editorFromCsv,
@@ -536,5 +540,114 @@ describe("customize tabs", () => {
     expect(editorWithFieldSteps(sealed, "name", [])).toBe(sealed);
     expect(editorWithAuthoredDraft(sealed, sealed.draft)).toBe(sealed);
     expect(editorWithImportedTerms(sealed, csv, donorTerms)).toBe(sealed);
+  });
+});
+
+describe("a column retype reconciles standardization even with authored keys", () => {
+  // The reviewer's exact repro seed: retyping first_name -> last_name once expert
+  // mode or an import has marked the key set author-controlled must still drop the
+  // stale first_name cleaning, so no first_name-named field typed last_name reaches
+  // the committed terms. Both name types share the name pipeline, so a step
+  // comparison would miss the change -- reconcileStandardization judges the column
+  // by its type across the edit.
+  const retypeCsv: AcquiredCsv = {
+    fileName: "seed.csv",
+    sizeBytes: 1024,
+    rawRows: [
+      {
+        first_name: "Ann",
+        last_name: "Lee",
+        dob: "01/02/1990",
+        extra: "x",
+      },
+    ],
+    columns: ["first_name", "last_name", "dob", "extra"],
+  };
+
+  function retypeFirstNameToLastName(editor: ReturnType<typeof editorFromCsv>) {
+    return editorWithColumnType(editor, retypeCsv, "first_name", "last_name")
+      .editor;
+  }
+
+  test("expert mode (editorWithAuthoredDraft) mints no mismatched field", () => {
+    const seeded = editorFromCsv("Org", retypeCsv);
+    // Enter expert mode: the current draft becomes author-controlled, so the
+    // template key reconciliation stops running -- but the standardization must
+    // still reconcile on a retype.
+    const authored = editorWithAuthoredDraft(seeded, seeded.draft);
+    const retyped = retypeFirstNameToLastName(authored);
+
+    // The stale first_name-named transformation on the retyped column is gone.
+    expect(
+      retyped.draft.standardization.some(
+        (t) => t.output === "first_name" && t.input === "first_name",
+      ),
+    ).toBe(false);
+
+    // No name/type-mismatched field reaches buildAdvancedTerms, and no
+    // first_name-named field survives at all (last_name is already covered).
+    const terms = buildAdvancedTerms(retyped.draft);
+    expect(
+      terms.linkageFields.some(
+        (f) => f.name === "first_name" && f.type === "last_name",
+      ),
+    ).toBe(false);
+    expect(terms.linkageFields.some((f) => f.name === "first_name")).toBe(
+      false,
+    );
+
+    // The re-derived last_name cleaning is present and the retyped column no longer
+    // carries a stale first_name binding: every remaining transformation resolves to
+    // a field typed to match its column.
+    const fields = authoredLinkageFields(
+      retyped.draft.metadata,
+      retyped.draft.standardization,
+    );
+    expect(fields.some((f) => f.type === "last_name")).toBe(true);
+    expect(fields.some((f) => f.type === "first_name")).toBe(false);
+  });
+
+  test("imported-draft path (editorWithImportedTerms) mints no mismatched field", () => {
+    // Import a valid terms document so keysAuthored is set via the import path,
+    // then retype through editorWithColumnType.
+    const donor = editorFromCsv("Org", retypeCsv);
+    const donorTerms = buildAdvancedTerms(donor.draft);
+    const imported = editorWithImportedTerms(donor, retypeCsv, donorTerms);
+    expect(imported.keysAuthored).toBe(true);
+
+    const retyped = retypeFirstNameToLastName(imported);
+
+    expect(
+      retyped.draft.standardization.some(
+        (t) => t.output === "first_name" && t.input === "first_name",
+      ),
+    ).toBe(false);
+    const terms = buildAdvancedTerms(retyped.draft);
+    expect(
+      terms.linkageFields.some(
+        (f) => f.name === "first_name" && f.type === "last_name",
+      ),
+    ).toBe(false);
+  });
+
+  test("authored keys survive the retype untouched", () => {
+    // The keysAuthored protection is not weakened: reconciling the standardization
+    // must not touch the author-controlled key set. The seeded keys carry a
+    // first_name element; author them, retype, and confirm the key NAMES and order
+    // are byte-identical (reconcileKeys, which would drop the now-unofferable
+    // first_name key, must stay off the authored set).
+    const seeded = editorFromCsv("Org", retypeCsv);
+    const keyNames = (candidate: ReturnType<typeof editorFromCsv>) =>
+      candidate.draft.keys.map((entry) => entry.key.name);
+    const authored = editorWithAuthoredDraft(seeded, seeded.draft);
+
+    const retyped = retypeFirstNameToLastName(authored);
+    expect(keyNames(retyped)).toEqual(keyNames(seeded));
+    expect(retyped.keysAuthored).toBe(true);
+
+    // The guided path, by contrast, DOES reconcile the keys away, so the two paths
+    // are demonstrably distinct.
+    const guided = retypeFirstNameToLastName(seeded);
+    expect(keyNames(guided)).not.toEqual(keyNames(seeded));
   });
 });
