@@ -9,6 +9,7 @@ import type { PreparedExchange } from "@psilink/core";
 const mockState = vi.hoisted(() => ({
   dropDir: "",
   // Captured log output from the mock getLogger returned to runProtocol.
+  infos: [] as string[],
   warnings: [] as string[],
   errors: [] as string[],
   // Two-party barrier counter for the abort-marker echo tests: each party
@@ -138,7 +139,9 @@ vi.mock("@psilink/core", async (importActual) => {
     // logger is only used for informational output; replacing it does not
     // affect key-exchange or PSI correctness.
     getLogger: (_name: string) => ({
-      info: () => {},
+      info: (msg: string, ...args: unknown[]) => {
+        mockState.infos.push([msg, ...args.map(String)].join(" "));
+      },
       warn: (msg: string, ...args: unknown[]) => {
         mockState.warnings.push([msg, ...args.map(String)].join(" "));
       },
@@ -185,39 +188,60 @@ const minimalPrepared = {} as unknown as PreparedExchange;
 let tmpDir: string;
 let dropDir: string;
 
-// fd-3 sentinel: no test in this file passes --event-stream, so nothing may ever
-// reach the machine-interface descriptor (EVENT_STREAM_FD = 3). Wrap writeSync to
-// record any fd-3 write while passing every other fd straight through to the real
-// implementation, then assert in afterEach that none occurred. This pins the
-// requirement that without --event-stream the run is byte-identical to today: fd
-// 3 is untouched across every protocol scenario the suite exercises.
+// fd-3 sentinel and capture: wrap writeSync so a write to the machine-interface
+// descriptor (EVENT_STREAM_FD = 3) is captured into a buffer -- never delivered
+// to the real descriptor, which the test process does not own -- while every
+// other fd passes straight through to the real implementation. A test that runs
+// under --event-stream drains the capture with takeFd3Lines() and asserts on the
+// parsed events; afterEach then asserts the capture is EMPTY, which pins two
+// requirements at once: a flag-off run writes nothing to fd 3 across every
+// scenario in this file, and a flag-on test must account for every line it
+// caused (so an unexpected extra emission -- a double terminal event -- fails
+// the test that produced it).
 const EVENT_STREAM_FD = 3;
-let fd3Writes: number;
+let fd3Chunks: Buffer[];
 let realWriteSync: typeof fs.writeSync;
+
+/** Drain the captured fd-3 bytes and return them parsed, one event per line. */
+function takeFd3Lines(): Array<Record<string, unknown>> {
+  const text = Buffer.concat(fd3Chunks).toString("utf8");
+  fd3Chunks.length = 0;
+  return text
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-proto-integ-"));
   dropDir = path.join(tmpDir, "drop");
   mockState.dropDir = dropDir;
+  mockState.infos.length = 0;
   mockState.warnings.length = 0;
   mockState.errors.length = 0;
   mockState.runExchangeEntries = 0;
   fs.mkdirSync(dropDir);
 
-  fd3Writes = 0;
+  fd3Chunks = [];
   realWriteSync = fs.writeSync;
   vi.spyOn(fs, "writeSync").mockImplementation(((
     fd: number,
     ...args: unknown[]
   ) => {
-    if (fd === EVENT_STREAM_FD) fd3Writes += 1;
+    if (fd === EVENT_STREAM_FD) {
+      const [buffer, offset, length] = args as [Buffer, number, number];
+      fd3Chunks.push(Buffer.from(buffer.subarray(offset, offset + length)));
+      return length;
+    }
     return (realWriteSync as (...a: unknown[]) => number)(fd, ...args);
   }) as typeof fs.writeSync);
 });
 
 afterEach(async () => {
-  // No --event-stream run in this file, so fd 3 must have stayed untouched.
-  expect(fd3Writes).toBe(0);
+  // Empty on a flag-off run (nothing may reach fd 3 without --event-stream);
+  // empty after a flag-on test too, because the test must have drained and
+  // asserted every line it caused via takeFd3Lines().
+  expect(fd3Chunks).toHaveLength(0);
   vi.mocked(fs.writeSync).mockRestore();
   // Clear any unconsumed mockImplementationOnce entries. When a test times out
   // before runExchange is called, the pending entry remains in the queue and
@@ -2720,4 +2744,154 @@ test("runProtocol without onAuthenticated runs a normal authenticated exchange (
   expect(
     mockState.errors.some((m) => m.includes("post-authentication hook")),
   ).toBe(false);
+});
+
+// --- Machine-interface event stream (--event-stream) --------------------------
+//
+// The flag-on tests below mock fstatSync for fd 3 (so the fail-closed preflight
+// passes deterministically regardless of how the test process was spawned) and
+// read the events from the fd-3 capture installed in beforeEach. Each drains the
+// capture with takeFd3Lines() and accounts for every line, so the afterEach
+// empty-capture assertion doubles as an exactly-one-terminal-event check.
+
+/** Make fstatSync succeed for fd 3 (pass every other target through). */
+function mockFd3Open(): void {
+  const realFstatSync = fs.fstatSync;
+  vi.spyOn(fs, "fstatSync").mockImplementation(((
+    fd: number,
+    ...rest: unknown[]
+  ) => {
+    if (fd === EVENT_STREAM_FD) return {} as fs.Stats;
+    return (realFstatSync as (...a: unknown[]) => fs.Stats)(fd, ...rest);
+  }) as typeof fs.fstatSync);
+}
+
+test("an expired shared secret under --event-stream emits exactly one terminal error event", async () => {
+  // The expired-secret rejection (assertSharedSecretReadyForHandshake) fires in
+  // the pre-connection prepare block, BEFORE the main try whose catch is the
+  // other emission site; this pins that the prepare block's own catch emits the
+  // terminal event for it. The error is a plain tagged Error (not an
+  // OperatorConfigError, not a security-kind ConnectionError), so the category
+  // is "exchange" per the classification rules.
+  mockFd3Open();
+  try {
+    await expect(
+      runProtocol(
+        { channel: "filedrop", path: dropDir },
+        {
+          sharedSecret: TOKEN_A,
+          expires: "2000-01-01T00:00:00.000Z",
+          keyFilePath: path.join(tmpDir, "expired.key"),
+        },
+        minimalPrepared,
+        undefined,
+        -1,
+        "test",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+    ).rejects.toThrow(/expired/);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  // The event was flushed before the rejection propagated (emit precedes the
+  // rethrow), so it is already in the capture here. Exactly one line: the
+  // classified terminal error, carrying the schema version.
+  const lines = takeFd3Lines();
+  expect(lines).toHaveLength(1);
+  expect(lines[0].type).toBe("error");
+  expect(lines[0].category).toBe("exchange");
+  expect(lines[0].v).toBe(1);
+  expect(String(lines[0].message)).toContain("expired");
+});
+
+test("a main-try failure under --event-stream emits exactly one terminal error event (no double emission)", async () => {
+  // conn.open() on a nonexistent drop path rejects inside the main try, whose
+  // catch is the other emission site. Exactly one captured line proves the
+  // prepare block's catch did not also fire for the same failure.
+  mockFd3Open();
+  try {
+    await expect(
+      runProtocol(
+        {
+          channel: "filedrop",
+          path: "/nonexistent-path-that-cannot-exist-psilink-test",
+        },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+    ).rejects.toThrow();
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  const lines = takeFd3Lines();
+  expect(lines).toHaveLength(1);
+  expect(lines[0].type).toBe("error");
+  expect(lines[0].category).toBe("exchange");
+  expect(lines[0].v).toBe(1);
+});
+
+// --- Stage/warning stderr sanitization -----------------------------------------
+
+test("a hostile stage label and terms warning reach the human log neutralized", async () => {
+  // The onStage/onWarning strings can derive from partner-authored linkage-key
+  // and column names. Drive both callbacks with the repo's hostile patterns (a
+  // bidi override and an ANSI ESC sequence) through a real two-party run and
+  // assert the captured stderr lines carry only the visible escapes.
+  const hostileStageId = "user‮EVIL stage";
+  const hostileWarning = "column \x1b[31mEVIL\x1b[0m mismatch";
+
+  vi.mocked(runExchange).mockImplementationOnce((async (...args: unknown[]) => {
+    const options = args[3] as {
+      onStage?: (id: string) => void;
+      onWarning?: (msg: string) => void;
+    };
+    // describeExchangeStages is mocked to [], so the raw id doubles as the
+    // label the log line renders.
+    options.onStage?.(hostileStageId);
+    options.onWarning?.(hostileWarning);
+    return defaultRunExchange();
+  }) as never);
+
+  await Promise.all([
+    runProtocol(
+      { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+      null,
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-a",
+    ),
+    runProtocol(
+      { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+      null,
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-b",
+    ),
+  ]);
+
+  const stageLine = mockState.infos.find((m) => m.includes("EVIL stage"));
+  expect(stageLine).toBeDefined();
+  expect(stageLine).not.toContain("‮");
+  expect(stageLine).toContain("\\u202e");
+
+  const warnLine = mockState.warnings.find((m) =>
+    m.includes("terms exchange:"),
+  );
+  expect(warnLine).toBeDefined();
+  expect(warnLine).not.toContain("\x1b");
+  expect(warnLine).toContain("\\x1b");
 });

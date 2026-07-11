@@ -114,6 +114,8 @@ The process exit code cannot distinguish a `security` failure from an ordinary o
 
 Exactly one terminal event -- a `result` on success, or one classified `error` on an organic failure -- is emitted per run. It is the last event on the stream. The `stages`, `stage`, and `warning` events that precede it are progress, not outcome.
 
+The guarantee applies from protocol entry, immediately after the fd-3 preflight: every organic failure inside the protocol lifecycle -- including the pre-connection prepare checks (an expired or malformed shared secret, a bad key-file path) -- emits its one classified `error` event before the failure propagates to the process exit. A failure before the process reaches the protocol lifecycle at all -- the config file failing to load or validate in the command handler, a bad flag or positional, or the fd-3 preflight itself -- emits no events and exits 64; a supervisor distinguishes that from an interrupt by the exit code (64 versus 130/143).
+
 A run interrupted by `SIGINT` or `SIGTERM` exits through the signal handler's `process.exit` (exit 130 for SIGINT, 143 for SIGTERM), which bypasses the emission site, so **no terminal event is emitted on a signal exit**. A supervisor reads the absence of a terminal event together with exit 130 or 143 as the interrupt signal. This is deliberate and applies to both interrupt sub-cases (a clean interrupt and an interrupt that coincides with an in-flight error), so the "no terminal event plus 130/143" reading is unambiguous rather than fired inconsistently. A broken pipe (the supervisor closed its read end) likewise leaves the stream without a terminal event; the exit code remains authoritative there too.
 
 ## Sanitization

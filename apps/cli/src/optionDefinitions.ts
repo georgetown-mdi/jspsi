@@ -19,7 +19,7 @@ import {
   singleValue,
 } from "./util/cli";
 import { DURATION_VALUE_HELP, FINE_DURATION_VALUE_HELP } from "./util/duration";
-import { resolveAtSignRef } from "./util/atSignRefs";
+import { resolveHostKeyFingerprintRef } from "./util/atSignRefs";
 
 /**
  * Upper bound for `--server-port`, matching the config schema's own
@@ -33,16 +33,18 @@ export const MAX_PORT = 65535;
  * Read `--server-host-key-fingerprint` from parsed `Arguments`, resolving an
  * `@file` reference and validating the result against
  * {@link HOST_KEY_FINGERPRINT_REGEX} before it reaches a connection -- a
- * malformed value is rejected here, at parse time, as a flag-named
- * {@link UsageError} (CLI exit 64), the same "reject loudly before any
- * connection is attempted" contract {@link nonNegativeIntFlag} and
- * {@link durationFlagSeconds} give their flags, rather than surfacing later as a
- * confusing host-key mismatch at connect time.
+ * malformed value is rejected here, at parse time, as a {@link UsageError} (CLI
+ * exit 64), the same "reject loudly before any connection is attempted"
+ * contract {@link nonNegativeIntFlag} and {@link durationFlagSeconds} give
+ * their flags, rather than surfacing later as a confusing host-key mismatch at
+ * connect time.
  *
- * Mirrors {@link resolveHostKeyFingerprintRef} in `util/atSignRefs.ts` -- the
- * same `@file` resolution and re-validation the config-load path applies to an
- * `@`-authored `host_key_fingerprint` -- so a pre-pinned CLI value and a
- * pre-pinned config value are checked identically. Rejects a repeat (via
+ * The `@file` read and re-validation are {@link resolveHostKeyFingerprintRef}
+ * -- the same helper the config-load path applies to an `@`-authored
+ * `host_key_fingerprint` -- so a pre-pinned CLI value and a pre-pinned config
+ * value are checked identically, and its failure names the reference. A
+ * literal value passes through that helper unvalidated (no earlier schema saw
+ * it), so its format check follows here, flag-named. Rejects a repeat (via
  * {@link singleValue}) before either step.
  */
 export function hostKeyFingerprintFlag(argv: Arguments): string | undefined {
@@ -52,19 +54,16 @@ export function hostKeyFingerprintFlag(argv: Arguments): string | undefined {
     throw new UsageError(
       "--server-host-key-fingerprint must be a string; got " + String(raw),
     );
-  const resolved = resolveAtSignRef(raw);
+  const resolved = resolveHostKeyFingerprintRef(raw);
+  // Only a literal can still be malformed here: an @-resolved value already
+  // passed the same regex inside the shared resolver, with a reference-naming
+  // error on failure.
   if (!HOST_KEY_FINGERPRINT_REGEX.test(resolved))
     throw new UsageError(
-      // Name the @-file reference (not just "--server-host-key-fingerprint")
-      // when the malformed value came from one, mirroring
-      // resolveHostKeyFingerprintRef's message: a secrets-mount file holding a
-      // bad value is otherwise indistinguishable from a bad literal flag value.
-      (raw.startsWith("@")
-        ? `the @-file reference ${raw}`
-        : "--server-host-key-fingerprint") +
-        " must be in OpenSSH SHA256 format: the SHA256: prefix followed by " +
-        "43 unpadded standard base64 characters (the value ssh-keygen -lf " +
-        "prints, or the fingerprint shown by a prior interactive psilink run)",
+      "--server-host-key-fingerprint must be in OpenSSH SHA256 format: the " +
+        "SHA256: prefix followed by 43 unpadded standard base64 characters " +
+        "(the value ssh-keygen -lf prints, or the fingerprint shown by a " +
+        "prior interactive psilink run)",
     );
   return resolved;
 }

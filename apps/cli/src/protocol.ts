@@ -270,99 +270,115 @@ export async function runProtocol(
   // including the handshake is "prepare"; the PSI exchange is "run"; the local
   // result/record generation after runExchange returns is "output". A single
   // terminal event fires per run -- the result on success, or one classified
-  // error -- so this is read exactly once, in the catch.
+  // error -- so it is emitted from exactly one of the two catch boundaries: the
+  // pre-connection prepare block just below, or the main try's catch.
   let terminalPhase: ErrorPhase = "prepare";
 
-  if (connection.channel !== "filedrop" && connection.channel !== "sftp")
-    // Only reachable via an unsafe cast past ProtocolConnectionConfig.
-    throw new Error(
-      `unsupported channel: ` +
-        (connection as unknown as { channel: string }).channel,
-    );
-
-  // saveIntent drives the zero-setup `--save` bootstrap, which exists only on
-  // the unauthenticated path: an authenticated exchange already has a persistent
-  // key and no provisioning step to consume a bootstrap result, so a stray
-  // saveIntent here would advertise a save field (and possibly transmit a secret
-  // frame) inside the authenticated channel with nothing reading it back. Reject
-  // the combination rather than leave the footgun open to a future caller; the
-  // type docs already mark saveIntent as meaningful only with `auth: null`, and
-  // both current callers honor that.
-  if (auth && saveIntent !== undefined)
-    throw new Error(
-      "saveIntent is only valid on an unauthenticated (zero-setup) exchange; " +
-        "an authenticated exchange must not pass it",
-    );
-  // The mirror constraint: onAuthenticated hooks the moment of acceptance, which
-  // exists only on the authenticated path -- its invocation below is nested in
-  // `if (auth)`. Reject a hook supplied with `auth: null` up front rather than
-  // silently dropping it, so a future caller that wires a hook to a zero-setup
-  // exchange gets a clear error instead of a persistence step that never runs.
-  if (!auth && onAuthenticated !== undefined)
-    throw new Error(
-      "onAuthenticated is only valid on an authenticated exchange; an " +
-        "unauthenticated (zero-setup) exchange has no acceptance step to hook",
-    );
   // Captured in the outer scope so the post-handshake saveKeyFile call below
   // can reuse the trimmed value without re-reading auth.keyFilePath.
   let trimmedKeyFilePath: string | undefined;
-  if (auth) {
-    // Fail fast on the locally-knowable secret preconditions -- a malformed or
-    // already-expired shared secret -- BEFORE opening any connection. Both are
-    // determinable without a peer, and deferring them to authenticateConnection
-    // (which runs only after the connection is open) would let a dead credential
-    // first drive the file-sync rendezvous, whose losing side can then surface a
-    // misleading "peer abandoned the handshake; retry" hint for what is really an
-    // expired or malformed secret. Running the same tagged check here keeps both
-    // parties' failure deterministic and correctly hinted, with no rendezvous
-    // I/O. authenticateConnection still runs it (and the post-handshake expiry
-    // check) as the authoritative boundary for library consumers that bypass
-    // runProtocol. The shared check carries psilinkRecoveryHintEmitted, so the
-    // catch block below suppresses its generic advisory.
-    assertSharedSecretReadyForHandshake(auth);
-    // Validate and trim the key-file path before any connection is opened, so a
-    // misconfiguration fails here -- with no rendezvous I/O and before the
-    // partner can be left holding a rotated token this side cannot persist --
-    // rather than at saveKeyFile post-handshake. Returns the trimmed path, which
-    // the saveKeyFile call below reuses without re-reading the caller's auth.
-    trimmedKeyFilePath = preflightKeyFilePath(auth.keyFilePath, log);
-  }
-  const client =
-    connection.channel === "filedrop"
-      ? new LocalFSClient()
-      : new SSH2SFTPClientAdapter({ verbosity });
-  // CLI-only sweep controls are passed straight to the constructor (the
-  // verbose/joinerRecoveryMs precedent), never through config.options, so they
-  // cannot be persisted to psilink.yaml. Spread conditionally so an unset value
-  // does not clobber the constructor default.
-  const conn = new FileSyncConnection(client, {
-    verbose: verbosity,
-    ...(fileSyncRuntime.sweepExchangeFiles !== undefined && {
-      sweepExchangeFiles: fileSyncRuntime.sweepExchangeFiles,
-    }),
-    ...(fileSyncRuntime.forceRetainSweep !== undefined && {
-      forceRetainSweep: fileSyncRuntime.forceRetainSweep,
-    }),
-  });
+  let conn: FileSyncConnection;
+  let mc: ReturnType<typeof fromEventConnection>;
+  // Pre-connection prepare block. Its throw sites -- the channel and caller-
+  // contract guards, the shared-secret readiness check (an expired or malformed
+  // secret), the key-file-path preflight, and the client/connection/bridge
+  // construction -- all run before the main try below, whose catch is the other
+  // error-emission site. This catch gives them the same single terminal error
+  // event (phase "prepare") and rethrows; the two regions are disjoint, so no
+  // failure route passes through both catches and the one-terminal-event
+  // guarantee holds on every path.
+  try {
+    if (connection.channel !== "filedrop" && connection.channel !== "sftp")
+      // Only reachable via an unsafe cast past ProtocolConnectionConfig.
+      throw new Error(
+        `unsupported channel: ` +
+          (connection as unknown as { channel: string }).channel,
+      );
 
-  // The PSI protocol layer (authenticateConnection / runExchange) consumes the
-  // pull-based MessageConnection interface. Bridge the event-based
-  // FileSyncConnection through fromEventConnection so its data/error events are
-  // delivered to awaited receive() calls with no per-phase listener gap. The
-  // bridge bounds a parked receive() by the peer-inactivity budget: if the peer
-  // stays silent past this window the exchange fails as a transport error
-  // rather than hanging. peerTimeoutMs (when configured) overrides the default;
-  // the same value bounds the file-sync rendezvous TTL inside conn.open().
-  const peerBudgetMs =
-    connection.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
-  // inactivityHint enriches the generic peer-silence error with file-sync
-  // operator guidance: the receiver names its own cause locally, but the sender
-  // only sees the inactivity timeout, so it points at the likely receiver-side
-  // causes and the peer's own logs (see PEER_SILENCE_GUIDANCE).
-  const mc = fromEventConnection(conn, {
-    inactivityTimeoutMs: peerBudgetMs,
-    inactivityHint: PEER_SILENCE_GUIDANCE,
-  });
+    // saveIntent drives the zero-setup `--save` bootstrap, which exists only on
+    // the unauthenticated path: an authenticated exchange already has a persistent
+    // key and no provisioning step to consume a bootstrap result, so a stray
+    // saveIntent here would advertise a save field (and possibly transmit a secret
+    // frame) inside the authenticated channel with nothing reading it back. Reject
+    // the combination rather than leave the footgun open to a future caller; the
+    // type docs already mark saveIntent as meaningful only with `auth: null`, and
+    // both current callers honor that.
+    if (auth && saveIntent !== undefined)
+      throw new Error(
+        "saveIntent is only valid on an unauthenticated (zero-setup) exchange; " +
+          "an authenticated exchange must not pass it",
+      );
+    // The mirror constraint: onAuthenticated hooks the moment of acceptance, which
+    // exists only on the authenticated path -- its invocation below is nested in
+    // `if (auth)`. Reject a hook supplied with `auth: null` up front rather than
+    // silently dropping it, so a future caller that wires a hook to a zero-setup
+    // exchange gets a clear error instead of a persistence step that never runs.
+    if (!auth && onAuthenticated !== undefined)
+      throw new Error(
+        "onAuthenticated is only valid on an authenticated exchange; an " +
+          "unauthenticated (zero-setup) exchange has no acceptance step to hook",
+      );
+    if (auth) {
+      // Fail fast on the locally-knowable secret preconditions -- a malformed or
+      // already-expired shared secret -- BEFORE opening any connection. Both are
+      // determinable without a peer, and deferring them to authenticateConnection
+      // (which runs only after the connection is open) would let a dead credential
+      // first drive the file-sync rendezvous, whose losing side can then surface a
+      // misleading "peer abandoned the handshake; retry" hint for what is really an
+      // expired or malformed secret. Running the same tagged check here keeps both
+      // parties' failure deterministic and correctly hinted, with no rendezvous
+      // I/O. authenticateConnection still runs it (and the post-handshake expiry
+      // check) as the authoritative boundary for library consumers that bypass
+      // runProtocol. The shared check carries psilinkRecoveryHintEmitted, so the
+      // catch block below suppresses its generic advisory.
+      assertSharedSecretReadyForHandshake(auth);
+      // Validate and trim the key-file path before any connection is opened, so a
+      // misconfiguration fails here -- with no rendezvous I/O and before the
+      // partner can be left holding a rotated token this side cannot persist --
+      // rather than at saveKeyFile post-handshake. Returns the trimmed path, which
+      // the saveKeyFile call below reuses without re-reading the caller's auth.
+      trimmedKeyFilePath = preflightKeyFilePath(auth.keyFilePath, log);
+    }
+    const client =
+      connection.channel === "filedrop"
+        ? new LocalFSClient()
+        : new SSH2SFTPClientAdapter({ verbosity });
+    // CLI-only sweep controls are passed straight to the constructor (the
+    // verbose/joinerRecoveryMs precedent), never through config.options, so they
+    // cannot be persisted to psilink.yaml. Spread conditionally so an unset value
+    // does not clobber the constructor default.
+    conn = new FileSyncConnection(client, {
+      verbose: verbosity,
+      ...(fileSyncRuntime.sweepExchangeFiles !== undefined && {
+        sweepExchangeFiles: fileSyncRuntime.sweepExchangeFiles,
+      }),
+      ...(fileSyncRuntime.forceRetainSweep !== undefined && {
+        forceRetainSweep: fileSyncRuntime.forceRetainSweep,
+      }),
+    });
+
+    // The PSI protocol layer (authenticateConnection / runExchange) consumes the
+    // pull-based MessageConnection interface. Bridge the event-based
+    // FileSyncConnection through fromEventConnection so its data/error events are
+    // delivered to awaited receive() calls with no per-phase listener gap. The
+    // bridge bounds a parked receive() by the peer-inactivity budget: if the peer
+    // stays silent past this window the exchange fails as a transport error
+    // rather than hanging. peerTimeoutMs (when configured) overrides the default;
+    // the same value bounds the file-sync rendezvous TTL inside conn.open().
+    const peerBudgetMs =
+      connection.options?.peerTimeoutMs ?? DEFAULT_PEER_TIMEOUT_MS;
+    // inactivityHint enriches the generic peer-silence error with file-sync
+    // operator guidance: the receiver names its own cause locally, but the sender
+    // only sees the inactivity timeout, so it points at the likely receiver-side
+    // causes and the peer's own logs (see PEER_SILENCE_GUIDANCE).
+    mc = fromEventConnection(conn, {
+      inactivityTimeoutMs: peerBudgetMs,
+      inactivityHint: PEER_SILENCE_GUIDANCE,
+    });
+  } catch (err) {
+    emit((e) => e.error(err, "prepare"));
+    throw err;
+  }
 
   // SIGINT/SIGTERM handlers and the finally block share this closure so that
   // stop/cleanup/close run at most once regardless of which path gets there
@@ -908,16 +924,22 @@ export async function runProtocol(
             secure !== undefined ? conn.observedHostKey : undefined,
           onStage: (id: string) => {
             const label = stageLabels[id] ?? id;
-            log.info(label.charAt(0).toLowerCase() + label.slice(1));
-            // Mirror the human stage line onto the event stream. The emitter
-            // sanitizes id and label (a label derives from partner-authored
-            // linkage-key names) before they reach fd 3.
+            // The label derives from linkage-key names the partner may have
+            // authored, so it goes through the display-boundary escape before
+            // reaching the terminal, like this file's other stderr sites. The
+            // emitter applies the same escape before the pair reaches fd 3.
+            log.info(
+              sanitizeForDisplay(
+                label.charAt(0).toLowerCase() + label.slice(1),
+              ),
+            );
             emit((e) => e.stage(id, label));
           },
           onWarning: (msg: string) => {
-            log.warn("terms exchange:", msg);
-            // The warning text can embed partner-authored column names; the
-            // emitter sanitizes it before the line reaches fd 3.
+            // Terms-exchange warnings can embed partner-authored column names,
+            // so the text goes through the display-boundary escape here and
+            // inside the emitter alike.
+            log.warn("terms exchange:", sanitizeForDisplay(msg));
             emit((e) => e.warning(msg));
           },
           // A host-key divergence is a security signal, not a terms warning, so
