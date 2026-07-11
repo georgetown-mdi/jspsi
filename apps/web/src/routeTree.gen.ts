@@ -19,8 +19,13 @@ import { Route as BenchVerifyRouteImport } from './routes/bench/verify'
 import { Route as BenchExchangeRouteImport } from './routes/bench/exchange'
 import { Route as BenchAcceptRouteImport } from './routes/bench/accept'
 import { Route as ApiPeerjsIndexRouteImport } from './routes/api/peerjs/index'
+import { Route as ApiJobsIndexRouteImport } from './routes/api/jobs/index'
 import { Route as ApiPeerjsIdRouteImport } from './routes/api/peerjs/id'
+import { Route as ApiJobsJobIdIndexRouteImport } from './routes/api/jobs/$jobId/index'
 import { Route as ApiPeerjsKeyPeersRouteImport } from './routes/api/peerjs/$key/peers'
+import { Route as ApiJobsJobIdResultRouteImport } from './routes/api/jobs/$jobId/result'
+import { Route as ApiJobsJobIdEventsRouteImport } from './routes/api/jobs/$jobId/events'
+import { Route as ApiJobsJobIdCancelRouteImport } from './routes/api/jobs/$jobId/cancel'
 
 const VerifyRoute = VerifyRouteImport.update({
   id: '/verify',
@@ -72,14 +77,39 @@ const ApiPeerjsIndexRoute = ApiPeerjsIndexRouteImport.update({
   path: '/api/peerjs/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiJobsIndexRoute = ApiJobsIndexRouteImport.update({
+  id: '/api/jobs/',
+  path: '/api/jobs/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPeerjsIdRoute = ApiPeerjsIdRouteImport.update({
   id: '/api/peerjs/id',
   path: '/api/peerjs/id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiJobsJobIdIndexRoute = ApiJobsJobIdIndexRouteImport.update({
+  id: '/api/jobs/$jobId/',
+  path: '/api/jobs/$jobId/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPeerjsKeyPeersRoute = ApiPeerjsKeyPeersRouteImport.update({
   id: '/api/peerjs/$key/peers',
   path: '/api/peerjs/$key/peers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiJobsJobIdResultRoute = ApiJobsJobIdResultRouteImport.update({
+  id: '/api/jobs/$jobId/result',
+  path: '/api/jobs/$jobId/result',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiJobsJobIdEventsRoute = ApiJobsJobIdEventsRouteImport.update({
+  id: '/api/jobs/$jobId/events',
+  path: '/api/jobs/$jobId/events',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiJobsJobIdCancelRoute = ApiJobsJobIdCancelRouteImport.update({
+  id: '/api/jobs/$jobId/cancel',
+  path: '/api/jobs/$jobId/cancel',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -94,8 +124,13 @@ export interface FileRoutesByFullPath {
   '/bench/verify': typeof BenchVerifyRoute
   '/bench/': typeof BenchIndexRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
+  '/api/jobs/': typeof ApiJobsIndexRoute
   '/api/peerjs/': typeof ApiPeerjsIndexRoute
+  '/api/jobs/$jobId/cancel': typeof ApiJobsJobIdCancelRoute
+  '/api/jobs/$jobId/events': typeof ApiJobsJobIdEventsRoute
+  '/api/jobs/$jobId/result': typeof ApiJobsJobIdResultRoute
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
+  '/api/jobs/$jobId/': typeof ApiJobsJobIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -107,8 +142,13 @@ export interface FileRoutesByTo {
   '/bench/verify': typeof BenchVerifyRoute
   '/bench': typeof BenchIndexRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
+  '/api/jobs': typeof ApiJobsIndexRoute
   '/api/peerjs': typeof ApiPeerjsIndexRoute
+  '/api/jobs/$jobId/cancel': typeof ApiJobsJobIdCancelRoute
+  '/api/jobs/$jobId/events': typeof ApiJobsJobIdEventsRoute
+  '/api/jobs/$jobId/result': typeof ApiJobsJobIdResultRoute
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
+  '/api/jobs/$jobId': typeof ApiJobsJobIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -122,8 +162,13 @@ export interface FileRoutesById {
   '/bench/verify': typeof BenchVerifyRoute
   '/bench/': typeof BenchIndexRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
+  '/api/jobs/': typeof ApiJobsIndexRoute
   '/api/peerjs/': typeof ApiPeerjsIndexRoute
+  '/api/jobs/$jobId/cancel': typeof ApiJobsJobIdCancelRoute
+  '/api/jobs/$jobId/events': typeof ApiJobsJobIdEventsRoute
+  '/api/jobs/$jobId/result': typeof ApiJobsJobIdResultRoute
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
+  '/api/jobs/$jobId/': typeof ApiJobsJobIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -138,8 +183,13 @@ export interface FileRouteTypes {
     | '/bench/verify'
     | '/bench/'
     | '/api/peerjs/id'
+    | '/api/jobs/'
     | '/api/peerjs/'
+    | '/api/jobs/$jobId/cancel'
+    | '/api/jobs/$jobId/events'
+    | '/api/jobs/$jobId/result'
     | '/api/peerjs/$key/peers'
+    | '/api/jobs/$jobId/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -151,8 +201,13 @@ export interface FileRouteTypes {
     | '/bench/verify'
     | '/bench'
     | '/api/peerjs/id'
+    | '/api/jobs'
     | '/api/peerjs'
+    | '/api/jobs/$jobId/cancel'
+    | '/api/jobs/$jobId/events'
+    | '/api/jobs/$jobId/result'
     | '/api/peerjs/$key/peers'
+    | '/api/jobs/$jobId'
   id:
     | '__root__'
     | '/'
@@ -165,8 +220,13 @@ export interface FileRouteTypes {
     | '/bench/verify'
     | '/bench/'
     | '/api/peerjs/id'
+    | '/api/jobs/'
     | '/api/peerjs/'
+    | '/api/jobs/$jobId/cancel'
+    | '/api/jobs/$jobId/events'
+    | '/api/jobs/$jobId/result'
     | '/api/peerjs/$key/peers'
+    | '/api/jobs/$jobId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -176,8 +236,13 @@ export interface RootRouteChildren {
   ExchangeRoute: typeof ExchangeRoute
   VerifyRoute: typeof VerifyRoute
   ApiPeerjsIdRoute: typeof ApiPeerjsIdRoute
+  ApiJobsIndexRoute: typeof ApiJobsIndexRoute
   ApiPeerjsIndexRoute: typeof ApiPeerjsIndexRoute
+  ApiJobsJobIdCancelRoute: typeof ApiJobsJobIdCancelRoute
+  ApiJobsJobIdEventsRoute: typeof ApiJobsJobIdEventsRoute
+  ApiJobsJobIdResultRoute: typeof ApiJobsJobIdResultRoute
   ApiPeerjsKeyPeersRoute: typeof ApiPeerjsKeyPeersRoute
+  ApiJobsJobIdIndexRoute: typeof ApiJobsJobIdIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -252,6 +317,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPeerjsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/jobs/': {
+      id: '/api/jobs/'
+      path: '/api/jobs'
+      fullPath: '/api/jobs/'
+      preLoaderRoute: typeof ApiJobsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/peerjs/id': {
       id: '/api/peerjs/id'
       path: '/api/peerjs/id'
@@ -259,11 +331,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPeerjsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/jobs/$jobId/': {
+      id: '/api/jobs/$jobId/'
+      path: '/api/jobs/$jobId'
+      fullPath: '/api/jobs/$jobId/'
+      preLoaderRoute: typeof ApiJobsJobIdIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/peerjs/$key/peers': {
       id: '/api/peerjs/$key/peers'
       path: '/api/peerjs/$key/peers'
       fullPath: '/api/peerjs/$key/peers'
       preLoaderRoute: typeof ApiPeerjsKeyPeersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/jobs/$jobId/result': {
+      id: '/api/jobs/$jobId/result'
+      path: '/api/jobs/$jobId/result'
+      fullPath: '/api/jobs/$jobId/result'
+      preLoaderRoute: typeof ApiJobsJobIdResultRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/jobs/$jobId/events': {
+      id: '/api/jobs/$jobId/events'
+      path: '/api/jobs/$jobId/events'
+      fullPath: '/api/jobs/$jobId/events'
+      preLoaderRoute: typeof ApiJobsJobIdEventsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/jobs/$jobId/cancel': {
+      id: '/api/jobs/$jobId/cancel'
+      path: '/api/jobs/$jobId/cancel'
+      fullPath: '/api/jobs/$jobId/cancel'
+      preLoaderRoute: typeof ApiJobsJobIdCancelRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -294,8 +394,13 @@ const rootRouteChildren: RootRouteChildren = {
   ExchangeRoute: ExchangeRoute,
   VerifyRoute: VerifyRoute,
   ApiPeerjsIdRoute: ApiPeerjsIdRoute,
+  ApiJobsIndexRoute: ApiJobsIndexRoute,
   ApiPeerjsIndexRoute: ApiPeerjsIndexRoute,
+  ApiJobsJobIdCancelRoute: ApiJobsJobIdCancelRoute,
+  ApiJobsJobIdEventsRoute: ApiJobsJobIdEventsRoute,
+  ApiJobsJobIdResultRoute: ApiJobsJobIdResultRoute,
   ApiPeerjsKeyPeersRoute: ApiPeerjsKeyPeersRoute,
+  ApiJobsJobIdIndexRoute: ApiJobsJobIdIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

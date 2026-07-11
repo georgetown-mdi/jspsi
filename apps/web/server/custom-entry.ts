@@ -19,8 +19,10 @@ import logLibrary from "loglevel";
 
 import { getLogger } from "@psilink/core";
 
+import { assertJobApiStartupSafe, readJobApiConfig } from "../src/jobs/gate";
 import { ConfigManager } from "../src/utils/serverConfig";
 import { registerServer } from "../src/httpServer";
+import { shutdownJobManager } from "../src/jobs/index";
 
 import { hardenUpgradeSurface } from "./upgradeHardening";
 
@@ -54,6 +56,15 @@ const port = (config.PORT || 3000) as number;
 const host = process.env.NITRO_HOST || process.env.HOST;
 
 const path = process.env.NITRO_UNIX_SOCKET;
+
+// Fail closed before binding: if the job API is enabled on a non-loopback bind
+// without an auth token, refuse to start rather than expose an unauthenticated
+// CLI driver on a public interface. A unix-socket bind is appliance-local, so it
+// is treated as loopback for this check.
+assertJobApiStartupSafe(
+  readJobApiConfig(),
+  path !== undefined ? "localhost" : host,
+);
 
 // @ts-ignore part of preset
 const listener = server.listen(path ? { path } : { port, host }, (err) => {
@@ -106,6 +117,13 @@ const listener = server.listen(path ? { path } : { port, host }, (err) => {
 
 // Trap unhandled errors
 trapUnhandledNodeErrors();
+
+// SIGTERM every running CLI child on shutdown so no orphaned CLI outlives the
+// server. A no-op when the job API was never enabled. Registered BEFORE the
+// graceful-shutdown handler: signal listeners run in registration order, and the
+// children must be signalled before any handler that may end the process.
+for (const signal of ["SIGINT", "SIGTERM"] as const)
+  process.once(signal, shutdownJobManager);
 
 // Graceful shutdown
 setupGracefulShutdown(listener, nitroApp);
