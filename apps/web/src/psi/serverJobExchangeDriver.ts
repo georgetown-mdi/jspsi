@@ -1,5 +1,7 @@
 import { ProcessState, getLogger } from "@psilink/core";
 
+import { whenDiagnostic } from "@utils/diagnostics";
+
 import type { ExchangeDriver, ExchangeDriverEvents } from "./exchangeDriver";
 import type {
   ExchangeErrorCategory,
@@ -316,7 +318,11 @@ export function createServerJobExchangeDriver(
               break;
             }
             case "warning":
-              log.warn("server job warning:", event.message);
+              // Dev-gated like onError: event.message is server/CLI-controlled,
+              // so a production console carries none of it.
+              whenDiagnostic(() =>
+                log.warn("server job warning:", event.message),
+              );
               break;
             case "result":
               onResult(resultOutputs(event, jobId));

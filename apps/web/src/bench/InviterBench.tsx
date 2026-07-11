@@ -24,6 +24,7 @@ import {
   endpointRequestFor,
   exchangeFileInputFor,
   exchangeFileName,
+  liveRunLedgerFooter,
   saveExchangeError,
   saveRailNote,
   saveTrustFooter,
@@ -557,9 +558,10 @@ export function InviterBench() {
           footer={
             section === "save" && isCliTransport(transport)
               ? saveTrustFooter(transport)
-              : outputs === undefined
-                ? "Your file stays in this browser. Nothing is uploaded; your partner receives only what this ledger names."
-                : "Your file never left this browser. The results above are all your partner received about your data."
+              : liveRunLedgerFooter(
+                  selection.kind === "server-job",
+                  outputs !== undefined,
+                )
           }
         />
       }

@@ -6,6 +6,7 @@ import {
   endpointRequestFor,
   exchangeFileInputFor,
   exchangeFileName,
+  liveRunLedgerFooter,
   runCommand,
   saveCapabilityCopy,
   saveExchangeError,
@@ -126,6 +127,34 @@ describe("copy is transport-specific", () => {
     expect(credentialAlertCopy("filedrop")).toBe(
       "A shared-directory exchange carries no credentials at all. The file " +
         "names only the directory both parties can reach.",
+    );
+  });
+});
+
+describe("live-run ledger footer by driver", () => {
+  test("a browser-local run keeps the never-uploaded assurance verbatim", () => {
+    expect(liveRunLedgerFooter(false, false)).toBe(
+      "Your file stays in this browser. Nothing is uploaded; your partner " +
+        "receives only what this ledger names.",
+    );
+    expect(liveRunLedgerFooter(false, true)).toBe(
+      "Your file never left this browser. The results above are all your " +
+        "partner received about your data.",
+    );
+  });
+
+  test("a server-job run drops the never-uploaded claim (the file is sent to the appliance)", () => {
+    for (const hasResult of [false, true]) {
+      const footer = liveRunLedgerFooter(true, hasResult);
+      expect(footer).not.toContain("uploaded");
+      expect(footer).not.toContain("never left this browser");
+      expect(footer).not.toContain("stays in this browser");
+    }
+    expect(liveRunLedgerFooter(true, false)).toContain(
+      "Your partner receives only what this ledger names",
+    );
+    expect(liveRunLedgerFooter(true, true)).toContain(
+      "all your partner received about your data",
     );
   });
 });
