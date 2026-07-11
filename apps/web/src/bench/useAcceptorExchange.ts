@@ -7,10 +7,13 @@ import PSI from "@openmined/psi.js/psi_wasm_web";
 
 import { loadPsiBackend } from "@psilink/core";
 
+import { createBrowserExchangeDriver } from "@psi/exchangeDriver";
 import { dialAsAcceptor } from "@psi/rendezvous";
-import { runExchangeLifecycle } from "@psi/exchangeLifecycle";
 
+import { deploymentProfile } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
+
+import { selectExchangeDriver } from "./exchangeDriverSelection";
 
 import {
   WAITING_STAGE_ID,
@@ -33,10 +36,27 @@ import type {
   AcceptorDataEdits,
 } from "@psi/acceptInvitation";
 import type { Acquire, GenerateOutput } from "@psi/exchangeLifecycle";
-import type { CSVRow } from "@psilink/core";
+import type { CSVRow, WebRTCEndpoint } from "@psilink/core";
 import type { ExchangeRun } from "./exchangeRun";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "./runOutputs";
+import type { Transport } from "./inviterModel";
+
+const ENDPOINT_CHANNEL_TRANSPORT: Record<WebRTCEndpoint["channel"], Transport> =
+  {
+    webrtc: "browser",
+  };
+
+/** Map an accepted invitation's connection-endpoint channel to the bench
+ * {@link Transport} the driver selector keys on. Only `webrtc` reaches the
+ * acceptor -- prepareAcceptedInvitation rejects every other channel -- and it
+ * runs live in this browser. Keying off the endpoint channel type means a
+ * widened channel union fails to build here until it is mapped. */
+function transportForEndpointChannel(
+  channel: WebRTCEndpoint["channel"],
+): Transport {
+  return ENDPOINT_CHANNEL_TRANSPORT[channel];
+}
 
 /** The launch the acceptor commits to on "Start the exchange": the decoded
  * invitation, the committed name recorded in the exchange record, the acquired
@@ -172,13 +192,31 @@ export function useAcceptorExchange({
       return { peer, conn, psi, prepared };
     };
 
-    void runExchangeLifecycle<RunOutputs>({
+    // The accepted invitation always carries a WebRTC endpoint --
+    // prepareAcceptedInvitation fails closed on any other channel before a
+    // launch can exist -- so the selector resolves to the browser driver here.
+    // Routing through it anyway keeps the driver seam identical to the inviter's
+    // and fails closed rather than silently building the wrong driver if a
+    // filedrop launch ever reaches this hook (it needs accept-side UI first).
+    const selection = selectExchangeDriver(
+      transportForEndpointChannel(endpoint.channel),
+      deploymentProfile(),
+    );
+    if (selection.kind !== "browser")
+      throw new Error(
+        `acceptor cannot run a ${selection.kind} exchange in the browser`,
+      );
+
+    const driver = createBrowserExchangeDriver<RunOutputs>({
       acquire,
       exchangeRole: "initiator",
       sharedSecret: token.sharedSecret,
       expires: token.expires,
-      signal: controller.signal,
       generateOutput,
+    });
+
+    void driver.run({
+      signal: controller.signal,
       onStages: (stages) => setRun((prev) => runWithStages(prev, stages)),
       onStage: (stageId) =>
         setRun((prev) => runWithStage(prev, stageId, new Date())),

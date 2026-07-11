@@ -14,6 +14,7 @@ import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
 import { invitationLocation } from "@psi/invitationLocation";
 import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 
+import { deploymentProfile } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
@@ -68,6 +69,7 @@ import { MatchingSharingSection } from "./MatchingSharingSection";
 import { ReviewCreateSection } from "./ReviewCreateSection";
 import { SaveExchangeSection } from "./SaveExchangeSection";
 import { YourFileSection } from "./YourFileSection";
+import { selectExchangeDriver } from "./exchangeDriverSelection";
 import { timelineSteps } from "./exchangeRun";
 import { useInviterExchange } from "./useInviterExchange";
 
@@ -151,16 +153,21 @@ export function InviterBench() {
   const [saveAlert, setSaveAlert] = useState<IntakeAlert>();
 
   const transport = editor?.transport ?? "browser";
+  const selection = selectExchangeDriver(transport, deploymentProfile());
 
-  // The live run starts the moment a BROWSER invitation exists (the hook
-  // listens for the partner right away) and is torn down when the invitation is
-  // discarded or the bench unmounts. A command-line transport never listens:
+  // The live run starts the moment a live invitation exists (the hook drives
+  // the partner exchange right away) and is torn down when the invitation is
+  // discarded or the bench unmounts. A `save-file` selection never runs live:
   // its invitation is minted for the save surface, so it is withheld from the
-  // hook and `invitation` alone (not the withheld value) proves the browser
-  // never dials for a CLI transport.
+  // hook and `invitation` alone (not the withheld value) proves nothing dials
+  // for a saved exchange. A `server-job` selection runs live too -- the console
+  // appliance carries it out -- so it drives the hook exactly as `browser` does.
+  const runsLive = selection.kind !== "save-file";
   const { run, outputs, failure, tryAgain } = useInviterExchange({
-    invitation: transport === "browser" ? invitation : undefined,
+    invitation: runsLive ? invitation : undefined,
     inviterName: editor?.draft.identity ?? "",
+    channel: transport,
+    sourceFile,
   });
 
   // The failure alerts' "start over with a fresh invitation": the seal lifts
@@ -300,11 +307,13 @@ export function InviterBench() {
     if (spineProblems(editor).length > 0) return;
     const validation = reviewValidation(editor);
     if (!validation.canGenerate || validation.terms === undefined) return;
-    // A command-line transport seals the terms exactly as the browser path
-    // does but mints NOTHING here: the code and the config YAML are minted
-    // together on the save surface, from the authored locator. Seal, discard
-    // any prior saved artifacts, and route to save.
-    if (isCliTransport(transport)) {
+    // A save-file selection seals the terms exactly as the live path does but
+    // mints NOTHING here: the code and the config YAML are minted together on
+    // the save surface, from the authored locator. Seal, discard any prior
+    // saved artifacts, and route to save. A server-job selection (filedrop on
+    // the console appliance) instead mints here and routes to the live run,
+    // exactly as the browser path does.
+    if (selection.kind === "save-file") {
       setEditor(sealEditor(editor));
       setSavedExchange(undefined);
       setSaveAlert(undefined);

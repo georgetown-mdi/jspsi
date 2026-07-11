@@ -1,5 +1,6 @@
 import { Button, NativeSelect, Radio, VisuallyHidden } from "@mantine/core";
 
+import { isConsoleBuild } from "@utils/clientConfig";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
 import {
@@ -62,6 +63,21 @@ export function ReviewCreateSection({
   onNavigate: (target: SpineTarget) => void;
 }) {
   const transport = editor.transport ?? "browser";
+  // On the console appliance the appliance itself runs a shared-directory
+  // exchange, so the filedrop card offers to run it here rather than to save a
+  // file, and the capability note names filedrop among the live transports. The
+  // SFTP and browser cards are unchanged, and the hosted-build copy is
+  // byte-identical to before.
+  const consoleBuild = isConsoleBuild();
+  const filedropLabel = consoleBuild
+    ? "Over a shared directory, run here"
+    : "Over a shared directory, run by the command-line tool";
+  const filedropDescription = consoleBuild
+    ? "Runs the exchange here against a directory both parties can reach. Your partner accepts with the same invitation code."
+    : "Saves an exchange file the command-line tool runs against a directory both parties can reach.";
+  const transportCapabilityNote = consoleBuild
+    ? "This deployment runs live and shared-directory exchanges here; SFTP exchanges run in the psilink command-line tool."
+    : "This browser runs live exchanges only; SFTP and shared-directory exchanges run in the psilink command-line tool.";
   const canCreate = problems.length === 0 && !minting;
   // Voiced when the create gate flips either way; deferred so a blocked state
   // present when the section mounts still announces.
@@ -147,13 +163,12 @@ export function ReviewCreateSection({
             name="transport"
             checked={transport === "filedrop"}
             onChange={() => onTransport("filedrop")}
-            label="Over a shared directory, run by the command-line tool"
-            description="Saves an exchange file the command-line tool runs against a directory both parties can reach."
+            label={filedropLabel}
+            description={filedropDescription}
           />
         </div>
         <p className={`${styles.small} ${styles.sub}`}>
-          This browser runs live exchanges only; SFTP and shared-directory
-          exchanges run in the psilink command-line tool.
+          {transportCapabilityNote}
         </p>
       </fieldset>
       <h2>Exchange proposal</h2>
