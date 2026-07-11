@@ -104,7 +104,7 @@ The derived rendezvous peer ids are redacted out of the PeerJS console output be
 
 The web application can run as a **console appliance** for a single party: a container that drives that party's own `psilink` exchange runs behind a server-side job API, so an operator creates, watches, and downloads the result of an exchange without invoking the CLI by hand. The appliance serves one party, inside that party's own trust boundary; it is never a shared meeting point between the two partners, who still rendezvous only over the exchange channel itself. The trust invariant and what would violate it are in [SECURITY_DESIGN.md](SECURITY_DESIGN.md#single-party-appliance-trust-boundary).
 
-**Two build-time halves.** The job API is the server half; the web UI has a matching client half selected at build time by `VITE_DEPLOYMENT_PROFILE` (`hosted` by default, or `console`). The console image builds its web assets with `VITE_DEPLOYMENT_PROFILE=console`, which makes the transport chooser offer to run a shared-directory (`filedrop`) exchange on the appliance -- sending the operator's file to the job API -- and drops the browser-only file-handling assurance from the UI accordingly. The default `hosted` build never offers to run an exchange server-side: a shared-directory or SFTP exchange there only saves an exchange file for the command-line tool, so the operator's file stays in the browser even if the API were reachable. Set the profile to `console` only on a build whose server half is the appliance.
+**One image, the console profile baked in.** The published `vdorie/psi-link` image is the appliance: it is built with `VITE_DEPLOYMENT_PROFILE=console` so its web assets and its server-side job driver are the console halves, and it runs them with `docker run -d -p 3000:3000 vdorie/psi-link serve` (see [Docker deployment](#docker-deployment)). You do not build web assets yourself, set the profile, or publish a second image; the profile the image carries drives which transports run server-side. Under `console` the transport chooser offers to run a shared-directory (`filedrop`) exchange on the appliance -- sending the operator's file to the job API -- and drops the browser-only file-handling assurance from the UI accordingly. The separate `hosted` web deployment (the continuously deployed `apps/web`, not this image) never offers to run an exchange server-side: a shared-directory or SFTP exchange there only saves an exchange file for the command-line tool, so the operator's file stays in the browser even if the API were reachable.
 
 The job API is **off by default.** It does nothing -- serves no endpoint, spawns no CLI -- until you configure a data root. Two environment variables control it:
 
@@ -126,6 +126,38 @@ PSI-Link does not include or require any particular SFTP server. In practice alm
 For local development and integration testing, the project's test suite stands up its own SFTP server (an in-process `ssh2.Server` by default, or a native OpenSSH `sshd` child process). That setup is intended for testing the CLI's transport behavior against a known-good server and is not a production reference.
 
 ## Docker deployment
+
+The single published image `vdorie/psi-link` runs in either of two roles depending on its first argument; there is no separate console image.
+
+### Running the CLI
+
+By default the image runs the headless CLI. Mount a working directory and pass CLI arguments:
+
+```sh
+docker run --rm -v "$PWD":/work vdorie/psi-link exchange input.csv
+```
+
+This is unchanged; existing CLI usage (`exchange`, `invite`, `accept`, and the rest) is backwards compatible.
+
+### Running the web console appliance
+
+Pass `serve` as the first argument to run the single-party console appliance instead. The image bakes the `console` web build (see [Server job API](#server-job-api)), so no build-time configuration is needed; the Nitro server listens on port 3000:
+
+```sh
+docker run -d -p 3000:3000 vdorie/psi-link serve
+```
+
+That starts the web UI and peer-coordination server only. The server job API stays off until you set `JOB_DATA_ROOT`; enable it by passing the two environment variables and mounting a data volume for the per-job working files:
+
+```sh
+docker run -d -p 3000:3000 \
+  --env JOB_DATA_ROOT=/data/jobs \
+  --env JOB_API_TOKEN=... \
+  -v /host/jobs:/data/jobs \
+  vdorie/psi-link serve
+```
+
+`JOB_CLI_BINARY` is pre-set in the image and needs no operator value. The loopback-or-token rule, why the token is required on a non-loopback bind, and the reverse-proxy caveat are in [Server job API](#server-job-api); a deployment reachable beyond loopback (a published port, or any reverse proxy) must set `JOB_API_TOKEN` or deny `/api/jobs` at the proxy.
 
 ### Key file permissions in containers
 

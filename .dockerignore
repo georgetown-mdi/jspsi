@@ -1,0 +1,36 @@
+# Keep the build context small and reproducible: the image builds from committed
+# source only, installing dependencies fresh from the lockfile and building every
+# artifact inside the builder stage. Anything here would be ignored by the build
+# (or would defeat the lockfile-exact install) if it leaked in from a dirty tree.
+node_modules
+**/node_modules
+
+# Build outputs -- the builder regenerates all of these.
+dist
+**/dist
+.output
+**/.output
+.nitro
+**/.nitro
+.tanstack
+**/.tanstack
+
+# VCS and CI metadata.
+.git
+.github
+
+# Test artifacts and local scratch.
+coverage
+**/coverage
+**/__screenshots__
+**/.vitest-attachments
+scratch
+test_data
+*.csv
+
+# Local environment and editor state.
+.env
+.env.*
+*.local*
+.DS_Store
+*.swp

@@ -14,7 +14,7 @@ PSI-Link uses [semantic versioning](https://semver.org/) (MAJOR.MINOR.PATCH):
 - **MINOR**: backwards-compatible new features or new configuration fields. Exchange specification files written for an earlier MINOR version of the same MAJOR must continue to work.
 - **MAJOR**: breaking changes to the exchange protocol, configuration schema, or CLI interface. A MAJOR bump means existing key files or exchange specs may need to be updated.
 
-`apps/cli/package.json` is the canonical release version: Docker image tags and GitHub Release tags reflect the CLI version. `packages/core` (and any future sub-packages) version independently -- a patch to the core library does not require a CLI release unless the CLI itself is also affected. `apps/web` is continuously deployed and carries no release version. The root `package.json` version is a monorepo workspace marker and is not independently meaningful.
+`apps/cli/package.json` is the canonical release version: Docker image tags and GitHub Release tags reflect the CLI version. That single image now also carries the web console appliance (`apps/web`, baked in and run via `serve`), which is versioned to the CLI version along with the rest of the image -- the deliberate departure from `apps/web` otherwise carrying no release version. `packages/core` (and any future sub-packages) version independently -- a patch to the core library does not require a CLI release unless the CLI itself is also affected. The hosted `apps/web` deployment is continuously deployed and carries no release version. The root `package.json` version is a monorepo workspace marker and is not independently meaningful.
 
 Compatibility between the CLI and its core dependency is recorded by the lockfile and embedded in the Docker image; no separate compatibility matrix is maintained.
 
@@ -22,12 +22,14 @@ Compatibility between the CLI and its core dependency is recorded by the lockfil
 
 Each release produces:
 
-| Artifact         | Published to                   | Tag / name                                                               |
-| ---------------- | ------------------------------ | ------------------------------------------------------------------------ |
-| CLI Docker image | Docker Hub (`vdorie/psi-link`) | `vdorie/psi-link:X.Y.Z`, `vdorie/psi-link:X.Y`, `vdorie/psi-link:latest` |
-| GitHub Release   | GitHub Releases                | Tag `vX.Y.Z`                                                             |
+| Artifact       | Published to                   | Tag / name                                                               |
+| -------------- | ------------------------------ | ------------------------------------------------------------------------ |
+| Docker image   | Docker Hub (`vdorie/psi-link`) | `vdorie/psi-link:X.Y.Z`, `vdorie/psi-link:X.Y`, `vdorie/psi-link:latest` |
+| GitHub Release | GitHub Releases                | Tag `vX.Y.Z`                                                             |
 
-The web application is deployed to its hosting environment as part of CI/CD; it is not distributed as a versioned artifact.
+The single `vdorie/psi-link` image carries both roles: it runs headless as the CLI by default (`docker run ... vdorie/psi-link exchange ...`) and, when its first argument is `serve`, as the single-party web console appliance (`docker run ... vdorie/psi-link serve`). See [DEPLOYMENT.md](DEPLOYMENT.md#docker-deployment) for running each role.
+
+The hosted web deployment (`apps/web`) is a separate deployment to its hosting environment as part of CI/CD; it is not this image and is not distributed as a versioned artifact.
 
 `@psilink/core` is not currently published to the npm registry. If that changes, add an npm row to the table above.
 
@@ -101,8 +103,10 @@ If you must build and push by hand -- for a workflow outage or a local test -- f
 From the workspace root:
 
 ```sh
-npm sbom --sbom-format cyclonedx --package-lock-only --omit=dev -w packages/core -w apps/cli > psilink-X.Y.Z.cdx.json
+npm sbom --sbom-format cyclonedx --package-lock-only --omit=dev -w packages/core -w apps/cli -w apps/web > psilink-X.Y.Z.cdx.json
 ```
+
+The image now bundles `apps/web`'s runtime dependencies into the Nitro `.output`, so the SBOM includes `apps/web`. That `.output` is a tree-shaken subset, so the `apps/web` entry is a superset of what actually ships -- acceptable for a security SBOM, which errs toward listing more. `--omit=dev` stays: `apps/web`'s build tools are `devDependencies` and are not shipped.
 
 ### 10. Publish the GitHub Release
 
@@ -163,4 +167,4 @@ git verify-tag vX.Y.Z
 
 ## Software Bill of Materials (SBOM)
 
-An SBOM in CycloneDX format is generated as part of the release checklist (step 9) and attached to each GitHub Release. The `--omit=dev -w packages/core -w apps/cli` scoping matches the Dockerfile's runtime install (`npm ci --omit=dev -w packages/core -w apps/cli`), so the SBOM describes the production dependency tree of the shipped image rather than the whole workspace: it excludes devDependencies and the `apps/web` workspace, which the image does not ship. Because both the SBOM and the image resolve from the same committed lockfile, every dependency it does list appears at the exact resolved version the image runs. The one known residual: `npm sbom` omits a small number of packages that are hoisted to a single `node_modules` entry shared with a dev-only consumer elsewhere in the workspace (for example `yaml` and `tslib`, both installed in the shipped tree but currently absent from the SBOM's component list) -- confirm against `npm ls <pkg> --omit=dev -w packages/core -w apps/cli` if a specific package's presence in the image needs checking and it is missing from the SBOM. See `docs/spec/DEPENDENCY_PINS.md`.
+An SBOM in CycloneDX format is generated as part of the release checklist (step 9) and attached to each GitHub Release. The `--omit=dev -w packages/core -w apps/cli -w apps/web` scoping covers everything the shipped image runs rather than the whole workspace: the CLI role's production tree (`packages/core` and `apps/cli`, matching the Dockerfile's runtime `npm ci --omit=dev -w packages/core -w apps/cli`) plus the web console's runtime dependencies, which ship bundled into the Nitro `.output` the image copies. `--omit=dev` excludes devDependencies (`apps/web`'s build tools among them), which the image does not ship. Because the `.output` is tree-shaken, the `apps/web` entry is a superset of what actually ships -- acceptable for a security SBOM. Because both the SBOM and the image resolve from the same committed lockfile, every dependency it does list appears at the exact resolved version the image runs. The one known residual: `npm sbom` omits a small number of packages that are hoisted to a single `node_modules` entry shared with a dev-only consumer elsewhere in the workspace (for example `yaml` and `tslib`, both installed in the shipped tree but currently absent from the SBOM's component list) -- confirm against `npm ls <pkg> --omit=dev -w packages/core -w apps/cli -w apps/web` if a specific package's presence in the image needs checking and it is missing from the SBOM. See `docs/spec/DEPENDENCY_PINS.md`.

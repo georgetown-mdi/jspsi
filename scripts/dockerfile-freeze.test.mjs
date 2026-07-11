@@ -108,21 +108,57 @@ describe("Dockerfile dependency freeze", () => {
 });
 
 describe("Dockerfile runtime layout", () => {
+  // The runtime ENTRYPOINT is a dispatch script serving two roles: the default
+  // CLI and, on a `serve` first argument, the web console server. The
+  // node/--expose-gc and worker-colocation invariants moved into the script, so
+  // they are read from its `exec node ...` lines rather than from the ENTRYPOINT
+  // argv directly.
   const entrypoint = runtime.find(({ inst }) => inst === "ENTRYPOINT");
-  const argv = JSON.parse(entrypoint.rest);
-  const entryPath = argv[argv.length - 1];
+  const entrypointArgv = JSON.parse(entrypoint.rest);
+  const entrypointScriptPath = entrypointArgv[entrypointArgv.length - 1];
+  const entrypointScript = readFileSync(
+    resolve(here, "..", posix.basename(entrypointScriptPath)),
+    "utf8",
+  );
+  const execArgv = (predicate) => {
+    const line = entrypointScript
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => /^exec\s+node\b/.test(l) && predicate(l));
+    return line.replace(/^exec\s+/, "").split(/\s+/);
+  };
+  const cliArgv = execArgv((l) => l.includes("--expose-gc"));
+  const cliEntryPath = cliArgv.find((t) => t.endsWith("index.js"));
+
+  it("ships the dispatch entrypoint script", () => {
+    expect(entrypointArgv).toEqual([entrypointScriptPath]);
+    expect(allRuntimeDests).toContain(entrypointScriptPath);
+  });
 
   it("runs the copied CLI entry under node with --expose-gc", () => {
-    expect(argv[0]).toBe("node");
-    expect(argv).toContain("--expose-gc");
-    expect(allRuntimeDests).toContain(entryPath);
+    expect(cliArgv[0]).toBe("node");
+    expect(cliArgv).toContain("--expose-gc");
+    expect(cliEntryPath).toBeDefined();
+    expect(allRuntimeDests).toContain(cliEntryPath);
   });
 
   it("places the PSI worker entry beside the CLI entry", () => {
     // psiWorkerHost resolves `<__dirname>/psiWorker.worker.js`; anywhere else
     // and createPsiEngine silently falls back to the in-process engine.
     expect(allRuntimeDests).toContain(
-      posix.join(posix.dirname(entryPath), "psiWorker.worker.js"),
+      posix.join(posix.dirname(cliEntryPath), "psiWorker.worker.js"),
     );
+  });
+
+  it("runs the web server entry, under a copied directory, for the serve role", () => {
+    const serveArgv = execArgv((l) => l.includes(".output"));
+    const serverEntry = serveArgv.find((t) => t.includes(".output"));
+    expect(serverEntry).toBeDefined();
+    // The server entry lives under a directory the runtime stage copies in.
+    expect(
+      allRuntimeDests.some(
+        (dest) => serverEntry === dest || serverEntry.startsWith(dest + "/"),
+      ),
+    ).toBe(true);
   });
 });
