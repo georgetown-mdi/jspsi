@@ -2,13 +2,11 @@ import { Badge, Group } from "@mantine/core";
 
 /**
  * A non-interactive list of column-name chips: the shared visual for the
- * "these columns" surfaces -- the home page's default exchange columns
- * ({@link DefaultExchangeColumns}) and the invitation preview's sent-columns
- * disclosure ({@link InvitationTerms}). Presentational only: the caller passes
- * names that are already safe to display (the home page sanitizes its
- * operator-entered headers; the invitation summary pre-sanitizes any
- * partner-controlled name) and supplies the accessible group label and the
- * surrounding copy.
+ * "these columns" surfaces in the terms panel ({@link InvitationTerms}: the
+ * sent-columns disclosure and the inviter's own send). Presentational only: the
+ * caller passes names that are already safe to display (the invitation summary
+ * pre-sanitizes any partner-controlled name) and supplies the accessible group
+ * label and the surrounding copy.
  *
  * Chips, not controls: no onClick and no remove affordance, marked up as a list
  * so assistive tech reads it as a list of names. Keyed by index -- a sanitized

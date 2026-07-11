@@ -346,7 +346,7 @@ export function InviterBench() {
         // Internal and non-user-actionable: a fixed message avoids echoing
         // internals into a secret-bearing flow, the default log carries only
         // the error type, and the detail reaches the console only under
-        // diagnostic mode -- the InvitePanel rule, applied literally.
+        // diagnostic mode -- the legacy invite surface's rule, applied literally.
         console.error(
           "invitation creation failed:",
           error instanceof Error ? error.name : typeof error,

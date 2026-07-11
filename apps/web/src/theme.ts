@@ -214,8 +214,8 @@ export const mantineTheme: MantineThemeOverride = createTheme({
  *
  * Both are global tokens, so overriding them via {@link cssVariablesResolver}
  * raises every `c="dimmed"` site (and any code reading
- * `var(--mantine-color-dimmed)` directly, e.g. the dropzone icon in FileSelect)
- * and every input placeholder at once, rather than editing each call site.
+ * `var(--mantine-color-dimmed)` directly) and every input placeholder at once,
+ * rather than editing each call site.
  *
  * The palette has no in-scale step that both clears the floor and stays clearly
  * lower-emphasis than the body text (gray-6 fails; gray-7 (#495057) overshoots
@@ -242,8 +242,8 @@ const MUTED_TEXT = {
  * "success" Mantine `light` variant surfaces in the light scheme -- the Alert
  * title and icon, the yellow constraint-warning Badge label (the
  * StandardizationPreview violation badge), and the green satisfiability surfaces
- * (the "All keys can match" Alert in PrepareData; the satisfiable key Badges in
- * ExpertKeyEditor / LinkageTermsEditor). Mantine's default
+ * (the all-keys-covered verdict Alert in AcceptorColumnsStep; the satisfiable
+ * key Badges in ExpertKeyEditor). Mantine's default
  * `--mantine-color-{c}-light-color` is the color's shade 9 on its shade-1 tint,
  * which fails WCAG 2.1 AA 1.4.3 for normal-weight text:
  * - yellow-9 (#e67700) on yellow-1 (#fff3bf) = 2.69:1 -- and no yellow/orange

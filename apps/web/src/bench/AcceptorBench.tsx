@@ -125,8 +125,7 @@ function fileSizeLabel(sizeBytes: number): string {
  * re-derived: {@link InvitationTerms} renders the full, never-condensed terms at
  * the review step, and {@link acceptorConsentName} (the shared `commitAcceptance`
  * gate) governs the consent step's submit BOTH as its disabled state and as a
- * re-check inside the handler, exactly as the legacy AcceptInvitationPanel and
- * AcceptInvitation.handleAcquired do.
+ * re-check inside the handler, exactly as the legacy accept flow did.
  */
 export function AcceptorBench() {
   const [decode, setDecode] = useState<DecodeState>({ status: "pending" });
@@ -327,7 +326,7 @@ export function AcceptorBench() {
     token !== undefined ? acceptorLegalAgreementDisplay(token) : undefined;
 
   // The effective { metadata, standardization } the verdict and launch both consume,
-  // derived from the columns-step state exactly as PrepareData derives it (see
+  // derived from the columns-step state in one place (see
   // acceptorColumnsEditorState). Undefined until a file is acquired.
   const editorState =
     columnsState !== undefined &&
@@ -499,10 +498,10 @@ export function AcceptorBench() {
     name: acceptorName,
   });
 
-  // The columns-step edit callbacks over the shared layered state, ported from
-  // PrepareData: a metadata edit replaces the metadata layer; a remap re-roles the
-  // chosen column for matching (setColumnTypeForMatching, forcing role linkage, not a
-  // bare retype); a cleaning edit sets an override layer; reset returns to the seed.
+  // The columns-step edit callbacks over the shared layered state: a metadata edit
+  // replaces the metadata layer; a remap re-roles the chosen column for matching
+  // (setColumnTypeForMatching, forcing role linkage, not a bare retype); a cleaning
+  // edit sets an override layer; reset returns to the seed.
   const changeMetadata = (next: Metadata) =>
     setColumnsState((prev) =>
       prev === undefined ? prev : { ...prev, metadata: next },
