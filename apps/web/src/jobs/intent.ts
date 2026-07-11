@@ -1,22 +1,16 @@
 import { z } from "zod";
 
-import { LinkageTermsSchema, mintExchangeFile } from "@psilink/core";
+import {
+  LinkageTermsSchema,
+  SHARED_SECRET_REGEX,
+  mintExchangeFile,
+} from "@psilink/core";
 
 import type {
   ExchangeFileInput,
   FileSyncOptions,
   LinkageTerms,
 } from "@psilink/core";
-
-/**
- * The base64url shared-secret shape the CLI's key file accepts: a 32-byte value,
- * 43 base64url characters with the canonical final character. Mirrors the CLI's
- * own key-file schema so a secret the server writes is one the CLI will load,
- * and so a malformed client secret is rejected here rather than crashing the
- * child at load. The secret is credential material, never a path, host, or argv
- * fragment, so it cannot be an injection vector regardless.
- */
-const SHARED_SECRET_PATTERN = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
 /**
  * The tuning knobs a client may set on a job. Deliberately the numeric/boolean
@@ -96,7 +90,7 @@ export const jobExchangeIntentSchema: z.ZodType<JobExchangeIntent> = z
     sharedSecret: z
       .string()
       .regex(
-        SHARED_SECRET_PATTERN,
+        SHARED_SECRET_REGEX,
         "sharedSecret must be a base64url-encoded 32-byte value (43 base64url characters)",
       ),
     inputCsv: z.string().min(1),

@@ -132,6 +132,29 @@ export class JobManager {
       JOB_FILE_NAMES.exchangeDirectory,
     );
 
+    try {
+      return await this.startJobInWorkdir(
+        intent,
+        id,
+        workdir,
+        exchangeDirectory,
+      );
+    } catch (error) {
+      // A failure after the workdir exists must not strand it: the record may
+      // not be in the table yet, so no DELETE or eviction could ever reach the
+      // directory (which may already hold the written key file).
+      this.jobs.delete(id);
+      await removeWorkdir(workdir);
+      throw error;
+    }
+  }
+
+  private async startJobInWorkdir(
+    intent: JobExchangeIntent,
+    id: string,
+    workdir: string,
+    exchangeDirectory: string,
+  ): Promise<string> {
     const configDocument = composeConfigDocument(intent, exchangeDirectory);
     const keyDocument = composeKeyFileDocument(intent);
 

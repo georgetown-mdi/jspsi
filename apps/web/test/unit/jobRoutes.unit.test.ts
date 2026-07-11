@@ -186,3 +186,18 @@ describe("result route serves only after success", () => {
     expect(response.status).toBe(404);
   });
 });
+
+describe("create failure is a clean 500", () => {
+  test("a data root that is a regular file yields 500", async () => {
+    const root = tempDataRoot("routes-file");
+    roots.push(root);
+    fs.writeFileSync(root, "");
+    vi.stubEnv("JOB_DATA_ROOT", root);
+    vi.stubEnv("JOB_CLI_BINARY", STUB_CLI_PATH);
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent()),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(500);
+  });
+});

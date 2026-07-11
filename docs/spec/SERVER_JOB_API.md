@@ -103,7 +103,7 @@ The CLI is spawned with `spawn` (not a shell, `shell: false`) and an argv array 
 
 `spawn` is used rather than `execFile` deliberately: `execFile` caps stdio at three pipes and cannot carry fd 3, which the event stream requires. The child's `stdio` is `["ignore", "pipe", "pipe", "pipe"]` (fd 3 wired for the event stream), `cwd` is the workdir, and the environment is minimal -- only `PATH`, `HOME`, `LANG`, `LC_ALL`, and `TZ` are forwarded from the server process, so the child inherits no ambient secret. The job's inputs reach the child through the workdir files, never the environment.
 
-A bounded, sanitized tail of the child's stderr (up to 8192 bytes, kept as a rolling tail) is retained for diagnostics; it is passed through the display sanitizer before it is surfaced and is never streamed to the client raw.
+A bounded, sanitized tail of the child's stderr (up to 8192 UTF-16 code units, kept as a rolling tail) is retained for diagnostics; it is passed through the display sanitizer before it is surfaced and is never streamed to the client raw.
 
 ## Event relay over SSE
 
@@ -128,7 +128,7 @@ The CLI is a separate workspace driven as a subprocess; the server does not impo
 Degradation is fail-safe, never a crash:
 
 - A non-JSON line, or one outside the known schema, is surfaced as a synthesized `warning` event carrying `degraded: true` and dropped -- the relay continues.
-- An oversized fd-3 line (the reader buffers up to 1,048,576 bytes before forcing a flush) is surfaced as a degradation warning and the partial buffer discarded.
+- An oversized fd-3 line (the reader buffers up to 1,048,576 UTF-16 code units before discarding the partial line) is surfaced as a degradation warning and the partial buffer discarded.
 - fd 3 being unavailable, or a read error on it, is surfaced as a degradation warning.
 
 **Buffer cap.** The event buffer is capped at 10,000 entries (a runaway backstop; a real CLI stream is dozens of lines). On overflow the job is failed rather than dropping events silently: a synthesized `error` terminal is appended, the child is `SIGKILL`ed, and status becomes `failed`, so a supervisor never observes a truncated history.

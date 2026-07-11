@@ -30,7 +30,14 @@ export const Route = createFileRoute("/api/jobs/")({
         const parsed = jobExchangeIntentSchema.safeParse(body);
         if (!parsed.success) return jobEmptyResponse(400);
 
-        const id = await gate.manager.createJob(parsed.data);
+        let id: string;
+        try {
+          id = await gate.manager.createJob(parsed.data);
+        } catch {
+          // Workdir creation or an input write failed (the manager has already
+          // cleaned up); no internal detail crosses the boundary.
+          return jobEmptyResponse(500);
+        }
         return jobJsonResponse({ id }, 201);
       },
     },

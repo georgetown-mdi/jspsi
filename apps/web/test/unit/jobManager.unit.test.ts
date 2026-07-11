@@ -3,10 +3,13 @@ import fs from "node:fs";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { JobManager } from "@jobs/jobManager";
+import { writeJobFile } from "@jobs/workdir";
 
 import { STUB_CLI_PATH, tempDataRoot, validIntent } from "../utils/jobFixtures";
 
 import type { BufferedEvent, JobRecord } from "@jobs/jobManager";
+
+vi.mock("@jobs/workdir", { spy: true });
 
 const roots: Array<string> = [];
 const managers: Array<JobManager> = [];
@@ -270,4 +273,14 @@ test("the security error terminal is classified and closes the stream", async ()
   expect(terminal.type).toBe("error");
   expect(terminal.category).toBe("security");
   expect(record.status).toBe("failed");
+});
+
+describe("createJob failure cleanup", () => {
+  test("a failed workdir write removes the directory and rethrows", async () => {
+    const manager = makeManager({});
+    const root = roots[roots.length - 1];
+    vi.mocked(writeJobFile).mockRejectedValueOnce(new Error("disk full"));
+    await expect(manager.createJob(validIntent())).rejects.toThrow("disk full");
+    expect(fs.readdirSync(root)).toEqual([]);
+  });
 });

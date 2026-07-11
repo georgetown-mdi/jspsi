@@ -104,14 +104,18 @@ export function resolveCliBinaryPath(
 }
 
 /**
- * The maximum bytes of child stderr retained as a diagnostic tail. Bounded so a
- * chatty or hostile child cannot grow server memory without limit; the tail is
- * sanitized before it is surfaced and is never streamed to the client raw.
+ * The maximum length of child stderr retained as a diagnostic tail, in UTF-16
+ * code units. Bounded so a chatty or hostile child cannot grow server memory
+ * without limit; the tail is sanitized before it is surfaced and is never
+ * streamed to the client raw.
  */
-export const STDERR_TAIL_BYTE_CAP = 8192;
+export const STDERR_TAIL_CAP = 8192;
 
-/** The maximum bytes buffered on the fd-3 line reader before a line is forced. */
-const FD3_LINE_BYTE_CAP = 1_048_576;
+/**
+ * The maximum length buffered on the fd-3 line reader, in UTF-16 code units,
+ * before the partial line is discarded as oversized.
+ */
+const FD3_LINE_CAP = 1_048_576;
 
 /**
  * Spawn the CLI to run a filedrop `exchange`, wiring fd 3 for the event stream.
@@ -219,7 +223,7 @@ function attachFd3Reader(
   fd3.setEncoding("utf8");
   fd3.on("data", (chunk: string) => {
     buffer += chunk;
-    if (buffer.length > FD3_LINE_BYTE_CAP) {
+    if (buffer.length > FD3_LINE_CAP) {
       handlers.onDegraded("CLI event stream line exceeded the size cap");
       buffer = "";
       return;
@@ -317,7 +321,7 @@ function attachStderrTail(child: ChildProcess): { get: () => string } {
   if (stderr !== null) {
     stderr.setEncoding("utf8");
     stderr.on("data", (chunk: string) => {
-      tail = (tail + chunk).slice(-STDERR_TAIL_BYTE_CAP);
+      tail = (tail + chunk).slice(-STDERR_TAIL_CAP);
     });
   }
   return { get: () => sanitizeForDisplay(tail) };
