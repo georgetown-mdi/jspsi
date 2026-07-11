@@ -8,19 +8,44 @@ WORKDIR /build
 COPY package.json package-lock.json ./
 COPY packages/core/package.json packages/core/
 COPY apps/cli/package.json apps/cli/
+COPY apps/web/package.json apps/web/
 COPY lib lib
 # npm ci resolves nothing: it installs exactly the committed lockfile (including
 # each registry package's integrity hash) and fails if a manifest disagrees with
-# it, so an image rebuild cannot drift from the tree CI tested.
+# it, so an image rebuild cannot drift from the tree CI tested. apps/web is in
+# scope with its dev deps because `vite build` (and the nitro plugin) are
+# devDependencies -- the runtime stage ships the self-contained .output/, not
+# these, so the dev deps never reach the shipped image.
 RUN --mount=type=cache,target=/root/.npm \
-  npm ci -w packages/core -w apps/cli
+  npm ci -w packages/core -w apps/cli -w apps/web
 
 COPY tsconfig.base.json tsconfig.json ./
 COPY packages/core/*.ts packages/core/tsconfig.json packages/core/
 COPY packages/core/src packages/core/src/
 COPY apps/cli/tsconfig.json apps/cli/*.ts apps/cli/
 COPY apps/cli/src apps/cli/src/
+# @psilink/core must be built before the web build: apps/web consumes it from its
+# built dist/ (a file: workspace dependency), so build core and the CLI first.
 RUN npm run build -w packages/core -w apps/cli
+
+# apps/web build inputs: its root-level config (vite/nitro/postcss/tsconfig) plus
+# the source, server entry, and static assets vite reads. There is no index.html
+# (TanStack Start generates the document), so none is copied.
+COPY apps/web/vite.config.ts apps/web/nitro.config.ts apps/web/postcss.config.cjs apps/web/tsconfig.json apps/web/
+COPY apps/web/src apps/web/src/
+COPY apps/web/server apps/web/server/
+COPY apps/web/public apps/web/public/
+# Build the console-appliance UI: VITE_DEPLOYMENT_PROFILE=console drops the
+# browser-only file-assurance copy and routes a filedrop channel to the
+# server-side job driver (see apps/web/src/utils/clientConfig.ts). vite build
+# produces a self-contained apps/web/.output/ (server entry + bundled
+# node_modules + public assets), so the runtime stage copies only that. The ARG
+# is promoted to ENV so vite's `import.meta.env.VITE_*` reads it from the build
+# process environment (a bare ARG is not exported into the RUN child); this ENV
+# lives only in the builder stage and never reaches the runtime image.
+ARG VITE_DEPLOYMENT_PROFILE=console
+ENV VITE_DEPLOYMENT_PROFILE=${VITE_DEPLOYMENT_PROFILE}
+RUN npm run build -w apps/web
 
 # Rebuild node_modules production-only (npm ci empties it first): the identical
 # lockfile-exact resolution minus devDependencies, ready to ship as-is.
@@ -50,10 +75,33 @@ COPY --from=builder /build/apps/cli/dist/index.js apps/cli/dist/index.js
 # name; it is spawned as a worker, never executed, so no shebang/chmod.
 COPY --from=builder /build/apps/cli/dist/psiWorker.worker.js apps/cli/dist/psiWorker.worker.js
 
+# The web console appliance: vite build produces a self-contained
+# apps/web/.output/ (server entry + bundled node_modules + public assets), so the
+# runtime stage copies only that -- no apps/web production `npm ci` is needed.
+COPY --from=builder /build/apps/web/.output apps/web/.output
+
+# The server spawns the CLI as a subprocess; its default binary resolution walks
+# up from the server module and would not find the CLI in this image layout, so
+# pin it explicitly to the shipped CLI entry (see apps/web/src/jobs/cliDriver.ts).
+ENV JOB_CLI_BINARY=/app/apps/cli/dist/index.js
+
+# The entrypoint dispatches: `serve` starts the web console server on this port
+# (apps/web default PORT=3000); any other argv runs the CLI unchanged.
+EXPOSE 3000
+
+# One script switches between the two roles: `serve` runs the web console server,
+# every other argv vector runs the CLI byte-for-byte (backwards compatible with
+# existing `docker run vdorie/psi-link <cli-args>` callers). `exec` in the script
+# makes node PID 1 so it receives signals directly.
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
 WORKDIR /work
 
 # --expose-gc lets @psilink/core release the single-pass linkage's transient
 # allocation peak at the phase boundaries (relieveTransientMemory in
 # packages/core/src/link.ts), lowering the receiver's peak RSS; a no-op for every
-# other command. Node consumes the flag, so it does not reach the CLI's argv.
-ENTRYPOINT ["node", "--expose-gc", "/app/apps/cli/dist/index.js"]
+# other command. Node consumes the flag, so it does not reach the CLI's argv. The
+# entrypoint script applies this flag to the CLI role and dispatches `serve` to
+# the web server; see docker-entrypoint.sh.
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

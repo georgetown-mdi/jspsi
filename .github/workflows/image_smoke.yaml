@@ -1,0 +1,97 @@
+name: Image Smoke
+
+# Pull-request smoke test for the combined CLI + web-console appliance image
+# (the same Dockerfile release.yaml ships). Release builds the image only at a
+# version tag, so this is the sole pre-merge check that the image actually builds
+# and that both of its roles run: the headless CLI and the `serve` web console.
+#
+# It builds single-arch (native amd64, no QEMU) and loads the image into the
+# runner's Docker so it can run it -- deliberately faster and simpler than the
+# release job's multi-arch build+push, since nothing is published here.
+#
+# Scoped by path to changes that can affect the image. If this is made a required
+# status check, configure branch protection so a path-skipped run does not block
+# an unrelated PR -- a skipped required check otherwise stays pending.
+on:
+  pull_request:
+    branches: [main, staging]
+    paths:
+      - "Dockerfile"
+      - "docker-entrypoint.sh"
+      - ".dockerignore"
+      - "apps/**"
+      - "packages/**"
+      - "lib/**"
+      - "package-lock.json"
+      - ".github/workflows/image_smoke.yaml"
+
+# Cancel a superseded run when a newer commit lands on the same PR/branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: this gate only needs to read the repo and build locally.
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Build and smoke the image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The image COPYs the vendored @openmined/psi.js tarball (a file:
+      # dependency with no npm integrity hash) and installs it; verify its
+      # committed sha256 before the build, mirroring the release job.
+      - name: Verify vendored native tarball integrity
+        run: sha256sum -c lib/openmined-psi.js-*.tgz.sha256
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # Single-arch, load into the runner's Docker so the smoke steps can run it.
+      # No push, no QEMU, no multi-arch -- that is the release job's concern.
+      - name: Build image (amd64, load into local Docker)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          push: false
+          tags: psi-link:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Role 1: the headless CLI still runs. `--help` is a read-only invocation
+      # that exits 0 (no exchange, no key material, no network).
+      - name: Smoke the CLI role
+        run: docker run --rm psi-link:smoke --help
+
+      # Role 2: the web console server comes up and serves. Start it detached in
+      # `serve` mode, poll the root URL until it answers HTTP 200 within a bounded
+      # timeout (fail if it never comes up), then tear the container down. `always()`
+      # on the teardown so a failed poll still removes the container and prints logs.
+      - name: Smoke the serve role
+        run: |
+          set -euo pipefail
+          cid=$(docker run -d -p 3000:3000 psi-link:smoke serve)
+          echo "started server container $cid"
+
+          ok=false
+          for attempt in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:3000/; then
+              echo "server answered HTTP 200 on attempt $attempt"
+              ok=true
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "$ok" != true ]; then
+            echo "server did not answer HTTP 200 within the timeout" >&2
+            docker logs "$cid" || true
+            docker rm -f "$cid" >/dev/null 2>&1 || true
+            exit 1
+          fi
+
+          docker rm -f "$cid" >/dev/null 2>&1 || true
