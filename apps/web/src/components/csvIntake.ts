@@ -1,6 +1,5 @@
 /**
- * Maximum size, in bytes, of a file the intake dropzone ({@link FileSelect})
- * accepts -- 100 MB.
+ * Maximum size, in bytes, of a file the bench intake dropzones accept -- 100 MB.
  *
  * This is a browser-memory bound, not a parser bound. Core's `loadCSVFile` now
  * accumulates across PapaParse chunks (it no longer truncates a file that spans
@@ -17,8 +16,7 @@
  * No-silent-truncation is the invariant that actually matters here, and it is
  * pinned directly by a multi-chunk correctness test
  * (`test/browser/loadCSVFile.test.ts`), not by holding the cap below the chunk
- * size. The dropzone-wiring guard (`test/browser/fileSelect.test.ts`) separately
- * checks that {@link FileSelect} passes this constant through as `maxSize` rather
+ * size. Each intake dropzone passes this constant through as `maxSize` rather
  * than a stale literal.
  */
 export const MAX_CSV_FILE_BYTES = 100 * 1024 ** 2;

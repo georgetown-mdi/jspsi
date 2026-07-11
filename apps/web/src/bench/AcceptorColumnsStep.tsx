@@ -42,7 +42,7 @@ import type {
 
 /**
  * The acceptor's "Confirm your columns" work surface (step 3 of 3): a port of the
- * hardened legacy {@link PrepareData} editor's primary column, reseated in the bench
+ * hardened legacy column editor's primary column, reseated in the bench
  * furniture. Presentational over the shared column-step state the bench owns -- the
  * verdict, mapper, and gate view-models come in derived from
  * {@link acceptorColumnsModel}, and edits go up through the callbacks; the pure logic

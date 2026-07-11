@@ -32,9 +32,9 @@ import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
 /**
  * The pure, React-free model behind the acceptor bench's "Confirm your columns"
- * step -- a port of the hardened legacy {@link PrepareData} editor's derivations
- * (apps/web/src/components/PrepareData.tsx), moved out of the component so the
- * verdict, mapper, cleaning-attention, launch-payload, and gate logic are the one
+ * step -- a port of the hardened legacy column editor's derivations, moved out
+ * of the component so the verdict, mapper, cleaning-attention, launch-payload,
+ * and gate logic are the one
  * tested boundary and React stays thin. No I/O and no state; every consent/verdict
  * semantic re-surfaces the existing logic layer ({@link assessLinkageSatisfiability},
  * {@link normalizeForEditor}/{@link inferMetadata}, {@link defaultStandardizationForRows},
@@ -44,7 +44,7 @@ import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
  * The verdict and the launch payload derive from the SAME `{ metadata, standardization }`
  * pair ({@link acceptorColumnsEditorState} produces it once; {@link acceptorVerdict}
  * and {@link acceptorLaunchPayload} both read it), so the gate the operator sees and
- * the exchange that runs cannot disagree -- the invariant PrepareData holds.
+ * the exchange that runs cannot disagree -- the invariant the legacy editor held.
  *
  * The acceptor cannot edit fields or keys: they are adopted verbatim from the
  * invitation's `linkageTerms`. Satisfiability is assessed against those exact terms.
@@ -64,9 +64,10 @@ export interface AcceptorAcquiredCsv {
 }
 
 /**
- * The acceptor's column-step working state, layered exactly as PrepareData holds
- * it: the seed metadata, plus two override LAYERS (input-column rebinds and authored
- * step edits) over the standardization derived from the current metadata. Held as
+ * The acceptor's column-step working state, layered exactly as the legacy editor
+ * held it: the seed metadata, plus two override LAYERS (input-column rebinds and
+ * authored step edits) over the standardization derived from the current
+ * metadata. Held as
  * layers rather than a whole standardization so the binding is always re-derived and
  * the verdict stays honest; an empty override map means the effective standardization
  * equals the derived default byte for byte.
@@ -99,7 +100,7 @@ export function acceptorInitialColumnsState(
 
 /**
  * The effective `{ metadata, standardization }` the verdict and the launch consume,
- * derived from {@link AcceptorColumnsState} exactly as PrepareData derives it:
+ * derived from {@link AcceptorColumnsState} in a fixed order:
  *
  * 1. The base standardization is the recommended per-type cleaning for the current
  *    metadata, with the date-of-birth input format inferred from the operator's own
@@ -254,7 +255,7 @@ export function acceptorUnsatisfiedTypes(
 }
 
 /**
- * The launch gate's `disabled` predicate, identical to PrepareData's expression:
+ * The launch gate's `disabled` predicate, ported from the legacy editor:
  * disabled when no key can match (`satisfiableKeyCount === 0`), OR the metadata
  * carries more than one identifier column, OR any authored cleaning step is
  * invalid/mid-edit. Partial coverage does NOT gate -- it threads a warning instead.
@@ -332,8 +333,8 @@ export function acceptorHasIdentifierConflict(metadata: Metadata): boolean {
  * gate a mid-edit step already trips).
  *
  * `rates` is the host's full-CSV coverage (null before the first sweep settles); a
- * pending sweep contributes no silent-empty count, matching PrepareData, which reads
- * a resolved map.
+ * pending sweep contributes no silent-empty count -- attention is computed only
+ * from a resolved map.
  */
 export interface AcceptorCleaningAttention {
   /** Whether the tab needs attention (any failing reason present). */

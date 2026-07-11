@@ -122,8 +122,8 @@ describe("quickInviteDisclosedColumns mirrors the quick path's wire", () => {
   });
 
   test("is empty when the quick path would send nothing", () => {
-    // Every column is a linkage type, so none is disclosed -- the condition under
-    // which InvitePanel shows no statement.
+    // Every column is a linkage type, so none is disclosed -- the empty list is
+    // the caller's cue to show no disclosed-columns statement.
     expect(quickInviteDisclosedColumns(["first_name", "ssn"])).toEqual([]);
   });
 

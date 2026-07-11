@@ -427,13 +427,12 @@ describe("InvitationTerms: per-key matching disclosures", () => {
 });
 
 describe("InvitationTerms: the condensed reference view folds the lower tiers", () => {
-  // The post-consent / authored REFERENCE surfaces (both run screens, prepare-your-
-  // data, the inviter's live preview) render the summary condensed: the disclose/
-  // produce facts stay always-visible; the lower reference tiers (what you receive,
-  // how records are matched, the legal agreement, and "Other details") fold behind one
-  // "See the full terms" disclosure. The acceptor's PRE-CONSENT review screen never
-  // passes condensed -- guarded directly in acceptInvitationTerms.test.ts, and here by
-  // every other test rendering without it.
+  // Surfaces that show the terms as post-consent / authored REFERENCE render the
+  // summary condensed: the disclose/produce facts stay always-visible; the lower
+  // reference tiers (what you receive, how records are matched, the legal agreement,
+  // and "Other details") fold behind one "See the full terms" disclosure. The
+  // acceptor's PRE-CONSENT review screen never passes condensed -- guarded directly
+  // in benchAccept.test.ts, and here by every other test rendering without it.
   const FOLD = "See the full terms";
   function renderCondensed(overrides?: Partial<LinkageTerms>) {
     renderTerms(

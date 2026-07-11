@@ -35,9 +35,9 @@ const NON_TRUST_KINDS: ReadonlySet<ConnectionErrorKind> = new Set([
  * exploitably).
  *
  * The web handshake role is the exchange role the web already assigns
- * (`"responder"` for the inviter, `"initiator"` for the acceptor): a
- * {@link PeerMessageConnection} has no separate negotiation step, so the same
- * role drives both the handshake and the subsequent PSI exchange.
+ * (`"responder"` for the inviter, `"initiator"` for the acceptor): the channel
+ * {@link openPeerMessageConnection} opens has no separate negotiation step, so
+ * the same role drives both the handshake and the subsequent PSI exchange.
  *
  * `requestEncryption` is `false`: a WebRTC data channel is end-to-end
  * confidential under DTLS against the peer-coordination server and any TURN

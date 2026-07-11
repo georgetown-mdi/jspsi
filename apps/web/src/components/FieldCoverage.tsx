@@ -35,8 +35,9 @@ function formatRate(coverage: FieldValueCoverage): string {
  * preview -- so an all-empty field is not mislabelled as zero coverage.
  *
  * The alarm is `role="presentation"`: the assistive-tech announcement is made once,
- * for the whole editor, by {@link PrepareData}'s coverage live region (so N field
- * cards do not each fire their own region). An `unavailable` rate (steps left
+ * for the whole editor, by the host editor's coverage live region ({@link CleaningTab}
+ * and {@link AcceptorCleaningStep} each own one), so N field cards do not each fire
+ * their own region. An `unavailable` rate (steps left
  * mid-edit) renders nothing -- the offending step already carries its own inline error.
  */
 export function FieldCoverage({
