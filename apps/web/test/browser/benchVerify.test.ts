@@ -400,6 +400,73 @@ describe("verify receipt bench", () => {
       .not.toBeInTheDocument();
   });
 
+  test("loading different partner terms after a verdict clears the stale verdict", async () => {
+    const { record, keys } = await buildFixture();
+    await mountVerifyBench();
+
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(0)),
+      jsonFile("rec.json", serializeExchangeRecord(record)),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(1)),
+      jsonFile("rec.keys.json", serializeVerificationKeys(keys)),
+    );
+    await userEvent.click(
+      page.getByRole("button", {
+        name: "Re-supply your files to open the commitments",
+      }),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(2)),
+      csvFile("input.csv", INPUT_CSV),
+    );
+    await userEvent.upload(
+      page.elementLocator(fileInputAt(3)),
+      csvFile("result.csv", RESULT_CSV),
+    );
+    await userEvent.fill(
+      page.getByLabelText("Your linkage terms"),
+      JSON.stringify(LOCAL_TERMS),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Load these terms" }).first(),
+    );
+    await userEvent.fill(
+      page.getByLabelText("Your partner's linkage terms"),
+      JSON.stringify(PARTNER_TERMS),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Load these terms" }).nth(1),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Verify with these files" }),
+    );
+    await expect.element(page.getByText("Verified")).toBeInTheDocument();
+    await expect
+      .element(page.getByText("Re-derives and matches"))
+      .toBeInTheDocument();
+
+    // Loading different partner terms changes what a re-run would consume, so
+    // the stale verdict (still claiming "Re-derives and matches") must not be
+    // left on screen -- it must disappear until Verify runs again.
+    const otherPartnerTerms: LinkageTerms = {
+      ...PARTNER_TERMS,
+      identity: "Party C",
+    };
+    await userEvent.fill(
+      page.getByLabelText("Your partner's linkage terms"),
+      JSON.stringify(otherPartnerTerms),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Load these terms" }).nth(1),
+    );
+    await expect.element(page.getByText("Verified")).not.toBeInTheDocument();
+    await expect
+      .element(page.getByText("Re-derives and matches"))
+      .not.toBeInTheDocument();
+  });
+
   test("loading a new record file clears previously re-supplied files and terms", async () => {
     const { record, keys } = await buildFixture();
     await mountVerifyBench();

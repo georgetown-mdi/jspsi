@@ -19,6 +19,7 @@ import {
 } from "@psilink/core";
 
 import { DisclosureSection } from "@components/DisclosureSection";
+import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 import { importLinkageTerms } from "@psi/linkageTermsIO";
 import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 
@@ -58,6 +59,9 @@ import type { ReactNode } from "react";
 // pathological file before it is ever read.
 const MAX_JSON_FILE_BYTES = 2 * 1024 ** 2;
 const JSON_MAX_MB = MAX_JSON_FILE_BYTES / 1024 ** 2;
+
+// The re-supplied input/result CSVs share the app-wide browser-memory bound.
+const CSV_MAX_MB = MAX_CSV_FILE_BYTES / 1024 ** 2;
 
 // The reconstruction and terms re-supply are optional; each holds its own parse
 // state and a possible alert.
@@ -274,8 +278,13 @@ export function VerifyReceiptBench() {
   // Re-supply (optional): the retained input and result files, and both parties'
   // linkage terms.
   const [resupplyOpen, setResupplyOpen] = useState(false);
-  const [inputCsv, setInputCsv] = useState<SuppliedFile>();
-  const [resultCsv, setResultCsv] = useState<SuppliedFile>();
+  // The original File, not a SuppliedFile: unlike the JSON record/keys (parsed
+  // eagerly, so their text is needed immediately), a re-supplied CSV is only
+  // parsed at verify time and the run can repeat, so holding the File itself
+  // -- rather than reading it to text now and re-wrapping it into a fresh File
+  // at each run -- avoids reading its content twice for no benefit.
+  const [inputCsv, setInputCsv] = useState<File>();
+  const [resultCsv, setResultCsv] = useState<File>();
   const [localTerms, setLocalTerms] = useState<LinkageTerms>();
   const [partnerTerms, setPartnerTerms] = useState<LinkageTerms>();
 
@@ -321,12 +330,22 @@ export function VerifyReceiptBench() {
     else setKeys({ file: supplied, alert: parsed.message });
   }
 
-  async function onCsvFile(
-    file: File,
-    set: (value: SuppliedFile) => void,
-  ): Promise<void> {
-    set(await readSupplied(file));
+  function onCsvFile(file: File, set: (value: File) => void): void {
+    set(file);
     // A changed re-supply file invalidates the last verdict; the user re-runs.
+    setVerdict(undefined);
+    setVerifyError(undefined);
+  }
+
+  function onLocalTerms(terms: LinkageTerms | undefined) {
+    setLocalTerms(terms);
+    // Changed terms invalidate the last verdict, same as a changed CSV.
+    setVerdict(undefined);
+    setVerifyError(undefined);
+  }
+
+  function onPartnerTerms(terms: LinkageTerms | undefined) {
+    setPartnerTerms(terms);
     setVerdict(undefined);
     setVerifyError(undefined);
   }
@@ -344,12 +363,8 @@ export function VerifyReceiptBench() {
         {};
       let warnings: Array<string> = [];
       if (inputCsv !== undefined && resultCsv !== undefined) {
-        const inputParse = await loadCSVFileOffMainThread(
-          new File([inputCsv.text], inputCsv.name),
-        );
-        const resultParse = await loadCSVFileOffMainThread(
-          new File([resultCsv.text], resultCsv.name),
-        );
+        const inputParse = await loadCSVFileOffMainThread(inputCsv);
+        const resultParse = await loadCSVFileOffMainThread(resultCsv);
         const result = toRetainedResult(resultParse);
         const ourIdColumn = deriveOurIdColumn(
           result.headers,
@@ -503,26 +518,26 @@ export function VerifyReceiptBench() {
               label="Your input CSV"
               hint="The input file you contributed to this exchange"
               chosen={inputCsv}
-              onFile={(file) => void onCsvFile(file, setInputCsv)}
+              onFile={(file) => onCsvFile(file, setInputCsv)}
             />
             <JsonOrCsvDropzone
               label="Your result CSV"
               hint="The result file you retained from this exchange"
               chosen={resultCsv}
-              onFile={(file) => void onCsvFile(file, setResultCsv)}
+              onFile={(file) => onCsvFile(file, setResultCsv)}
             />
             {oneCsvSupplied && <OneCsvWarning />}
             <TermsInput
               label="Your linkage terms"
               description="Paste your exchange config or exported linkage-terms document."
               terms={localTerms}
-              onTerms={setLocalTerms}
+              onTerms={onLocalTerms}
             />
             <TermsInput
               label="Your partner's linkage terms"
               description="Paste your partner's config or exported terms. The partner's terms are not retained by default; both sides are needed to check the hash."
               terms={partnerTerms}
-              onTerms={setPartnerTerms}
+              onTerms={onPartnerTerms}
             />
             <div>
               <Button
@@ -575,7 +590,7 @@ function JsonOrCsvDropzone({
 }: {
   label: string;
   hint: string;
-  chosen: SuppliedFile | undefined;
+  chosen: File | undefined;
   onFile: (file: File) => void;
 }) {
   const [rejectionMessage, setRejectionMessage] = useState<string>();
@@ -586,10 +601,13 @@ function JsonOrCsvDropzone({
       ),
     );
     log.warn(`rejected ${rejections.length} file(s):`, [...codes]);
+    const reasons: Array<string> = [];
+    if (codes.has("file-too-large"))
+      reasons.push(`larger than the ${CSV_MAX_MB} MB maximum`);
+    if (codes.has("file-invalid-type") || reasons.length === 0)
+      reasons.push("not a supported file type");
     setRejectionMessage(
-      codes.has("file-invalid-type")
-        ? "That is not a supported file type. Choose a CSV file."
-        : "That file could not be accepted. Choose a CSV file.",
+      `That file is ${reasons.join(" and ")}. Choose a CSV file under ${CSV_MAX_MB} MB.`,
     );
   }
   return (
@@ -609,12 +627,14 @@ function JsonOrCsvDropzone({
         }}
         onReject={handleReject}
         accept={["text/plain", "text/csv", "application/vnd.ms-excel"]}
+        maxSize={MAX_CSV_FILE_BYTES}
         multiple={false}
         aria-label={label}
       >
         <p>
           <strong>Drag the file here or click to select</strong>
         </p>
+        <p className={styles.dropzoneMax}>(Max file size: {CSV_MAX_MB} MB)</p>
       </Dropzone>
       {rejectionMessage !== undefined && (
         <Text role="alert" c="red" size="sm" mt="xs">
