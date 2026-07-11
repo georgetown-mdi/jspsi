@@ -29,7 +29,7 @@ import {
   runWithStages,
   stagesFor,
 } from "./exchangeRun";
-import { buildInviterRunOutputs } from "./inviterRunOutputs";
+import { buildRunOutputs } from "./runOutputs";
 import { invitationUsable } from "./inviterModel";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
@@ -41,7 +41,7 @@ import type {
 } from "@psi/exchangeLifecycle";
 import type { ExchangeRun } from "./exchangeRun";
 import type { GeneratedInvitation } from "@psi/invitation";
-import type { InviterRunOutputs } from "./inviterRunOutputs";
+import type { RunOutputs } from "./runOutputs";
 
 /** A failed run, ready to render: the lifecycle's category (which decides the
  * recovery the alert offers) and the operator-facing alert content, composed
@@ -153,12 +153,12 @@ export function useInviterExchange({
   inviterName: string;
 }): {
   run: ExchangeRun;
-  outputs: InviterRunOutputs | undefined;
+  outputs: RunOutputs | undefined;
   failure: RunFailure | undefined;
   tryAgain: () => void;
 } {
   const [run, setRun] = useState<ExchangeRun>(initialRun);
-  const [outputs, setOutputs] = useState<InviterRunOutputs>();
+  const [outputs, setOutputs] = useState<RunOutputs>();
   const [failure, setFailure] = useState<RunFailure>();
 
   // Drives the lifecycle's AbortSignal; the effect cleanup below aborts it so
@@ -200,13 +200,10 @@ export function useInviterExchange({
 
     // Output-generation half. The URLs the build creates are revoked when the
     // outputs are replaced or the bench unmounts (effect above); a throw
-    // mid-build revokes its own partial URLs (see buildInviterRunOutputs).
-    const generateOutput: GenerateOutput<InviterRunOutputs> = (
-      result,
-      prepared,
-    ) => {
+    // mid-build revokes its own partial URLs (see buildRunOutputs).
+    const generateOutput: GenerateOutput<RunOutputs> = (result, prepared) => {
       log.info("linkage complete, generating results and record files");
-      return buildInviterRunOutputs(result, prepared, {
+      return buildRunOutputs(result, prepared, {
         create: (blob) => window.URL.createObjectURL(blob),
         revoke: (url) => window.URL.revokeObjectURL(url),
       });
@@ -257,7 +254,7 @@ export function useInviterExchange({
       }
     };
 
-    void runExchangeLifecycle<InviterRunOutputs>({
+    void runExchangeLifecycle<RunOutputs>({
       acquire,
       exchangeRole: "responder",
       sharedSecret: minted.sharedSecret,

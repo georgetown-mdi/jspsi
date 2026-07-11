@@ -19,8 +19,8 @@ import styles from "./bench.module.css";
 import type { AcceptableInvitation } from "@psi/acceptInvitation";
 import type { AlertContent } from "@components/csvIntake";
 import type { ExchangeRun } from "./exchangeRun";
-import type { InviterRunOutputs } from "./inviterRunOutputs";
 import type { RunFailure } from "./useInviterExchange";
+import type { RunOutputs } from "./runOutputs";
 
 /**
  * The acceptor's run/completion work column, re-using the shared run furniture
@@ -48,7 +48,7 @@ export function AcceptorExchangeSection({
 }: {
   invitation: AcceptableInvitation;
   run: ExchangeRun;
-  outputs: InviterRunOutputs | undefined;
+  outputs: RunOutputs | undefined;
   failure: RunFailure | undefined;
   /** The confirm-columns step's partial-coverage advisory, kept visible through
    * the run and cleared on a failure. */

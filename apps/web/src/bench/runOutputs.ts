@@ -10,11 +10,11 @@ import type { ExchangeOutputs } from "@psi/exchangeLifecycle";
 /** The bench run's downloadable artifacts: the lifecycle's outputs widened
  * with the matched-row count the completion header states. Present exactly
  * when the result table is (a withheld result has no count to state). */
-export type InviterRunOutputs = ExchangeOutputs & {
+export type RunOutputs = ExchangeOutputs & {
   matchedRecordCount?: number;
 };
 
-/** The object-URL boundary {@link buildInviterRunOutputs} allocates through --
+/** The object-URL boundary {@link buildRunOutputs} allocates through --
  * `window.URL` in the app, a recording fake in tests. */
 export interface ObjectUrls {
   create: (blob: Blob) => string;
@@ -29,11 +29,11 @@ export interface ObjectUrls {
  * the results blob is matched-record PII, and a stranded object URL would keep
  * it alive until page unload.
  */
-export function buildInviterRunOutputs(
+export function buildRunOutputs(
   result: ExchangeResult,
   prepared: PreparedExchange,
   urls: ObjectUrls,
-): InviterRunOutputs {
+): RunOutputs {
   const created: Array<string> = [];
   const trackedUrl = (blob: Blob): string => {
     const url = urls.create(blob);
@@ -48,7 +48,7 @@ export function buildInviterRunOutputs(
     // PSI sender/helper): produce no results file -- the completion panel
     // shows it contributed but receives no result -- while still offering
     // the record downloads below.
-    const generated: InviterRunOutputs =
+    const generated: RunOutputs =
       result.associationTable === undefined
         ? { resultWithheld: true }
         : (() => {
