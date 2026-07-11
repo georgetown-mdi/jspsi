@@ -32,13 +32,13 @@ The command line application enables the automation of all exchange operations a
 
 ## Web application
 
-The web application is a management interface for exchanges. It allows for the inspection and editing of one-off and recurring exchanges, setting their parameters, adjusting their schedules, and viewing their logs. It also includes code to execute exchanges, which it conducts over WebRTC; the file-based channels (SFTP, filedrop) are CLI-only.
+The web application is the browser-based, install-free entry point for conducting an exchange. It opens on a lobby that offers three actions: start an exchange, accept an invitation, and verify a receipt. Files are read and processed in the browser; nothing leaves the machine except the protocol traffic of an exchange the operator has consented to.
 
-Exchange specifications can be downloaded from the web app for use by the command line application, so the web application has user-friendly ways of creating those files. This includes a data explorer and metadata labeler, linkage rule creator, and data cleaning transformation creator.
+Starting an exchange walks the inviter through a short, guided flow: choose your data file, decide how records are matched and which columns are shared, then review and create the invitation. More involved choices -- data cleaning, the matching keys, and an optional legal agreement -- are available without leaving the flow for the operator who wants them; the guided defaults are derived from the chosen file so a first exchange needs none of them. Creating the invitation produces a single-use deep link to send to the partner out of band; from there the inviter shares the link, waits for the partner to connect, and watches the exchange run to completion. For the browser-only transports the exchange runs directly between the two browsers over WebRTC; for the file-based transports (SFTP, file-drop), which the browser cannot drive, it instead produces a downloadable exchange file that the command line application runs.
 
-If the browser window is left open, it runs scheduled exchanges at the appropriate time. Note that this is a sub-optimal user experience, as it is easy to accidentally close the application.
+Accepting an invitation opens the partner's deep link and walks the acceptor through reviewing the invitation's terms, consenting to them (an explicit acknowledgement and a typed name, with the inviter's legal agreement shown for agreement when one is attached), confirming which of the acceptor's own columns take part, and running the exchange. The invitation's secret travels in the link's URL fragment and is never sent to a server; the two parties rendezvous over the peer-coordination (PeerJS) signaling server the web application itself hosts, deriving their peer identifiers from that shared secret.
 
-The web application includes a feature to invite parties to conduct exchanges. A user generates a shared secret, and the two parties rendezvous over the peer-coordination (PeerJS) signaling server that the web application itself hosts, deriving their peer identifiers from that single shared secret. The user transfers the shared secret to the other party using an existing communication channel.
+Verifying a receipt checks a completed exchange's self-attested record against its verification keys, entirely in the browser, so a party can confirm its own disclosure record without uploading anything.
 
 # User journey
 

@@ -1,11 +1,15 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { HomePage } from "@components/HomePage";
+import { BenchLobby } from "@bench/BenchLobby";
+import { seo } from "@utils/seo";
 
 export const Route = createFileRoute("/")({
-  component: HomePage,
-  // Wide: the home page lays out two panels side by side and shows the long
-  // invitation code/link, so it wants more room than a single-column reading
-  // width. The shell sizes the content column to match.
-  staticData: { contentWidth: "xl" },
+  component: BenchLobby,
+  head: () => ({
+    meta: seo({
+      title: "psilink - private record linkage",
+      description:
+        "Find the records you both hold - without either of you seeing the other's data.",
+    }),
+  }),
 });

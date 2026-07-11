@@ -3,17 +3,17 @@ import { useState } from "react";
 import { Button, Textarea, VisuallyHidden } from "@mantine/core";
 import { Link, useNavigate } from "@tanstack/react-router";
 
-import { tokenFromInput } from "@components/AcceptForm";
+import { tokenFromInput } from "@psi/invitation";
 
 import { BenchPage } from "./BenchPage";
+import { FILE_ASSURANCE_LINE } from "./fileAssurance";
 import styles from "./bench.module.css";
 
 /**
- * The bench's landing screen: the two ways into an exchange, side by side --
- * set one up, or accept an invitation you were sent -- above the standing
- * how-it-works explanation. Mirrors the mockup's landing screen; both actions
- * currently lead to under-construction bench screens while the flows are
- * built out, and the current app at `/` remains the way to run an exchange.
+ * The app's landing screen: the three actions side by side -- set up an
+ * exchange, accept an invitation you were sent, or verify a receipt -- above
+ * the standing how-it-works explanation. Mirrors the mockup's landing screen,
+ * with the verify card as its third action.
  */
 export function BenchLobby() {
   const navigate = useNavigate();
@@ -34,7 +34,7 @@ export function BenchLobby() {
       setInvitationError("An invitation is required");
       return;
     }
-    void navigate({ to: "/bench/accept", hash: token });
+    void navigate({ to: "/accept", hash: token });
   }
 
   const invitationToken = tokenFromInput(invitation);
@@ -48,10 +48,11 @@ export function BenchLobby() {
           Find the records you both hold - without either of you seeing the
           other&apos;s data.
         </p>
-        <p className={`${styles.sub} ${styles.small}`}>
-          Your file is processed entirely in your browser and it is never
-          uploaded to our server.
-        </p>
+        {FILE_ASSURANCE_LINE !== undefined && (
+          <p className={`${styles.sub} ${styles.small}`}>
+            {FILE_ASSURANCE_LINE}
+          </p>
+        )}
         <VisuallyHidden component="h2">
           Start a private data exchange
         </VisuallyHidden>
@@ -64,7 +65,7 @@ export function BenchLobby() {
               more.
             </p>
             <p>
-              <Button component={Link} to="/bench/exchange">
+              <Button component={Link} to="/exchange">
                 Set up an exchange
               </Button>
             </p>
@@ -105,7 +106,7 @@ export function BenchLobby() {
               commitments. Everything is checked in your browser.
             </p>
             <p>
-              <Button component={Link} to="/bench/verify" variant="outline">
+              <Button component={Link} to="/verify" variant="outline">
                 Verify a receipt
               </Button>
             </p>

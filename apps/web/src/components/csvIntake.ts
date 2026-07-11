@@ -22,3 +22,17 @@
  * than a stale literal.
  */
 export const MAX_CSV_FILE_BYTES = 100 * 1024 ** 2;
+
+/**
+ * A titled operator-facing alert -- a read failure, an unlinkable/unnameable
+ * file, or a coverage advisory. The intake surfaces set this shape into their
+ * error/warning state and render it through a shared alert slot; the helpers that
+ * compose the messages ({@link unlinkableFileAlert}, {@link unnameableColumnsAlert})
+ * return it. A structural `{ title, message }` with no component or role
+ * coupling, so leaf helpers can depend on it without pulling in the component
+ * layer.
+ */
+export interface AlertContent {
+  title: string;
+  message: string;
+}

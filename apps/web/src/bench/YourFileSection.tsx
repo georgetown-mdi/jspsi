@@ -7,6 +7,7 @@ import log from "loglevel";
 
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 
+import { FILE_ASSURANCE_LINE } from "./fileAssurance";
 import { fileCardMeta } from "./inviterModel";
 import styles from "./bench.module.css";
 
@@ -135,10 +136,9 @@ export function YourFileSection({
           </div>
         </div>
       )}
-      <p className={`${styles.small} ${styles.sub}`}>
-        Your file is processed entirely in your browser and it is never uploaded
-        to our server.
-      </p>
+      {FILE_ASSURANCE_LINE !== undefined && (
+        <p className={`${styles.small} ${styles.sub}`}>{FILE_ASSURANCE_LINE}</p>
+      )}
       {alert !== undefined && (
         <Alert
           color="red"

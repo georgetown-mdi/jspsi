@@ -9,7 +9,8 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as AdvancedRouteImport } from './routes/advanced'
+import { Route as VerifyRouteImport } from './routes/verify'
+import { Route as ExchangeRouteImport } from './routes/exchange'
 import { Route as AcceptRouteImport } from './routes/accept'
 import { Route as BenchRouteRouteImport } from './routes/bench/route'
 import { Route as IndexRouteImport } from './routes/index'
@@ -21,9 +22,14 @@ import { Route as ApiPeerjsIndexRouteImport } from './routes/api/peerjs/index'
 import { Route as ApiPeerjsIdRouteImport } from './routes/api/peerjs/id'
 import { Route as ApiPeerjsKeyPeersRouteImport } from './routes/api/peerjs/$key/peers'
 
-const AdvancedRoute = AdvancedRouteImport.update({
-  id: '/advanced',
-  path: '/advanced',
+const VerifyRoute = VerifyRouteImport.update({
+  id: '/verify',
+  path: '/verify',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExchangeRoute = ExchangeRouteImport.update({
+  id: '/exchange',
+  path: '/exchange',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AcceptRoute = AcceptRouteImport.update({
@@ -81,7 +87,8 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/bench': typeof BenchRouteRouteWithChildren
   '/accept': typeof AcceptRoute
-  '/advanced': typeof AdvancedRoute
+  '/exchange': typeof ExchangeRoute
+  '/verify': typeof VerifyRoute
   '/bench/accept': typeof BenchAcceptRoute
   '/bench/exchange': typeof BenchExchangeRoute
   '/bench/verify': typeof BenchVerifyRoute
@@ -93,7 +100,8 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/accept': typeof AcceptRoute
-  '/advanced': typeof AdvancedRoute
+  '/exchange': typeof ExchangeRoute
+  '/verify': typeof VerifyRoute
   '/bench/accept': typeof BenchAcceptRoute
   '/bench/exchange': typeof BenchExchangeRoute
   '/bench/verify': typeof BenchVerifyRoute
@@ -107,7 +115,8 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/bench': typeof BenchRouteRouteWithChildren
   '/accept': typeof AcceptRoute
-  '/advanced': typeof AdvancedRoute
+  '/exchange': typeof ExchangeRoute
+  '/verify': typeof VerifyRoute
   '/bench/accept': typeof BenchAcceptRoute
   '/bench/exchange': typeof BenchExchangeRoute
   '/bench/verify': typeof BenchVerifyRoute
@@ -122,7 +131,8 @@ export interface FileRouteTypes {
     | '/'
     | '/bench'
     | '/accept'
-    | '/advanced'
+    | '/exchange'
+    | '/verify'
     | '/bench/accept'
     | '/bench/exchange'
     | '/bench/verify'
@@ -134,7 +144,8 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/accept'
-    | '/advanced'
+    | '/exchange'
+    | '/verify'
     | '/bench/accept'
     | '/bench/exchange'
     | '/bench/verify'
@@ -147,7 +158,8 @@ export interface FileRouteTypes {
     | '/'
     | '/bench'
     | '/accept'
-    | '/advanced'
+    | '/exchange'
+    | '/verify'
     | '/bench/accept'
     | '/bench/exchange'
     | '/bench/verify'
@@ -161,7 +173,8 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   BenchRouteRoute: typeof BenchRouteRouteWithChildren
   AcceptRoute: typeof AcceptRoute
-  AdvancedRoute: typeof AdvancedRoute
+  ExchangeRoute: typeof ExchangeRoute
+  VerifyRoute: typeof VerifyRoute
   ApiPeerjsIdRoute: typeof ApiPeerjsIdRoute
   ApiPeerjsIndexRoute: typeof ApiPeerjsIndexRoute
   ApiPeerjsKeyPeersRoute: typeof ApiPeerjsKeyPeersRoute
@@ -169,11 +182,18 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/advanced': {
-      id: '/advanced'
-      path: '/advanced'
-      fullPath: '/advanced'
-      preLoaderRoute: typeof AdvancedRouteImport
+    '/verify': {
+      id: '/verify'
+      path: '/verify'
+      fullPath: '/verify'
+      preLoaderRoute: typeof VerifyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/exchange': {
+      id: '/exchange'
+      path: '/exchange'
+      fullPath: '/exchange'
+      preLoaderRoute: typeof ExchangeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/accept': {
@@ -271,7 +291,8 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BenchRouteRoute: BenchRouteRouteWithChildren,
   AcceptRoute: AcceptRoute,
-  AdvancedRoute: AdvancedRoute,
+  ExchangeRoute: ExchangeRoute,
+  VerifyRoute: VerifyRoute,
   ApiPeerjsIdRoute: ApiPeerjsIdRoute,
   ApiPeerjsIndexRoute: ApiPeerjsIndexRoute,
   ApiPeerjsKeyPeersRoute: ApiPeerjsKeyPeersRoute,

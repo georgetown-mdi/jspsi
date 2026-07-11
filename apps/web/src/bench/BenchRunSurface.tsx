@@ -193,7 +193,7 @@ export function FailureAlert({
 export function AnotherExchangeFoot() {
   return (
     <div className={styles.workFoot}>
-      <Button component={Link} to="/bench">
+      <Button component={Link} to="/">
         Set up another exchange
       </Button>
     </div>

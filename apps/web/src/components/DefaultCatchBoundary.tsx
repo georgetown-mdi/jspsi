@@ -10,6 +10,7 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 
+import { BenchPage } from "@bench/BenchPage";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import type { ErrorComponentProps } from "@tanstack/react-router";
@@ -28,31 +29,35 @@ export function DefaultCatchBoundary({ error }: ErrorComponentProps) {
   // debugging. The on-screen render below is separately sanitized.
   whenDiagnostic(() => console.error("DefaultCatchBoundary Error:", error));
 
+  // A root-level error surface outside any route layout: it renders itself on
+  // the bench page ground and supplies its own <main> landmark and padding.
   return (
-    <Stack gap="sm" p="sm">
-      {/* ErrorComponent renders only `error.message` (auto-shown in dev, behind
-          a toggle in production), never `.stack`. Hand it a sanitized message
-          rather than the raw Error so the at-the-sink escaping and the
-          key-redaction backstop apply before anything reaches the DOM. */}
-      <ErrorComponent error={new Error(sanitizeErrorForDisplay(error))} />
-      <Group gap="sm">
-        <Button
-          onClick={() => {
-            router.invalidate();
-          }}
-        >
-          Try again
-        </Button>
-        {isRoot ? (
-          <Button component={Link} to="/" variant="default">
-            Home
+    <BenchPage>
+      <Stack component="main" gap="sm" p="xl">
+        {/* ErrorComponent renders only `error.message` (auto-shown in dev, behind
+            a toggle in production), never `.stack`. Hand it a sanitized message
+            rather than the raw Error so the at-the-sink escaping and the
+            key-redaction backstop apply before anything reaches the DOM. */}
+        <ErrorComponent error={new Error(sanitizeErrorForDisplay(error))} />
+        <Group gap="sm">
+          <Button
+            onClick={() => {
+              router.invalidate();
+            }}
+          >
+            Try again
           </Button>
-        ) : (
-          <Button variant="default" onClick={() => window.history.back()}>
-            Go back
-          </Button>
-        )}
-      </Group>
-    </Stack>
+          {isRoot ? (
+            <Button component={Link} to="/" variant="default">
+              Home
+            </Button>
+          ) : (
+            <Button variant="default" onClick={() => window.history.back()}>
+              Go back
+            </Button>
+          )}
+        </Group>
+      </Stack>
+    </BenchPage>
   );
 }

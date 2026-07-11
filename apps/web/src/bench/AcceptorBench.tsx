@@ -43,6 +43,7 @@ import { AcceptorCleaningStep } from "./AcceptorCleaningStep";
 import { AcceptorColumnsStep } from "./AcceptorColumnsStep";
 import { AcceptorExchangeSection } from "./AcceptorExchangeSection";
 import { BenchShell } from "./BenchShell";
+import { FILE_ASSURANCE_LINE } from "./fileAssurance";
 import { Ledger } from "./Ledger";
 import { acceptorTimelineSteps } from "./exchangeRun";
 import styles from "./bench.module.css";
@@ -64,7 +65,7 @@ import type {
   StandardizationStep,
 } from "@psilink/core";
 import type { AcceptorStep } from "./acceptorModel";
-import type { AlertContent } from "@components/FileAcquire";
+import type { AlertContent } from "@components/csvIntake";
 import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 import type { FileRejection } from "@mantine/dropzone";
 import type { IntakeAlert } from "./YourFileSection";
@@ -695,10 +696,11 @@ export function AcceptorBench() {
                 </Button>
               </div>
             )}
-            <p className={`${styles.small} ${styles.sub}`}>
-              Your file is processed entirely in your browser and it is never
-              uploaded to our server.
-            </p>
+            {FILE_ASSURANCE_LINE !== undefined && (
+              <p className={`${styles.small} ${styles.sub}`}>
+                {FILE_ASSURANCE_LINE}
+              </p>
+            )}
             {fieldErrors.file === true && (
               <Alert
                 color="red"

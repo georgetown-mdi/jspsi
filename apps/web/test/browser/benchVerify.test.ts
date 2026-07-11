@@ -144,7 +144,7 @@ describe("bench lobby: verify a receipt card", () => {
     const verifyLink = Array.from(document.querySelectorAll("a")).find(
       (anchor) => anchor.textContent === "Verify a receipt",
     );
-    expect(verifyLink?.getAttribute("href")).toBe("/bench/verify");
+    expect(verifyLink?.getAttribute("href")).toBe("/verify");
   });
 });
 

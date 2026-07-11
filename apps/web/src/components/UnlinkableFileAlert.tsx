@@ -2,7 +2,7 @@ import { sanitizeForDisplay } from "@psilink/core";
 
 import type { LinkageField } from "@psilink/core";
 
-import type { AlertContent } from "@components/FileAcquire";
+import type { AlertContent } from "@components/csvIntake";
 
 /**
  * The operator-facing alert for a file whose columns satisfy zero default linkage

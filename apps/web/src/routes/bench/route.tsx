@@ -1,10 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 /**
- * Layout route for the linkage bench subtree: every route under `/bench`
- * inherits the bench chrome here, opting the whole redesign out of the legacy
- * shell in one place (see `resolveChrome`).
+ * Layout route for the legacy `/bench/*` subtree. The bench is now mounted on
+ * the primary routes (`/`, `/accept`, `/exchange`, `/verify`); every leaf under
+ * here redirects to its primary path, preserving the URL fragment (see each
+ * leaf). This layout only anchors the `/bench` path segment.
  */
-export const Route = createFileRoute("/bench")({
-  staticData: { chrome: "bench" },
-});
+export const Route = createFileRoute("/bench")({});

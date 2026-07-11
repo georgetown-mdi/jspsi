@@ -329,7 +329,7 @@ describe("bench lobby", () => {
     const setUpLink = Array.from(document.querySelectorAll("a")).find(
       (anchor) => anchor.textContent === "Set up an exchange",
     );
-    expect(setUpLink?.getAttribute("href")).toBe("/bench/exchange");
+    expect(setUpLink?.getAttribute("href")).toBe("/exchange");
 
     await expect
       .element(page.getByLabelText("Invitation link or code"))
@@ -1075,7 +1075,7 @@ describe("inviter bench", () => {
     const another = Array.from(document.querySelectorAll("a")).find(
       (anchor) => anchor.textContent === "Set up another exchange",
     );
-    expect(another?.getAttribute("href")).toBe("/bench");
+    expect(another?.getAttribute("href")).toBe("/");
   });
 
   test("post-create: a one-sided exchange states the withheld-result caveat", async () => {
@@ -1188,7 +1188,7 @@ describe("inviter bench", () => {
     const another = Array.from(document.querySelectorAll("a")).find(
       (anchor) => anchor.textContent === "Set up another exchange",
     );
-    expect(another?.getAttribute("href")).toBe("/bench");
+    expect(another?.getAttribute("href")).toBe("/");
   });
 
   test("post-create: a config failure surfaces its message and starts over", async () => {

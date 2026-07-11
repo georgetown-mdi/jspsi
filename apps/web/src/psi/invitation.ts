@@ -240,6 +240,20 @@ export function deepLinkFor(origin: string, encoded: string): string {
 }
 
 /**
+ * Peel the encoded invitation token out of what the acceptor pasted -- the
+ * inverse of {@link deepLinkFor}. A deep-link URL carries the token in its
+ * fragment (`<origin>${ACCEPT_ROUTE_PATH}#<token>`), so everything after the
+ * first `#` is the token; a bare code has no `#` and is used as-is. Taking the
+ * fragment keeps the confidential token out of any query string, the same reason
+ * the inviter places it in the fragment.
+ */
+export function tokenFromInput(input: string): string {
+  const trimmed = input.trim();
+  const hash = trimmed.indexOf("#");
+  return hash === -1 ? trimmed : trimmed.slice(hash + 1);
+}
+
+/**
  * The connection-endpoint an invitation should carry. Defaults to the app's own
  * WebRTC signaling locator, built from {@link InvitationLocation}; a caller
  * composing a file-drop or SFTP exchange instead supplies an explicit

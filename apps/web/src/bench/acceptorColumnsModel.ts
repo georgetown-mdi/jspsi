@@ -26,7 +26,7 @@ import type {
 } from "@psilink/core";
 
 import type { AcceptorDataEdits } from "@psi/acceptInvitation";
-import type { AlertContent } from "@components/FileAcquire";
+import type { AlertContent } from "@components/csvIntake";
 import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
