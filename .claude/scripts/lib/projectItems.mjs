@@ -276,7 +276,7 @@ export function fieldValueInput(field, value) {
  */
 export async function fetchItems(projectNumber, numericIds) {
   const fields =
-    "... on ProjectV2Item { databaseId " +
+    "... on ProjectV2Item { databaseId project { number } " +
     FIELD_VALUES_FRAGMENT +
     " content { __typename " +
     "... on DraftIssue { title body } " +
@@ -294,28 +294,50 @@ export async function fetchItems(projectNumber, numericIds) {
   // whole fetch -- the missing aliases simply come back as null nodes below.
   const data = (await graphql(query)).data;
 
-  return numericIds.map((id, i) => {
-    const node = data[`i${i}`];
-    if (!node || !node.content) {
-      return {
-        id,
-        type: "missing",
-        title: null,
-        body: null,
-        url: null,
-        fields: {},
-      };
-    }
-    const c = node.content;
-    return {
-      id,
-      type: c.__typename,
-      title: c.title ?? null,
-      body: c.body ?? null,
-      url: c.url ?? null,
-      fields: extractFields(node.fieldValues),
-    };
+  return numericIds.map((id, i) =>
+    mapFetchedNode(data[`i${i}`], id, projectNumber),
+  );
+}
+
+/**
+ * Map one node from a fetchItems response to its result. A node that is absent or
+ * has no content is `missing`. So is a node whose own project does not match the
+ * requested one: pvtiNodeId builds a node id from the requested project's byte
+ * prefix plus the numeric id, but that prefix is not a reliable per-project
+ * discriminator -- GitHub can resolve the constructed id to an item on a
+ * DIFFERENT project (a numeric id whose item lives on another board reads back
+ * that other board's item). Verifying the resolved node's own project closes that
+ * cross-board read, which would otherwise return another board's item as if it
+ * were this one. The mismatch result carries `resolvedProject` so a caller can
+ * point at the board the id actually belongs to. Exported for unit testing.
+ */
+export function mapFetchedNode(node, id, projectNumber) {
+  const missing = (extra = {}) => ({
+    id,
+    type: "missing",
+    title: null,
+    body: null,
+    url: null,
+    fields: {},
+    ...extra,
   });
+  if (!node || !node.content) return missing();
+  const resolvedProject = node.project?.number;
+  if (
+    typeof resolvedProject === "number" &&
+    resolvedProject !== projectNumber
+  ) {
+    return missing({ resolvedProject });
+  }
+  const c = node.content;
+  return {
+    id,
+    type: c.__typename,
+    title: c.title ?? null,
+    body: c.body ?? null,
+    url: c.url ?? null,
+    fields: extractFields(node.fieldValues),
+  };
 }
 
 // GitHub's projectV2 items connection caps `first` at 100, so this is also the
