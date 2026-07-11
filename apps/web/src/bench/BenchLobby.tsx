@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { Button, Textarea, VisuallyHidden } from "@mantine/core";
+import { Anchor, Button, Textarea, VisuallyHidden } from "@mantine/core";
 import { Link, useNavigate } from "@tanstack/react-router";
 
 import { tokenFromInput } from "@psi/invitation";
@@ -10,10 +10,10 @@ import { FILE_ASSURANCE_LINE } from "./fileAssurance";
 import styles from "./bench.module.css";
 
 /**
- * The app's landing screen: the three actions side by side -- set up an
- * exchange, accept an invitation you were sent, or verify a receipt -- above
- * the standing how-it-works explanation. Mirrors the mockup's landing screen,
- * with the verify card as its third action.
+ * The app's landing screen: two primary actions side by side -- set up an
+ * exchange, or accept an invitation you were sent -- above the standing
+ * how-it-works explanation. Verifying a receipt is a secondary action, given
+ * as an inline text link below the two cards rather than equal billing.
  */
 export function BenchLobby() {
   const navigate = useNavigate();
@@ -98,23 +98,17 @@ export function BenchLobby() {
               </Button>
             </p>
           </div>
-          <div className={styles.actionCard}>
-            <h3>Verify a receipt</h3>
-            <p className={`${styles.small} ${styles.sub}`}>
-              Check that an exchange record you kept is internally consistent.
-              Load the record and its keys; re-supply your files to open the
-              commitments. Everything is checked in your browser.
-            </p>
-            <p>
-              <Button component={Link} to="/verify" variant="outline">
-                Verify a receipt
-              </Button>
-            </p>
-          </div>
         </div>
         <p className={`${styles.sub} ${styles.small}`}>
           Running exchanges on a schedule? The same setup saves an SFTP exchange
           file for the command-line tool.
+        </p>
+        <p className={`${styles.sub} ${styles.small}`}>
+          Already have an exchange record?{" "}
+          <Anchor component={Link} to="/verify">
+            Verify a receipt
+          </Anchor>{" "}
+          checks it&apos;s internally consistent, entirely in your browser.
         </p>
         <div className={styles.howItWorks}>
           <p>
