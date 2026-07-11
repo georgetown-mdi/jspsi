@@ -7,6 +7,8 @@ import { dateTimeLabel } from "./inviterModel";
 
 import type { InvitationToken, LinkageTerms, Metadata } from "@psilink/core";
 
+import type { InvitationLegalAgreementSummary } from "@psi/invitationSummary";
+
 import type { RailFact, RailStepState } from "./Rail";
 
 /**
@@ -324,4 +326,18 @@ export function acceptorConsentReady(input: {
   name: string;
 }): boolean {
   return acceptorConsentName(input) !== undefined;
+}
+
+/**
+ * The legal-agreement values the consent step displays beside the attestation,
+ * or undefined when the invitation attaches none. Display only -- no gate and no
+ * comparison; the acceptor is invited to check the values against the signed
+ * document, not to transcribe them. Derived through {@link summarizeInvitation},
+ * the one sanitizing boundary, so the three partner-controlled strings are
+ * display-safe -- never the raw token values.
+ */
+export function acceptorLegalAgreementDisplay(
+  token: InvitationToken,
+): InvitationLegalAgreementSummary | undefined {
+  return summarizeInvitation(token).legalAgreement;
 }

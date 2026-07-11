@@ -8,6 +8,7 @@ import {
   acceptorDoneLedgerTag,
   acceptorLedgerRows,
   acceptorLedgerTag,
+  acceptorLegalAgreementDisplay,
   acceptorRailFacts,
   acceptorSpine,
   invitingPartyName,
@@ -349,5 +350,45 @@ describe("acceptor consent gate", () => {
     expect(
       acceptorConsentReady({ consented: true, name: "  Sam Alvarez  " }),
     ).toBe(true);
+  });
+});
+
+describe("acceptor legal-agreement display", () => {
+  test("derives the invitation's three values for the consent step", () => {
+    expect(acceptorLegalAgreementDisplay(makeToken())).toEqual({
+      reference: "MOU-2025-0042",
+      purpose: "Program evaluation",
+      expirationDate: "2026-12-31",
+    });
+  });
+
+  test("neutralizes hostile agreement values for display", () => {
+    // The agreement strings are partner-controlled free text; a reference or
+    // purpose carrying ANSI-escape and bidi-override bytes must reach the
+    // consent step neutralized -- the summarizeInvitation boundary, never the
+    // raw token values.
+    const display = acceptorLegalAgreementDisplay(
+      makeToken({
+        legalAgreement: {
+          reference: `MOU${ESC}[31m${RLO}-0042`,
+          purpose: `Program${ESC}[0m${RLO} evaluation`,
+          expirationDate: "2026-12-31",
+        },
+      }),
+    );
+    expect(display).toBeDefined();
+    expect(display?.reference).not.toContain(ESC);
+    expect(display?.reference).not.toContain(RLO);
+    expect(display?.reference).toContain("MOU");
+    expect(display?.purpose).not.toContain(ESC);
+    expect(display?.purpose).not.toContain(RLO);
+    expect(display?.purpose).toContain("evaluation");
+    expect(display?.expirationDate).toBe("2026-12-31");
+  });
+
+  test("an invitation without an agreement yields no display", () => {
+    expect(
+      acceptorLegalAgreementDisplay(makeToken({ legalAgreement: undefined })),
+    ).toBeUndefined();
   });
 });

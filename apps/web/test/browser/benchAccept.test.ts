@@ -587,6 +587,61 @@ describe("acceptor bench: consent gate and parse-behind-consent", () => {
   });
 });
 
+describe("acceptor bench: consent-step legal-agreement display", () => {
+  // acceptorTerms carries no agreement, so the display tests mint their own
+  // agreement-bearing terms; the shared fixture keeps the no-fieldset case.
+  const agreementTerms: LinkageTerms = {
+    ...acceptorTerms,
+    legalAgreement: {
+      reference: "MOU-2025-0042",
+      purpose: "Program evaluation",
+      expirationDate: "2026-12-31",
+    },
+  };
+
+  async function reachConsentWith(terms: LinkageTerms) {
+    window.location.hash = await encodeAcceptToken(terms);
+    mount(createElement(AcceptorBench));
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+    await userEvent.click(
+      page.getByRole("button", { name: "Continue: consent & your file" }),
+    );
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Consent & your file");
+  }
+
+  test("an agreement-bearing invitation shows the three values, read-only", async () => {
+    await reachConsentWith(agreementTerms);
+    const fieldset = document.querySelector("fieldset");
+    expect(fieldset).not.toBeNull();
+    expect(fieldset?.querySelector("legend")?.textContent).toBe(
+      "Legal agreement",
+    );
+    expect(fieldset?.textContent).toContain(
+      "Check these values against your signed agreement",
+    );
+    expect(fieldset?.textContent).toContain("MOU-2025-0042");
+    expect(fieldset?.textContent).toContain("Program evaluation");
+    expect(fieldset?.textContent).toContain("2026-12-31");
+    // Display only: nothing to type, so the fieldset holds no inputs.
+    expect(fieldset?.querySelector("input")).toBeNull();
+
+    // And it adds no precondition: consent plus a name still completes the gate.
+    await consentAndName();
+    await expect
+      .element(page.getByRole("button", { name: "Accept and continue" }))
+      .toBeEnabled();
+  });
+
+  test("an agreement-less invitation shows no legal-agreement fieldset", async () => {
+    await reachConsentWith(acceptorTerms);
+    expect(document.querySelector("fieldset")).toBeNull();
+  });
+});
+
 describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () => {
   // Consent, name, choose a file, and press Accept to land on the columns step.
   async function reachColumns(content: string) {
