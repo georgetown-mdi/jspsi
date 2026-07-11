@@ -3,6 +3,7 @@ import {
   fetchAllItems,
   fieldValueInput,
   githubToken,
+  mapFetchedNode,
   numericIdFromNodeId,
   PAGE_SIZE,
   pvtiNodeId,
@@ -112,6 +113,45 @@ describe("fetchAllItems pagination", () => {
     });
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe(199240250);
+  });
+});
+
+describe("mapFetchedNode cross-project guard", () => {
+  const contentNode = (projectNumber) => ({
+    databaseId: 1,
+    project: { number: projectNumber },
+    fieldValues: {
+      nodes: [
+        {
+          __typename: "ProjectV2ItemFieldNumberValue",
+          number: 4,
+          field: { name: "Order" },
+        },
+      ],
+    },
+    content: { __typename: "DraftIssue", title: "T", body: "B" },
+  });
+
+  it("resolves a node whose project matches the requested one", () => {
+    const r = mapFetchedNode(contentNode(9), 123, 9);
+    expect(r.type).toBe("DraftIssue");
+    expect(r.fields).toEqual({ Order: 4 });
+    expect(r.resolvedProject).toBeUndefined();
+  });
+
+  it("treats a node resolved on a different project as missing, noting the resolved project", () => {
+    // The core foot-gun: a numeric id whose item lives on board 10, read under
+    // board 9, must not come back as a board-9 item.
+    const r = mapFetchedNode(contentNode(10), 123, 9);
+    expect(r.type).toBe("missing");
+    expect(r.resolvedProject).toBe(10);
+    expect(r.body).toBeNull();
+  });
+
+  it("treats an absent or contentless node as missing without a resolved project", () => {
+    expect(mapFetchedNode(null, 123, 9).type).toBe("missing");
+    expect(mapFetchedNode({ content: null }, 123, 9).type).toBe("missing");
+    expect(mapFetchedNode(null, 123, 9).resolvedProject).toBeUndefined();
   });
 });
 

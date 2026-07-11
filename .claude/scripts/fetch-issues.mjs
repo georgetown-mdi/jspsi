@@ -109,7 +109,13 @@ async function main() {
   for (const item of items) {
     process.stdout.write(`=== ${item.id} ===\n`);
     if (item.type === "missing") {
-      process.stdout.write(`(not found on project ${projectNumber})\n\n`);
+      const hint =
+        item.resolvedProject !== undefined
+          ? ` (this id resolves to an item on project ${item.resolvedProject}; try that board)`
+          : "";
+      process.stdout.write(
+        `(not found on project ${projectNumber}${hint})\n\n`,
+      );
       continue;
     }
     process.stdout.write(`TITLE: ${item.title}\n`);
