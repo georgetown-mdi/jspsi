@@ -100,6 +100,21 @@ The flag is read once per page load, so set or clear it and then reload. It is s
 
 The derived rendezvous peer ids are redacted out of the PeerJS console output before printing, so a verbose capture carries no rendezvous id even with the flag on. It is not, however, unconditionally safe to share: at this level PeerJS also logs connection-establishment detail -- SDP and ICE candidates -- which includes the local machine's private/LAN IP addresses and network topology. Treat a verbose capture as a diagnostic containing network internals: share it only with trusted support, and review it first if your network layout is sensitive. The same caution covers the whole capture, not only the PeerJS lines: the app's own exchange-failure errors the flag re-enables carry the partner's signaling host/port and transport-error text -- the same network-internals class, not invitation secrets, session keys, or record data, which never reach these logs.
 
+## Server job API
+
+The web application can run as a **console appliance** for a single party: a container that drives that party's own `psilink` exchange runs behind a server-side job API, so an operator creates, watches, and downloads the result of an exchange without invoking the CLI by hand. The appliance serves one party, inside that party's own trust boundary; it is never a shared meeting point between the two partners, who still rendezvous only over the exchange channel itself. The trust invariant and what would violate it are in [SECURITY_DESIGN.md](SECURITY_DESIGN.md#single-party-appliance-trust-boundary).
+
+The job API is **off by default.** It does nothing -- serves no endpoint, spawns no CLI -- until you configure a data root. Two environment variables control it:
+
+- `JOB_DATA_ROOT` -- the feature gate and the directory under which each job's working files are created. Set it to turn the API on; leave it unset to keep it off. A hosted deployment that does not set it never exposes the API.
+- `JOB_API_TOKEN` -- a bearer token the API requires on every request. Set it whenever the API is reachable beyond loopback.
+
+**Loopback or token, enforced at startup.** The API assumes a single operator, not multiple tenants, so it must not sit unauthenticated on a shared interface. If you enable it (set `JOB_DATA_ROOT`) on a non-loopback bind without a token, the server refuses to start. Run it either bound to loopback (the appliance case, no token needed) or with `JOB_API_TOKEN` set; front it with your own reverse proxy if you expose it, exactly as with the signaling surface above.
+
+**Restarting cancels in-flight exchanges.** Job state lives in server memory only. Restarting the server cancels any exchange still running -- rerun those. Completed jobs leave their result files on disk: deleting the job through the API removes them, but a job drops out of the API an hour after it finishes (and always on a restart), after which you clean its per-job directory under `JOB_DATA_ROOT` by hand.
+
+The endpoint contract, the request schema, the working-directory layout and file permissions, and the exact gate and startup rules are specified in [SERVER_JOB_API.md](spec/SERVER_JOB_API.md).
+
 ## SFTP server
 
 PSI-Link does not include or require any particular SFTP server. In practice almost all deployments reuse an existing service: `sshd` on a standard Linux host, with a per-exchange directory whose Unix permissions restrict access to the two partner accounts, is sufficient. The two parties should agree out-of-band on the directory path and on which accounts have access; nothing more is required of the server beyond that.
