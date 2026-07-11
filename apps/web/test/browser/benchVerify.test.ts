@@ -133,18 +133,12 @@ afterEach(() => {
   container = undefined;
 });
 
-describe("bench lobby: verify a receipt card", () => {
-  test("the third action card links to the verify bench", async () => {
+describe("bench lobby: verify a receipt link", () => {
+  test("the inline verify link below the two action cards navigates to the verify bench", async () => {
     mount(createElement(BenchLobby));
-    await expect
-      .element(
-        page.getByRole("heading", { level: 3, name: "Verify a receipt" }),
-      )
-      .toBeInTheDocument();
-    const verifyLink = Array.from(document.querySelectorAll("a")).find(
-      (anchor) => anchor.textContent === "Verify a receipt",
-    );
-    expect(verifyLink?.getAttribute("href")).toBe("/verify");
+    const verifyLink = page.getByRole("link", { name: "Verify a receipt" });
+    await expect.element(verifyLink).toBeInTheDocument();
+    await expect.element(verifyLink).toHaveAttribute("href", "/verify");
   });
 });
 

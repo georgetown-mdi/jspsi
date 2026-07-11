@@ -20,6 +20,13 @@ import { IconCheck, IconCopy } from "@tabler/icons-react";
 
 import { cssVariablesResolver, mantineTheme } from "@theme";
 
+// tokens.css defines the --bench-* custom properties bench.module.css reads
+// (--bench-accent among them); BenchPage.tsx imports it as a side effect in
+// the real app, so the anchor-inside-.page case below needs it too, or
+// --bench-accent resolves to nothing and masks the rule this test targets.
+import "@bench/tokens.css";
+import benchStyles from "@bench/bench.module.css";
+
 import type { ComponentType, ReactNode } from "react";
 import type { Root } from "react-dom/client";
 
@@ -28,6 +35,14 @@ import type { Root } from "react-dom/client";
 // JSX), and createElement cannot resolve their overloaded type directly -- cast each
 // to the plain component shape this test renders.
 const FilledButton = Button as unknown as ComponentType<{
+  children?: ReactNode;
+}>;
+// Rendered with component="a" -- a bare host tag reproduces the exact selector
+// clash a component={Link} render hits (Link ultimately renders a real <a>
+// too), without pulling the router into this harness.
+const LinkRenderedButton = Button as unknown as ComponentType<{
+  component?: string;
+  href?: string;
   children?: ReactNode;
 }>;
 const PrimaryCheckbox = Checkbox as unknown as ComponentType<{
@@ -303,6 +318,36 @@ describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
     // clear the floor and read brighter than the hover fill it replaced.
     expect(restingContrast).toBeGreaterThanOrEqual(4.5);
     expect(restingContrast).toBeGreaterThan(hoverContrast);
+  });
+
+  // A filled-primary Button rendered as an anchor (component={Link} in the
+  // app; component="a" here, see LinkRenderedButton above) inside the bench's
+  // .page wrapper. bench.module.css's `.page a` rule once outranked Mantine's
+  // --button-color on specificity (class+type beats Mantine's single class on
+  // .mantine-Button-root) and repainted the label --bench-accent -- a teal
+  // close enough to the cyan-9 filled background that the label was
+  // unreadable until :hover changed the background. This proves the label and
+  // background are actually distinguishable colors, not just that each
+  // individually clears an arithmetic floor -- the two could still be pinned
+  // to the same value and pass a floor-only check.
+  test("a Button rendered as an anchor inside .page keeps its filled label legible", async () => {
+    mount(
+      "light",
+      createElement(
+        "div",
+        { className: benchStyles.page },
+        createElement(
+          LinkRenderedButton,
+          { component: "a", href: "/exchange" },
+          "Set up an exchange",
+        ),
+      ),
+    );
+    const btn = await waitForEl(".mantine-Button-root");
+    const backgroundColor = await restingBackground(btn);
+    const { color } = getComputedStyle(btn);
+    expect(color).not.toBe(backgroundColor);
+    expect(contrast(color, backgroundColor)).toBeGreaterThanOrEqual(4.5);
   });
 });
 

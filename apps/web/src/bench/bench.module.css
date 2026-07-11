@@ -46,7 +46,20 @@
   max-width: 68ch;
 }
 
-.page a {
+/* Excludes a Mantine Button rendered as an anchor (component={Link}): a filled
+   Button's label color is --button-color (routed to the per-scheme contrast
+   color by the theme, see theme.ts FILLED_PRIMARY_CONTRAST), and this rule's
+   higher specificity (a class + type selector vs. Mantine's single class on
+   .mantine-Button-root) would otherwise overwrite that with --bench-accent --
+   which resolves close enough to the filled background color that the label
+   became unreadable until :hover repainted the background. An outline/light
+   Button legitimately wants accent-colored text, so the exclusion is scoped
+   to the Button root, not to Mantine controls generally. mantine-Button-root
+   is one of Mantine's global static class names (unhashed by design, so apps
+   can target it), so it must be wrapped in :global() here -- CSS Modules
+   would otherwise locally scope/hash the name inside :not() and the
+   exclusion would silently never match. */
+.page a:not(:global(.mantine-Button-root)) {
   color: var(--bench-accent);
 }
 

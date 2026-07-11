@@ -313,7 +313,6 @@ describe("bench lobby", () => {
     expect(cardHeadings).toEqual([
       "Set up an exchange",
       "Accept an invitation you were sent",
-      "Verify a receipt",
     ]);
 
     // The in-browser processing assurance is a preserved invariant of the
@@ -333,6 +332,12 @@ describe("bench lobby", () => {
 
     await expect
       .element(page.getByLabelText("Invitation link or code"))
+      .toBeInTheDocument();
+
+    // Verifying a receipt is a secondary action below the two cards, not a
+    // third card of equal billing.
+    await expect
+      .element(page.getByRole("link", { name: "Verify a receipt" }))
       .toBeInTheDocument();
   });
 
