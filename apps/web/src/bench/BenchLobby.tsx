@@ -97,6 +97,19 @@ export function BenchLobby() {
               </Button>
             </p>
           </div>
+          <div className={styles.actionCard}>
+            <h3>Verify a receipt</h3>
+            <p className={`${styles.small} ${styles.sub}`}>
+              Check that an exchange record you kept is internally consistent.
+              Load the record and its keys; re-supply your files to open the
+              commitments. Everything is checked in your browser.
+            </p>
+            <p>
+              <Button component={Link} to="/bench/verify" variant="outline">
+                Verify a receipt
+              </Button>
+            </p>
+          </div>
         </div>
         <p className={`${styles.sub} ${styles.small}`}>
           Running exchanges on a schedule? The same setup saves an SFTP exchange

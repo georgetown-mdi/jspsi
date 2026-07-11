@@ -14,6 +14,7 @@ import { Route as AcceptRouteImport } from './routes/accept'
 import { Route as BenchRouteRouteImport } from './routes/bench/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as BenchIndexRouteImport } from './routes/bench/index'
+import { Route as BenchVerifyRouteImport } from './routes/bench/verify'
 import { Route as BenchExchangeRouteImport } from './routes/bench/exchange'
 import { Route as BenchAcceptRouteImport } from './routes/bench/accept'
 import { Route as ApiPeerjsIndexRouteImport } from './routes/api/peerjs/index'
@@ -43,6 +44,11 @@ const IndexRoute = IndexRouteImport.update({
 const BenchIndexRoute = BenchIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => BenchRouteRoute,
+} as any)
+const BenchVerifyRoute = BenchVerifyRouteImport.update({
+  id: '/verify',
+  path: '/verify',
   getParentRoute: () => BenchRouteRoute,
 } as any)
 const BenchExchangeRoute = BenchExchangeRouteImport.update({
@@ -78,6 +84,7 @@ export interface FileRoutesByFullPath {
   '/advanced': typeof AdvancedRoute
   '/bench/accept': typeof BenchAcceptRoute
   '/bench/exchange': typeof BenchExchangeRoute
+  '/bench/verify': typeof BenchVerifyRoute
   '/bench/': typeof BenchIndexRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
   '/api/peerjs/': typeof ApiPeerjsIndexRoute
@@ -89,6 +96,7 @@ export interface FileRoutesByTo {
   '/advanced': typeof AdvancedRoute
   '/bench/accept': typeof BenchAcceptRoute
   '/bench/exchange': typeof BenchExchangeRoute
+  '/bench/verify': typeof BenchVerifyRoute
   '/bench': typeof BenchIndexRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
   '/api/peerjs': typeof ApiPeerjsIndexRoute
@@ -102,6 +110,7 @@ export interface FileRoutesById {
   '/advanced': typeof AdvancedRoute
   '/bench/accept': typeof BenchAcceptRoute
   '/bench/exchange': typeof BenchExchangeRoute
+  '/bench/verify': typeof BenchVerifyRoute
   '/bench/': typeof BenchIndexRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
   '/api/peerjs/': typeof ApiPeerjsIndexRoute
@@ -116,6 +125,7 @@ export interface FileRouteTypes {
     | '/advanced'
     | '/bench/accept'
     | '/bench/exchange'
+    | '/bench/verify'
     | '/bench/'
     | '/api/peerjs/id'
     | '/api/peerjs/'
@@ -127,6 +137,7 @@ export interface FileRouteTypes {
     | '/advanced'
     | '/bench/accept'
     | '/bench/exchange'
+    | '/bench/verify'
     | '/bench'
     | '/api/peerjs/id'
     | '/api/peerjs'
@@ -139,6 +150,7 @@ export interface FileRouteTypes {
     | '/advanced'
     | '/bench/accept'
     | '/bench/exchange'
+    | '/bench/verify'
     | '/bench/'
     | '/api/peerjs/id'
     | '/api/peerjs/'
@@ -192,6 +204,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BenchIndexRouteImport
       parentRoute: typeof BenchRouteRoute
     }
+    '/bench/verify': {
+      id: '/bench/verify'
+      path: '/verify'
+      fullPath: '/bench/verify'
+      preLoaderRoute: typeof BenchVerifyRouteImport
+      parentRoute: typeof BenchRouteRoute
+    }
     '/bench/exchange': {
       id: '/bench/exchange'
       path: '/exchange'
@@ -233,12 +252,14 @@ declare module '@tanstack/react-router' {
 interface BenchRouteRouteChildren {
   BenchAcceptRoute: typeof BenchAcceptRoute
   BenchExchangeRoute: typeof BenchExchangeRoute
+  BenchVerifyRoute: typeof BenchVerifyRoute
   BenchIndexRoute: typeof BenchIndexRoute
 }
 
 const BenchRouteRouteChildren: BenchRouteRouteChildren = {
   BenchAcceptRoute: BenchAcceptRoute,
   BenchExchangeRoute: BenchExchangeRoute,
+  BenchVerifyRoute: BenchVerifyRoute,
   BenchIndexRoute: BenchIndexRoute,
 }
 
