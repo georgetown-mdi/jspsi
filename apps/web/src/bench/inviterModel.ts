@@ -73,6 +73,38 @@ export function isCliTransport(
   return transport !== "browser";
 }
 
+/** The Review & create transport-chooser copy that changes with the deployment.
+ * On the console appliance (`consoleBuild`) the appliance itself runs the
+ * shared-directory exchange, so the filedrop card offers to run it here and the
+ * capability note names filedrop among the live transports; the hosted build
+ * keeps the browser-only phrasing. The SFTP and browser cards are unchanged
+ * either way. */
+export interface TransportChooserCopy {
+  filedropLabel: string;
+  filedropDescription: string;
+  capabilityNote: string;
+}
+
+export function transportChooserCopy(
+  consoleBuild: boolean,
+): TransportChooserCopy {
+  return consoleBuild
+    ? {
+        filedropLabel: "Over a shared directory, run here",
+        filedropDescription:
+          "Runs the exchange here against a directory both parties can reach. Your partner accepts with the same invitation code.",
+        capabilityNote:
+          "This deployment runs live and shared-directory exchanges here; SFTP exchanges run in the psilink command-line tool.",
+      }
+    : {
+        filedropLabel: "Over a shared directory, run by the command-line tool",
+        filedropDescription:
+          "Saves an exchange file the command-line tool runs against a directory both parties can reach.",
+        capabilityNote:
+          "This browser runs live exchanges only; SFTP and shared-directory exchanges run in the psilink command-line tool.",
+      };
+}
+
 /**
  * The pure model behind the inviter bench's required spine: seeding the draft
  * from the read file, applying the two column edits step 2 offers, and the

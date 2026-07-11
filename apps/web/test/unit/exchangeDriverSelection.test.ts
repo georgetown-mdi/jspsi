@@ -34,13 +34,6 @@ describe("selectExchangeDriver", () => {
     }
   }
 
-  test("covers every channel and profile combination exactly once", () => {
-    const seen = new Set<string>();
-    for (const channel of CHANNELS)
-      for (const profile of PROFILES) seen.add(`${channel}:${profile}`);
-    expect(seen.size).toBe(CHANNELS.length * PROFILES.length);
-  });
-
   test("browser never routes to a server-side or save path", () => {
     for (const profile of PROFILES)
       expect(selectExchangeDriver("browser", profile).kind).toBe("browser");

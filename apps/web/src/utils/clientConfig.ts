@@ -62,7 +62,7 @@ class ConfigManager extends BaseConfigManager<Env> {
 
 /**
  * The VITE_-prefixed build-time values as the plain `data` env-schema reads,
- * matching the derivation client.tsx and fileAssurance.ts use. `import.meta.env`
+ * matching the derivation client.tsx uses. `import.meta.env`
  * has no `process.env` in a real browser, so the values arrive explicitly here
  * rather than through env-schema's default env reading.
  */

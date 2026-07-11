@@ -196,16 +196,25 @@ export function useAcceptorExchange({
     // prepareAcceptedInvitation fails closed on any other channel before a
     // launch can exist -- so the selector resolves to the browser driver here.
     // Routing through it anyway keeps the driver seam identical to the inviter's
-    // and fails closed rather than silently building the wrong driver if a
-    // filedrop launch ever reaches this hook (it needs accept-side UI first).
+    // and fails closed if a non-browser launch ever reaches this hook (it needs
+    // accept-side UI first): it surfaces the run's own failure alert rather than
+    // throwing out of the start effect, which would crash the render.
     const selection = selectExchangeDriver(
       transportForEndpointChannel(endpoint.channel),
       deploymentProfile(),
     );
-    if (selection.kind !== "browser")
-      throw new Error(
-        `acceptor cannot run a ${selection.kind} exchange in the browser`,
+    if (selection.kind !== "browser") {
+      setFailure(
+        failureFor(
+          "config",
+          new Error(
+            `acceptor cannot run a ${selection.kind} exchange in the browser`,
+          ),
+        ),
       );
+      setRun((prev) => runWithFailure(prev));
+      return;
+    }
 
     const driver = createBrowserExchangeDriver<RunOutputs>({
       acquire,
