@@ -301,14 +301,20 @@ export function validateAndSanitizeEvent(value: unknown): RelayEvent | null {
   return { ...sanitized, v: 1, type: type as RelayEventType };
 }
 
-/** Recursively sanitize every string in a JSON value through the display escaper. */
+/**
+ * Recursively sanitize a JSON value through the display escaper: every string,
+ * whether a value or an object key, so no partner-influenced text crosses the
+ * trust boundary unescaped. A known event's keys are fixed, but a subverted
+ * source could emit arbitrary keys, so keys are escaped for the same reason
+ * values are.
+ */
 function sanitizeValue(value: unknown): unknown {
   if (typeof value === "string") return sanitizeForDisplay(value);
   if (Array.isArray(value)) return value.map(sanitizeValue);
   if (value !== null && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [key, inner] of Object.entries(value as Record<string, unknown>))
-      out[key] = sanitizeValue(inner);
+      out[sanitizeForDisplay(key)] = sanitizeValue(inner);
     return out;
   }
   return value;

@@ -59,7 +59,13 @@ export async function createWorkdir(
   const workdir = resolveWorkdir(dataRoot, jobId);
   if (workdir === null)
     throw new Error("job id did not resolve to a path under the data root");
-  await fsp.mkdir(path.resolve(dataRoot), { recursive: true });
+  // Owner-only when this process creates the data root; a pre-existing root's
+  // mode is the operator's to set (the sensitive per-job material is owner-only
+  // beneath it regardless).
+  await fsp.mkdir(path.resolve(dataRoot), {
+    recursive: true,
+    mode: WORKDIR_MODE,
+  });
   await fsp.mkdir(workdir, { mode: WORKDIR_MODE });
   await fsp.chmod(workdir, WORKDIR_MODE);
   const exchangeDirectory = path.join(workdir, exchangeSubdir);

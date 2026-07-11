@@ -108,6 +108,21 @@ describe("validateAndSanitizeEvent enforces the v1 vocabulary and sanitizes", ()
   });
 });
 
+describe("validateAndSanitizeEvent sanitizes object keys", () => {
+  test("an event key carrying a control byte is escaped", () => {
+    const esc = String.fromCharCode(0x1b);
+    const controlKey = `danger${esc}[31mkey`;
+    const event = validateAndSanitizeEvent({
+      v: 1,
+      type: "warning",
+      message: "ok",
+      [controlKey]: "value",
+    });
+    expect(event).not.toBeNull();
+    for (const key of Object.keys(event as object))
+      expect(key).not.toContain(esc);
+  });
+});
 describe("resolveCliBinaryPath", () => {
   test("uses the JOB_CLI_BINARY override when set", () => {
     expect(resolveCliBinaryPath({ [JOB_CLI_BINARY_ENV]: STUB_CLI_PATH })).toBe(

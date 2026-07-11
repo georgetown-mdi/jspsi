@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import net from "node:net";
 
 /**
  * The resolved job-API configuration read from the environment. The job API is a
@@ -23,7 +24,7 @@ export function readJobApiConfig(
 ): JobApiConfig {
   return {
     dataRoot: (env[JOB_DATA_ROOT_ENV] ?? "").trim(),
-    token: env[JOB_API_TOKEN_ENV] ?? "",
+    token: (env[JOB_API_TOKEN_ENV] ?? "").trim(),
   };
 }
 
@@ -85,6 +86,13 @@ export function constantTimeEquals(a: string, b: string): boolean {
  * Whether a bind host is a loopback address. A non-loopback bind with the job API
  * enabled and no token is a fail-closed startup error; a loopback bind without a
  * token is allowed (the appliance case).
+ *
+ * A host is loopback only when it is the literal `localhost` or an IP literal in a
+ * loopback range. A `127.`-prefixed value must parse as a real IPv4 literal: a
+ * hostname such as `127.example.com` is NOT loopback (it can resolve to a public
+ * address), so it must fail closed rather than pass the startup gate on the
+ * string prefix alone. Anything that is neither `localhost` nor a recognized IP
+ * literal is treated as non-loopback.
  */
 export function isLoopbackHost(host: string | undefined): boolean {
   if (host === undefined || host === "") {
@@ -94,8 +102,13 @@ export function isLoopbackHost(host: string | undefined): boolean {
   }
   const normalized = host.trim().toLowerCase();
   if (normalized === "localhost") return true;
-  if (normalized === "::1" || normalized === "[::1]") return true;
-  if (normalized.startsWith("127.")) return true;
+  const literal =
+    normalized.startsWith("[") && normalized.endsWith("]")
+      ? normalized.slice(1, -1)
+      : normalized;
+  if (net.isIPv4(literal)) return literal.startsWith("127.");
+  if (net.isIPv6(literal))
+    return literal === "::1" || literal === "0:0:0:0:0:0:0:1";
   return false;
 }
 
