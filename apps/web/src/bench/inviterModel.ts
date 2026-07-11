@@ -12,6 +12,7 @@ import {
   producibleFieldNames,
   seedAdvancedInvite,
   setDraftMetadata,
+  setDraftMetadataKeepingKeys,
   validateAdvancedInvite,
 } from "@psi/advancedInvite";
 import {
@@ -97,8 +98,9 @@ export interface AcquiredCsv {
  * created), every mutator in this module returns the session unchanged -- the
  * terms a partner is consenting to can never drift from what was minted.
  * `keysAuthored` marks the key set as author-controlled (an expert edit or an
- * import): a later column edit then updates only the metadata, because the
- * template-driven key reconciliation would silently drop authored keys. */
+ * import): a later column edit then reconciles the metadata and standardization
+ * but leaves the keys untouched, because the template-driven key reconciliation
+ * would silently drop authored keys. */
 export interface InviterEditor {
   draft: AdvancedInviteDraft;
   seed: AdvancedInviteSeed;
@@ -417,9 +419,14 @@ function withMetadata(
   return {
     editor: {
       ...editor,
+      // Reconcile the standardization on every metadata edit, so a column retype
+      // re-derives its cleaning and can never leave a stale transformation minting
+      // a name/type-mismatched field into the agreed terms. The keysAuthored guard
+      // protects only the authored/imported KEY set from the template-driven key
+      // reconciliation (setDraftMetadata), never the standardization.
       draft:
         editor.keysAuthored === true
-          ? { ...editor.draft, metadata }
+          ? setDraftMetadataKeepingKeys(editor.draft, metadata, csv.rawRows)
           : setDraftMetadata(editor.draft, metadata, csv.rawRows),
     },
     demotedIdentifiers,

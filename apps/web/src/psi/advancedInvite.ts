@@ -308,6 +308,35 @@ export function seedAdvancedInvite(
 }
 
 /**
+ * Swap in a freshly-edited column metadata and reconcile the draft's
+ * standardization against it ({@link reconcileStandardization}), leaving the
+ * linkage keys untouched. This is the metadata edit for an AUTHORED or IMPORTED
+ * key set, where the template-driven {@link reconcileKeys} must NOT run (it would
+ * silently drop keys the operator authored element-by-element or imported). The
+ * standardization is still reconciled, so a column retype re-derives its cleaning
+ * and cannot leave a stale transformation declaring a field whose type no longer
+ * matches its column -- the protection {@link reconcileStandardization} provides
+ * is orthogonal to the key set and applies on every path.
+ */
+export function setDraftMetadataKeepingKeys(
+  draft: AdvancedInviteDraft,
+  metadata: Metadata,
+  rawRows: ReadonlyArray<CSVRow> = [],
+): AdvancedInviteDraft {
+  return {
+    ...draft,
+    metadata,
+    standardization: reconcileStandardization(
+      draft.standardization,
+      draft.metadata,
+      metadata,
+      draft.identity,
+      rawRows,
+    ),
+  };
+}
+
+/**
  * Re-derive the editor's draft for a new column metadata: editing a column's
  * semantic type changes which linkage keys are offerable ({@link getDefaultLinkageTerms}
  * filters by the `role: linkage` column types present), so this recomputes the
@@ -315,7 +344,10 @@ export function seedAdvancedInvite(
  * offerable keep their enabled flag and position, newly-offerable keys are
  * appended (enabled), and keys no longer offerable drop. The threaded metadata is
  * what the inviter's exchange binds on, so a remap that makes a key offerable also
- * makes the run actually produce it.
+ * makes the run actually produce it. Reconciles the standardization too (via
+ * {@link setDraftMetadataKeepingKeys}); the guided path drives this, the authored
+ * key set drives the keep-keys variant so the template key reconciliation stays
+ * off it.
  */
 export function setDraftMetadata(
   draft: AdvancedInviteDraft,
@@ -327,15 +359,7 @@ export function setDraftMetadata(
     metadata,
   ).linkageKeys;
   return {
-    ...draft,
-    metadata,
-    standardization: reconcileStandardization(
-      draft.standardization,
-      draft.metadata,
-      metadata,
-      draft.identity,
-      rawRows,
-    ),
+    ...setDraftMetadataKeepingKeys(draft, metadata, rawRows),
     keys: reconcileKeys(draft.keys, offerable),
   };
 }
