@@ -118,6 +118,7 @@ This changelog records, per release, the changes that affect how PSI-Link is run
 
 ### Fixed
 
+- Exchange failures from a failed key-exchange authentication (a wrong shared secret, or tampered handshake messages) or from an SFTP host-key verification failure (a pinned-fingerprint mismatch, or the unpinned fail-closed refusal) now classify as security failures in the CLI event stream (`--event-stream`, terminal `category: "security"`) instead of presenting as retryable exchange faults. Messages and exit codes are unchanged, and the web app is unaffected: it already surfaced these as security failures through its own authentication wrapper. See `docs/spec/CLI_EVENTS.md`.
 - A host-less `sftp://` URL on the zero-setup exchange (`psilink URL INPUT_FILE`) now fails fast with a usage error (exit 64) naming the problem, instead of reaching the live server connection and failing obscurely. The other commands already rejected it; the two paths now share one URL-to-connection builder.
 - The web app's peer signaling server now accepts the IPv6 loopback origin: the CORS allowlist built the entry without the colon before the port (`http://[::1]3000`), so a browser at `http://[::1]:<port>` was always rejected. IPv4 loopback and non-loopback deployments are unaffected.
 - Linkage values are now normalized to Unicode NFC before matching, and again after any case-folding step, so the same value in different normalization forms -- the common macOS-NFC vs database-NFD split -- matches instead of silently failing. See `docs/EXCHANGE_REFERENCE.md`.

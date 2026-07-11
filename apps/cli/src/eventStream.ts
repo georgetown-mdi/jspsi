@@ -45,9 +45,11 @@ export type EventType = "stages" | "stage" | "warning" | "result" | "error";
  *   solely of this party's own configuration, actionable and safe to surface.
  * - `security`: a trust-boundary failure -- a `security`-kind
  *   {@link ConnectionError} from the authenticated key exchange (wrong secret,
- *   tamper, replay). It must be identifiable from the terminal event alone, since
- *   the process exit code (64/69) cannot distinguish it from a plain usage or
- *   transport failure.
+ *   tamper, replay), from SFTP host-key verification (a pinned-fingerprint
+ *   mismatch, or an unpinned host refused fail-closed), or from the
+ *   post-handshake AEAD layer. It must be identifiable from the terminal event
+ *   alone, since the process exit code (64/69) cannot distinguish it from a
+ *   plain usage or transport failure.
  * - `output`: the privacy-sensitive exchange already succeeded and only local
  *   result-file generation failed -- the operator must NOT re-run the exchange.
  * - `exchange`: every other failure (a retryable transport/usage fault).

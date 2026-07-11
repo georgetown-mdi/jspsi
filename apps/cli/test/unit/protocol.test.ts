@@ -157,6 +157,61 @@ vi.mock("@psilink/core", async (importActual) => {
   };
 });
 
+// Replace the SFTP adapter with a transport mock whose connect() drives the
+// configured hostVerifier with a fixed ssh-ed25519 key blob (as ssh2 would) and
+// rejects with ssh2's host-denied message when the verifier refuses -- the same
+// harness core's fileSyncConnection host-key tests use. This lets an
+// sftp-channel runProtocol exercise the REAL host-key verification wrap in core
+// (the security classification under test) with no live SSH connection. Only
+// the sftp-channel test below constructs this class; every other test in this
+// file runs filedrop, which never touches the adapter.
+vi.mock("../../src/connection/ssh2SftpAdapter", () => {
+  // A raw OpenSSH ssh-ed25519 host-key blob: uint32 len + "ssh-ed25519" +
+  // uint32 len + 32 key bytes, matching what ssh2 hands hostVerifier.
+  const keyTypeBytes = Buffer.from("ssh-ed25519");
+  const keyBytes = Buffer.alloc(32, 7);
+  const blob = Buffer.alloc(4 + keyTypeBytes.length + 4 + keyBytes.length);
+  blob.writeUInt32BE(keyTypeBytes.length, 0);
+  keyTypeBytes.copy(blob, 4);
+  blob.writeUInt32BE(keyBytes.length, 4 + keyTypeBytes.length);
+  keyBytes.copy(blob, 4 + keyTypeBytes.length + 4);
+
+  const notImplemented = (op: string) => () =>
+    Promise.reject(new Error(`mock sftp adapter: ${op} not implemented`));
+
+  class MockHostKeySftpAdapter {
+    connect(options: Record<string, unknown>): Promise<void> {
+      const verifier = options["hostVerifier"] as
+        | ((keyBlob: Buffer, verify: (permitted: boolean) => void) => void)
+        | undefined;
+      return new Promise<void>((resolve, reject) => {
+        if (verifier === undefined) {
+          resolve();
+          return;
+        }
+        verifier(blob, (permitted: boolean) => {
+          if (permitted) resolve();
+          else reject(new Error("Host denied (verification failed)"));
+        });
+      });
+    }
+    end(): Promise<void> {
+      return Promise.resolve();
+    }
+    safeDelete(): Promise<void> {
+      return Promise.resolve();
+    }
+    list = notImplemented("list");
+    get = notImplemented("get");
+    put = notImplemented("put");
+    delete = notImplemented("delete");
+    rename = notImplemented("rename");
+    createExclusive = notImplemented("createExclusive");
+    exists = notImplemented("exists");
+  }
+  return { SSH2SFTPClientAdapter: MockHostKeySftpAdapter };
+});
+
 import {
   buildOutputTable,
   parseExchangeRecord,
@@ -165,6 +220,9 @@ import {
   PeerAbortError,
   ConnectionError,
   FrameSizeExceededError,
+  FileSyncConnection,
+  fromEventConnection,
+  authenticateConnection,
   MESSAGE_ENVELOPE_VERSION,
   MESSAGE_TYPE_BINARY,
   MESSAGE_HEADER_BYTES,
@@ -176,11 +234,14 @@ import {
   PEER_SILENCE_GUIDANCE,
   type RunProtocolResult,
 } from "../../src/protocol";
+import { runOrExit } from "../../src/util/cli";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
 import { LocalFSClient } from "../../src/connection/localFSClient";
 
 // 32 zero bytes in base64url (43 chars, no padding).
 const TOKEN_A = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+// 32 0x01 bytes in base64url: a second valid token for the mismatched-secret case.
+const TOKEN_B = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE";
 
 // Values unused because runExchange and buildOutputTable are mocked.
 const minimalPrepared = {} as unknown as PreparedExchange;
@@ -2894,4 +2955,144 @@ test("a hostile stage label and terms warning reach the human log neutralized", 
   expect(warnLine).toBeDefined();
   expect(warnLine).not.toContain("\x1b");
   expect(warnLine).toContain("\\x1b");
+});
+
+// --- Security classification, end to end ---------------------------------------
+//
+// The two canonical trust-boundary failures must classify as category "security"
+// on the event stream from their REAL production paths (not a hand-built
+// ConnectionError): a failed key-exchange authentication driven by a genuine
+// mismatched-secret handshake over the real filedrop transport, and an SFTP
+// host-key verification failure driven through core's real hostVerifier wrap
+// (mocked transport). Both must keep exit code 69, pinned through the real
+// runOrExit mapper fed the real captured error.
+
+test("a mismatched shared secret under --event-stream emits category security and maps to exit 69", async () => {
+  const keyFileA = path.join(tmpDir, "a.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+
+  // Party B: a real peer running the real key exchange with a DIFFERENT
+  // token, orchestrated by hand (open/synchronize/start, then
+  // authenticateConnection) exactly as authentication.test.ts does. Its
+  // teardown is deferred until both parties settle so its handshake files --
+  // including a best-effort abort -- stay readable for party A. Its own
+  // outcome is not asserted (it may see the generic failure or, if A's
+  // teardown swept the abort file first, a bounded transport timeout).
+  const connB = new FileSyncConnection(new LocalFSClient(), {
+    verbose: -1,
+    pollingFrequency: 10,
+  });
+  const partyB = (async () => {
+    await connB.open({ channel: "filedrop", path: dropDir });
+    await connB.synchronize();
+    connB.start();
+    const roleB = connB.handshakeRole;
+    if (roleB === undefined) throw new Error("party B resolved no role");
+    const mcB = fromEventConnection(connB, { inactivityTimeoutMs: 2000 });
+    return authenticateConnection(mcB, { sharedSecret: TOKEN_B }, roleB, true);
+  })();
+
+  mockFd3Open();
+  let resA: PromiseSettledResult<unknown>;
+  try {
+    [resA] = await Promise.allSettled([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+      partyB,
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+    await connB.close().catch(() => {});
+  }
+
+  // The real handshake failure: the generic non-oracular message, now carried
+  // by a security-kind ConnectionError.
+  expect(resA.status).toBe("rejected");
+  const reasonA = (resA as PromiseRejectedResult).reason as unknown;
+  expect(reasonA).toBeInstanceOf(ConnectionError);
+  expect((reasonA as ConnectionError).kind).toBe("security");
+  expect((reasonA as ConnectionError).message).toBe(
+    "key exchange authentication failed",
+  );
+
+  // Exactly one terminal event, classified security.
+  const lines = takeFd3Lines();
+  expect(lines).toHaveLength(1);
+  expect(lines[0].type).toBe("error");
+  expect(lines[0].category).toBe("security");
+  expect(lines[0].v).toBe(1);
+
+  // The exit code stays 69: feed the real captured error through the real
+  // command exit mapper (a ConnectionError is not a UsageError and carries no
+  // exitCode of its own).
+  const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
+  try {
+    await runOrExit("test-a", () => Promise.reject(reasonA));
+    expect(exitSpy).toHaveBeenCalledWith(69);
+  } finally {
+    exitSpy.mockRestore();
+  }
+}, 15_000);
+
+test("an SFTP host-key mismatch under --event-stream emits category security and maps to exit 69", async () => {
+  // The pinned fingerprint is well-formed but matches no key, so core's real
+  // hostVerifier wrap (driven by the mocked adapter's connect) fails closed
+  // with its mismatch error.
+  mockFd3Open();
+  let err: unknown;
+  try {
+    err = await runProtocol(
+      {
+        channel: "sftp",
+        server: {
+          host: "sftp.example.org",
+          hostKeyFingerprint: "SHA256:" + "A".repeat(43),
+        },
+      },
+      null,
+      minimalPrepared,
+      undefined,
+      -1,
+      "test",
+      undefined,
+      undefined,
+      undefined,
+      { eventStream: true },
+    ).then(
+      () => {
+        throw new Error("expected the host-key mismatch to reject");
+      },
+      (e: unknown) => e,
+    );
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  expect((err as Error).message).toMatch(/SFTP host-key verification failed/);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("security");
+
+  const lines = takeFd3Lines();
+  expect(lines).toHaveLength(1);
+  expect(lines[0].type).toBe("error");
+  expect(lines[0].category).toBe("security");
+  expect(lines[0].v).toBe(1);
+
+  const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
+  try {
+    await runOrExit("test", () => Promise.reject(err));
+    expect(exitSpy).toHaveBeenCalledWith(69);
+  } finally {
+    exitSpy.mockRestore();
+  }
 });

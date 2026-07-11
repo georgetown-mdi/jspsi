@@ -904,9 +904,15 @@ test("open (sftp) with no pin records no observed host key", async () => {
   const conn = new FileSyncConnection(makeHostKeyMockClient(ed25519Blob()), {
     verbose: -1,
   });
-  await expect(
-    conn.open({ channel: "sftp", server: { host: "sftp.example.org" } }),
-  ).rejects.toThrow(/no host_key_fingerprint is pinned/);
+  const err = await conn
+    .open({ channel: "sftp", server: { host: "sftp.example.org" } })
+    .catch((e: unknown) => e);
+  expect((err as Error).message).toMatch(/no host_key_fingerprint is pinned/);
+  // The no-pin refusal is the other host-identity trust failure: the same
+  // security-kind ConnectionError as the pinned mismatch, cause preserved.
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("security");
+  expect((err as ConnectionError).cause).toBeInstanceOf(Error);
   expect(conn.observedHostKey).toBeUndefined();
 });
 
@@ -925,12 +931,19 @@ test("open (sftp) with a mismatched pin fails closed and names the re-pin recove
   const conn = new FileSyncConnection(makeHostKeyMockClient(ed25519Blob(2)), {
     verbose: -1,
   });
-  await expect(
-    conn.open({
+  const err = await conn
+    .open({
       channel: "sftp",
       server: { host: "sftp.example.org", hostKeyFingerprint: pin },
-    }),
-  ).rejects.toThrow(/SFTP host-key verification failed/);
+    })
+    .catch((e: unknown) => e);
+  expect((err as Error).message).toMatch(/SFTP host-key verification failed/);
+  // A host-identity mismatch is a trust-boundary failure: a security-kind
+  // ConnectionError (the classification the web classifier and the CLI event
+  // stream key on), with the underlying connect rejection preserved as cause.
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("security");
+  expect((err as ConnectionError).cause).toBeInstanceOf(Error);
   await expect(
     conn.open({
       channel: "sftp",

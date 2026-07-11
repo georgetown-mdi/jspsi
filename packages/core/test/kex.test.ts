@@ -6,6 +6,7 @@ import { x25519 } from "@noble/curves/ed25519.js";
 import { runKex, computeKexKeys, noiseHkdf } from "../src/kex";
 import { toBase64Url, fromBase64Url } from "../src/utils/crypto";
 import {
+  ConnectionError,
   createMessagePipe,
   fromEventConnection,
 } from "../src/connection/messageConnection";
@@ -214,10 +215,15 @@ test("a mismatched secret fails closed on both sides with the generic error", as
   const [a, b] = await runPair(PSK_A, PSK_B);
   expect(a.status).toBe("rejected");
   expect(b.status).toBe("rejected");
-  const msgs = [a, b].map(
-    (r) => (r as PromiseRejectedResult).reason.message as string,
-  );
-  expect(msgs.every((m) => m === GENERIC_FAILURE)).toBe(true);
+  for (const r of [a, b]) {
+    const reason = (r as PromiseRejectedResult).reason as unknown;
+    // The trust-boundary classification consumers key on: a security-kind
+    // ConnectionError, with the message byte-identical to the generic string
+    // (the type carries the classification, never the message).
+    expect(reason).toBeInstanceOf(ConnectionError);
+    expect((reason as ConnectionError).kind).toBe("security");
+    expect((reason as ConnectionError).message).toBe(GENERIC_FAILURE);
+  }
 });
 
 test("forward-secrecy guard: the same secret with different ephemerals yields different session keys", async () => {
@@ -232,9 +238,14 @@ test("forward-secrecy guard: the same secret with different ephemerals yields di
 test("the handshake times out if the peer never responds", async () => {
   const eventConn = new PassthroughConnection();
   const conn = fromEventConnection(eventConn, { inactivityTimeoutMs: 20 });
-  await expect(runKex(conn, "responder", PSK_A, false)).rejects.toThrow(
-    "key exchange handshake timed out",
+  const err = await runKex(conn, "responder", PSK_A, false).catch(
+    (e: unknown) => e,
   );
+  expect((err as Error).message).toBe("key exchange handshake timed out");
+  // The timeout is a transport fault (the peer is gone), not an authentication
+  // verdict, so it deliberately does NOT carry the security classification the
+  // generic authentication failure does.
+  expect(err).not.toBeInstanceOf(ConnectionError);
 });
 
 test("runKex rejects when the psk is not 32 bytes", async () => {
@@ -253,7 +264,13 @@ test("responder sends abort when the initiator's msg1 is malformed", async () =>
   // reqEnc is present (a valid boolean) so the schema parses; the failure is the
   // undecodable `e`, exercising the public-key-decode abort path.
   await connA.send({ kexMsg: "1", e: "not-base64url!!", reqEnc: false });
-  await expect(responder).rejects.toThrow(GENERIC_FAILURE);
+  const err = await responder.catch((e: unknown) => e);
+  // A malformed-frame rejection carries the same security classification as a
+  // confirmation mismatch: every authentication-failure site throws the one
+  // generic security-kind error.
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("security");
+  expect((err as ConnectionError).message).toBe(GENERIC_FAILURE);
   expect(await connA.receive()).toEqual({ kexMsg: "abort" });
 });
 

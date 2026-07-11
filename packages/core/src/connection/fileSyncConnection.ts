@@ -20,6 +20,7 @@ import type {
   FileDropConnectionConfig,
 } from "../config/connection";
 import type { HandshakeRole } from "../types";
+import { ConnectionError } from "./messageConnection";
 import {
   UsageError,
   BilateralModeMismatchError,
@@ -1301,8 +1302,14 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         await this.client.connect(connectOptions);
       } catch (err) {
         if (mismatchDetails !== undefined) {
-          throw Object.assign(
-            new Error(`SFTP host-key verification failed: ${mismatchDetails}`),
+          // A host-identity failure -- a pinned-fingerprint mismatch or the
+          // no-pin fail-closed refusal (both verifier branches settle through
+          // mismatchDetails) -- is a trust-boundary fault, so it carries the
+          // security kind consumers classify on; the message and the cause
+          // chain are unchanged.
+          throw new ConnectionError(
+            `SFTP host-key verification failed: ${mismatchDetails}`,
+            "security",
             { cause: err },
           );
         }

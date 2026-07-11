@@ -100,7 +100,7 @@ The four categories are lifted verbatim from the web front end's `ExchangeErrorC
 | Category | Meaning | Classification rule |
 | -------- | ------- | ------------------- |
 | `config` | A prepare-time fault composed solely of this party's own configuration -- actionable and safe to surface. | The terminal error is an `OperatorConfigError` (a `UsageError` subclass) raised in the PREPARE phase. Scoped to that exact base type, **not** any prepare-phase `UsageError`: a sibling prepare-time `UsageError` can embed partner-influenced text, so it stays `exchange` (message not surfaced as config). |
-| `security` | A trust-boundary failure -- the authenticated key exchange reported a wrong secret, tamper, or replay. | The terminal error is a `ConnectionError` with `kind === "security"`, in any phase. |
+| `security` | A trust-boundary failure: the authenticated key exchange reported a wrong secret, tamper, or replay; the SFTP host-key verification failed (a pinned-fingerprint mismatch, or an unpinned host refused fail-closed); or the post-handshake AEAD layer reported tampering. | The terminal error is a `ConnectionError` with `kind === "security"`, in any phase. |
 | `output` | The privacy-sensitive exchange already succeeded; only local result-file generation failed. The operator must **not** re-run the exchange. | The failure landed in the OUTPUT phase (after `runExchange` returned, during result-CSV or audit-record generation), regardless of the error's type. |
 | `exchange` | Every other failure -- a retryable transport or usage fault. | The default: any terminal error not matched by a rule above. |
 
@@ -108,7 +108,7 @@ The phase advances as the run progresses: everything up to and including the han
 
 ### The security marker
 
-The process exit code cannot distinguish a `security` failure from an ordinary one: a `security`-kind `ConnectionError` is not a `UsageError`, so it exits 69 (EX_UNAVAILABLE) -- the same code a plain transport drop yields. A supervisor that must treat an authentication failure differently (a wrong secret is not a retryable transport blip) therefore cannot rely on the exit code; the `error` event's `category: "security"` is the only place the distinction is observable. Reading the terminal event, not the exit code, is the supported way to detect a trust-boundary failure.
+The process exit code cannot distinguish a `security` failure from an ordinary one: a `security`-kind `ConnectionError` is not a `UsageError`, so it exits 69 (EX_UNAVAILABLE) -- the same code a plain transport drop yields. A supervisor that must treat a trust failure differently (a wrong secret is not a retryable transport blip, and a host presenting an unexpected key must not be silently reconnected to) therefore cannot rely on the exit code; the `error` event's `category: "security"` is the only place the distinction is observable. This covers the handshake cases (a failed key-exchange authentication: wrong secret, tampered or malformed handshake frames) and the host-identity cases (an SFTP host-key mismatch against the pinned fingerprint, or the unpinned fail-closed refusal) alike. Reading the terminal event, not the exit code, is the supported way to detect a trust-boundary failure.
 
 ## Terminal-event guarantees
 
