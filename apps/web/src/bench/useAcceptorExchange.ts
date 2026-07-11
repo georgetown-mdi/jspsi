@@ -21,7 +21,7 @@ import {
   runWithStages,
   stagesFor,
 } from "./exchangeRun";
-import { buildInviterRunOutputs } from "./inviterRunOutputs";
+import { buildRunOutputs } from "./runOutputs";
 import { failureFor } from "./useInviterExchange";
 import { invitationUsable } from "./inviterModel";
 import { prepareAcceptorExchange } from "./acceptorExchange";
@@ -35,10 +35,8 @@ import type {
 import type { Acquire, GenerateOutput } from "@psi/exchangeLifecycle";
 import type { CSVRow } from "@psilink/core";
 import type { ExchangeRun } from "./exchangeRun";
-// buildInviterRunOutputs and its output type are role-neutral: the download
-// artifacts are the same both seats, so the acceptor reuses them verbatim.
-import type { InviterRunOutputs } from "./inviterRunOutputs";
 import type { RunFailure } from "./useInviterExchange";
+import type { RunOutputs } from "./runOutputs";
 
 /** The launch the acceptor commits to on "Start the exchange": the decoded
  * invitation, the committed name recorded in the exchange record, the acquired
@@ -78,12 +76,12 @@ export function useAcceptorExchange({
   launch: AcceptorLaunch | undefined;
 }): {
   run: ExchangeRun;
-  outputs: InviterRunOutputs | undefined;
+  outputs: RunOutputs | undefined;
   failure: RunFailure | undefined;
   tryAgain: () => void;
 } {
   const [run, setRun] = useState<ExchangeRun>(() => initialRun("acceptor"));
-  const [outputs, setOutputs] = useState<InviterRunOutputs>();
+  const [outputs, setOutputs] = useState<RunOutputs>();
   const [failure, setFailure] = useState<RunFailure>();
 
   // Drives the lifecycle's AbortSignal; the effect cleanup below aborts it so an
@@ -127,13 +125,10 @@ export function useAcceptorExchange({
 
     // Output-generation half. The URLs the build creates are revoked when the
     // outputs are replaced or the bench unmounts (effect above); a throw
-    // mid-build revokes its own partial URLs (see buildInviterRunOutputs).
-    const generateOutput: GenerateOutput<InviterRunOutputs> = (
-      result,
-      prepared,
-    ) => {
+    // mid-build revokes its own partial URLs (see buildRunOutputs).
+    const generateOutput: GenerateOutput<RunOutputs> = (result, prepared) => {
       log.info("linkage complete, generating results and record files");
-      return buildInviterRunOutputs(result, prepared, {
+      return buildRunOutputs(result, prepared, {
         create: (blob) => window.URL.createObjectURL(blob),
         revoke: (url) => window.URL.revokeObjectURL(url),
       });
@@ -177,7 +172,7 @@ export function useAcceptorExchange({
       return { peer, conn, psi, prepared };
     };
 
-    void runExchangeLifecycle<InviterRunOutputs>({
+    void runExchangeLifecycle<RunOutputs>({
       acquire,
       exchangeRole: "initiator",
       sharedSecret: token.sharedSecret,

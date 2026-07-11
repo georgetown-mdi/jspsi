@@ -18,8 +18,8 @@ import styles from "./bench.module.css";
 
 import type { ExchangeRun } from "./exchangeRun";
 import type { GeneratedInvitation } from "@psi/invitation";
-import type { InviterRunOutputs } from "./inviterRunOutputs";
 import type { RunFailure } from "./useInviterExchange";
+import type { RunOutputs } from "./runOutputs";
 
 /**
  * The inviter's post-create work column, through the run's three phases: the
@@ -41,7 +41,7 @@ export function InviterExchangeSection({
 }: {
   invitation: GeneratedInvitation;
   run: ExchangeRun;
-  outputs: InviterRunOutputs | undefined;
+  outputs: RunOutputs | undefined;
   failure: RunFailure | undefined;
   onTryAgain: () => void;
   onStartOver: () => void;

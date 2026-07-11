@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vitest";
 
-import { buildInviterRunOutputs } from "@bench/inviterRunOutputs";
+import { buildRunOutputs } from "@bench/runOutputs";
 
 import type { ExchangeResult, PreparedExchange } from "@psilink/core";
-import type { ObjectUrls } from "@bench/inviterRunOutputs";
+import type { ObjectUrls } from "@bench/runOutputs";
 
 // A recording ObjectUrls fake: each create hands out a distinct url (or throws
 // on the configured call), and both sides log what they were given, so the
@@ -58,14 +58,10 @@ function withheldResult(): ExchangeResult {
   } as unknown as ExchangeResult;
 }
 
-describe("buildInviterRunOutputs", () => {
+describe("buildRunOutputs", () => {
   test("a received result yields the results url, count, and timestamped record pair", () => {
     const { urls, created, revoked } = recordingUrls();
-    const outputs = buildInviterRunOutputs(
-      receivedResult(true),
-      prepared,
-      urls,
-    );
+    const outputs = buildRunOutputs(receivedResult(true), prepared, urls);
 
     expect(outputs.resultsUrl).toBe(created[0]);
     expect(outputs.matchedRecordCount).toBe(1);
@@ -82,7 +78,7 @@ describe("buildInviterRunOutputs", () => {
 
   test("a withheld result offers the record but no results url", () => {
     const { urls, created } = recordingUrls();
-    const outputs = buildInviterRunOutputs(withheldResult(), prepared, urls);
+    const outputs = buildRunOutputs(withheldResult(), prepared, urls);
 
     expect(outputs.resultWithheld).toBe(true);
     expect(outputs.resultsUrl).toBeUndefined();
@@ -94,20 +90,16 @@ describe("buildInviterRunOutputs", () => {
   test("a throw after the results url was created revokes it before propagating", () => {
     const { urls, created, revoked } = recordingUrls({ failOnCall: 2 });
 
-    expect(() =>
-      buildInviterRunOutputs(receivedResult(true), prepared, urls),
-    ).toThrow("createObjectURL refused");
+    expect(() => buildRunOutputs(receivedResult(true), prepared, urls)).toThrow(
+      "createObjectURL refused",
+    );
     expect(created).toHaveLength(1);
     expect(revoked).toEqual([created[0]]);
   });
 
   test("a result without an audit pair omits the record downloads", () => {
     const { urls, created, revoked } = recordingUrls();
-    const outputs = buildInviterRunOutputs(
-      receivedResult(false),
-      prepared,
-      urls,
-    );
+    const outputs = buildRunOutputs(receivedResult(false), prepared, urls);
 
     expect(outputs.record).toBeUndefined();
     expect(outputs.resultsUrl).toBe(created[0]);
