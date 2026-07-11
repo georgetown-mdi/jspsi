@@ -26,6 +26,7 @@ import {
   acceptorDoneLedgerTag,
   acceptorLedgerRows,
   acceptorLedgerTag,
+  acceptorLegalAgreementDisplay,
   acceptorRailFacts,
   acceptorSpine,
   invitingPartyName,
@@ -318,6 +319,11 @@ export function AcceptorBench() {
   const ready = decode.status === "ready";
   const token = ready ? decode.invitation.token : undefined;
   const linkageTerms = token?.linkageTerms;
+  // The sanitized legal-agreement values the consent step displays beside the
+  // attestation; undefined when the invitation attaches none (no fieldset then).
+  // Display only -- consent stays gated on the checkbox and name alone.
+  const legalAgreementDisplay =
+    token !== undefined ? acceptorLegalAgreementDisplay(token) : undefined;
 
   // The effective { metadata, standardization } the verdict and launch both consume,
   // derived from the columns-step state exactly as PrepareData derives it (see
@@ -715,6 +721,38 @@ export function AcceptorBench() {
                   {parseAlert.message}
                 </span>
               </Alert>
+            )}
+            {legalAgreementDisplay !== undefined && (
+              <fieldset className={styles.fieldset}>
+                <legend>Legal agreement</legend>
+                <p className={`${styles.small} ${styles.sub}`}>
+                  Check these values against your signed agreement before you
+                  accept.
+                </p>
+                <Text size="sm">
+                  Agreement reference:{" "}
+                  <span className={styles.mono}>
+                    {legalAgreementDisplay.reference}
+                  </span>
+                </Text>
+                <Text size="sm">
+                  Stated purpose of the disclosure:{" "}
+                  {legalAgreementDisplay.purpose}
+                </Text>
+                <Text size="sm">
+                  Expiration date:{" "}
+                  <span className={styles.mono}>
+                    {legalAgreementDisplay.expirationDate}
+                  </span>
+                </Text>
+                {legalAgreementDisplay.alteredForDisplay && (
+                  <p className={`${styles.small} ${styles.sub}`}>
+                    Some characters here are shown as escape codes because they
+                    fall outside plain ASCII, so these values may not read
+                    exactly as they do in your document.
+                  </p>
+                )}
+              </fieldset>
             )}
             <div className={styles.workFoot}>
               <Button
