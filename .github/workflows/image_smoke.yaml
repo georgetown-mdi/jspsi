@@ -69,8 +69,9 @@ jobs:
 
       # Role 2: the web console server comes up and serves. Start it detached in
       # `serve` mode, poll the root URL until it answers HTTP 200 within a bounded
-      # timeout (fail if it never comes up), then tear the container down. `always()`
-      # on the teardown so a failed poll still removes the container and prints logs.
+      # timeout, then tear the container down. Both exits -- the timeout-failure
+      # branch (after dumping logs) and the success fall-through -- remove the
+      # container by hand; there is no separate teardown step to rely on.
       - name: Smoke the serve role
         run: |
           set -euo pipefail
