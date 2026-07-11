@@ -443,6 +443,7 @@ export async function handler(argv: Arguments): Promise<void> {
     verbosity,
     sweepExchangeFiles,
     forceRetainSweep,
+    eventStream,
     linkageStrategy,
     ...options
   } = parsed;
@@ -616,9 +617,10 @@ export async function handler(argv: Arguments): Promise<void> {
         // rides the terms frame when intent is true (see exchangeTerms).
         options.save,
         // onAuthenticated is undefined on the unauthenticated zero-setup path; the
-        // trailing object carries the CLI-only sweep controls.
+        // trailing object carries the CLI-only sweep controls and the
+        // --event-stream toggle.
         undefined,
-        { sweepExchangeFiles, forceRetainSweep },
+        { sweepExchangeFiles, forceRetainSweep, eventStream },
       );
     } catch (err) {
       exitWithError(log, err, err instanceof UsageError ? 64 : 69);

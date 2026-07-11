@@ -43,6 +43,7 @@ function testOptions(
     configFile: path.join(tmpdir(), `psilink-invite-test-${id}.yaml`),
     keyFile: path.join(tmpdir(), `psilink-invite-test-${id}.key`),
     record: false,
+    eventStream: false,
     logLevel: logLibrary.levels.SILENT,
     verbosity: 0,
     ...overrides,

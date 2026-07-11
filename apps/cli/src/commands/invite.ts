@@ -695,6 +695,7 @@ export async function handler(argv: Arguments): Promise<void> {
             enabled: options.record,
             recordFile: options.recordFile,
           }),
+          eventStream: options.eventStream,
           // The inviter's received-payload set is unknown until the acceptor
           // transmits it, so crystallize the observed set into the saved config
           // after this first exchange -- a later `psilink exchange` then fails

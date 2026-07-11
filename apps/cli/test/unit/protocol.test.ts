@@ -185,6 +185,16 @@ const minimalPrepared = {} as unknown as PreparedExchange;
 let tmpDir: string;
 let dropDir: string;
 
+// fd-3 sentinel: no test in this file passes --event-stream, so nothing may ever
+// reach the machine-interface descriptor (EVENT_STREAM_FD = 3). Wrap writeSync to
+// record any fd-3 write while passing every other fd straight through to the real
+// implementation, then assert in afterEach that none occurred. This pins the
+// requirement that without --event-stream the run is byte-identical to today: fd
+// 3 is untouched across every protocol scenario the suite exercises.
+const EVENT_STREAM_FD = 3;
+let fd3Writes: number;
+let realWriteSync: typeof fs.writeSync;
+
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-proto-integ-"));
   dropDir = path.join(tmpDir, "drop");
@@ -193,9 +203,22 @@ beforeEach(() => {
   mockState.errors.length = 0;
   mockState.runExchangeEntries = 0;
   fs.mkdirSync(dropDir);
+
+  fd3Writes = 0;
+  realWriteSync = fs.writeSync;
+  vi.spyOn(fs, "writeSync").mockImplementation(((
+    fd: number,
+    ...args: unknown[]
+  ) => {
+    if (fd === EVENT_STREAM_FD) fd3Writes += 1;
+    return (realWriteSync as (...a: unknown[]) => number)(fd, ...args);
+  }) as typeof fs.writeSync);
 });
 
 afterEach(async () => {
+  // No --event-stream run in this file, so fd 3 must have stayed untouched.
+  expect(fd3Writes).toBe(0);
+  vi.mocked(fs.writeSync).mockRestore();
   // Clear any unconsumed mockImplementationOnce entries. When a test times out
   // before runExchange is called, the pending entry remains in the queue and
   // the next test receives a stale blocking promise instead of the default

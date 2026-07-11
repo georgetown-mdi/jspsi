@@ -30,6 +30,12 @@ import { createPsiEngine } from "./psiWorkerHost";
 import { writeExchangeRecord, type RecordOutput } from "./recordFile";
 import { writeOutput } from "./util/cli";
 import { logRuntimeEnv } from "./util/runtimeEnv";
+import {
+  assertEventStreamFdOpen,
+  createEventStreamEmitter,
+  type ErrorPhase,
+  type EventStreamEmitter,
+} from "./eventStream";
 
 /**
  * Operator guidance appended to the file-sync peer-silence timeout error.
@@ -102,6 +108,15 @@ export interface FileSyncRuntimeOptions {
   sweepExchangeFiles?: boolean;
   /** `--force-retain-sweep`: permit the sweep to wipe a retain-mode transcript. */
   forceRetainSweep?: boolean;
+  /**
+   * `--event-stream`: emit the opt-in NDJSON machine-interface stream on fd 3
+   * (see eventStream.ts and docs/spec/CLI_EVENTS.md). When unset (the default)
+   * no emitter is constructed and nothing is ever written to fd 3, so the run is
+   * byte-identical to one without the flag. The fail-closed fd-3 preflight
+   * (assertEventStreamFdOpen) runs at the top of runProtocol, before any other
+   * exchange work.
+   */
+  eventStream?: boolean;
 }
 
 /** The value {@link runProtocol} resolves with. */
@@ -225,9 +240,38 @@ export async function runProtocol(
 ): Promise<RunProtocolResult> {
   const log = getLogger(loggerName);
 
+  // The opt-in machine-interface emitter (fd-3 NDJSON), constructed only under
+  // --event-stream. Undefined when the flag is absent, so no line is ever written
+  // to fd 3 and the run stays byte-identical. `emit` runs the callback only when
+  // the emitter exists, so every emission site is a no-op in the default
+  // (flag-off) run.
+  //
+  // Fail closed and loud FIRST -- before the runtime banner, any connection, or
+  // any other exchange work: if --event-stream was given but fd 3 is not actually
+  // wired, throw a UsageError (exit 64 at the command boundary) here rather than
+  // silently dropping every event or crashing mid-run on the first write. This is
+  // the top of the protocol lifecycle every exchange-running command reaches, so
+  // the one check covers exchange, zero-setup, and the online invite/accept alike.
+  let eventStream: EventStreamEmitter | undefined;
+  if (fileSyncRuntime.eventStream) {
+    assertEventStreamFdOpen();
+    eventStream = createEventStreamEmitter();
+  }
+
   // Best-effort: a failure to probe the runtime warns and is swallowed, never
   // aborting the exchange.
   logRuntimeEnv(log);
+  const emit = (fn: (e: EventStreamEmitter) => void): void => {
+    if (eventStream !== undefined) fn(eventStream);
+  };
+  // The lifecycle phase a terminal event is classified against. It advances as
+  // the run progresses so the catch below classifies a failure by where it
+  // landed, mirroring the web's prepare/run/output split: everything up to and
+  // including the handshake is "prepare"; the PSI exchange is "run"; the local
+  // result/record generation after runExchange returns is "output". A single
+  // terminal event fires per run -- the result on success, or one classified
+  // error -- so this is read exactly once, in the catch.
+  let terminalPhase: ErrorPhase = "prepare";
 
   if (connection.channel !== "filedrop" && connection.channel !== "sftp")
     // Only reachable via an unsafe cast past ProtocolConnectionConfig.
@@ -823,9 +867,15 @@ export async function runProtocol(
       });
     log.debug(`PSI crypto backend: ${psiBackend}`);
 
+    const stageDefinitions = describeExchangeStages(prepared);
     const stageLabels = Object.fromEntries(
-      describeExchangeStages(prepared).map(({ id, label }) => [id, label]),
+      stageDefinitions.map(({ id, label }) => [id, label]),
     );
+    // Emit the full stage list once, before the first transition, mirroring the
+    // web's onStages. The PSI exchange proper is about to begin, so any failure
+    // from here on is a "run" fault (until output, marked below).
+    emit((e) => e.stages(stageDefinitions));
+    terminalPhase = "run";
     const { associationTable, partnerPayload, audit, bootstrap } =
       await runExchange(
         // Encrypted path: `secure` is the AEAD decorator over mc (the handshake
@@ -859,8 +909,17 @@ export async function runProtocol(
           onStage: (id: string) => {
             const label = stageLabels[id] ?? id;
             log.info(label.charAt(0).toLowerCase() + label.slice(1));
+            // Mirror the human stage line onto the event stream. The emitter
+            // sanitizes id and label (a label derives from partner-authored
+            // linkage-key names) before they reach fd 3.
+            emit((e) => e.stage(id, label));
           },
-          onWarning: (msg: string) => log.warn("terms exchange:", msg),
+          onWarning: (msg: string) => {
+            log.warn("terms exchange:", msg);
+            // The warning text can embed partner-authored column names; the
+            // emitter sanitizes it before the line reaches fd 3.
+            emit((e) => e.warning(msg));
+          },
           // A host-key divergence is a security signal, not a terms warning, so
           // it gets its own un-prefixed warn line; the message is complete and
           // display-safe (reconcileHostKeyFingerprints sanitizes both parties'
@@ -907,6 +966,10 @@ export async function runProtocol(
     // help here: it resolves the decision for close(), but writeAbortMarker writes
     // regardless, and the gate keys on abortArmed, still true.)
     exchangeComplete = true;
+    // From here on any failure is a purely-local "output"-stage fault (result CSV
+    // or audit record), never a run fault: the exchange already succeeded and the
+    // operator must not re-run it, so the catch classifies it as "output".
+    terminalPhase = "output";
 
     // The result table is withheld (associationTable undefined) when this party's
     // agreed terms give it no output -- a one-sided exchange where it is the PSI
@@ -950,6 +1013,13 @@ export async function runProtocol(
     // observedReceivedPayloadColumns surfaces what this party received so a
     // save-capable caller can crystallize it into a fail-closed recurring lock-in
     // (see RunProtocolResult); it is set only here, on the completed-exchange path.
+    //
+    // The single success terminal event: the exchange completed and the local
+    // output stage (result CSV plus the non-fatal record) finished, so exactly one
+    // terminal event has now fired. resultWritten is false for a helper whose
+    // agreed terms give it no output table (associationTable withheld), true when a
+    // result CSV was produced.
+    emit((e) => e.result(associationTable !== undefined));
     return {
       bootstrap,
       onAuthenticatedError,
@@ -1123,8 +1193,20 @@ export async function runProtocol(
       // onAuthenticatedError so a hook failure recorded before the signal is not
       // silently dropped here -- otherwise the caller would treat the run as a
       // clean config write.
+      //
+      // No terminal event is emitted here: a signal exits via the signal
+      // handler's process.exit(130/143), which bypasses this catch, so a
+      // supervisor reads "no terminal event plus exit 130/143" as the interrupt
+      // (see docs/spec/CLI_EVENTS.md). Emitting one only on this in-flight-error
+      // subpath -- but not on the far more common clean interrupt -- would give an
+      // inconsistent signal, so both interrupt paths deliberately emit nothing.
       return { onAuthenticatedError };
     }
+    // The single failure terminal event for an organic (non-signal) fault,
+    // classified against the phase the run reached: "output" once the exchange
+    // completed, otherwise "run" or "prepare". Exactly one terminal event fires
+    // per run, so this is the only error emission and it precedes the rethrow.
+    emit((e) => e.error(err, terminalPhase));
     throw err;
   } finally {
     await doCleanup();

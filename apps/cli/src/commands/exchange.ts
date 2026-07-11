@@ -89,6 +89,12 @@ export function builder(cmd: Argv): Argv {
         "overriding connection.server.keyboard_interactive in config; requires " +
         "a password. Enable for a server that rejects the direct password " +
         "method but accepts the same password over keyboard-interactive",
+      "server-host-key-fingerprint":
+        "pre-pin the server's SSH host-key fingerprint (OpenSSH SHA256 " +
+        "format; use @path to read from file), overriding " +
+        "connection.server.host_key_fingerprint in config. Lets an " +
+        "unattended run connect without the interactive trust prompt; a " +
+        "server presenting a different key still fails closed",
       "peer-id":
         "stable identifier for this party; appears in filenames and logs. " +
         "Overrides connection.options.peer_id in config. Requires " +
@@ -179,6 +185,7 @@ type ExchangeOptions = Omit<
   | "verbosity"
   | "sweepExchangeFiles"
   | "forceRetainSweep"
+  | "eventStream"
   | "invitation"
   | "record"
   | "recordFile"
@@ -656,6 +663,7 @@ export async function handler(argv: Arguments): Promise<void> {
     verbosity,
     sweepExchangeFiles,
     forceRetainSweep,
+    eventStream,
     invitation,
     ...options
   } = parsed;
@@ -796,10 +804,11 @@ export async function handler(argv: Arguments): Promise<void> {
         "exchange",
         recordOutput,
         // saveIntent and onAuthenticated are both undefined on the authenticated
-        // exchange path; the trailing object carries the CLI-only sweep controls.
+        // exchange path; the trailing object carries the CLI-only sweep controls
+        // and the --event-stream toggle.
         undefined,
         undefined,
-        { sweepExchangeFiles, forceRetainSweep },
+        { sweepExchangeFiles, forceRetainSweep, eventStream },
       );
     } catch (err) {
       // Capture rather than exit here so the expiry advisory below can run on the

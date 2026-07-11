@@ -1,7 +1,11 @@
 import type { Argv, Arguments } from "yargs";
 import logLibrary from "loglevel";
 
-import { MAX_RECONNECT_ATTEMPTS, UsageError } from "@psilink/core";
+import {
+  HOST_KEY_FINGERPRINT_REGEX,
+  MAX_RECONNECT_ATTEMPTS,
+  UsageError,
+} from "@psilink/core";
 import type { ConnectionConfig } from "@psilink/core";
 
 import { type ConnectionOverrides, DEFAULT_CONFIG_PATH } from "./config";
@@ -15,6 +19,7 @@ import {
   singleValue,
 } from "./util/cli";
 import { DURATION_VALUE_HELP, FINE_DURATION_VALUE_HELP } from "./util/duration";
+import { resolveAtSignRef } from "./util/atSignRefs";
 
 /**
  * Upper bound for `--server-port`, matching the config schema's own
@@ -23,6 +28,46 @@ import { DURATION_VALUE_HELP, FINE_DURATION_VALUE_HELP } from "./util/duration";
  * schema reject the same range.
  */
 export const MAX_PORT = 65535;
+
+/**
+ * Read `--server-host-key-fingerprint` from parsed `Arguments`, resolving an
+ * `@file` reference and validating the result against
+ * {@link HOST_KEY_FINGERPRINT_REGEX} before it reaches a connection -- a
+ * malformed value is rejected here, at parse time, as a flag-named
+ * {@link UsageError} (CLI exit 64), the same "reject loudly before any
+ * connection is attempted" contract {@link nonNegativeIntFlag} and
+ * {@link durationFlagSeconds} give their flags, rather than surfacing later as a
+ * confusing host-key mismatch at connect time.
+ *
+ * Mirrors {@link resolveHostKeyFingerprintRef} in `util/atSignRefs.ts` -- the
+ * same `@file` resolution and re-validation the config-load path applies to an
+ * `@`-authored `host_key_fingerprint` -- so a pre-pinned CLI value and a
+ * pre-pinned config value are checked identically. Rejects a repeat (via
+ * {@link singleValue}) before either step.
+ */
+export function hostKeyFingerprintFlag(argv: Arguments): string | undefined {
+  const raw = singleValue(argv, "server-host-key-fingerprint");
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "string")
+    throw new UsageError(
+      "--server-host-key-fingerprint must be a string; got " + String(raw),
+    );
+  const resolved = resolveAtSignRef(raw);
+  if (!HOST_KEY_FINGERPRINT_REGEX.test(resolved))
+    throw new UsageError(
+      // Name the @-file reference (not just "--server-host-key-fingerprint")
+      // when the malformed value came from one, mirroring
+      // resolveHostKeyFingerprintRef's message: a secrets-mount file holding a
+      // bad value is otherwise indistinguishable from a bad literal flag value.
+      (raw.startsWith("@")
+        ? `the @-file reference ${raw}`
+        : "--server-host-key-fingerprint") +
+        " must be in OpenSSH SHA256 format: the SHA256: prefix followed by " +
+        "43 unpadded standard base64 characters (the value ssh-keygen -lf " +
+        "prints, or the fingerprint shown by a prior interactive psilink run)",
+    );
+  return resolved;
+}
 
 /**
  * Per-command overrides for the descriptions of the common bootstrap options
@@ -44,6 +89,7 @@ export type CommonBootstrapDescribeOverrides = Partial<
     | "server-private-key"
     | "server-private-key-passphrase"
     | "server-keyboard-interactive"
+    | "server-host-key-fingerprint"
     | "peer-id"
     | "timestamp-in-filename"
     | "retain-files"
@@ -123,6 +169,17 @@ export function addCommonBootstrapOptions(
           "password method but accepts the same password over " +
           "keyboard-interactive",
     })
+    .option("server-host-key-fingerprint", {
+      type: "string",
+      describe:
+        describe["server-host-key-fingerprint"] ??
+        "pre-pin the server's SSH host-key fingerprint (OpenSSH SHA256 " +
+          "format, e.g. SHA256:abc...xyz; the value ssh-keygen -lf prints, or " +
+          "the fingerprint shown by a prior interactive psilink run); use " +
+          "@path to read from file. Lets an unattended (non-interactive) run " +
+          "connect without the interactive trust prompt; a server presenting a " +
+          "different key still fails closed",
+    })
     .option("connection-timeout", {
       type: "string",
       describe:
@@ -175,6 +232,16 @@ export function addCommonBootstrapOptions(
         "path for the audit record (default: ./psilink-record-<timestamp>." +
         "json); the private verification keys are written alongside it as " +
         "<name>.keys.json",
+    })
+    .option("event-stream", {
+      type: "boolean",
+      describe:
+        "emit a machine-readable NDJSON event stream on file descriptor 3 for a " +
+        "supervising process: stage transitions, warnings, and one terminal " +
+        "result/error event carrying a classified category (exchange, output, " +
+        "security, config). stdout (the CSV result) and stderr (human logs) are " +
+        "unchanged. Fails fast (exit 64) if fd 3 is not wired. No effect on an " +
+        "offline invite/accept, which runs no exchange. See docs/spec/CLI_EVENTS.md",
     })
     .option("lockless-rendezvous", {
       type: "boolean",
@@ -239,6 +306,15 @@ export interface CommonBootstrapOptions {
   serverPrivateKey?: string;
   serverPrivateKeyPassphrase?: string;
   serverKeyboardInteractive?: boolean;
+  /**
+   * Pre-pinned host-key fingerprint from `--server-host-key-fingerprint`,
+   * already resolved (`@file`) and format-validated by
+   * {@link hostKeyFingerprintFlag}. Feeds `connection.server.hostKeyFingerprint`
+   * so {@link establishHostKeyTrust} finds a pin already set and skips the
+   * interactive prompt; the real connection then verifies it exactly as a
+   * stored pin, so a wrong value still fails closed. See hostKeyTrust.ts.
+   */
+  serverHostKeyFingerprint?: string;
   connectionTimeout?: number;
   peerTimeout?: number;
   // The --polling-frequency override, in MILLISECONDS (not seconds like the two
@@ -254,6 +330,9 @@ export interface CommonBootstrapOptions {
   outboundPath?: string;
   record: boolean;
   recordFile?: string;
+  // Opt-in NDJSON machine-interface stream on fd 3 (see eventStream.ts). A
+  // boolean toggle; when absent nothing is ever written to fd 3.
+  eventStream: boolean;
   logLevel: logLibrary.LogLevelNumbers;
   logFile?: string;
   verbosity: number;
@@ -299,6 +378,11 @@ export function parseCommonBootstrapArgs(
     // boolean flags); yargs yields true only when the enabling form is passed.
     serverKeyboardInteractive: argv["server-keyboard-interactive"] as
       boolean | undefined,
+    // Unlike the credential flags above, a host-key fingerprint is non-secret and
+    // carries no "keep the @path out of the saved config" concern -- resolved (and
+    // format-validated) here at parse time, same as the config-load path already
+    // does for an @-authored host_key_fingerprint (resolveHostKeyFingerprintRef).
+    serverHostKeyFingerprint: hostKeyFingerprintFlag(argv),
     connectionTimeout: durationFlagSeconds(
       argv,
       "connection-timeout",
@@ -323,6 +407,9 @@ export function parseCommonBootstrapArgs(
     // default otherwise, so it is always a boolean here.
     record: argv["record"] as boolean,
     recordFile: singleValue(argv, "record-file") as string | undefined,
+    // Boolean toggle: a repeat is valid (last-one-wins), so read it directly.
+    // yargs yields true only when --event-stream is passed; default off.
+    eventStream: argv["event-stream"] === true,
     logLevel,
     logFile: singleValue(argv, "log-file") as string | undefined,
     verbosity: (argv["verbose"] as number | undefined) ?? 0,
@@ -346,6 +433,7 @@ export type ConnectionOverrideOptions = Pick<
   | "serverPrivateKey"
   | "serverPrivateKeyPassphrase"
   | "serverKeyboardInteractive"
+  | "serverHostKeyFingerprint"
   | "serverPort"
   | "locklessRendezvous"
   | "peerId"
@@ -373,6 +461,7 @@ export function connectionOverridesFrom(
       privateKey: options.serverPrivateKey,
       privateKeyPassphrase: options.serverPrivateKeyPassphrase,
       keyboardInteractive: options.serverKeyboardInteractive,
+      hostKeyFingerprint: options.serverHostKeyFingerprint,
       port: options.serverPort,
       outboundPath: options.outboundPath,
     },
@@ -529,6 +618,7 @@ export type OfflineIgnoredServerOverrides = Pick<
   | "serverPrivateKey"
   | "serverPrivateKeyPassphrase"
   | "serverKeyboardInteractive"
+  | "serverHostKeyFingerprint"
   | "serverPort"
   | "outboundPath"
 >;
@@ -536,8 +626,8 @@ export type OfflineIgnoredServerOverrides = Pick<
 /**
  * Warn that the server-block overrides (`--server-username`, `--server-password`,
  * `--server-private-key`, `--server-private-key-passphrase`,
- * `--server-keyboard-interactive`, `--server-port`, and `--outbound-path`) have no
- * effect
+ * `--server-keyboard-interactive`, `--server-host-key-fingerprint`,
+ * `--server-port`, and `--outbound-path`) have no effect
  * on an OFFLINE invite/accept. Those paths write a placeholder (invite) or
  * invitation-endpoint-seeded (accept) connection block for the operator to edit
  * before `psilink exchange`, rather than building a connection from a URL the way
@@ -571,6 +661,8 @@ export function warnServerOverridesIgnoredOffline(
   // only the enabling form was an override that could have done anything.
   if (options.serverKeyboardInteractive === true)
     ignored.push("--server-keyboard-interactive");
+  if (options.serverHostKeyFingerprint !== undefined)
+    ignored.push("--server-host-key-fingerprint");
   if (options.serverPort !== undefined) ignored.push("--server-port");
   if (options.outboundPath !== undefined) ignored.push("--outbound-path");
   if (ignored.length === 0) return;

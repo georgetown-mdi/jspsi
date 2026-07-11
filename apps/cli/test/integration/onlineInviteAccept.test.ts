@@ -125,6 +125,7 @@ function testOptions(label: string): CommonBootstrapOptions {
     pollingFrequencyMs: 10,
     record: true,
     recordFile: path.join(work, `${label}-record.json`),
+    eventStream: false,
     logLevel: logLibrary.levels.SILENT,
     verbosity: 0,
   };

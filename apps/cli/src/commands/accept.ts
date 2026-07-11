@@ -664,6 +664,7 @@ export async function handler(argv: Arguments): Promise<void> {
             enabled: options.record,
             recordFile: options.recordFile,
           }),
+          eventStream: options.eventStream,
           reuseExistingConfig: ready.reuseExistingConfig,
           // Persist the consented received-column lock-in into the fresh config so
           // the later `psilink exchange` enforces it, the online sibling of the

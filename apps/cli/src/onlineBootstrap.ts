@@ -680,6 +680,14 @@ export async function runOnlineBootstrap(params: {
   verbosity: number;
   loggerName: string;
   recordOutput?: RecordOutput;
+  /**
+   * `--event-stream`: emit the opt-in NDJSON machine-interface stream on fd 3
+   * for the online exchange (see protocol.FileSyncRuntimeOptions and
+   * docs/spec/CLI_EVENTS.md). Threaded straight to runProtocol, which runs the
+   * fail-closed fd-3 preflight before opening the connection. Undefined/false on
+   * the offline invite/accept paths, which never reach runProtocol.
+   */
+  eventStream?: boolean;
   /** Keep a pre-existing, already-reconciled config: skip the config write. */
   reuseExistingConfig?: boolean;
   /**
@@ -866,6 +874,11 @@ export async function runOnlineBootstrap(params: {
         });
         configWritten = true;
       },
+      // The online invite/accept run no file-sync entry-sweep (the sweep flags are
+      // exchange/zero-setup only), so the trailing runtime object carries only the
+      // --event-stream toggle. runProtocol runs the fail-closed fd-3 preflight
+      // before opening the connection.
+      { eventStream: params.eventStream },
     );
     // observedReceivedPayloadColumns is what this party received during the
     // completed exchange (undefined on a signal-interrupted run); it feeds the
