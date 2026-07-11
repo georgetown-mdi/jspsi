@@ -40,10 +40,10 @@ export type FuzzyComparison = NonNullable<
 >;
 
 /**
- * The pure data model behind the Advanced-options editor: seeding a draft from the
+ * The pure data model behind the inviter's authoring bench: seeding a draft from the
  * inviter's columns, building the {@link LinkageTerms} a draft represents, and
- * validating it. No React, no I/O -- the single tested boundary the editor
- * component drives, so the seed/build/validate contract is checked here rather
+ * validating it. No React, no I/O -- the single tested boundary the bench
+ * drives, so the seed/build/validate contract is checked here rather
  * than through the UI.
  *
  * Scope: the guided editor reviews and reorders the metadata-derived default
@@ -450,7 +450,7 @@ export function standardizationForTerms(
 }
 
 /** The inviter's edited per-party data settings, threaded into its own exchange
- * spec: the metadata and standardization it authored in the Advanced editor. Both
+ * spec: the metadata and standardization it authored in the inviter bench. Both
  * are absent on the quick (name-only) path, where they are inferred downstream.
  * The inviter analogue of `AcceptorDataEdits`. */
 export interface InviterDataEdits {

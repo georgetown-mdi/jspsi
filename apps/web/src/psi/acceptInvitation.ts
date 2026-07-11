@@ -13,8 +13,8 @@ import type {
   WebRTCEndpoint,
 } from "@psilink/core";
 
-/** The per-party data preparation the acceptor authored in the "Prepare your
- * data" editor: the edited column metadata (semantic type + disclosure role) and
+/** The per-party data preparation the acceptor authored in its confirm-columns
+ * step: the edited column metadata (semantic type + disclosure role) and
  * the standardization pipeline. Both are local to this party, derived from its own
  * CSV, and never cross-checked with the partner -- see
  * {@link acceptorExchangeDataSpec}. */

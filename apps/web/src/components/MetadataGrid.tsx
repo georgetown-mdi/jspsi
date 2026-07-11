@@ -42,11 +42,11 @@ const SINGLE_IDENTIFIER_MESSAGE =
  * The shared metadata grid: a real table mapping each input column to a semantic
  * type and a single consequence-labeled disclosure choice. Presentational -- it
  * holds no metadata state of its own; it renders `metadata` and emits the next
- * array through {@link onChange}, so each host (the acceptor "Prepare your data"
- * screen and the inviter Advanced-options editor) owns the model and decides what
+ * array through {@link onChange}, so the host (the acceptor's Confirm-your-columns
+ * step) owns the model and decides what
  * the edit means.
  *
- * The grid does not paint the disclosed-columns list itself: each host already
+ * The grid does not paint the disclosed-columns list itself: the host already
  * shows it visibly as the "What you will send to your partner" chips beside the
  * agreed terms, so a second text copy here would be a same-screen duplicate. What
  * the grid keeps is the aria-live ANNOUNCEMENT of that list -- computed

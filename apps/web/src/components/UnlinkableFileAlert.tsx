@@ -6,12 +6,12 @@ import type { AlertContent } from "@components/csvIntake";
 
 /**
  * The operator-facing alert for a file whose columns satisfy zero default linkage
- * keys, shared by both invite surfaces so the wording cannot drift: the quick
- * invite (rendered from an {@link InvitationFileError} zero-satisfiable-keys
- * failure in {@link InvitePanel}) and the Advanced editor's file entry
- * ({@link AdvancedInvite}). When every default key references at least one field
+ * keys, shared by the inviter bench's create and save-exchange-file gates so the
+ * wording cannot drift: each renders it from an {@link InvitationFileError}
+ * zero-satisfiable-keys failure raised by the mint-time re-parse. When every
+ * default key references at least one field
  * type the file lacks, no match is possible and the exchange would yield a result
- * byte-indistinguishable from a legitimately empty intersection, so both surfaces
+ * byte-indistinguishable from a legitimately empty intersection, so both gates
  * refuse the file EARLY with this shared message rather than running it.
  *
  * `unsatisfied` is the missing linkage fields from {@link assessLinkageSatisfiability}

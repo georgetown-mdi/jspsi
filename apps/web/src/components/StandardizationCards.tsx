@@ -20,7 +20,7 @@ import type { ReactNode } from "react";
 
 /**
  * The shared, presentational per-field cleaning card loop, used by BOTH the inviter's
- * advanced-options editor and the acceptor's "Prepare your data" screen. It holds NO
+ * and the acceptor's Cleaning tabs. It holds NO
  * model state: it renders the effective {@link Standardization} the host passes and
  * emits each edit through GRANULAR, intent-shaped callbacks -- never a whole-array
  * `onChange`. That granularity is what lets the two hosts keep opposite data-flow

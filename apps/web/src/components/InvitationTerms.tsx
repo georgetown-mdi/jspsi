@@ -259,10 +259,8 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
  * Wraps the terms panel's lower reference tiers (what you receive, how records are
  * matched, the legal agreement, and "Other details") in one default-collapsed
  * disclosure when {@link condensed}; otherwise renders them inline unchanged.
- * condensed is set on the surfaces that show the terms as post-consent or authored
- * REFERENCE -- both roles' during-run exchange screens, the acceptor's "prepare your
- * data" screen, and the inviter's own live authoring preview -- so the panel stays
- * short (and, for the inviter's run screen, keeps the share block above it in view).
+ * condensed is set on surfaces that show the terms as post-consent or authored
+ * REFERENCE, so the panel stays short.
  * It is NEVER set on the acceptor's pre-consent "review" screen, the one place
  * informed consent is captured, which keeps every tier always-visible. So even though
  * this can fold a tier, it never hides one from the party at the consent decision
@@ -462,9 +460,8 @@ export function InvitationTerms({
   /** Fold the lower reference tiers (what you receive, how records are matched, the
    * legal agreement, and "Other details") into one default-collapsed disclosure,
    * keeping only "What you disclose" and "What the exchange produces" always visible.
-   * Set on the surfaces that show the terms as post-consent or authored REFERENCE
-   * (both roles' during-run exchange screens, the acceptor's "prepare your data"
-   * screen, and the inviter's live authoring preview). NEVER set on the acceptor's
+   * Set on surfaces that show the terms as post-consent or authored
+   * REFERENCE. NEVER set on the acceptor's
    * pre-consent "review" screen, whose every tier must stay always-visible for
    * informed consent. See {@link CondensableDetails}. */
   condensed?: boolean;

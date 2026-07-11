@@ -129,8 +129,8 @@ export interface GeneratedInvitation {
    * inviter's exchange feeds to `prepareForExchange`. Local-only. */
   columns: Array<string>;
   /**
-   * The inviter's edited per-party column metadata, from the Advanced-options
-   * editor. Threaded into the inviter's own `prepareForExchange` (never encoded in
+   * The inviter's edited per-party column metadata, from the bench's Matching &
+   * sharing section. Threaded into the inviter's own `prepareForExchange` (never encoded in
    * the token), so its disclosure choices govern what the inviter sends and its
    * column->type bindings match the run that the authored keys were derived from.
    * Absent on the quick path, where metadata is inferred from the columns
@@ -138,8 +138,8 @@ export interface GeneratedInvitation {
    */
   metadata?: Metadata;
   /**
-   * The inviter's authored per-party standardization, from the Advanced-options
-   * editor's data-prep workbench. Paired with {@link metadata} and threaded into
+   * The inviter's authored per-party standardization, from the bench's Cleaning
+   * tab. Paired with {@link metadata} and threaded into
    * the inviter's own `prepareForExchange` (never embedded in the token), so the
    * cleaning -- and the per-field input-column binding that lets two fields of one
    * semantic type bind to distinct columns -- matches the run the authored fields
@@ -319,14 +319,15 @@ export async function generateInvitation(params: {
   /**
    * Invitation lifetime in seconds; defaults to {@link INVITATION_LIFETIME_SECONDS}
    * (one hour) and must be in the range `(0, {@link MAX_INVITATION_LIFETIME_SECONDS}]`
-   * (up to one year). The quick path omits it and takes the default; the Advanced-
-   * options editor passes the inviter's chosen lifetime. The bounds are enforced
+   * (up to one year). The quick path omits it and takes the default; the inviter
+   * bench passes the inviter's chosen lifetime. The bounds are enforced
    * here so that seam cannot mint an unbounded token.
    */
   lifetimeSeconds?: number;
   /**
-   * Authored linkage terms to embed, from the Advanced-options editor. When
-   * supplied they are embedded VERBATIM: the editor seeded them from this file's
+   * Authored linkage terms to embed, from the AdvancedInvite model
+   * (`buildAdvancedTerms`). When
+   * supplied they are embedded VERBATIM: the model seeded them from this file's
    * columns, validated them through {@link safeParseLinkageTerms}, and confirmed
    * at least one key is satisfiable, so the default-terms derivation is skipped
    * and `inviterName` is not consulted for the terms (the authored terms carry
@@ -337,7 +338,8 @@ export async function generateInvitation(params: {
    */
   linkageTerms?: LinkageTerms;
   /**
-   * The inviter's edited column metadata from the Advanced-options editor, paired
+   * The inviter's edited column metadata from the bench's Matching & sharing
+   * section, paired
    * with `linkageTerms`. Returned on {@link GeneratedInvitation} and threaded into
    * the inviter's own exchange (never embedded in the token); the fail-closed
    * satisfiability re-check binds against it too, so the verdict matches the run.
@@ -345,8 +347,8 @@ export async function generateInvitation(params: {
    */
   metadata?: Metadata;
   /**
-   * The inviter's authored per-party standardization from the Advanced-options
-   * data-prep workbench, paired with `metadata`/`linkageTerms`. Returned on
+   * The inviter's authored per-party standardization from the bench's Cleaning
+   * tab, paired with `metadata`/`linkageTerms`. Returned on
    * {@link GeneratedInvitation} for the inviter's own exchange and threaded into
    * the fail-closed satisfiability re-check (which binds against it, mirroring how
    * `metadata` already does), so the verdict matches the run that produces the
@@ -419,7 +421,7 @@ export async function generateInvitation(params: {
       positions: emptyPositions,
     });
 
-  // The terms to embed. The Advanced-options editor's authored terms are embedded
+  // The terms to embed. The AdvancedInvite model's authored terms are embedded
   // verbatim; the quick path derives them from the file's columns (inferred
   // metadata filters the default keys to those the columns can satisfy -- the same
   // filter the inviter's own exchange would otherwise re-derive -- and authors a
@@ -451,7 +453,7 @@ export async function generateInvitation(params: {
     // Reject a payload.send that does not match the disclosed set before the token
     // is minted, so the partner's consent screen never misstates what is sent (a
     // column metadata gates off, or one it transmits but the dictionary omits). The
-    // Advanced editor derives payload.send from the disclosed columns, so its send
+    // AdvancedInvite model derives payload.send from the disclosed columns, so its send
     // equals what metadata transmits and this is a defense-in-depth backstop
     // (against a regression or a non-editor caller) rather than a gate the editor
     // reaches; it runs here because the exchange-time check in prepareForExchange

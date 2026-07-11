@@ -382,9 +382,9 @@ export async function loadCSVFile(
 }
 
 /**
- * Read only the column header names from a CSV, without parsing its rows. The
- * Advanced-options editor (apps/web) is column-aware -- it seeds metadata-aware
- * defaults and populates field pickers from the header alone -- and needs those
+ * Read only the column header names from a CSV, without parsing its rows. A
+ * column-aware authoring surface seeds metadata-aware
+ * defaults and populates field pickers from the header alone, and needs those
  * names before the inviter commits to generating, where parsing the whole file
  * (which `loadCSVFile` does, and which `generateInvitation` still does at mint
  * time) would be wasted work held in memory through the edit session.

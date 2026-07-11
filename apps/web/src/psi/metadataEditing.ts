@@ -10,8 +10,8 @@ import type {
 /**
  * The pure model behind the web metadata grid: the collapsed disclosure control,
  * the semantic-type and disclosure label tables, and the metadata-editing helpers
- * both hosts (the acceptor "Prepare your data" screen and the inviter
- * Advanced-options editor) drive their grids from. No React, no I/O -- the single
+ * both hosts (the acceptor's Confirm-your-columns step and the inviter's
+ * Matching & sharing section) drive their grids from. No React, no I/O -- the single
  * tested boundary, so the disclosure <-> {role, isPayload} mapping is checked here
  * rather than through the UI.
  *
@@ -310,7 +310,7 @@ export function quickInviteDisclosedColumns(
  * acceptor mirrors this send into its own receive and validates that exactly).
  *
  * Shared by both invite paths so they cannot drift in how they declare what they
- * send: the Advanced editor (`buildAdvancedTerms`) over its edited metadata and the
+ * send: the AdvancedInvite model (`buildAdvancedTerms`) over its edited metadata and the
  * quick path (`generateInvitation`) over the inferred metadata its own exchange
  * falls back to. This declares what already transmits; it does not change which
  * columns flow.
