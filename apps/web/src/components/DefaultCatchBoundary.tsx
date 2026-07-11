@@ -29,9 +29,8 @@ export function DefaultCatchBoundary({ error }: ErrorComponentProps) {
   // debugging. The on-screen render below is separately sanitized.
   whenDiagnostic(() => console.error("DefaultCatchBoundary Error:", error));
 
-  // A root-level error surface: with the legacy Shell gone, it renders itself on
-  // the bench page ground and supplies its own <main> landmark and padding so it
-  // reads acceptably in the bench world.
+  // A root-level error surface outside any route layout: it renders itself on
+  // the bench page ground and supplies its own <main> landmark and padding.
   return (
     <BenchPage>
       <Stack component="main" gap="sm" p="xl">
