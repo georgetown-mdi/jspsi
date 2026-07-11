@@ -1017,7 +1017,7 @@ Steps following `split_on` are applied element-wise across all parts. Null-produ
 
 ## Full example
 
-An end-to-end annotated specification covering every component is planned; see [ROADMAP.md](ROADMAP.md). The web application's "Advanced options" editor, under Expert authoring, now exports the linkage terms as a JSON or YAML document (and imports one back, round-tripped through the same validation) -- the GUI-produced reference for the linkage-terms component. The per-section snippets above remain the working reference for the rest.
+An end-to-end annotated specification covering every component is planned; see [ROADMAP.md](ROADMAP.md). The web application, under Expert authoring in the Matching keys tab, now exports the linkage terms as a JSON or YAML document (and imports one back, round-tripped through the same validation) -- the GUI-produced reference for the linkage-terms component. The per-section snippets above remain the working reference for the rest.
 
 ## See also
 
