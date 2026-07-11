@@ -78,10 +78,10 @@ export function isCliTransport(
  * from the read file, applying the two column edits step 2 offers, and the
  * view-model builders the rail facts and the disclosure ledger render from.
  * No React, no I/O -- the tested boundary for "default terms derive from the
- * file" and "the ledger tracks term edits". The draft itself is the Advanced
- * editor's ({@link AdvancedInviteDraft}); the bench re-surfaces that model, so
- * every derivation and edit goes through the same seed/reconcile helpers the
- * old editor is tested on.
+ * file" and "the ledger tracks term edits". The draft itself is the AdvancedInvite
+ * model's ({@link AdvancedInviteDraft}); the bench re-surfaces that model, so
+ * every derivation and edit goes through the same seed/reconcile helpers that
+ * model is tested on.
  */
 
 /** The read file the spine works over: identity for the file card plus the
@@ -722,7 +722,7 @@ export interface SpineProblem {
   target: SpineTarget;
 }
 
-/** Validate the draft for the create gate -- the Advanced editor's own
+/** Validate the draft for the create gate -- the AdvancedInvite model's own
  * validation over the bench's session. */
 export function reviewValidation(
   editor: InviterEditor,

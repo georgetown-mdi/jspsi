@@ -20,9 +20,10 @@ export function emptyColumnPositions(
 
 /**
  * The operator-facing alert for a file whose header carries unnamed column(s),
- * shared by every web intake surface so the wording cannot drift: the quick invite
- * (rendered from an {@link InvitationFileError} `unnameable` failure), the
- * Advanced editor's file entry, and the acceptor's file acquire. `positions` are
+ * shared by every web intake surface so the wording cannot drift: the inviter
+ * bench's file entry (and its create/save gates, rendered from an
+ * {@link InvitationFileError} `unnameable` failure raised by the mint-time
+ * re-parse) and the acceptor's file acquire. `positions` are
  * the 1-based column positions from {@link emptyColumnPositions} and are not
  * operator-controlled content, so they are surfaced directly. The return shape is
  * the structural {@link AlertContent} (`{ title, message }`) every caller assigns

@@ -1224,7 +1224,7 @@ export function safeParseLinkageTerms(raw: unknown) {
  *   empty case kept distinct from the absent case above, which yields an absent send.
  *
  * `deduplicate` is left as adopted from the inviter's terms. It is per-party in
- * principle, but the web Advanced-options editor and the CLI default acceptance
+ * principle, but the web app's AdvancedInvite authoring and the CLI default acceptance
  * never author it one-sided (`deduplicate` stays false), so for the configurations
  * those front ends produce a verbatim adoption is correct and the mirror is always
  * coherent. Metadata and standardization stay per-party and local (they are never
