@@ -74,6 +74,7 @@ function testOptions(
     configFile: path.join(tmpdir(), `psilink-accept-test-${id}.yaml`),
     keyFile: path.join(tmpdir(), `psilink-accept-test-${id}.key`),
     record: false,
+    eventStream: false,
     logLevel: logLibrary.levels.SILENT,
     verbosity: 0,
     ...overrides,

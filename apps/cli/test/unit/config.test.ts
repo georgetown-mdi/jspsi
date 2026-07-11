@@ -254,6 +254,72 @@ test("a negative serverPort is rejected on the ordinary path", () => {
   ).toThrow(UsageError);
 });
 
+// --- host-key fingerprint pre-pinning (--server-host-key-fingerprint) --------
+
+const FP = "SHA256:" + "A".repeat(43);
+
+test("hostKeyFingerprint overrides an unpinned connection", () => {
+  const result = applyConnectionOverrides(baseSFTP, {
+    server: { hostKeyFingerprint: FP },
+  });
+  if (result.channel !== "sftp") return;
+  expect(result.server.hostKeyFingerprint).toBe(FP);
+});
+
+test("hostKeyFingerprint overwrites a fingerprint already pinned in the base config", () => {
+  // An explicit CLI pin is the operator's current word on the server's
+  // identity, so it supersedes whatever the loaded config already carried
+  // rather than being ignored or merged alongside it.
+  const other = "SHA256:" + "B".repeat(42) + "A";
+  const base: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "sftp.example.org", hostKeyFingerprint: other },
+  };
+  const result = applyConnectionOverrides(base, {
+    server: { hostKeyFingerprint: FP },
+  });
+  if (result.channel !== "sftp") return;
+  expect(result.server.hostKeyFingerprint).toBe(FP);
+});
+
+test("hostKeyFingerprint override participates in the same schema re-validation as other server overrides", () => {
+  // applyConnectionOverrides itself does not format-check the string -- CLI
+  // format validation happens earlier, at parse time (hostKeyFingerprintFlag) --
+  // but a malformed value that reaches here (e.g. from a non-CLI caller) must
+  // still be caught by the connection-wide re-validation the hostKeyFingerprint
+  // override triggers (serverModified -> safeParseConnectionConfig), exactly as
+  // an out-of-range serverPort is.
+  expect(() =>
+    applyConnectionOverrides(baseSFTP, {
+      server: { hostKeyFingerprint: "not-a-valid-fingerprint" },
+    }),
+  ).toThrow(UsageError);
+});
+
+test("an absent hostKeyFingerprint override leaves an existing pin untouched", () => {
+  const base: ConnectionConfig = {
+    channel: "sftp",
+    server: { host: "sftp.example.org", hostKeyFingerprint: FP },
+  };
+  const result = applyConnectionOverrides(base, { server: { port: 2222 } });
+  if (result.channel !== "sftp") return;
+  expect(result.server.hostKeyFingerprint).toBe(FP);
+});
+
+test("hostKeyFingerprint override is dropped (not an error) off the sftp channel", () => {
+  // Like the sibling credential overrides, a fingerprint override is meaningless
+  // on webrtc (no SFTP host key to pin) and is silently ignored rather than
+  // rejected -- webrtc carries its own connection-security surface (TURN/ICE),
+  // not an SSH host key.
+  const result = applyConnectionOverrides(baseWebRTC, {
+    server: { hostKeyFingerprint: FP },
+  });
+  if (result.channel !== "webrtc") return;
+  expect(
+    (result.server as unknown as Record<string, unknown>)["hostKeyFingerprint"],
+  ).toBeUndefined();
+});
+
 test("a serverPassword conflicting with a base config's privateKey is rejected on the ordinary path", () => {
   const base: ConnectionConfig = {
     channel: "sftp",

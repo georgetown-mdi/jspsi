@@ -63,6 +63,18 @@ export interface ConnectionServerOverrides {
    * {@link applyConnectionOverrides}, which rejects it without one. sftp-only.
    */
   keyboardInteractive?: boolean;
+  /**
+   * Pre-pinned SSH host-key fingerprint (OpenSSH SHA256 format), from
+   * `--server-host-key-fingerprint`; already `@file`-resolved and
+   * format-validated by {@link hostKeyFingerprintFlag} before it reaches here.
+   * Overwrites any fingerprint already on the base config -- an explicit CLI
+   * pin is the operator's current word on the server's identity. Feeding it
+   * into `connection.server.hostKeyFingerprint` lets `establishHostKeyTrust`
+   * find a pin already set and skip the interactive prompt; the real connect
+   * then verifies it exactly as a stored pin, so a wrong value still fails
+   * closed. sftp-only.
+   */
+  hostKeyFingerprint?: string;
   port?: number;
   /**
    * Outbound (self-written) directory for a split-directory exchange. When set,
@@ -152,6 +164,16 @@ export function applyConnectionOverrides(
       server.privateKeyPassphrase = serverOverrides.privateKeyPassphrase;
     if (serverOverrides.keyboardInteractive !== undefined)
       server.keyboardInteractive = serverOverrides.keyboardInteractive;
+    if (serverOverrides.hostKeyFingerprint !== undefined) {
+      // A pre-pin overwrites any fingerprint already on the base config, list or
+      // scalar: an explicit CLI pin is the operator's current word on the
+      // server's identity, superseding whatever the config carried. The value
+      // has already been @file-resolved and format-validated at the CLI parse
+      // boundary (hostKeyFingerprintFlag), so it can be assigned as-is here; the
+      // re-validation below re-checks it as part of the whole connection anyway.
+      server.hostKeyFingerprint = serverOverrides.hostKeyFingerprint;
+      serverModified = true;
+    }
     if (serverOverrides.port !== undefined) {
       server.port = serverOverrides.port;
       serverModified = true;

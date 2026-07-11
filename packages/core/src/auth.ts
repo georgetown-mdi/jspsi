@@ -267,8 +267,9 @@ export function assertSharedSecretReadyForHandshake(
  * instructions. Higher-level code (e.g. the CLI) that adds its own generic
  * recovery advisory should check this property and suppress the generic hint
  * when it is set, to avoid contradictory user-facing messages. Key-exchange
- * protocol failures from `runKex` (generic "key exchange authentication failed"
- * or "key exchange handshake timed out") do not carry the tag because their
+ * protocol failures from `runKex` (the generic security-kind ConnectionError
+ * "key exchange authentication failed", propagated unwrapped, or the plain
+ * "key exchange handshake timed out") do not carry the tag because their
  * messages are intentionally generic and benefit from the caller's added
  * advisory.
  *
@@ -291,8 +292,11 @@ export function assertSharedSecretReadyForHandshake(
  * @throws {Error} if `authentication.expires` is in the past before the
  *                 handshake, or if it expires during the key-exchange round-trip
  *                 (post-handshake check).
- * @throws {Error} if the key exchange fails (wrong shared secret or tampered
- *                 messages).
+ * @throws {ConnectionError} of kind `"security"` (message `"key exchange
+ *                 authentication failed"`, propagated unwrapped from `runKex`)
+ *                 if the key exchange fails: a wrong shared secret or tampered
+ *                 messages. The kind is the trust-boundary marker consumers
+ *                 classify on; the message stays generic (see `runKex`).
  */
 export async function authenticateConnection(
   conn: MessageConnection,

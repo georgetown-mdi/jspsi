@@ -69,9 +69,13 @@ const REAL_DEPS: HostKeyTrustDeps = {
  * `invite`/`accept`, and `zero-setup`); the persistence mode differs per command.
  *
  * Behavior:
- * - Not sftp, or a pin is already set (pinned out-of-band, or by a prior
+ * - Not sftp, or a pin is already set (pinned out-of-band -- a saved
+ *   `host_key_fingerprint`, or `--server-host-key-fingerprint` -- or by a prior
  *   first-use run): a no-op -- the caller proceeds and a pinned connection
- *   enforces in core.
+ *   enforces in core. This is what lets a supervised, TTY-less run complete
+ *   without the interactive prompt: pre-pinning skips the QUESTION, never the
+ *   CHECK, since the real connect that follows still verifies the pin against
+ *   the server's actual presented key and fails closed on a mismatch.
  * - Non-interactive (stdin is not a TTY -- an automated run, or one piping its
  *   CSV through stdin): fails closed with an actionable {@link UsageError}; it
  *   never hangs on a prompt and never auto-accepts. The error names the recovery.

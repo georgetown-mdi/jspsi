@@ -172,14 +172,19 @@ function resolveHostKeyFingerprintRefs(
 }
 
 /**
- * Resolve one host-key fingerprint entry. A literal value passes through (it was
- * format-validated at parse); an @-file one is read and re-validated against
- * {@link HOST_KEY_FINGERPRINT_REGEX}, because the literal `@path` could not match
- * the SHA256: format so the schema skipped it. A malformed secrets file fails
- * here as a clear {@link UsageError} (exit 64) naming the reference rather than
- * later as a confusing host-key "mismatch" at connect time.
+ * Resolve one host-key fingerprint entry. A literal value passes through
+ * unvalidated (the caller owns its format check: the config schema at parse, or
+ * the flag parser's flag-named rejection); an @-file one is read and
+ * re-validated against {@link HOST_KEY_FINGERPRINT_REGEX}, because the literal
+ * `@path` could not match the SHA256: format so no earlier check saw the real
+ * value. A malformed or missing secrets file fails here as a clear
+ * {@link UsageError} (exit 64) naming the reference rather than later as a
+ * confusing host-key "mismatch" at connect time. Shared by the config-load
+ * resolver above and the `--server-host-key-fingerprint` flag parser
+ * (`hostKeyFingerprintFlag` in optionDefinitions.ts), so the @-file read and
+ * re-validation live once.
  */
-function resolveHostKeyFingerprintRef(ref: string): string {
+export function resolveHostKeyFingerprintRef(ref: string): string {
   if (!ref.startsWith("@")) return ref;
   const resolved = resolveAtSignRef(ref);
   if (!HOST_KEY_FINGERPRINT_REGEX.test(resolved))

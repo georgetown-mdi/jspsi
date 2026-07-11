@@ -208,6 +208,8 @@ Every command that opens an SFTP connection -- `psilink exchange`, an online `ps
 - A run with no terminal -- an automated or scheduled run, or one piping its input CSV through stdin -- does not prompt and does not silently accept: it fails closed with an error telling you to run once interactively to pin the key, or to set `host_key_fingerprint` yourself. So pin the key (out-of-band or via one interactive run) before scheduling unattended exchanges.
 - If the server legitimately rotates its host key, a later run fails with a mismatch error rather than silently trusting the new key. Verify the new fingerprint out-of-band, then re-pin deliberately: set `host_key_fingerprint` to the new value, or remove it from `psilink.yaml` and run once interactively to confirm and re-pin (the same as removing a changed host from `~/.ssh/known_hosts`).
 
+The command-line spelling of the same pin is `--server-host-key-fingerprint` (accepted by every command above): it sets `host_key_fingerprint` for that run, overriding any value in the configuration, so a supervised or scripted run that already knows the fingerprint connects with no prompt while a server presenting a different key still fails closed with a mismatch error.
+
 ## Verifying a receipt
 
 ```sh
@@ -270,12 +272,28 @@ psilink follows the standard stream convention: a command's result data goes to 
 
 For unattended runs, set `--peer-timeout` to a value that suits how long you are willing to wait for a partner that never appears (it defaults to one hour); a dead or departed peer makes the command wait out this budget at the rendezvous and live-exchange steps before exiting. The teardown after a successful exchange does not inherit this budget - it is bounded separately and short - so the long wait only applies while the exchange is still in progress. Wrapping the command in your pipeline's own outer timeout is still recommended as a backstop.
 
+### Machine-readable event stream
+
+`--event-stream` emits a machine-readable event stream for a supervising process (an orchestrator, a job runner, a test harness) that spawns psilink and needs structured progress and outcome events rather than parsed log lines. It is available on every exchange-running command - the zero-setup exchange, `psilink exchange`, and the online `psilink invite`/`accept` - and is off by default; it has no effect on an offline `invite`/`accept`, which runs no exchange.
+
+The stream is newline-delimited JSON on **file descriptor 3**, one event object per line, flushed as it happens: a stage-list event up front, a stage event at each protocol step, a warning event per non-fatal terms-exchange warning, and exactly one terminal event - a result on success or a classified error on failure. The error event names one of four categories (`exchange`, `output`, `security`, `config`), so a supervisor can tell a security (authentication) failure or a local output-write failure from a retryable transport fault - a distinction the exit code alone cannot make. A run interrupted by a signal exits 130/143 without a terminal event, which together is the interrupt signal.
+
+`stdout` and `stderr` are unchanged by the flag: the CSV result still goes to stdout and every diagnostic still goes to stderr, so the event stream never corrupts either. Wire fd 3 to a pipe when you spawn psilink (for example, in Node, `stdio: ["inherit", "pipe", "pipe", "pipe"]`); if you pass `--event-stream` without wiring fd 3, the command fails fast with a usage error (exit 64) before any exchange work. The full contract - the framing, the per-line schema version, every event's fields, and the category rules - is in [docs/spec/CLI_EVENTS.md](spec/CLI_EVENTS.md).
+
 ## Exit codes
 
-The CLI distinguishes two failure classes, following the BSD `sysexits` convention:
+Every `psilink` command exits with one of the following codes. The two failure classes 64 and 69 follow the BSD `sysexits` convention.
 
-- **64 (`EX_USAGE`)** - invalid caller input or configuration: a problem the operator fixes locally by editing or provisioning a file. Retrying without changing anything will not help.
-- **69 (`EX_UNAVAILABLE`)** - a transport or availability failure: the exchange server, peer, or shared storage was unreachable, rejected an operation, or went silent. Retrying once the transport recovers may succeed.
+| Code | Name | Meaning |
+| ---- | ---- | ------- |
+| 0 | success | The command completed. For an exchange, the run finished and any result was written. |
+| 64 | `EX_USAGE` | Invalid caller input or configuration: a bad flag or positional, an unrecognized or repeated option, a missing/malformed config or key file, an unsupported channel, or -- with `--event-stream` -- fd 3 not wired. A problem the operator fixes locally; retrying unchanged will not help. |
+| 69 | `EX_UNAVAILABLE` | A transport or availability failure: the exchange server, peer, or shared storage was unreachable, rejected an operation, or went silent. Retrying once the transport recovers may succeed. |
+| 130 | interrupted (SIGINT) | The run was interrupted by `SIGINT` (Ctrl-C). 128 + 2, the conventional signal exit. |
+| 143 | terminated (SIGTERM) | The run was terminated by `SIGTERM`. 128 + 15. |
+| 1 | unexpected error | A last-resort code for an error that escaped every command handler; ordinary faults use 64 or 69 above. |
+
+64 and 69 are the classification the command error boundaries apply (a `UsageError` maps to 64, otherwise the error's own exit code or 69); 130 and 143 are set by the exchange's own signal handlers; 1 is the top-level catch-all. When `--event-stream` is active a `security`-category failure exits 69 like any other transport failure -- the exit code cannot single it out, so read the terminal event's category to detect it (see [Machine-readable event stream](#machine-readable-event-stream)).
 
 For `psilink exchange`, a missing, malformed, or unreadable configuration file (`psilink.yaml`) or key file (`.psilink.key`) - including a key file whose stored token is malformed - is a usage error and exits 64. An unsupported channel or URL scheme - a `webrtc` config or `ws://` URL the CLI does not yet support, an unknown scheme, or a malformed `file://` authority - is likewise a usage error and exits 64, as is a URL carrying a malformed percent-escape such as a lone `%` (with any credential redacted from the message) or an invalid connection option or combination (for example a negative, fractional, non-numeric, or above-ceiling `--max-reconnect-attempts`, a non-numeric or out-of-range (outside `0..65535`) `--server-port`, a reserved `peer_id`, or a `retain_files`/`lockless_rendezvous` contradiction). Failures during the exchange itself - connecting to the server, the rendezvous, or the message loop - exit 69. A successful run exits 0; a run terminated by a signal exits 130 (SIGINT) or 143 (SIGTERM).
 

@@ -9,6 +9,7 @@ import type { PreparedExchange } from "@psilink/core";
 const mockState = vi.hoisted(() => ({
   dropDir: "",
   // Captured log output from the mock getLogger returned to runProtocol.
+  infos: [] as string[],
   warnings: [] as string[],
   errors: [] as string[],
   // Two-party barrier counter for the abort-marker echo tests: each party
@@ -138,7 +139,9 @@ vi.mock("@psilink/core", async (importActual) => {
     // logger is only used for informational output; replacing it does not
     // affect key-exchange or PSI correctness.
     getLogger: (_name: string) => ({
-      info: () => {},
+      info: (msg: string, ...args: unknown[]) => {
+        mockState.infos.push([msg, ...args.map(String)].join(" "));
+      },
       warn: (msg: string, ...args: unknown[]) => {
         mockState.warnings.push([msg, ...args.map(String)].join(" "));
       },
@@ -154,6 +157,61 @@ vi.mock("@psilink/core", async (importActual) => {
   };
 });
 
+// Replace the SFTP adapter with a transport mock whose connect() drives the
+// configured hostVerifier with a fixed ssh-ed25519 key blob (as ssh2 would) and
+// rejects with ssh2's host-denied message when the verifier refuses -- the same
+// harness core's fileSyncConnection host-key tests use. This lets an
+// sftp-channel runProtocol exercise the REAL host-key verification wrap in core
+// (the security classification under test) with no live SSH connection. Only
+// the sftp-channel test below constructs this class; every other test in this
+// file runs filedrop, which never touches the adapter.
+vi.mock("../../src/connection/ssh2SftpAdapter", () => {
+  // A raw OpenSSH ssh-ed25519 host-key blob: uint32 len + "ssh-ed25519" +
+  // uint32 len + 32 key bytes, matching what ssh2 hands hostVerifier.
+  const keyTypeBytes = Buffer.from("ssh-ed25519");
+  const keyBytes = Buffer.alloc(32, 7);
+  const blob = Buffer.alloc(4 + keyTypeBytes.length + 4 + keyBytes.length);
+  blob.writeUInt32BE(keyTypeBytes.length, 0);
+  keyTypeBytes.copy(blob, 4);
+  blob.writeUInt32BE(keyBytes.length, 4 + keyTypeBytes.length);
+  keyBytes.copy(blob, 4 + keyTypeBytes.length + 4);
+
+  const notImplemented = (op: string) => () =>
+    Promise.reject(new Error(`mock sftp adapter: ${op} not implemented`));
+
+  class MockHostKeySftpAdapter {
+    connect(options: Record<string, unknown>): Promise<void> {
+      const verifier = options["hostVerifier"] as
+        | ((keyBlob: Buffer, verify: (permitted: boolean) => void) => void)
+        | undefined;
+      return new Promise<void>((resolve, reject) => {
+        if (verifier === undefined) {
+          resolve();
+          return;
+        }
+        verifier(blob, (permitted: boolean) => {
+          if (permitted) resolve();
+          else reject(new Error("Host denied (verification failed)"));
+        });
+      });
+    }
+    end(): Promise<void> {
+      return Promise.resolve();
+    }
+    safeDelete(): Promise<void> {
+      return Promise.resolve();
+    }
+    list = notImplemented("list");
+    get = notImplemented("get");
+    put = notImplemented("put");
+    delete = notImplemented("delete");
+    rename = notImplemented("rename");
+    createExclusive = notImplemented("createExclusive");
+    exists = notImplemented("exists");
+  }
+  return { SSH2SFTPClientAdapter: MockHostKeySftpAdapter };
+});
+
 import {
   buildOutputTable,
   parseExchangeRecord,
@@ -162,6 +220,9 @@ import {
   PeerAbortError,
   ConnectionError,
   FrameSizeExceededError,
+  FileSyncConnection,
+  fromEventConnection,
+  authenticateConnection,
   MESSAGE_ENVELOPE_VERSION,
   MESSAGE_TYPE_BINARY,
   MESSAGE_HEADER_BYTES,
@@ -173,11 +234,14 @@ import {
   PEER_SILENCE_GUIDANCE,
   type RunProtocolResult,
 } from "../../src/protocol";
+import { runOrExit } from "../../src/util/cli";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
 import { LocalFSClient } from "../../src/connection/localFSClient";
 
 // 32 zero bytes in base64url (43 chars, no padding).
 const TOKEN_A = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+// 32 0x01 bytes in base64url: a second valid token for the mismatched-secret case.
+const TOKEN_B = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE";
 
 // Values unused because runExchange and buildOutputTable are mocked.
 const minimalPrepared = {} as unknown as PreparedExchange;
@@ -185,17 +249,61 @@ const minimalPrepared = {} as unknown as PreparedExchange;
 let tmpDir: string;
 let dropDir: string;
 
+// fd-3 sentinel and capture: wrap writeSync so a write to the machine-interface
+// descriptor (EVENT_STREAM_FD = 3) is captured into a buffer -- never delivered
+// to the real descriptor, which the test process does not own -- while every
+// other fd passes straight through to the real implementation. A test that runs
+// under --event-stream drains the capture with takeFd3Lines() and asserts on the
+// parsed events; afterEach then asserts the capture is EMPTY, which pins two
+// requirements at once: a flag-off run writes nothing to fd 3 across every
+// scenario in this file, and a flag-on test must account for every line it
+// caused (so an unexpected extra emission -- a double terminal event -- fails
+// the test that produced it).
+const EVENT_STREAM_FD = 3;
+let fd3Chunks: Buffer[];
+let realWriteSync: typeof fs.writeSync;
+
+/** Drain the captured fd-3 bytes and return them parsed, one event per line. */
+function takeFd3Lines(): Array<Record<string, unknown>> {
+  const text = Buffer.concat(fd3Chunks).toString("utf8");
+  fd3Chunks.length = 0;
+  return text
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-proto-integ-"));
   dropDir = path.join(tmpDir, "drop");
   mockState.dropDir = dropDir;
+  mockState.infos.length = 0;
   mockState.warnings.length = 0;
   mockState.errors.length = 0;
   mockState.runExchangeEntries = 0;
   fs.mkdirSync(dropDir);
+
+  fd3Chunks = [];
+  realWriteSync = fs.writeSync;
+  vi.spyOn(fs, "writeSync").mockImplementation(((
+    fd: number,
+    ...args: unknown[]
+  ) => {
+    if (fd === EVENT_STREAM_FD) {
+      const [buffer, offset, length] = args as [Buffer, number, number];
+      fd3Chunks.push(Buffer.from(buffer.subarray(offset, offset + length)));
+      return length;
+    }
+    return (realWriteSync as (...a: unknown[]) => number)(fd, ...args);
+  }) as typeof fs.writeSync);
 });
 
 afterEach(async () => {
+  // Empty on a flag-off run (nothing may reach fd 3 without --event-stream);
+  // empty after a flag-on test too, because the test must have drained and
+  // asserted every line it caused via takeFd3Lines().
+  expect(fd3Chunks).toHaveLength(0);
+  vi.mocked(fs.writeSync).mockRestore();
   // Clear any unconsumed mockImplementationOnce entries. When a test times out
   // before runExchange is called, the pending entry remains in the queue and
   // the next test receives a stale blocking promise instead of the default
@@ -2697,4 +2805,294 @@ test("runProtocol without onAuthenticated runs a normal authenticated exchange (
   expect(
     mockState.errors.some((m) => m.includes("post-authentication hook")),
   ).toBe(false);
+});
+
+// --- Machine-interface event stream (--event-stream) --------------------------
+//
+// The flag-on tests below mock fstatSync for fd 3 (so the fail-closed preflight
+// passes deterministically regardless of how the test process was spawned) and
+// read the events from the fd-3 capture installed in beforeEach. Each drains the
+// capture with takeFd3Lines() and accounts for every line, so the afterEach
+// empty-capture assertion doubles as an exactly-one-terminal-event check.
+
+/** Make fstatSync succeed for fd 3 (pass every other target through). */
+function mockFd3Open(): void {
+  const realFstatSync = fs.fstatSync;
+  vi.spyOn(fs, "fstatSync").mockImplementation(((
+    fd: number,
+    ...rest: unknown[]
+  ) => {
+    if (fd === EVENT_STREAM_FD) return {} as fs.Stats;
+    return (realFstatSync as (...a: unknown[]) => fs.Stats)(fd, ...rest);
+  }) as typeof fs.fstatSync);
+}
+
+test("an expired shared secret under --event-stream emits exactly one terminal error event", async () => {
+  // The expired-secret rejection (assertSharedSecretReadyForHandshake) fires in
+  // the pre-connection prepare block, BEFORE the main try whose catch is the
+  // other emission site; this pins that the prepare block's own catch emits the
+  // terminal event for it. The error is a plain tagged Error (not an
+  // OperatorConfigError, not a security-kind ConnectionError), so the category
+  // is "exchange" per the classification rules.
+  mockFd3Open();
+  try {
+    await expect(
+      runProtocol(
+        { channel: "filedrop", path: dropDir },
+        {
+          sharedSecret: TOKEN_A,
+          expires: "2000-01-01T00:00:00.000Z",
+          keyFilePath: path.join(tmpDir, "expired.key"),
+        },
+        minimalPrepared,
+        undefined,
+        -1,
+        "test",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+    ).rejects.toThrow(/expired/);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  // The event was flushed before the rejection propagated (emit precedes the
+  // rethrow), so it is already in the capture here. Exactly one line: the
+  // classified terminal error, carrying the schema version.
+  const lines = takeFd3Lines();
+  expect(lines).toHaveLength(1);
+  expect(lines[0].type).toBe("error");
+  expect(lines[0].category).toBe("exchange");
+  expect(lines[0].v).toBe(1);
+  expect(String(lines[0].message)).toContain("expired");
+});
+
+test("a main-try failure under --event-stream emits exactly one terminal error event (no double emission)", async () => {
+  // conn.open() on a nonexistent drop path rejects inside the main try, whose
+  // catch is the other emission site. Exactly one captured line proves the
+  // prepare block's catch did not also fire for the same failure.
+  mockFd3Open();
+  try {
+    await expect(
+      runProtocol(
+        {
+          channel: "filedrop",
+          path: "/nonexistent-path-that-cannot-exist-psilink-test",
+        },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+    ).rejects.toThrow();
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  const lines = takeFd3Lines();
+  expect(lines).toHaveLength(1);
+  expect(lines[0].type).toBe("error");
+  expect(lines[0].category).toBe("exchange");
+  expect(lines[0].v).toBe(1);
+});
+
+// --- Stage/warning stderr sanitization -----------------------------------------
+
+test("a hostile stage label and terms warning reach the human log neutralized", async () => {
+  // The onStage/onWarning strings can derive from partner-authored linkage-key
+  // and column names. Drive both callbacks with the repo's hostile patterns (a
+  // bidi override and an ANSI ESC sequence) through a real two-party run and
+  // assert the captured stderr lines carry only the visible escapes.
+  const hostileStageId = "user‮EVIL stage";
+  const hostileWarning = "column \x1b[31mEVIL\x1b[0m mismatch";
+
+  vi.mocked(runExchange).mockImplementationOnce((async (...args: unknown[]) => {
+    const options = args[3] as {
+      onStage?: (id: string) => void;
+      onWarning?: (msg: string) => void;
+    };
+    // describeExchangeStages is mocked to [], so the raw id doubles as the
+    // label the log line renders.
+    options.onStage?.(hostileStageId);
+    options.onWarning?.(hostileWarning);
+    return defaultRunExchange();
+  }) as never);
+
+  await Promise.all([
+    runProtocol(
+      { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+      null,
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-a",
+    ),
+    runProtocol(
+      { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+      null,
+      minimalPrepared,
+      undefined,
+      -1,
+      "test-b",
+    ),
+  ]);
+
+  const stageLine = mockState.infos.find((m) => m.includes("EVIL stage"));
+  expect(stageLine).toBeDefined();
+  expect(stageLine).not.toContain("‮");
+  expect(stageLine).toContain("\\u202e");
+
+  const warnLine = mockState.warnings.find((m) =>
+    m.includes("terms exchange:"),
+  );
+  expect(warnLine).toBeDefined();
+  expect(warnLine).not.toContain("\x1b");
+  expect(warnLine).toContain("\\x1b");
+});
+
+// --- Security classification, end to end ---------------------------------------
+//
+// The two canonical trust-boundary failures must classify as category "security"
+// on the event stream from their REAL production paths (not a hand-built
+// ConnectionError): a failed key-exchange authentication driven by a genuine
+// mismatched-secret handshake over the real filedrop transport, and an SFTP
+// host-key verification failure driven through core's real hostVerifier wrap
+// (mocked transport). Both must keep exit code 69, pinned through the real
+// runOrExit mapper fed the real captured error.
+
+test("a mismatched shared secret under --event-stream emits category security and maps to exit 69", async () => {
+  const keyFileA = path.join(tmpDir, "a.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+
+  // Party B: a real peer running the real key exchange with a DIFFERENT
+  // token, orchestrated by hand (open/synchronize/start, then
+  // authenticateConnection) exactly as authentication.test.ts does. Its
+  // teardown is deferred until both parties settle so its handshake files --
+  // including a best-effort abort -- stay readable for party A. Its own
+  // outcome is not asserted (it may see the generic failure or, if A's
+  // teardown swept the abort file first, a bounded transport timeout).
+  const connB = new FileSyncConnection(new LocalFSClient(), {
+    verbose: -1,
+    pollingFrequency: 10,
+  });
+  const partyB = (async () => {
+    await connB.open({ channel: "filedrop", path: dropDir });
+    await connB.synchronize();
+    connB.start();
+    const roleB = connB.handshakeRole;
+    if (roleB === undefined) throw new Error("party B resolved no role");
+    const mcB = fromEventConnection(connB, { inactivityTimeoutMs: 2000 });
+    return authenticateConnection(mcB, { sharedSecret: TOKEN_B }, roleB, true);
+  })();
+
+  mockFd3Open();
+  let resA: PromiseSettledResult<unknown>;
+  try {
+    [resA] = await Promise.allSettled([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+      partyB,
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+    await connB.close().catch(() => {});
+  }
+
+  // The real handshake failure: the generic non-oracular message, now carried
+  // by a security-kind ConnectionError.
+  expect(resA.status).toBe("rejected");
+  const reasonA = (resA as PromiseRejectedResult).reason as unknown;
+  expect(reasonA).toBeInstanceOf(ConnectionError);
+  expect((reasonA as ConnectionError).kind).toBe("security");
+  expect((reasonA as ConnectionError).message).toBe(
+    "key exchange authentication failed",
+  );
+
+  // Exactly one terminal event, classified security.
+  const lines = takeFd3Lines();
+  expect(lines).toHaveLength(1);
+  expect(lines[0].type).toBe("error");
+  expect(lines[0].category).toBe("security");
+  expect(lines[0].v).toBe(1);
+
+  // The exit code stays 69: feed the real captured error through the real
+  // command exit mapper (a ConnectionError is not a UsageError and carries no
+  // exitCode of its own).
+  const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
+  try {
+    await runOrExit("test-a", () => Promise.reject(reasonA));
+    expect(exitSpy).toHaveBeenCalledWith(69);
+  } finally {
+    exitSpy.mockRestore();
+  }
+}, 15_000);
+
+test("an SFTP host-key mismatch under --event-stream emits category security and maps to exit 69", async () => {
+  // The pinned fingerprint is well-formed but matches no key, so core's real
+  // hostVerifier wrap (driven by the mocked adapter's connect) fails closed
+  // with its mismatch error.
+  mockFd3Open();
+  let err: unknown;
+  try {
+    err = await runProtocol(
+      {
+        channel: "sftp",
+        server: {
+          host: "sftp.example.org",
+          hostKeyFingerprint: "SHA256:" + "A".repeat(43),
+        },
+      },
+      null,
+      minimalPrepared,
+      undefined,
+      -1,
+      "test",
+      undefined,
+      undefined,
+      undefined,
+      { eventStream: true },
+    ).then(
+      () => {
+        throw new Error("expected the host-key mismatch to reject");
+      },
+      (e: unknown) => e,
+    );
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  expect((err as Error).message).toMatch(/SFTP host-key verification failed/);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("security");
+
+  const lines = takeFd3Lines();
+  expect(lines).toHaveLength(1);
+  expect(lines[0].type).toBe("error");
+  expect(lines[0].category).toBe("security");
+  expect(lines[0].v).toBe(1);
+
+  const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
+  try {
+    await runOrExit("test", () => Promise.reject(err));
+    expect(exitSpy).toHaveBeenCalledWith(69);
+  } finally {
+    exitSpy.mockRestore();
+  }
 });
