@@ -76,6 +76,27 @@ export function credentialAlertCopy(transport: CliTransport): string {
         "names only the directory both parties can reach.";
 }
 
+/** The ledger trust-footer copy for a live run. A browser-local run asserts the
+ * file never leaves the browser; a server-job run (the console appliance)
+ * sends the file to the appliance to run the exchange, so it omits that claim
+ * and keeps only the partner-disclosure statement, which holds either way -- an
+ * unverified "never uploaded" claim would be false there. The browser-local
+ * copy is unchanged from before the console appliance existed. */
+export function liveRunLedgerFooter(
+  serverJob: boolean,
+  hasResult: boolean,
+): string {
+  if (serverJob)
+    return hasResult
+      ? "The results above are all your partner received about your data."
+      : "Your partner receives only what this ledger names.";
+  return hasResult
+    ? "Your file never left this browser. The results above are all your " +
+        "partner received about your data."
+    : "Your file stays in this browser. Nothing is uploaded; your partner " +
+        "receives only what this ledger names.";
+}
+
 /** The trust-footer copy for the ledger on the save surface. */
 export function saveTrustFooter(transport: CliTransport): string {
   return transport === "sftp"

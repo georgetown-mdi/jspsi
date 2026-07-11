@@ -12,13 +12,17 @@ import {
   sanitizeForDisplay,
 } from "@psilink/core";
 
+import { createBrowserExchangeDriver } from "@psi/exchangeDriver";
+import { createServerJobExchangeDriver } from "@psi/serverJobExchangeDriver";
 import { hasRecoveryHint } from "@psi/authenticateExchange";
 import { inviterExchangeDataSpec } from "@psi/advancedInvite";
 import { listenAsInviter } from "@psi/rendezvous";
-import { runExchangeLifecycle } from "@psi/exchangeLifecycle";
 import { waitForIncomingConnection } from "@psi/waitForConnection";
 
+import { deploymentProfile } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
+
+import { selectExchangeDriver } from "./exchangeDriverSelection";
 
 import {
   WAITING_STAGE_ID,
@@ -39,9 +43,11 @@ import type {
   ExchangeErrorCategory,
   GenerateOutput,
 } from "@psi/exchangeLifecycle";
+import type { ExchangeDriver } from "@psi/exchangeDriver";
 import type { ExchangeRun } from "./exchangeRun";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { RunOutputs } from "./runOutputs";
+import type { Transport } from "./inviterModel";
 
 /** A failed run, ready to render: the lifecycle's category (which decides the
  * recovery the alert offers) and the operator-facing alert content, composed
@@ -148,9 +154,19 @@ export function failureFor(
 export function useInviterExchange({
   invitation,
   inviterName,
+  channel,
+  sourceFile,
 }: {
   invitation: GeneratedInvitation | undefined;
   inviterName: string;
+  /** The transport chosen at Review & create, driving which {@link ExchangeDriver}
+   * this run builds. A live run only ever starts for a channel the selector maps
+   * to a live kind; the owner withholds the invitation for a save-file channel. */
+  channel: Transport;
+  /** The original CSV file, the server-job driver's `inputCsv` source. The
+   * server-job path submits the file's raw text; the browser path re-parses the
+   * retained rows off the minted invitation and never reads this. */
+  sourceFile: File | undefined;
 }): {
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
@@ -254,31 +270,70 @@ export function useInviterExchange({
       }
     };
 
-    void runExchangeLifecycle<RunOutputs>({
-      acquire,
-      exchangeRole: "responder",
-      sharedSecret: minted.sharedSecret,
-      expires: minted.expires,
-      signal: controller.signal,
-      generateOutput,
-      onStages: (stages) => setRun((current) => runWithStages(current, stages)),
-      onStage: (stageId) =>
-        setRun((current) => runWithStage(current, stageId, new Date())),
-      onResult: (generated) => {
-        setOutputs(generated);
-        setRun((current) => runWithCompletion(current, new Date()));
-      },
-      onError: ({ category, error }) => {
-        // Dev-gated: the raw Error object's message/cause can embed partner-/
-        // server-controlled bytes, so a production console carries none of it,
-        // while a developer (or a deployed client with the diagnostics toggle
-        // on) keeps the full object. The user-facing alert is separately
-        // sanitized in failureFor.
+    const browserDriver = (): ExchangeDriver<RunOutputs> =>
+      createBrowserExchangeDriver<RunOutputs>({
+        acquire,
+        exchangeRole: "responder",
+        sharedSecret: minted.sharedSecret,
+        expires: minted.expires,
+        generateOutput,
+      });
+
+    // The console appliance carries out the filedrop exchange: the driver POSTs
+    // the sealed terms, the shared secret, and the file's raw text to the job
+    // API and maps the server's event stream onto the same lifecycle events.
+    // It owns no peer connection or PSI library, so `acquire`/`generateOutput`
+    // go unused on this path. Reading the file's text is the only async step
+    // before the run, so it precedes the driver build.
+    const serverJobDriver = async (): Promise<ExchangeDriver<RunOutputs>> => {
+      if (sourceFile === undefined)
+        throw new Error("no source file for the server-job exchange");
+      const inputCsv = await sourceFile.text();
+      return createServerJobExchangeDriver({
+        linkageTerms: minted.linkageTerms,
+        sharedSecret: minted.sharedSecret,
+        inputCsv,
+      });
+    };
+
+    const selection = selectExchangeDriver(channel, deploymentProfile());
+
+    void (async () => {
+      let driver: ExchangeDriver<RunOutputs>;
+      try {
+        driver =
+          selection.kind === "server-job"
+            ? await serverJobDriver()
+            : browserDriver();
+      } catch (error) {
+        if (controller.signal.aborted) return;
         whenDiagnostic(() => console.error(error));
-        setFailure(failureFor(category, error));
+        setFailure(failureFor("exchange", error));
         setRun((current) => runWithFailure(current));
-      },
-    });
+        return;
+      }
+      await driver.run({
+        signal: controller.signal,
+        onStages: (stages) =>
+          setRun((current) => runWithStages(current, stages)),
+        onStage: (stageId) =>
+          setRun((current) => runWithStage(current, stageId, new Date())),
+        onResult: (generated) => {
+          setOutputs(generated);
+          setRun((current) => runWithCompletion(current, new Date()));
+        },
+        onError: ({ category, error }) => {
+          // Dev-gated: the raw Error object's message/cause can embed partner-/
+          // server-controlled bytes, so a production console carries none of it,
+          // while a developer (or a deployed client with the diagnostics toggle
+          // on) keeps the full object. The user-facing alert is separately
+          // sanitized in failureFor.
+          whenDiagnostic(() => console.error(error));
+          setFailure(failureFor(category, error));
+          setRun((current) => runWithFailure(current));
+        },
+      });
+    })();
   }
 
   // Start the run the moment an invitation exists -- the bench's partner may

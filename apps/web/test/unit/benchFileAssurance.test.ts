@@ -24,10 +24,18 @@ describe("fileAssuranceLine", () => {
   });
 });
 
-describe("SERVER_RECEIVES_FILES default", () => {
-  test("defaults to false: a deployment must opt in to weakening the claim", async () => {
+describe("DEPLOYMENT_PROFILE default", () => {
+  test("defaults to hosted: a deployment must opt in to the console appliance", async () => {
     const configManager = new ConfigManager();
     const config = await configManager.load({ data: {} });
-    expect(config.SERVER_RECEIVES_FILES).toBe(false);
+    expect(config.DEPLOYMENT_PROFILE).toBe("hosted");
+  });
+
+  test("accepts the console profile", async () => {
+    const configManager = new ConfigManager();
+    const config = await configManager.load({
+      data: { DEPLOYMENT_PROFILE: "console" },
+    });
+    expect(config.DEPLOYMENT_PROFILE).toBe("console");
   });
 });

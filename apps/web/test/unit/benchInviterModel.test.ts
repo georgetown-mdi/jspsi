@@ -36,6 +36,7 @@ import {
   reviewValidation,
   sealEditor,
   spineProblems,
+  transportChooserCopy,
   unsealEditor,
 } from "@bench/inviterModel";
 
@@ -331,6 +332,28 @@ describe("transport choice", () => {
   test("a sealed session refuses the transport mutator", () => {
     const sealed = sealEditor(editorFromCsv("Dana", csv));
     expect(editorWithTransport(sealed, "sftp")).toBe(sealed);
+  });
+});
+
+describe("transport chooser copy by deployment", () => {
+  test("a hosted build offers to save the shared-directory exchange", () => {
+    const copy = transportChooserCopy(false);
+    expect(copy.filedropLabel).toBe(
+      "Over a shared directory, run by the command-line tool",
+    );
+    expect(copy.filedropDescription).toContain("Saves an exchange file");
+    expect(copy.capabilityNote).toBe(
+      "This browser runs live exchanges only; SFTP and shared-directory exchanges run in the psilink command-line tool.",
+    );
+  });
+
+  test("a console build offers to run the shared-directory exchange here", () => {
+    const copy = transportChooserCopy(true);
+    expect(copy.filedropLabel).toBe("Over a shared directory, run here");
+    expect(copy.filedropDescription).toContain("Runs the exchange here");
+    expect(copy.capabilityNote).toContain(
+      "runs live and shared-directory exchanges here",
+    );
   });
 });
 

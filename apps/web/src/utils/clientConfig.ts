@@ -4,10 +4,21 @@ import type { JSONSchemaType } from "env-schema";
 
 import type { LogLevel } from "loglevel";
 
+/**
+ * The deployment this build targets. `hosted` is the public browser-only
+ * deployment: the server never receives a file and only coordinates peers.
+ * `console` is the single-party appliance, whose same-origin job API runs a
+ * filedrop exchange server-side. The value is fixed at build time from
+ * `VITE_DEPLOYMENT_PROFILE`; it decides the file-assurance copy, the transport
+ * chooser's filedrop copy, and whether a filedrop channel routes to the
+ * server-job driver.
+ */
+export type DeploymentProfile = "hosted" | "console";
+
 interface Env {
   PEERJS_DEBUG_LEVEL: number;
   LOG_LEVEL: keyof LogLevel;
-  SERVER_RECEIVES_FILES: boolean;
+  DEPLOYMENT_PROFILE: DeploymentProfile;
 }
 
 const schema: JSONSchemaType<Env> = {
@@ -28,13 +39,17 @@ const schema: JSONSchemaType<Env> = {
       type: "string",
       default: "INFO",
     },
-    SERVER_RECEIVES_FILES: {
-      // False fits the hosted browser-only deployment, where the file-assurance
-      // copy in bench/fileAssurance.ts is true. A deployment whose server
-      // legitimately receives files (the console-container deployment) opts in
-      // via VITE_SERVER_RECEIVES_FILES so that copy stops rendering.
-      type: "boolean",
-      default: false,
+    DEPLOYMENT_PROFILE: {
+      // `hosted` (the default) is the public browser-only deployment: the
+      // server never receives a file, so the browser-only file-assurance copy
+      // holds and every filedrop/sftp transport saves an exchange file. A
+      // deployment whose server legitimately runs exchanges (the console
+      // appliance) opts in via VITE_DEPLOYMENT_PROFILE=console, which drops
+      // that assurance copy and routes a filedrop channel to the server-job
+      // driver.
+      type: "string",
+      enum: ["hosted", "console"],
+      default: "hosted",
     },
   },
 };
@@ -43,6 +58,34 @@ class ConfigManager extends BaseConfigManager<Env> {
   constructor() {
     super(schema);
   }
+}
+
+/**
+ * The VITE_-prefixed build-time values as the plain `data` env-schema reads,
+ * matching the derivation client.tsx uses. `import.meta.env`
+ * has no `process.env` in a real browser, so the values arrive explicitly here
+ * rather than through env-schema's default env reading.
+ */
+function viteEnvData(): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(import.meta.env)
+      .filter(([key]) => key.startsWith("VITE_"))
+      .map(([key, value]) => [key.substring(5), value]),
+  );
+}
+
+const configManager = new ConfigManager();
+const config = await configManager.load({ env: false, data: viteEnvData() });
+
+/** This build's {@link DeploymentProfile}, resolved once from the config. */
+export function deploymentProfile(): DeploymentProfile {
+  return config.DEPLOYMENT_PROFILE;
+}
+
+/** Whether this build targets the console appliance ({@link DeploymentProfile}
+ * `console`), whose server runs a filedrop exchange rather than the browser. */
+export function isConsoleBuild(): boolean {
+  return deploymentProfile() === "console";
 }
 
 export { ConfigManager };
