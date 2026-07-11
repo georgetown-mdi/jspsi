@@ -736,7 +736,8 @@ export function AcceptorBench() {
                   </span>
                 </Text>
                 <Text size="sm">
-                  Purpose of the disclosure: {legalAgreementDisplay.purpose}
+                  Stated purpose of the disclosure:{" "}
+                  {legalAgreementDisplay.purpose}
                 </Text>
                 <Text size="sm">
                   Expiration date:{" "}
@@ -744,6 +745,13 @@ export function AcceptorBench() {
                     {legalAgreementDisplay.expirationDate}
                   </span>
                 </Text>
+                {legalAgreementDisplay.alteredForDisplay && (
+                  <p className={`${styles.small} ${styles.sub}`}>
+                    Some characters here are shown as escape codes because they
+                    fall outside plain ASCII, so these values may not read
+                    exactly as they do in your document.
+                  </p>
+                )}
               </fieldset>
             )}
             <div className={styles.workFoot}>

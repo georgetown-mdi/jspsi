@@ -624,16 +624,44 @@ describe("acceptor bench: consent-step legal-agreement display", () => {
       "Check these values against your signed agreement",
     );
     expect(fieldset?.textContent).toContain("MOU-2025-0042");
-    expect(fieldset?.textContent).toContain("Program evaluation");
+    // The purpose keeps its provenance marker: partner-attested free text,
+    // never presented as psilink-endorsed (the InvitationTerms convention).
+    expect(fieldset?.textContent).toContain(
+      "Stated purpose of the disclosure: Program evaluation",
+    );
     expect(fieldset?.textContent).toContain("2026-12-31");
     // Display only: nothing to type, so the fieldset holds no inputs.
     expect(fieldset?.querySelector("input")).toBeNull();
+    // Plain-ASCII values read exactly as authored, so no escaping caveat.
+    expect(fieldset?.textContent).not.toContain("shown as escape codes");
 
     // And it adds no precondition: consent plus a name still completes the gate.
     await consentAndName();
     await expect
       .element(page.getByRole("button", { name: "Accept and continue" }))
       .toBeEnabled();
+  });
+
+  test("a non-ASCII agreement value renders escaped, with the caveat line", async () => {
+    // An accented purpose is legitimate authored text, but sanitizeForDisplay
+    // escapes every non-ASCII code point -- the display cannot visually match
+    // the signed document, so the caveat line must accompany the escaped form.
+    await reachConsentWith({
+      ...agreementTerms,
+      legalAgreement: {
+        reference: "MOU-2025-0042",
+        purpose: "Evaluaci\u00f3n del programa",
+        expirationDate: "2026-12-31",
+      },
+    });
+    const fieldset = document.querySelector("fieldset");
+    expect(fieldset).not.toBeNull();
+    // The escaped form displays; the raw accented character never renders.
+    expect(fieldset?.textContent).toContain("Evaluaci\\xf3n del programa");
+    expect(fieldset?.textContent).not.toContain("\u00f3");
+    expect(fieldset?.textContent).toContain(
+      "shown as escape codes because they fall outside plain ASCII",
+    );
   });
 
   test("an agreement-less invitation shows no legal-agreement fieldset", async () => {

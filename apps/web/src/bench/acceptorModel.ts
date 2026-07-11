@@ -7,8 +7,6 @@ import { dateTimeLabel } from "./inviterModel";
 
 import type { InvitationToken, LinkageTerms, Metadata } from "@psilink/core";
 
-import type { InvitationLegalAgreementSummary } from "@psi/invitationSummary";
-
 import type { RailFact, RailStepState } from "./Rail";
 
 /**
@@ -328,16 +326,48 @@ export function acceptorConsentReady(input: {
   return acceptorConsentName(input) !== undefined;
 }
 
+/** The consent-step legal-agreement display: the three sanitized values plus
+ * whether sanitization changed how any of them reads. */
+export interface AcceptorLegalAgreementDisplay {
+  /** Agreement identifier, sanitized for display. */
+  reference: string;
+  /** Stated purpose of the disclosure, sanitized for display. */
+  purpose: string;
+  /** Expiration date (ISO 8601, YYYY-MM-DD), sanitized for display. */
+  expirationDate: string;
+  /**
+   * True when the display does not read exactly as the authored value:
+   * sanitizeForDisplay escaped a code point outside plain ASCII or truncated a
+   * long value in at least one of the three fields. The consent step then adds
+   * a caveat so "check these against your signed agreement" does not overclaim
+   * a visual match the escaping makes impossible.
+   */
+  alteredForDisplay: boolean;
+}
+
 /**
  * The legal-agreement values the consent step displays beside the attestation,
  * or undefined when the invitation attaches none. Display only -- no gate and no
  * comparison; the acceptor is invited to check the values against the signed
- * document, not to transcribe them. Derived through {@link summarizeInvitation},
- * the one sanitizing boundary, so the three partner-controlled strings are
- * display-safe -- never the raw token values.
+ * document, not to transcribe them. The three strings derive through
+ * {@link summarizeInvitation}, the one sanitizing boundary, so they are
+ * display-safe -- never the raw token values. `alteredForDisplay` compares each
+ * against its raw counterpart, the one place the raw values are consulted, and
+ * only for inequality -- no raw string is returned.
  */
 export function acceptorLegalAgreementDisplay(
   token: InvitationToken,
-): InvitationLegalAgreementSummary | undefined {
-  return summarizeInvitation(token).legalAgreement;
+): AcceptorLegalAgreementDisplay | undefined {
+  const sanitized = summarizeInvitation(token).legalAgreement;
+  const raw = token.linkageTerms.legalAgreement;
+  if (sanitized === undefined || raw === undefined) return undefined;
+  return {
+    reference: sanitized.reference,
+    purpose: sanitized.purpose,
+    expirationDate: sanitized.expirationDate,
+    alteredForDisplay:
+      sanitized.reference !== raw.reference ||
+      sanitized.purpose !== raw.purpose ||
+      sanitized.expirationDate !== raw.expirationDate,
+  };
 }

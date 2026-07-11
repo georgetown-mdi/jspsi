@@ -354,19 +354,21 @@ describe("acceptor consent gate", () => {
 });
 
 describe("acceptor legal-agreement display", () => {
-  test("derives the invitation's three values for the consent step", () => {
+  test("derives the invitation's three values, unaltered for a plain-ASCII agreement", () => {
     expect(acceptorLegalAgreementDisplay(makeToken())).toEqual({
       reference: "MOU-2025-0042",
       purpose: "Program evaluation",
       expirationDate: "2026-12-31",
+      alteredForDisplay: false,
     });
   });
 
-  test("neutralizes hostile agreement values for display", () => {
+  test("neutralizes hostile agreement values and flags the alteration", () => {
     // The agreement strings are partner-controlled free text; a reference or
     // purpose carrying ANSI-escape and bidi-override bytes must reach the
     // consent step neutralized -- the summarizeInvitation boundary, never the
-    // raw token values.
+    // raw token values. The escaping changes how the values read, so the
+    // display carries alteredForDisplay for the consent step's caveat line.
     const display = acceptorLegalAgreementDisplay(
       makeToken({
         legalAgreement: {
@@ -384,6 +386,24 @@ describe("acceptor legal-agreement display", () => {
     expect(display?.purpose).not.toContain(RLO);
     expect(display?.purpose).toContain("evaluation");
     expect(display?.expirationDate).toBe("2026-12-31");
+    expect(display?.alteredForDisplay).toBe(true);
+  });
+
+  test("a long value truncated by sanitization also flags the alteration", () => {
+    // sanitizeForDisplay caps output length as well as escaping; a legitimate
+    // very long purpose cannot read exactly as authored, so the caveat flag
+    // must cover truncation, not only escaping.
+    const display = acceptorLegalAgreementDisplay(
+      makeToken({
+        legalAgreement: {
+          reference: "MOU-2025-0042",
+          purpose: "x".repeat(1000),
+          expirationDate: "2026-12-31",
+        },
+      }),
+    );
+    expect(display?.purpose.length).toBeLessThan(1000);
+    expect(display?.alteredForDisplay).toBe(true);
   });
 
   test("an invitation without an agreement yields no display", () => {
