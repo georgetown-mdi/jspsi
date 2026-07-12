@@ -32,7 +32,8 @@ export const EVENT_STREAM_VERSION = 1;
  * The closed vocabulary of event `type` values. This party owns every one of
  * these strings -- none is partner-derived -- so a consumer can switch on the
  * discriminant safely. `stages` is the one-shot stage-list event; `stage` marks
- * each stage transition; `warning` carries a non-fatal terms-exchange warning;
+ * each stage transition; `warning` carries a non-fatal warning (a
+ * terms-exchange warning or the cross-party host-key divergence notice);
  * `result` and `error` are the two terminal events (exactly one fires per run).
  */
 export type EventType = "stages" | "stage" | "warning" | "result" | "error";
@@ -91,7 +92,10 @@ export interface StageEvent extends EventBase {
   label: string;
 }
 
-/** A non-fatal warning from the terms exchange. */
+/**
+ * A non-fatal warning: a terms-exchange warning or the cross-party host-key
+ * divergence notice.
+ */
 export interface WarningEvent extends EventBase {
   type: "warning";
   message: string;
@@ -177,7 +181,7 @@ export function buildStageEvent(id: string, label: string): StageEvent {
   };
 }
 
-/** Build a warning event from a non-fatal terms-exchange warning. */
+/** Build a warning event from a non-fatal warning message. */
 export function buildWarningEvent(message: string): WarningEvent {
   return {
     v: EVENT_STREAM_VERSION,
