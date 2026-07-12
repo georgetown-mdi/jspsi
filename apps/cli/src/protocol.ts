@@ -945,10 +945,16 @@ export async function runProtocol(
           // A host-key divergence is a security signal, not a terms warning, so
           // it gets its own un-prefixed warn line; the message is complete and
           // display-safe (reconcileHostKeyFingerprints sanitizes both parties'
-          // server-controlled values). Non-fatal: the exchange still completes
-          // and the operator disambiguates a rekey from an interception
-          // out-of-band.
-          onHostKeyDivergence: (msg: string) => log.warn(msg),
+          // server-controlled values). It also rides the machine-interface
+          // warning event: a supervisor that discards stderr on success (the
+          // appliance job runner) must still see the one control that catches a
+          // one-sided SFTP interception. Non-fatal: the exchange still
+          // completes and the operator disambiguates a rekey from an
+          // interception out-of-band.
+          onHostKeyDivergence: (msg: string) => {
+            log.warn(msg);
+            emit((e) => e.warning(msg));
+          },
           // A present-but-malformed partner host-key advertisement is dropped by
           // the fail-soft parse, so reconciliation is silently skipped for it.
           // Log that drop at debug -- low enough that a benign version-skew does

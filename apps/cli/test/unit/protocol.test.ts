@@ -3096,3 +3096,68 @@ test("an SFTP host-key mismatch under --event-stream emits category security and
     exitSpy.mockRestore();
   }
 });
+
+test("a host-key divergence under --event-stream emits a warning event and still warns on stderr", async () => {
+  // The divergence notice is the one control that catches a one-sided SFTP
+  // interception, and a supervisor that discards child stderr on success (the
+  // appliance job runner) would otherwise lose it -- so it must ride the fd-3
+  // stream as a structured warning event, in addition to the human warn line.
+  const divergence =
+    "Both observed key type 'ssh-ed25519', but this party observed " +
+    `fingerprint SHA256:${"A".repeat(43)} while the partner observed ` +
+    `SHA256:${"B".repeat(43)}.`;
+
+  vi.mocked(runExchange).mockImplementation((async (...args: unknown[]) => {
+    const options = args[3] as {
+      onHostKeyDivergence?: (msg: string) => void;
+    };
+    options.onHostKeyDivergence?.(divergence);
+    return defaultRunExchange();
+  }) as never);
+
+  mockFd3Open();
+  try {
+    // Party A runs flag-on; party B flag-off, so every captured fd-3 line is
+    // A's (the afterEach empty-capture assertion backs this up). The mocked
+    // runExchange fires the divergence callback for both parties, so the
+    // emission is exercised regardless of which party reaches it first.
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        minimalPrepared,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  // A's full stream: the one-shot (empty, mocked) stage list, the divergence
+  // warning, and the success terminal event.
+  const lines = takeFd3Lines();
+  expect(lines).toHaveLength(3);
+  expect(lines[0].type).toBe("stages");
+  expect(lines[1].type).toBe("warning");
+  expect(lines[1].v).toBe(1);
+  expect(lines[1].message).toBe(divergence);
+  expect(lines[2].type).toBe("result");
+
+  // The stderr warn line is preserved verbatim: un-prefixed, unlike the
+  // "terms exchange:" lines onWarning produces.
+  expect(mockState.warnings).toContain(divergence);
+});

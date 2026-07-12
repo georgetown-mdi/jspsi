@@ -12,16 +12,29 @@ import type { JobExchangeIntent, JobExchangeOptions } from "@jobs/intent";
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 import type { RelayEvent, RelayEventType } from "@jobs/cliDriver";
 import type { RunOutputs } from "@bench/runOutputs";
+import type { SftpRemoteProjection } from "@jobs/jobManager";
 
 const log = getLogger("serverJobExchangeDriver");
+
+/** The channel a server job runs over, mirroring the {@link JobExchangeIntent}
+ * discriminant so the driver stays transport-blind past intent construction.
+ * The sftp variant carries exactly one extra field: the opaque NAME of an
+ * operator-provisioned remote (`GET /api/jobs/remotes`). No free-form
+ * connection field exists here by construction -- every host, port, path, and
+ * credential reference lives in the appliance's remotes table, never in the
+ * browser. */
+export type ServerJobExchangeTransport =
+  { channel: "filedrop" } | { channel: "sftp"; remote: string };
 
 /** The construction-time inputs a server-job driver needs: the analog of the
  * browser driver's config, minus everything that only a peer-to-peer run has (no
  * `acquire`, no PSI library, no `generateOutput`). These are exactly the
  * {@link JobExchangeIntent} fields the wiring agent draws from the prepared
- * exchange; the driver stamps `channel: "filedrop"` and `eventStream: true`
- * itself, so a caller supplies only the exchange payload. */
+ * exchange; `transport` picks the intent arm and the driver stamps
+ * `eventStream: true` itself, so a caller supplies only the exchange payload
+ * and the channel it rides. */
 export interface ServerJobExchangeDriverConfig {
+  transport: ServerJobExchangeTransport;
   linkageTerms: LinkageTerms;
   sharedSecret: string;
   inputCsv: string;
@@ -162,6 +175,59 @@ export function createFetchJobApiClient(
       return { available: true, createdAt };
     },
   };
+}
+
+/**
+ * Fetch the appliance's operator-provisioned SFTP remotes
+ * (`GET /api/jobs/remotes`) as the validated projection array. Fail-safe toward
+ * "none configured": a non-2xx, a network error, or a body that is not an array
+ * of `{name, host, port?, path?}` entries resolves to an empty array, so the
+ * bench falls back to the save-a-file surface rather than arming a server-job
+ * run it cannot name a remote for.
+ */
+export async function fetchSftpRemotes(
+  fetchImpl: typeof fetch = fetch,
+): Promise<Array<SftpRemoteProjection>> {
+  try {
+    const response = await fetchImpl("/api/jobs/remotes", { method: "GET" });
+    if (!response.ok) return [];
+    const body: unknown = await response.json();
+    return sftpRemotesProjectionOf(body) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Validate the remotes response body into the projection array, or null when
+ * any entry is malformed -- one bad entry fails the whole listing closed rather
+ * than serving a partial table the operator did not provision. */
+function sftpRemotesProjectionOf(
+  body: unknown,
+): Array<SftpRemoteProjection> | null {
+  if (!Array.isArray(body)) return null;
+  const remotes: Array<SftpRemoteProjection> = [];
+  for (const entry of body) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry))
+      return null;
+    const { name, host, port, path } = entry as Record<string, unknown>;
+    if (typeof name !== "string" || name.length === 0) return null;
+    if (typeof host !== "string" || host.length === 0) return null;
+    if (
+      port !== undefined &&
+      (typeof port !== "number" ||
+        !Number.isInteger(port) ||
+        port < 1 ||
+        port > 65535)
+    )
+      return null;
+    if (path !== undefined && (typeof path !== "string" || path.length === 0))
+      return null;
+    const remote: SftpRemoteProjection = { name, host };
+    if (port !== undefined) remote.port = port;
+    if (path !== undefined) remote.path = path;
+    remotes.push(remote);
+  }
+  return remotes;
 }
 
 /** Open the SSE event stream and yield each parsed frame as a {@link RelayEvent}.
@@ -314,19 +380,51 @@ function errorMessageOf(event: RelayEvent): string {
     : "the exchange failed";
 }
 
+/** Build the {@link JobExchangeIntent} a run POSTs from the driver config: the
+ * `transport` picks the arm (the sftp arm adds only the remote NAME), and
+ * everything after the discriminant is channel-independent. */
+function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
+  const {
+    transport,
+    linkageTerms,
+    sharedSecret,
+    inputCsv,
+    metadata,
+    standardization,
+    expectedPayloadColumns,
+    options,
+  } = config;
+  const shared = {
+    linkageTerms,
+    sharedSecret,
+    inputCsv,
+    ...(metadata !== undefined ? { metadata } : {}),
+    ...(standardization !== undefined ? { standardization } : {}),
+    ...(expectedPayloadColumns !== undefined ? { expectedPayloadColumns } : {}),
+    ...(options !== undefined ? { options } : {}),
+    eventStream: true,
+  };
+  return transport.channel === "sftp"
+    ? { channel: "sftp", remote: transport.remote, ...shared }
+    : { channel: "filedrop", ...shared };
+}
+
 /**
- * Build a server-job {@link ExchangeDriver} for a filedrop exchange: `run` POSTs
- * a {@link JobExchangeIntent} to the job API and maps the server's SSE event
- * stream onto the typed lifecycle events, so it is a drop-in for the in-browser
- * WebRTC driver behind the same contract. It owns no peer connection, PSI
- * library, or exchange result -- the result is written on the console appliance,
- * not downloaded in the browser.
+ * Build a server-job {@link ExchangeDriver}: `run` POSTs a
+ * {@link JobExchangeIntent} for the config's transport (filedrop, or sftp over
+ * an operator-provisioned named remote) to the job API and maps the server's
+ * SSE event stream onto the typed lifecycle events, so it is a drop-in for the
+ * in-browser WebRTC driver behind the same contract. It owns no peer
+ * connection, PSI library, or exchange result -- the result is written on the
+ * console appliance, not downloaded in the browser. Past intent construction
+ * every step is channel-independent.
  *
  * Faithful mapping: `stages`/`stage` forward in order; `result` fires
  * `onResult` once; `error` fires `onError` once with the CLI-classified
  * category preserved verbatim (`security` stays `security`). Exactly one
- * terminal fires per run. A `warning` event has no slot in the contract, so it
- * is logged and dropped rather than invented into an `onWarning`.
+ * terminal fires per run. A `warning` event's message forwards to the optional
+ * `onWarning` (and keeps its dev-gated log either way); with no `onWarning`
+ * it is logged and dropped.
  *
  * Cancellation stays on the run's signal: an already-aborted signal starts
  * nothing; an abort mid-run POSTs a cancel and stops consuming the stream
@@ -337,15 +435,6 @@ export function createServerJobExchangeDriver(
   config: ServerJobExchangeDriverConfig,
   client: JobApiClient = createFetchJobApiClient(),
 ): ExchangeDriver<RunOutputs> {
-  const {
-    linkageTerms,
-    sharedSecret,
-    inputCsv,
-    metadata,
-    standardization,
-    expectedPayloadColumns,
-    options,
-  } = config;
   return {
     run: async ({
       signal,
@@ -353,25 +442,14 @@ export function createServerJobExchangeDriver(
       onStage,
       onResult,
       onError,
+      onWarning,
     }: ExchangeDriverEvents<RunOutputs>) => {
       // Read the live abort state through a call so the re-checks across each
       // `await` below are not narrowed to a constant by the first guard.
       const aborted = () => signal.aborted;
       if (aborted()) return;
 
-      const intent: JobExchangeIntent = {
-        channel: "filedrop",
-        linkageTerms,
-        sharedSecret,
-        inputCsv,
-        ...(metadata !== undefined ? { metadata } : {}),
-        ...(standardization !== undefined ? { standardization } : {}),
-        ...(expectedPayloadColumns !== undefined
-          ? { expectedPayloadColumns }
-          : {}),
-        ...(options !== undefined ? { options } : {}),
-        eventStream: true,
-      };
+      const intent = intentFor(config);
 
       let jobId: string;
       try {
@@ -408,13 +486,23 @@ export function createServerJobExchangeDriver(
               if (typeof id === "string") onStage(id);
               break;
             }
-            case "warning":
+            case "warning": {
               // Dev-gated like onError: event.message is server/CLI-controlled,
-              // so a production console carries none of it.
+              // so a production console carries none of it. The consumer's
+              // optional onWarning is the operator-facing slot; it renders
+              // through its own display-boundary sanitization.
               whenDiagnostic(() =>
                 log.warn("server job warning:", event.message),
               );
+              const message = event.message;
+              if (
+                onWarning !== undefined &&
+                typeof message === "string" &&
+                message.length > 0
+              )
+                onWarning(message);
               break;
+            }
             case "result": {
               const outputs = baseResultOutputs(event, jobId);
               const availability = await queryRecordAvailability(

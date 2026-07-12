@@ -337,7 +337,7 @@ describe("transport choice", () => {
 
 describe("transport chooser copy by deployment", () => {
   test("a hosted build offers to save the shared-directory exchange", () => {
-    const copy = transportChooserCopy(false);
+    const copy = transportChooserCopy(false, false);
     expect(copy.filedropLabel).toBe(
       "Over a shared directory, run by the command-line tool",
     );
@@ -348,12 +348,41 @@ describe("transport chooser copy by deployment", () => {
   });
 
   test("a console build offers to run the shared-directory exchange here", () => {
-    const copy = transportChooserCopy(true);
+    const copy = transportChooserCopy(true, false);
     expect(copy.filedropLabel).toBe("Over a shared directory, run here");
     expect(copy.filedropDescription).toContain("Runs the exchange here");
     expect(copy.capabilityNote).toContain(
       "runs live and shared-directory exchanges here",
     );
+  });
+
+  test("SFTP stays a command-line save everywhere without provisioned remotes", () => {
+    for (const consoleBuild of [false, true]) {
+      const copy = transportChooserCopy(consoleBuild, false);
+      expect(copy.sftpLabel).toBe(
+        "Over SFTP, run by the psilink command-line tool",
+      );
+      expect(copy.sftpDescription).toContain("Saves an exchange file");
+    }
+    // The remotes flag means nothing off a console: no job API runs there.
+    const hosted = transportChooserCopy(false, true);
+    expect(hosted.sftpLabel).toBe(
+      "Over SFTP, run by the psilink command-line tool",
+    );
+    expect(hosted.capabilityNote).toContain("live exchanges only");
+  });
+
+  test("a console build with provisioned remotes offers to run SFTP here", () => {
+    const copy = transportChooserCopy(true, true);
+    expect(copy.sftpLabel).toBe("Over SFTP, run here");
+    expect(copy.sftpDescription).toContain(
+      "SFTP server provisioned on this appliance",
+    );
+    expect(copy.capabilityNote).toBe(
+      "This deployment runs live, shared-directory, and SFTP exchanges here.",
+    );
+    // The filedrop card is unchanged by the remotes flag.
+    expect(copy.filedropLabel).toBe("Over a shared directory, run here");
   });
 });
 

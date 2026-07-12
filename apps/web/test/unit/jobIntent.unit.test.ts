@@ -2,16 +2,28 @@ import { describe, expect, test } from "vitest";
 
 import { parse as parseYaml } from "yaml";
 
-import { disclosedColumnNames, safeParseMetadata } from "@psilink/core";
+import {
+  disclosedColumnNames,
+  safeParseExchangeSpec,
+  safeParseMetadata,
+} from "@psilink/core";
 
 import {
   JOB_FILE_NAMES,
   composeConfigDocument,
   composeKeyFileDocument,
+  composeSftpConfigDocument,
   jobExchangeIntentSchema,
 } from "@jobs/intent";
 
-import { validIntent, validLinkageTerms } from "../utils/jobFixtures";
+import {
+  TEST_HOST_KEY_FINGERPRINT,
+  TEST_SFTP_REMOTE_NAME,
+  testSftpRemoteEntry,
+  validIntent,
+  validLinkageTerms,
+  validSftpIntent,
+} from "../utils/jobFixtures";
 
 import type { Metadata, Standardization } from "@psilink/core";
 
@@ -170,8 +182,13 @@ describe("jobExchangeIntentSchema rejects injection-shaped intents", () => {
     expect(jobExchangeIntentSchema.safeParse(validIntent()).success).toBe(true);
   });
 
-  test("rejects an sftp channel (unknown intent for this cut)", () => {
+  test("rejects an sftp intent that names no remote", () => {
     const intent = { ...validIntent(), channel: "sftp" };
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
+  test("rejects an unknown channel", () => {
+    const intent = { ...validIntent(), channel: "webrtc" };
     expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
   });
 
@@ -250,6 +267,151 @@ describe("composeConfigDocument is injection-closed", () => {
   });
 });
 
+describe("the sftp intent arm", () => {
+  test("accepts a well-formed sftp intent", () => {
+    expect(jobExchangeIntentSchema.safeParse(validSftpIntent()).success).toBe(
+      true,
+    );
+  });
+
+  test("rejects an unknown key on the sftp arm", () => {
+    const intent = { ...validSftpIntent(), path: "/etc/passwd" };
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
+  test("rejects a smuggled server block on the sftp arm", () => {
+    const intent = {
+      ...validSftpIntent(),
+      server: { host: "evil.example", password: "@/etc/shadow" },
+    };
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
+  test("rejects a remote outside the name charset", () => {
+    for (const remote of [
+      "",
+      "../evil",
+      "a b",
+      "-leading",
+      "name/with/slash",
+      "a".repeat(65),
+    ]) {
+      const intent = validSftpIntent({ remote });
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+    }
+  });
+
+  test("the filedrop arm rejects a remote field", () => {
+    const intent = { ...validIntent(), remote: TEST_SFTP_REMOTE_NAME };
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
+  test("pollIntervalMs 999 is rejected on sftp, accepted on filedrop", () => {
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validSftpIntent({ options: { pollIntervalMs: 999 } }),
+      ).success,
+    ).toBe(false);
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validSftpIntent({ options: { pollIntervalMs: 1000 } }),
+      ).success,
+    ).toBe(true);
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validIntent({ options: { pollIntervalMs: 999 } }),
+      ).success,
+    ).toBe(true);
+  });
+});
+
+describe("composeSftpConfigDocument", () => {
+  test("writes snake_case fields with @path credential refs verbatim at rest", () => {
+    const entry = {
+      ...testSftpRemoteEntry(),
+      keyboardInteractive: true,
+    };
+    const yaml = composeSftpConfigDocument(validSftpIntent(), entry);
+    const doc = parseYaml(yaml) as {
+      connection: { channel: string; server: Record<string, unknown> };
+    };
+    expect(doc.connection.channel).toBe("sftp");
+    expect(doc.connection.server.host).toBe("sftp.example.org");
+    expect(doc.connection.server.port).toBe(2222);
+    expect(doc.connection.server.password).toBe(
+      "@/etc/psilink/prod-east-password",
+    );
+    expect(doc.connection.server.host_key_fingerprint).toBe(
+      TEST_HOST_KEY_FINGERPRINT,
+    );
+    expect(doc.connection.server.keyboard_interactive).toBe(true);
+    // The camelCase spellings never reach the file.
+    expect(yaml).not.toContain("hostKeyFingerprint");
+    expect(yaml).not.toContain("keyboardInteractive");
+  });
+
+  test("the remote NAME appears nowhere in the document", () => {
+    const yaml = composeSftpConfigDocument(
+      validSftpIntent(),
+      testSftpRemoteEntry(),
+    );
+    expect(yaml).not.toContain(TEST_SFTP_REMOTE_NAME);
+  });
+
+  test("client linkage terms and metadata land exactly as filedrop's do", () => {
+    const intentFields = {
+      metadata: editedMetadata,
+      standardization: editedStandardization,
+      expectedPayloadColumns: ["program_code"],
+    };
+    const sftpDoc = parseYaml(
+      composeSftpConfigDocument(
+        validSftpIntent(intentFields),
+        testSftpRemoteEntry(),
+      ),
+    ) as Record<string, unknown>;
+    const filedropDoc = parseYaml(
+      composeConfigDocument(validIntent(intentFields), "/srv/jobs/x/exchange"),
+    ) as Record<string, unknown>;
+    expect(sftpDoc.linkage_terms).toEqual(filedropDoc.linkage_terms);
+    expect(sftpDoc.metadata).toEqual(filedropDoc.metadata);
+    expect(sftpDoc.standardization).toEqual(filedropDoc.standardization);
+    expect(sftpDoc.expected_payload_columns).toEqual(
+      filedropDoc.expected_payload_columns,
+    );
+  });
+
+  test("never assembles an authentication block", () => {
+    const doc = parseYaml(
+      composeSftpConfigDocument(validSftpIntent(), testSftpRemoteEntry()),
+    ) as Record<string, unknown>;
+    expect(doc.authentication).toBeUndefined();
+  });
+
+  test("forwards the sftp option subset under the connection", () => {
+    const yaml = composeSftpConfigDocument(
+      validSftpIntent({
+        options: { pollIntervalMs: 5000, retainFiles: false },
+      }),
+      testSftpRemoteEntry(),
+    );
+    const doc = parseYaml(yaml) as {
+      connection: { options?: Record<string, unknown> };
+    };
+    expect(doc.connection.options?.poll_interval_ms).toBe(5000);
+    expect(doc.connection.options?.retain_files).toBe(false);
+  });
+
+  test("the document parses back through core's exchange-spec schema", () => {
+    const yaml = composeSftpConfigDocument(
+      validSftpIntent(),
+      testSftpRemoteEntry(),
+    );
+    const parsed = safeParseExchangeSpec(parseYaml(yaml));
+    expect(parsed.success).toBe(true);
+  });
+});
+
 describe("composeKeyFileDocument", () => {
   test("writes only the shared secret, no expiry", () => {
     const body = JSON.parse(composeKeyFileDocument(validIntent())) as {
@@ -258,6 +420,12 @@ describe("composeKeyFileDocument", () => {
     };
     expect(body.sharedSecret).toBe(validIntent().sharedSecret);
     expect(body.expires).toBeUndefined();
+  });
+
+  test("serializes the sftp arm's secret identically", () => {
+    expect(composeKeyFileDocument(validSftpIntent())).toBe(
+      composeKeyFileDocument(validIntent()),
+    );
   });
 });
 

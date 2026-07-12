@@ -107,6 +107,7 @@ export function acceptorServerJobConfig({
   inputCsv: string;
 }): ServerJobExchangeDriverConfig {
   return {
+    transport: { channel: "filedrop" },
     linkageTerms: deriveAcceptedLinkageTerms(token.linkageTerms, acceptorName),
     sharedSecret: token.sharedSecret,
     inputCsv,
@@ -306,9 +307,13 @@ export function useAcceptorExchange({
     // (a save-file, which the guard fails closed before a launch can exist) is
     // surfaced as the run's own failure alert rather than thrown out of the start
     // effect, which would crash the render.
+    // The remotes flag is the selector's sftp-only input; the accept guard
+    // admits no sftp endpoint (webrtc and console filedrop only), so it is
+    // constant false here.
     const selection = selectExchangeDriver(
       transportForEndpointChannel(endpoint.channel),
       deploymentProfile(),
+      false,
     );
     if (selection.kind === "save-file") {
       setFailure(

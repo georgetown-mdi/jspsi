@@ -3,20 +3,24 @@ import type { Transport } from "./inviterModel";
 
 /**
  * How a chosen channel runs in a given build. `browser` runs the live WebRTC
- * exchange in this tab; `server-job` runs a filedrop exchange through the
- * console appliance's job API; `save-file` mints an exchange file the operator
- * runs with the command-line tool. The bench's two seams consume this: the
- * Create branch routes `save-file` to the save surface and both live kinds to
- * the run, and the run hooks build the matching {@link ExchangeDriver}.
+ * exchange in this tab; `server-job` runs a filedrop or sftp exchange through
+ * the console appliance's job API; `save-file` mints an exchange file the
+ * operator runs with the command-line tool. The bench's two seams consume
+ * this: the Create branch routes `save-file` to the save surface and both live
+ * kinds to the run, and the run hooks build the matching {@link ExchangeDriver}.
  */
 export type ExchangeDriverSelection =
   { kind: "browser" } | { kind: "server-job" } | { kind: "save-file" };
 
 /**
- * Map a chosen `channel` and the build's `profile` to how the exchange runs.
- * The job API is filedrop-only by design, so only a filedrop channel on the
- * console appliance runs server-side; sftp always saves a file (server-job SFTP
- * is a separately-tracked future item), and browser always runs live.
+ * Map a chosen `channel`, the build's `profile`, and the appliance's sftp
+ * server-job availability to how the exchange runs. A filedrop channel runs
+ * server-side on the console appliance; an sftp channel runs server-side only
+ * when the build is a console AND the appliance has at least one
+ * operator-provisioned remote to name (`sftpRemotesConfigured`) -- with none,
+ * there is no server-side connection material, so it saves a file for the
+ * command-line tool instead of arming a run that cannot start. Browser always
+ * runs live.
  *
  * The `channel` switch is exhaustive over {@link Transport} with no default: a
  * new channel makes this fail to compile rather than silently falling through
@@ -26,6 +30,7 @@ export type ExchangeDriverSelection =
 export function selectExchangeDriver(
   channel: Transport,
   profile: DeploymentProfile,
+  sftpRemotesConfigured: boolean,
 ): ExchangeDriverSelection {
   switch (channel) {
     case "browser":
@@ -35,6 +40,8 @@ export function selectExchangeDriver(
         ? { kind: "server-job" }
         : { kind: "save-file" };
     case "sftp":
-      return { kind: "save-file" };
+      return profile === "console" && sftpRemotesConfigured
+        ? { kind: "server-job" }
+        : { kind: "save-file" };
   }
 }

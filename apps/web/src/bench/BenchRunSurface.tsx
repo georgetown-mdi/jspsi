@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 
 import { Alert, Button, CopyButton } from "@mantine/core";
-import { IconAlertCircle } from "@tabler/icons-react";
+import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 
 import { dateTimeLabel } from "./inviterModel";
@@ -184,6 +184,44 @@ export function FailureAlert({
     >
       <span style={{ whiteSpace: "pre-line" }}>{failure.message}</span>
       {children}
+    </Alert>
+  );
+}
+
+/**
+ * The run's non-fatal warnings, accumulated in arrival order -- the driver's
+ * `onWarning` slot rendered for the operator (e.g. the CLI's cross-party
+ * host-key divergence notice, which must reach the appliance operator). Not a
+ * terminal and not dismissible: it stays up through completion or failure so a
+ * warning cannot be scrolled away by the run finishing. Renders nothing while
+ * no warning has arrived. Messages are sanitized by the owning hook at its
+ * display boundary before they reach this prop.
+ */
+export function RunWarningsAlert({
+  warnings,
+}: {
+  warnings: ReadonlyArray<string>;
+}) {
+  if (warnings.length === 0) return null;
+  return (
+    <Alert
+      color="yellow"
+      icon={<IconAlertTriangle aria-hidden />}
+      title={
+        warnings.length === 1
+          ? "The exchange reported a warning"
+          : "The exchange reported warnings"
+      }
+      role="status"
+      mb="md"
+    >
+      {warnings.map((message, index) => (
+        // Index keys are stable here: the list is append-only per run and
+        // resets only with the whole run.
+        <p key={index} style={{ whiteSpace: "pre-line", margin: 0 }}>
+          {message}
+        </p>
+      ))}
     </Alert>
   );
 }

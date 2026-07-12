@@ -2,12 +2,23 @@ import fs from "node:fs";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { JobManager } from "@jobs/jobManager";
+import {
+  JobManager,
+  SftpRemoteBusyError,
+  UnknownSftpRemoteError,
+} from "@jobs/jobManager";
 import { writeJobFile } from "@jobs/workdir";
 
-import { STUB_CLI_PATH, tempDataRoot, validIntent } from "../utils/jobFixtures";
+import {
+  STUB_CLI_PATH,
+  tempDataRoot,
+  testSftpRemotesTable,
+  validIntent,
+  validSftpIntent,
+} from "../utils/jobFixtures";
 
 import type { BufferedEvent, JobRecord } from "@jobs/jobManager";
+import type { JobSftpRemotesTable } from "@jobs/sftpRemotes";
 
 vi.mock("@jobs/workdir", { spy: true });
 
@@ -31,6 +42,7 @@ function makeManager(options: {
   ignoreSigint?: boolean;
   ignoreSigterm?: boolean;
   eventBufferCap?: number;
+  sftpRemotes?: JobSftpRemotesTable;
 }): JobManager {
   // The stub reads its scenario from the child environment; the driver's
   // sanitized child env drops ambient vars, so pass the config through childEnv.
@@ -55,6 +67,7 @@ function makeManager(options: {
     cancelSigtermGraceMs: 40,
     cancelSigkillGraceMs: 40,
     eventBufferCap: options.eventBufferCap,
+    sftpRemotes: options.sftpRemotes,
     childEnv,
   });
   managers.push(manager);
@@ -282,5 +295,112 @@ describe("createJob failure cleanup", () => {
     vi.mocked(writeJobFile).mockRejectedValueOnce(new Error("disk full"));
     await expect(manager.createJob(validIntent())).rejects.toThrow("disk full");
     expect(fs.readdirSync(root)).toEqual([]);
+  });
+
+  test("a failed sftp job write releases the remote latch with the workdir", async () => {
+    const manager = makeManager({
+      events: [RESULT_EVENT],
+      exitCode: 0,
+      sftpRemotes: testSftpRemotesTable(),
+    });
+    const root = roots[roots.length - 1];
+    vi.mocked(writeJobFile).mockRejectedValueOnce(new Error("disk full"));
+    await expect(manager.createJob(validSftpIntent())).rejects.toThrow(
+      "disk full",
+    );
+    expect(fs.readdirSync(root)).toEqual([]);
+    // The latch did not leak: the same remote is immediately acquirable.
+    const id = await manager.createJob(validSftpIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    expect(record.status).toBe("succeeded");
+  });
+});
+
+describe("sftp remote resolution and the per-remote busy latch", () => {
+  test("an unknown remote is a typed error and creates NO workdir", async () => {
+    const manager = makeManager({ sftpRemotes: testSftpRemotesTable() });
+    const root = roots[roots.length - 1];
+    await expect(
+      manager.createJob(validSftpIntent({ remote: "not_provisioned" })),
+    ).rejects.toThrow(UnknownSftpRemoteError);
+    // The remote resolves BEFORE createWorkdir: nothing touched the disk, not
+    // even the data root.
+    expect(fs.existsSync(root)).toBe(false);
+  });
+
+  test("an absent table rejects every sftp intent the same way", async () => {
+    const manager = makeManager({});
+    const root = roots[roots.length - 1];
+    await expect(manager.createJob(validSftpIntent())).rejects.toThrow(
+      UnknownSftpRemoteError,
+    );
+    expect(fs.existsSync(root)).toBe(false);
+  });
+
+  test("a running job's remote is busy; terminal state releases it", async () => {
+    const manager = makeManager({
+      delayMs: 5000,
+      sftpRemotes: testSftpRemotesTable(),
+    });
+    const firstId = await manager.createJob(validSftpIntent());
+    const first = manager.getJob(firstId)!;
+
+    await expect(manager.createJob(validSftpIntent())).rejects.toThrow(
+      SftpRemoteBusyError,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    manager.cancelJob(first);
+    await waitForTerminal(first);
+    await vi.waitFor(() => expect(first.terminal).not.toBeNull());
+
+    const secondId = await manager.createJob(validSftpIntent());
+    expect(secondId).not.toBe(firstId);
+  });
+
+  test("deleting the holding job releases the latch when its child exits", async () => {
+    const manager = makeManager({
+      delayMs: 5000,
+      sftpRemotes: testSftpRemotesTable(),
+    });
+    const firstId = await manager.createJob(validSftpIntent());
+    const first = manager.getJob(firstId)!;
+    await expect(manager.createJob(validSftpIntent())).rejects.toThrow(
+      SftpRemoteBusyError,
+    );
+    expect(await manager.deleteJob(firstId)).toBe(true);
+    // The latch releases when the SIGKILL'd child actually exits, not on the
+    // delete request, so a successor cannot rendezvous with the dying child.
+    await waitForTerminal(first);
+    const secondId = await manager.createJob(validSftpIntent());
+    expect(manager.getJob(secondId)).toBeDefined();
+  });
+
+  test("an sftp job completes end-to-end and writes an sftp config", async () => {
+    const manager = makeManager({
+      events: [RESULT_EVENT],
+      exitCode: 0,
+      sftpRemotes: testSftpRemotesTable(),
+    });
+    const id = await manager.createJob(validSftpIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    expect(record.status).toBe("succeeded");
+    const configYaml = fs.readFileSync(
+      `${record.workdir}/psilink.yaml`,
+      "utf8",
+    );
+    expect(configYaml).toContain("channel: sftp");
+    expect(configYaml).toContain("host: sftp.example.org");
+    expect(configYaml).not.toContain("prod_east");
+  });
+
+  test("filedrop jobs are unaffected by an absent remotes table", async () => {
+    const manager = makeManager({ events: [RESULT_EVENT], exitCode: 0 });
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    expect(record.status).toBe("succeeded");
   });
 });

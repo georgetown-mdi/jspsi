@@ -4,7 +4,7 @@ title: "Web Server Job API"
 
 # Web server job API
 
-This document specifies the web application's server-side job API: the HTTP endpoints through which a supervisor creates, observes, cancels, and deletes an exchange job that the Nitro server drives as a `psilink` CLI subprocess, the typed intent the client submits and the validation that makes it injection-closed, the on-disk workdir layout and modes, the SSE event relay and its full-history replay, the exit-code reconciliation and cancellation escalation, the environment variables that gate and configure the feature, and the memory-only job lifetime. It is the spec-tier complement to the operator-facing overview in [DEPLOYMENT.md](../DEPLOYMENT.md#server-job-api), which says what the feature is for and how to turn it on; this document says how each request, file, and event is constructed. It consumes -- and re-validates at the trust boundary -- the CLI's fd-3 event stream specified in [CLI_EVENTS.md](CLI_EVENTS.md); it does not respecify that stream's construction (see there). It does not cover the exchange protocol that produces the events (see [PROTOCOL.md](PROTOCOL.md)) or the display-sanitization escape format the fields reuse (see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#display-sanitization-escape-format)). Intended readers are implementors writing a supervisor against this API and security auditors.
+This document specifies the web application's server-side job API: the HTTP endpoints through which a supervisor creates, observes, cancels, and deletes an exchange job that the Nitro server drives as a `psilink` CLI subprocess, the typed intent the client submits and the validation that makes it injection-closed, the operator-provisioned SFTP remotes table and its validation, the on-disk workdir layout and modes, the SSE event relay and its full-history replay, the exit-code reconciliation and cancellation escalation, the environment variables that gate and configure the feature, and the memory-only job lifetime. It is the spec-tier complement to the operator-facing overview in [DEPLOYMENT.md](../DEPLOYMENT.md#server-job-api), which says what the feature is for and how to turn it on; this document says how each request, file, and event is constructed. It consumes -- and re-validates at the trust boundary -- the CLI's fd-3 event stream specified in [CLI_EVENTS.md](CLI_EVENTS.md); it does not respecify that stream's construction (see there). It does not cover the exchange protocol that produces the events (see [PROTOCOL.md](PROTOCOL.md)) or the display-sanitization escape format the fields reuse (see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#display-sanitization-escape-format)). Intended readers are implementors writing a supervisor against this API and security auditors.
 
 The job API exists for the console-appliance deployment: a container serving one party, inside that party's trust boundary, that drives the party's own `psilink exchange` runs without the operator invoking the CLI by hand. It is not a shared rendezvous between parties; the trust invariant it rests on and what would violate it are in [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#single-party-appliance-trust-boundary). The API is off unless a data root is configured, and its whole design -- server-composed CLI inputs, memory-only state, loopback-or-token auth -- is calibrated to that single-operator posture.
 
@@ -21,7 +21,7 @@ Every job response carries `Cache-Control: no-store` and no CORS headers -- the 
 
 | Method | Path | Success | Notes |
 | ------ | ---- | ------- | ----- |
-| `POST` | `/api/jobs` | `201` `{ "id": "<uuid>" }` | Create and start a job from a JSON intent. `400` on unparseable body or intent that fails schema validation. |
+| `POST` | `/api/jobs` | `201` `{ "id": "<uuid>" }` | Create and start a job from a JSON intent. `400` on unparseable body, intent that fails schema validation, or an sftp intent naming an unknown remote (empty body, resolved before any workdir exists). `409` (empty body) when the named remote is held by a running job. |
 | `GET` | `/api/jobs/:jobId` | `200` status JSON | `404` on malformed, unknown, or evicted id. |
 | `DELETE` | `/api/jobs/:jobId` | `204` | Kills a still-running child, drops the record, removes the workdir. `404` when the id is unknown. |
 | `GET` | `/api/jobs/:jobId/events` | `200` `text/event-stream` | SSE event relay with full-history replay. `404` on unknown id. |
@@ -29,6 +29,7 @@ Every job response carries `Cache-Control: no-store` and no CORS headers -- the 
 | `GET` | `/api/jobs/:jobId/result` | `200` `text/csv` | The matched-result CSV, only after the job succeeded. `404` otherwise. |
 | `GET` | `/api/jobs/:jobId/record` | `200` `application/json` | The self-attested exchange record, only after the job succeeded. `404` otherwise. |
 | `GET` | `/api/jobs/:jobId/keys` | `200` `application/json` | The private verification keys paired with the record, only after the job succeeded. `404` otherwise. |
+| `GET` | `/api/jobs/remotes` | `200` JSON array | The operator-provisioned SFTP remotes as a credential-free projection; `[]` when none are configured. See [SFTP remotes](#sftp-remotes). |
 
 Auth applies to every endpoint uniformly: a disabled API is `404` and a bad bearer is `401` on all of them, resolved before the id is even parsed.
 
@@ -63,11 +64,12 @@ Served under the same gate as the result response -- only when `status === "succ
 
 ## The exchange intent
 
-`POST /api/jobs` accepts a JSON body validated against a strict schema. The intent is the only channel from the client into a CLI invocation, and it is injection-closed by construction: no field becomes an argv string, a filesystem path, a host, or a credential reference.
+`POST /api/jobs` accepts a JSON body validated against a strict schema, discriminated on `channel`. The intent is the only channel from the client into a CLI invocation, and it is injection-closed by construction: no field becomes an argv string, a filesystem path, a host, or a credential reference. On the sftp arm, connection material is drawn exclusively from the server-side remotes table (see [SFTP remotes](#sftp-remotes)); the client contributes a lookup name only.
 
 | Field | Type / validation | Why it cannot inject |
 | ----- | ----------------- | -------------------- |
-| `channel` | literal `"filedrop"` | The only accepted channel. A filedrop exchange has no host and no credential field at all, so the connection block the server composes carries nothing injectable. An `sftp`/`webrtc` intent is rejected as unknown. |
+| `channel` | `"filedrop"` or `"sftp"` | The closed discriminant. A filedrop exchange has no host and no credential field at all, so the connection block the server composes carries nothing injectable. An sftp exchange draws every piece of connection material from the operator-provisioned remotes table; the intent's only sftp-specific field is `remote`. A `webrtc` or other value is rejected as unknown. |
+| `remote` | sftp arm only; matches `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$` | An opaque name compared by exact string equality (a `Map` lookup) against the remotes table -- never interpolated into a path, host, argv fragment, YAML document, or response body. An unknown name is an empty-bodied `400`, resolved before any workdir exists. On the filedrop arm the field is rejected as an unknown key. |
 | `linkageTerms` | core's `LinkageTermsSchema` | Bounded partner-authored vocabulary (field names, key elements, transforms). It carries no filesystem path, host, or command field, so a hostile value cannot escape into argv or the filesystem. |
 | `sharedSecret` | base64url 32-byte pattern (`/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/`) | Credential material matching the CLI key-file shape. It is written into a fixed-name key file, never used as a path or argv fragment; a malformed secret is rejected here rather than crashing the child at load. |
 | `inputCsv` | non-empty string | CONTENT written to a fixed, server-chosen filename in the workdir. The client never names a file. |
@@ -77,7 +79,7 @@ Served under the same gate as the result response -- only when `status === "succ
 | `options` | numeric/boolean/enum subset (below) | Every field is a number, boolean, or closed enum -- none can carry a path, host, credential, or command. |
 | `eventStream` | optional boolean (default true) | Whether `--event-stream` is passed. |
 
-The schema is `.strict()`: an unknown key (a smuggled `path`, `host`, or `@path` credential reference) fails validation. The `options` subset is deliberately the numeric/boolean/enum knobs only -- `pollIntervalMs`, `peerTimeoutMs`, `serverConnectTimeoutMs`, `maxReconnectAttempts` (0..604800), `timestampInFilename`, `locklessRendezvous`, `retainFiles`, and `unexpectedFiles` (`error`/`warn`/`ignore`). The path and directory fields of the CLI's file-sync options are intentionally not surfaced (the server owns every directory), and the free-text `peerId` is omitted for the same reason.
+Both arms are `.strict()`: an unknown key (a smuggled `path`, `host`, `server` block, or `@path` credential reference) fails validation, and each arm admits only its own fields. The `options` subset is deliberately the numeric/boolean/enum knobs only -- `pollIntervalMs`, `peerTimeoutMs`, `serverConnectTimeoutMs`, `maxReconnectAttempts` (0..604800), `timestampInFilename`, `locklessRendezvous`, `retainFiles`, and `unexpectedFiles` (`error`/`warn`/`ignore`). The path and directory fields of the CLI's file-sync options are intentionally not surfaced (the server owns every directory), and the free-text `peerId` is omitted for the same reason. On the sftp arm `pollIntervalMs` is additionally floored at 1000 ms: an sftp poll is a directory listing against the operator's provisioned remote server, not a job-local directory, so a client-chosen hot poll would flood a shared -- possibly partner-hosted -- host.
 
 The `metadata` and `standardization` fields are validated structured data -- core's `MetadataSchema` and `StandardizationSchema`, respectively -- and carry no injectable field. Their size bound is only partial: each column `name` is length-capped and `role`/`type` are closed enums, but the metadata and standardization arrays and the free-text `description`, `output`, `input`, and standardization `params` are not length-bounded by these schemas, and the linear-time regex-dialect gate (`docs/spec/PROTOCOL.md`, "Transform regular-expression dialect") -- which caps and dialect-checks transform-pattern sources -- applies to the negotiated `linkageTerms` transforms, not to the standardization pipeline's raw-pattern steps. This is a compile/size cost, not a ReDoS hole: every standardization raw-pattern step still compiles and runs under core's linear-time RE2 engine (RE2JS), so it cannot backtrack catastrophically. It remains a resource bound, not an injection escape: no metadata or standardization value becomes an argv fragment, a path, a host, or a credential.
 
@@ -85,7 +87,7 @@ The `expectedPayloadColumns` field is a list of partner-namespace column names -
 
 ### Composed CLI configuration
 
-From a validated intent the server composes the CLI config document (snake_case YAML the CLI loads verbatim) through core's `mintExchangeFile`, so the assembled spec is validated by the CLI's own schema before it is written. The composition is fixed:
+From a validated filedrop intent the server composes the CLI config document (snake_case YAML the CLI loads verbatim) through core's `mintExchangeFile`, so the assembled spec is validated by the CLI's own schema before it is written. The composition is fixed:
 
 - The connection is a credential-free `filedrop` locator whose one path field is set to the server-chosen `exchange` subdirectory of the workdir -- not to any client value. By core's `ExchangeFileInput` typing no credential is representable in a filedrop connection.
 - No `authentication` block is ever assembled; the shared secret rides the separate key file.
@@ -94,7 +96,42 @@ From a validated intent the server composes the CLI config document (snake_case 
 - The intent's `expectedPayloadColumns`, when present, is attached as the config's `expected_payload_columns` (an empty array is attached verbatim; only an omitted field is left off). Carrying it makes the acceptor's received-payload lock-in explicit: the CLI prefers `expected_payload_columns` over the `linkageTerms.payload.receive` fallback, which is undefined for a token that discloses columns but carries no `payload.send` -- a shape where the fallback would fail open (silently ingesting extra partner columns) while the browser acceptor aborts. The inviter path omits it.
 - The tuning `options`, if any were set, are narrowed to the CLI's file-sync options and attached; when none were set the block is omitted entirely.
 
+An sftp intent is composed differently. `mintExchangeFile`'s input type deliberately cannot represent a credential -- an invariant shared with the browser's exchange-file minting that must not be widened -- so the server assembles the exchange spec directly: the connection's `server` block is the resolved remotes-table entry verbatim (its `@path` credential references land in the YAML as references, resolved only by the CLI child), the client's `linkageTerms`, `metadata`, `standardization`, `expectedPayloadColumns`, and tuning options attach exactly as on the filedrop path, and the assembled spec is validated through core's exchange-spec schema before serialization, with only the schema's own fields reaching the YAML. The remote NAME appears nowhere in the document. No `authentication` block is assembled on either path.
+
 The key file body is `{"sharedSecret":"<value>"}` with no `expires` stamped, so a server-driven job carries no invitation-token lifetime of its own.
+
+## SFTP remotes
+
+An sftp job's connection material never comes from the client; it comes from a table the operator provisions at deploy time. `JOB_SFTP_REMOTES` names a YAML file (mounted read-only in the container case) of shape:
+
+```yaml
+remotes:
+  partner-agency:
+    host: sftp.partner.example
+    port: 22
+    username: psilink
+    password: "@/run/secrets/partner-sftp-password"
+    path: /exchange/psilink
+    host_key_fingerprint: "SHA256:..."
+```
+
+The file is read and validated once at server startup, fail-closed: any invalid entry refuses startup with an error naming the offending field path (never a value), the same posture as the loopback-or-token rule. Setting `JOB_SFTP_REMOTES` without `JOB_DATA_ROOT` is itself a startup error. The variable is set only server-side, never derived from a request.
+
+The validation rules, each load-bearing:
+
+- **Names.** A remote name matches `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$` and is kept verbatim -- top-level name keys are never case-folded or camelized, so `prod_east` and `prodEast` are distinct and cannot alias or collide. The intent's `remote` field is matched against names by exact string equality only.
+- **Strict field allowlist.** An entry admits exactly `host`, `port`, `username`, `path`, `password`, `private_key`, `private_key_passphrase`, `keyboard_interactive`, and `host_key_fingerprint`; any other key is a startup error. This is deliberately stricter than the CLI's connection schema, which is non-strict and admits blocks the appliance must never carry: `provision` (whose auth block holds inline HTTP credentials and drives pre-connect egress) and the split `inbound_path`/`outbound_path` pair (which couples to the client-owned retain tuning). Strictness also turns a typo into a startup error instead of a silently dropped field.
+- **Mandatory literal pin.** `host_key_fingerprint` is required (a string or a list) and every element must be a literal OpenSSH SHA256 fingerprint; an `@path` reference is rejected. The job child is non-interactive (stdin ignored), so first-use trust can never happen there; requiring the pin turns what would be a first-job failure into a boot-time error and makes every appliance SFTP connection host-key-pinned, verified before authentication. A host-key rotation is staged by listing the old and new fingerprints together.
+- **Credential references only.** `password`, `private_key`, and `private_key_passphrase`, when present, must be `@path` references to an ABSOLUTE path OUTSIDE the resolved data root, and the referenced file must exist at load time (checked by `stat` only; the bytes are never read into the server). Inline values are rejected, so no secret enters server memory or any composed job file; the CLI child resolves the reference at config load. The data-root exclusion closes a laundering path: workdir contents are client-written, so a reference under the data root could turn client content -- or a past job's result -- into a transmitted credential.
+- **Boot-time composition check.** Each entry is additionally parsed through core's connection schema as `{channel: "sftp", server: <entry>}`, so the CLI's cross-field refines (one primary auth method, a passphrase requires a key, keyboard-interactive requires a password, canonical fingerprint form) hold at startup rather than first inside a job.
+
+The table is startup-frozen: changing hosts, names, or pins requires a restart. The referenced credential FILES are live -- the CLI child re-reads them at each job's config load -- so rotating a secret in place takes effect without one.
+
+**One running job per remote.** Unlike filedrop, whose rendezvous is a fresh per-job directory, every job against a remote shares that remote's directory. A second sftp job naming a remote held by a running job is refused with an empty-bodied `409`; the hold is released when the holding job reaches a terminal state or is deleted.
+
+### `GET /api/jobs/remotes`
+
+Returns the provisioned remotes as an explicitly mapped, credential-free projection -- `[{ "name": "...", "host": "...", "port"?: <int>, "path"?: "..." }]` and nothing else: no username, no credential references (which would reveal the secret-mount filesystem layout), no fingerprints. An enabled API with no remotes configured serves `200 []` (a `404` would be indistinguishable from the disabled-API gate). The console web build uses this to offer the remote picker and to author an invitation's sftp endpoint from the picked remote's locator. The static `remotes` segment cannot be captured as a job id: ids are validated as canonical v4 UUIDs before any use, which `remotes` is not.
 
 ## Workdir layout
 
@@ -111,6 +148,8 @@ Each job gets a workdir at `<dataRoot>/<jobId>/`, created mode `0o700` (owner-on
 | `record.keys.json` | The private verification keys paired with the record (owner-only; written alongside the record under the same non-fatal write). |
 
 The client never supplies a filename: submitted content is written to these constant names, and the CLI is pointed at them by absolute path. Keeping the names constant is what makes "a client string never becomes a file path" hold.
+
+An sftp job's workdir has the same layout; its `exchange/` directory is created but unused (the rendezvous is the remote's own directory), and its `psilink.yaml` carries the remote entry's connection block -- locator, pinned fingerprint, and `@path` credential references, never a credential value.
 
 ## Subprocess invocation
 
@@ -190,10 +229,13 @@ The escalation timers are cleared when the child exits, so a child that stops on
 | `JOB_DATA_ROOT` | The feature gate and the data root. Empty or unset -> the API is disabled (every endpoint `404`, no manager constructed, no child spawned). Non-empty -> per-job workdirs are created under this resolved directory. Read with surrounding whitespace trimmed. |
 | `JOB_API_TOKEN` | The bearer token. Non-empty -> every endpoint requires a matching `Authorization: Bearer` header (constant-time compared). Empty -> unauthenticated, permitted only on a loopback bind (see the startup rule). |
 | `JOB_CLI_BINARY` | Overrides the CLI entry path the driver spawns. Unset -> the workspace-relative built entry (`apps/cli/dist/index.js`, resolved four levels up from the jobs module). Used by production overrides and by tests pointing the driver at a stub. It is set only server-side, never derived from a request. |
+| `JOB_SFTP_REMOTES` | The SFTP remotes table (see [SFTP remotes](#sftp-remotes)). Empty or unset -> every sftp intent is rejected; the API is otherwise unchanged. Non-empty -> the named YAML file is loaded and validated at startup, fail-closed. Requires `JOB_DATA_ROOT`; set only server-side, never derived from a request. |
 
 ### Fail-closed startup rule
 
 Before the server binds, if the API is enabled (`JOB_DATA_ROOT` set) and no token is configured (`JOB_API_TOKEN` empty) and the bind host is not loopback, startup is refused with a configuration error rather than exposing an unauthenticated CLI driver on a public interface. A bind host is loopback when it is `localhost`, `::1`/`[::1]`, or a `127.` address; an unset host (the default all-interfaces bind) is treated as non-loopback and fails closed rather than assuming loopback. A unix-socket bind is appliance-local and treated as loopback for this check. The safe configurations -- disabled, loopback, or token-protected -- start normally.
+
+The same posture covers the remotes table: a configured `JOB_SFTP_REMOTES` that is unreadable or invalid, or one configured without `JOB_DATA_ROOT`, refuses startup.
 
 ## Job lifetime and orphan handling
 
@@ -202,6 +244,7 @@ Job state lives in server memory only and is never persisted:
 - **Restart empties the table.** In-memory job records do not survive a server restart; a restart cancels in-flight exchanges rather than persisting another party's material. After a restart, a stale job id `404`s (the record is gone), while the workdir of a completed job remains on disk until an explicit `DELETE`.
 - **TTL eviction is memory-only.** One hour after a job reaches a terminal state, its in-memory record is evicted as a memory backstop. Eviction removes only the record (the id then `404`s); it leaves the workdir on disk. The eviction timer is `unref`ed and does not resurrect a record already removed by a `DELETE`.
 - **DELETE removes the disk.** `DELETE /api/jobs/:jobId` is the only operation that removes the workdir. It `SIGKILL`s a still-running child first so the delete leaves no orphan, drops the record, and `rm -rf`s the workdir (idempotent).
+- **Terminal states release the remote.** An sftp job's per-remote hold (see [SFTP remotes](#sftp-remotes)) is released when the job reaches a terminal state or is deleted; a restart empties the holds with the rest of the in-memory state.
 - **Shutdown signals every child.** On server shutdown (`SIGINT`/`SIGTERM`), every running child is sent `SIGTERM` so no orphaned CLI outlives the server. The shutdown hook is registered before the graceful-shutdown handler (signal listeners run in registration order), so children are signaled before any handler that may end the process. It is a no-op when the API was never enabled.
 
 ## See also

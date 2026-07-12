@@ -21,6 +21,7 @@ import { Route as BenchAcceptRouteImport } from './routes/bench/accept'
 import { Route as ApiPeerjsIndexRouteImport } from './routes/api/peerjs/index'
 import { Route as ApiJobsIndexRouteImport } from './routes/api/jobs/index'
 import { Route as ApiPeerjsIdRouteImport } from './routes/api/peerjs/id'
+import { Route as ApiJobsRemotesRouteImport } from './routes/api/jobs/remotes'
 import { Route as ApiJobsJobIdIndexRouteImport } from './routes/api/jobs/$jobId/index'
 import { Route as ApiPeerjsKeyPeersRouteImport } from './routes/api/peerjs/$key/peers'
 import { Route as ApiJobsJobIdResultRouteImport } from './routes/api/jobs/$jobId/result'
@@ -89,6 +90,11 @@ const ApiPeerjsIdRoute = ApiPeerjsIdRouteImport.update({
   path: '/api/peerjs/id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiJobsRemotesRoute = ApiJobsRemotesRouteImport.update({
+  id: '/api/jobs/remotes',
+  path: '/api/jobs/remotes',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiJobsJobIdIndexRoute = ApiJobsJobIdIndexRouteImport.update({
   id: '/api/jobs/$jobId/',
   path: '/api/jobs/$jobId/',
@@ -135,6 +141,7 @@ export interface FileRoutesByFullPath {
   '/bench/exchange': typeof BenchExchangeRoute
   '/bench/verify': typeof BenchVerifyRoute
   '/bench/': typeof BenchIndexRoute
+  '/api/jobs/remotes': typeof ApiJobsRemotesRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
   '/api/jobs/': typeof ApiJobsIndexRoute
   '/api/peerjs/': typeof ApiPeerjsIndexRoute
@@ -155,6 +162,7 @@ export interface FileRoutesByTo {
   '/bench/exchange': typeof BenchExchangeRoute
   '/bench/verify': typeof BenchVerifyRoute
   '/bench': typeof BenchIndexRoute
+  '/api/jobs/remotes': typeof ApiJobsRemotesRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
   '/api/jobs': typeof ApiJobsIndexRoute
   '/api/peerjs': typeof ApiPeerjsIndexRoute
@@ -177,6 +185,7 @@ export interface FileRoutesById {
   '/bench/exchange': typeof BenchExchangeRoute
   '/bench/verify': typeof BenchVerifyRoute
   '/bench/': typeof BenchIndexRoute
+  '/api/jobs/remotes': typeof ApiJobsRemotesRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
   '/api/jobs/': typeof ApiJobsIndexRoute
   '/api/peerjs/': typeof ApiPeerjsIndexRoute
@@ -200,6 +209,7 @@ export interface FileRouteTypes {
     | '/bench/exchange'
     | '/bench/verify'
     | '/bench/'
+    | '/api/jobs/remotes'
     | '/api/peerjs/id'
     | '/api/jobs/'
     | '/api/peerjs/'
@@ -220,6 +230,7 @@ export interface FileRouteTypes {
     | '/bench/exchange'
     | '/bench/verify'
     | '/bench'
+    | '/api/jobs/remotes'
     | '/api/peerjs/id'
     | '/api/jobs'
     | '/api/peerjs'
@@ -241,6 +252,7 @@ export interface FileRouteTypes {
     | '/bench/exchange'
     | '/bench/verify'
     | '/bench/'
+    | '/api/jobs/remotes'
     | '/api/peerjs/id'
     | '/api/jobs/'
     | '/api/peerjs/'
@@ -259,6 +271,7 @@ export interface RootRouteChildren {
   AcceptRoute: typeof AcceptRoute
   ExchangeRoute: typeof ExchangeRoute
   VerifyRoute: typeof VerifyRoute
+  ApiJobsRemotesRoute: typeof ApiJobsRemotesRoute
   ApiPeerjsIdRoute: typeof ApiPeerjsIdRoute
   ApiJobsIndexRoute: typeof ApiJobsIndexRoute
   ApiPeerjsIndexRoute: typeof ApiPeerjsIndexRoute
@@ -357,6 +370,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPeerjsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/jobs/remotes': {
+      id: '/api/jobs/remotes'
+      path: '/api/jobs/remotes'
+      fullPath: '/api/jobs/remotes'
+      preLoaderRoute: typeof ApiJobsRemotesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/jobs/$jobId/': {
       id: '/api/jobs/$jobId/'
       path: '/api/jobs/$jobId'
@@ -433,6 +453,7 @@ const rootRouteChildren: RootRouteChildren = {
   AcceptRoute: AcceptRoute,
   ExchangeRoute: ExchangeRoute,
   VerifyRoute: VerifyRoute,
+  ApiJobsRemotesRoute: ApiJobsRemotesRoute,
   ApiPeerjsIdRoute: ApiPeerjsIdRoute,
   ApiJobsIndexRoute: ApiJobsIndexRoute,
   ApiPeerjsIndexRoute: ApiPeerjsIndexRoute,

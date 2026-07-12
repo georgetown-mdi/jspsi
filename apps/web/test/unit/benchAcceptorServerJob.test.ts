@@ -119,6 +119,10 @@ describe("acceptorServerJobConfig", () => {
     expect(config.sharedSecret).toBe(token.sharedSecret);
   });
 
+  test("rides the filedrop transport: the accept guard admits no sftp endpoint", () => {
+    expect(configFor().transport).toEqual({ channel: "filedrop" });
+  });
+
   test("carries the operator's authored metadata and standardization edits", () => {
     const config = configFor();
 
