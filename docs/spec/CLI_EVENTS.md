@@ -58,7 +58,7 @@ Emitted at the start of each protocol stage, mirroring `onStage`. It marks a tra
 
 ### `warning`
 
-Emitted for each non-fatal warning produced during the terms exchange, mirroring `onWarning`. A warning does not end the run.
+Emitted for each non-fatal warning: the terms-exchange warnings mirroring `onWarning`, and the cross-party host-key divergence notice -- a security signal a supervisor that discards stderr would otherwise never see. A warning does not end the run.
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
