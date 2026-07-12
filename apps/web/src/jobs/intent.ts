@@ -5,12 +5,15 @@ import { stringify as stringifyYaml } from "yaml";
 import {
   ExchangeSpecSchema,
   LinkageTermsSchema,
+  MAX_NAME_LENGTH,
   MetadataSchema,
   SHARED_SECRET_REGEX,
   StandardizationSchema,
   mintExchangeFile,
   snakeizeKeys,
 } from "@psilink/core";
+
+import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 
 import { SFTP_REMOTE_NAME_REGEX } from "./sftpRemotes";
 
@@ -96,15 +99,17 @@ const jobSftpExchangeOptionsSchema: z.ZodType<JobExchangeOptions> = z
  *   a step pipeline. They are written into the composed config as YAML VALUES, never
  *   as an argv fragment, a path, a host, or a credential. The connection block the
  *   server composes is unaffected by them, so neither can redirect a directory or
- *   introduce an authentication field. Note the size bound is only partial: each
- *   column `name` is length-capped and `role`/`type` are closed enums, but the
- *   metadata/standardization ARRAYS and the free-text `description`, `output`,
- *   `input`, and standardization `params` are not length-bounded by these schemas.
- *   The linkage-terms dialect gate (which caps and dialect-checks transform-pattern
- *   SOURCES) applies to `linkageTerms` patterns, not to the standardization
- *   pipeline's raw-pattern steps -- so a client can submit a large or (in the
- *   linkage-terms sense) non-conformant `standardization` pattern. That is a
- *   compile/size cost, NOT a ReDoS hole: every standardization raw-pattern step
+ *   introduce an authentication field. Both are wrapped web-side with generous
+ *   size caps ({@link MAX_METADATA_COLUMNS}, {@link MAX_METADATA_DESCRIPTION_LENGTH},
+ *   {@link MAX_STANDARDIZATION_TRANSFORMATIONS}, {@link MAX_STANDARDIZATION_STEPS},
+ *   and {@link MAX_NAME_LENGTH} on `output`/`input`) so the arrays and free-text
+ *   fields cannot be unbounded; each standardization step's `params` is a
+ *   `Record<string, unknown>` left uncapped by nature, with the boundary byte cap
+ *   as its backstop. The linkage-terms dialect gate (which caps and dialect-checks
+ *   transform-pattern SOURCES) applies to `linkageTerms` patterns, not to the
+ *   standardization pipeline's raw-pattern steps -- so a client can submit a large
+ *   or (in the linkage-terms sense) non-conformant `standardization` pattern. That
+ *   is a compile/size cost, NOT a ReDoS hole: every standardization raw-pattern step
  *   still compiles and runs under core's linear-time RE2 engine (RE2JS), so it
  *   cannot backtrack catastrophically. It stays a resource bound, not an injection
  *   escape: it cannot become argv/path/host/credential.
@@ -174,6 +179,88 @@ export interface JobSftpExchangeIntent extends JobExchangeIntentBase {
 export type JobExchangeIntent =
   JobFiledropExchangeIntent | JobSftpExchangeIntent;
 
+/**
+ * Upper bound on the `inputCsv` string length, anchored to the browser intake's
+ * own file-size gate ({@link MAX_CSV_FILE_BYTES}, 100 MiB): a CSV that passed
+ * that gate must never be rejected here. This is a chars-vs-bytes approximation
+ * (a JavaScript string length counts UTF-16 code units, not the bytes the file
+ * gate measures), generous by construction -- the boundary byte cap
+ * ({@link MAX_JOB_BODY_BYTES}) is the true memory bound.
+ */
+export const MAX_INPUT_CSV_LENGTH = MAX_CSV_FILE_BYTES;
+
+/**
+ * Upper bound on the COUNT of `expectedPayloadColumns` entries. A real received
+ * set is a handful to a few dozen partner-namespace column names; 4096 is far
+ * above any legitimate one yet refuses an unbounded array.
+ */
+export const MAX_EXPECTED_PAYLOAD_COLUMNS = 4096;
+
+/**
+ * Upper bound on the COUNT of `metadata` columns. A real input has tens of
+ * columns; 4096 is far above any legitimate schema yet refuses an unbounded array.
+ */
+export const MAX_METADATA_COLUMNS = 4096;
+
+/**
+ * Upper bound on the length of a `metadata` column `description` -- a free-text
+ * data-dictionary entry, larger than a name yet still bounded.
+ */
+export const MAX_METADATA_DESCRIPTION_LENGTH = 4096;
+
+/**
+ * Upper bound on the COUNT of `standardization` transformations. One
+ * transformation produces one linkage field; 4096 is far above any real pipeline
+ * set yet refuses an unbounded array.
+ */
+export const MAX_STANDARDIZATION_TRANSFORMATIONS = 4096;
+
+/**
+ * Upper bound on the COUNT of `steps` in one `standardization` transformation. A
+ * real pipeline chains a handful of steps; 256 is generous yet refuses an
+ * unbounded array.
+ */
+export const MAX_STANDARDIZATION_STEPS = 256;
+
+// The size bounds below apply to BOTH union arms through the shared common
+// fields. Each `standardization` step's `params` (a Record<string, unknown>) is
+// unbounded by nature and left uncapped here; the boundary byte cap
+// (MAX_JOB_BODY_BYTES) is its backstop.
+const boundedMetadataSchema = MetadataSchema.refine(
+  (columns) => columns.length <= MAX_METADATA_COLUMNS,
+  { message: "metadata must not exceed the column cap" },
+).refine(
+  (columns) =>
+    columns.every(
+      (column) =>
+        (column.description?.length ?? 0) <= MAX_METADATA_DESCRIPTION_LENGTH,
+    ),
+  { message: "a metadata column description exceeds the length cap" },
+);
+
+const boundedStandardizationSchema = StandardizationSchema.refine(
+  (transformations) =>
+    transformations.length <= MAX_STANDARDIZATION_TRANSFORMATIONS,
+  { message: "standardization must not exceed the transformation cap" },
+)
+  .refine(
+    (transformations) =>
+      transformations.every(
+        (transformation) =>
+          (transformation.steps?.length ?? 0) <= MAX_STANDARDIZATION_STEPS,
+      ),
+    { message: "a standardization transformation exceeds the step cap" },
+  )
+  .refine(
+    (transformations) =>
+      transformations.every(
+        (transformation) =>
+          transformation.output.length <= MAX_NAME_LENGTH &&
+          transformation.input.length <= MAX_NAME_LENGTH,
+      ),
+    { message: "a standardization output or input exceeds the length cap" },
+  );
+
 const jobExchangeIntentCommonFields = {
   linkageTerms: LinkageTermsSchema,
   sharedSecret: z
@@ -182,10 +269,13 @@ const jobExchangeIntentCommonFields = {
       SHARED_SECRET_REGEX,
       "sharedSecret must be a base64url-encoded 32-byte value (43 base64url characters)",
     ),
-  inputCsv: z.string().min(1),
-  metadata: MetadataSchema.optional(),
-  standardization: StandardizationSchema.optional(),
-  expectedPayloadColumns: z.array(z.string()).optional(),
+  inputCsv: z.string().min(1).max(MAX_INPUT_CSV_LENGTH),
+  metadata: boundedMetadataSchema.optional(),
+  standardization: boundedStandardizationSchema.optional(),
+  expectedPayloadColumns: z
+    .array(z.string().max(MAX_NAME_LENGTH))
+    .max(MAX_EXPECTED_PAYLOAD_COLUMNS)
+    .optional(),
   eventStream: z.boolean().optional(),
 };
 

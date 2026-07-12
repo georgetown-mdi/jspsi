@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import { parse as parseYaml } from "yaml";
 
 import {
+  MAX_NAME_LENGTH,
   disclosedColumnNames,
   safeParseExchangeSpec,
   safeParseMetadata,
@@ -10,6 +11,12 @@ import {
 
 import {
   JOB_FILE_NAMES,
+  MAX_EXPECTED_PAYLOAD_COLUMNS,
+  MAX_INPUT_CSV_LENGTH,
+  MAX_METADATA_COLUMNS,
+  MAX_METADATA_DESCRIPTION_LENGTH,
+  MAX_STANDARDIZATION_STEPS,
+  MAX_STANDARDIZATION_TRANSFORMATIONS,
   composeConfigDocument,
   composeKeyFileDocument,
   composeSftpConfigDocument,
@@ -105,6 +112,156 @@ describe("jobExchangeIntentSchema validates metadata and standardization", () =>
     const intent = { ...validIntent(), expectedPayloadColumns: [1, 2] };
     expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
   });
+});
+
+// The size caps live on the shared common fields, so both arms inherit them.
+// Each case is exercised against the filedrop and the sftp builder. Overrides are
+// loosely typed (some carry deliberately over-cap or malformed shapes the schema
+// must reject), so they are spread over a valid base as `unknown`.
+const intentArms: Array<{
+  name: string;
+  build: (overrides: Record<string, unknown>) => unknown;
+}> = [
+  {
+    name: "filedrop",
+    build: (overrides) => ({ ...validIntent(), ...overrides }),
+  },
+  {
+    name: "sftp",
+    build: (overrides) => ({ ...validSftpIntent(), ...overrides }),
+  },
+];
+
+describe("jobExchangeIntentSchema bounds the intent's sizes", () => {
+  for (const arm of intentArms) {
+    test(`[${arm.name}] rejects an over-cap inputCsv`, () => {
+      // One allocation just past the char cap; freed when the test ends. Every
+      // other cap below is exercised with small values.
+      const intent = arm.build({
+        inputCsv: "a".repeat(MAX_INPUT_CSV_LENGTH + 1),
+      });
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+    });
+
+    test(`[${arm.name}] accepts an inputCsv at the cap`, () => {
+      const intent = arm.build({ inputCsv: "a".repeat(MAX_INPUT_CSV_LENGTH) });
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(true);
+    });
+
+    test(`[${arm.name}] rejects too many expectedPayloadColumns`, () => {
+      const intent = arm.build({
+        expectedPayloadColumns: Array.from(
+          { length: MAX_EXPECTED_PAYLOAD_COLUMNS + 1 },
+          (_, i) => `c${i}`,
+        ),
+      });
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+    });
+
+    test(`[${arm.name}] rejects an over-length expectedPayloadColumns entry`, () => {
+      const intent = arm.build({
+        expectedPayloadColumns: ["a".repeat(MAX_NAME_LENGTH + 1)],
+      });
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+    });
+
+    test(`[${arm.name}] rejects too many metadata columns`, () => {
+      const intent = arm.build({
+        metadata: Array.from({ length: MAX_METADATA_COLUMNS + 1 }, (_, i) => ({
+          name: `col_${i}`,
+          type: "other",
+          role: "payload",
+          isPayload: true,
+        })),
+      });
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+    });
+
+    test(`[${arm.name}] rejects an over-length metadata description`, () => {
+      const intent = arm.build({
+        metadata: [
+          {
+            name: "ssn",
+            type: "ssn",
+            role: "linkage",
+            isPayload: false,
+            description: "d".repeat(MAX_METADATA_DESCRIPTION_LENGTH + 1),
+          },
+        ],
+      });
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+    });
+
+    test(`[${arm.name}] rejects too many standardization transformations`, () => {
+      const intent = arm.build({
+        standardization: Array.from(
+          { length: MAX_STANDARDIZATION_TRANSFORMATIONS + 1 },
+          (_, i) => ({ output: `o${i}`, input: `i${i}` }),
+        ),
+      });
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+    });
+
+    test(`[${arm.name}] rejects too many standardization steps`, () => {
+      const intent = arm.build({
+        standardization: [
+          {
+            output: "ssn",
+            input: "ssn",
+            steps: Array.from(
+              { length: MAX_STANDARDIZATION_STEPS + 1 },
+              () => ({ function: "trim" }),
+            ),
+          },
+        ],
+      });
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+    });
+
+    test(`[${arm.name}] rejects an over-length standardization output`, () => {
+      const intent = arm.build({
+        standardization: [
+          { output: "o".repeat(MAX_NAME_LENGTH + 1), input: "ssn" },
+        ],
+      });
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+    });
+
+    test(`[${arm.name}] rejects an over-length standardization input`, () => {
+      const intent = arm.build({
+        standardization: [
+          { output: "ssn", input: "i".repeat(MAX_NAME_LENGTH + 1) },
+        ],
+      });
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+    });
+
+    test(`[${arm.name}] accepts a realistically large well-formed intent`, () => {
+      const intent = arm.build({
+        expectedPayloadColumns: Array.from(
+          { length: 64 },
+          (_, i) => `program_${i}`,
+        ),
+        metadata: [
+          {
+            name: "ssn",
+            type: "ssn",
+            role: "linkage",
+            isPayload: false,
+            description: "d".repeat(1024),
+          },
+        ],
+        standardization: [
+          {
+            output: "ssn",
+            input: "ssn",
+            steps: Array.from({ length: 32 }, () => ({ function: "trim" })),
+          },
+        ],
+      });
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(true);
+    });
+  }
 });
 
 describe("composeConfigDocument carries the operator's data-prep edits", () => {

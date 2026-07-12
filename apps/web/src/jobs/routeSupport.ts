@@ -1,3 +1,5 @@
+import { MAX_INPUT_CSV_LENGTH } from "./intent";
+
 import { gateRequest, jobEmptyResponse, readJobApiConfig } from "./gate";
 import { isValidJobId } from "./workdir";
 import { useJobManager } from "./index";
@@ -34,6 +36,78 @@ export function gateJobRoute(request: Request): GateOutcome {
   if (manager === null)
     return { kind: "response", response: jobEmptyResponse(404) };
   return { kind: "manager", manager };
+}
+
+/**
+ * The boundary byte cap on a `POST /api/jobs` body. Derived from the intent's
+ * `inputCsv` char cap ({@link MAX_INPUT_CSV_LENGTH}), which dominates a
+ * schema-valid intent: a JSON string can more than double in length under
+ * worst-case escaping (every byte a `\uXXXX` escape), so twice the char cap plus
+ * a generous margin for the other capped fields keeps this boundary comfortably
+ * above the JSON-encoded worst case of the schema caps -- the two layers stay
+ * coherent, and a schema-valid intent can never be rejected here.
+ */
+export const MAX_JOB_BODY_BYTES = 224 * 1024 ** 2;
+
+/**
+ * The outcome of reading a job request body under a byte cap:
+ * - `too-large`: the body exceeded the cap (mapped to 413).
+ * - `invalid`: the body was absent or was not valid JSON (mapped to 400).
+ * - `parsed`: the decoded JSON value.
+ */
+export type JobRequestBodyResult =
+  | { kind: "too-large" }
+  | { kind: "invalid" }
+  | { kind: "parsed"; value: unknown };
+
+/**
+ * Read a request body as JSON under a hard byte cap, without trusting
+ * `Content-Length` (absent or understated on a chunked request). The body is
+ * streamed through {@link ReadableStream.getReader}; each chunk's `byteLength`
+ * adds to a running total, and the read aborts the moment the total EXCEEDS
+ * `maxBytes` -- the whole body is never buffered first. On abort the reader is
+ * cancelled to free the connection. The accumulated bytes are decoded and parsed
+ * here (the stream is consumed, so `request.json()` is no longer available).
+ *
+ * Pure over its arguments (no global fetch), so a test can drive it with any
+ * `Request` and a small `maxBytes` to exercise the boundary.
+ */
+export async function readJobRequestBody(
+  request: Request,
+  maxBytes: number,
+): Promise<JobRequestBodyResult> {
+  const body = request.body;
+  if (body === null) return { kind: "invalid" };
+  const reader = body.getReader();
+  const chunks: Array<Uint8Array> = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        return { kind: "too-large" };
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(new TextDecoder().decode(merged));
+  } catch {
+    return { kind: "invalid" };
+  }
+  return { kind: "parsed", value };
 }
 
 /**
