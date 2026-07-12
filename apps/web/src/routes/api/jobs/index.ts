@@ -10,6 +10,10 @@ import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
 import { jobExchangeIntentSchema } from "@jobs/intent";
 
 /**
+ * `GET /api/jobs` -- list every job the manager knows: live in-memory records
+ * plus restart-restored jobs re-discovered from their on-disk artifacts, deduped
+ * by id. Auth-gated.
+ *
  * `POST /api/jobs` -- create and start an exchange job from a typed intent.
  *
  * Auth-gated. The request body is a JSON {@link JobExchangeIntent}: a filedrop
@@ -29,6 +33,11 @@ import { jobExchangeIntentSchema } from "@jobs/intent";
 export const Route = createFileRoute("/api/jobs/")({
   server: {
     handlers: {
+      GET: async ({ request }) => {
+        const gate = gateJobRoute(request);
+        if (gate.kind === "response") return gate.response;
+        return jobJsonResponse({ jobs: await gate.manager.listJobs() });
+      },
       POST: async ({ request }) => {
         const gate = gateJobRoute(request);
         if (gate.kind === "response") return gate.response;

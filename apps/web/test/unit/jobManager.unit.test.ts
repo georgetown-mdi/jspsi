@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -7,7 +8,12 @@ import {
   SftpRemoteBusyError,
   UnknownSftpRemoteError,
 } from "@jobs/jobManager";
-import { writeJobFile } from "@jobs/workdir";
+import {
+  createWorkdir,
+  generateJobId,
+  removeWorkdir,
+  writeJobFile,
+} from "@jobs/workdir";
 
 import {
   STUB_CLI_PATH,
@@ -30,6 +36,10 @@ afterEach(() => {
   for (const root of roots.splice(0))
     fs.rmSync(root, { recursive: true, force: true });
   vi.unstubAllEnvs();
+  // Clear the spy call history and any per-test `*Once` overrides so a test can
+  // never observe a prior test's calls (a cumulative `toHaveBeenCalled` is a
+  // false-signal trap for the concurrency tests below).
+  vi.restoreAllMocks();
 });
 
 /** A manager pointed at the stub CLI with shortened cancellation graces. */
@@ -43,6 +53,7 @@ function makeManager(options: {
   ignoreSigterm?: boolean;
   eventBufferCap?: number;
   sftpRemotes?: JobSftpRemotesTable;
+  recordJson?: string;
 }): JobManager {
   // The stub reads its scenario from the child environment; the driver's
   // sanitized child env drops ambient vars, so pass the config through childEnv.
@@ -54,6 +65,8 @@ function makeManager(options: {
     childEnv.STUB_EXIT_CODE = String(options.exitCode);
   if (options.outputFile !== undefined)
     childEnv.STUB_OUTPUT_FILE = options.outputFile;
+  if (options.recordJson !== undefined)
+    childEnv.STUB_RECORD_JSON = options.recordJson;
   if (options.delayMs !== undefined)
     childEnv.STUB_DELAY_MS = String(options.delayMs);
   if (options.ignoreSigint) childEnv.STUB_IGNORE_SIGINT = "1";
@@ -69,6 +82,29 @@ function makeManager(options: {
     eventBufferCap: options.eventBufferCap,
     sftpRemotes: options.sftpRemotes,
     childEnv,
+  });
+  managers.push(manager);
+  return manager;
+}
+
+/** A throwaway data-root path registered for cleanup, for building on-disk
+ * fixtures without spawning a job. */
+function freshRoot(label: string): string {
+  const root = tempDataRoot(label);
+  roots.push(root);
+  return root;
+}
+
+/**
+ * A fresh manager over an existing data root -- the simulated restart: new
+ * in-memory state, same disk. The stub CLI is wired but never spawned by these
+ * tests (restore is read-only).
+ */
+function restartManagerOverRoot(root: string): JobManager {
+  const manager = new JobManager({
+    dataRoot: root,
+    binaryPath: STUB_CLI_PATH,
+    childEnv: { STUB_FD3_EVENTS: JSON.stringify([]) },
   });
   managers.push(manager);
   return manager;
@@ -402,5 +438,266 @@ describe("sftp remote resolution and the per-remote busy latch", () => {
     const record = manager.getJob(id)!;
     await waitForTerminal(record);
     expect(record.status).toBe("succeeded");
+  });
+});
+
+const CREATED_AT = "2026-07-08T14:32:00.000Z";
+
+/** Run a job to a succeeded terminal (with result and record/keys on disk) and
+ * return its id and the data root it lives under. */
+async function runSucceededJob(): Promise<{ id: string; root: string }> {
+  const manager = makeManager({
+    events: [RESULT_EVENT],
+    exitCode: 0,
+    outputFile: "id1,id2\n1,2\n",
+    recordJson: JSON.stringify({ createdAt: CREATED_AT, summary: "s" }),
+  });
+  const root = roots[roots.length - 1];
+  const id = await manager.createJob(validIntent());
+  await waitForTerminal(manager.getJob(id)!);
+  await vi.waitFor(() => expect(manager.getJob(id)!.terminal).not.toBeNull());
+  return { id, root };
+}
+
+describe("restore after a simulated restart", () => {
+  test("a succeeded job is re-discovered as a restored view and summary", async () => {
+    const { id, root } = await runSucceededJob();
+
+    const restarted = restartManagerOverRoot(root);
+    expect(restarted.getJob(id)).toBeUndefined();
+
+    const summaries = await restarted.listJobs();
+    const summary = summaries.find((entry) => entry.id === id);
+    expect(summary).toMatchObject({
+      id,
+      status: "succeeded",
+      restored: true,
+      resultAvailable: true,
+      recordAvailable: true,
+      recordCreatedAt: CREATED_AT,
+    });
+
+    const view = await restarted.getJobView(id);
+    expect(view).toMatchObject({
+      id,
+      status: "succeeded",
+      restored: true,
+      terminal: null,
+      terminalEmitted: true,
+      eventCount: 0,
+      resultAvailable: true,
+      recordAvailable: true,
+      recordCreatedAt: CREATED_AT,
+    });
+  });
+
+  test("an interrupted job (no result) restores as terminated/failed, never running", async () => {
+    const root = freshRoot("interrupted");
+    const id = generateJobId();
+    const workdir = path.join(root, id);
+    await fs.promises.mkdir(workdir, { recursive: true });
+    // config/key/input written, but the CLI never produced output.csv.
+    await writeJobFile(workdir, "psilink.yaml", "channel: filedrop\n");
+    await writeJobFile(workdir, ".psilink.key", '{"sharedSecret":"x"}');
+    await writeJobFile(workdir, "input.csv", "id\n1\n");
+
+    const restarted = restartManagerOverRoot(root);
+    const view = await restarted.getJobView(id);
+    expect(view).toMatchObject({
+      id,
+      status: "failed",
+      restored: true,
+      resultAvailable: false,
+    });
+    expect(view!.status).not.toBe("running");
+  });
+
+  test("a restored view exposes only the three servable output paths", async () => {
+    const { id, root } = await runSucceededJob();
+    const restarted = restartManagerOverRoot(root);
+    const view = await restarted.getJobView(id);
+    expect(view).not.toBeNull();
+    const workdir = path.join(root, id);
+    // The only paths the view carries are result, record, and keys -- never the
+    // key file or the config.
+    expect(view!.outputPath).toBe(path.join(workdir, "output.csv"));
+    expect(view!.recordPath).toBe(path.join(workdir, "record.json"));
+    expect(view!.keysPath).toBe(path.join(workdir, "record.keys.json"));
+    const paths = [view!.outputPath, view!.recordPath, view!.keysPath];
+    for (const p of paths) {
+      expect(p).not.toContain(".psilink.key");
+      expect(p).not.toContain("psilink.yaml");
+    }
+  });
+
+  test("delete of a restored (disk-only) job removes the workdir; a second delete is false", async () => {
+    const { id, root } = await runSucceededJob();
+    const restarted = restartManagerOverRoot(root);
+    const workdir = path.join(root, id);
+    expect(fs.existsSync(workdir)).toBe(true);
+    expect(await restarted.deleteJob(id)).toBe(true);
+    expect(fs.existsSync(workdir)).toBe(false);
+    expect(await restarted.deleteJob(id)).toBe(false);
+  });
+
+  test("listJobs dedups a live job whose workdir is also on disk (in-memory wins)", async () => {
+    const manager = makeManager({
+      events: [RESULT_EVENT],
+      exitCode: 0,
+      outputFile: "id\n1\n",
+    });
+    const id = await manager.createJob(validIntent());
+    await waitForTerminal(manager.getJob(id)!);
+
+    const summaries = await manager.listJobs();
+    const matching = summaries.filter((entry) => entry.id === id);
+    expect(matching).toHaveLength(1);
+    expect(matching[0].restored).toBe(false);
+  });
+
+  test("discovery excludes a non-UUID directory and a stray file", async () => {
+    const root = freshRoot("hygiene");
+    await fs.promises.mkdir(root, { recursive: true });
+    await fs.promises.mkdir(path.join(root, "not-a-uuid"));
+    await fs.promises.writeFile(path.join(root, "stray.txt"), "x");
+    const validId = generateJobId();
+    await fs.promises.mkdir(path.join(root, validId));
+
+    const restarted = restartManagerOverRoot(root);
+    const ids = (await restarted.listJobs()).map((entry) => entry.id);
+    expect(ids).toContain(validId);
+    expect(ids).not.toContain("not-a-uuid");
+    expect(ids).not.toContain("stray.txt");
+  });
+
+  test("discovery does not follow a symlinked directory out of the root", async () => {
+    const root = freshRoot("symlink-root");
+    await fs.promises.mkdir(root, { recursive: true });
+    // A directory outside the data root, linked in under a valid UUID name.
+    const outside = freshRoot("outside-target");
+    await fs.promises.mkdir(outside, { recursive: true });
+    await fs.promises.writeFile(path.join(outside, "output.csv"), "id\n1\n");
+    const linkId = generateJobId();
+    await fs.promises.symlink(outside, path.join(root, linkId), "dir");
+
+    const restarted = restartManagerOverRoot(root);
+    const ids = (await restarted.listJobs()).map((entry) => entry.id);
+    // The symlink is not admitted: readdir reports it as a symlink, not a
+    // directory, so discovery never resolves through it to the outside target.
+    expect(ids).not.toContain(linkId);
+  });
+
+  test("listJobs is [] when the data root does not exist yet", async () => {
+    const root = freshRoot("absent");
+    const manager = restartManagerOverRoot(root);
+    expect(await manager.listJobs()).toEqual([]);
+    expect(fs.existsSync(root)).toBe(false);
+  });
+
+  test("a job mid-creation is not misclassified as a restored/failed job", async () => {
+    const id = generateJobId();
+    vi.mocked(generateJobId).mockReturnValueOnce(id);
+    let release!: () => void;
+    const paused = new Promise<void>((resolve) => (release = resolve));
+    // Pause createWorkdir after the workdir exists but before the record is set,
+    // so a concurrent read lands squarely in the creation window.
+    vi.mocked(createWorkdir).mockImplementationOnce(
+      async (dataRoot, jobId, subdir) => {
+        const workdir = path.join(dataRoot, jobId);
+        await fs.promises.mkdir(workdir, { recursive: true });
+        const exchangeDirectory = path.join(workdir, subdir);
+        await fs.promises.mkdir(exchangeDirectory, { recursive: true });
+        await paused;
+        return { workdir, exchangeDirectory };
+      },
+    );
+    const manager = makeManager({
+      events: [RESULT_EVENT],
+      exitCode: 0,
+      outputFile: "id\n1\n",
+    });
+    const root = roots[roots.length - 1];
+    const creating = manager.createJob(validIntent());
+    await vi.waitFor(() =>
+      expect(fs.existsSync(path.join(root, id))).toBe(true),
+    );
+    // The workdir is on disk with no record yet; the guard shadows the disk.
+    expect(await manager.getJobView(id)).toBeNull();
+    expect((await manager.listJobs()).map((entry) => entry.id)).not.toContain(
+      id,
+    );
+    release();
+    await creating;
+    const view = await manager.getJobView(id);
+    expect(view).not.toBeNull();
+    expect(view!.restored).toBe(false);
+  });
+
+  test("a job mid-deletion reports gone, not a transient restored view", async () => {
+    const { id, root } = await runSucceededJob();
+    const restarted = restartManagerOverRoot(root);
+    const workdir = path.join(root, id);
+    let release!: () => void;
+    let entered!: () => void;
+    const paused = new Promise<void>((resolve) => (release = resolve));
+    const removalEntered = new Promise<void>((resolve) => (entered = resolve));
+    vi.mocked(removeWorkdir).mockImplementationOnce(async (dir) => {
+      entered();
+      await paused;
+      await fs.promises.rm(dir, { recursive: true, force: true });
+    });
+    const deleting = restarted.deleteJob(id);
+    await removalEntered;
+    // The workdir is still on disk mid-removal; the guard reports it gone.
+    expect(fs.existsSync(workdir)).toBe(true);
+    expect(await restarted.getJobView(id)).toBeNull();
+    release();
+    expect(await deleting).toBe(true);
+    expect(fs.existsSync(workdir)).toBe(false);
+    expect(await restarted.getJobView(id)).toBeNull();
+  });
+
+  test("a no-result success (record but no output.csv) restores as succeeded", async () => {
+    const root = freshRoot("no-result-success");
+    const id = generateJobId();
+    const workdir = path.join(root, id);
+    await fs.promises.mkdir(workdir, { recursive: true });
+    // A party whose terms give it no result of its own writes the record pair on
+    // success but never an output.csv; live it is succeeded, so restore must be
+    // too rather than collapsing to failed.
+    await writeJobFile(
+      workdir,
+      "record.json",
+      JSON.stringify({ createdAt: CREATED_AT, summary: "s" }),
+    );
+    await writeJobFile(workdir, "record.keys.json", "{}");
+
+    const restarted = restartManagerOverRoot(root);
+    const view = await restarted.getJobView(id);
+    expect(view).toMatchObject({
+      id,
+      status: "succeeded",
+      restored: true,
+      resultAvailable: false,
+      recordAvailable: true,
+      recordCreatedAt: CREATED_AT,
+    });
+  });
+
+  test("a direct request for a symlinked leaf workdir is rejected, not followed", async () => {
+    const root = freshRoot("symlink-leaf");
+    await fs.promises.mkdir(root, { recursive: true });
+    const outside = freshRoot("outside-leaf");
+    await fs.promises.mkdir(outside, { recursive: true });
+    await fs.promises.writeFile(path.join(outside, "output.csv"), "id\n1\n");
+    const linkId = generateJobId();
+    await fs.promises.symlink(outside, path.join(root, linkId), "dir");
+
+    const restarted = restartManagerOverRoot(root);
+    // classifyRestoredJob lstats the leaf, so a direct id request neither serves
+    // nor deletes through the planted link.
+    expect(await restarted.getJobView(linkId)).toBeNull();
+    expect(await restarted.deleteJob(linkId)).toBe(false);
+    expect(fs.existsSync(path.join(outside, "output.csv"))).toBe(true);
   });
 });

@@ -22,8 +22,9 @@ Every job response carries `Cache-Control: no-store` and no CORS headers -- the 
 | Method | Path | Success | Notes |
 | ------ | ---- | ------- | ----- |
 | `POST` | `/api/jobs` | `201` `{ "id": "<uuid>" }` | Create and start a job from a JSON intent. `413` (empty body) when the body exceeds the size cap (see [Size caps](#size-caps)). `400` on unparseable body, intent that fails schema validation, or an sftp intent naming an unknown remote (empty body, resolved before any workdir exists). `409` (empty body) when the named remote is held by a running job. |
-| `GET` | `/api/jobs/:jobId` | `200` status JSON | `404` on malformed, unknown, or evicted id. |
-| `DELETE` | `/api/jobs/:jobId` | `204` | Kills a still-running child, drops the record, removes the workdir. `404` when the id is unknown. |
+| `GET` | `/api/jobs` | `200` `{ "jobs": [...] }` | List every job: live in-memory records and restart-restored jobs re-discovered from disk artifacts, deduped by id (the in-memory record wins). Each entry is `{ id, status, restored, resultAvailable, recordAvailable, recordCreatedAt? }`. See [Job lifetime and orphan handling](#job-lifetime-and-orphan-handling). |
+| `GET` | `/api/jobs/:jobId` | `200` status JSON | `404` on malformed or unknown id. A restart-restored job is served read-only from its disk artifacts. |
+| `DELETE` | `/api/jobs/:jobId` | `204` | Kills a still-running child, drops the record, removes the workdir. For a restart-restored job (no in-memory record) it removes the disk-only workdir. `404` when neither a record nor a workdir exists. |
 | `GET` | `/api/jobs/:jobId/events` | `200` `text/event-stream` | SSE event relay with full-history replay. `404` on unknown id. |
 | `POST` | `/api/jobs/:jobId/cancel` | `202` | Request cancellation; idempotent (`202` even if already terminal). `404` on unknown id. |
 | `GET` | `/api/jobs/:jobId/result` | `200` `text/csv` | The matched-result CSV, only after the job succeeded. `404` otherwise. |
@@ -43,6 +44,7 @@ The job id is a server-generated v4 UUID; the client never supplies it. Every id
 {
   "id": "<uuid>",
   "status": "running" | "succeeded" | "failed" | "cancelled",
+  "restored": <bool>,
   "terminal": { "outcome": "...", "exitCode": <int|null>, "signal": "<sig|null>" } | null,
   "terminalEmitted": <bool>,
   "eventCount": <int>,
@@ -53,6 +55,8 @@ The job id is a server-generated v4 UUID; the client never supplies it. Every id
 ```
 
 `terminal` is null until the child exits; `resultAvailable` is true exactly when `status` is `succeeded`. `recordAvailable` is true only when the job succeeded, both the record and its verification-keys file are on disk, and the record validates and yields a `createdAt`; the record pair is offered all-or-nothing. `recordCreatedAt` is the record's own timestamp, present exactly when `recordAvailable` is true -- a client derives the download filename from it, matching the in-browser exchange path. Because the CLI's record write is non-fatal (a disk failure after a successful exchange is warned, not thrown), a job can be `resultAvailable: true` with `recordAvailable: false`.
+
+`restored` is true when the view was reconstructed from disk artifacts rather than an in-memory record -- after a restart, or after the in-memory record's TTL eviction on a still-running server (see [Job lifetime and orphan handling](#job-lifetime-and-orphan-handling)). A restored job carries no event history, so `terminal` is `null`, `terminalEmitted` is `true`, and `eventCount` is `0`; its `status` is derived purely from artifacts (`succeeded` when the result file or the exchange record is present, else `failed`). Because the disk carries no cancellation marker, a job that was `cancelled` before the restart restores as `failed`.
 
 ### The `GET /api/jobs/:jobId/result` response
 
@@ -248,8 +252,8 @@ The same posture covers the remotes table: a configured `JOB_SFTP_REMOTES` that 
 
 Job state lives in server memory only and is never persisted:
 
-- **Restart empties the table.** In-memory job records do not survive a server restart; a restart cancels in-flight exchanges rather than persisting another party's material. After a restart, a stale job id `404`s (the record is gone), while the workdir of a completed job remains on disk until an explicit `DELETE`.
-- **TTL eviction is memory-only.** One hour after a job reaches a terminal state, its in-memory record is evicted as a memory backstop. Eviction removes only the record (the id then `404`s); it leaves the workdir on disk. The eviction timer is `unref`ed and does not resurrect a record already removed by a `DELETE`.
+- **Restart empties the table; completed results are re-discoverable read-only.** The in-memory table -- running state, the terminal reconciliation, and the full event history -- does not survive a server restart, and no in-flight exchange is resumed or persisted (a restart cancels it rather than persisting another party's material). What does survive is the on-disk workdir of a completed job, and after a restart the API re-discovers those workdirs and re-surfaces each completed job read-only. Discovery reads the data root and admits an entry only when it is a real directory (a symlinked directory is not followed out of the root), its name is a canonical v4 UUID, and it resolves strictly under the resolved data root -- the same traversal guard the live routes apply. For each admitted id the restored view is derived purely from the output artifacts: `status` is `succeeded` when `output.csv` or `record.json` is present (a party whose terms give it no result of its own still writes the record on success) else `failed`, and `recordAvailable`/`recordCreatedAt` follow the same all-or-nothing rule as the live status body (`record.json` and `record.keys.json` both present and the record's `createdAt` parses). Restore reads only these output artifacts and their existence; it never reads or serves the key file (`.psilink.key`) or the connection config (`psilink.yaml`), so no shared secret or connection material re-enters server state. A restored job's `GET`, `result`, `record`, `keys`, and `DELETE` behave as a live job's do; there is no cancel and no event replay (`eventCount` is `0`, the SSE stream has no history to replay), and it is never re-run. An interrupted job (a workdir with neither a result nor a record) surfaces as `failed`/terminated, never `running` and never resumable.
+- **TTL eviction is memory-only.** One hour after a job reaches a terminal state, its in-memory record is evicted as a memory backstop. Eviction removes only the record; it leaves the workdir on disk, so a completed job then resolves read-only as a restored job (served from disk until an explicit `DELETE`) rather than `404`ing, with its event history gone. The eviction timer is `unref`ed and does not resurrect a record already removed by a `DELETE`.
 - **DELETE removes the disk.** `DELETE /api/jobs/:jobId` is the only operation that removes the workdir. It `SIGKILL`s a still-running child first so the delete leaves no orphan, drops the record, and `rm -rf`s the workdir (idempotent).
 - **Terminal states release the remote.** An sftp job's per-remote hold (see [SFTP remotes](#sftp-remotes)) is released when the job reaches a terminal state or is deleted; a restart empties the holds with the rest of the in-memory state.
 - **Shutdown signals every child.** On server shutdown (`SIGINT`/`SIGTERM`), every running child is sent `SIGTERM` so no orphaned CLI outlives the server. The shutdown hook is registered before the graceful-shutdown handler (signal listeners run in registration order), so children are signaled before any handler that may end the process. It is a no-op when the API was never enabled.
