@@ -11,7 +11,12 @@ import { buildRunOutputs } from "@bench/runOutputs";
 
 import { VALID_SHARED_SECRET, validLinkageTerms } from "../utils/jobFixtures";
 
-import type { ExchangeResult, PreparedExchange } from "@psilink/core";
+import type {
+  ExchangeResult,
+  Metadata,
+  PreparedExchange,
+  Standardization,
+} from "@psilink/core";
 import type {
   JobApiClient,
   RecordAvailability,
@@ -394,6 +399,65 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
       sharedSecret: config.sharedSecret,
       inputCsv: config.inputCsv,
     });
+  });
+
+  test("forwards the config's metadata and standardization into the intent", async () => {
+    // Both builders (acceptor and inviter) funnel their operator-authored data-prep
+    // edits through this driver config; the driver must carry them into the intent
+    // so the appliance's CLI honors them rather than inferring metadata.
+    const metadata: Metadata = [
+      { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+      { name: "secret", type: "other", role: "ignored", isPayload: true },
+    ];
+    const standardization: Standardization = [
+      { output: "ssn", input: "ssn", steps: [{ function: "trim" }] },
+    ];
+    const { client, createdIntents } = scriptedClient([result(true)]);
+    const driver = createServerJobExchangeDriver(
+      { ...driverConfig(), metadata, standardization },
+      client,
+    );
+    const events = driverEvents(new AbortController().signal);
+
+    await driver.run(events);
+
+    expect(createdIntents[0]).toMatchObject({ metadata, standardization });
+  });
+
+  test("omits metadata and standardization when the config sets neither", async () => {
+    const { client, createdIntents } = scriptedClient([result(true)]);
+    const driver = createServerJobExchangeDriver(driverConfig(), client);
+    const events = driverEvents(new AbortController().signal);
+
+    await driver.run(events);
+
+    const intent = createdIntents[0] as Record<string, unknown>;
+    expect(intent.metadata).toBeUndefined();
+    expect(intent.standardization).toBeUndefined();
+    expect(intent.expectedPayloadColumns).toBeUndefined();
+  });
+
+  test("forwards expectedPayloadColumns into the intent, empty array included", async () => {
+    // The received-payload lock-in must reach the intent as-is; an empty array is a
+    // strict "receive nothing" and must not be collapsed to undefined.
+    const nonEmpty = scriptedClient([result(true)]);
+    await createServerJobExchangeDriver(
+      { ...driverConfig(), expectedPayloadColumns: ["program_code"] },
+      nonEmpty.client,
+    ).run(driverEvents(new AbortController().signal));
+    expect(nonEmpty.createdIntents[0]).toMatchObject({
+      expectedPayloadColumns: ["program_code"],
+    });
+
+    const empty = scriptedClient([result(true)]);
+    await createServerJobExchangeDriver(
+      { ...driverConfig(), expectedPayloadColumns: [] },
+      empty.client,
+    ).run(driverEvents(new AbortController().signal));
+    expect(
+      (empty.createdIntents[0] as { expectedPayloadColumns?: unknown })
+        .expectedPayloadColumns,
+    ).toEqual([]);
   });
 
   test("an already-aborted signal starts no job", async () => {

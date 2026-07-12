@@ -280,11 +280,13 @@ export function useInviterExchange({
       });
 
     // The console appliance carries out the filedrop exchange: the driver POSTs
-    // the sealed terms, the shared secret, and the file's raw text to the job
-    // API and maps the server's event stream onto the same lifecycle events.
-    // It owns no peer connection or PSI library, so `acquire`/`generateOutput`
-    // go unused on this path. Reading the file's text is the only async step
-    // before the run, so it precedes the driver build.
+    // the sealed terms, this party's authored metadata/standardization (when
+    // present, so the CLI honors the operator's data-prep edits rather than
+    // inferring), the shared secret, and the file's raw text to the job API and
+    // maps the server's event stream onto the same lifecycle events. It owns no
+    // peer connection or PSI library, so `acquire`/`generateOutput` go unused on
+    // this path. Reading the file's text is the only async step before the run,
+    // so it precedes the driver build.
     const serverJobDriver = async (): Promise<ExchangeDriver<RunOutputs>> => {
       if (sourceFile === undefined)
         throw new Error("no source file for the server-job exchange");
@@ -293,6 +295,10 @@ export function useInviterExchange({
         linkageTerms: minted.linkageTerms,
         sharedSecret: minted.sharedSecret,
         inputCsv,
+        ...(minted.metadata !== undefined ? { metadata: minted.metadata } : {}),
+        ...(minted.standardization !== undefined
+          ? { standardization: minted.standardization }
+          : {}),
       });
     };
 

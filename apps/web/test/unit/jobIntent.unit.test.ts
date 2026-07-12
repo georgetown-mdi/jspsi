@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest";
 
 import { parse as parseYaml } from "yaml";
 
+import { disclosedColumnNames, safeParseMetadata } from "@psilink/core";
+
 import {
   JOB_FILE_NAMES,
   composeConfigDocument,
@@ -11,10 +13,157 @@ import {
 
 import { validIntent, validLinkageTerms } from "../utils/jobFixtures";
 
+import type { Metadata, Standardization } from "@psilink/core";
+
 // The intent schema is the ONLY channel from the client into a CLI invocation.
 // These pin its injection-closure: unknown/injection-shaped values are rejected,
 // only the credential-free filedrop channel is admitted, and the composed config
 // never carries a client-chosen path, host, or credential.
+
+// The operator's authored per-party data-prep edits. `secret` is roled `ignored`;
+// left to metadata inference an unrecognized column defaults to disclosed payload,
+// so carrying this metadata is what keeps it off the wire.
+const editedMetadata: Metadata = [
+  { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+  { name: "last_name", type: "last_name", role: "linkage", isPayload: false },
+  {
+    name: "date_of_birth",
+    type: "date_of_birth",
+    role: "linkage",
+    isPayload: false,
+  },
+  { name: "secret", type: "other", role: "ignored", isPayload: true },
+];
+
+const editedStandardization: Standardization = [
+  {
+    output: "ssn",
+    input: "ssn",
+    steps: [{ function: "trim" }],
+  },
+];
+
+describe("jobExchangeIntentSchema validates metadata and standardization", () => {
+  test("accepts an intent carrying valid metadata and standardization", () => {
+    const intent = validIntent({
+      metadata: editedMetadata,
+      standardization: editedStandardization,
+    });
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(true);
+  });
+
+  test("rejects malformed metadata (a duplicate column name)", () => {
+    const intent = validIntent({
+      metadata: [...editedMetadata, editedMetadata[0]],
+    });
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
+  test("rejects malformed standardization (a missing output field)", () => {
+    const intent = {
+      ...validIntent(),
+      standardization: [{ input: "ssn" }],
+    };
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
+  test("still rejects an unknown top-level key alongside the new fields", () => {
+    const intent = {
+      ...validIntent({ metadata: editedMetadata }),
+      path: "/etc/passwd",
+    };
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
+  test("accepts expectedPayloadColumns, including an empty array", () => {
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validIntent({ expectedPayloadColumns: ["program_code"] }),
+      ).success,
+    ).toBe(true);
+    // An empty array is a valid, meaningful value (strict "receive nothing").
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validIntent({ expectedPayloadColumns: [] }),
+      ).success,
+    ).toBe(true);
+  });
+
+  test("rejects a non-string-array expectedPayloadColumns", () => {
+    const intent = { ...validIntent(), expectedPayloadColumns: [1, 2] };
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+  });
+});
+
+describe("composeConfigDocument carries the operator's data-prep edits", () => {
+  test("forwards edited metadata and standardization into the composed config", () => {
+    const intent = validIntent({
+      metadata: editedMetadata,
+      standardization: editedStandardization,
+    });
+    const yaml = composeConfigDocument(intent, "/srv/jobs/abc/exchange");
+    const doc = parseYaml(yaml) as {
+      metadata?: unknown;
+      standardization?: unknown;
+    };
+
+    // The metadata block reaches the CLI verbatim (snake_case on disk); parse it
+    // back through core's own parser to compare on the camelCase side.
+    const parsed = safeParseMetadata(doc.metadata);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data).toEqual(editedMetadata);
+
+    expect(doc.standardization).toEqual(editedStandardization);
+  });
+
+  test("the operator-ignored column is NOT disclosed in the composed metadata", () => {
+    // The bug this slice closes: without carried metadata the CLI infers `secret`
+    // as an unrecognized column and defaults it to disclosed payload. The forwarded
+    // metadata roles it `ignored`, so disclosedColumnNames -- the single source of
+    // truth for what leaves the machine -- excludes it.
+    const intent = validIntent({ metadata: editedMetadata });
+    const yaml = composeConfigDocument(intent, "/srv/jobs/abc/exchange");
+    const doc = parseYaml(yaml) as { metadata?: unknown };
+    const parsed = safeParseMetadata(doc.metadata);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(disclosedColumnNames(parsed.data)).not.toContain("secret");
+  });
+
+  test("omits metadata and standardization when the intent sets neither", () => {
+    const yaml = composeConfigDocument(validIntent(), "/srv/jobs/abc/exchange");
+    const doc = parseYaml(yaml) as Record<string, unknown>;
+    expect(doc.metadata).toBeUndefined();
+    expect(doc.standardization).toBeUndefined();
+  });
+});
+
+describe("composeConfigDocument carries the received-payload lock-in", () => {
+  // The acceptor's expectedPayloadColumns must reach the config as
+  // expected_payload_columns so the CLI enforces the received set explicitly
+  // rather than falling back (fail open) to linkageTerms.payload.receive.
+  test("forwards a non-empty expectedPayloadColumns as expected_payload_columns", () => {
+    const intent = validIntent({ expectedPayloadColumns: ["program_code"] });
+    const yaml = composeConfigDocument(intent, "/srv/jobs/abc/exchange");
+    const doc = parseYaml(yaml) as { expected_payload_columns?: unknown };
+    expect(doc.expected_payload_columns).toEqual(["program_code"]);
+  });
+
+  test("an empty expectedPayloadColumns SURVIVES into the config (strict), not dropped", () => {
+    // The empty-vs-undefined distinction: an empty array is a strict "receive
+    // nothing" and must lock in, not collapse to an omitted (lazy) field.
+    const intent = validIntent({ expectedPayloadColumns: [] });
+    const yaml = composeConfigDocument(intent, "/srv/jobs/abc/exchange");
+    const doc = parseYaml(yaml) as { expected_payload_columns?: unknown };
+    expect(doc.expected_payload_columns).toEqual([]);
+  });
+
+  test("omits expected_payload_columns when the intent leaves it undefined (lazy)", () => {
+    const yaml = composeConfigDocument(validIntent(), "/srv/jobs/abc/exchange");
+    const doc = parseYaml(yaml) as Record<string, unknown>;
+    expect(doc.expected_payload_columns).toBeUndefined();
+  });
+});
 
 describe("jobExchangeIntentSchema rejects injection-shaped intents", () => {
   test("accepts a well-formed filedrop intent", () => {

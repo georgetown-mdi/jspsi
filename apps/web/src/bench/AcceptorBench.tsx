@@ -11,6 +11,8 @@ import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
 import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
+import { deploymentProfile } from "@utils/clientConfig";
+
 import { InvitationTerms } from "@components/InvitationTerms";
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 import { setColumnTypeForMatching } from "@psi/metadataEditing";
@@ -151,13 +153,18 @@ export function AcceptorBench() {
   // columns step and its verdict derive from it; and the layered column-step editor
   // state (metadata + override layers), seeded once from the acquired columns.
   const [acquired, setAcquired] = useState<AcceptorAcquiredCsv>();
+  // The original file whose parse produced `acquired`, captured at the same commit
+  // so the server-job path submits the exact bytes the browser path parsed (no
+  // re-serialization of rawRows). Fixed alongside `acquired` and the committed name.
+  const [acceptedFile, setAcceptedFile] = useState<File>();
   const [columnsState, setColumnsState] = useState<AcceptorColumnsState>();
   // The launched exchange (the assembled edits + optional advisory); rendering the
   // minimal run stub the next package replaces.
   const [launched, setLaunched] = useState<AcceptorLaunched>();
 
   // Decode the fragment token once, failing closed: an empty fragment, a bad
-  // checksum/schema, an expired token, or a non-WebRTC endpoint each throws in
+  // checksum/schema, an expired token, or an endpoint this build cannot drive
+  // (SFTP, or a filedrop endpoint on a non-console build) each throws in
   // prepareAcceptedInvitation and lands on the focused error alert; only a valid
   // invitation reaches the review step. The token rides ONLY in the fragment,
   // which never reaches the server. Aborted on unmount so a resolving decode does
@@ -176,7 +183,9 @@ export function AcceptorBench() {
     const controller = new AbortController();
     void (async () => {
       try {
-        const invitation = await prepareAcceptedInvitation(encoded);
+        const invitation = await prepareAcceptedInvitation(encoded, {
+          profile: deploymentProfile(),
+        });
         if (!controller.signal.aborted)
           setDecode({ status: "ready", invitation });
       } catch (error) {
@@ -294,6 +303,7 @@ export function AcceptorBench() {
       // the gate-checked name here so the run records it even if the input is later
       // edited (the input stays editable; the committed identity does not drift).
       setCommittedName(name);
+      setAcceptedFile(file);
       setAcquired({
         fileName: file.name,
         sizeBytes: file.size,
@@ -351,7 +361,8 @@ export function AcceptorBench() {
     if (
       launched === undefined ||
       decode.status !== "ready" ||
-      acquired === undefined
+      acquired === undefined ||
+      acceptedFile === undefined
     )
       return undefined;
     return {
@@ -360,10 +371,11 @@ export function AcceptorBench() {
       rawRows: acquired.rawRows,
       columns: acquired.columns,
       edits: launched.edits,
+      sourceFile: acceptedFile,
     };
     // `launched` is the launch key: it is set once, from the same render that
-    // fixes the acquired CSV, committed name, and ready decode, so keying the
-    // memo on it alone cannot go stale.
+    // fixes the acquired CSV, its source file, the committed name, and the ready
+    // decode, so keying the memo on it alone cannot go stale.
   }, [launched]);
 
   const { run, outputs, failure, tryAgain } = useAcceptorExchange({ launch });
