@@ -6,9 +6,12 @@ import {
   composeKeyFileDocument,
   composeSftpConfigDocument,
 } from "./intent";
+import { classifyRestoredJob, listRestorableJobIds } from "./jobArtifacts";
 import {
   createWorkdir,
   generateJobId,
+  jobFileExists,
+  readRecordCreatedAt,
   removeWorkdir,
   resolveWorkdir,
   writeJobFile,
@@ -63,6 +66,44 @@ export interface BufferedEvent {
 
 /** The lifecycle status of a job. */
 export type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
+
+/**
+ * The uniform view the status and download routes consume, built either from a
+ * live in-memory {@link JobRecord} or -- after a restart, when only the workdir
+ * survives -- reconstructed from disk artifacts. A live view mirrors what the
+ * routes report today; a restored view carries no event history (the events were
+ * in memory and are gone) and is always terminal.
+ */
+export interface JobView {
+  id: string;
+  status: JobStatus;
+  /** True when this view was reconstructed from disk with no in-memory record. */
+  restored: boolean;
+  /** The reconciled terminal state; always null for a restored job. */
+  terminal: JobTerminalState | null;
+  terminalEmitted: boolean;
+  eventCount: number;
+  resultAvailable: boolean;
+  recordAvailable: boolean;
+  recordCreatedAt?: string;
+  /** The three servable file paths (result, record, keys) inside the workdir. */
+  outputPath: string;
+  recordPath: string;
+  keysPath: string;
+}
+
+/**
+ * The listing subset of a {@link JobView} returned by {@link JobManager.listJobs}:
+ * the fields a job list surfaces without the servable paths or event bookkeeping.
+ */
+export interface JobSummary {
+  id: string;
+  status: JobStatus;
+  restored: boolean;
+  resultAvailable: boolean;
+  recordAvailable: boolean;
+  recordCreatedAt?: string;
+}
 
 /** A job record. Lives in server memory only; never persisted. */
 export interface JobRecord {
@@ -359,6 +400,64 @@ export class JobManager {
   }
 
   /**
+   * The uniform view for a job: the live in-memory record when one exists, else a
+   * restored view reconstructed from disk artifacts, else null (no record and no
+   * workdir). Routes resolve through this so a restart-restored job serves
+   * identically to a live one.
+   */
+  async getJobView(id: string): Promise<JobView | null> {
+    const record = this.jobs.get(id);
+    if (record !== undefined) return liveJobView(record);
+    const artifacts = await classifyRestoredJob(this.dataRoot, id);
+    if (artifacts === null) return null;
+    return {
+      id,
+      status: artifacts.status,
+      restored: true,
+      terminal: null,
+      terminalEmitted: true,
+      eventCount: 0,
+      resultAvailable: artifacts.resultAvailable,
+      recordAvailable: artifacts.recordAvailable,
+      ...(artifacts.recordCreatedAt !== undefined
+        ? { recordCreatedAt: artifacts.recordCreatedAt }
+        : {}),
+      outputPath: artifacts.outputPath,
+      recordPath: artifacts.recordPath,
+      keysPath: artifacts.keysPath,
+    };
+  }
+
+  /**
+   * The merged listing of every in-memory record and every restorable disk id not
+   * already in memory, deduped by id with the in-memory record winning. A live
+   * record is summarized exactly as its status route reports; a disk-only id is
+   * classified from its artifacts.
+   */
+  async listJobs(): Promise<Array<JobSummary>> {
+    const summaries = new Map<string, JobSummary>();
+    for (const record of this.jobs.values())
+      summaries.set(record.id, liveJobSummary(record));
+    const diskIds = await listRestorableJobIds(this.dataRoot);
+    for (const id of diskIds) {
+      if (summaries.has(id)) continue;
+      const artifacts = await classifyRestoredJob(this.dataRoot, id);
+      if (artifacts === null) continue;
+      summaries.set(id, {
+        id,
+        status: artifacts.status,
+        restored: true,
+        resultAvailable: artifacts.resultAvailable,
+        recordAvailable: artifacts.recordAvailable,
+        ...(artifacts.recordCreatedAt !== undefined
+          ? { recordCreatedAt: artifacts.recordCreatedAt }
+          : {}),
+      });
+    }
+    return [...summaries.values()];
+  }
+
+  /**
    * Append an event to a job's buffer with the next monotonic id, notify SSE
    * listeners, and enforce the cap. On overflow the job is failed with a
    * synthesized error terminal so a supervisor always sees a terminal event.
@@ -541,12 +640,26 @@ export class JobManager {
    */
   async deleteJob(id: string): Promise<boolean> {
     const record = this.jobs.get(id);
-    if (record === undefined) return false;
+    if (record === undefined) return this.deleteRestoredJob(id);
     this.clearCancelTimers(record);
     if (record.handle?.isRunning()) record.handle.signal("SIGKILL");
     this.jobs.delete(id);
     const workdir = resolveWorkdir(this.dataRoot, id);
     if (workdir !== null) await removeWorkdir(workdir);
+    return true;
+  }
+
+  /**
+   * Delete a restart-restored job that has no in-memory record: a disk-only
+   * removal of the workdir. Such a job holds no child and no remote latch, so
+   * there is nothing to signal or release. Returns false when no workdir exists.
+   */
+  private async deleteRestoredJob(id: string): Promise<boolean> {
+    const artifacts = await classifyRestoredJob(this.dataRoot, id);
+    if (artifacts === null) return false;
+    const workdir = resolveWorkdir(this.dataRoot, id);
+    if (workdir === null) return false;
+    await removeWorkdir(workdir);
     return true;
   }
 
@@ -573,6 +686,53 @@ export class JobManager {
       if (record.handle?.isRunning()) record.handle.signal("SIGTERM");
     }
   }
+}
+
+/**
+ * The record pair's availability for a live record, offered all-or-nothing: the
+ * job succeeded, both the record and keys files exist, and the record's
+ * `createdAt` parses. This is the same rule the status route applied when it read
+ * the in-memory record directly, lifted here so live and restored views share it.
+ */
+function liveRecordAvailability(
+  record: JobRecord,
+):
+  | { recordAvailable: false }
+  | { recordAvailable: true; recordCreatedAt: string } {
+  if (record.status !== "succeeded") return { recordAvailable: false };
+  if (!jobFileExists(record.recordPath) || !jobFileExists(record.keysPath))
+    return { recordAvailable: false };
+  const recordCreatedAt = readRecordCreatedAt(record.recordPath);
+  if (recordCreatedAt === null) return { recordAvailable: false };
+  return { recordAvailable: true, recordCreatedAt };
+}
+
+/** The live view of an in-memory record, mirroring what the routes report. */
+function liveJobView(record: JobRecord): JobView {
+  return {
+    id: record.id,
+    status: record.status,
+    restored: false,
+    terminal: record.terminal,
+    terminalEmitted: record.terminalEmitted,
+    eventCount: record.events.length,
+    resultAvailable: record.status === "succeeded",
+    ...liveRecordAvailability(record),
+    outputPath: record.outputPath,
+    recordPath: record.recordPath,
+    keysPath: record.keysPath,
+  };
+}
+
+/** The listing summary of a live in-memory record. */
+function liveJobSummary(record: JobRecord): JobSummary {
+  return {
+    id: record.id,
+    status: record.status,
+    restored: false,
+    resultAvailable: record.status === "succeeded",
+    ...liveRecordAvailability(record),
+  };
 }
 
 /**

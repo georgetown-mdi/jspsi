@@ -112,6 +112,37 @@ async function createSucceededJob(stubEnv: NodeJS.ProcessEnv): Promise<string> {
   }
 }
 
+/**
+ * Run a job to success, then install a FRESH manager over the same data root as
+ * the global -- a simulated restart: the in-memory record is gone, only the disk
+ * survives. Returns the succeeded job's id and its data root. The API is left
+ * enabled (optionally token-gated) so the routes resolve the restarted manager.
+ */
+async function restartAfterSucceededJob(
+  options: { token?: string } = {},
+): Promise<{
+  id: string;
+  root: string;
+}> {
+  const id = await createSucceededJob({
+    STUB_OUTPUT_FILE: "id1,id2\n1,2\n",
+    STUB_RECORD_JSON: recordJson("2026-07-08T14:32:00.000Z"),
+  });
+  const root = roots[roots.length - 1];
+  const previous = (globalThis as { jobManagerInstance?: JobManager })
+    .jobManagerInstance;
+  previous?.shutdown();
+  const restarted = new JobManager({
+    dataRoot: root,
+    binaryPath: STUB_CLI_PATH,
+    childEnv: { STUB_FD3_EVENTS: JSON.stringify([]) },
+  });
+  (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
+    restarted;
+  if (options.token !== undefined) vi.stubEnv("JOB_API_TOKEN", options.token);
+  return { id, root };
+}
+
 describe("the feature gate keeps the API dark when disabled", () => {
   test("POST /api/jobs is 404 when JOB_DATA_ROOT is unset", async () => {
     vi.stubEnv("JOB_DATA_ROOT", "");
@@ -719,5 +750,243 @@ describe("POST /api/jobs bounds the body before schema parse", () => {
       params: {},
     })) as Response;
     expect(response.status).toBe(401);
+  });
+});
+
+describe("GET /api/jobs lists jobs and is gated", () => {
+  test("is 404 when the API is disabled", async () => {
+    vi.stubEnv("JOB_DATA_ROOT", "");
+    const response = (await handlersOf(CreateRoute).GET({
+      request: new Request("http://localhost/api/jobs"),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(404);
+  });
+
+  test("is 401 on a wrong bearer", async () => {
+    enableJobApi({ token: "the-token" });
+    const response = (await handlersOf(CreateRoute).GET({
+      request: new Request("http://localhost/api/jobs", {
+        headers: { authorization: "Bearer wrong" },
+      }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(401);
+  });
+
+  test("lists a live succeeded job with no-store", async () => {
+    const id = await createSucceededJob({ STUB_OUTPUT_FILE: "id\n1\n" });
+    const response = (await handlersOf(CreateRoute).GET({
+      request: new Request("http://localhost/api/jobs"),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = (await response.json()) as {
+      jobs: Array<{ id: string; restored: boolean; resultAvailable: boolean }>;
+    };
+    const entry = body.jobs.find((job) => job.id === id);
+    expect(entry).toMatchObject({ restored: false, resultAvailable: true });
+  });
+});
+
+describe("restore after a restart surfaces completed jobs read-only", () => {
+  const CREATED_AT = "2026-07-08T14:32:00.000Z";
+
+  test("GET /api/jobs lists the restored job with resultAvailable", async () => {
+    const { id } = await restartAfterSucceededJob();
+    const response = (await handlersOf(CreateRoute).GET({
+      request: new Request("http://localhost/api/jobs"),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      jobs: Array<{
+        id: string;
+        restored: boolean;
+        status: string;
+        resultAvailable: boolean;
+        recordAvailable: boolean;
+      }>;
+    };
+    const entry = body.jobs.find((job) => job.id === id);
+    expect(entry).toMatchObject({
+      id,
+      restored: true,
+      status: "succeeded",
+      resultAvailable: true,
+      recordAvailable: true,
+    });
+  });
+
+  test("the status body shape marks the job restored, terminal null, eventCount 0", async () => {
+    const { id } = await restartAfterSucceededJob();
+    const response = (await handlersOf(JobRoute).GET({
+      request: new Request(`http://localhost/api/jobs/${id}`),
+      params: { jobId: id },
+    })) as Response;
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      restored: boolean;
+      terminal: unknown;
+      terminalEmitted: boolean;
+      eventCount: number;
+      status: string;
+      recordCreatedAt?: string;
+    };
+    expect(body.restored).toBe(true);
+    expect(body.terminal).toBeNull();
+    expect(body.terminalEmitted).toBe(true);
+    expect(body.eventCount).toBe(0);
+    expect(body.status).toBe("succeeded");
+    expect(body.recordCreatedAt).toBe(CREATED_AT);
+  });
+
+  test("the restored result/record/keys serve byte-identically through the gate", async () => {
+    const { id, root } = await restartAfterSucceededJob();
+
+    const resultResp = (await handlersOf(ResultRoute).GET({
+      request: new Request(`http://localhost/api/jobs/${id}/result`),
+      params: { jobId: id },
+    })) as Response;
+    expect(resultResp.status).toBe(200);
+    expect(resultResp.headers.get("cache-control")).toBe("no-store");
+    expect(await resultResp.text()).toBe(
+      fs.readFileSync(`${root}/${id}/output.csv`, "utf8"),
+    );
+
+    const recordResp = (await handlersOf(RecordRoute).GET({
+      request: new Request(`http://localhost/api/jobs/${id}/record`),
+      params: { jobId: id },
+    })) as Response;
+    expect(recordResp.status).toBe(200);
+    expect(await recordResp.text()).toBe(
+      fs.readFileSync(`${root}/${id}/record.json`, "utf8"),
+    );
+
+    const keysResp = (await handlersOf(KeysRoute).GET({
+      request: new Request(`http://localhost/api/jobs/${id}/keys`),
+      params: { jobId: id },
+    })) as Response;
+    expect(keysResp.status).toBe(200);
+    expect(await keysResp.text()).toBe(
+      fs.readFileSync(`${root}/${id}/record.keys.json`, "utf8"),
+    );
+  });
+
+  test("the restored surfaces are 404 when the API is disabled", async () => {
+    const { id } = await restartAfterSucceededJob();
+    vi.stubEnv("JOB_DATA_ROOT", "");
+    const listResp = (await handlersOf(CreateRoute).GET({
+      request: new Request("http://localhost/api/jobs"),
+      params: {},
+    })) as Response;
+    expect(listResp.status).toBe(404);
+    for (const route of [ResultRoute, RecordRoute, KeysRoute]) {
+      const resp = (await handlersOf(route).GET({
+        request: new Request(`http://localhost/api/jobs/${id}/x`),
+        params: { jobId: id },
+      })) as Response;
+      expect(resp.status).toBe(404);
+    }
+  });
+
+  test("the restored surfaces are 401 on a bad bearer", async () => {
+    const { id } = await restartAfterSucceededJob({ token: "the-token" });
+    const bad = { authorization: "Bearer wrong" };
+    const listResp = (await handlersOf(CreateRoute).GET({
+      request: new Request("http://localhost/api/jobs", { headers: bad }),
+      params: {},
+    })) as Response;
+    expect(listResp.status).toBe(401);
+    for (const route of [ResultRoute, RecordRoute, KeysRoute]) {
+      const resp = (await handlersOf(route).GET({
+        request: new Request(`http://localhost/api/jobs/${id}/x`, {
+          headers: bad,
+        }),
+        params: { jobId: id },
+      })) as Response;
+      expect(resp.status).toBe(401);
+    }
+  });
+
+  test("an interrupted restored job's result endpoint is 404 and status is failed", async () => {
+    // A workdir with config/key/input but no output.csv: a restart surfaces it
+    // as terminated/failed, and its result is unservable.
+    const root = tempDataRoot("routes-interrupted");
+    roots.push(root);
+    vi.stubEnv("JOB_DATA_ROOT", root);
+    const jobId = "00000000-0000-4000-8000-000000000000";
+    const workdir = `${root}/${jobId}`;
+    fs.mkdirSync(workdir, { recursive: true });
+    fs.writeFileSync(`${workdir}/psilink.yaml`, "channel: filedrop\n");
+    fs.writeFileSync(`${workdir}/.psilink.key`, '{"sharedSecret":"x"}');
+    fs.writeFileSync(`${workdir}/input.csv`, "id\n1\n");
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      childEnv: { STUB_FD3_EVENTS: JSON.stringify([]) },
+    });
+    (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
+      manager;
+
+    const statusResp = (await handlersOf(JobRoute).GET({
+      request: new Request(`http://localhost/api/jobs/${jobId}`),
+      params: { jobId },
+    })) as Response;
+    const statusBody = (await statusResp.json()) as {
+      status: string;
+      restored: boolean;
+      resultAvailable: boolean;
+    };
+    expect(statusBody.status).toBe("failed");
+    expect(statusBody.restored).toBe(true);
+    expect(statusBody.resultAvailable).toBe(false);
+
+    const resultResp = (await handlersOf(ResultRoute).GET({
+      request: new Request(`http://localhost/api/jobs/${jobId}/result`),
+      params: { jobId },
+    })) as Response;
+    expect(resultResp.status).toBe(404);
+  });
+
+  test("DELETE of a restored disk-only job is 204, and a second delete is 404", async () => {
+    const { id, root } = await restartAfterSucceededJob();
+    const workdir = `${root}/${id}`;
+    expect(fs.existsSync(workdir)).toBe(true);
+    const first = (await handlersOf(JobRoute).DELETE({
+      request: new Request(`http://localhost/api/jobs/${id}`, {
+        method: "DELETE",
+      }),
+      params: { jobId: id },
+    })) as Response;
+    expect(first.status).toBe(204);
+    expect(fs.existsSync(workdir)).toBe(false);
+    const second = (await handlersOf(JobRoute).DELETE({
+      request: new Request(`http://localhost/api/jobs/${id}`, {
+        method: "DELETE",
+      }),
+      params: { jobId: id },
+    })) as Response;
+    expect(second.status).toBe(404);
+  });
+
+  test("no route serves the key file or the config for a restored job", async () => {
+    // The restore surfaces are exactly result/record/keys. There is no handler
+    // that serves .psilink.key or psilink.yaml, and the served bodies never equal
+    // the secret key file or the config on disk.
+    const { id, root } = await restartAfterSucceededJob();
+    const keyFile = fs.readFileSync(`${root}/${id}/.psilink.key`, "utf8");
+    const configFile = fs.readFileSync(`${root}/${id}/psilink.yaml`, "utf8");
+    for (const route of [ResultRoute, RecordRoute, KeysRoute]) {
+      const resp = (await handlersOf(route).GET({
+        request: new Request(`http://localhost/api/jobs/${id}/x`),
+        params: { jobId: id },
+      })) as Response;
+      const text = await resp.text();
+      expect(text).not.toBe(keyFile);
+      expect(text).not.toBe(configFile);
+      expect(text).not.toContain("sharedSecret");
+    }
   });
 });

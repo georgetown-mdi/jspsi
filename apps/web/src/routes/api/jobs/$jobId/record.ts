@@ -12,7 +12,8 @@ import { jobFileExists } from "@jobs/workdir";
  * A near-exact mirror of the result route: auth-gated, id-validated, and served
  * only after the job succeeded, from the job's server-chosen record path inside
  * its workdir (never derived from client input). A job that has not succeeded, or
- * whose record is missing, is 404. The download name the browser saves is set by
+ * whose record is missing, is 404. A restart-restored succeeded job serves from
+ * the disk-resolved record path. The download name the browser saves is set by
  * the driver's `download` attribute; the Content-Disposition name here is a
  * stable fallback.
  */
@@ -25,12 +26,12 @@ export const Route = createFileRoute("/api/jobs/$jobId/record")({
         const jobId = validateJobIdParam(params.jobId);
         if (jobId === null) return jobEmptyResponse(404);
 
-        const record = gate.manager.getJob(jobId);
-        if (record === undefined) return jobEmptyResponse(404);
-        if (record.status !== "succeeded") return jobEmptyResponse(404);
-        if (!jobFileExists(record.recordPath)) return jobEmptyResponse(404);
+        const view = await gate.manager.getJobView(jobId);
+        if (view === null) return jobEmptyResponse(404);
+        if (view.status !== "succeeded") return jobEmptyResponse(404);
+        if (!jobFileExists(view.recordPath)) return jobEmptyResponse(404);
 
-        const body = await fsp.readFile(record.recordPath);
+        const body = await fsp.readFile(view.recordPath);
         return new Response(body, {
           status: 200,
           headers: {

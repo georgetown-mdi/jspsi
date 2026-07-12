@@ -14,7 +14,8 @@ import { resultFileExists } from "@jobs/workdir";
  * client input. Content-Type and Content-Disposition are set explicitly with a
  * fixed download name, and a nosniff/no-store discipline applies. A job that has
  * not succeeded, or whose result is missing, is 404 rather than leaking whether
- * an unfinished job exists.
+ * an unfinished job exists. A restart-restored succeeded job serves byte-for-byte
+ * identically to a live one, from the disk-resolved output path.
  */
 export const Route = createFileRoute("/api/jobs/$jobId/result")({
   server: {
@@ -25,17 +26,17 @@ export const Route = createFileRoute("/api/jobs/$jobId/result")({
         const jobId = validateJobIdParam(params.jobId);
         if (jobId === null) return jobEmptyResponse(404);
 
-        const record = gate.manager.getJob(jobId);
-        if (record === undefined) return jobEmptyResponse(404);
-        if (record.status !== "succeeded") return jobEmptyResponse(404);
-        if (!resultFileExists(record.outputPath)) return jobEmptyResponse(404);
+        const view = await gate.manager.getJobView(jobId);
+        if (view === null) return jobEmptyResponse(404);
+        if (view.status !== "succeeded") return jobEmptyResponse(404);
+        if (!resultFileExists(view.outputPath)) return jobEmptyResponse(404);
 
-        const body = await fsp.readFile(record.outputPath);
+        const body = await fsp.readFile(view.outputPath);
         return new Response(body, {
           status: 200,
           headers: {
             "Content-Type": "text/csv; charset=utf-8",
-            "Content-Disposition": `attachment; filename="result-${record.id}.csv"`,
+            "Content-Disposition": `attachment; filename="result-${view.id}.csv"`,
             "X-Content-Type-Options": "nosniff",
             ...JOB_RESPONSE_HEADERS,
           },
