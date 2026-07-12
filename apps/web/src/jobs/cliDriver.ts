@@ -133,6 +133,7 @@ export function spawnExchangeJob(args: {
   keyPath: string;
   inputPath: string;
   outputPath: string;
+  recordPath: string;
   workdir: string;
   eventStream: boolean;
   handlers: CliDriverHandlers;
@@ -144,9 +145,8 @@ export function spawnExchangeJob(args: {
    */
   extraEnv?: NodeJS.ProcessEnv;
 }): CliDriverHandle {
-  const { binaryPath, configPath, keyPath, inputPath, outputPath, workdir } =
-    args;
-  const { handlers, eventStream, extraEnv } = args;
+  const { binaryPath, configPath, keyPath, inputPath, outputPath } = args;
+  const { recordPath, workdir, handlers, eventStream, extraEnv } = args;
 
   // Fixed argv template. Every element is a server constant or a server-generated
   // absolute path; nothing here derives from client text.
@@ -157,6 +157,8 @@ export function spawnExchangeJob(args: {
     configPath,
     "--key-file",
     keyPath,
+    "--record-file",
+    recordPath,
     ...(eventStream ? ["--event-stream"] : []),
     inputPath,
     outputPath,

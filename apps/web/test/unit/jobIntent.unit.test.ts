@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import { parse as parseYaml } from "yaml";
 
 import {
+  JOB_FILE_NAMES,
   composeConfigDocument,
   composeKeyFileDocument,
   jobExchangeIntentSchema,
@@ -108,5 +109,18 @@ describe("composeKeyFileDocument", () => {
     };
     expect(body.sharedSecret).toBe(validIntent().sharedSecret);
     expect(body.expires).toBeUndefined();
+  });
+});
+
+describe("JOB_FILE_NAMES record/keys pairing", () => {
+  // The web app cannot import apps/cli's keysPathFor, so this pins the same
+  // derivation (a trailing `.json` replaced by `.keys.json`) the CLI applies to
+  // the record path: the keys name the server serves must match the one the CLI
+  // writes alongside the record it is pointed at via --record-file.
+  test("recordKeys is the record name under the .json -> .keys.json rule", () => {
+    const derivedKeysName = JOB_FILE_NAMES.record.endsWith(".json")
+      ? `${JOB_FILE_NAMES.record.slice(0, -".json".length)}.keys.json`
+      : `${JOB_FILE_NAMES.record}.keys.json`;
+    expect(JOB_FILE_NAMES.recordKeys).toBe(derivedKeysName);
   });
 });

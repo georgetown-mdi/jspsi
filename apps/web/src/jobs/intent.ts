@@ -116,6 +116,13 @@ export const JOB_FILE_NAMES = {
   exchangeDirectory: "exchange",
   /** The CLI's matched-result output. */
   output: "output.csv",
+  /** The self-attested exchange record, pinned so the server knows its path
+   * (the CLI's `--record-file` target). */
+  record: "record.json",
+  /** The private verification keys paired with {@link JOB_FILE_NAMES.record}.
+   * Must equal the CLI's `keysPathFor` derivation of the record name (`.json` ->
+   * `.keys.json`); a unit test pins this cross-workspace pairing. */
+  recordKeys: "record.keys.json",
 } as const;
 
 /**

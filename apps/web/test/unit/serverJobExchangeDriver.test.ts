@@ -7,15 +7,18 @@ import {
   createFetchJobApiClient,
   createServerJobExchangeDriver,
 } from "@psi/serverJobExchangeDriver";
+import { buildRunOutputs } from "@bench/runOutputs";
 
 import { VALID_SHARED_SECRET, validLinkageTerms } from "../utils/jobFixtures";
 
+import type { ExchangeResult, PreparedExchange } from "@psilink/core";
 import type {
   JobApiClient,
+  RecordAvailability,
   ServerJobExchangeDriverConfig,
 } from "@psi/serverJobExchangeDriver";
+import type { ObjectUrls, RunOutputs } from "@bench/runOutputs";
 import type { RelayEvent } from "@jobs/cliDriver";
-import type { RunOutputs } from "@bench/runOutputs";
 
 /** The construction-time config every test reuses; the driver only carries it
  * into the intent, so its values are never validated here. */
@@ -52,8 +55,15 @@ async function* scriptedStream(
 }
 
 /** A {@link JobApiClient} whose event stream is a fixed script, capturing the
- * intent it was asked to create and each cancel it received. */
-function scriptedClient(events: Array<RelayEvent>) {
+ * intent it was asked to create and each cancel it received. The record
+ * availability defaults to unavailable; a test that exercises the record set
+ * passes an availability (or a function that throws to script a failed query). */
+function scriptedClient(
+  events: Array<RelayEvent>,
+  availability: RecordAvailability | (() => Promise<RecordAvailability>) = {
+    available: false,
+  },
+) {
   const createdIntents: Array<unknown> = [];
   const cancelledIds: Array<string> = [];
   const client: JobApiClient = {
@@ -66,6 +76,10 @@ function scriptedClient(events: Array<RelayEvent>) {
       cancelledIds.push(jobId);
       return Promise.resolve();
     },
+    fetchRecordAvailability: () =>
+      typeof availability === "function"
+        ? availability()
+        : Promise.resolve(availability),
   };
   return { client, createdIntents, cancelledIds };
 }
@@ -248,6 +262,122 @@ describe("createServerJobExchangeDriver event mapping", () => {
   });
 });
 
+describe("createServerJobExchangeDriver record downloads", () => {
+  const CREATED_AT = "2026-07-08T14:32:00.000Z";
+  const RECORD_NAME = "psilink-record-2026-07-08T14-32-00-000Z.json";
+  const KEYS_NAME = "psilink-record-2026-07-08T14-32-00-000Z.keys.json";
+
+  test("a completed job with an available record yields the full result set", async () => {
+    const { client } = scriptedClient([result(true)], {
+      available: true,
+      createdAt: CREATED_AT,
+    });
+    const driver = createServerJobExchangeDriver(driverConfig(), client);
+    const events = driverEvents(new AbortController().signal);
+
+    await driver.run(events);
+
+    expect(events.onError).not.toHaveBeenCalled();
+    const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
+    expect(outputs.resultsUrl).toBe("/api/jobs/job-1/result");
+    expect(outputs.record).toEqual({
+      recordUrl: "/api/jobs/job-1/record",
+      recordFileName: RECORD_NAME,
+      keysUrl: "/api/jobs/job-1/keys",
+      keysFileName: KEYS_NAME,
+    });
+  });
+
+  test("a withheld result still offers the record when available", async () => {
+    const { client } = scriptedClient([result(false)], {
+      available: true,
+      createdAt: CREATED_AT,
+    });
+    const driver = createServerJobExchangeDriver(driverConfig(), client);
+    const events = driverEvents(new AbortController().signal);
+
+    await driver.run(events);
+
+    const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
+    expect(outputs.resultWithheld).toBe(true);
+    expect(outputs.resultsUrl).toBeUndefined();
+    expect(outputs.record?.recordUrl).toBe("/api/jobs/job-1/record");
+    expect(outputs.record?.keysUrl).toBe("/api/jobs/job-1/keys");
+  });
+
+  test("a not-yet-available record omits the record but still delivers the result", async () => {
+    const { client } = scriptedClient([result(true)], { available: false });
+    const driver = createServerJobExchangeDriver(driverConfig(), client);
+    const events = driverEvents(new AbortController().signal);
+
+    await driver.run(events);
+
+    expect(events.onError).not.toHaveBeenCalled();
+    const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
+    expect(outputs.resultsUrl).toBe("/api/jobs/job-1/result");
+    expect(outputs.record).toBeUndefined();
+  });
+
+  test("a failed availability query degrades gracefully to no record", async () => {
+    // The result CSV is the primary artifact; a metadata-fetch failure must not
+    // fail the run or block the download.
+    const { client } = scriptedClient([result(true)], () =>
+      Promise.reject(new Error("status fetch failed")),
+    );
+    const driver = createServerJobExchangeDriver(driverConfig(), client);
+    const events = driverEvents(new AbortController().signal);
+
+    await driver.run(events);
+
+    expect(events.onError).not.toHaveBeenCalled();
+    const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
+    expect(outputs.resultsUrl).toBe("/api/jobs/job-1/result");
+    expect(outputs.record).toBeUndefined();
+  });
+
+  test("an abort during the availability query stays silent", async () => {
+    const controller = new AbortController();
+    const { client } = scriptedClient([result(true)], () => {
+      controller.abort();
+      return Promise.resolve({ available: true, createdAt: CREATED_AT });
+    });
+    const driver = createServerJobExchangeDriver(driverConfig(), client);
+    const events = driverEvents(controller.signal);
+
+    await driver.run(events);
+
+    // A caller-initiated abort mid-query is silent: neither terminal fires.
+    expect(events.onResult).not.toHaveBeenCalled();
+    expect(events.onError).not.toHaveBeenCalled();
+  });
+
+  test("the record filenames are byte-identical to the in-browser path's", () => {
+    // buildRunOutputs is the in-browser parity reference: for the same createdAt
+    // the console driver must produce the same record/keys filenames.
+    const created: Array<string> = [];
+    const urls: ObjectUrls = {
+      create: (blob) => {
+        const url = `blob:${created.length}-${blob.type}`;
+        created.push(url);
+        return url;
+      },
+      revoke: () => {},
+    };
+    const inBrowser = buildRunOutputs(
+      {
+        associationTable: undefined,
+        partnerPayload: { columns: [], rowIndices: [], rows: [] },
+        audit: { record: { createdAt: CREATED_AT }, keys: { salts: {} } },
+      } as unknown as ExchangeResult,
+      {} as unknown as PreparedExchange,
+      urls,
+    );
+
+    expect(inBrowser.record?.recordFileName).toBe(RECORD_NAME);
+    expect(inBrowser.record?.keysFileName).toBe(KEYS_NAME);
+  });
+});
+
 describe("createServerJobExchangeDriver intent and cancellation", () => {
   test("POSTs an intent with channel 'filedrop' and eventStream true", async () => {
     const { client, createdIntents } = scriptedClient([result(true)]);
@@ -298,6 +428,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
         cancelledIds.push(jobId);
         return Promise.resolve();
       },
+      fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
     const driver = createServerJobExchangeDriver(driverConfig(), client);
     const events = driverEvents(controller.signal);
@@ -320,6 +451,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
         Promise.reject(new JobApiRequestError(400, "bad intent")),
       openEventStream: () => scriptedStream([]),
       cancelJob: () => Promise.resolve(),
+      fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
     const driver = createServerJobExchangeDriver(driverConfig(), failingClient);
     const events = driverEvents(new AbortController().signal);
@@ -336,6 +468,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
         Promise.reject(new JobApiRequestError(500, "server error")),
       openEventStream: () => scriptedStream([]),
       cancelJob: () => Promise.resolve(),
+      fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
     const driver = createServerJobExchangeDriver(driverConfig(), client);
     const events = driverEvents(new AbortController().signal);
@@ -379,6 +512,16 @@ describe("createFetchJobApiClient over an injected fetch", () => {
               headers: { "Content-Type": "application/json" },
             }),
           );
+        if (url === "/api/jobs/job-9")
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                recordAvailable: true,
+                recordCreatedAt: "2026-07-08T14:32:00.000Z",
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            ),
+          );
         return Promise.resolve(
           sseResponse(
             'id: 1\ndata: {"v":1,"type":"result","resultWritten":true}\n\n',
@@ -404,9 +547,16 @@ describe("createFetchJobApiClient over an injected fetch", () => {
     expect(calls.some((call) => call.url === "/api/jobs/job-9/events")).toBe(
       true,
     );
-    // The streamed result frame reached onResult.
+    // The streamed result frame reached onResult, with the record pair fetched
+    // off the status endpoint.
     const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
     expect(outputs.resultsUrl).toBe("/api/jobs/job-9/result");
+    expect(outputs.record).toEqual({
+      recordUrl: "/api/jobs/job-9/record",
+      recordFileName: "psilink-record-2026-07-08T14-32-00-000Z.json",
+      keysUrl: "/api/jobs/job-9/keys",
+      keysFileName: "psilink-record-2026-07-08T14-32-00-000Z.keys.json",
+    });
   });
 
   test("a streamed security error frame maps to category 'security'", async () => {
@@ -453,5 +603,51 @@ describe("createFetchJobApiClient over an injected fetch", () => {
         new AbortController().signal,
       ),
     ).rejects.toBeInstanceOf(JobApiRequestError);
+  });
+
+  test("fetchRecordAvailability reads recordAvailable and recordCreatedAt", async () => {
+    const statusResponse =
+      (body: unknown): typeof fetch =>
+      () =>
+        Promise.resolve(
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+    const signal = new AbortController().signal;
+
+    await expect(
+      createFetchJobApiClient(
+        statusResponse({
+          recordAvailable: true,
+          recordCreatedAt: "2026-07-08T14:32:00.000Z",
+        }),
+      ).fetchRecordAvailability("job-1", signal),
+    ).resolves.toEqual({
+      available: true,
+      createdAt: "2026-07-08T14:32:00.000Z",
+    });
+
+    // recordAvailable false, a missing createdAt, and a non-2xx all read as
+    // unavailable.
+    await expect(
+      createFetchJobApiClient(
+        statusResponse({ recordAvailable: false }),
+      ).fetchRecordAvailability("job-1", signal),
+    ).resolves.toEqual({ available: false });
+    await expect(
+      createFetchJobApiClient(
+        statusResponse({ recordAvailable: true }),
+      ).fetchRecordAvailability("job-1", signal),
+    ).resolves.toEqual({ available: false });
+    const notFound: typeof fetch = () =>
+      Promise.resolve(new Response(null, { status: 404 }));
+    await expect(
+      createFetchJobApiClient(notFound).fetchRecordAvailability(
+        "job-1",
+        signal,
+      ),
+    ).resolves.toEqual({ available: false });
   });
 });

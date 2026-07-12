@@ -22,6 +22,19 @@ export interface ObjectUrls {
 }
 
 /**
+ * The filesystem-safe stamp for a record's download filenames, derived from the
+ * record's own `createdAt` (colons and the fractional-second dot replaced with
+ * hyphens). This matches the CLI's default record path (`keysPathFor` /
+ * `defaultRecordPath` in apps/cli), so the console and in-browser paths produce
+ * byte-identical download names for the same `createdAt`; a unit test pins that
+ * parity. The web app cannot import apps/cli, so the rule is replicated here as
+ * the single source both browser drivers share.
+ */
+export function recordFileStamp(createdAt: string): string {
+  return createdAt.replace(/[:.]/g, "-");
+}
+
+/**
  * Build the run's downloadable artifacts from the exchange result: the results
  * CSV (unless the terms withheld it) with its matched-row count, plus the
  * record pair when the audit exists. If anything throws after a URL was
@@ -74,7 +87,7 @@ export function buildRunOutputs(
     // made filesystem-safe) so repeated downloads accumulate rather than
     // collide.
     if (result.audit !== undefined) {
-      const stamp = result.audit.record.createdAt.replace(/[:.]/g, "-");
+      const stamp = recordFileStamp(result.audit.record.createdAt);
       generated.record = {
         recordUrl: jsonUrl(serializeExchangeRecord(result.audit.record)),
         recordFileName: `psilink-record-${stamp}.json`,
