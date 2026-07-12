@@ -4,6 +4,7 @@ import {
   JOB_FILE_NAMES,
   composeConfigDocument,
   composeKeyFileDocument,
+  composeSftpConfigDocument,
 } from "./intent";
 import {
   createWorkdir,
@@ -19,7 +20,36 @@ import type {
   JobTerminalState,
   RelayEvent,
 } from "./cliDriver";
+import type { JobSftpRemoteEntry, JobSftpRemotesTable } from "./sftpRemotes";
 import type { JobExchangeIntent } from "./intent";
+
+/**
+ * Thrown by {@link JobManager.createJob} when an sftp intent names a remote
+ * that is not in the operator-provisioned table (or no table is configured).
+ * The message never carries the requested name: the route maps this to an
+ * empty-bodied 400, and nothing client-chosen should ride an error object
+ * toward a log or response either.
+ */
+export class UnknownSftpRemoteError extends Error {
+  constructor() {
+    super("the intent names an sftp remote that is not provisioned");
+    this.name = "UnknownSftpRemoteError";
+  }
+}
+
+/**
+ * Thrown by {@link JobManager.createJob} when the named remote is already held
+ * by a running job. One running exchange per remote: two CLI children polling
+ * the same remote directory would corrupt each other's rendezvous. The latch
+ * releases when the holding job reaches a terminal state (child exit, event
+ * overflow, or delete).
+ */
+export class SftpRemoteBusyError extends Error {
+  constructor() {
+    super("the named sftp remote is held by a running job");
+    this.name = "SftpRemoteBusyError";
+  }
+}
 
 /**
  * A single buffered event with its monotonic id. The full event list is retained
@@ -45,6 +75,10 @@ export interface JobRecord {
   recordPath: string;
   /** The private verification-keys path paired with {@link recordPath}. */
   keysPath: string;
+  /** The remote name an sftp job holds (for the per-remote busy latch); null
+   * for filedrop. Only the holder recorded in the manager's latch map releases
+   * it, so a stale record cannot free a successor's hold. */
+  sftpRemote: string | null;
   status: JobStatus;
   events: Array<BufferedEvent>;
   /** True once a terminal event has been buffered; the SSE stream closes after it. */
@@ -91,11 +125,32 @@ export interface JobManagerOptions {
   cancelSigkillGraceMs?: number;
   terminalTtlMs?: number;
   /**
+   * The operator-provisioned SFTP remotes table (loaded fail-closed at server
+   * startup; tests inject one directly). Absent when no remotes are
+   * configured, in which case every sftp intent fails with
+   * {@link UnknownSftpRemoteError}. Never derived from a request.
+   */
+  sftpRemotes?: JobSftpRemotesTable;
+  /**
    * Extra environment variables merged into every spawned child. Empty in
    * production; the manager tests use it to configure the stub CLI. Set only by
    * the server-side constructor, never derived from a request.
    */
   childEnv?: NodeJS.ProcessEnv;
+}
+
+/**
+ * The public, credential-free projection of one provisioned remote served by
+ * `GET /api/jobs/remotes`: the name a client may select plus the locator
+ * fields an operator needs to recognize it. Constructed field-by-field from
+ * the table entry -- never by spreading it -- so no credential reference,
+ * fingerprint, or future field can ride along.
+ */
+export interface SftpRemoteProjection {
+  name: string;
+  host: string;
+  port?: number;
+  path?: string;
 }
 
 /**
@@ -112,6 +167,9 @@ export class JobManager {
   private readonly cancelSigkillGraceMs: number;
   private readonly terminalTtlMs: number;
   private readonly childEnv: NodeJS.ProcessEnv | undefined;
+  private readonly sftpRemotes: JobSftpRemotesTable | undefined;
+  /** The per-remote busy latch: remote name -> holding job id. */
+  private readonly sftpRemoteHolders = new Map<string, string>();
 
   constructor(options: JobManagerOptions) {
     this.dataRoot = options.dataRoot;
@@ -122,6 +180,7 @@ export class JobManager {
     this.cancelSigkillGraceMs =
       options.cancelSigkillGraceMs ?? CANCEL_SIGKILL_GRACE_MS;
     this.terminalTtlMs = options.terminalTtlMs ?? JOB_TERMINAL_TTL_MS;
+    this.sftpRemotes = options.sftpRemotes;
     this.childEnv = options.childEnv;
   }
 
@@ -129,30 +188,84 @@ export class JobManager {
    * Create and start a job from a validated intent. The server generates the id,
    * builds the workdir, writes the composed config, key, and input CSV under
    * fixed names, and spawns the CLI. Returns the new job's id.
+   *
+   * An sftp intent resolves (and latches) its remote BEFORE any filesystem
+   * work, so an unknown or busy remote is rejected with nothing on disk.
    */
   async createJob(intent: JobExchangeIntent): Promise<string> {
     const id = generateJobId();
-    const { workdir, exchangeDirectory } = await createWorkdir(
-      this.dataRoot,
-      id,
-      JOB_FILE_NAMES.exchangeDirectory,
-    );
+    const remoteEntry =
+      intent.channel === "sftp"
+        ? this.acquireSftpRemote(intent.remote, id)
+        : undefined;
 
+    let workdir: string | null = null;
     try {
+      const created = await createWorkdir(
+        this.dataRoot,
+        id,
+        JOB_FILE_NAMES.exchangeDirectory,
+      );
+      workdir = created.workdir;
       return await this.startJobInWorkdir(
         intent,
         id,
-        workdir,
-        exchangeDirectory,
+        created.workdir,
+        created.exchangeDirectory,
+        remoteEntry,
       );
     } catch (error) {
       // A failure after the workdir exists must not strand it: the record may
       // not be in the table yet, so no DELETE or eviction could ever reach the
-      // directory (which may already hold the written key file).
+      // directory (which may already hold the written key file). The remote
+      // latch is released the same way -- no terminal path could ever run.
       this.jobs.delete(id);
-      await removeWorkdir(workdir);
+      if (intent.channel === "sftp") this.releaseSftpRemote(intent.remote, id);
+      if (workdir !== null) await removeWorkdir(workdir);
       throw error;
     }
+  }
+
+  /**
+   * Resolve an sftp intent's remote name against the table by exact `Map.get`
+   * equality and latch it to the new job. Unknown names (including "any name"
+   * when no table is configured) and names held by a running job are typed
+   * rejections the routes map to status codes without echoing the name.
+   */
+  private acquireSftpRemote(remote: string, jobId: string): JobSftpRemoteEntry {
+    const entry = this.sftpRemotes?.get(remote);
+    if (entry === undefined) throw new UnknownSftpRemoteError();
+    if (this.sftpRemoteHolders.has(remote)) throw new SftpRemoteBusyError();
+    this.sftpRemoteHolders.set(remote, jobId);
+    return entry;
+  }
+
+  /** Release a remote latch, but only if this job is still its holder. */
+  private releaseSftpRemote(remote: string, jobId: string): void {
+    if (this.sftpRemoteHolders.get(remote) === jobId)
+      this.sftpRemoteHolders.delete(remote);
+  }
+
+  private releaseSftpRemoteForRecord(record: JobRecord): void {
+    if (record.sftpRemote === null) return;
+    this.releaseSftpRemote(record.sftpRemote, record.id);
+  }
+
+  /**
+   * The credential-free projection of the provisioned remotes for
+   * `GET /api/jobs/remotes`. Explicitly mapped field-by-field (never a spread)
+   * so only {name, host, port, path} can ever cross the response boundary.
+   */
+  listSftpRemotes(): Array<SftpRemoteProjection> {
+    const projection: Array<SftpRemoteProjection> = [];
+    if (this.sftpRemotes === undefined) return projection;
+    for (const [name, entry] of this.sftpRemotes) {
+      const item: SftpRemoteProjection = { name, host: entry.host };
+      if (entry.port !== undefined) item.port = entry.port;
+      if (entry.path !== undefined) item.path = entry.path;
+      projection.push(item);
+    }
+    return projection;
   }
 
   private async startJobInWorkdir(
@@ -160,8 +273,13 @@ export class JobManager {
     id: string,
     workdir: string,
     exchangeDirectory: string,
+    remoteEntry: JobSftpRemoteEntry | undefined,
   ): Promise<string> {
-    const configDocument = composeConfigDocument(intent, exchangeDirectory);
+    const configDocument = composeDocumentByChannel(
+      intent,
+      exchangeDirectory,
+      remoteEntry,
+    );
     const keyDocument = composeKeyFileDocument(intent);
 
     const configPath = await writeJobFile(
@@ -189,6 +307,7 @@ export class JobManager {
       outputPath,
       recordPath,
       keysPath,
+      sftpRemote: intent.channel === "sftp" ? intent.remote : null,
       status: "running",
       events: [],
       terminalEmitted: false,
@@ -267,6 +386,7 @@ export class JobManager {
     for (const listener of record.listeners) listener(entry);
     this.markTerminalEmitted(record, "error");
     record.status = "failed";
+    this.releaseSftpRemoteForRecord(record);
     record.handle?.signal("SIGKILL");
   }
 
@@ -296,6 +416,7 @@ export class JobManager {
   private reconcileTerminal(record: JobRecord, state: JobTerminalState): void {
     record.terminal = state;
     this.clearCancelTimers(record);
+    this.releaseSftpRemoteForRecord(record);
 
     if (state.outcome === "succeeded") record.status = "succeeded";
     else if (state.outcome === "cancelled") record.status = "cancelled";
@@ -412,6 +533,7 @@ export class JobManager {
     const record = this.jobs.get(id);
     if (record === undefined) return false;
     this.clearCancelTimers(record);
+    this.releaseSftpRemoteForRecord(record);
     if (record.handle?.isRunning()) record.handle.signal("SIGKILL");
     this.jobs.delete(id);
     const workdir = resolveWorkdir(this.dataRoot, id);
@@ -442,4 +564,25 @@ export class JobManager {
       if (record.handle?.isRunning()) record.handle.signal("SIGTERM");
     }
   }
+}
+
+/**
+ * Compose the CLI config document for the intent's channel: filedrop rendezvous
+ * in the server-chosen exchange directory inside the workdir; sftp rendezvous
+ * at the operator-provisioned remote (the per-job exchange directory is simply
+ * unused). The sftp arm requires the entry `acquireSftpRemote` resolved; a
+ * missing one here is a caller bug surfaced as a hard error, not a silent
+ * fallback.
+ */
+function composeDocumentByChannel(
+  intent: JobExchangeIntent,
+  exchangeDirectory: string,
+  remoteEntry: JobSftpRemoteEntry | undefined,
+): string {
+  if (intent.channel === "sftp") {
+    if (remoteEntry === undefined)
+      throw new Error("sftp job reached compose without a resolved remote");
+    return composeSftpConfigDocument(intent, remoteEntry);
+  }
+  return composeConfigDocument(intent, exchangeDirectory);
 }

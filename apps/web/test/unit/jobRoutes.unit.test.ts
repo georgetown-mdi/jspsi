@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { JobManager } from "@jobs/jobManager";
+import { validateJobIdParam } from "@jobs/routeSupport";
 
 import { Route as CancelRoute } from "../../src/routes/api/jobs/$jobId/cancel";
 import { Route as CreateRoute } from "../../src/routes/api/jobs/index";
@@ -10,9 +11,16 @@ import { Route as EventsRoute } from "../../src/routes/api/jobs/$jobId/events";
 import { Route as JobRoute } from "../../src/routes/api/jobs/$jobId/index";
 import { Route as KeysRoute } from "../../src/routes/api/jobs/$jobId/keys";
 import { Route as RecordRoute } from "../../src/routes/api/jobs/$jobId/record";
+import { Route as RemotesRoute } from "../../src/routes/api/jobs/remotes";
 import { Route as ResultRoute } from "../../src/routes/api/jobs/$jobId/result";
 
-import { STUB_CLI_PATH, tempDataRoot, validIntent } from "../utils/jobFixtures";
+import {
+  STUB_CLI_PATH,
+  tempDataRoot,
+  testSftpRemotesTable,
+  validIntent,
+  validSftpIntent,
+} from "../utils/jobFixtures";
 
 import type { JobManager as JobManagerType } from "@jobs/jobManager";
 
@@ -25,8 +33,10 @@ afterEach(() => {
   seeded?.shutdown();
   for (const root of roots.splice(0))
     fs.rmSync(root, { recursive: true, force: true });
-  // Reset the memoized manager so each test starts from a clean table.
+  // Reset the memoized manager and remotes table so each test starts clean.
   (globalThis as { jobManagerInstance?: unknown }).jobManagerInstance =
+    undefined;
+  (globalThis as { jobSftpRemotesTable?: unknown }).jobSftpRemotesTable =
     undefined;
 });
 
@@ -410,6 +420,135 @@ describe("status route reports record availability", () => {
     })) as Response;
     const body = (await response.json()) as { recordAvailable: boolean };
     expect(body.recordAvailable).toBe(false);
+  });
+});
+
+/**
+ * Enable the API and seed the global manager with an sftp remotes table (the
+ * startup-loaded table production wiring passes), pointed at the stub CLI.
+ */
+function enableJobApiWithRemotes(stubEnv: NodeJS.ProcessEnv = {}): JobManager {
+  const root = tempDataRoot("routes-remotes");
+  roots.push(root);
+  vi.stubEnv("JOB_DATA_ROOT", root);
+  const manager = new JobManager({
+    dataRoot: root,
+    binaryPath: STUB_CLI_PATH,
+    sftpRemotes: testSftpRemotesTable(),
+    childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), ...stubEnv },
+  });
+  (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
+    manager;
+  return manager;
+}
+
+describe("POST /api/jobs maps the sftp remote rejections to empty bodies", () => {
+  test("an unknown remote is an empty-bodied 400", async () => {
+    enableJobApiWithRemotes();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validSftpIntent({ remote: "not_provisioned" })),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(400);
+    expect(await response.text()).toBe("");
+  });
+
+  test("a busy remote is an empty-bodied 409 that never echoes the name", async () => {
+    enableJobApiWithRemotes({ STUB_DELAY_MS: "5000" });
+    const first = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validSftpIntent()),
+      params: {},
+    })) as Response;
+    expect(first.status).toBe(201);
+
+    const second = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validSftpIntent()),
+      params: {},
+    })) as Response;
+    expect(second.status).toBe(409);
+    expect(await second.text()).toBe("");
+  });
+
+  test("an sftp intent without a configured table is an empty-bodied 400", async () => {
+    enableJobApi();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validSftpIntent()),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(400);
+    expect(await response.text()).toBe("");
+  });
+});
+
+describe("GET /api/jobs/remotes", () => {
+  test("is 404 when the API is disabled", async () => {
+    vi.stubEnv("JOB_DATA_ROOT", "");
+    const response = (await handlersOf(RemotesRoute).GET({
+      request: new Request("http://localhost/api/jobs/remotes"),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(404);
+  });
+
+  test("is 401 on a wrong bearer", async () => {
+    enableJobApi({ token: "the-token" });
+    const response = (await handlersOf(RemotesRoute).GET({
+      request: new Request("http://localhost/api/jobs/remotes", {
+        headers: { authorization: "Bearer wrong" },
+      }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(401);
+  });
+
+  test("serves [] when the API is enabled but no remotes are configured", async () => {
+    enableJobApi();
+    const response = (await handlersOf(RemotesRoute).GET({
+      request: new Request("http://localhost/api/jobs/remotes"),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual([]);
+  });
+
+  test("the projection carries only {name, host, port, path} and no @ ref", async () => {
+    enableJobApiWithRemotes();
+    const response = (await handlersOf(RemotesRoute).GET({
+      request: new Request("http://localhost/api/jobs/remotes"),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(200);
+
+    const body = await response.text();
+    // No credential reference and no fingerprint survives serialization.
+    expect(body).not.toContain("@");
+    expect(body).not.toContain("SHA256");
+
+    const items = JSON.parse(body) as Array<Record<string, unknown>>;
+    expect(items).toHaveLength(1);
+    for (const item of items)
+      for (const key of Object.keys(item))
+        expect(["name", "host", "port", "path"]).toContain(key);
+    expect(items[0]).toEqual({
+      name: "prod_east",
+      host: "sftp.example.org",
+      port: 2222,
+      path: "/exchange",
+    });
+  });
+
+  test("'remotes' can never be captured as a job id", async () => {
+    // The traversal guard every $jobId route applies rejects the static
+    // segment outright, so even a router that mis-ranked the routes could not
+    // reach the filesystem with "remotes" as an id.
+    expect(validateJobIdParam("remotes")).toBeNull();
+    enableJobApi();
+    const response = (await handlersOf(JobRoute).GET({
+      request: new Request("http://localhost/api/jobs/remotes"),
+      params: { jobId: "remotes" },
+    })) as Response;
+    expect(response.status).toBe(404);
   });
 });
 
