@@ -99,11 +99,11 @@ describe("acceptorServerJobConfig", () => {
   test("mirrors the payload so `receive` is the inviter's disclosed `send`", () => {
     const config = configFor();
 
-    // This is the security-relevant lock-in source on the server-job path: with no
-    // explicit expectedPayloadColumns in the composed config, the CLI enforces its
-    // received-payload lock-in off linkageTerms.payload.receive, and the mirror
-    // makes that equal the inviter's disclosed send -- the SAME set the browser
-    // path locks in from disclosedPayloadColumns.
+    // The derive-mirror puts the inviter's disclosed send into the acceptor's
+    // payload.receive -- the SAME set the browser path locks in from
+    // disclosedPayloadColumns. On this fixture (payload.send aligned with
+    // disclosedPayloadColumns) it also equals the explicit expectedPayloadColumns
+    // lock-in below; the divergence describe exercises the shape where it does not.
     expect(config.linkageTerms.payload?.receive).toEqual([
       { name: "program_code" },
     ]);
@@ -136,5 +136,70 @@ describe("acceptorServerJobConfig", () => {
     const disclosed = disclosedColumnNames(config.metadata ?? []);
     expect(disclosed).toContain("notes");
     expect(disclosed).not.toContain("secret");
+  });
+
+  test("sets the received-payload lock-in from the disclosed set", () => {
+    const config = configFor();
+    expect(config.expectedPayloadColumns).toEqual(
+      token.disclosedPayloadColumns,
+    );
+  });
+});
+
+// The received-payload lock-in the console acceptor must set EXPLICITLY, mirroring
+// the browser accept path (acceptorExchange.ts sets prepared.expectedPayloadColumns
+// from disclosedPayloadColumns). Without it the CLI falls back to
+// linkageTerms.payload.receive, which is undefined for a token that discloses
+// columns but carries no payload.send -- a fail-OPEN shape a malicious inviter can
+// craft. These cases pin the empty-vs-absent distinction end to end.
+describe("acceptorServerJobConfig received-payload lock-in", () => {
+  // The inviter perspective a malicious inviter can craft: it advertises no
+  // payload.send at all, yet the token discloses a column. The derive-mirror then
+  // produces no payload.receive, so the CLI's fallback would be undefined and
+  // reconcile lazily (fail open) unless expectedPayloadColumns is set explicitly.
+  const noSendTerms: LinkageTerms = {
+    ...inviterTerms,
+    payload: undefined,
+  };
+
+  function tokenWith(disclosed: Array<string> | undefined): InvitationToken {
+    return {
+      version: "1",
+      linkageTerms: noSendTerms,
+      sharedSecret: "a".repeat(43),
+      ...(disclosed !== undefined
+        ? { disclosedPayloadColumns: disclosed }
+        : {}),
+    };
+  }
+
+  function configFrom(disclosed: Array<string> | undefined) {
+    return acceptorServerJobConfig({
+      token: tokenWith(disclosed),
+      acceptorName: "Accepting Org",
+      edits,
+      inputCsv,
+    });
+  }
+
+  test("locks in even when the token omits payload.send (the fail-open shape)", () => {
+    const config = configFrom(["program_code"]);
+    // The derive-mirror yields no payload.receive here, so the CLI fallback would be
+    // undefined; the explicit lock-in is what enforces the received set.
+    expect(config.linkageTerms.payload?.receive).toBeUndefined();
+    expect(config.expectedPayloadColumns).toEqual(["program_code"]);
+  });
+
+  test("an empty disclosed set locks in strictly (receive nothing), not lazily", () => {
+    const config = configFrom([]);
+    // An empty array must SURVIVE as an empty array -- a strict "receive nothing" --
+    // not be collapsed to undefined (which would reconcile lazily / fail open).
+    expect(config.expectedPayloadColumns).toEqual([]);
+    expect(config.expectedPayloadColumns).not.toBeUndefined();
+  });
+
+  test("an absent disclosed set leaves the lock-in undefined (lazy)", () => {
+    const config = configFrom(undefined);
+    expect(config.expectedPayloadColumns).toBeUndefined();
   });
 });

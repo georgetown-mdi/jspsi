@@ -74,6 +74,25 @@ describe("jobExchangeIntentSchema validates metadata and standardization", () =>
     };
     expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
   });
+
+  test("accepts expectedPayloadColumns, including an empty array", () => {
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validIntent({ expectedPayloadColumns: ["program_code"] }),
+      ).success,
+    ).toBe(true);
+    // An empty array is a valid, meaningful value (strict "receive nothing").
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validIntent({ expectedPayloadColumns: [] }),
+      ).success,
+    ).toBe(true);
+  });
+
+  test("rejects a non-string-array expectedPayloadColumns", () => {
+    const intent = { ...validIntent(), expectedPayloadColumns: [1, 2] };
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+  });
 });
 
 describe("composeConfigDocument carries the operator's data-prep edits", () => {
@@ -116,6 +135,33 @@ describe("composeConfigDocument carries the operator's data-prep edits", () => {
     const doc = parseYaml(yaml) as Record<string, unknown>;
     expect(doc.metadata).toBeUndefined();
     expect(doc.standardization).toBeUndefined();
+  });
+});
+
+describe("composeConfigDocument carries the received-payload lock-in", () => {
+  // The acceptor's expectedPayloadColumns must reach the config as
+  // expected_payload_columns so the CLI enforces the received set explicitly
+  // rather than falling back (fail open) to linkageTerms.payload.receive.
+  test("forwards a non-empty expectedPayloadColumns as expected_payload_columns", () => {
+    const intent = validIntent({ expectedPayloadColumns: ["program_code"] });
+    const yaml = composeConfigDocument(intent, "/srv/jobs/abc/exchange");
+    const doc = parseYaml(yaml) as { expected_payload_columns?: unknown };
+    expect(doc.expected_payload_columns).toEqual(["program_code"]);
+  });
+
+  test("an empty expectedPayloadColumns SURVIVES into the config (strict), not dropped", () => {
+    // The empty-vs-undefined distinction: an empty array is a strict "receive
+    // nothing" and must lock in, not collapse to an omitted (lazy) field.
+    const intent = validIntent({ expectedPayloadColumns: [] });
+    const yaml = composeConfigDocument(intent, "/srv/jobs/abc/exchange");
+    const doc = parseYaml(yaml) as { expected_payload_columns?: unknown };
+    expect(doc.expected_payload_columns).toEqual([]);
+  });
+
+  test("omits expected_payload_columns when the intent leaves it undefined (lazy)", () => {
+    const yaml = composeConfigDocument(validIntent(), "/srv/jobs/abc/exchange");
+    const doc = parseYaml(yaml) as Record<string, unknown>;
+    expect(doc.expected_payload_columns).toBeUndefined();
   });
 });
 

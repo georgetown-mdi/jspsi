@@ -434,6 +434,30 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
     const intent = createdIntents[0] as Record<string, unknown>;
     expect(intent.metadata).toBeUndefined();
     expect(intent.standardization).toBeUndefined();
+    expect(intent.expectedPayloadColumns).toBeUndefined();
+  });
+
+  test("forwards expectedPayloadColumns into the intent, empty array included", async () => {
+    // The received-payload lock-in must reach the intent as-is; an empty array is a
+    // strict "receive nothing" and must not be collapsed to undefined.
+    const nonEmpty = scriptedClient([result(true)]);
+    await createServerJobExchangeDriver(
+      { ...driverConfig(), expectedPayloadColumns: ["program_code"] },
+      nonEmpty.client,
+    ).run(driverEvents(new AbortController().signal));
+    expect(nonEmpty.createdIntents[0]).toMatchObject({
+      expectedPayloadColumns: ["program_code"],
+    });
+
+    const empty = scriptedClient([result(true)]);
+    await createServerJobExchangeDriver(
+      { ...driverConfig(), expectedPayloadColumns: [] },
+      empty.client,
+    ).run(driverEvents(new AbortController().signal));
+    expect(
+      (empty.createdIntents[0] as { expectedPayloadColumns?: unknown })
+        .expectedPayloadColumns,
+    ).toEqual([]);
   });
 
   test("an already-aborted signal starts no job", async () => {

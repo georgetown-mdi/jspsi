@@ -35,6 +35,14 @@ export interface ServerJobExchangeDriverConfig {
   /** This party's authored standardization pipeline, paired with {@link metadata}.
    * Forwarded only when present. */
   standardization?: Standardization;
+  /** The acceptor's received-payload lock-in (partner-namespace column names),
+   * mirrored from the invitation's disclosed set. Carried into the intent so the
+   * CLI enforces it explicitly instead of relying on the lazy `payload.receive`
+   * fallback, which fails open when the token discloses columns but carries no
+   * `payload.send`. Forwarded whenever present, INCLUDING an empty array (a strict
+   * "receive nothing"); only an omitted field reconciles lazily. The inviter path
+   * leaves it undefined -- the lock-in is the acceptor's. */
+  expectedPayloadColumns?: Array<string>;
   options?: JobExchangeOptions;
 }
 
@@ -335,6 +343,7 @@ export function createServerJobExchangeDriver(
     inputCsv,
     metadata,
     standardization,
+    expectedPayloadColumns,
     options,
   } = config;
   return {
@@ -357,6 +366,9 @@ export function createServerJobExchangeDriver(
         inputCsv,
         ...(metadata !== undefined ? { metadata } : {}),
         ...(standardization !== undefined ? { standardization } : {}),
+        ...(expectedPayloadColumns !== undefined
+          ? { expectedPayloadColumns }
+          : {}),
         ...(options !== undefined ? { options } : {}),
         eventStream: true,
       };

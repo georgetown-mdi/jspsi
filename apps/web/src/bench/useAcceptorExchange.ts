@@ -71,13 +71,18 @@ function transportForEndpointChannel(
  * ({@link deriveAcceptedLinkageTerms}: the acceptor's identity replaces the
  * inviter's, output/payload mirrored) -- the SAME derivation
  * {@link acceptorExchangeDataSpec} applies for the browser path, NOT the raw
- * inviter-perspective `token.linkageTerms`. This is load-bearing for both
- * identity and security: the CLI enforces its received-payload lock-in off
- * `linkageTerms.payload.receive` when the composed config carries no explicit
- * `expectedPayloadColumns`, and the mirror puts the inviter's disclosed `send`
- * there -- the same set the browser path locks in from `disclosedPayloadColumns`.
- * Passing the raw inviter terms would run the acceptor with the wrong identity,
- * direction, and lock-in.
+ * inviter-perspective `token.linkageTerms`. This is load-bearing for identity and
+ * direction: passing the raw inviter terms would run the acceptor with the wrong
+ * identity and output direction.
+ *
+ * The received-payload lock-in is set EXPLICITLY via `expectedPayloadColumns`,
+ * mirrored from the invitation's `disclosedPayloadColumns` exactly as the browser
+ * path does ({@link prepareAcceptorExchange} -> `prepared.expectedPayloadColumns`).
+ * This is load-bearing for security: the CLI prefers this explicit lock-in over the
+ * `linkageTerms.payload.receive` fallback, which is undefined for a token that
+ * discloses columns but carries no `payload.send` -- a shape a malicious inviter can
+ * craft, and one where the fallback would fail OPEN (silently ingesting extra
+ * partner columns) while the browser aborts. Setting it explicitly closes that gap.
  *
  * The confirm-columns `edits` (this party's authored metadata and standardization)
  * are carried into the config so the appliance's CLI honors them rather than
@@ -107,6 +112,15 @@ export function acceptorServerJobConfig({
     inputCsv,
     metadata: edits.metadata,
     standardization: edits.standardization,
+    // The received-payload lock-in, mirrored from the invitation's disclosed set
+    // exactly as the browser accept path does (prepareAcceptorExchange ->
+    // prepared.expectedPayloadColumns). Passed through AS-IS: undefined when the
+    // token omits it (lazy), an empty array when the disclosed set is empty
+    // (strict "receive nothing"). Without it the CLI falls back to
+    // linkageTerms.payload.receive, which is undefined for a token that discloses
+    // columns but carries no payload.send -- a shape that would then fail OPEN,
+    // silently ingesting extra partner columns where the browser aborts.
+    expectedPayloadColumns: token.disclosedPayloadColumns,
   };
 }
 
