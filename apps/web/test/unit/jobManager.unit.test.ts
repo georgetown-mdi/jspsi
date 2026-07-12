@@ -359,16 +359,20 @@ describe("sftp remote resolution and the per-remote busy latch", () => {
     expect(secondId).not.toBe(firstId);
   });
 
-  test("deleting the holding job releases the latch", async () => {
+  test("deleting the holding job releases the latch when its child exits", async () => {
     const manager = makeManager({
       delayMs: 5000,
       sftpRemotes: testSftpRemotesTable(),
     });
     const firstId = await manager.createJob(validSftpIntent());
+    const first = manager.getJob(firstId)!;
     await expect(manager.createJob(validSftpIntent())).rejects.toThrow(
       SftpRemoteBusyError,
     );
     expect(await manager.deleteJob(firstId)).toBe(true);
+    // The latch releases when the SIGKILL'd child actually exits, not on the
+    // delete request, so a successor cannot rendezvous with the dying child.
+    await waitForTerminal(first);
     const secondId = await manager.createJob(validSftpIntent());
     expect(manager.getJob(secondId)).toBeDefined();
   });

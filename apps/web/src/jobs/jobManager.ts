@@ -246,6 +246,13 @@ export class JobManager {
       this.sftpRemoteHolders.delete(remote);
   }
 
+  /**
+   * Release the remote latch a job holds. Called only from
+   * {@link reconcileTerminal}, which fires on the child's `close` -- a child
+   * confirmed dead can no longer poll the remote, so a successor may safely take
+   * it. The forced-kill paths (overflow, delete) must NOT release here: their
+   * SIGKILL is asynchronous and the child can still be running.
+   */
   private releaseSftpRemoteForRecord(record: JobRecord): void {
     if (record.sftpRemote === null) return;
     this.releaseSftpRemote(record.sftpRemote, record.id);
@@ -386,7 +393,6 @@ export class JobManager {
     for (const listener of record.listeners) listener(entry);
     this.markTerminalEmitted(record, "error");
     record.status = "failed";
-    this.releaseSftpRemoteForRecord(record);
     record.handle?.signal("SIGKILL");
   }
 
@@ -528,12 +534,15 @@ export class JobManager {
   /**
    * Delete a job: remove the in-memory record and the workdir on disk. Signals a
    * still-running child SIGKILL first so the delete does not leave an orphan.
+   * The remote latch is not released here: a SIGKILL is asynchronous, so the
+   * child may still be polling the remote's directory after this returns:
+   * {@link reconcileTerminal} releases the latch on the child's `close`, which
+   * keeps a successor job from rendezvousing with the dying child.
    */
   async deleteJob(id: string): Promise<boolean> {
     const record = this.jobs.get(id);
     if (record === undefined) return false;
     this.clearCancelTimers(record);
-    this.releaseSftpRemoteForRecord(record);
     if (record.handle?.isRunning()) record.handle.signal("SIGKILL");
     this.jobs.delete(id);
     const workdir = resolveWorkdir(this.dataRoot, id);
