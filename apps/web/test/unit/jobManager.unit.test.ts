@@ -36,6 +36,10 @@ afterEach(() => {
   for (const root of roots.splice(0))
     fs.rmSync(root, { recursive: true, force: true });
   vi.unstubAllEnvs();
+  // Clear the spy call history and any per-test `*Once` overrides so a test can
+  // never observe a prior test's calls (a cumulative `toHaveBeenCalled` is a
+  // false-signal trap for the concurrency tests below).
+  vi.restoreAllMocks();
 });
 
 /** A manager pointed at the stub CLI with shortened cancellation graces. */
@@ -651,6 +655,33 @@ describe("restore after a simulated restart", () => {
     expect(await deleting).toBe(true);
     expect(fs.existsSync(workdir)).toBe(false);
     expect(await restarted.getJobView(id)).toBeNull();
+  });
+
+  test("a no-result success (record but no output.csv) restores as succeeded", async () => {
+    const root = freshRoot("no-result-success");
+    const id = generateJobId();
+    const workdir = path.join(root, id);
+    await fs.promises.mkdir(workdir, { recursive: true });
+    // A party whose terms give it no result of its own writes the record pair on
+    // success but never an output.csv; live it is succeeded, so restore must be
+    // too rather than collapsing to failed.
+    await writeJobFile(
+      workdir,
+      "record.json",
+      JSON.stringify({ createdAt: CREATED_AT, summary: "s" }),
+    );
+    await writeJobFile(workdir, "record.keys.json", "{}");
+
+    const restarted = restartManagerOverRoot(root);
+    const view = await restarted.getJobView(id);
+    expect(view).toMatchObject({
+      id,
+      status: "succeeded",
+      restored: true,
+      resultAvailable: false,
+      recordAvailable: true,
+      recordCreatedAt: CREATED_AT,
+    });
   });
 
   test("a direct request for a symlinked leaf workdir is rejected, not followed", async () => {

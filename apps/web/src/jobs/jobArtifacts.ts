@@ -61,11 +61,13 @@ export async function listRestorableJobIds(
 /**
  * Classify a job from its on-disk artifacts alone, or null when the workdir does
  * not resolve or is not a real directory. `status` is `succeeded` when the result
- * file is present, else `failed` (an interrupted job -- workdir but no result --
- * is terminal/failed, never running or resumable). The record pair is available
- * all-or-nothing, matching the live status path: both files present and the
- * record's `createdAt` parses. Only the output artifacts are consulted; the key
- * file and config are never touched.
+ * file OR the exchange record is present -- a party whose terms give it no result
+ * of its own still writes a record on success, so keying success on the result
+ * alone would misreport it as failed -- else `failed` (an interrupted job, with
+ * neither artifact, is terminal/failed, never running or resumable). The record
+ * pair is available all-or-nothing, matching the live status path: both files
+ * present and the record's `createdAt` parses. Only the output artifacts are
+ * consulted; the key file and config are never touched.
  *
  * The leaf workdir is stat-ed with `lstat`, so a symlink planted at
  * `<dataRoot>/<jobId>` is rejected rather than followed -- the same exclusion
@@ -91,13 +93,14 @@ export async function classifyRestoredJob(
   const keysPath = path.join(workdir, JOB_FILE_NAMES.recordKeys);
 
   const resultAvailable = jobFileExists(outputPath);
+  const recordPresent = jobFileExists(recordPath);
   const recordCreatedAt =
-    jobFileExists(recordPath) && jobFileExists(keysPath)
+    recordPresent && jobFileExists(keysPath)
       ? readRecordCreatedAt(recordPath)
       : null;
 
   return {
-    status: resultAvailable ? "succeeded" : "failed",
+    status: resultAvailable || recordPresent ? "succeeded" : "failed",
     resultAvailable,
     recordAvailable: recordCreatedAt !== null,
     ...(recordCreatedAt !== null ? { recordCreatedAt } : {}),
