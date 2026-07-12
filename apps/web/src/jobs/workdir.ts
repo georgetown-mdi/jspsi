@@ -3,6 +3,8 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
+import { z } from "zod";
+
 /**
  * A server-generated job id: a v4 UUID. The client never supplies it, and every
  * route validates its format before any filesystem use, so a crafted id cannot
@@ -106,32 +108,29 @@ export function resultFileExists(outputPath: string): boolean {
   return jobFileExists(outputPath);
 }
 
+/** The ISO-8601 rule core stamps a record's `createdAt` with, applied here so the
+ * status path validates the timestamp the same way rather than accepting any
+ * non-empty string. */
+const recordCreatedAtSchema = z.iso.datetime();
+
 /**
- * Read the `createdAt` timestamp from a server-produced record file, or null on
- * any read/parse failure or a `createdAt` that is not a non-empty string. The
- * file is small and server-produced (the CLI wrote it), so it is read whole; the
- * defensive null keeps a missing or malformed record from throwing on the status
- * path -- the caller treats null as "record unavailable".
+ * Read the `createdAt` timestamp from a server-produced record file, or null if
+ * the file cannot be read, is not JSON, or its `createdAt` is not a valid
+ * ISO-8601 timestamp. The file is small and server-produced (the CLI wrote it),
+ * so it is read whole; the defensive null keeps a missing or malformed record
+ * from throwing on the status path -- the caller treats null as "record
+ * unavailable".
  */
 export function readRecordCreatedAt(recordPath: string): string | null {
-  let raw: string;
+  let createdAt: unknown;
   try {
-    raw = fs.readFileSync(recordPath, "utf8");
+    const parsed: unknown = JSON.parse(fs.readFileSync(recordPath, "utf8"));
+    createdAt = (parsed as { createdAt?: unknown } | null)?.createdAt;
   } catch {
     return null;
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
-    return null;
-  const createdAt = (parsed as { createdAt?: unknown }).createdAt;
-  return typeof createdAt === "string" && createdAt.length > 0
-    ? createdAt
-    : null;
+  const result = recordCreatedAtSchema.safeParse(createdAt);
+  return result.success ? result.data : null;
 }
 
 /** Remove a job's workdir and everything under it. Idempotent. */
