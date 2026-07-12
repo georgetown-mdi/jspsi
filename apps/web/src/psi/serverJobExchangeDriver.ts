@@ -1,5 +1,6 @@
 import { ProcessState, getLogger } from "@psilink/core";
 
+import { recordFileStamp } from "@bench/runOutputs";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import type { ExchangeDriver, ExchangeDriverEvents } from "./exchangeDriver";
@@ -27,6 +28,13 @@ export interface ServerJobExchangeDriverConfig {
   options?: JobExchangeOptions;
 }
 
+/** The exchange-record pair's availability on the appliance, read off
+ * `GET /api/jobs/:id`. Available only when the record and its verification keys
+ * are both on disk and the record's `createdAt` parsed; the driver stamps the
+ * download filenames from that `createdAt`. */
+export type RecordAvailability =
+  { available: false } | { available: true; createdAt: string };
+
 /** The browser-side job-API surface a server-job driver reaches, injectable so
  * the fidelity tests feed a scripted event stream without a live server. The
  * defaults hit the real same-origin endpoints. */
@@ -47,6 +55,13 @@ export interface JobApiClient {
   /** `POST /api/jobs/:id/cancel`; best-effort, errors are swallowed by the
    * caller since a cancel races a naturally-terminating job. */
   cancelJob: (jobId: string) => Promise<void>;
+  /** `GET /api/jobs/:id`, reading `recordAvailable`/`recordCreatedAt` off the
+   * status body. A graceful-degrade metadata fetch: the driver delivers the
+   * result without the record pair if this fails or aborts. */
+  fetchRecordAvailability: (
+    jobId: string,
+    signal: AbortSignal,
+  ) => Promise<RecordAvailability>;
 }
 
 /** A non-2xx response from the job API, carrying the status so the driver can
@@ -66,6 +81,17 @@ export class JobApiRequestError extends Error {
  * through this endpoint rather than as a browser object URL. */
 function jobResultUrl(jobId: string): string {
   return `/api/jobs/${jobId}/result`;
+}
+
+/** The self-attested exchange record, served from the appliance. */
+function jobRecordUrl(jobId: string): string {
+  return `/api/jobs/${jobId}/record`;
+}
+
+/** The private verification keys paired with the record, served from the
+ * appliance. */
+function jobKeysUrl(jobId: string): string {
+  return `/api/jobs/${jobId}/keys`;
 }
 
 /** The default {@link JobApiClient}, hitting the real same-origin job endpoints
@@ -103,6 +129,19 @@ export function createFetchJobApiClient(
       streamJobEvents(fetchImpl, jobId, signal),
     cancelJob: async (jobId) => {
       await fetchImpl(`/api/jobs/${jobId}/cancel`, { method: "POST" });
+    },
+    fetchRecordAvailability: async (jobId, signal) => {
+      const response = await fetchImpl(`/api/jobs/${jobId}`, {
+        method: "GET",
+        signal,
+      });
+      if (!response.ok) return { available: false };
+      const body: unknown = await response.json();
+      const available = (body as { recordAvailable?: unknown }).recordAvailable;
+      const createdAt = (body as { recordCreatedAt?: unknown }).recordCreatedAt;
+      if (available !== true || typeof createdAt !== "string")
+        return { available: false };
+      return { available: true, createdAt };
     },
   };
 }
@@ -203,15 +242,36 @@ function stagesOf(event: RelayEvent): Array<StageDefinition> {
   });
 }
 
-/** Map a `result` relay event to the bench {@link RunOutputs}. A server job
- * writes its result on the appliance, so there is no browser object URL: a
- * received result points `resultsUrl` at the job's appliance result endpoint (a
- * real same-origin download href), and a withheld result is the withheld
- * variant exactly as the browser driver produces it. */
-function resultOutputs(event: RelayEvent, jobId: string): RunOutputs {
+/** The base bench {@link RunOutputs} for a `result` relay event, before the
+ * record pair is attached. A server job writes its result on the appliance, so
+ * there is no browser object URL: a received result points `resultsUrl` at the
+ * job's appliance result endpoint (a real same-origin download href), and a
+ * withheld result is the withheld variant exactly as the browser driver
+ * produces it. */
+function baseResultOutputs(event: RelayEvent, jobId: string): RunOutputs {
   return event.resultWritten === false
     ? { resultWithheld: true }
     : { resultsUrl: jobResultUrl(jobId) };
+}
+
+/** Attach the record-pair downloads to the base outputs, pointed at the
+ * appliance's record/keys endpoints with filenames byte-identical to the
+ * in-browser path's (the record's own `createdAt`, made filesystem-safe). The
+ * record is written even for a withheld result, so it attaches in either
+ * branch. */
+function withRecordDownloads(
+  outputs: RunOutputs,
+  jobId: string,
+  createdAt: string,
+): RunOutputs {
+  const stamp = recordFileStamp(createdAt);
+  outputs.record = {
+    recordUrl: jobRecordUrl(jobId),
+    recordFileName: `psilink-record-${stamp}.json`,
+    keysUrl: jobKeysUrl(jobId),
+    keysFileName: `psilink-record-${stamp}.keys.json`,
+  };
+  return outputs;
 }
 
 /** Read the category off an `error` relay event, preserving it verbatim -- a
@@ -324,9 +384,21 @@ export function createServerJobExchangeDriver(
                 log.warn("server job warning:", event.message),
               );
               break;
-            case "result":
-              onResult(resultOutputs(event, jobId));
+            case "result": {
+              const outputs = baseResultOutputs(event, jobId);
+              const availability = await queryRecordAvailability(
+                client,
+                jobId,
+                signal,
+              );
+              // Re-check after the await: a caller-initiated abort mid-query
+              // stays silent, matching the browser lifecycle.
+              if (aborted()) return;
+              if (availability.available)
+                withRecordDownloads(outputs, jobId, availability.createdAt);
+              onResult(outputs);
               return;
+            }
             case "error":
               onError({
                 category: errorCategoryOf(event),
@@ -354,6 +426,25 @@ export function createServerJobExchangeDriver(
       }
     },
   };
+}
+
+/** Query the job's record availability as a graceful-degrade step: any failure
+ * or abort resolves to unavailable so the run still delivers its primary
+ * artifact (the result CSV) rather than failing on a metadata fetch. The
+ * diagnostic is dev-gated like the driver's other server-influenced logs. */
+async function queryRecordAvailability(
+  client: JobApiClient,
+  jobId: string,
+  signal: AbortSignal,
+): Promise<RecordAvailability> {
+  try {
+    return await client.fetchRecordAvailability(jobId, signal);
+  } catch (error) {
+    whenDiagnostic(() =>
+      log.warn("server job record availability query failed:", error),
+    );
+    return { available: false };
+  }
 }
 
 /** Categorize a `createJob` failure: a 400 is a rejected/invalid intent, which
