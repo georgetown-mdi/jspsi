@@ -27,6 +27,8 @@ Every job response carries `Cache-Control: no-store` and no CORS headers -- the 
 | `GET` | `/api/jobs/:jobId/events` | `200` `text/event-stream` | SSE event relay with full-history replay. `404` on unknown id. |
 | `POST` | `/api/jobs/:jobId/cancel` | `202` | Request cancellation; idempotent (`202` even if already terminal). `404` on unknown id. |
 | `GET` | `/api/jobs/:jobId/result` | `200` `text/csv` | The matched-result CSV, only after the job succeeded. `404` otherwise. |
+| `GET` | `/api/jobs/:jobId/record` | `200` `application/json` | The self-attested exchange record, only after the job succeeded. `404` otherwise. |
+| `GET` | `/api/jobs/:jobId/keys` | `200` `application/json` | The private verification keys paired with the record, only after the job succeeded. `404` otherwise. |
 
 Auth applies to every endpoint uniformly: a disabled API is `404` and a bad bearer is `401` on all of them, resolved before the id is even parsed.
 
@@ -43,15 +45,21 @@ The job id is a server-generated v4 UUID; the client never supplies it. Every id
   "terminal": { "outcome": "...", "exitCode": <int|null>, "signal": "<sig|null>" } | null,
   "terminalEmitted": <bool>,
   "eventCount": <int>,
-  "resultAvailable": <bool>
+  "resultAvailable": <bool>,
+  "recordAvailable": <bool>,
+  "recordCreatedAt": "<iso-8601>"   // present only when recordAvailable is true
 }
 ```
 
-`terminal` is null until the child exits; `resultAvailable` is true exactly when `status` is `succeeded`.
+`terminal` is null until the child exits; `resultAvailable` is true exactly when `status` is `succeeded`. `recordAvailable` is true only when the job succeeded, both the record and its verification-keys file are on disk, and the record validates and yields a `createdAt`; the record pair is offered all-or-nothing. `recordCreatedAt` is the record's own timestamp, present exactly when `recordAvailable` is true -- a client derives the download filename from it, matching the in-browser exchange path. Because the CLI's record write is non-fatal (a disk failure after a successful exchange is warned, not thrown), a job can be `resultAvailable: true` with `recordAvailable: false`.
 
 ### The `GET /api/jobs/:jobId/result` response
 
 Served only when `status === "succeeded"` and the output file exists and is readable; any other case (unfinished, failed, cancelled, or missing file) is `404` rather than leaking whether an unfinished job exists. The body is the job's server-chosen output file inside its workdir -- never a client-named path. Headers: `Content-Type: text/csv; charset=utf-8`, `Content-Disposition: attachment; filename="result-<id>.csv"` (a fixed, server-derived download name), and `X-Content-Type-Options: nosniff`, plus the `no-store` discipline.
+
+### The `GET /api/jobs/:jobId/record` and `/api/jobs/:jobId/keys` responses
+
+Served under the same gate as the result response -- only when `status === "succeeded"` and the respective file (`record.json`, `record.keys.json`) exists and is readable, `404` otherwise. The bodies are the job's server-chosen record and keys files inside its workdir, never a client-named path. Headers: `Content-Type: application/json; charset=utf-8`, a fixed `Content-Disposition: attachment; filename="psilink-record.json"` / `"psilink-record.keys.json"` (a server-side fallback; the browser's save name is set by its download control and carries the record's timestamp), and `X-Content-Type-Options: nosniff`, plus the `no-store` discipline. A client offers these two downloads only when `recordAvailable` on the status route is true, so it never links a `404`. The verification keys are private material -- a salt plus the record's commitment can open a committed value -- so `/keys` is gated and `no-store` identically to `/record` and `/result`; see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md).
 
 ## The exchange intent
 
@@ -90,6 +98,8 @@ Each job gets a workdir at `<dataRoot>/<jobId>/`, created mode `0o700` (owner-on
 | `input.csv` | The client's input CSV content. |
 | `exchange/` | The rendezvous directory (mode `0o700`) the filedrop exchange reads and writes. |
 | `output.csv` | The CLI's matched-result output (written by the CLI on success). |
+| `record.json` | The self-attested exchange record (written by the CLI on success; the write is non-fatal, so it may be absent). |
+| `record.keys.json` | The private verification keys paired with the record (owner-only; written alongside the record under the same non-fatal write). |
 
 The client never supplies a filename: submitted content is written to these constant names, and the CLI is pointed at them by absolute path. Keeping the names constant is what makes "a client string never becomes a file path" hold.
 
@@ -98,8 +108,10 @@ The client never supplies a filename: submitted content is written to these cons
 The CLI is spawned with `spawn` (not a shell, `shell: false`) and an argv array assembled only from fixed templates plus the server-generated absolute paths:
 
 ```
-<node> <binaryPath> exchange --config-file <configPath> --key-file <keyPath> [--event-stream] <inputPath> <outputPath>
+<node> <binaryPath> exchange --config-file <configPath> --key-file <keyPath> --record-file <recordPath> [--event-stream] <inputPath> <outputPath>
 ```
+
+`--record-file` pins the self-attested record to the server-known `record.json` in the workdir (the CLI derives the keys path as `record.keys.json` alongside it), so the server can serve both from a fixed path; without it the CLI would write to a timestamped default name the server could not locate. Records are on by default, so no `--no-record` is passed.
 
 `spawn` is used rather than `execFile` deliberately: `execFile` caps stdio at three pipes and cannot carry fd 3, which the event stream requires. The child's `stdio` is `["ignore", "pipe", "pipe", "pipe"]` (fd 3 wired for the event stream), `cwd` is the workdir, and the environment is minimal -- only `PATH`, `HOME`, `LANG`, `LC_ALL`, and `TZ` are forwarded from the server process, so the child inherits no ambient secret. The job's inputs reach the child through the workdir files, never the environment.
 
