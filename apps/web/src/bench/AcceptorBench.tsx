@@ -164,7 +164,7 @@ export function AcceptorBench() {
 
   // Decode the fragment token once, failing closed: an empty fragment, a bad
   // checksum/schema, an expired token, or an endpoint this build cannot drive
-  // (SFTP, or filedrop off a console build) each throws in
+  // (SFTP, or a filedrop endpoint on a non-console build) each throws in
   // prepareAcceptedInvitation and lands on the focused error alert; only a valid
   // invitation reaches the review step. The token rides ONLY in the fragment,
   // which never reaches the server. Aborted on unmount so a resolving decode does

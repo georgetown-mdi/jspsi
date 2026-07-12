@@ -50,8 +50,8 @@ export interface AcceptableInvitation {
  * endpoint always (the acceptor reaches the inviter through the PeerJS signaling
  * endpoint the invitation carries), or a file-drop endpoint on a console build
  * (the appliance runs the exchange through its job API). Every other channel --
- * SFTP, or file-drop off a console build -- is rejected, and so is a token with
- * no endpoint. The admitted channels are exactly what {@link selectExchangeDriver}
+ * SFTP, or a file-drop endpoint on a non-console build -- is rejected, and so is
+ * a token with no endpoint. The admitted channels are exactly what {@link selectExchangeDriver}
  * drives (webrtc -> browser, filedrop on console -> server-job); the allowlist is
  * of what THIS build can drive, never a loosening to arbitrary endpoints. Because
  * every failure throws, a caller that only proceeds on success cannot dial or
