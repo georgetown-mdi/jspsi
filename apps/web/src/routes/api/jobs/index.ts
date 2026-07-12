@@ -1,8 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 
+import {
+  MAX_JOB_BODY_BYTES,
+  gateJobRoute,
+  readJobRequestBody,
+} from "@jobs/routeSupport";
 import { SftpRemoteBusyError, UnknownSftpRemoteError } from "@jobs/jobManager";
 import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
-import { gateJobRoute } from "@jobs/routeSupport";
 import { jobExchangeIntentSchema } from "@jobs/intent";
 
 /**
@@ -15,6 +19,10 @@ import { jobExchangeIntentSchema } from "@jobs/intent";
  * material drawn only from the operator-provisioned remotes table), writes the
  * inputs, and spawns the CLI. No client string reaches argv or a file path.
  *
+ * The body is read under a byte cap ({@link MAX_JOB_BODY_BYTES}) streamed off the
+ * request without trusting `Content-Length`, so an oversized body is a 413 (and
+ * an unparseable one a 400) before schema validation runs.
+ *
  * The sftp rejections are EMPTY-bodied: an unknown remote is 400 and a busy
  * one 409, and neither response reflects the requested name.
  */
@@ -25,14 +33,14 @@ export const Route = createFileRoute("/api/jobs/")({
         const gate = gateJobRoute(request);
         if (gate.kind === "response") return gate.response;
 
-        let body: unknown;
-        try {
-          body = await request.json();
-        } catch {
-          return jobEmptyResponse(400);
-        }
+        const bodyResult = await readJobRequestBody(
+          request,
+          MAX_JOB_BODY_BYTES,
+        );
+        if (bodyResult.kind === "too-large") return jobEmptyResponse(413);
+        if (bodyResult.kind === "invalid") return jobEmptyResponse(400);
 
-        const parsed = jobExchangeIntentSchema.safeParse(body);
+        const parsed = jobExchangeIntentSchema.safeParse(bodyResult.value);
         if (!parsed.success) return jobEmptyResponse(400);
 
         let id: string;

@@ -2,8 +2,13 @@ import fs from "node:fs";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import {
+  MAX_JOB_BODY_BYTES,
+  readJobRequestBody,
+  validateJobIdParam,
+} from "@jobs/routeSupport";
 import { JobManager } from "@jobs/jobManager";
-import { validateJobIdParam } from "@jobs/routeSupport";
+import { MAX_INPUT_CSV_LENGTH } from "@jobs/intent";
 
 import { Route as CancelRoute } from "../../src/routes/api/jobs/$jobId/cancel";
 import { Route as CreateRoute } from "../../src/routes/api/jobs/index";
@@ -564,5 +569,155 @@ describe("create failure is a clean 500", () => {
       params: {},
     })) as Response;
     expect(response.status).toBe(500);
+  });
+});
+
+/**
+ * A POST request whose body streams `chunkCount` chunks of `chunkBytes` each,
+ * with the given headers applied verbatim. Streaming (not a fixed buffer) is what
+ * lets a caller understate or omit `Content-Length` while the actual bytes exceed
+ * a cap -- the case the boundary read must catch by measuring the READ, not the
+ * declared length.
+ */
+function streamingPostRequest(
+  chunkBytes: number,
+  chunkCount: number,
+  headers: Record<string, string> = {},
+): Request {
+  let emitted = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (emitted >= chunkCount) {
+        controller.close();
+        return;
+      }
+      emitted += 1;
+      controller.enqueue(new Uint8Array(chunkBytes));
+    },
+  });
+  return new Request("http://localhost/api/jobs", {
+    method: "POST",
+    headers,
+    body: stream,
+    // undici requires an explicit duplex for a streaming request body.
+    duplex: "half",
+  } as RequestInit & { duplex: "half" });
+}
+
+describe("readJobRequestBody caps the read, not Content-Length", () => {
+  test("a body exceeding the cap is too-large, without a Content-Length header", async () => {
+    // No Content-Length at all: the running byte total alone trips the cap.
+    const request = streamingPostRequest(16, 4);
+    const result = await readJobRequestBody(request, 32);
+    expect(result.kind).toBe("too-large");
+  });
+
+  test("a body exceeding the cap is too-large even when Content-Length understates it", async () => {
+    const request = streamingPostRequest(16, 8, { "content-length": "1" });
+    const result = await readJobRequestBody(request, 32);
+    expect(result.kind).toBe("too-large");
+  });
+
+  test("a body at the cap is read and parsed", async () => {
+    const payload = JSON.stringify({ ok: true });
+    const bytes = new TextEncoder().encode(payload);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    });
+    const request = new Request("http://localhost/api/jobs", {
+      method: "POST",
+      body: stream,
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+    const result = await readJobRequestBody(request, bytes.byteLength);
+    expect(result).toEqual({ kind: "parsed", value: { ok: true } });
+  });
+
+  test("an unparseable body is invalid", async () => {
+    const request = new Request("http://localhost/api/jobs", {
+      method: "POST",
+      body: "}{ not json",
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+    const result = await readJobRequestBody(request, 1024);
+    expect(result.kind).toBe("invalid");
+  });
+
+  test("the boundary cap clears a realistic schema-valid intent", () => {
+    // Real CSV text barely grows under JSON string escaping (only newlines and
+    // the rare quote escape), so a max-length inputCsv plus the other capped
+    // fields stays well under the boundary cap and gets a clean schema error,
+    // never a spurious 413. A pathological control-character payload that
+    // inflates ~6x under \uXXXX escaping is not valid CSV and is bounded here by
+    // design, so the cap is deliberately not sized to clear it.
+    const sample = "12345,Jane,Public,1990-01-01\n".repeat(4096);
+    const jsonBytesPerChar =
+      new TextEncoder().encode(JSON.stringify(sample)).length / sample.length;
+    const realisticInputCsvBytes = jsonBytesPerChar * MAX_INPUT_CSV_LENGTH;
+    // Generous allowance for the other capped fields at their worst realistic
+    // encoded size.
+    const otherCappedFieldsBytes = 64 * 1024 ** 2;
+    expect(realisticInputCsvBytes + otherCappedFieldsBytes).toBeLessThan(
+      MAX_JOB_BODY_BYTES,
+    );
+  });
+});
+
+describe("POST /api/jobs bounds the body before schema parse", () => {
+  test("an oversized body is rejected 413 by the route", async () => {
+    enableJobApi();
+    // A stream well past the shipped cap, driven cheaply by chunk count so no
+    // multi-hundred-MiB buffer is allocated.
+    const chunkBytes = 1024 * 1024;
+    const chunkCount = MAX_JOB_BODY_BYTES / chunkBytes + 4;
+    const response = (await handlersOf(CreateRoute).POST({
+      request: streamingPostRequest(chunkBytes, chunkCount),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(413);
+    expect(await response.text()).toBe("");
+  });
+
+  test("an unparseable body is rejected 400 by the route", async () => {
+    enableJobApi();
+    const request = new Request("http://localhost/api/jobs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "}{ not json",
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+    const response = (await handlersOf(CreateRoute).POST({
+      request,
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(400);
+  });
+
+  test("the gate short-circuits before the body is read (disabled -> 404)", async () => {
+    vi.stubEnv("JOB_DATA_ROOT", "");
+    const chunkBytes = 1024 * 1024;
+    const chunkCount = MAX_JOB_BODY_BYTES / chunkBytes + 4;
+    const response = (await handlersOf(CreateRoute).POST({
+      request: streamingPostRequest(chunkBytes, chunkCount),
+      params: {},
+    })) as Response;
+    // A 404 (not 413) proves the oversized body was never read: the gate ran first.
+    expect(response.status).toBe(404);
+  });
+
+  test("the gate short-circuits before the body is read (bad bearer -> 401)", async () => {
+    enableJobApi({ token: "the-token" });
+    const chunkBytes = 1024 * 1024;
+    const chunkCount = MAX_JOB_BODY_BYTES / chunkBytes + 4;
+    const response = (await handlersOf(CreateRoute).POST({
+      request: streamingPostRequest(chunkBytes, chunkCount, {
+        authorization: "Bearer wrong",
+      }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(401);
   });
 });
