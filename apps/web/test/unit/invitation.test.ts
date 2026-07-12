@@ -861,14 +861,17 @@ describe("generateInvitation expiry", () => {
 
     // A second before expiry: the acceptor proceeds to the WebRTC endpoint.
     await expect(
-      prepareAcceptedInvitation(encoded, new Date(expiresAt.getTime() - 1000)),
+      prepareAcceptedInvitation(encoded, {
+        now: new Date(expiresAt.getTime() - 1000),
+        profile: "hosted",
+      }),
     ).resolves.toMatchObject({ endpoint: { channel: "webrtc" } });
 
     // At the expiry instant: the acceptor fails closed (its `<=` boundary), so a
     // token accepted at or after `expires` is rejected.
-    await expect(prepareAcceptedInvitation(encoded, expiresAt)).rejects.toThrow(
-      /expired/i,
-    );
+    await expect(
+      prepareAcceptedInvitation(encoded, { now: expiresAt, profile: "hosted" }),
+    ).rejects.toThrow(/expired/i);
   });
 });
 

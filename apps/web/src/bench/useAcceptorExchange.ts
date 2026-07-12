@@ -5,9 +5,10 @@ import { useEffect, useRef, useState } from "react";
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
-import { loadPsiBackend } from "@psilink/core";
+import { deriveAcceptedLinkageTerms, loadPsiBackend } from "@psilink/core";
 
 import { createBrowserExchangeDriver } from "@psi/exchangeDriver";
+import { createServerJobExchangeDriver } from "@psi/serverJobExchangeDriver";
 import { dialAsAcceptor } from "@psi/rendezvous";
 
 import { deploymentProfile } from "@utils/clientConfig";
@@ -36,38 +37,85 @@ import type {
   AcceptorDataEdits,
 } from "@psi/acceptInvitation";
 import type { Acquire, GenerateOutput } from "@psi/exchangeLifecycle";
-import type { CSVRow, WebRTCEndpoint } from "@psilink/core";
+import type { CSVRow, InvitationToken } from "@psilink/core";
+import type { ExchangeDriver } from "@psi/exchangeDriver";
 import type { ExchangeRun } from "./exchangeRun";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "./runOutputs";
+import type { ServerJobExchangeDriverConfig } from "@psi/serverJobExchangeDriver";
 import type { Transport } from "./inviterModel";
 
-const ENDPOINT_CHANNEL_TRANSPORT: Record<WebRTCEndpoint["channel"], Transport> =
-  {
-    webrtc: "browser",
-  };
+/** The connection-endpoint channels the acceptor can drive, narrowed from the
+ * token by {@link prepareAcceptedInvitation}: WebRTC always, file-drop on a
+ * console build. */
+type AcceptEndpointChannel = AcceptableInvitation["endpoint"]["channel"];
+
+const ENDPOINT_CHANNEL_TRANSPORT: Record<AcceptEndpointChannel, Transport> = {
+  webrtc: "browser",
+  filedrop: "filedrop",
+};
 
 /** Map an accepted invitation's connection-endpoint channel to the bench
- * {@link Transport} the driver selector keys on. Only `webrtc` reaches the
- * acceptor -- prepareAcceptedInvitation rejects every other channel -- and it
- * runs live in this browser. Keying off the endpoint channel type means a
- * widened channel union fails to build here until it is mapped. */
+ * {@link Transport} the driver selector keys on. Keying off the endpoint channel
+ * type means a widened channel union fails to build here until it is mapped. */
 function transportForEndpointChannel(
-  channel: WebRTCEndpoint["channel"],
+  channel: AcceptEndpointChannel,
 ): Transport {
   return ENDPOINT_CHANNEL_TRANSPORT[channel];
 }
 
+/**
+ * Assemble the {@link ServerJobExchangeDriverConfig} for a console filedrop
+ * accept: the exchange the console appliance runs on this party's behalf. The
+ * `linkageTerms` are the acceptor's OWN-PERSPECTIVE terms
+ * ({@link deriveAcceptedLinkageTerms}: the acceptor's identity replaces the
+ * inviter's, output/payload mirrored) -- the SAME derivation
+ * {@link acceptorExchangeDataSpec} applies for the browser path, NOT the raw
+ * inviter-perspective `token.linkageTerms`. This is load-bearing for both
+ * identity and security: the CLI enforces its received-payload lock-in off
+ * `linkageTerms.payload.receive` when the composed config carries no explicit
+ * `expectedPayloadColumns`, and the mirror puts the inviter's disclosed `send`
+ * there -- the same set the browser path locks in from `disclosedPayloadColumns`.
+ * Passing the raw inviter terms would run the acceptor with the wrong identity,
+ * direction, and lock-in.
+ *
+ * Pure and exported so the derivation is the tested boundary, pinned without
+ * running the hook.
+ *
+ * @internal
+ */
+export function acceptorServerJobConfig({
+  token,
+  acceptorName,
+  inputCsv,
+}: {
+  token: InvitationToken;
+  acceptorName: string;
+  inputCsv: string;
+}): ServerJobExchangeDriverConfig {
+  return {
+    linkageTerms: deriveAcceptedLinkageTerms(token.linkageTerms, acceptorName),
+    sharedSecret: token.sharedSecret,
+    inputCsv,
+  };
+}
+
 /** The launch the acceptor commits to on "Start the exchange": the decoded
  * invitation, the committed name recorded in the exchange record, the acquired
- * CSV, and the confirm-columns edits. A fresh object per launch keys the run
- * effect, so a superseded or discarded launch aborts and resets. */
+ * CSV, the confirm-columns edits, and the original file. A fresh object per
+ * launch keys the run effect, so a superseded or discarded launch aborts and
+ * resets. */
 export interface AcceptorLaunch {
   invitation: AcceptableInvitation;
   acceptorName: string;
   rawRows: Array<CSVRow>;
   columns: Array<string>;
   edits: AcceptorDataEdits;
+  /** The original CSV file, the server-job driver's `inputCsv` source. The
+   * server-job path submits the file's raw text; the browser path uses the
+   * retained `rawRows`/`columns` and never reads this. Mirrors the inviter's
+   * `sourceFile`. */
+  sourceFile: File;
 }
 
 /**
@@ -86,6 +134,12 @@ export interface AcceptorLaunch {
  *  - The prepared exchange adopts the invitation's terms with the committed name
  *    and the confirm-columns edits, and locks in the received-payload columns to
  *    the invitation's disclosed set ({@link prepareAcceptorExchange}).
+ *
+ * On a console build accepting a filedrop invitation the appliance runs the
+ * exchange through the job API instead ({@link acceptorServerJobConfig} ->
+ * {@link createServerJobExchangeDriver}), mirroring the inviter's server-job
+ * path: no dial, no PSI library here, and the acceptor's own-perspective terms
+ * and raw CSV text go to the appliance.
  *
  * Try again (the retryable "exchange" category only) re-dials the same invitation
  * while it is still usable, exactly like the inviter's re-listen.
@@ -140,7 +194,8 @@ export function useAcceptorExchange({
     setOutputs(undefined);
     setFailure(undefined);
 
-    const { invitation, acceptorName, rawRows, columns, edits } = current;
+    const { invitation, acceptorName, rawRows, columns, edits, sourceFile } =
+      current;
     const { token, endpoint } = invitation;
 
     // Output-generation half. The URLs the build creates are revoked when the
@@ -184,66 +239,99 @@ export function useAcceptorExchange({
       await psi;
 
       onStage(WAITING_STAGE_ID);
-      // Dial the inviter's derived id. dialAsAcceptor tears down its own peer on
-      // failure, so acquisition stays atomic without a redundant destroy here.
+      // Dial the inviter's derived id. acquire runs only on the browser path,
+      // which the selection below reaches only for a WebRTC endpoint; narrow to
+      // it fail-closed so a mis-selected non-WebRTC endpoint aborts rather than
+      // reaching dialAsAcceptor with an undrivable locator. dialAsAcceptor tears
+      // down its own peer on failure, so acquisition stays atomic without a
+      // redundant destroy here.
+      if (endpoint.channel !== "webrtc")
+        throw new Error("the browser acceptor path requires a WebRTC endpoint");
       const [peer, conn] = await dialAsAcceptor(token.sharedSecret, endpoint, {
         signal,
       });
       return { peer, conn, psi, prepared };
     };
 
-    // The accepted invitation always carries a WebRTC endpoint --
-    // prepareAcceptedInvitation fails closed on any other channel before a
-    // launch can exist -- so the selector resolves to the browser driver here.
-    // Routing through it anyway keeps the driver seam identical to the inviter's
-    // and fails closed if a non-browser launch ever reaches this hook (it needs
-    // accept-side UI first): it surfaces the run's own failure alert rather than
-    // throwing out of the start effect, which would crash the render.
+    const browserDriver = (): ExchangeDriver<RunOutputs> =>
+      createBrowserExchangeDriver<RunOutputs>({
+        acquire,
+        exchangeRole: "initiator",
+        sharedSecret: token.sharedSecret,
+        expires: token.expires,
+        generateOutput,
+      });
+
+    // The console appliance carries out the filedrop exchange: the driver POSTs
+    // the acceptor's OWN-PERSPECTIVE terms, the shared secret, and the file's raw
+    // text to the job API and maps the server's event stream onto the same
+    // lifecycle events. It owns no peer connection or PSI library, so
+    // `acquire`/`generateOutput` and the dial go unused on this path. Reading the
+    // file's text is the only async step before the run, so it precedes the
+    // driver build.
+    const serverJobDriver = async (): Promise<ExchangeDriver<RunOutputs>> => {
+      const inputCsv = await sourceFile.text();
+      return createServerJobExchangeDriver(
+        acceptorServerJobConfig({ token, acceptorName, inputCsv }),
+      );
+    };
+
+    // The launch reaches this hook only for an endpoint prepareAcceptedInvitation
+    // admitted -- WebRTC (-> browser) or a console filedrop (-> server-job) -- so
+    // the selection is one of those two live kinds. A residual non-drivable kind
+    // (a save-file, which the guard fails closed before a launch can exist) is
+    // surfaced as the run's own failure alert rather than thrown out of the start
+    // effect, which would crash the render.
     const selection = selectExchangeDriver(
       transportForEndpointChannel(endpoint.channel),
       deploymentProfile(),
     );
-    if (selection.kind !== "browser") {
+    if (selection.kind === "save-file") {
       setFailure(
         failureFor(
           "config",
-          new Error(
-            `acceptor cannot run a ${selection.kind} exchange in the browser`,
-          ),
+          new Error("this build cannot run the accepted exchange"),
         ),
       );
       setRun((prev) => runWithFailure(prev));
       return;
     }
 
-    const driver = createBrowserExchangeDriver<RunOutputs>({
-      acquire,
-      exchangeRole: "initiator",
-      sharedSecret: token.sharedSecret,
-      expires: token.expires,
-      generateOutput,
-    });
-
-    void driver.run({
-      signal: controller.signal,
-      onStages: (stages) => setRun((prev) => runWithStages(prev, stages)),
-      onStage: (stageId) =>
-        setRun((prev) => runWithStage(prev, stageId, new Date())),
-      onResult: (generated) => {
-        setOutputs(generated);
-        setRun((prev) => runWithCompletion(prev, new Date()));
-      },
-      onError: ({ category, error }) => {
-        // Dev-gated: the raw Error object's message/cause can embed partner-/
-        // server-controlled bytes, so a production console carries none of it,
-        // while a developer (or a deployed client with the diagnostics toggle
-        // on) keeps the full object. The user-facing alert is separately
-        // sanitized in failureFor.
+    void (async () => {
+      let driver: ExchangeDriver<RunOutputs>;
+      try {
+        driver =
+          selection.kind === "server-job"
+            ? await serverJobDriver()
+            : browserDriver();
+      } catch (error) {
+        if (controller.signal.aborted) return;
         whenDiagnostic(() => console.error(error));
-        setFailure(failureFor(category, error));
+        setFailure(failureFor("exchange", error));
         setRun((prev) => runWithFailure(prev));
-      },
-    });
+        return;
+      }
+      await driver.run({
+        signal: controller.signal,
+        onStages: (stages) => setRun((prev) => runWithStages(prev, stages)),
+        onStage: (stageId) =>
+          setRun((prev) => runWithStage(prev, stageId, new Date())),
+        onResult: (generated) => {
+          setOutputs(generated);
+          setRun((prev) => runWithCompletion(prev, new Date()));
+        },
+        onError: ({ category, error }) => {
+          // Dev-gated: the raw Error object's message/cause can embed partner-/
+          // server-controlled bytes, so a production console carries none of it,
+          // while a developer (or a deployed client with the diagnostics toggle
+          // on) keeps the full object. The user-facing alert is separately
+          // sanitized in failureFor.
+          whenDiagnostic(() => console.error(error));
+          setFailure(failureFor(category, error));
+          setRun((prev) => runWithFailure(prev));
+        },
+      });
+    })();
   }
 
   // Start the run the moment a launch exists -- the columns step's "Start the

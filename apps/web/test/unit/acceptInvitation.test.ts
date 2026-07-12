@@ -12,18 +12,31 @@ import {
   acceptorExchangeDataSpec,
   prepareAcceptedInvitation,
 } from "../../src/psi/acceptInvitation.js";
+import { selectExchangeDriver } from "../../src/bench/exchangeDriverSelection.js";
 
 import type {
   ConnectionEndpoint,
   InvitationToken,
   LinkageTerms,
 } from "@psilink/core";
+import type { DeploymentProfile } from "@utils/clientConfig";
 
 const webrtcEndpoint: ConnectionEndpoint = {
   channel: "webrtc",
   host: "127.0.0.1",
   port: 3000,
   path: "/api/",
+};
+
+const filedropEndpoint: ConnectionEndpoint = {
+  channel: "filedrop",
+  path: "/srv/exchange",
+};
+
+const sftpEndpoint: ConnectionEndpoint = {
+  channel: "sftp",
+  host: "sftp.example.com",
+  port: 22,
 };
 
 async function encode(
@@ -44,11 +57,14 @@ describe("prepareAcceptedInvitation", () => {
     const secret = generateSharedSecret();
     const encoded = await encode({ sharedSecret: secret });
 
-    const { token, endpoint } = await prepareAcceptedInvitation(encoded);
+    const { token, endpoint } = await prepareAcceptedInvitation(encoded, {
+      profile: "hosted",
+    });
 
     expect(token.sharedSecret).toBe(secret);
+    // A WebRTC endpoint is admitted on any profile, and only it carries `host`.
     expect(endpoint.channel).toBe("webrtc");
-    expect(endpoint.host).toBe("127.0.0.1");
+    if (endpoint.channel === "webrtc") expect(endpoint.host).toBe("127.0.0.1");
   });
 
   test("rejects an expired invitation (before any connect)", async () => {
@@ -59,7 +75,10 @@ describe("prepareAcceptedInvitation", () => {
     const encoded = await encode({ expires });
 
     await expect(
-      prepareAcceptedInvitation(encoded, new Date("2030-01-01T00:00:01.000Z")),
+      prepareAcceptedInvitation(encoded, {
+        now: new Date("2030-01-01T00:00:01.000Z"),
+        profile: "hosted",
+      }),
     ).rejects.toThrow(/expired/i);
   });
 
@@ -68,33 +87,88 @@ describe("prepareAcceptedInvitation", () => {
     const encoded = await encode({ expires });
 
     await expect(
-      prepareAcceptedInvitation(encoded, new Date("2029-12-31T23:59:59.000Z")),
+      prepareAcceptedInvitation(encoded, {
+        now: new Date("2029-12-31T23:59:59.000Z"),
+        profile: "hosted",
+      }),
     ).resolves.toMatchObject({ endpoint: { channel: "webrtc" } });
   });
 
   test("rejects an invitation with no connection endpoint", async () => {
     const encoded = await encode({ connectionEndpoint: undefined });
 
-    await expect(prepareAcceptedInvitation(encoded)).rejects.toThrow(/WebRTC/i);
+    await expect(
+      prepareAcceptedInvitation(encoded, { profile: "console" }),
+    ).rejects.toThrow(/cannot/i);
   });
 
-  test("rejects an invitation whose endpoint is not WebRTC", async () => {
-    const encoded = await encode({
-      connectionEndpoint: {
-        channel: "sftp",
-        host: "sftp.example.com",
-        port: 22,
-      },
-    });
+  test("admits a filedrop endpoint on a console build", async () => {
+    const encoded = await encode({ connectionEndpoint: filedropEndpoint });
 
-    await expect(prepareAcceptedInvitation(encoded)).rejects.toThrow(/WebRTC/i);
+    await expect(
+      prepareAcceptedInvitation(encoded, { profile: "console" }),
+    ).resolves.toMatchObject({ endpoint: { channel: "filedrop" } });
+  });
+
+  test("rejects a filedrop endpoint off a console build (fails closed)", async () => {
+    const encoded = await encode({ connectionEndpoint: filedropEndpoint });
+
+    await expect(
+      prepareAcceptedInvitation(encoded, { profile: "hosted" }),
+    ).rejects.toThrow(/cannot/i);
+  });
+
+  test("always rejects an SFTP endpoint, on either profile", async () => {
+    const encoded = await encode({ connectionEndpoint: sftpEndpoint });
+
+    for (const profile of ["hosted", "console"] as const)
+      await expect(
+        prepareAcceptedInvitation(encoded, { profile }),
+      ).rejects.toThrow(/cannot/i);
   });
 
   test("rejects a malformed invitation string", async () => {
     await expect(
-      prepareAcceptedInvitation("not-a-real-invitation"),
+      prepareAcceptedInvitation("not-a-real-invitation", {
+        profile: "console",
+      }),
     ).rejects.toThrow();
   });
+
+  // The guard's admit decision must AGREE with what selectExchangeDriver would
+  // drive: an admitted endpoint's channel (mapped to a Transport) resolves to a
+  // live driver kind, and a rejected one either has no drivable channel or maps
+  // to the save-file kind that cannot run in the accept flow. Pinned so the two
+  // decisions cannot drift.
+  const PROFILES: ReadonlyArray<DeploymentProfile> = ["hosted", "console"];
+  const ENDPOINT_TRANSPORT = {
+    webrtc: "browser",
+    filedrop: "filedrop",
+  } as const;
+  const CASES = [
+    { channel: "webrtc" as const, endpoint: webrtcEndpoint },
+    { channel: "filedrop" as const, endpoint: filedropEndpoint },
+    { channel: "sftp" as const, endpoint: sftpEndpoint },
+  ];
+
+  for (const profile of PROFILES) {
+    for (const { channel, endpoint } of CASES) {
+      test(`guard admit for ${channel} on ${profile} matches selectExchangeDriver`, async () => {
+        const encoded = await encode({ connectionEndpoint: endpoint });
+        const admitted = await prepareAcceptedInvitation(encoded, { profile })
+          .then(() => true)
+          .catch(() => false);
+
+        // sftp has no accept-drivable transport at all; webrtc and filedrop map
+        // to a Transport whose selection kind decides drivability.
+        const drivenLive =
+          channel !== "sftp" &&
+          selectExchangeDriver(ENDPOINT_TRANSPORT[channel], profile).kind !==
+            "save-file";
+        expect(admitted).toBe(drivenLive);
+      });
+    }
+  }
 });
 
 describe("acceptorExchangeDataSpec", () => {

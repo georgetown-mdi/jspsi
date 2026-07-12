@@ -4,8 +4,11 @@ import {
   isInvitationExpired,
 } from "@psilink/core";
 
+import type { DeploymentProfile } from "@utils/clientConfig";
+
 import type {
   ExchangeDataSpec,
+  FileDropEndpoint,
   InvitationToken,
   LinkageTerms,
   Metadata,
@@ -25,12 +28,15 @@ export interface AcceptorDataEdits {
 
 /** A decoded invitation that has passed every locally-checkable precondition for
  * acceptance: valid format/checksum (via `decodeInvitation`), not expired, and
- * carrying a WebRTC endpoint to dial. */
+ * carrying an endpoint this build can drive. */
 export interface AcceptableInvitation {
   token: InvitationToken;
-  /** The WebRTC signaling endpoint, narrowed from the token's
-   * `connectionEndpoint`, that the acceptor dials. */
-  endpoint: WebRTCEndpoint;
+  /** The connection endpoint, narrowed from the token's `connectionEndpoint` to
+   * the subset this build can drive: a WebRTC signaling endpoint the acceptor
+   * dials in this browser, or a file-drop endpoint the console appliance runs
+   * through the job API. Never an SFTP endpoint, which is not browser- or
+   * appliance-drivable. */
+  endpoint: WebRTCEndpoint | FileDropEndpoint;
 }
 
 /**
@@ -40,17 +46,27 @@ export interface AcceptableInvitation {
  * `decodeInvitation` validates format and checksum but deliberately does not
  * check expiry, so this calls {@link isInvitationExpired} (which fails closed at
  * the boundary and on an unparseable `expires`) and rejects an expired token
- * here. It also requires a WebRTC `connectionEndpoint`: the web
- * acceptor reaches the inviter only through the PeerJS signaling endpoint the
- * invitation carries, so a token without one (or carrying a different channel)
- * cannot be accepted in the browser. Because every failure throws, a caller that
- * only proceeds to connect on success cannot dial on an expired or malformed
- * invitation.
+ * here. It also requires a `connectionEndpoint` this build can drive: a WebRTC
+ * endpoint always (the acceptor reaches the inviter through the PeerJS signaling
+ * endpoint the invitation carries), or a file-drop endpoint on a console build
+ * (the appliance runs the exchange through its job API). Every other channel --
+ * SFTP, or file-drop off a console build -- is rejected, and so is a token with
+ * no endpoint. The admitted channels are exactly what {@link selectExchangeDriver}
+ * drives (webrtc -> browser, filedrop on console -> server-job); the allowlist is
+ * of what THIS build can drive, never a loosening to arbitrary endpoints. Because
+ * every failure throws, a caller that only proceeds on success cannot dial or
+ * launch on an expired, malformed, or undrivable invitation.
  *
  * @param encoded  The encoded invitation string (bare code or deep-link
  *                 fragment).
- * @param now      The instant to compare `expires` against; injectable for tests.
- * @throws {Error}    on an expired token, or one without a WebRTC endpoint.
+ * @param options.now      The instant to compare `expires` against; injectable
+ *                         for tests. Defaults to now.
+ * @param options.profile  This build's deployment profile, deciding whether a
+ *                         file-drop endpoint is drivable (console only). Injected
+ *                         rather than read from the global so the guard stays pure
+ *                         and testable, mirroring {@link selectExchangeDriver}.
+ * @throws {Error}    on an expired token, or one whose endpoint this build cannot
+ *   drive.
  * @throws {Error}    on invalid base64url or a checksum mismatch (`decodeInvitation`).
  * @throws {ZodError} on schema validation failure (`decodeInvitation`).
  * @throws {NestingDepthExceededError|NodeCountExceededError} on a token whose
@@ -60,8 +76,9 @@ export interface AcceptableInvitation {
  */
 export async function prepareAcceptedInvitation(
   encoded: string,
-  now: Date = new Date(),
+  options: { now?: Date; profile: DeploymentProfile },
 ): Promise<AcceptableInvitation> {
+  const { now = new Date(), profile } = options;
   const token = await decodeInvitation(encoded);
 
   if (isInvitationExpired(token.expires, now)) {
@@ -71,10 +88,16 @@ export async function prepareAcceptedInvitation(
   }
 
   const endpoint = token.connectionEndpoint;
-  if (endpoint === undefined || endpoint.channel !== "webrtc") {
+  if (
+    endpoint === undefined ||
+    !(
+      endpoint.channel === "webrtc" ||
+      (endpoint.channel === "filedrop" && profile === "console")
+    )
+  ) {
     throw new Error(
-      "This invitation does not carry a WebRTC connection endpoint, so it " +
-        "cannot be accepted in the browser.",
+      "This invitation does not carry a connection endpoint this build can " +
+        "accept, so it cannot be run here.",
     );
   }
 
