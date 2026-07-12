@@ -39,6 +39,12 @@ export interface JobRecord {
   id: string;
   workdir: string;
   outputPath: string;
+  /** The self-attested exchange record's path (the CLI's `--record-file`
+   * target). Present whether or not the file was actually written -- the record
+   * write is non-fatal, so availability is checked at serve time, not assumed. */
+  recordPath: string;
+  /** The private verification-keys path paired with {@link recordPath}. */
+  keysPath: string;
   status: JobStatus;
   events: Array<BufferedEvent>;
   /** True once a terminal event has been buffered; the SSE stream closes after it. */
@@ -174,11 +180,15 @@ export class JobManager {
       intent.inputCsv,
     );
     const outputPath = path.join(workdir, JOB_FILE_NAMES.output);
+    const recordPath = path.join(workdir, JOB_FILE_NAMES.record);
+    const keysPath = path.join(workdir, JOB_FILE_NAMES.recordKeys);
 
     const record: JobRecord = {
       id,
       workdir,
       outputPath,
+      recordPath,
+      keysPath,
       status: "running",
       events: [],
       terminalEmitted: false,
@@ -197,6 +207,7 @@ export class JobManager {
       keyPath,
       inputPath,
       outputPath,
+      recordPath,
       workdir,
       eventStream,
       ...(this.childEnv !== undefined ? { extraEnv: this.childEnv } : {}),

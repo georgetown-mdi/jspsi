@@ -91,14 +91,47 @@ export async function writeJobFile(
   return filePath;
 }
 
-/** Whether a job's result file exists and is readable. */
-export function resultFileExists(outputPath: string): boolean {
+/** Whether a file at the given path exists and is readable. */
+export function jobFileExists(filePath: string): boolean {
   try {
-    fs.accessSync(outputPath, fs.constants.R_OK);
+    fs.accessSync(filePath, fs.constants.R_OK);
     return true;
   } catch {
     return false;
   }
+}
+
+/** Whether a job's result file exists and is readable. */
+export function resultFileExists(outputPath: string): boolean {
+  return jobFileExists(outputPath);
+}
+
+/**
+ * Read the `createdAt` timestamp from a server-produced record file, or null on
+ * any read/parse failure or a `createdAt` that is not a non-empty string. The
+ * file is small and server-produced (the CLI wrote it), so it is read whole; the
+ * defensive null keeps a missing or malformed record from throwing on the status
+ * path -- the caller treats null as "record unavailable".
+ */
+export function readRecordCreatedAt(recordPath: string): string | null {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(recordPath, "utf8");
+  } catch {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
+    return null;
+  const createdAt = (parsed as { createdAt?: unknown }).createdAt;
+  return typeof createdAt === "string" && createdAt.length > 0
+    ? createdAt
+    : null;
 }
 
 /** Remove a job's workdir and everything under it. Idempotent. */

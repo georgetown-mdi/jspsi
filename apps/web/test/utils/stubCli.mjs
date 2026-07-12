@@ -15,6 +15,11 @@
 //   STUB_STDOUT       Text written to stdout before exit.
 //   STUB_OUTPUT_FILE  When set, the output positional (last argv) is written
 //                     with this content (so the result route has a file).
+//   STUB_RECORD_JSON  When set, the record file named by --record-file is written
+//                     with this content, and its paired .keys.json alongside it
+//                     (so the record/keys routes have files). The keys path is
+//                     the record path with .json replaced by .keys.json, matching
+//                     the CLI's keysPathFor.
 //   STUB_DELAY_MS     Milliseconds to wait before exiting (default 0). During
 //                     the wait the process is interruptible.
 //   STUB_IGNORE_SIGINT  When "1", SIGINT is ignored (to test SIGTERM escalation).
@@ -42,6 +47,18 @@ if (process.env.STUB_STDOUT !== undefined)
 if (process.env.STUB_OUTPUT_FILE !== undefined) {
   const outputPath = process.argv[process.argv.length - 1];
   fs.writeFileSync(outputPath, process.env.STUB_OUTPUT_FILE);
+}
+
+if (process.env.STUB_RECORD_JSON !== undefined) {
+  const flagIndex = process.argv.indexOf("--record-file");
+  if (flagIndex !== -1 && flagIndex + 1 < process.argv.length) {
+    const recordPath = process.argv[flagIndex + 1];
+    const keysPath = recordPath.endsWith(".json")
+      ? recordPath.slice(0, -".json".length) + ".keys.json"
+      : recordPath + ".keys.json";
+    fs.writeFileSync(recordPath, process.env.STUB_RECORD_JSON);
+    fs.writeFileSync(keysPath, JSON.stringify({ salts: {} }));
+  }
 }
 
 const exitCode = Number.parseInt(process.env.STUB_EXIT_CODE ?? "0", 10);
