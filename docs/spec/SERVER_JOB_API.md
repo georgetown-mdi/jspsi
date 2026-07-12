@@ -71,10 +71,14 @@ Served under the same gate as the result response -- only when `status === "succ
 | `linkageTerms` | core's `LinkageTermsSchema` | Bounded partner-authored vocabulary (field names, key elements, transforms). It carries no filesystem path, host, or command field, so a hostile value cannot escape into argv or the filesystem. |
 | `sharedSecret` | base64url 32-byte pattern (`/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/`) | Credential material matching the CLI key-file shape. It is written into a fixed-name key file, never used as a path or argv fragment; a malformed secret is rejected here rather than crashing the child at load. |
 | `inputCsv` | non-empty string | CONTENT written to a fixed, server-chosen filename in the workdir. The client never names a file. |
+| `metadata` | optional; core's `MetadataSchema` | The operator's per-party column metadata (each column's name, semantic type, role, and payload flag). Structured data written into the config as YAML values, never an argv fragment, path, host, or credential. Carried so the CLI honors the operator's disclosure edits (which columns are sent vs ignored) instead of inferring metadata from the column names. |
+| `standardization` | optional; core's `StandardizationSchema` | The operator's per-party standardization pipeline (per-field transform steps). Structured data written into the config as YAML values, never an argv fragment, path, host, or credential. |
 | `options` | numeric/boolean/enum subset (below) | Every field is a number, boolean, or closed enum -- none can carry a path, host, credential, or command. |
 | `eventStream` | optional boolean (default true) | Whether `--event-stream` is passed. |
 
 The schema is `.strict()`: an unknown key (a smuggled `path`, `host`, or `@path` credential reference) fails validation. The `options` subset is deliberately the numeric/boolean/enum knobs only -- `pollIntervalMs`, `peerTimeoutMs`, `serverConnectTimeoutMs`, `maxReconnectAttempts` (0..604800), `timestampInFilename`, `locklessRendezvous`, `retainFiles`, and `unexpectedFiles` (`error`/`warn`/`ignore`). The path and directory fields of the CLI's file-sync options are intentionally not surfaced (the server owns every directory), and the free-text `peerId` is omitted for the same reason.
+
+The `metadata` and `standardization` fields are validated structured data -- core's `MetadataSchema` and `StandardizationSchema`, respectively -- and carry no injectable field. Their size bound is only partial: each column `name` is length-capped and `role`/`type` are closed enums, but the metadata and standardization arrays and the free-text `description`, `output`, `input`, and standardization `params` are not length-bounded by these schemas, and the linear-time regex-dialect gate (`docs/spec/PROTOCOL.md`, "Transform regular-expression dialect") applies to the negotiated `linkageTerms` transforms, not to the standardization pipeline's raw-pattern steps. That is a resource bound, not an injection escape: no metadata or standardization value becomes an argv fragment, a path, a host, or a credential.
 
 ### Composed CLI configuration
 
@@ -83,6 +87,7 @@ From a validated intent the server composes the CLI config document (snake_case 
 - The connection is a credential-free `filedrop` locator whose one path field is set to the server-chosen `exchange` subdirectory of the workdir -- not to any client value. By core's `ExchangeFileInput` typing no credential is representable in a filedrop connection.
 - No `authentication` block is ever assembled; the shared secret rides the separate key file.
 - The intent's `linkageTerms` reach the document only after core's schema validation.
+- The intent's `metadata` and `standardization`, when present, are attached as the config's `metadata` and `standardization` blocks (omitted when absent). Carrying them is what makes the operator's data-prep edits authoritative on this path: the CLI's `prepareForExchange` uses the composed metadata instead of falling back to `inferMetadata`, which would default an unrecognized column to disclosed payload and could silently disclose a column the operator marked ignored.
 - The tuning `options`, if any were set, are narrowed to the CLI's file-sync options and attached; when none were set the block is omitted entirely.
 
 The key file body is `{"sharedSecret":"<value>"}` with no `expires` stamped, so a server-driven job carries no invitation-token lifetime of its own.

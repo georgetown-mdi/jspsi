@@ -79,6 +79,12 @@ function transportForEndpointChannel(
  * Passing the raw inviter terms would run the acceptor with the wrong identity,
  * direction, and lock-in.
  *
+ * The confirm-columns `edits` (this party's authored metadata and standardization)
+ * are carried into the config so the appliance's CLI honors them rather than
+ * inferring metadata from the CSV column names -- the same edits the browser accept
+ * path threads through {@link prepareAcceptorExchange}. Without them a column the
+ * operator marked ignored would be inferred as disclosed payload and silently sent.
+ *
  * Pure and exported so the derivation is the tested boundary, pinned without
  * running the hook.
  *
@@ -87,16 +93,20 @@ function transportForEndpointChannel(
 export function acceptorServerJobConfig({
   token,
   acceptorName,
+  edits,
   inputCsv,
 }: {
   token: InvitationToken;
   acceptorName: string;
+  edits: AcceptorDataEdits;
   inputCsv: string;
 }): ServerJobExchangeDriverConfig {
   return {
     linkageTerms: deriveAcceptedLinkageTerms(token.linkageTerms, acceptorName),
     sharedSecret: token.sharedSecret,
     inputCsv,
+    metadata: edits.metadata,
+    standardization: edits.standardization,
   };
 }
 
@@ -272,7 +282,7 @@ export function useAcceptorExchange({
     const serverJobDriver = async (): Promise<ExchangeDriver<RunOutputs>> => {
       const inputCsv = await sourceFile.text();
       return createServerJobExchangeDriver(
-        acceptorServerJobConfig({ token, acceptorName, inputCsv }),
+        acceptorServerJobConfig({ token, acceptorName, edits, inputCsv }),
       );
     };
 

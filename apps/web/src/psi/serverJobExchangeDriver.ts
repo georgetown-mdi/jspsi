@@ -9,8 +9,8 @@ import type {
   StageDefinition,
 } from "./exchangeLifecycle";
 import type { JobExchangeIntent, JobExchangeOptions } from "@jobs/intent";
+import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 import type { RelayEvent, RelayEventType } from "@jobs/cliDriver";
-import type { LinkageTerms } from "@psilink/core";
 import type { RunOutputs } from "@bench/runOutputs";
 
 const log = getLogger("serverJobExchangeDriver");
@@ -25,6 +25,16 @@ export interface ServerJobExchangeDriverConfig {
   linkageTerms: LinkageTerms;
   sharedSecret: string;
   inputCsv: string;
+  /** This party's authored column metadata (which columns are sent vs ignored,
+   * their roles/types). Carried into the intent so the appliance's CLI uses the
+   * operator's edits instead of inferring metadata from the column names -- an
+   * inferred column defaults to disclosed payload, so an omitted metadata would
+   * silently disclose a column the operator marked ignored. Forwarded only when
+   * present, mirroring how the browser path guards these. */
+  metadata?: Metadata;
+  /** This party's authored standardization pipeline, paired with {@link metadata}.
+   * Forwarded only when present. */
+  standardization?: Standardization;
   options?: JobExchangeOptions;
 }
 
@@ -319,7 +329,14 @@ export function createServerJobExchangeDriver(
   config: ServerJobExchangeDriverConfig,
   client: JobApiClient = createFetchJobApiClient(),
 ): ExchangeDriver<RunOutputs> {
-  const { linkageTerms, sharedSecret, inputCsv, options } = config;
+  const {
+    linkageTerms,
+    sharedSecret,
+    inputCsv,
+    metadata,
+    standardization,
+    options,
+  } = config;
   return {
     run: async ({
       signal,
@@ -338,6 +355,8 @@ export function createServerJobExchangeDriver(
         linkageTerms,
         sharedSecret,
         inputCsv,
+        ...(metadata !== undefined ? { metadata } : {}),
+        ...(standardization !== undefined ? { standardization } : {}),
         ...(options !== undefined ? { options } : {}),
         eventStream: true,
       };
