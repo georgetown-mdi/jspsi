@@ -35,15 +35,11 @@ function writeFd3(line) {
   }
 }
 
-if (process.env.STUB_FD3_RAW !== undefined) writeFd3(process.env.STUB_FD3_RAW);
-const events = JSON.parse(process.env.STUB_FD3_EVENTS ?? "[]");
-for (const event of events) writeFd3(JSON.stringify(event) + "\n");
-
-if (process.env.STUB_STDERR !== undefined)
-  process.stderr.write(process.env.STUB_STDERR);
-if (process.env.STUB_STDOUT !== undefined)
-  process.stdout.write(process.env.STUB_STDOUT);
-
+// Write the result artifacts BEFORE the fd-3 events, so a terminal `result`
+// event implies the output/record/keys files are already on disk. This mirrors
+// the real CLI (whose result event means the result has been written) and lets a
+// test that waits for the terminal event read the files without racing the
+// child's write.
 if (process.env.STUB_OUTPUT_FILE !== undefined) {
   const outputPath = process.argv[process.argv.length - 1];
   fs.writeFileSync(outputPath, process.env.STUB_OUTPUT_FILE);
@@ -60,6 +56,15 @@ if (process.env.STUB_RECORD_JSON !== undefined) {
     fs.writeFileSync(keysPath, JSON.stringify({ salts: {} }));
   }
 }
+
+if (process.env.STUB_FD3_RAW !== undefined) writeFd3(process.env.STUB_FD3_RAW);
+const events = JSON.parse(process.env.STUB_FD3_EVENTS ?? "[]");
+for (const event of events) writeFd3(JSON.stringify(event) + "\n");
+
+if (process.env.STUB_STDERR !== undefined)
+  process.stderr.write(process.env.STUB_STDERR);
+if (process.env.STUB_STDOUT !== undefined)
+  process.stdout.write(process.env.STUB_STDOUT);
 
 const exitCode = Number.parseInt(process.env.STUB_EXIT_CODE ?? "0", 10);
 const delayMs = Number.parseInt(process.env.STUB_DELAY_MS ?? "0", 10);

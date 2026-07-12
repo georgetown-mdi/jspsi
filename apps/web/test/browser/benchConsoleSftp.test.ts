@@ -262,6 +262,16 @@ describe("console inviter bench, sftp channel", () => {
     expect(intent.port).toBeUndefined();
     expect(intent.path).toBeUndefined();
 
+    // The driver opens the SSE stream in a separate fetch after the POST
+    // resolves; wait for that request before emitting, or the event enqueues
+    // into a stream the driver has not yet subscribed to and is dropped.
+    await vi.waitFor(() =>
+      expect(
+        api.captured.some(
+          (request) => request.url === "/api/jobs/job-7/events",
+        ),
+      ).toBe(true),
+    );
     // A relay warning (the host-key divergence notice the security review
     // requires the operator to see) surfaces in the run UI without ending
     // the run.
