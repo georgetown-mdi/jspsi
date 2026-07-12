@@ -11,6 +11,7 @@ import {
   DonePanel,
   DownloadRow,
   FailureAlert,
+  RunWarningsAlert,
   WithheldResultInset,
 } from "./BenchRunSurface";
 import { StatusPanel } from "./StatusPanel";
@@ -36,6 +37,7 @@ export function InviterExchangeSection({
   run,
   outputs,
   failure,
+  warnings,
   onTryAgain,
   onStartOver,
 }: {
@@ -43,6 +45,9 @@ export function InviterExchangeSection({
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
   failure: RunFailure | undefined;
+  /** The run's accumulated non-fatal warnings (the driver's `onWarning` slot),
+   * rendered beside the status panel through every phase. */
+  warnings: ReadonlyArray<string>;
   onTryAgain: () => void;
   onStartOver: () => void;
 }) {
@@ -162,6 +167,7 @@ export function InviterExchangeSection({
           finishedAt={run.finishedAt}
         />
       )}
+      <RunWarningsAlert warnings={warnings} />
       <StatusPanel
         run={run}
         done={phase === "done"}

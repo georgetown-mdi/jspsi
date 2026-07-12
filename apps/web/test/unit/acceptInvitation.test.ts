@@ -160,11 +160,13 @@ describe("prepareAcceptedInvitation", () => {
           .catch(() => false);
 
         // sftp has no accept-drivable transport at all; webrtc and filedrop map
-        // to a Transport whose selection kind decides drivability.
+        // to a Transport whose selection kind decides drivability. The remotes
+        // flag is false as the accept path passes it: it gates only the sftp
+        // channel, which never reaches the selector from an accept.
         const drivenLive =
           channel !== "sftp" &&
-          selectExchangeDriver(ENDPOINT_TRANSPORT[channel], profile).kind !==
-            "save-file";
+          selectExchangeDriver(ENDPOINT_TRANSPORT[channel], profile, false)
+            .kind !== "save-file";
         expect(admitted).toBe(drivenLive);
       });
     }

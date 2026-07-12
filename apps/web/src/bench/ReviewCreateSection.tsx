@@ -10,6 +10,7 @@ import {
   expiryLabel,
   transportChooserCopy,
 } from "./inviterModel";
+import { sftpRemoteOptionLabel } from "./sftpRemoteChoice";
 import styles from "./bench.module.css";
 
 import type {
@@ -20,6 +21,7 @@ import type {
   Transport,
 } from "./inviterModel";
 import type { OutputDirection } from "@psi/advancedInvite";
+import type { SftpRemoteProjection } from "@jobs/jobManager";
 
 const DIRECTION_CHOICES: ReadonlyArray<{
   value: OutputDirection;
@@ -37,14 +39,21 @@ const DIRECTION_CHOICES: ReadonlyArray<{
  * so. The transport chooser offers the live-browser exchange and the two
  * command-line transports (SFTP and a shared directory); its copy comes from
  * {@link transportChooserCopy}, which reflects whether the deployment runs a
- * shared-directory exchange here (the console appliance) or saves an exchange
- * file for the command-line tool.
+ * shared-directory or SFTP exchange here (the console appliance) or saves an
+ * exchange file for the command-line tool. On a console build whose appliance
+ * has provisioned SFTP remotes, choosing SFTP shows a remote picker under the
+ * card instead of routing to free-text host authoring: the exchange runs here
+ * through the picked remote, and the connection material stays on the
+ * appliance.
  */
 export function ReviewCreateSection({
   editor,
   csv,
   problems,
   minting,
+  sftpRemotes,
+  sftpRemoteName,
+  onSftpRemote,
   onLifetime,
   onDirection,
   onTransport,
@@ -56,6 +65,13 @@ export function ReviewCreateSection({
   csv: AcquiredCsv;
   problems: ReadonlyArray<SpineProblem>;
   minting: boolean;
+  /** The appliance's provisioned SFTP remotes, fetched once the sftp channel
+   * is picked on a console build; undefined before the fetch resolves (or off
+   * a console), empty when the appliance has none -- both fall back to the
+   * save-a-file flow. */
+  sftpRemotes: Array<SftpRemoteProjection> | undefined;
+  sftpRemoteName: string | undefined;
+  onSftpRemote: (name: string) => void;
   onLifetime: (seconds: number) => void;
   onDirection: (direction: OutputDirection) => void;
   onTransport: (transport: Transport) => void;
@@ -64,8 +80,14 @@ export function ReviewCreateSection({
   onNavigate: (target: SpineTarget) => void;
 }) {
   const transport = editor.transport ?? "browser";
-  const { filedropLabel, filedropDescription, capabilityNote } =
-    transportChooserCopy(isConsoleBuild());
+  const sftpServerJob = sftpRemotes !== undefined && sftpRemotes.length > 0;
+  const {
+    filedropLabel,
+    filedropDescription,
+    sftpLabel,
+    sftpDescription,
+    capabilityNote,
+  } = transportChooserCopy(isConsoleBuild(), sftpServerJob);
   const canCreate = problems.length === 0 && !minting;
   // Voiced when the create gate flips either way; deferred so a blocked state
   // present when the section mounts still announces.
@@ -136,9 +158,22 @@ export function ReviewCreateSection({
             name="transport"
             checked={transport === "sftp"}
             onChange={() => onTransport("sftp")}
-            label="Over SFTP, run by the psilink command-line tool"
-            description="Saves an exchange file that runs the command-line tool over your SFTP server. Your partner accepts with the same invitation code."
+            label={sftpLabel}
+            description={sftpDescription}
           />
+          {transport === "sftp" && sftpServerJob && (
+            <NativeSelect
+              label="SFTP server"
+              description="Provisioned on this appliance. Connection details and credentials stay on the appliance; the invitation carries only where to meet."
+              value={sftpRemoteName ?? ""}
+              data={sftpRemotes.map((remote) => ({
+                value: remote.name,
+                label: sftpRemoteOptionLabel(remote),
+              }))}
+              onChange={(event) => onSftpRemote(event.currentTarget.value)}
+              mt="sm"
+            />
+          )}
         </div>
         <div
           className={

@@ -39,6 +39,13 @@ export interface ExchangeDriverEvents<
     category: ExchangeErrorCategory;
     error: unknown;
   }) => void;
+  /** A non-fatal, operator-relevant notice raised mid-run -- the server-job
+   * driver forwards each relay `warning` event's message here (e.g. the CLI's
+   * cross-party host-key divergence notice, which the operator must be able to
+   * see). Optional: a consumer with no warning surface omits it and a driver
+   * then drops the message. Never a terminal -- the run continues to exactly
+   * one `onResult`/`onError`. The in-browser WebRTC driver emits none. */
+  onWarning?: (message: string) => void;
 }
 
 /** A per-channel exchange driver: a `run` that carries out one exchange and

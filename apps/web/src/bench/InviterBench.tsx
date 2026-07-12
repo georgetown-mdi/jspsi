@@ -11,10 +11,11 @@ import {
 
 import { InvitationFileError, generateInvitation } from "@psi/invitation";
 import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
+import { fetchSftpRemotes } from "@psi/serverJobExchangeDriver";
 import { invitationLocation } from "@psi/invitationLocation";
 import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 
-import { deploymentProfile } from "@utils/clientConfig";
+import { deploymentProfile, isConsoleBuild } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
@@ -71,17 +72,22 @@ import { ReviewCreateSection } from "./ReviewCreateSection";
 import { SaveExchangeSection } from "./SaveExchangeSection";
 import { YourFileSection } from "./YourFileSection";
 import { selectExchangeDriver } from "./exchangeDriverSelection";
+import { sftpEndpointForRemote } from "./sftpRemoteChoice";
 import { timelineSteps } from "./exchangeRun";
 import { useInviterExchange } from "./useInviterExchange";
 
 import type { AcquiredCsv, InviterEditor, SpineTarget } from "./inviterModel";
 import type { CliTransport, SaveExchangeFields } from "./saveExchangeModel";
+import type {
+  ConnectionEndpointRequest,
+  GeneratedInvitation,
+} from "@psi/invitation";
 import type { DisclosureChoice } from "@psi/metadataEditing";
-import type { GeneratedInvitation } from "@psi/invitation";
 import type { IntakeAlert } from "./YourFileSection";
 import type { RailStep } from "./Rail";
 import type { SavedExchange } from "./SaveExchangeSection";
 import type { SemanticType } from "@psilink/core";
+import type { SftpRemoteProjection } from "@jobs/jobManager";
 
 type Section = SpineTarget | "share" | "save";
 type SpineStep = "file" | "columns" | "review";
@@ -152,9 +158,46 @@ export function InviterBench() {
   const [savedExchange, setSavedExchange] = useState<SavedExchange>();
   const [saving, setSaving] = useState(false);
   const [saveAlert, setSaveAlert] = useState<IntakeAlert>();
+  const [sftpRemotes, setSftpRemotes] = useState<Array<SftpRemoteProjection>>();
+  const [sftpRemoteName, setSftpRemoteName] = useState<string>();
 
   const transport = editor?.transport ?? "browser";
-  const selection = selectExchangeDriver(transport, deploymentProfile());
+
+  // Fetch the appliance's provisioned SFTP remotes the first time the operator
+  // picks the sftp channel on a console build; the table is boot-static on the
+  // server, so one fetch per bench serves the session. The helper resolves to
+  // an empty array on any failure, so Create then falls back to the save-file
+  // surface rather than arming a server-job run with no remote to name. The
+  // picker defaults to the first remote so a chosen name always exists while
+  // the picker is shown.
+  useEffect(() => {
+    if (!isConsoleBuild() || transport !== "sftp" || sftpRemotes !== undefined)
+      return;
+    let cancelled = false;
+    void fetchSftpRemotes().then((remotes) => {
+      if (cancelled) return;
+      setSftpRemotes(remotes);
+      setSftpRemoteName((current) =>
+        remotes.some((remote) => remote.name === current)
+          ? current
+          : remotes[0]?.name,
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [transport, sftpRemotes]);
+
+  const sftpRemotesConfigured =
+    sftpRemotes !== undefined && sftpRemotes.length > 0;
+  const chosenSftpRemote = sftpRemotes?.find(
+    (remote) => remote.name === sftpRemoteName,
+  );
+  const selection = selectExchangeDriver(
+    transport,
+    deploymentProfile(),
+    sftpRemotesConfigured,
+  );
 
   // The live run starts the moment a live invitation exists (the hook drives
   // the partner exchange right away) and is torn down when the invitation is
@@ -164,11 +207,13 @@ export function InviterBench() {
   // for a saved exchange. A `server-job` selection runs live too -- the console
   // appliance carries it out -- so it drives the hook exactly as `browser` does.
   const runsLive = selection.kind !== "save-file";
-  const { run, outputs, failure, tryAgain } = useInviterExchange({
+  const { run, outputs, failure, warnings, tryAgain } = useInviterExchange({
     invitation: runsLive ? invitation : undefined,
     inviterName: editor?.draft.identity ?? "",
     channel: transport,
     sourceFile,
+    sftpRemotesConfigured,
+    sftpRemote: chosenSftpRemote?.name,
   });
 
   // The failure alerts' "start over with a fresh invitation": the seal lifts
@@ -321,6 +366,17 @@ export function InviterBench() {
       goTo("save");
       return;
     }
+    // An sftp server-job run authors the invitation's endpoint from the picked
+    // provisioned remote's locator -- the same connectionEndpoint seam the save
+    // surface's free-text fields feed -- so the partner's CLI meets the
+    // appliance where it will actually connect. The picker defaults to the
+    // first remote, so a missing choice here means the remotes state changed
+    // mid-create; refuse rather than mint a code with the wrong rendezvous.
+    let connectionEndpoint: ConnectionEndpointRequest | undefined;
+    if (transport === "sftp") {
+      if (chosenSftpRemote === undefined) return;
+      connectionEndpoint = sftpEndpointForRemote(chosenSftpRemote);
+    }
     setMinting(true);
     setCreateAlert(undefined);
     try {
@@ -332,6 +388,7 @@ export function InviterBench() {
         linkageTerms: validation.terms,
         metadata: editor.draft.metadata,
         standardization: editor.draft.standardization,
+        ...(connectionEndpoint !== undefined ? { connectionEndpoint } : {}),
       });
       setEditor(sealEditor(editor));
       setInvitation(minted);
@@ -617,6 +674,9 @@ export function InviterBench() {
                 csv={acquired}
                 problems={spineProblems(editor)}
                 minting={minting}
+                sftpRemotes={sftpRemotes}
+                sftpRemoteName={sftpRemoteName}
+                onSftpRemote={setSftpRemoteName}
                 onLifetime={(seconds) =>
                   applyEditor(editorWithLifetime(editor, seconds))
                 }
@@ -736,6 +796,7 @@ export function InviterBench() {
             run={run}
             outputs={outputs}
             failure={failure}
+            warnings={warnings}
             onTryAgain={tryAgain}
             onStartOver={startOver}
           />

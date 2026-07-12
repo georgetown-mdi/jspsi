@@ -75,31 +75,50 @@ export function isCliTransport(
 
 /** The Review & create transport-chooser copy that changes with the deployment.
  * On the console appliance (`consoleBuild`) the appliance itself runs the
- * shared-directory exchange, so the filedrop card offers to run it here and the
- * capability note names filedrop among the live transports; the hosted build
- * keeps the browser-only phrasing. The SFTP and browser cards are unchanged
- * either way. */
+ * shared-directory exchange, so the filedrop card offers to run it here; when
+ * the appliance also has provisioned SFTP remotes (`sftpServerJob`) the SFTP
+ * card offers to run here too, through a provisioned server, and the
+ * capability note names both. The hosted build keeps the browser-only
+ * phrasing, and the browser card is unchanged everywhere. */
 export interface TransportChooserCopy {
   filedropLabel: string;
   filedropDescription: string;
+  sftpLabel: string;
+  sftpDescription: string;
   capabilityNote: string;
 }
 
 export function transportChooserCopy(
   consoleBuild: boolean,
+  sftpServerJob: boolean,
 ): TransportChooserCopy {
+  const sftpRunsHere = consoleBuild && sftpServerJob;
+  const sftpCopy = sftpRunsHere
+    ? {
+        sftpLabel: "Over SFTP, run here",
+        sftpDescription:
+          "Runs the exchange here through an SFTP server provisioned on this appliance. Your partner accepts with the same invitation code.",
+      }
+    : {
+        sftpLabel: "Over SFTP, run by the psilink command-line tool",
+        sftpDescription:
+          "Saves an exchange file that runs the command-line tool over your SFTP server. Your partner accepts with the same invitation code.",
+      };
   return consoleBuild
     ? {
         filedropLabel: "Over a shared directory, run here",
         filedropDescription:
           "Runs the exchange here against a directory both parties can reach. Your partner accepts with the same invitation code.",
-        capabilityNote:
-          "This deployment runs live and shared-directory exchanges here; SFTP exchanges run in the psilink command-line tool.",
+        ...sftpCopy,
+        capabilityNote: sftpRunsHere
+          ? "This deployment runs live, shared-directory, and SFTP exchanges here."
+          : "This deployment runs live and shared-directory exchanges here; SFTP exchanges run in the psilink command-line tool.",
       }
     : {
         filedropLabel: "Over a shared directory, run by the command-line tool",
         filedropDescription:
           "Saves an exchange file the command-line tool runs against a directory both parties can reach.",
+        ...sftpCopy,
         capabilityNote:
           "This browser runs live exchanges only; SFTP and shared-directory exchanges run in the psilink command-line tool.",
       };

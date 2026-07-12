@@ -6,6 +6,7 @@ import {
   JobApiRequestError,
   createFetchJobApiClient,
   createServerJobExchangeDriver,
+  fetchSftpRemotes,
 } from "@psi/serverJobExchangeDriver";
 import { buildRunOutputs } from "@bench/runOutputs";
 
@@ -25,10 +26,12 @@ import type {
 import type { ObjectUrls, RunOutputs } from "@bench/runOutputs";
 import type { RelayEvent } from "@jobs/cliDriver";
 
-/** The construction-time config every test reuses; the driver only carries it
- * into the intent, so its values are never validated here. */
+/** The construction-time config every test reuses (a filedrop transport unless
+ * a test overrides it); the driver only carries it into the intent, so its
+ * values are never validated here. */
 function driverConfig(): ServerJobExchangeDriverConfig {
   return {
+    transport: { channel: "filedrop" },
     linkageTerms: validLinkageTerms(),
     sharedSecret: VALID_SHARED_SECRET,
     inputCsv: "ssn\n111223333\n",
@@ -252,7 +255,9 @@ describe("createServerJobExchangeDriver event mapping", () => {
     expect(failure.category).toBe("exchange");
   });
 
-  test("a warning event is dropped, not surfaced as a terminal", async () => {
+  test("a warning event is dropped when no onWarning is provided", async () => {
+    // Not a terminal, and with the optional slot absent the message goes
+    // nowhere.
     const { client } = scriptedClient([
       { v: 1, type: "warning", message: "a non-fatal warning" },
       result(true),
@@ -264,6 +269,52 @@ describe("createServerJobExchangeDriver event mapping", () => {
 
     expect(events.onResult).toHaveBeenCalledTimes(1);
     expect(events.onError).not.toHaveBeenCalled();
+  });
+
+  test("a warning event forwards its message to onWarning, then the run continues", async () => {
+    // The operator-visibility requirement: the CLI's structured warning (e.g.
+    // the cross-party host-key divergence notice) must reach the consumer's
+    // optional slot, without becoming a terminal.
+    const { client } = scriptedClient([
+      { v: 1, type: "warning", message: "host key fingerprints diverge" },
+      { v: 1, type: "warning", message: "second notice" },
+      result(true),
+    ]);
+    const driver = createServerJobExchangeDriver(driverConfig(), client);
+    const onWarning = vi.fn();
+    const events = {
+      ...driverEvents(new AbortController().signal),
+      onWarning,
+    };
+
+    await driver.run(events);
+
+    expect(onWarning.mock.calls.map((call) => call[0])).toEqual([
+      "host key fingerprints diverge",
+      "second notice",
+    ]);
+    expect(events.onResult).toHaveBeenCalledTimes(1);
+    expect(events.onError).not.toHaveBeenCalled();
+  });
+
+  test("a warning with a missing or empty message never reaches onWarning", async () => {
+    const { client } = scriptedClient([
+      { v: 1, type: "warning" },
+      { v: 1, type: "warning", message: "" },
+      { v: 1, type: "warning", message: 7 },
+      result(true),
+    ]);
+    const driver = createServerJobExchangeDriver(driverConfig(), client);
+    const onWarning = vi.fn();
+    const events = {
+      ...driverEvents(new AbortController().signal),
+      onWarning,
+    };
+
+    await driver.run(events);
+
+    expect(onWarning).not.toHaveBeenCalled();
+    expect(events.onResult).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -399,6 +450,76 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
       sharedSecret: config.sharedSecret,
       inputCsv: config.inputCsv,
     });
+  });
+
+  test("a filedrop transport serializes to exactly the bare filedrop intent", async () => {
+    // The transport discriminator must be invisible on the wire for filedrop:
+    // the serialized intent -- field set AND order -- is the intent arm's own
+    // fields, with no transport artifact riding along.
+    const { client, createdIntents } = scriptedClient([result(true)]);
+    const config = driverConfig();
+    await createServerJobExchangeDriver(config, client).run(
+      driverEvents(new AbortController().signal),
+    );
+
+    expect(JSON.stringify(createdIntents[0])).toBe(
+      JSON.stringify({
+        channel: "filedrop",
+        linkageTerms: config.linkageTerms,
+        sharedSecret: config.sharedSecret,
+        inputCsv: config.inputCsv,
+        eventStream: true,
+      }),
+    );
+  });
+
+  test("an sftp transport POSTs the sftp arm carrying ONLY the remote name", async () => {
+    const { client, createdIntents } = scriptedClient([result(true)]);
+    const config: ServerJobExchangeDriverConfig = {
+      ...driverConfig(),
+      transport: { channel: "sftp", remote: "prod_east" },
+    };
+    await createServerJobExchangeDriver(config, client).run(
+      driverEvents(new AbortController().signal),
+    );
+
+    const intent = createdIntents[0] as Record<string, unknown>;
+    expect(intent.channel).toBe("sftp");
+    expect(intent.remote).toBe("prod_east");
+    // Exactly one field beyond the filedrop shape: no host, port, path, or any
+    // other connection material can ride the intent.
+    expect(Object.keys(intent).sort()).toEqual([
+      "channel",
+      "eventStream",
+      "inputCsv",
+      "linkageTerms",
+      "remote",
+      "sharedSecret",
+    ]);
+  });
+
+  test("the event mapping is channel-independent: an sftp run maps a result identically", async () => {
+    const { client } = scriptedClient([
+      stages("prepare", "exchange"),
+      stage("prepare"),
+      result(true),
+    ]);
+    const driver = createServerJobExchangeDriver(
+      {
+        ...driverConfig(),
+        transport: { channel: "sftp", remote: "prod_east" },
+      },
+      client,
+    );
+    const events = driverEvents(new AbortController().signal);
+
+    await driver.run(events);
+
+    expect(events.onStages).toHaveBeenCalledTimes(1);
+    expect(events.onStage).toHaveBeenCalledWith("prepare");
+    const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
+    expect(outputs.resultsUrl).toBe("/api/jobs/job-1/result");
+    expect(events.onError).not.toHaveBeenCalled();
   });
 
   test("forwards the config's metadata and standardization into the intent", async () => {
@@ -713,5 +834,89 @@ describe("createFetchJobApiClient over an injected fetch", () => {
         signal,
       ),
     ).resolves.toEqual({ available: false });
+  });
+});
+
+describe("fetchSftpRemotes", () => {
+  function jsonResponse(body: unknown, status = 200): typeof fetch {
+    return () =>
+      Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+  }
+
+  test("returns the validated projection array, optional fields preserved", async () => {
+    const remotes = await fetchSftpRemotes(
+      jsonResponse([
+        { name: "prod_east", host: "sftp.example.gov", port: 2222, path: "/x" },
+        { name: "dr-west", host: "dr.example.gov" },
+      ]),
+    );
+    expect(remotes).toEqual([
+      { name: "prod_east", host: "sftp.example.gov", port: 2222, path: "/x" },
+      { name: "dr-west", host: "dr.example.gov" },
+    ]);
+  });
+
+  test("GETs the remotes route", async () => {
+    const urls: Array<string> = [];
+    await fetchSftpRemotes((input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return Promise.resolve(
+        new Response("[]", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    });
+    expect(urls).toEqual(["/api/jobs/remotes"]);
+  });
+
+  test("an enabled API with no remotes reads as none configured", async () => {
+    await expect(fetchSftpRemotes(jsonResponse([]))).resolves.toEqual([]);
+  });
+
+  test("a non-2xx reads as none configured (fail toward save-file)", async () => {
+    // 404 is also the gate's disabled-API response, and 401 its bad-bearer
+    // response; both mean "no server-job run can start here".
+    for (const status of [401, 404, 500])
+      await expect(
+        fetchSftpRemotes(jsonResponse([{ name: "a", host: "h" }], status)),
+      ).resolves.toEqual([]);
+  });
+
+  test("a malformed body reads as none configured, never a partial table", async () => {
+    const malformed: Array<unknown> = [
+      { remotes: [] },
+      "prod_east",
+      [null],
+      ["prod_east"],
+      [{ host: "no-name.example.gov" }],
+      [{ name: "no_host" }],
+      [{ name: "", host: "h" }],
+      [{ name: "a", host: "" }],
+      [{ name: "a", host: "h", port: "2222" }],
+      [{ name: "a", host: "h", port: 0 }],
+      [{ name: "a", host: "h", port: 65536 }],
+      [{ name: "a", host: "h", path: "" }],
+      // One bad entry beside a good one fails the WHOLE listing closed.
+      [{ name: "good", host: "h" }, { name: "bad" }],
+    ];
+    for (const body of malformed)
+      await expect(fetchSftpRemotes(jsonResponse(body))).resolves.toEqual([]);
+  });
+
+  test("a network error and a non-JSON body read as none configured", async () => {
+    await expect(
+      fetchSftpRemotes(() => Promise.reject(new Error("offline"))),
+    ).resolves.toEqual([]);
+    const htmlResponse: typeof fetch = () =>
+      Promise.resolve(
+        new Response("<html>gateway error</html>", { status: 200 }),
+      );
+    await expect(fetchSftpRemotes(htmlResponse)).resolves.toEqual([]);
   });
 });

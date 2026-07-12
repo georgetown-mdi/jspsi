@@ -47,6 +47,7 @@ import type { ExchangeDriver } from "@psi/exchangeDriver";
 import type { ExchangeRun } from "./exchangeRun";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { RunOutputs } from "./runOutputs";
+import type { ServerJobExchangeTransport } from "@psi/serverJobExchangeDriver";
 import type { Transport } from "./inviterModel";
 
 /** A failed run, ready to render: the lifecycle's category (which decides the
@@ -156,6 +157,8 @@ export function useInviterExchange({
   inviterName,
   channel,
   sourceFile,
+  sftpRemotesConfigured,
+  sftpRemote,
 }: {
   invitation: GeneratedInvitation | undefined;
   inviterName: string;
@@ -167,15 +170,24 @@ export function useInviterExchange({
    * server-job path submits the file's raw text; the browser path re-parses the
    * retained rows off the minted invitation and never reads this. */
   sourceFile: File | undefined;
+  /** Whether the appliance has provisioned SFTP remotes -- the selector's third
+   * input, threaded from the owner's fetch so this hook and the owner route
+   * identically. */
+  sftpRemotesConfigured: boolean;
+  /** The picked provisioned remote's NAME for an sftp server-job run; the only
+   * connection field the intent carries. Undefined for every other channel. */
+  sftpRemote: string | undefined;
 }): {
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
   failure: RunFailure | undefined;
+  warnings: ReadonlyArray<string>;
   tryAgain: () => void;
 } {
   const [run, setRun] = useState<ExchangeRun>(initialRun);
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [failure, setFailure] = useState<RunFailure>();
+  const [warnings, setWarnings] = useState<Array<string>>([]);
 
   // Drives the lifecycle's AbortSignal; the effect cleanup below aborts it so
   // an unmount (or a superseded invitation) tears down any in-flight wait or
@@ -213,6 +225,7 @@ export function useInviterExchange({
     setRun(initialRun());
     setOutputs(undefined);
     setFailure(undefined);
+    setWarnings([]);
 
     // Output-generation half. The URLs the build creates are revoked when the
     // outputs are replaced or the bench unmounts (effect above); a throw
@@ -279,8 +292,19 @@ export function useInviterExchange({
         generateOutput,
       });
 
-    // The console appliance carries out the filedrop exchange: the driver POSTs
-    // the sealed terms, this party's authored metadata/standardization (when
+    // The transport a server-job run rides: an sftp channel names the picked
+    // provisioned remote (the intent's only connection field), any other
+    // server-job channel is filedrop. Reached only for a server-job selection,
+    // which the selector never produces for `browser`.
+    const serverJobTransport = (): ServerJobExchangeTransport => {
+      if (channel !== "sftp") return { channel: "filedrop" };
+      if (sftpRemote === undefined)
+        throw new Error("no provisioned remote picked for the sftp exchange");
+      return { channel: "sftp", remote: sftpRemote };
+    };
+
+    // The console appliance carries out the exchange: the driver POSTs the
+    // sealed terms, this party's authored metadata/standardization (when
     // present, so the CLI honors the operator's data-prep edits rather than
     // inferring), the shared secret, and the file's raw text to the job API and
     // maps the server's event stream onto the same lifecycle events. It owns no
@@ -290,8 +314,10 @@ export function useInviterExchange({
     const serverJobDriver = async (): Promise<ExchangeDriver<RunOutputs>> => {
       if (sourceFile === undefined)
         throw new Error("no source file for the server-job exchange");
+      const transport = serverJobTransport();
       const inputCsv = await sourceFile.text();
       return createServerJobExchangeDriver({
+        transport,
         linkageTerms: minted.linkageTerms,
         sharedSecret: minted.sharedSecret,
         inputCsv,
@@ -302,7 +328,11 @@ export function useInviterExchange({
       });
     };
 
-    const selection = selectExchangeDriver(channel, deploymentProfile());
+    const selection = selectExchangeDriver(
+      channel,
+      deploymentProfile(),
+      sftpRemotesConfigured,
+    );
 
     void (async () => {
       let driver: ExchangeDriver<RunOutputs>;
@@ -328,6 +358,11 @@ export function useInviterExchange({
           setOutputs(generated);
           setRun((current) => runWithCompletion(current, new Date()));
         },
+        // Server/CLI-controlled text sanitized at this display boundary, like
+        // failureFor's alert content; accumulated so no notice displaces an
+        // earlier one.
+        onWarning: (message) =>
+          setWarnings((current) => [...current, sanitizeForDisplay(message)]),
         onError: ({ category, error }) => {
           // Dev-gated: the raw Error object's message/cause can embed partner-/
           // server-controlled bytes, so a production console carries none of it,
@@ -357,6 +392,7 @@ export function useInviterExchange({
       setRun(initialRun());
       setOutputs(undefined);
       setFailure(undefined);
+      setWarnings([]);
       return;
     }
     startRef.current(invitation);
@@ -385,5 +421,5 @@ export function useInviterExchange({
     start(invitation);
   }
 
-  return { run, outputs, failure, tryAgain };
+  return { run, outputs, failure, warnings, tryAgain };
 }
