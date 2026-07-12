@@ -21,6 +21,7 @@ export interface RestoredJobArtifacts {
   resultAvailable: boolean;
   recordAvailable: boolean;
   recordCreatedAt?: string;
+  workdir: string;
   outputPath: string;
   recordPath: string;
   keysPath: string;
@@ -100,6 +101,7 @@ export async function classifyRestoredJob(
     resultAvailable,
     recordAvailable: recordCreatedAt !== null,
     ...(recordCreatedAt !== null ? { recordCreatedAt } : {}),
+    workdir,
     outputPath,
     recordPath,
     keysPath,

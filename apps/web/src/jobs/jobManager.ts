@@ -211,6 +211,15 @@ export class JobManager {
   private readonly sftpRemotes: JobSftpRemotesTable | undefined;
   /** The per-remote busy latch: remote name -> holding job id. */
   private readonly sftpRemoteHolders = new Map<string, string>();
+  /**
+   * Job ids whose workdir is mid-creation (before the in-memory record is set)
+   * or mid-deletion (after the record is dropped, before the workdir is gone).
+   * A disk read during either window would otherwise misclassify the half-built
+   * or half-removed workdir as a restored job, so these ids shadow the disk: a
+   * view or listing treats them as not-a-restored-job until the transition ends.
+   */
+  private readonly creatingJobIds = new Set<string>();
+  private readonly deletingJobIds = new Set<string>();
 
   constructor(options: JobManagerOptions) {
     this.dataRoot = options.dataRoot;
@@ -240,6 +249,7 @@ export class JobManager {
         ? this.acquireSftpRemote(intent.remote, id)
         : undefined;
 
+    this.creatingJobIds.add(id);
     let workdir: string | null = null;
     try {
       const created = await createWorkdir(
@@ -264,6 +274,8 @@ export class JobManager {
       if (intent.channel === "sftp") this.releaseSftpRemote(intent.remote, id);
       if (workdir !== null) await removeWorkdir(workdir);
       throw error;
+    } finally {
+      this.creatingJobIds.delete(id);
     }
   }
 
@@ -408,6 +420,7 @@ export class JobManager {
   async getJobView(id: string): Promise<JobView | null> {
     const record = this.jobs.get(id);
     if (record !== undefined) return liveJobView(record);
+    if (this.creatingJobIds.has(id) || this.deletingJobIds.has(id)) return null;
     const artifacts = await classifyRestoredJob(this.dataRoot, id);
     if (artifacts === null) return null;
     return {
@@ -441,6 +454,7 @@ export class JobManager {
     const diskIds = await listRestorableJobIds(this.dataRoot);
     for (const id of diskIds) {
       if (summaries.has(id)) continue;
+      if (this.creatingJobIds.has(id) || this.deletingJobIds.has(id)) continue;
       const artifacts = await classifyRestoredJob(this.dataRoot, id);
       if (artifacts === null) continue;
       summaries.set(id, {
@@ -641,12 +655,17 @@ export class JobManager {
   async deleteJob(id: string): Promise<boolean> {
     const record = this.jobs.get(id);
     if (record === undefined) return this.deleteRestoredJob(id);
-    this.clearCancelTimers(record);
-    if (record.handle?.isRunning()) record.handle.signal("SIGKILL");
-    this.jobs.delete(id);
-    const workdir = resolveWorkdir(this.dataRoot, id);
-    if (workdir !== null) await removeWorkdir(workdir);
-    return true;
+    this.deletingJobIds.add(id);
+    try {
+      this.clearCancelTimers(record);
+      if (record.handle?.isRunning()) record.handle.signal("SIGKILL");
+      this.jobs.delete(id);
+      const workdir = resolveWorkdir(this.dataRoot, id);
+      if (workdir !== null) await removeWorkdir(workdir);
+      return true;
+    } finally {
+      this.deletingJobIds.delete(id);
+    }
   }
 
   /**
@@ -657,10 +676,13 @@ export class JobManager {
   private async deleteRestoredJob(id: string): Promise<boolean> {
     const artifacts = await classifyRestoredJob(this.dataRoot, id);
     if (artifacts === null) return false;
-    const workdir = resolveWorkdir(this.dataRoot, id);
-    if (workdir === null) return false;
-    await removeWorkdir(workdir);
-    return true;
+    this.deletingJobIds.add(id);
+    try {
+      await removeWorkdir(artifacts.workdir);
+      return true;
+    } finally {
+      this.deletingJobIds.delete(id);
+    }
   }
 
   /**
