@@ -39,13 +39,15 @@ export function gateJobRoute(request: Request): GateOutcome {
 }
 
 /**
- * The boundary byte cap on a `POST /api/jobs` body. Derived from the intent's
- * `inputCsv` char cap ({@link MAX_INPUT_CSV_LENGTH}), which dominates a
- * schema-valid intent: a JSON string can more than double in length under
- * worst-case escaping (every byte a `\uXXXX` escape), so twice the char cap plus
- * a generous margin for the other capped fields keeps this boundary comfortably
- * above the JSON-encoded worst case of the schema caps -- the two layers stay
- * coherent, and a schema-valid intent can never be rejected here.
+ * The boundary byte cap on a `POST /api/jobs` body: a memory bound on the
+ * streamed read. It sits well above the JSON-encoded size of a realistic
+ * schema-valid intent -- real CSV text barely grows under JSON string escaping,
+ * so a max-length `inputCsv` ({@link MAX_INPUT_CSV_LENGTH}) plus the other
+ * capped fields stays comfortably under this cap and reaches a clean schema
+ * error rather than a `413`. It is NOT sized to clear a pathological payload of
+ * control characters that each escape to a 6-byte `\uXXXX` sequence: such input
+ * is not valid CSV, and bounding it here is the memory guard doing its job. The
+ * uncapped standardization `params` is likewise bounded only by this cap.
  */
 export const MAX_JOB_BODY_BYTES = 224 * 1024 ** 2;
 
