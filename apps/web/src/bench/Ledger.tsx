@@ -28,8 +28,9 @@ export function Ledger({
   footer,
 }: {
   title?: string;
-  /** A standing state marker under the title -- "Terms sealed at create" once
-   * the invitation is minted and the ledger stops being editable. */
+  /** A standing state marker under the title -- "Terms locked when the
+   * invitation was created" once the invitation is minted and the ledger
+   * stops being editable. */
   tag?: string;
   rows: ReadonlyArray<LedgerRow>;
   footer?: ReactNode;

@@ -802,7 +802,7 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
       .toBeEnabled();
   });
 
-  test("Reset to recommended restores the file-derived defaults", async () => {
+  test("Reset to defaults restores the file-derived defaults", async () => {
     await reachColumns("first_name,last_name\nAlice,Smith\n");
     await expect
       .element(page.getByText("All 2 keys can match"))
@@ -820,9 +820,9 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
       .element(page.getByText("1 of 2 keys can match"))
       .toBeInTheDocument();
 
-    // Reset restores the recommended (file-derived) metadata: back to all-clear.
+    // Reset restores the default (file-derived) metadata: back to all-clear.
     await userEvent.click(
-      page.getByRole("button", { name: "Reset to recommended" }),
+      page.getByRole("button", { name: "Reset to defaults" }),
     );
     await expect
       .element(page.getByText("All 2 keys can match"))

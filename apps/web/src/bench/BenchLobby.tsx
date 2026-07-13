@@ -61,7 +61,7 @@ export function BenchLobby() {
             <h3>Set up an exchange</h3>
             <p className={`${styles.small} ${styles.sub}`}>
               Choose a file, confirm what you disclose, and share an invitation.
-              Recommended terms come from your file; most exchanges need nothing
+              Default terms come from your file; most exchanges need nothing
               more.
             </p>
             <p>

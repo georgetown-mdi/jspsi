@@ -263,7 +263,7 @@ export function defaultStandardizationForRows(
  * over {@link inferMetadata}), so only keys the columns can satisfy are present and
  * the editor never opens on a blank form; the seeded standardization infers the
  * date-of-birth format from `rawRows` (see {@link defaultStandardizationForRows}).
- * Calling this again is exactly the "Reset to recommended" action. `rawRows`
+ * Calling this again is exactly the "Reset to defaults" action. `rawRows`
  * defaults to empty, which yields the `MM/DD/YYYY` date default.
  */
 export function seedAdvancedInvite(
@@ -983,7 +983,7 @@ export function validateAdvancedInvite(
     if (err instanceof CanonicalEncodingError) {
       encodable = false;
       if (errors.keys === undefined)
-        errors.keys = "These terms cannot be encoded; reset to recommended.";
+        errors.keys = "These terms cannot be encoded; reset to defaults.";
     } else {
       throw err;
     }

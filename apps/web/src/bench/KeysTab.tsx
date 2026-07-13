@@ -182,7 +182,7 @@ export function KeysTab({
       >
         <Radio
           value="cascade"
-          label="Cascade (recommended)"
+          label="Cascade"
           description="Keys run in order; a record matched by an earlier key is settled and never re-exposed to later, broader keys."
           mt="xs"
         />
@@ -202,8 +202,10 @@ export function KeysTab({
           role="alert"
           mt="sm"
         >
-          Every record meets every key, so a partner can learn more about
-          near-misses than under the cascade. Choose it only when both of you
+          Every record meets every key, so the receiving side observes matches
+          on weaker keys that the cascade would have filtered out. The linked
+          output file is identical either way; the difference is what a partner
+          can observe while matching runs. Choose it only when both of you
           accept that.
         </Alert>
       )}

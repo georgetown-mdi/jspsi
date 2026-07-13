@@ -429,11 +429,11 @@ describe("inviter bench", () => {
       ),
     );
 
-    // The file card and the recommended-terms callout appear on read, and the
+    // The file card and the default-terms callout appear on read, and the
     // ledger fills in while still on step 1: derivation happens at read time.
     await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
     await expect
-      .element(page.getByText("Recommended terms are ready", { exact: false }))
+      .element(page.getByText("Default terms are ready", { exact: false }))
       .toBeInTheDocument();
 
     const ledger = () =>
@@ -744,9 +744,9 @@ describe("inviter bench", () => {
     expect(agreementRow?.textContent).toContain("MOU-2025-0042");
 
     // Reset discards the authored terms and announces it politely.
-    await page.getByRole("button", { name: "Reset to recommended" }).click();
+    await page.getByRole("button", { name: "Reset to defaults" }).click();
     await expect
-      .element(page.getByText("Reset to the recommended settings."))
+      .element(page.getByText("Reset to the default settings."))
       .toBeInTheDocument();
     expect(
       Array.from(document.querySelectorAll("th")).find(
@@ -957,7 +957,7 @@ describe("inviter bench", () => {
     expect(call.expires).toBeDefined();
     expect(call.signal.aborted).toBe(false);
     await expect
-      .element(page.getByText("Terms sealed at create"))
+      .element(page.getByText("Terms locked when the invitation was created"))
       .toBeInTheDocument();
 
     // The status panel tracks the lifecycle's stage events; Share stays the
@@ -1334,7 +1334,9 @@ describe("inviter bench", () => {
     await expect
       .element(page.getByText("Ready to create."))
       .toBeInTheDocument();
-    expect(page.getByText("Terms sealed at create").query()).toBeNull();
+    expect(
+      page.getByText("Terms locked when the invitation was created").query(),
+    ).toBeNull();
   });
 
   test("choosing SFTP routes Create to the save surface without listening", async () => {
@@ -1480,7 +1482,7 @@ describe("inviter bench", () => {
         .element(page.getByRole("heading", { level: 1 }))
         .toHaveTextContent("Review & create");
       await expect
-        .element(page.getByText("Terms sealed at create"))
+        .element(page.getByText("Terms locked when the invitation was created"))
         .toBeInTheDocument();
     } finally {
       downloads.restore();
