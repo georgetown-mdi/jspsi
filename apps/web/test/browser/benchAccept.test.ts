@@ -908,11 +908,12 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
     ).toBeNull();
   });
 
-  test("the Cleaning rail tab opens the acceptor's own cleaning editor", async () => {
+  test("the Cleaning menu tab opens the acceptor's own cleaning editor", async () => {
     await reachColumns("first_name,last_name\nAlice,Smith\n");
-    // The Customize group's Cleaning tab navigates to the cleaning sub-section
+    // The Customize menu's Cleaning item navigates to the cleaning sub-section
     // (the acceptor edits only its own standardization there).
-    await userEvent.click(page.getByRole("button", { name: "Cleaning" }));
+    await userEvent.click(page.getByRole("button", { name: "Customize" }));
+    await userEvent.click(page.getByRole("menuitem", { name: /Cleaning/ }));
     await expect
       .element(page.getByRole("heading", { name: "Cleaning" }))
       .toBeInTheDocument();
@@ -1407,10 +1408,10 @@ describe("acceptor bench: run and completion", () => {
     expect(another?.getAttribute("href")).toBe("/");
   });
 
-  test("the partial-coverage advisory shows in the rail and the work column", async () => {
+  test("the partial-coverage advisory shows in Problems and the work column", async () => {
     // A partially-covered file (only first_name recognized) raises the
     // partial-coverage advisory at launch, which the run surfaces in both the
-    // rail's Problems block and a work-column amber alert.
+    // work column's Problems block and its own amber alert.
     window.location.hash = await encodeRunToken();
     mount(createElement(AcceptorBench));
     await expect
@@ -1439,20 +1440,14 @@ describe("acceptor bench: run and completion", () => {
     );
     await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(1));
 
-    // The advisory shows in BOTH the rail's Problems block and the work column's
-    // amber alert. "Partial coverage" appears in both, so scope each query rather
-    // than match globally (Playwright strict mode rejects the ambiguity).
+    // The advisory shows in BOTH the work column's Problems block (the short
+    // label) and its own amber alert (the fuller message) -- scope each query
+    // rather than match globally (Playwright strict mode rejects the
+    // ambiguity).
     await vi.waitFor(() => {
-      const rail = document.querySelector(
-        'nav[aria-label="Exchange progress"]',
-      );
-      const problems = (rail as Element).querySelector(
-        'section[aria-label="Problems"]',
-      );
+      const problems = document.querySelector('section[aria-label="Problems"]');
       expect(problems?.textContent).toContain("Partial coverage");
     });
-    // The work column (outside the rail) carries the same advisory as an amber
-    // alert body -- the message the rail's short label does not.
     const work = document.querySelector("main") as Element;
     expect(work.textContent).toContain("Partial coverage");
     expect(work.textContent).toContain("linkage keys can match with");

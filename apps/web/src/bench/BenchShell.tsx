@@ -4,34 +4,39 @@ import styles from "./bench.module.css";
 import type { ReactNode } from "react";
 
 /**
- * The three-region working surface of the linkage bench: a section rail on the
- * left, the work column in the center, and the standing disclosure ledger on
- * the right. The work column is the page's single `<main>` landmark; the rail
- * and ledger are landmarks of their own (`<nav>` in {@link Rail}, `<aside>` in
- * {@link Ledger}). Omitting both collapses to the mockup's single-column
- * "no-rail" layout; omitting one drops just that region's grid track.
+ * The linkage bench's working surface: a full-width top bar above a two-region
+ * grid, the work column in the center and the standing disclosure ledger on
+ * the right. The work column is the page's single `<main>` landmark; the
+ * ledger is a landmark of its own (`<aside>` in {@link Ledger}), as is the
+ * top bar's Stepper nav (see {@link TopBar}). Omitting both `topBar` and
+ * `ledger` collapses to the single-column "plain" layout {@link
+ * VerifyReceiptBench} uses; omitting only the ledger keeps the work column
+ * alone under the top bar.
  */
 export function BenchShell({
-  rail,
+  topBar,
   ledger,
   children,
 }: {
-  rail?: ReactNode;
+  topBar?: ReactNode;
   ledger?: ReactNode;
   children: ReactNode;
 }) {
+  // gridUnderBar raises the ledger's sticky offset above the stuck top bar;
+  // a ledger with no bar (a generic layout this shell permits even though no
+  // current bench composes it) keeps the plain offset.
   const gridClass =
-    rail === undefined && ledger === undefined
+    topBar === undefined && ledger === undefined
       ? `${styles.grid} ${styles.gridPlain}`
-      : rail === undefined
-        ? `${styles.grid} ${styles.gridNoRail}`
-        : ledger === undefined
-          ? `${styles.grid} ${styles.gridNoLedger}`
-          : styles.grid;
+      : ledger === undefined
+        ? styles.grid
+        : topBar === undefined
+          ? `${styles.grid} ${styles.gridLedger}`
+          : `${styles.grid} ${styles.gridLedger} ${styles.gridUnderBar}`;
   return (
     <BenchPage>
+      {topBar}
       <div className={gridClass}>
-        {rail}
         <main className={styles.work}>{children}</main>
         {ledger}
       </div>

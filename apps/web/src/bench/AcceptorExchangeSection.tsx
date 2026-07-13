@@ -30,12 +30,12 @@ import type { RunOutputs } from "./runOutputs";
  * panel spans both from one stable mount so its live region persists.
  *
  * The partial-coverage advisory the confirm-columns step raised surfaces here as
- * an amber alert (the run column's half of that advisory; the rail carries the
- * other half). A failed run renders the failure vocabulary's alert for its
- * category, each with its one concrete way forward -- an acceptor seat cannot
- * mint, so every non-retryable recovery is a link back to the lobby to paste a
- * fresh invitation, and a config fault returns to the confirm-columns step. No
- * failure clears any operator input.
+ * an amber alert (this run column's half of that advisory; the work column's
+ * Problems block carries the other half). A failed run renders the failure
+ * vocabulary's alert for its category, each with its one concrete way forward
+ * -- an acceptor seat cannot mint, so every non-retryable recovery is a link
+ * back to the lobby to paste a fresh invitation, and a config fault returns to
+ * the confirm-columns step. No failure clears any operator input.
  */
 export function AcceptorExchangeSection({
   invitation,

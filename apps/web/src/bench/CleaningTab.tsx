@@ -42,8 +42,8 @@ export function CleaningTab({
   onFieldAdded: (type: LinkageField["type"]) => void;
   onFieldRemoved: (output: string) => void;
   onResetCleaning: () => void;
-  /** The validation message for the cleaning, rendered inline (the rail's
-   * Problems block carries it too). */
+  /** The validation message for the cleaning, rendered inline (the work
+   * column's Problems block carries it too). */
   cleaningError: string | undefined;
   onBack: () => void;
 }) {

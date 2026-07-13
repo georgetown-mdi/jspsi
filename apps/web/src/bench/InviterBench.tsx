@@ -30,7 +30,6 @@ import {
   saveRailNote,
   saveTrustFooter,
 } from "./saveExchangeModel";
-import { Rail, RailFacts, RailGroup, RailProblems, RailSteps } from "./Rail";
 import {
   editorFromCsv,
   editorWithAlgorithm,
@@ -68,15 +67,22 @@ import { InviterExchangeSection } from "./InviterExchangeSection";
 import { KeysTab } from "./KeysTab";
 import { Ledger } from "./Ledger";
 import { MatchingSharingSection } from "./MatchingSharingSection";
+import { Problems } from "./Problems";
 import { ReviewCreateSection } from "./ReviewCreateSection";
 import { SaveExchangeSection } from "./SaveExchangeSection";
+import { TopBar } from "./TopBar";
 import { YourFileSection } from "./YourFileSection";
 import { selectExchangeDriver } from "./exchangeDriverSelection";
 import { sftpEndpointForRemote } from "./sftpRemoteChoice";
 import { timelineSteps } from "./exchangeRun";
 import { useInviterExchange } from "./useInviterExchange";
 
-import type { AcquiredCsv, InviterEditor, SpineTarget } from "./inviterModel";
+import type {
+  AcquiredCsv,
+  InviterEditor,
+  RailStep,
+  SpineTarget,
+} from "./inviterModel";
 import type { CliTransport, SaveExchangeFields } from "./saveExchangeModel";
 import type {
   ConnectionEndpointRequest,
@@ -84,7 +90,6 @@ import type {
 } from "@psi/invitation";
 import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { IntakeAlert } from "./YourFileSection";
-import type { RailStep } from "./Rail";
 import type { SavedExchange } from "./SaveExchangeSection";
 import type { SemanticType } from "@psilink/core";
 import type { SftpRemoteProjection } from "@jobs/jobManager";
@@ -132,11 +137,11 @@ function triggerDownload(fileName: string, content: string): void {
 }
 
 /**
- * The inviter's working surface: one bench whose rail walks the three-step
+ * The inviter's working surface: one bench whose top bar walks the three-step
  * required spine while the work column swaps sections in place. The draft
  * seeds from the file the moment it is read (step 1) and every step-2 edit
- * flows through the shared draft model, so the rail facts and the disclosure
- * ledger track live. Step 3 is not built yet and says so.
+ * flows through the shared draft model, so the Customize facts and the
+ * disclosure ledger track live. Step 3 is not built yet and says so.
  */
 export function InviterBench() {
   const [name, setName] = useState("");
@@ -558,29 +563,25 @@ export function InviterBench() {
 
   return (
     <BenchShell
-      rail={
+      topBar={
         section === "share" ? (
-          <Rail label="Exchange progress">
-            <RailGroup label="This exchange" note="Browser">
-              <RailSteps steps={steps} />
-            </RailGroup>
-          </Rail>
+          <TopBar
+            navLabel="Exchange progress"
+            steps={steps}
+            transportNote="Browser"
+          />
         ) : section === "save" && isCliTransport(transport) ? (
-          <Rail label="Exchange progress">
-            <RailGroup label="This exchange" note={saveRailNote(transport)}>
-              <RailSteps steps={saveSteps} />
-            </RailGroup>
-          </Rail>
+          <TopBar
+            navLabel="Exchange progress"
+            steps={saveSteps}
+            transportNote={saveRailNote(transport)}
+          />
         ) : (
-          <Rail label="Exchange setup">
-            <RailGroup label="Set up">
-              <RailSteps steps={steps} />
-            </RailGroup>
-            <RailGroup label="Customize" note="Filled in from your file.">
-              <RailFacts facts={facts} />
-            </RailGroup>
-            <RailProblems problems={problems} />
-          </Rail>
+          <TopBar
+            navLabel="Exchange setup"
+            steps={steps}
+            customize={{ note: "Filled in from your file.", facts }}
+          />
         )
       }
       ledger={
@@ -626,6 +627,7 @@ export function InviterBench() {
       }
     >
       <div ref={headingRef}>
+        <Problems problems={problems} />
         {section === "file" && (
           <YourFileSection
             name={name}

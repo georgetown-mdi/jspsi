@@ -64,7 +64,7 @@ export function KeysTab({
   onDeduplicate: (deduplicate: boolean) => void;
   onImport: (terms: LinkageTerms) => void;
   /** The validation message for the key set, rendered inline beside the list
-   * it names (the rail's Problems block carries it too). */
+   * it names (the work column's Problems block carries it too). */
   keysError: string | undefined;
   announce: (message: string) => void;
   onBack: () => void;

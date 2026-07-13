@@ -40,6 +40,44 @@ import type {
 import type { DisclosureChoice } from "@psi/metadataEditing";
 
 /**
+ * Where a step stands in the exchange's progression, rendered by the bench's
+ * top-bar Stepper. `current` is announced to assistive tech via
+ * `aria-current="step"`; the other two are conveyed by the Stepper's own
+ * completed/inactive styling.
+ */
+export type RailStepState = "done" | "current" | "pending";
+
+/** One entry in a step spine or timeline list, rendered as a Mantine
+ * Stepper.Step. A completed step with `onSelect` is clickable, per the
+ * design's done-steps-are-links rule; the current and pending steps are not. */
+export interface RailStep {
+  label: string;
+  state: RailStepState;
+  onSelect?: () => void;
+}
+
+/**
+ * One row in the Customize menu: an optional-surface label and the quiet
+ * fact summarizing its state ("3 fields", "2 keys"). An absent fact renders
+ * as an em-dash; `tone` colors the fact only when the surface has been
+ * edited or needs attention. With `onSelect` the row opens that surface;
+ * `current` marks the open tab.
+ */
+export interface RailFact {
+  label: string;
+  fact?: string;
+  tone?: "edited" | "attention";
+  onSelect?: () => void;
+  current?: boolean;
+}
+
+/** One entry in the work column's Problems block. */
+export interface RailProblem {
+  label: string;
+  onSelect?: () => void;
+}
+
+/**
  * The transport an exchange runs over, chosen at Review & create. `browser`
  * runs the live WebRTC exchange in this tab; `sftp` and `filedrop` are the two
  * command-line transports whose Create routes to the save-exchange-file surface
@@ -127,7 +165,7 @@ export function transportChooserCopy(
 /**
  * The pure model behind the inviter bench's required spine: seeding the draft
  * from the read file, applying the two column edits step 2 offers, and the
- * view-model builders the rail facts and the disclosure ledger render from.
+ * view-model builders the Customize facts and the disclosure ledger render from.
  * No React, no I/O -- the tested boundary for "default terms derive from the
  * file" and "the ledger tracks term edits". The draft itself is the AdvancedInvite
  * model's ({@link AdvancedInviteDraft}); the bench re-surfaces that model, so
@@ -523,7 +561,7 @@ export function enabledKeys(draft: AdvancedInviteDraft): Array<LinkageKey> {
 }
 
 /** Whether the metadata sits in the two-identifier state the single-identifier
- * rule forbids -- the rail's Problems entry for step 2. */
+ * rule forbids -- the work column's Problems entry for step 2. */
 export function identifierProblem(draft: AdvancedInviteDraft): boolean {
   return hasMultipleIdentifiers(draft.metadata);
 }
@@ -699,7 +737,7 @@ export function inviterLedgerRows(
   ];
 }
 
-/** One rail quiet fact for the Customize group; `target` is the tab the
+/** One quiet fact for the Customize menu; `target` is the tab the
  * fact's label opens. */
 export interface InviterRailFact {
   label: string;
@@ -711,13 +749,13 @@ function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-/** The cleaning summary ("3 fields") shared by the rail fact and the
+/** The cleaning summary ("3 fields") shared by the Customize fact and the
  * check-your-answers row, so the two surfaces cannot disagree. */
 export function cleaningFact(draft: AdvancedInviteDraft): string {
   return plural(draft.standardization.length, "field");
 }
 
-/** The key-count summary ("2 keys") shared by the rail fact and the
+/** The key-count summary ("2 keys") shared by the Customize fact and the
  * check-your-answers row. */
 export function keysFact(draft: AdvancedInviteDraft): string {
   return plural(enabledKeys(draft).length, "key");
@@ -766,8 +804,8 @@ const FIELD_TARGETS: Record<AdvancedField, SpineTarget> = {
   legalExpiration: "agreement",
 };
 
-/** One entry in the rail's Problems block: the message and the section that
- * can resolve it. */
+/** One entry in the work column's Problems block: the message and the section
+ * that can resolve it. */
 export interface SpineProblem {
   message: string;
   target: SpineTarget;
@@ -783,7 +821,7 @@ export function reviewValidation(
 }
 
 /**
- * The rail's Problems block as an error summary: the single-identifier
+ * The work column's Problems block as an error summary: the single-identifier
  * conflict (which only inference can seed) plus every validation error, each
  * pointing at the section that owns the fix. Empty when the draft can mint.
  */

@@ -24,7 +24,7 @@ export const DONE_STAGE_ID = "done";
 
 /** The two run seats: the inviter (PSI responder that listens) and the acceptor
  * (PSI initiator that dials). The only thing the pure run model varies by role is
- * the waiting-stage label and the rail timeline the run drives. */
+ * the waiting-stage label and the top-bar timeline the run drives. */
 export type ExchangeSeat = "inviter" | "acceptor";
 
 /** The waiting-stage label each seat shows: the inviter waits for the partner to
@@ -178,7 +178,7 @@ export function runWithFailure(run: ExchangeRun): ExchangeRun {
   return { ...run, failed: true };
 }
 
-/** One step of the five-step protocol timeline the rail shows after create. */
+/** One step of the five-step protocol timeline the top bar shows after create. */
 export interface TimelineStep {
   label: string;
   state: "done" | "current" | "pending";
@@ -193,7 +193,7 @@ const TIMELINE_LABELS = [
 ] as const;
 
 /**
- * The rail's protocol timeline, derived from the run's stage: Share while the
+ * The top bar's protocol timeline, derived from the run's stage: Share while the
  * exchange waits for the partner, Confirm protocol during the protocol
  * handshake, Link keys through the per-key rounds, everything done at
  * completion. "Partner accepts" is a moment rather than a duration, so it is
@@ -222,8 +222,8 @@ const ACCEPTOR_TIMELINE_LABELS = [
 ] as const;
 
 /**
- * The acceptor's rail timeline. Unlike the inviter's, it opens at Connect and
- * has no Share or Partner-accepts step -- the acceptor dials, so its rail never
+ * The acceptor's top-bar timeline. Unlike the inviter's, it opens at Connect and
+ * has no Share or Partner-accepts step -- the acceptor dials, so its timeline never
  * shows a stage it cannot act on. Connect stays current through the pre-stages
  * (before-start and the "Connecting to your partner" wait); a protocol stage
  * flips it to Confirm protocol; the per-key rounds sit under Link keys; and

@@ -1,9 +1,9 @@
 /* Layout and identity classes for the linkage bench, translated from the
    approved mockup (design/web-redesign/proposal-c.html) onto the --bench-*
    tokens (tokens.css). Interactive controls stay Mantine; these classes carry
-   only what Mantine cannot: the three-region bench grid, the rail and ledger
-   chrome, and the mockup's type discipline (mono = real data or protocol
-   state, sans = guidance). */
+   only what Mantine cannot: the top bar and work/ledger grid, and the
+   mockup's type discipline (mono = real data or protocol state, sans =
+   guidance). */
 
 .page {
   min-height: 100dvh;
@@ -11,6 +11,10 @@
   color: var(--bench-ink);
   font-size: 16.5px;
   line-height: 1.5;
+  /* The top bar's fixed height: sets .topBar's real rendered height AND the
+     sticky offset of anything that must clear the stuck bar (.gridUnderBar
+     .ledger), so the two cannot drift apart. */
+  --bench-topbar-height: 56px;
 }
 
 .page h1 {
@@ -95,11 +99,11 @@
   font-size: 14px;
 }
 
-/* ---------- three-region bench ---------- */
+/* ---------- work + ledger grid ---------- */
 
 .grid {
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr) 296px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 28px;
   max-width: 1260px;
   margin: 0 auto;
@@ -107,16 +111,11 @@
   align-items: start;
 }
 
-.gridNoRail {
+.gridLedger {
   grid-template-columns: minmax(0, 1fr) 296px;
 }
 
-.gridNoLedger {
-  grid-template-columns: 232px minmax(0, 1fr);
-}
-
 .gridPlain {
-  grid-template-columns: minmax(0, 1fr);
   max-width: 860px;
 }
 
@@ -133,15 +132,19 @@
   max-width: 640px;
 }
 
-/* ---------- rail ---------- */
+/* ---------- top bar ---------- */
 
-.rail {
+.topBar {
   position: sticky;
-  top: 20px;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  height: var(--bench-topbar-height);
   background: var(--bench-column);
-  border: 1px solid var(--bench-rule);
-  border-radius: 2px;
-  padding: 18px 16px 20px 16px;
+  border-bottom: 1px solid var(--bench-rule);
+  padding: 0 32px;
 }
 
 .wordmark {
@@ -152,93 +155,33 @@
   margin-bottom: 18px;
 }
 
-.rail .wordmark {
+.topBar .wordmark {
   font-family: inherit;
   font-weight: 650;
   font-size: 14.5px;
   letter-spacing: normal;
-  margin: 0 0 4px 0;
+  margin: 0;
+  flex: none;
 }
 
-.wordRule {
-  border: 0;
-  border-top: 1px solid var(--bench-rule);
-  margin: 0 0 14px 0;
+.topBarNav {
+  min-width: 0;
+  overflow-x: auto;
 }
 
-.railGroup {
-  font-variant-caps: all-small-caps;
-  letter-spacing: 0.09em;
-  font-weight: 650;
-  font-size: 14px;
-  color: var(--bench-secondary);
-  margin: 18px 0 4px 0;
+.topBarStepper {
+  min-width: max-content;
 }
 
-.railGroupNote {
+/* Scoped under .topBar so the left-auto margin outweighs the .page p margin
+   rule (higher specificity), keeping the note pinned to the bar's right edge
+   rather than reading as a sixth step. */
+.topBar .topBarNote {
+  margin: 0 0 0 auto;
   font-size: 12px;
   color: var(--bench-faint);
-  margin: 0 0 4px 0;
-}
-
-.railSteps,
-.railFacts {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.step {
-  position: relative;
-  padding: 6px 0 6px 24px;
-  font-size: 14px;
-  color: var(--bench-secondary);
-}
-
-.step::before {
-  content: "";
-  position: absolute;
-  left: 3px;
-  top: 11px;
-  width: 9px;
-  height: 9px;
-  border: 2px solid var(--bench-faint);
-  background: var(--bench-column);
-  z-index: 1;
-}
-
-.step::after {
-  content: "";
-  position: absolute;
-  left: 8px;
-  top: 22px;
-  bottom: -8px;
-  width: 1px;
-  background: var(--bench-rule);
-}
-
-.step:last-child::after {
-  display: none;
-}
-
-.stepDone {
-  color: var(--bench-ink);
-}
-
-.stepDone::before {
-  background: var(--bench-ink);
-  border-color: var(--bench-ink);
-}
-
-.stepCurrent {
-  color: var(--bench-ink);
-  font-weight: 650;
-}
-
-.stepCurrent::before {
-  border-color: var(--bench-accent);
-  background: var(--bench-accent);
-  box-shadow: 0 0 0 3px var(--bench-accent-glow);
+  white-space: nowrap;
+  flex: none;
 }
 
 .stepLink {
@@ -253,7 +196,7 @@
 }
 
 .problems {
-  margin-top: 20px;
+  margin-bottom: 20px;
   border: 2px solid var(--bench-danger);
   background: var(--bench-danger-bg);
   border-radius: 8px;
@@ -272,15 +215,6 @@
   margin: 0;
   padding: 0 0 0 1.1em;
   font-size: 13.5px;
-}
-
-.railFacts li {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 10px;
-  padding: 6px 0;
-  font-size: 14px;
 }
 
 .val {
@@ -310,6 +244,14 @@
   border: 1px solid var(--bench-rule);
   border-radius: 10px;
   padding: 18px 20px 16px 20px;
+}
+
+/* Under a top bar both elements stick in the same scroll container, so the
+   ledger's offset must clear the bar's height or the opaque bar covers its
+   top edge. Scoped to grids that actually sit under a bar; a bar-less screen
+   keeps the plain 20px offset above. */
+.gridUnderBar .ledger {
+  top: calc(var(--bench-topbar-height) + 20px);
 }
 
 .ledger h2 {
@@ -504,10 +446,6 @@
 
 .statusLineDanger {
   color: var(--bench-danger);
-}
-
-.currentTab {
-  color: var(--bench-accent);
 }
 
 .backlink {
@@ -926,18 +864,26 @@
 /* ---------- responsive ---------- */
 
 @media (max-width: 1080px) {
-  .grid,
-  .gridNoRail,
-  .gridNoLedger {
+  .gridLedger {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .rail,
   .ledger {
     position: static;
   }
 
   .lobbyActions {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .topBar {
+    padding: 0 16px;
+    gap: 12px;
+  }
+
+  .topBarNote {
+    display: none;
   }
 }

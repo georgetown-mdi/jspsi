@@ -106,7 +106,7 @@ export function saveTrustFooter(transport: CliTransport): string {
         "encrypted protocol messages - never your rows.";
 }
 
-/** The rail group's transport note on the save surface. */
+/** The top bar's transport note on the save surface. */
 export function saveRailNote(transport: CliTransport): string {
   return transport === "sftp" ? "SFTP" : "Shared directory";
 }

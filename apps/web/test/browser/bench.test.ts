@@ -368,18 +368,18 @@ describe("inviter bench", () => {
 
     expect(document.querySelectorAll("main").length).toBe(1);
 
-    const rail = document.querySelector('nav[aria-label="Exchange setup"]');
-    expect(rail).not.toBeNull();
+    const nav = document.querySelector('nav[aria-label="Exchange setup"]');
+    expect(nav).not.toBeNull();
 
     const currentSteps = Array.from(
-      (rail as Element).querySelectorAll('[aria-current="step"]'),
+      (nav as Element).querySelectorAll('[aria-current="step"]'),
     );
     expect(currentSteps.map((step) => step.textContent)).toEqual(["Your file"]);
 
-    // Customize facts with no file yet render the em-dash quiet fact.
-    const facts = Array.from(
-      (rail as Element).querySelectorAll(`.${styles.val}`),
-    );
+    // Customize facts with no file yet render the em-dash quiet fact, once
+    // the Customize menu is opened.
+    await page.getByRole("button", { name: "Customize" }).click();
+    const facts = Array.from(document.querySelectorAll(`.${styles.val}`));
     expect(facts.map((fact) => fact.textContent)).toEqual([
       EM_DASH,
       EM_DASH,
@@ -587,12 +587,13 @@ describe("inviter bench", () => {
       .toBeInTheDocument();
 
     // An incoherent direction (payload to a partner receiving no results)
-    // surfaces in the rail and refuses to arm the create button.
+    // surfaces in the work column's Problems block and refuses to arm the
+    // create button.
     await page
       .getByLabelText("Who receives the matched results")
       .selectOptions("inviter");
     await expect
-      .element(page.getByText("Resolve the problem in the rail to continue."))
+      .element(page.getByText("Resolve the problem above to continue."))
       .toBeInTheDocument();
     expect(
       document.querySelector('section[aria-label="Problems"]'),
@@ -617,11 +618,14 @@ describe("inviter bench", () => {
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Your invitation is ready");
 
-    const rail = document.querySelector('nav[aria-label="Exchange progress"]');
-    expect(rail).not.toBeNull();
-    const current = (rail as Element).querySelector('[aria-current="step"]');
+    const nav = document.querySelector('nav[aria-label="Exchange progress"]');
+    expect(nav).not.toBeNull();
+    const current = (nav as Element).querySelector('[aria-current="step"]');
     expect(current?.textContent).toBe("Share");
-    expect((rail as Element).querySelectorAll("button")).toHaveLength(0);
+    // No step links back into editing: every step button is out of tab order.
+    expect(
+      (nav as Element).querySelectorAll('button[tabindex="0"]'),
+    ).toHaveLength(0);
 
     const ledger = document.querySelector('aside[aria-label="This exchange"]');
     const expiresRow = Array.from(
@@ -663,15 +667,18 @@ describe("inviter bench", () => {
         (row) => row.querySelector("dt")?.childNodes[0].textContent === label,
       );
 
-    // The rail's Customize facts are links once the file is read; the open
-    // tab carries aria-current="true" (spine steps use "step").
-    await page.getByRole("button", { name: "Matching keys" }).click();
+    // The Customize menu's facts are links once the file is read; the open
+    // tab's menu item carries aria-current="true" (spine steps use "step").
+    await page.getByRole("button", { name: "Customize" }).click();
+    await page.getByRole("menuitem", { name: /Matching keys/ }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Matching keys");
-    expect(document.querySelector('[aria-current="true"]')?.textContent).toBe(
-      "Matching keys",
-    );
+    await page.getByRole("button", { name: "Customize" }).click();
+    expect(
+      document.querySelector('[role="menuitem"][aria-current="true"]')
+        ?.textContent,
+    ).toContain("Matching keys");
 
     // Reordering the guided list reorders the ledger's matched-on keys.
     const orderBefore = ledgerRow("Matched on")?.querySelector("dd")
@@ -703,7 +710,8 @@ describe("inviter bench", () => {
 
     // The agreement authored in its tab reaches the ledger and the review
     // table.
-    await page.getByRole("button", { name: "Legal agreement" }).click();
+    await page.getByRole("button", { name: "Customize" }).click();
+    await page.getByRole("menuitem", { name: /Legal agreement/ }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Legal agreement");
@@ -892,11 +900,8 @@ describe("inviter bench", () => {
     expect(document.querySelector(`.${styles.fileCard}`)).toBeNull();
     expect(document.querySelector(`.${styles.callout}`)).toBeNull();
     await expect.element(continueButton).toBeDisabled();
-    const facts = Array.from(
-      document.querySelectorAll(
-        `nav[aria-label="Exchange setup"] .${styles.val}`,
-      ),
-    );
+    await page.getByRole("button", { name: "Customize" }).click();
+    const facts = Array.from(document.querySelectorAll(`.${styles.val}`));
     expect(facts.map((fact) => fact.textContent)).toEqual([
       EM_DASH,
       EM_DASH,
