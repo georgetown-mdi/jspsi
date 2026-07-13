@@ -22,12 +22,17 @@ export function BenchShell({
   ledger?: ReactNode;
   children: ReactNode;
 }) {
+  // gridUnderBar raises the ledger's sticky offset above the stuck top bar;
+  // a ledger with no bar (a generic layout this shell permits even though no
+  // current bench composes it) keeps the plain offset.
   const gridClass =
     topBar === undefined && ledger === undefined
       ? `${styles.grid} ${styles.gridPlain}`
       : ledger === undefined
         ? styles.grid
-        : `${styles.grid} ${styles.gridLedger}`;
+        : topBar === undefined
+          ? `${styles.grid} ${styles.gridLedger}`
+          : `${styles.grid} ${styles.gridLedger} ${styles.gridUnderBar}`;
   return (
     <BenchPage>
       {topBar}

@@ -11,6 +11,10 @@
   color: var(--bench-ink);
   font-size: 16.5px;
   line-height: 1.5;
+  /* The top bar's fixed height: sets .topBar's real rendered height AND the
+     sticky offset of anything that must clear the stuck bar (.gridUnderBar
+     .ledger), so the two cannot drift apart. */
+  --bench-topbar-height: 56px;
 }
 
 .page h1 {
@@ -137,9 +141,10 @@
   display: flex;
   align-items: center;
   gap: 20px;
+  height: var(--bench-topbar-height);
   background: var(--bench-column);
   border-bottom: 1px solid var(--bench-rule);
-  padding: 12px 32px;
+  padding: 0 32px;
 }
 
 .wordmark {
@@ -239,6 +244,14 @@
   border: 1px solid var(--bench-rule);
   border-radius: 10px;
   padding: 18px 20px 16px 20px;
+}
+
+/* Under a top bar both elements stick in the same scroll container, so the
+   ledger's offset must clear the bar's height or the opaque bar covers its
+   top edge. Scoped to grids that actually sit under a bar; a bar-less screen
+   keeps the plain 20px offset above. */
+.gridUnderBar .ledger {
+  top: calc(var(--bench-topbar-height) + 20px);
 }
 
 .ledger h2 {
@@ -866,7 +879,7 @@
 
 @media (max-width: 560px) {
   .topBar {
-    padding: 12px 16px;
+    padding: 0 16px;
     gap: 12px;
   }
 
