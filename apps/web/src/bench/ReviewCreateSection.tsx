@@ -27,7 +27,7 @@ const DIRECTION_CHOICES: ReadonlyArray<{
   value: OutputDirection;
   label: string;
 }> = [
-  { value: "both", label: `${RESULTS_DIRECTION_LABELS.both} (recommended)` },
+  { value: "both", label: RESULTS_DIRECTION_LABELS.both },
   { value: "inviter", label: RESULTS_DIRECTION_LABELS.inviter },
   { value: "partner", label: RESULTS_DIRECTION_LABELS.partner },
 ];
@@ -143,7 +143,7 @@ export function ReviewCreateSection({
             name="transport"
             checked={transport === "browser"}
             onChange={() => onTransport("browser")}
-            label="Live, in this browser (recommended)"
+            label="Live, in this browser"
             description="Your browsers connect directly. You get an invitation link and code to share; keep this tab open while your partner accepts."
           />
         </div>
@@ -245,7 +245,7 @@ export function ReviewCreateSection({
           Create the invitation
         </Button>
         <Button variant="default" disabled={minting} onClick={onReset}>
-          Reset to recommended
+          Reset to defaults
         </Button>
         <p
           className={

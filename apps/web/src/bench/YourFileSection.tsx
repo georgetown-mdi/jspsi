@@ -156,7 +156,7 @@ export function YourFileSection({
       {acquired !== undefined && linkable && (
         <div className={styles.callout}>
           <p className={styles.calloutLead}>
-            Recommended terms are ready. Most exchanges need nothing more.
+            Default terms are ready. Most exchanges need nothing more.
           </p>
           <p className={styles.small}>
             Cleaning, matching keys, and the option of a legal agreement were

@@ -295,7 +295,7 @@ export function AcceptorColumnsStep({
           Start the exchange
         </Button>
         <Button variant="subtle" onClick={onReset}>
-          Reset to recommended
+          Reset to defaults
         </Button>
       </div>
     </>

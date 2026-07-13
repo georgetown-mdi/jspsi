@@ -585,7 +585,9 @@ export function InviterBench() {
       }
       ledger={
         <Ledger
-          tag={sealed ? "Terms sealed at create" : undefined}
+          tag={
+            sealed ? "Terms locked when the invitation was created" : undefined
+          }
           rows={inviterLedgerRows(
             editor,
             savedExchange?.invitation.expires ?? invitation?.expires,
@@ -688,7 +690,7 @@ export function InviterBench() {
                 }
                 onReset={() => {
                   setEditor(resetToRecommended(editor, acquired));
-                  setEditorAnnouncement("Reset to the recommended settings.");
+                  setEditorAnnouncement("Reset to the default settings.");
                 }}
                 onCreate={() => void createInvitation()}
                 onNavigate={goTo}
@@ -728,9 +730,7 @@ export function InviterBench() {
               }
               onResetCleaning={() => {
                 setEditor(editorWithRecommendedCleaning(editor, acquired));
-                setEditorAnnouncement(
-                  "Cleaning reset to the recommended steps.",
-                );
+                setEditorAnnouncement("Cleaning reset to the default steps.");
               }}
               cleaningError={reviewValidation(editor).errors.standardization}
               onBack={() => goTo("review")}

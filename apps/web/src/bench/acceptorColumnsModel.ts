@@ -85,7 +85,7 @@ export interface AcceptorColumnsState {
 /**
  * The seed metadata for a freshly-acquired file: {@link inferMetadata} over the
  * file's columns, normalized for the editor so the collapsed disclosure control is
- * faithful (see {@link normalizeForEditor}). "Reset to recommended" restores exactly
+ * faithful (see {@link normalizeForEditor}). "Reset to defaults" restores exactly
  * this, and the override layers start empty.
  */
 export function acceptorInitialColumnsState(

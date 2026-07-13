@@ -444,7 +444,7 @@ export function keySatisfiabilityFor(
 }
 
 /** Discard every edit and re-derive the recommended draft from the file,
- * keeping only the inviter's name -- step 3's "Reset to recommended". */
+ * keeping only the inviter's name -- step 3's "Reset to defaults". */
 export function resetToRecommended(
   editor: InviterEditor,
   csv: AcquiredCsv,
@@ -561,7 +561,7 @@ export const LIFETIME_CHOICES: ReadonlyArray<{
   seconds: number;
   label: string;
 }> = [
-  { seconds: 3600, label: "1 hour (recommended)" },
+  { seconds: 3600, label: "1 hour" },
   { seconds: 6 * 3600, label: "6 hours" },
   { seconds: 86400, label: "1 day" },
   { seconds: 7 * 86400, label: "7 days" },

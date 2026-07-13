@@ -99,8 +99,8 @@ export function CleaningErrorBoundary({
         >
           <Stack gap="sm" align="flex-start">
             <Text size="sm">
-              Resetting your field cleaning to the recommended steps should
-              restore it. Your file and consent are unaffected.
+              Resetting your field cleaning to the default steps should restore
+              it. Your file and consent are unaffected.
             </Text>
             <Button
               size="xs"
@@ -109,7 +109,7 @@ export function CleaningErrorBoundary({
                 reset();
               }}
             >
-              Reset to recommended
+              Reset to defaults
             </Button>
           </Stack>
         </Alert>

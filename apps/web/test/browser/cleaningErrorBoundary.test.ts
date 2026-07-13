@@ -62,7 +62,7 @@ describe("CleaningErrorBoundary contains a cleaning-section crash and recovers",
         .element(page.getByText("The cleaning editor hit an unexpected state"))
         .toBeInTheDocument();
       const resetButton = page.getByRole("button", {
-        name: "Reset to recommended",
+        name: "Reset to defaults",
       });
       await expect.element(resetButton).toBeInTheDocument();
 
