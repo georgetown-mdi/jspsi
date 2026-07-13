@@ -433,11 +433,7 @@ export function AcceptorBench() {
         transportNote="Browser"
       />
     ) : (
-      <TopBar
-        navLabel="Accept an invitation"
-        steps={spineSteps}
-        customize={{ facts: customizeFacts }}
-      />
+      <TopBar navLabel="Accept an invitation" steps={spineSteps} />
     );
 
   // The confirm-columns partial-coverage advisory surfaces in the work
@@ -463,6 +459,7 @@ export function AcceptorBench() {
             ? acceptorDoneLedgerTag(invitingPartyName(token))
             : acceptorLedgerTag(invitingPartyName(token))
         }
+        customize={step === "launched" ? undefined : customizeFacts}
         rows={(settled && launched !== undefined
           ? acceptorDoneLedgerRows(
               token,

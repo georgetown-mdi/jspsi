@@ -7,6 +7,11 @@ import { page, userEvent } from "vitest/browser";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
+// Load Mantine's stylesheet so components render with their real
+// geometry: without it the Stepper's completed-step icon has no size
+// bound and blankets the top bar, intercepting unrelated clicks.
+import "@mantine/core/styles.css";
+
 import { MantineProvider } from "@mantine/core";
 
 import { decodeInvitation } from "@psilink/core";
@@ -371,23 +376,29 @@ describe("inviter bench", () => {
     const nav = document.querySelector('nav[aria-label="Exchange setup"]');
     expect(nav).not.toBeNull();
 
+    // The step indicators share the button's text content, so the current
+    // step's identity is read off its label node.
     const currentSteps = Array.from(
-      (nav as Element).querySelectorAll('[aria-current="step"]'),
+      (nav as Element).querySelectorAll(
+        '[aria-current="step"] .mantine-Stepper-stepLabel',
+      ),
     );
     expect(currentSteps.map((step) => step.textContent)).toEqual(["Your file"]);
 
-    // Customize facts with no file yet render the em-dash quiet fact, once
-    // the Customize menu is opened.
-    await page.getByRole("button", { name: "Customize" }).click();
-    const facts = Array.from(document.querySelectorAll(`.${styles.val}`));
+    const ledger = document.querySelector('aside[aria-label="This exchange"]');
+    expect(ledger).not.toBeNull();
+
+    // The ledger hosts the Customize group pre-create; with no file yet each
+    // fact renders the em-dash quiet value on a not-yet-reachable row.
+    expect((ledger as Element).textContent).toContain("Customize");
+    const facts = Array.from(
+      (ledger as Element).querySelectorAll(`.${styles.val}`),
+    );
     expect(facts.map((fact) => fact.textContent)).toEqual([
       EM_DASH,
       EM_DASH,
       EM_DASH,
     ]);
-
-    const ledger = document.querySelector('aside[aria-label="This exchange"]');
-    expect(ledger).not.toBeNull();
 
     const rowLabels = Array.from(
       (ledger as Element).querySelectorAll("dt"),
@@ -620,14 +631,18 @@ describe("inviter bench", () => {
 
     const nav = document.querySelector('nav[aria-label="Exchange progress"]');
     expect(nav).not.toBeNull();
-    const current = (nav as Element).querySelector('[aria-current="step"]');
+    const current = (nav as Element).querySelector(
+      '[aria-current="step"] .mantine-Stepper-stepLabel',
+    );
     expect(current?.textContent).toBe("Share");
     // No step links back into editing: every step button is out of tab order.
     expect(
       (nav as Element).querySelectorAll('button[tabindex="0"]'),
     ).toHaveLength(0);
 
+    // Sealed terms: the ledger's Customize group is gone post-create.
     const ledger = document.querySelector('aside[aria-label="This exchange"]');
+    expect((ledger as Element).textContent).not.toContain("Customize");
     const expiresRow = Array.from(
       (ledger as Element).querySelectorAll(`.${styles.ledgerRow}`),
     ).find(
@@ -667,17 +682,17 @@ describe("inviter bench", () => {
         (row) => row.querySelector("dt")?.childNodes[0].textContent === label,
       );
 
-    // The Customize menu's facts are links once the file is read; the open
-    // tab's menu item carries aria-current="true" (spine steps use "step").
-    await page.getByRole("button", { name: "Customize" }).click();
-    await page.getByRole("menuitem", { name: /Matching keys/ }).click();
+    // The ledger's Customize rows are plain buttons once the file is read;
+    // the open tab's row carries aria-current="true" (spine steps use
+    // "step"), and each row's accessible name carries its quiet fact.
+    await page.getByRole("button", { name: /Matching keys/ }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Matching keys");
-    await page.getByRole("button", { name: "Customize" }).click();
     expect(
-      document.querySelector('[role="menuitem"][aria-current="true"]')
-        ?.textContent,
+      document.querySelector(
+        `aside[aria-label="This exchange"] button[aria-current="true"]`,
+      )?.textContent,
     ).toContain("Matching keys");
 
     // Reordering the guided list reorders the ledger's matched-on keys.
@@ -710,8 +725,7 @@ describe("inviter bench", () => {
 
     // The agreement authored in its tab reaches the ledger and the review
     // table.
-    await page.getByRole("button", { name: "Customize" }).click();
-    await page.getByRole("menuitem", { name: /Legal agreement/ }).click();
+    await page.getByRole("button", { name: /Legal agreement/ }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Legal agreement");
@@ -900,7 +914,6 @@ describe("inviter bench", () => {
     expect(document.querySelector(`.${styles.fileCard}`)).toBeNull();
     expect(document.querySelector(`.${styles.callout}`)).toBeNull();
     await expect.element(continueButton).toBeDisabled();
-    await page.getByRole("button", { name: "Customize" }).click();
     const facts = Array.from(document.querySelectorAll(`.${styles.val}`));
     expect(facts.map((fact) => fact.textContent)).toEqual([
       EM_DASH,
@@ -1006,7 +1019,9 @@ describe("inviter bench", () => {
     });
     const rail = document.querySelector('nav[aria-label="Exchange progress"]');
     expect(
-      (rail as Element).querySelector('[aria-current="step"]')?.textContent,
+      (rail as Element).querySelector(
+        '[aria-current="step"] .mantine-Stepper-stepLabel',
+      )?.textContent,
     ).toBe("Share");
   });
 
@@ -1053,9 +1068,10 @@ describe("inviter bench", () => {
 
     const rail = () =>
       document.querySelector('nav[aria-label="Exchange progress"]') as Element;
-    expect(rail().querySelector('[aria-current="step"]')?.textContent).toBe(
-      "Confirm protocol",
-    );
+    const currentStepLabel = () =>
+      rail().querySelector('[aria-current="step"] .mantine-Stepper-stepLabel')
+        ?.textContent;
+    expect(currentStepLabel()).toBe("Confirm protocol");
 
     // Per-key stages sit under Link keys; the history keeps the completed
     // stages with their times, and the progress bar tracks the position.
@@ -1065,9 +1081,7 @@ describe("inviter bench", () => {
         "Linking key 2 / 2",
       );
     });
-    expect(rail().querySelector('[aria-current="step"]')?.textContent).toBe(
-      "Link keys",
-    );
+    expect(currentStepLabel()).toBe("Link keys");
     await expect
       .element(page.getByText(/Waiting for your partner - done/))
       .toBeInTheDocument();
@@ -1417,10 +1431,13 @@ describe("inviter bench", () => {
       .toHaveTextContent("Save your exchange file");
     expect(document.querySelectorAll(`.${styles.tagRoadmap}`)).toHaveLength(0);
     expect(lifecycleHarness.calls).toHaveLength(0);
-    // The save rail shows the four-step timeline with Save file current.
+    // The save-flow top bar shows the four-step timeline with Save file
+    // current.
     const rail = document.querySelector('nav[aria-label="Exchange progress"]');
     expect(
-      (rail as Element).querySelector('[aria-current="step"]')?.textContent,
+      (rail as Element).querySelector(
+        '[aria-current="step"] .mantine-Stepper-stepLabel',
+      )?.textContent,
     ).toBe("Save file");
     // The capability statement is explicit on the surface and in the ledger.
     await expect

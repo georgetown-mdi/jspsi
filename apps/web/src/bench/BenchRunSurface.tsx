@@ -53,7 +53,7 @@ export function CopyRow({
   value,
 }: {
   label: string;
-  hint: string;
+  hint?: string;
   value: string;
 }) {
   const [copyStatus, setCopyStatus] = useState("");
@@ -73,7 +73,7 @@ export function CopyRow({
   return (
     <div className={styles.copyRow}>
       <span className={styles.copyLabel}>{label}</span>
-      <span className={styles.copyHint}>{hint}</span>
+      {hint !== undefined && <span className={styles.copyHint}>{hint}</span>}
       <div className={styles.copyBox}>
         <div
           className={`${styles.codeBlock} ${styles.mono} ${styles.copyPreview}`}
