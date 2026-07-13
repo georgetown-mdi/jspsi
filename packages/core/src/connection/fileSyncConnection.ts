@@ -1145,7 +1145,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       this.path = inboundDir;
       this.outbound = split ? outboundDir : undefined;
 
-      const connectOptions = this.buildSftpConnectOptions(config);
+      const connectOptions = this.buildSftpConnectOptions(config, {
+        includeCredentials: true,
+      });
 
       // Host-key verification, installed AFTER providerOptions (which the
       // allowlist already strips of hostVerifier/hostHash) so a providerOptions
@@ -1421,10 +1423,20 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
    * are assigned AFTER and always win, so a providerOptions entry can never
    * override them even if the allowlist were loosened. Shared by {@link open}
    * and {@link probeHostKeyFingerprint} so the probe negotiates with the exact
-   * same options (and therefore the same host-key type) the real connect uses.
+   * same options (and therefore the same host-key type) the real connect uses;
+   * only credentials differ, gated by `includeCredentials`.
+   *
+   * `includeCredentials` is false for the host-key probe, which refuses before
+   * authenticating and so needs no credential. Omitting them is not merely tidy:
+   * the probe runs before `@path` credential refs are resolved, so an included
+   * `privateKey`/`password` could still be an unresolved "@/path" string, and
+   * ssh2 parses `privateKey` eagerly at connect time -- it would abort the probe
+   * with "Unsupported key format" before ever reading the host key. Credentials
+   * never affect host-key negotiation, so the probe still sees the same key.
    */
   private buildSftpConnectOptions(
     config: SFTPConnectionConfig,
+    { includeCredentials }: { includeCredentials: boolean },
   ): Record<string, unknown> {
     const connectOptions: Record<string, unknown> = {};
     this.applyProviderOptions(connectOptions, config.providerOptions);
@@ -1436,26 +1448,28 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       connectOptions["port"] = config.server.port;
     if (config.server.username !== undefined)
       connectOptions["username"] = config.server.username;
-    if (config.server.password !== undefined)
-      connectOptions["password"] = config.server.password;
-    if (config.server.privateKey !== undefined)
-      connectOptions["privateKey"] = config.server.privateKey;
-    if (config.server.privateKeyPassphrase !== undefined)
-      connectOptions["passphrase"] = config.server.privateKeyPassphrase;
-    // Offer the keyboard-interactive auth method alongside `password` for a
-    // server that disables the direct `password` method but accepts the same
-    // password over keyboard-interactive (ssh2 tries password first, then
-    // keyboard-interactive, exactly as a GUI SFTP client does). The transport
-    // adapter reads this flag to install a handler that answers the server's
-    // prompts with `password`; gated on a password being present so the handler
-    // always has a value to answer with (the schema also refines this). Nothing
-    // is installed unless the operator opted in, so default behavior is
-    // unchanged. See SSH2SFTPClientAdapter.connect and docs/EXCHANGE_REFERENCE.md.
-    if (
-      config.server.keyboardInteractive === true &&
-      config.server.password !== undefined
-    )
-      connectOptions["tryKeyboard"] = true;
+    if (includeCredentials) {
+      if (config.server.password !== undefined)
+        connectOptions["password"] = config.server.password;
+      if (config.server.privateKey !== undefined)
+        connectOptions["privateKey"] = config.server.privateKey;
+      if (config.server.privateKeyPassphrase !== undefined)
+        connectOptions["passphrase"] = config.server.privateKeyPassphrase;
+      // Offer the keyboard-interactive auth method alongside `password` for a
+      // server that disables the direct `password` method but accepts the same
+      // password over keyboard-interactive (ssh2 tries password first, then
+      // keyboard-interactive, exactly as a GUI SFTP client does). The transport
+      // adapter reads this flag to install a handler that answers the server's
+      // prompts with `password`; gated on a password being present so the handler
+      // always has a value to answer with (the schema also refines this). Nothing
+      // is installed unless the operator opted in, so default behavior is
+      // unchanged. See SSH2SFTPClientAdapter.connect and docs/EXCHANGE_REFERENCE.md.
+      if (
+        config.server.keyboardInteractive === true &&
+        config.server.password !== undefined
+      )
+        connectOptions["tryKeyboard"] = true;
+    }
     // serverConnectTimeoutMs for SFTP is enforced by ssh2 via readyTimeout, not a
     // Promise.race wrapper -- the per-attempt deadline is equivalent. Always set:
     // the schema defaults the field to DEFAULT_SERVER_CONNECT_TIMEOUT_MS, and the
@@ -1490,7 +1504,9 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   async probeHostKeyFingerprint(
     config: SFTPConnectionConfig,
   ): Promise<PresentedHostKey> {
-    const connectOptions = this.buildSftpConnectOptions(config);
+    const connectOptions = this.buildSftpConnectOptions(config, {
+      includeCredentials: false,
+    });
     let captured: PresentedHostKey | undefined;
     let captureError: unknown;
     let connectError: unknown;

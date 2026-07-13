@@ -1047,6 +1047,54 @@ test("probeHostKeyFingerprint returns the presented key without authenticating",
   expect(conn.connected).toBe(false);
 });
 
+test("probeHostKeyFingerprint sends no credential, so an unresolved @path never reaches ssh2", async () => {
+  // Regression: the probe refuses before authenticating and runs before @path
+  // credential refs are resolved, so it must pass NO credential to ssh2. A
+  // literal "@/secrets/id_rsa" left in privateKey would otherwise hit ssh2's
+  // eager privateKey parse at connect time and abort with "Unsupported key
+  // format" -- surfacing as "could not read the server's host key" -- before the
+  // host key is ever read.
+  const blob = ed25519Blob();
+  const { client } = makeMockClient();
+  let captured: Record<string, unknown> | undefined;
+  client.connect = (options: Record<string, unknown>) => {
+    captured = options;
+    const verifier = options["hostVerifier"] as (
+      b: Buffer,
+      verify: (permitted: boolean) => void,
+    ) => void;
+    return new Promise<void>((resolve, reject) => {
+      verifier(blob, (permitted: boolean) =>
+        permitted
+          ? resolve()
+          : reject(new Error("Host denied (verification failed)")),
+      );
+    });
+  };
+  const conn = new FileSyncConnection(client, { verbose: -1 });
+  const presented = await conn.probeHostKeyFingerprint({
+    channel: "sftp",
+    server: {
+      host: "sftp.example.org",
+      username: "roberts",
+      privateKey: "@/secrets/id_rsa",
+      privateKeyPassphrase: "@/secrets/pass",
+    },
+  });
+  // The host key is still read: dropping credentials leaves host-key negotiation
+  // unchanged.
+  expect(presented.keyType).toBe("ssh-ed25519");
+  // No credential -- the unresolved @path included -- reached ssh2.
+  expect(captured).toBeDefined();
+  expect(captured?.["privateKey"]).toBeUndefined();
+  expect(captured?.["passphrase"]).toBeUndefined();
+  expect(captured?.["password"]).toBeUndefined();
+  expect(captured?.["tryKeyboard"]).toBeUndefined();
+  // The non-secret fields the probe DOES need are still present.
+  expect(captured?.["host"]).toBe("sftp.example.org");
+  expect(captured?.["username"]).toBe("roberts");
+});
+
 test("probeHostKeyFingerprint throws when the host presents no key", async () => {
   // A connect that fails before presenting a key (here, a no-verifier resolve)
   // leaves nothing captured, so the probe throws rather than returning a bogus
