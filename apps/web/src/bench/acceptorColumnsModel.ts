@@ -325,8 +325,8 @@ export function acceptorHasIdentifierConflict(metadata: Metadata): boolean {
 }
 
 /**
- * The Cleaning tab's rail attention state. The tab keeps its em-dash placeholder
- * until there is a REASON to review cleaning -- a silent-empty field (a transform
+ * The Cleaning tab's Customize-menu attention state. The tab keeps its em-dash
+ * placeholder until there is a REASON to review cleaning -- a silent-empty field (a transform
  * that drops every row), a dead key (a self-defeating adopted rule), or an
  * invalid/mid-edit step -- then it shows an amber attention value naming the failing
  * field count. Warns via colour; never blocks (except through the standardization
@@ -343,8 +343,8 @@ export interface AcceptorCleaningAttention {
    * Zero when only a dead key drives attention (dead keys are counted separately and
    * are the partner's to fix). */
   failingFieldCount: number;
-  /** The rail fact string: undefined (em-dash) when no attention is needed, else the
-   * amber "N field(s) failing" value. */
+  /** The Customize-menu fact string: undefined (em-dash) when no attention is
+   * needed, else the amber "N field(s) failing" value. */
   railValue: string | undefined;
 }
 

@@ -6,12 +6,11 @@ import { summarizeInvitation } from "@psi/invitationSummary";
 import { dateTimeLabel } from "./inviterModel";
 
 import type { InvitationToken, LinkageTerms, Metadata } from "@psilink/core";
-
-import type { RailFact, RailStepState } from "./Rail";
+import type { RailFact, RailStepState } from "./inviterModel";
 
 /**
  * The pure model behind the acceptor bench's three-step spine: the step
- * progression the rail walks, the disclosure ledger built from the decoded
+ * progression the top bar walks, the disclosure ledger built from the decoded
  * invitation's terms and the acceptor's own live metadata disclosure, the single
  * Customize fact, and the consent-gate helper the consent step submits through. No
  * React and no I/O -- the tested boundary for "the spine derives
@@ -32,12 +31,12 @@ import type { RailFact, RailStepState } from "./Rail";
  * own column names are sanitized per name here, as the columns-step summary does.
  */
 
-/** The acceptor's three spine steps, in order -- the steps the rail walks. */
+/** The acceptor's three spine steps, in order -- the steps the top bar walks. */
 export type AcceptorSpineStepName = "review" | "consent" | "columns";
 
 /** The acceptor's working states: the three spine steps plus the terminal `launched`
  * state the columns step commits to, which drives the acceptor's run surface.
- * `launched` is not a spine step -- the rail switches to the run timeline there. */
+ * `launched` is not a spine step -- the top bar switches to the run timeline there. */
 export type AcceptorStep = AcceptorSpineStepName | "launched";
 
 /** The spine step labels, exactly as the mockup names them. */
@@ -47,7 +46,7 @@ export const ACCEPTOR_STEP_LABELS: Record<AcceptorSpineStepName, string> = {
   columns: "Confirm your columns",
 };
 
-/** The spine order the rail renders and the step-state derivation walks. */
+/** The spine order the top bar renders and the step-state derivation walks. */
 export const ACCEPTOR_STEP_ORDER: ReadonlyArray<AcceptorSpineStepName> = [
   "review",
   "consent",
@@ -69,7 +68,7 @@ export interface AcceptorSpineStep {
  * on: steps before the current one are done (and navigable back), the current
  * one is current, and later ones are pending -- the inviterModel spine pattern,
  * over the acceptor's fixed three-step order. Only the spine steps are passed; the
- * terminal `launched` state swaps the rail for the run timeline instead.
+ * terminal `launched` state swaps the top bar for the run timeline instead.
  */
 export function acceptorSpine(
   current: AcceptorSpineStepName,

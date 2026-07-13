@@ -66,8 +66,8 @@ export function MatchingSharingSection({
   }, [summary]);
 
   // The two-identifier conflict's visible surfaces are the standing hint and
-  // the rail's Problems entry, per the design; this deferred region is its
-  // audible half, voiced even when a seed mounts already in conflict.
+  // the work column's Problems entry, per the design; this deferred region is
+  // its audible half, voiced even when a seed mounts already in conflict.
   const conflictAnnouncement = useDeferredAnnouncement(
     hasMultipleIdentifiers(metadata)
       ? "Problem: choose a single row identifier."

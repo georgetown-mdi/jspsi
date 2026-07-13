@@ -85,8 +85,8 @@ export function failureFor(
     // lifecycle scopes "config" to that type). Not a transport drop: retrying
     // as-is fails identically, so the message -- actionable -- is surfaced and
     // the alert offers start-over (back to Review & create with every input
-    // intact, where the rail's Problems block routes to the fix) rather than
-    // a retry.
+    // intact, where the work column's Problems block routes to the fix)
+    // rather than a retry.
     return {
       category,
       title: "Could not prepare the exchange",

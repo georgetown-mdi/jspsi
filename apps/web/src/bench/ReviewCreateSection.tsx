@@ -94,7 +94,7 @@ export function ReviewCreateSection({
   const readiness = useDeferredAnnouncement(
     problems.length === 0
       ? "Ready to create the invitation."
-      : `${problems.length === 1 ? "A problem" : `${problems.length} problems`} in the rail must be resolved before you can create.`,
+      : `${problems.length === 1 ? "A problem" : `${problems.length} problems`} above must be resolved before you can create.`,
   );
   return (
     <>
@@ -256,7 +256,7 @@ export function ReviewCreateSection({
         >
           {problems.length === 0
             ? "Ready to create."
-            : `Resolve ${problems.length === 1 ? "the problem" : `the ${problems.length} problems`} in the rail to continue.`}
+            : `Resolve ${problems.length === 1 ? "the problem" : `the ${problems.length} problems`} above to continue.`}
         </p>
       </div>
     </>

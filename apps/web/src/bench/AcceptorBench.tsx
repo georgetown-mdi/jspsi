@@ -33,7 +33,6 @@ import {
   acceptorSpine,
   invitingPartyName,
 } from "./acceptorModel";
-import { Rail, RailFacts, RailGroup, RailProblems, RailSteps } from "./Rail";
 import {
   acceptorCleaningAttention,
   acceptorColumnsEditorState,
@@ -47,6 +46,8 @@ import { AcceptorExchangeSection } from "./AcceptorExchangeSection";
 import { BenchShell } from "./BenchShell";
 import { FILE_ASSURANCE_LINE } from "./fileAssurance";
 import { Ledger } from "./Ledger";
+import { Problems } from "./Problems";
+import { TopBar } from "./TopBar";
 import { acceptorTimelineSteps } from "./exchangeRun";
 import styles from "./bench.module.css";
 import { useAcceptorExchange } from "./useAcceptorExchange";
@@ -71,7 +72,7 @@ import type { AlertContent } from "@components/csvIntake";
 import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 import type { FileRejection } from "@mantine/dropzone";
 import type { IntakeAlert } from "./YourFileSection";
-import type { RailStep } from "./Rail";
+import type { RailStep } from "./inviterModel";
 
 /** Stable empty inputs for {@link useNonEmptyRates} before a file is acquired, so the
  * hook's controller is not rebuilt every render on a fresh `[]` identity. */
@@ -79,7 +80,7 @@ const EMPTY_ROWS: ReadonlyArray<CSVRow> = [];
 const EMPTY_STANDARDIZATION: Standardization = [];
 
 /** The columns-step sub-section: the main confirm surface, or the Cleaning tab the
- * Customize rail group navigates to (mirroring how InviterBench mounts its
+ * Customize menu navigates to (mirroring how InviterBench mounts its
  * CleaningTab). Only meaningful while {@link AcceptorStep} is `columns`. */
 type AcceptorColumnsSection = "columns" | "cleaning";
 
@@ -133,7 +134,7 @@ export function AcceptorBench() {
   const [decode, setDecode] = useState<DecodeState>({ status: "pending" });
   const [step, setStep] = useState<AcceptorStep>("review");
   // The columns-step sub-section: the confirm surface, or the Cleaning tab the
-  // Customize rail group navigates to. Only meaningful while `step` is `columns`.
+  // Customize menu navigates to. Only meaningful while `step` is `columns`.
   const [columnsSection, setColumnsSection] =
     useState<AcceptorColumnsSection>("columns");
   // The consent gate's two inputs; the file is held as an unparsed handle until
@@ -380,9 +381,9 @@ export function AcceptorBench() {
 
   const { run, outputs, failure, tryAgain } = useAcceptorExchange({ launch });
 
-  // Full-CSV coverage for the cleaning tab and the rail's Cleaning-attention value,
-  // one sweep shared by both. The hook must run every render, so it takes empty
-  // inputs until a file is acquired.
+  // Full-CSV coverage for the cleaning tab and the Customize menu's
+  // Cleaning-attention value, one sweep shared by both. The hook must run
+  // every render, so it takes empty inputs until a file is acquired.
   const { rates, pending: ratesPending } = useNonEmptyRates(
     acquired?.rawRows ?? EMPTY_ROWS,
     editorState?.standardization ?? EMPTY_STANDARDIZATION,
@@ -410,47 +411,44 @@ export function AcceptorBench() {
             : undefined,
         }));
 
-  const rail =
+  const customizeFacts = acceptorRailFacts(cleaningAttention?.railValue).map(
+    (fact) => ({
+      ...fact,
+      // The Cleaning tab is reachable only once a file is acquired (the
+      // columns step exists). Selecting it navigates the columns
+      // sub-section, as InviterBench mounts its CleaningTab.
+      onSelect:
+        editorState !== undefined && step === "columns"
+          ? () => setColumnsSection("cleaning")
+          : undefined,
+      current: step === "columns" && columnsSection === "cleaning",
+    }),
+  );
+
+  const topBar =
     step === "launched" ? (
-      <Rail label="Exchange progress">
-        <RailGroup label="This exchange" note="Browser">
-          <RailSteps steps={acceptorTimelineSteps(run)} />
-        </RailGroup>
-        {/* The confirm-columns partial-coverage advisory surfaces in the rail's
-            Problems block as well as the work column's amber alert, while the run
-            has not failed (a failure clears it so it cannot read as the cause). */}
-        <RailProblems
-          problems={
-            launched?.warning !== undefined && failure === undefined
-              ? [{ label: launched.warning.title }]
-              : []
-          }
-        />
-      </Rail>
+      <TopBar
+        navLabel="Exchange progress"
+        steps={acceptorTimelineSteps(run)}
+        transportNote="Browser"
+      />
     ) : (
-      <Rail label="Accept an invitation">
-        <RailGroup label="Accept an invitation">
-          <RailSteps steps={spineSteps} />
-        </RailGroup>
-        <RailGroup label="Customize">
-          <RailFacts
-            facts={acceptorRailFacts(cleaningAttention?.railValue).map(
-              (fact) => ({
-                ...fact,
-                // The Cleaning tab is reachable only once a file is acquired (the
-                // columns step exists). Selecting it navigates the columns
-                // sub-section, as InviterBench mounts its CleaningTab.
-                onSelect:
-                  editorState !== undefined && step === "columns"
-                    ? () => setColumnsSection("cleaning")
-                    : undefined,
-                current: step === "columns" && columnsSection === "cleaning",
-              }),
-            )}
-          />
-        </RailGroup>
-      </Rail>
+      <TopBar
+        navLabel="Accept an invitation"
+        steps={spineSteps}
+        customize={{ facts: customizeFacts }}
+      />
     );
+
+  // The confirm-columns partial-coverage advisory surfaces in the work
+  // column's Problems block as well as its own amber alert, while the run
+  // has not failed (a failure clears it so it cannot read as the cause).
+  const launchedProblems =
+    step === "launched" &&
+    launched?.warning !== undefined &&
+    failure === undefined
+      ? [{ label: launched.warning.title }]
+      : [];
 
   // The ledger settles once the exchange completes: the tag names who it was
   // agreed with, the rows relabel past tense with the actual outcome, and the
@@ -584,8 +582,9 @@ export function AcceptorBench() {
       .join(",") ?? "";
 
   return (
-    <BenchShell rail={ready ? rail : undefined} ledger={ledger}>
+    <BenchShell topBar={ready ? topBar : undefined} ledger={ledger}>
       <div ref={stepHeadingRef}>
+        <Problems problems={launchedProblems} />
         {decode.status === "pending" && (
           <p aria-live="polite">Reading your invitation...</p>
         )}

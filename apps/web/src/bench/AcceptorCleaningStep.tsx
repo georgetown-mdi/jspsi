@@ -31,7 +31,7 @@ import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
  *
  * Presentational over the shared column-step state the bench owns; the full-CSV
  * coverage (`rates`) is computed by the bench's `useNonEmptyRates` and passed in, so
- * one sweep drives both this tab and the rail's Cleaning-attention value.
+ * one sweep drives both this tab and the Customize menu's Cleaning-attention value.
  */
 export function AcceptorCleaningStep({
   declaredFields,
