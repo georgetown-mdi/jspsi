@@ -927,22 +927,51 @@ describe("inviter bench", () => {
   test("post-create: the share screen offers the artifacts while listening", async () => {
     await createSealedInvitation();
 
-    // Both copy artifacts render, the link wrapping the code's token, each
-    // with its copy action; the one-time-secret guidance and the expiry sit
-    // on the thing being shared.
-    const codeBlocks = Array.from(
-      document.querySelectorAll(`.${styles.codeBlock}`),
-    ).map((block) => block.textContent);
-    expect(codeBlocks).toHaveLength(2);
-    expect(codeBlocks[0]).toContain("/accept#");
-    expect(codeBlocks[1].length).toBeGreaterThan(0);
-    expect(codeBlocks[0]).toContain(codeBlocks[1]);
+    // A browser partner accepts by pasting the whole link, so the share
+    // screen offers ONE artifact row -- the link -- and no bare-code row.
+    expect(document.querySelectorAll(`.${styles.copyRow}`)).toHaveLength(1);
     await expect
       .element(page.getByRole("button", { name: "Copy invitation link" }))
       .toBeInTheDocument();
-    await expect
-      .element(page.getByRole("button", { name: "Copy invitation code" }))
-      .toBeInTheDocument();
+    expect(
+      page.getByRole("button", { name: "Copy invitation code" }).query(),
+    ).toBeNull();
+
+    // The reveal expands in place to a readonly textarea holding the full
+    // minted deep link; the toggle keeps focus and reports its state.
+    const reveal = page.getByRole("button", { name: "Show full link" });
+    await expect.element(reveal).toHaveAttribute("aria-expanded", "false");
+    expect(document.querySelector(`.${styles.revealArea}`)).toBeNull();
+    await reveal.click();
+    await expect.element(reveal).toHaveAttribute("aria-expanded", "true");
+    const revealArea = document.querySelector(
+      `.${styles.revealArea}`,
+    ) as HTMLTextAreaElement;
+    expect(revealArea.readOnly).toBe(true);
+    const deepLink = revealArea.value;
+    expect(deepLink).toContain("/accept#");
+
+    // The visible preview is the real head/tail slices of the minted value:
+    // the origin-and-route head in full, then the fragment's first and last
+    // eight characters around an ellipsis.
+    const hash = deepLink.indexOf("#");
+    const fragment = deepLink.slice(hash + 1);
+    expect(fragment.length).toBeGreaterThan(17);
+    expect(document.querySelector(`.${styles.copyPreview}`)?.textContent).toBe(
+      deepLink.slice(0, hash + 1) +
+        fragment.slice(0, 8) +
+        "\u2026" +
+        fragment.slice(-8),
+    );
+
+    // Copying announces through the row's polite status region.
+    await page.getByRole("button", { name: "Copy invitation link" }).click();
+    await vi.waitFor(() => {
+      expect(document.querySelector(`.${styles.copyStatus}`)?.textContent).toBe(
+        "Copied to clipboard",
+      );
+    });
+
     await expect
       .element(page.getByText("It carries a one-time secret", { exact: false }))
       .toBeInTheDocument();
@@ -979,6 +1008,29 @@ describe("inviter bench", () => {
     expect(
       (rail as Element).querySelector('[aria-current="step"]')?.textContent,
     ).toBe("Share");
+  });
+
+  test("post-create: the collapsed share screen never carries the full secret", async () => {
+    await createSealedInvitation();
+
+    // Read the full value through the explicit reveal, then collapse again.
+    const reveal = page.getByRole("button", { name: "Show full link" });
+    await reveal.click();
+    const deepLink = (
+      document.querySelector(`.${styles.revealArea}`) as HTMLTextAreaElement
+    ).value;
+    expect(deepLink).toContain("/accept#");
+    await reveal.click();
+    await expect.element(reveal).toHaveAttribute("aria-expanded", "false");
+    expect(document.querySelector(`.${styles.revealArea}`)).toBeNull();
+
+    // Collapsed, neither the full link nor its whole fragment exists as text
+    // anywhere in the document: the preview must be a real slice, never CSS
+    // truncation over the full secret (which select-all and screen readers
+    // would still receive).
+    const fragment = deepLink.slice(deepLink.indexOf("#") + 1);
+    expect(document.body.textContent).not.toContain(deepLink);
+    expect(document.body.textContent).not.toContain(fragment);
   });
 
   test("post-create: the timeline advances with the exchange stages", async () => {
@@ -1467,10 +1519,12 @@ describe("inviter bench", () => {
 
       // The minted code re-parses through decodeInvitation with the SAME sftp
       // endpoint the file names -- the code and the config point at one
-      // rendezvous.
-      const encoded = document.querySelector(
-        `.${styles.copyRow} .${styles.codeBlock}`,
-      )?.textContent as string;
+      // rendezvous. The full code lives behind the reveal, not in the row's
+      // preview.
+      await page.getByRole("button", { name: "Show full code" }).click();
+      const encoded = (
+        document.querySelector(`.${styles.revealArea}`) as HTMLTextAreaElement
+      ).value;
       const token = await decodeInvitation(encoded);
       const endpoint = token.connectionEndpoint;
       expect(endpoint?.channel).toBe("sftp");
@@ -1533,9 +1587,10 @@ describe("inviter bench", () => {
       expect(yaml).not.toMatch(/password/i);
       expect(yaml).not.toMatch(/authentication/i);
 
-      const encoded = document.querySelector(
-        `.${styles.copyRow} .${styles.codeBlock}`,
-      )?.textContent as string;
+      await page.getByRole("button", { name: "Show full code" }).click();
+      const encoded = (
+        document.querySelector(`.${styles.revealArea}`) as HTMLTextAreaElement
+      ).value;
       const token = await decodeInvitation(encoded);
       expect(token.connectionEndpoint?.channel).toBe("filedrop");
     } finally {
@@ -1559,8 +1614,11 @@ describe("inviter bench", () => {
       await expect
         .element(page.getByText("Saved to your downloads"))
         .toBeInTheDocument();
-      const codeSelector = `.${styles.copyRow} .${styles.codeBlock}`;
-      const firstCode = document.querySelector(codeSelector)?.textContent;
+      await page.getByRole("button", { name: "Show full code" }).click();
+      const codeValue = () =>
+        document.querySelector<HTMLTextAreaElement>(`.${styles.revealArea}`)
+          ?.value;
+      const firstCode = codeValue();
       expect(firstCode?.length).toBeGreaterThan(0);
 
       // Edit the host and save again: the code re-mints, so the old code is
@@ -1571,11 +1629,9 @@ describe("inviter bench", () => {
       );
       await page.getByRole("button", { name: "Save exchange file" }).click();
       await vi.waitFor(() => {
-        const nextCode = document.querySelector(codeSelector)?.textContent;
-        expect(nextCode).not.toBe(firstCode);
+        expect(codeValue()).not.toBe(firstCode);
       });
-      const secondCode = document.querySelector(codeSelector)
-        ?.textContent as string;
+      const secondCode = codeValue() as string;
       const token = await decodeInvitation(secondCode);
       expect(
         (token.connectionEndpoint as { host?: string } | undefined)?.host,

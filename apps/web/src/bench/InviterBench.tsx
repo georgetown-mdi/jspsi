@@ -799,6 +799,7 @@ export function InviterBench() {
             outputs={outputs}
             failure={failure}
             warnings={warnings}
+            partnerAcceptsByCli={isCliTransport(transport)}
             onTryAgain={tryAgain}
             onStartOver={startOver}
           />

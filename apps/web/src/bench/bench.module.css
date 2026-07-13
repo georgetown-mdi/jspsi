@@ -637,6 +637,32 @@
   min-width: 0;
 }
 
+.copyPreview {
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+.copyStatus {
+  min-height: 1.2em;
+  font-size: 13px;
+  color: var(--bench-secondary);
+  margin: 4px 0;
+}
+
+.revealArea {
+  display: block;
+  width: 100%;
+  height: 110px;
+  overflow-y: auto;
+  resize: none;
+  background: var(--bench-code-bg);
+  border: 1px solid var(--bench-rule);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-top: 4px;
+  color: inherit;
+}
+
 .copyBtn {
   flex: none;
   align-self: center;
