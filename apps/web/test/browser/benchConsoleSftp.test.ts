@@ -226,13 +226,15 @@ describe("console inviter bench, sftp channel", () => {
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Your invitation is ready");
 
-    // The minted code carries the picked remote's locator as its sftp
-    // endpoint -- the partner's CLI meets the appliance where it will
-    // actually connect -- and never the remote's appliance-local name.
-    const codeBlocks = Array.from(
-      document.querySelectorAll(`.${styles.codeBlock}`),
-    ).map((block) => block.textContent);
-    const encoded = codeBlocks[1] ?? "";
+    // The CLI-accept share screen keeps the bare-code row (the partner's CLI
+    // takes the code alone); the minted code carries the picked remote's
+    // locator as its sftp endpoint -- the partner's CLI meets the appliance
+    // where it will actually connect -- and never the remote's
+    // appliance-local name. The full code lives behind the row's reveal.
+    await page.getByRole("button", { name: "Show full code" }).click();
+    const encoded = (
+      document.querySelector(`.${styles.revealArea}`) as HTMLTextAreaElement
+    ).value;
     const token = await decodeInvitation(encoded);
     expect(token.connectionEndpoint).toEqual({
       channel: "sftp",

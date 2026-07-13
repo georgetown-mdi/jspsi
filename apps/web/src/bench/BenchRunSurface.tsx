@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Alert, Button, CopyButton } from "@mantine/core";
 import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
@@ -10,13 +10,42 @@ import styles from "./bench.module.css";
 import type { ReactNode } from "react";
 import type { RunFailure } from "./useInviterExchange";
 
+const PREVIEW_EDGE_CHARS = 8;
+const COPY_STATUS_CLEAR_MS = 2000;
+
+/**
+ * The short preview of a copy-only artifact: the secret's first and last
+ * {@link PREVIEW_EDGE_CHARS} characters around an ellipsis, with a deep link's
+ * origin-and-route head (everything through the first `#`, mirroring
+ * `tokenFromInput`'s split) rendered in full. Built by slicing the string --
+ * never CSS truncation over the full value, which would still hand the whole
+ * secret to screen readers and select-all. A value too short to elide renders
+ * whole.
+ */
+function previewFor(value: string): string {
+  const hash = value.indexOf("#");
+  const head = hash === -1 ? "" : value.slice(0, hash + 1);
+  const secret = hash === -1 ? value : value.slice(hash + 1);
+  if (secret.length <= PREVIEW_EDGE_CHARS * 2 + 1) return value;
+  return (
+    head +
+    secret.slice(0, PREVIEW_EDGE_CHARS) +
+    "\u2026" +
+    secret.slice(-PREVIEW_EDGE_CHARS)
+  );
+}
+
 /**
  * A labelled, copy-to-clipboard view of one shareable artifact -- the invitation
- * link/code on the share screen and the save surface. Client-only by
- * construction (both surfaces mount from a handler, so neither server-renders);
- * the `typeof navigator` check is defence-in-depth and hides the button on
- * non-secure origins, where `navigator.clipboard` is undefined -- the text
- * itself stays selectable for a manual copy.
+ * link/code on the share screen and the save surface. The DOM carries only a
+ * head/tail preview of the value; the Copy button puts the full value on the
+ * clipboard (announced through a polite status region), and a disclosure
+ * toggle expands an in-place readonly textarea holding the full value for the
+ * cases where the clipboard cannot be used. The reveal never persists: a fresh
+ * mount is collapsed. Client-only by construction (both surfaces mount from a
+ * handler, so neither server-renders); the `typeof navigator` check is
+ * defence-in-depth and hides the button on non-secure origins, where
+ * `navigator.clipboard` is undefined -- the reveal remains for a manual copy.
  */
 export function CopyRow({
   label,
@@ -27,12 +56,30 @@ export function CopyRow({
   hint: string;
   value: string;
 }) {
+  const [copyStatus, setCopyStatus] = useState("");
+  const [revealed, setRevealed] = useState(false);
+  const statusTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(statusTimer.current), []);
+  function announceCopied() {
+    setCopyStatus("Copied to clipboard");
+    window.clearTimeout(statusTimer.current);
+    statusTimer.current = window.setTimeout(
+      () => setCopyStatus(""),
+      COPY_STATUS_CLEAR_MS,
+    );
+  }
+  // "link" / "code", for the reveal toggle's name.
+  const noun = label.split(" ").at(-1)?.toLowerCase() ?? "value";
   return (
     <div className={styles.copyRow}>
       <span className={styles.copyLabel}>{label}</span>
       <span className={styles.copyHint}>{hint}</span>
       <div className={styles.copyBox}>
-        <div className={`${styles.codeBlock} ${styles.mono}`}>{value}</div>
+        <div
+          className={`${styles.codeBlock} ${styles.mono} ${styles.copyPreview}`}
+        >
+          {previewFor(value)}
+        </div>
         {
           // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
           typeof navigator !== "undefined" && navigator.clipboard ? (
@@ -41,7 +88,10 @@ export function CopyRow({
                 <Button
                   className={styles.copyBtn}
                   variant="default"
-                  onClick={copy}
+                  onClick={() => {
+                    copy();
+                    announceCopied();
+                  }}
                   // Name reflects the copied state so a screen reader announces
                   // the success (the label swap alone is not reliably conveyed
                   // to assistive tech).
@@ -56,6 +106,25 @@ export function CopyRow({
           ) : null
         }
       </div>
+      <div role="status" aria-atomic="true" className={styles.copyStatus}>
+        {copyStatus}
+      </div>
+      <Button
+        variant="subtle"
+        size="compact-sm"
+        aria-expanded={revealed}
+        onClick={() => setRevealed((current) => !current)}
+      >
+        Show full {noun}
+      </Button>
+      {revealed && (
+        <textarea
+          className={`${styles.revealArea} ${styles.mono}`}
+          readOnly
+          value={value}
+          aria-label={label}
+        />
+      )}
     </div>
   );
 }

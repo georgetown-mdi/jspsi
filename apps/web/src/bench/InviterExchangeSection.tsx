@@ -38,6 +38,7 @@ export function InviterExchangeSection({
   outputs,
   failure,
   warnings,
+  partnerAcceptsByCli,
   onTryAgain,
   onStartOver,
 }: {
@@ -48,6 +49,13 @@ export function InviterExchangeSection({
   /** The run's accumulated non-fatal warnings (the driver's `onWarning` slot),
    * rendered beside the status panel through every phase. */
   warnings: ReadonlyArray<string>;
+  /** Whether the partner accepts through the command-line tool (the CLI
+   * transports' server-job runs), whose accept takes the bare code -- the
+   * share screen then offers the code beside the link. A browser partner
+   * needs only the link: the accept form swallows a pasted deep link whole
+   * (tokenFromInput), so the bare code adds nothing but a second secret to
+   * leave on screen. */
+  partnerAcceptsByCli: boolean;
   onTryAgain: () => void;
   onStartOver: () => void;
 }) {
@@ -123,21 +131,33 @@ export function InviterExchangeSection({
       {phase === "share" && (failure === undefined || retryable) && (
         <>
           <h2>Share this invitation</h2>
-          <p>
-            Send one of these to your partner over a trusted channel (for
-            example, secure email). It carries a one-time secret, so treat it as
-            confidential. Keep this tab open while your partner accepts.
-          </p>
+          {partnerAcceptsByCli ? (
+            <p>
+              Send one of these to your partner over a trusted channel (for
+              example, secure email). It carries a one-time secret, so treat it
+              as confidential. Keep this tab open while your partner accepts.
+            </p>
+          ) : (
+            <p>
+              Send this link to your partner over a trusted channel (for
+              example, secure email). It carries a one-time secret, so treat it
+              as confidential. If the link arrives broken, your partner can
+              paste the whole link into the accept form on the bench&apos;s home
+              page. Keep this tab open while your partner accepts.
+            </p>
+          )}
           <CopyRow
             label="Invitation link"
             hint="Opens the accept page with the invitation prefilled"
             value={invitation.deepLink}
           />
-          <CopyRow
-            label="Invitation code"
-            hint="Paste into the accept form if the link cannot be used"
-            value={invitation.encoded}
-          />
+          {partnerAcceptsByCli && (
+            <CopyRow
+              label="Invitation code"
+              hint="Your partner accepts with this same code, whichever transport they run"
+              value={invitation.encoded}
+            />
+          )}
           <p className={styles.small}>
             <strong>
               This invitation expires{" "}
