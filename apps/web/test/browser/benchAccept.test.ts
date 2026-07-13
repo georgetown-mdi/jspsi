@@ -7,6 +7,11 @@ import { page, userEvent } from "vitest/browser";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
+// Load Mantine's stylesheet so components render with their real
+// geometry: without it the Stepper's completed-step icon has no size
+// bound and blankets the top bar, intercepting unrelated clicks.
+import "@mantine/core/styles.css";
+
 import { MantineProvider } from "@mantine/core";
 
 import {
@@ -444,13 +449,16 @@ describe("acceptor bench: review terms", () => {
       "These terms are your partner's proposal, read-only.",
     );
 
-    // The rail walks the acceptor spine with Review terms current.
+    // The top bar walks the acceptor spine with Review terms current; the
+    // step indicators share the button's text, so read the label node.
     const rail = document.querySelector(
       'nav[aria-label="Accept an invitation"]',
     );
     expect(rail).not.toBeNull();
     expect(
-      (rail as Element).querySelector('[aria-current="step"]')?.textContent,
+      (rail as Element).querySelector(
+        '[aria-current="step"] .mantine-Stepper-stepLabel',
+      )?.textContent,
     ).toBe("Review terms");
   });
 
@@ -908,15 +916,20 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
     ).toBeNull();
   });
 
-  test("the Cleaning menu tab opens the acceptor's own cleaning editor", async () => {
+  test("the ledger's Cleaning row opens the acceptor's own cleaning editor", async () => {
     await reachColumns("first_name,last_name\nAlice,Smith\n");
-    // The Customize menu's Cleaning item navigates to the cleaning sub-section
-    // (the acceptor edits only its own standardization there).
-    await userEvent.click(page.getByRole("button", { name: "Customize" }));
-    await userEvent.click(page.getByRole("menuitem", { name: /Cleaning/ }));
+    // The ledger's Customize row navigates to the cleaning sub-section (the
+    // acceptor edits only its own standardization there), and the open tab's
+    // row carries aria-current.
+    await userEvent.click(page.getByRole("button", { name: /Cleaning/ }));
     await expect
       .element(page.getByRole("heading", { name: "Cleaning" }))
       .toBeInTheDocument();
+    expect(
+      document.querySelector(
+        'aside[aria-label="This exchange"] button[aria-current="true"]',
+      )?.textContent,
+    ).toContain("Cleaning");
     // Back returns to the columns confirm surface.
     await userEvent.click(
       page.getByRole("button", { name: "Back to Confirm your columns" }),
@@ -1043,21 +1056,20 @@ describe("acceptor bench: run and completion", () => {
     // the label node (the class), since the history row repeats the text.
     const rail = () =>
       document.querySelector('nav[aria-label="Exchange progress"]') as Element;
+    const currentStepLabel = () =>
+      rail().querySelector('[aria-current="step"] .mantine-Stepper-stepLabel')
+        ?.textContent;
     await vi.waitFor(() => {
       expect(document.querySelector(`.${styles.stageLabel}`)?.textContent).toBe(
         "Connecting to your partner",
       );
     });
-    expect(rail().querySelector('[aria-current="step"]')?.textContent).toBe(
-      "Connect",
-    );
+    expect(currentStepLabel()).toBe("Connect");
 
     // A protocol stage flips Connect to done and Confirm protocol to current.
     call.onStage("confirming protocol");
     await vi.waitFor(() => {
-      expect(rail().querySelector('[aria-current="step"]')?.textContent).toBe(
-        "Confirm protocol",
-      );
+      expect(currentStepLabel()).toBe("Confirm protocol");
     });
 
     // Per-key stages sit under Link keys.
@@ -1067,9 +1079,7 @@ describe("acceptor bench: run and completion", () => {
         "Linking key 2 / 2",
       );
     });
-    expect(rail().querySelector('[aria-current="step"]')?.textContent).toBe(
-      "Link keys",
-    );
+    expect(currentStepLabel()).toBe("Link keys");
   });
 
   test("completion offers downloads and settles the past-tense ledger", async () => {
@@ -1123,6 +1133,8 @@ describe("acceptor bench: run and completion", () => {
     const ledger = document.querySelector(
       'aside[aria-label="This exchange"]',
     ) as Element;
+    // The Customize group left the ledger with the launch.
+    expect(ledger.textContent).not.toContain("Customize");
     expect(ledger.textContent).toContain(
       "Agreed with County Health Department",
     );

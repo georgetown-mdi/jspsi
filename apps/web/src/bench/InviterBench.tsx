@@ -577,11 +577,7 @@ export function InviterBench() {
             transportNote={saveRailNote(transport)}
           />
         ) : (
-          <TopBar
-            navLabel="Exchange setup"
-            steps={steps}
-            customize={{ note: "Filled in from your file.", facts }}
-          />
+          <TopBar navLabel="Exchange setup" steps={steps} />
         )
       }
       ledger={
@@ -589,6 +585,7 @@ export function InviterBench() {
           tag={
             sealed ? "Terms locked when the invitation was created" : undefined
           }
+          customize={sealed ? undefined : facts}
           rows={inviterLedgerRows(
             editor,
             savedExchange?.invitation.expires ?? invitation?.expires,

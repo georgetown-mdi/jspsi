@@ -128,10 +128,6 @@
   min-width: 0;
 }
 
-.work > * {
-  max-width: 640px;
-}
-
 /* ---------- top bar ---------- */
 
 .topBar {
@@ -171,6 +167,20 @@
 
 .topBarStepper {
   min-width: max-content;
+}
+
+/* Label weight/color track the step state alongside Mantine's indicators
+   (accent ring = current, filled check = done, muted number = pending), so
+   the three states read at a glance at the bar's slim height. */
+.topBarStepper button[data-progress] .topBarStepLabel {
+  font-weight: 650;
+  color: var(--bench-ink);
+}
+
+.topBarStepper
+  button:not([data-progress]):not([data-completed])
+  .topBarStepLabel {
+  color: var(--bench-secondary);
 }
 
 /* Scoped under .topBar so the left-auto margin outweighs the .page p margin
@@ -302,6 +312,61 @@
   text-transform: none;
   color: var(--bench-accent);
   white-space: nowrap;
+}
+
+.ledgerCustomize {
+  border-top: 1px solid var(--bench-rule);
+  padding: 9px 0 4px 0;
+}
+
+.ledgerGroupLabel {
+  font-size: 11.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--bench-secondary);
+  margin: 0 0 2px 0;
+}
+
+.ledgerCustomize ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.customizeRow {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 14px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.customizeRow > span:first-child {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.customizeRow:disabled {
+  cursor: default;
+  color: var(--bench-secondary);
+}
+
+.customizeRow:disabled > span:first-child {
+  text-decoration: none;
+}
+
+.customizeCurrent {
+  color: var(--bench-accent);
+  font-weight: 650;
 }
 
 .trust {

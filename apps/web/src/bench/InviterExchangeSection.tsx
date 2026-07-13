@@ -146,11 +146,7 @@ export function InviterExchangeSection({
               page. Keep this tab open while your partner accepts.
             </p>
           )}
-          <CopyRow
-            label="Invitation link"
-            hint="Opens the accept page with the invitation prefilled"
-            value={invitation.deepLink}
-          />
+          <CopyRow label="Invitation link" value={invitation.deepLink} />
           {partnerAcceptsByCli && (
             <CopyRow
               label="Invitation code"

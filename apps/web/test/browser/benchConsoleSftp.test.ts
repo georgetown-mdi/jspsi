@@ -7,6 +7,11 @@ import { page, userEvent } from "vitest/browser";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
+// Load Mantine's stylesheet so components render with their real
+// geometry: without it the Stepper's completed-step icon has no size
+// bound and blankets the top bar, intercepting unrelated clicks.
+import "@mantine/core/styles.css";
+
 import { MantineProvider } from "@mantine/core";
 
 import { decodeInvitation } from "@psilink/core";
