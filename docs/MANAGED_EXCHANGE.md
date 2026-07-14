@@ -179,10 +179,36 @@ as everything else the exchange persists (shape and caveats:
 [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)). Browsers
 without the API (Safari, Firefox) re-select the file each attended run.
 
+The handle is a **live pointer to the path, not a snapshot**: each run reads
+the file through the handle at run start and receives whatever file currently
+exists at that path. Replacing the file at the agreed path with the current
+period's extract **is** the data-refresh workflow -- an export job or the
+operator drops the new file over the same name, and the next scheduled run
+picks it up with no interaction. Because a `File` object obtained from a
+handle is a point-in-time reference, the design reads through the handle at
+each run rather than retaining `File` objects across runs: contents are always
+current at run time.
+
+A missing entry -- the file deleted, moved, or renamed away -- fails the run's
+file read with a clean not-found before any connection is attempted: a third
+benign state alongside expiry and the missed window, never routed through the
+desync/attack framing. An unattended run records it in the run bookkeeping (a
+benign `input` failure; see
+[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)) and surfaces it
+through the notification concept and the next visit's state; an attended visit
+offers re-selection to re-point the handle. Because that state is harmless,
+the same mechanics double as optional hygiene: an operator can remove the file
+after a run completes and drop the next extract before the next window, so the
+file -- and the persisted handle's read path to it -- has content only around
+the run window (see
+[SECURITY_DESIGN.md](SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)).
+
 On every path -- unattended, one-action, or re-selection -- the app rejects an
 input file whose columns cannot satisfy the standing terms: the record's
-document carries the agreed terms' column shape, a cheap guard that catches the
-wrong-dataset case, though not a same-shaped wrong file.
+document carries the agreed terms' column shape, so a malformed or drifted
+refresh is rejected as a benign pre-run problem, never silently linked -- a
+cheap guard that catches the wrong-dataset case, though not a same-shaped
+wrong file.
 
 ## The durability and crash-consistency contract
 
