@@ -5,15 +5,17 @@ title: "Managed (Recurring) Web Exchanges"
 # Managed (recurring) web exchanges
 
 This document describes the **managed exchange** lifecycle for the hosted web
-application: how a two-party PPRL exchange, once set up, can be run again on a
-later schedule from the browser without re-authoring the terms or
-re-establishing a shared secret. It covers the durability and crash-consistency
+application: how a two-party PPRL exchange, once set up, runs again on an agreed
+schedule from the browser -- unattended where the platform allows -- without
+re-authoring the terms or re-establishing a shared secret. It covers the
+automation goal and its platform envelope, the durability and crash-consistency
 contract for the rotating secret, the single-device ownership invariant and its
-rationale, how a party distinguishes a rotation desync from an attack and
-recovers, how the design survives silent browser storage eviction, and the
-moment-anchored backup surfaces that keep an operator honestly informed without
-training click-through. It opens with who the feature serves and the normative
-second-run journey; the failure machinery follows.
+rationale, how a party tells a rotation desync from an attack (and a missed run
+window from either) and recovers, how the design survives silent browser
+storage eviction, the moment-anchored backup surfaces that keep an operator
+honestly informed without training click-through, and the one-action deletion
+of an exchange's stored information. It opens with who the feature serves; the
+failure machinery follows.
 
 It is the operational and conceptual counterpart to two companion documents: the
 **managed exchange record** field-by-field shape in
@@ -25,14 +27,11 @@ directive syntax; those live in the spec tier. Intended readers are program
 officers, security reviewers, IT staff operating the hosted app, and
 contributors.
 
-> **Design spike.** This document is the output of a gating design and security
-> spike for the recurring-exchange epic. It reverses a deliberate invariant --
-> today the web app discards the rotated secret so a web exchange is single-use
-> (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md#recurring-web-exchanges-single-use-vs-managed)) --
-> so it is security-review-gated. Its four decisions were ratified at owner
-> sign-off on 2026-07-14 and recorded under [Decision
-> record](#decision-record-owner-sign-off-2026-07-14); the epic's implementation
-> items remain subject to the security-review gate.
+> **Status.** The managed exchange lifecycle is not yet implemented. It reverses
+> a deliberate invariant -- a web exchange is single-use today, the browser
+> discarding the rotated secret (see
+> [SECURITY_DESIGN.md](SECURITY_DESIGN.md#recurring-web-exchanges-single-use-vs-managed)) --
+> so the epic's implementation is gated on security review.
 
 ## Who this is for
 
@@ -48,86 +47,142 @@ leaving the browser.
 The calibration is honest in both directions. An organization **with** IT
 support should still graduate to the CLI plus host cron -- the CLI remains the
 stronger recurring tool: on-disk key-file durability instead of evictable
-browser storage, true unattended scheduling instead of an operator-initiated
-re-run, and the hardened container deployment. The graduation point is when
-runs need to happen unattended, or as soon as the organization can vet and
-operate installed software at all. Every posture choice in this document --
-browser persistence with honest eviction handling, operator-initiated runs, a
-plaintext export under operator custody -- is calibrated to the no-IT persona,
-not to the organization that has better options.
+browser storage, an OS scheduler instead of a browser runtime kept alive, and
+the hardened container deployment. The graduation point is when the
+organization can vet and operate installed software at all. Every posture
+choice in this document -- browser persistence with honest eviction handling,
+automation inside the operator's own browser runtime, a plaintext export under
+operator custody -- is calibrated to the no-IT persona, not to the organization
+that has better options.
 
 ## What "managed" adds, and what it does not
 
-Today a web exchange is single-use: the browser runs the authenticated exchange,
-derives the rotated secret, and **discards** it, so the exchange cannot run again
-and nothing sensitive persists. A managed exchange instead persists the rotated
-secret alongside this party's exchange-file document (the standing terms and
-rendezvous locator -- the browser's `psilink.yaml` plus `.psilink.key` analog)
-so the same partnership can run again later.
+A one-shot web exchange is single-use: the browser runs the authenticated
+exchange, derives the rotated secret, and **discards** it, so the exchange
+cannot run again and nothing sensitive persists. A managed exchange instead
+persists the rotated secret alongside this party's exchange-file document (the
+standing terms and rendezvous locator -- the browser's `psilink.yaml` plus
+`.psilink.key` analog) so the same partnership can run again later.
 
 What managed **adds**:
 
 - A **managed exchange record** in the browser (IndexedDB, origin-isolated) that
   survives runs, crashes, and restarts.
-- A **rotating shared secret at rest** in that record, replacing the deliberate
+- A **rotating shared secret at rest** in that record, in place of the one-shot
   discard.
-- A **run-again** action that re-runs against the persisted terms and rendezvous,
-  after the operator re-supplies the input file.
+- **Scheduled, unattended runs** as the design goal: once an exchange is
+  managed and a schedule agreed, runs happen with nobody present, on the
+  platforms that can carry it -- with an attended one-action re-run as the
+  named degradation (see [The automation
+  goal](#the-automation-goal-and-its-platform-envelope)).
 
 What managed does **not** add:
 
-- **No unattended scheduling in the browser.** Reliable unattended scheduling is
-  out of scope for the console appliance -- that is the CLI plus host cron (see
+- **No server-side execution.** Automation runs in the operator's own browser
+  runtime -- an installed app kept running on the operator's machine -- never
+  on a server acting for the party. The installed-software paths for scheduled
+  runs remain the CLI plus host cron and the console appliance (see
   [SECURITY_DESIGN.md](SECURITY_DESIGN.md#single-party-appliance-trust-boundary)).
-  The browser offers a handoff and an operator-initiated re-run, not a background
-  scheduler.
-- **No second copy of the input data.** The record never holds the input CSV or
-  any row value; the operator re-selects the input file each run (see
+- **No second copy of the input data.** The record never holds the input file's
+  contents or any row value. Where the platform allows, it holds a file
+  **handle** -- a pointer to the operator's file, not a copy (see
   [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)).
 - **No server-side persistence.** There is one persistence target: the browser,
   origin-isolated, never a server. There is no profile-split persistence provider
   to choose between.
 
+## The automation goal and its platform envelope
+
+The design goal is a **fully automated recurring exchange**: once an exchange
+is managed and its schedule agreed with the partner, runs happen unattended.
+Browser automation is inherently a compromise against installed software, and
+the compromises are accepted -- what is not accepted is settling for an
+attended flow where the platform can carry an unattended one.
+
+**The first-class path is an installed PWA on Chromium.** The app is installed
+and launched at OS login (or otherwise kept running), and the exchange executes
+in the app's own window context: WebRTC is unavailable to service workers, and
+Periodic Background Sync's short opportunistic windows cannot carry a live
+exchange, so an open app runtime -- not a service-worker wakeup -- is the
+mechanism. At the agreed window the runtime re-reads the input file through the
+record's persisted `FileSystemFileHandle` under its persistent read permission
+(a pointer, never a copy; see [The input file each
+run](#the-input-file-each-run)), and the run executes, rotates, and persists
+per the durability contract below, with nobody present.
+
+Degradations are named, not design floors:
+
+- **No installed PWA** (an ordinary Chromium tab): the run is
+  operator-initiated -- one action, through the persisted handle.
+- **No File System Access API** (Safari, Firefox): the run is attended and the
+  operator re-selects the input file.
+
+**An unattended run takes two parties.** A WebRTC exchange is live: both
+parties' runners must be awake in an overlapping window, so the run schedule is
+partnership-level agreement, coordinated out-of-band exactly as the terms are.
+A partner whose runner does not arrive in the agreed window is a **benign
+retry-at-next-window outcome**, recorded in the run bookkeeping -- never a
+desync and never an attack (see [A missed window is neither desync nor
+attack](#a-missed-window-is-neither-desync-nor-attack)). The record persists
+the agreed schedule and the retry bookkeeping
+([MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)).
+
+Scope: this document fixes the automation goal, the platform envelope, and what
+the record persists to support them; the detailed scheduling and
+window-coordination design (run windows, retry policy, notification surfaces)
+is later, separately-designed work and is neither foreclosed nor duplicated
+here.
+
 ## The second run, end to end
 
 The managed exchange is judged by its second run -- the first thing the feature
-does that today's app cannot. The normative happy path, coordinated with the
-partner out-of-band as every run is:
+does that the one-shot flow cannot. On the first-class path the second run is
+**scheduled**, and nobody is present:
 
-1. **Open the app.** The managed exchanges list shows the partnership, quiet
-   and green: last run succeeded, backed up as of its date (see
-   [Moment-anchored backup surfaces](#moment-anchored-backup-surfaces)).
-2. **Run.** The operator picks the exchange and starts the run.
-3. **Re-select the input file.** The app prompts for this run's input file --
-   the one thing the record never persists.
-4. **The run completes.** Rendezvous, handshake, rotate-and-persist, data
-   exchange: the machinery of the sections below, none of it operator-visible
-   when it works.
-5. **The completion surface offers the results and the refreshed backup.** The
-   result artifacts, as today's one-shot flow offers them, plus one more
-   action: "download updated backup" -- the export, refreshed because the
-   secret just rotated, offered as the natural final step of the run rather
-   than a later nagging prompt.
+1. **The window arrives.** The installed app runtime, running since OS login,
+   begins the run under the single-writer lock (see [Single-device
+   ownership](#single-device-ownership)).
+2. **The input file is re-read** through the persisted handle, no prompt, and
+   rejected if its columns cannot satisfy the standing terms (see [The input
+   file each run](#the-input-file-each-run)).
+3. **Rendezvous and handshake** with the partner's runner, awake in the same
+   agreed window; a no-show partner is a recorded miss, retried next window.
+4. **Rotate-and-persist, then the data exchange** -- the durability contract
+   below, unchanged by nobody watching.
+5. **The outcome lands in the run bookkeeping**, and the next visit's surfaces
+   carry it: the results, the refreshed-backup prompt, or the failure state.
+   An OS-level notification from the installed app is the natural "this ran /
+   this needs you" surface between visits; its design belongs to the later
+   scheduling and installed-app work.
 
-On this path, with a fresh backup taken, **no standing warnings are shown** --
-green and quiet. Every warning surface in this document is reserved for the
-moment its condition is true and actionable.
+The **attended re-run** -- the degradations' path, available on any platform --
+is the same run with the operator present: open the app (the exchange shows
+quiet and green: last run succeeded, backed up as of its date), pick it, run;
+confirm the input file (one action through the persisted handle, or
+re-selection where no handle is held); the completion surface offers the
+results and one more action, "download updated backup" -- the export, refreshed
+because the secret just rotated, offered as the natural final step rather than
+a later nagging prompt. On that path, with a fresh backup taken, **no standing
+warnings are shown** -- green and quiet. Every warning surface in this document
+is reserved for the moment its condition is true and actionable.
 
-### File re-selection is deliberate (v1)
+### The input file each run
 
-Re-prompting for the input file each run is a position, not a gap (a spike
-position, for owner review). Persisting a file handle for re-permission
-(`FileSystemHandle` in IndexedDB) is effectively Chromium-only, while Safari is
-a primary concern of this design's eviction analysis; and re-selection keeps
-the record holding **zero persisted reference to participant data** -- not even
-a filename. A persisted-handle re-permission flow is a possible later
-enhancement, not designed here.
+Where the File System Access API exists (Chromium), the record persists the
+input file's `FileSystemFileHandle`, with persistent read permission where the
+platform grants it (an installed app), so an unattended run reads the standing
+file with nobody present and an attended re-run is one action plus at most a
+permission re-prompt. The handle is a persisted **pointer** to the operator's
+file, never a copy of its contents -- the no-second-copy invariant is about
+content and holds unchanged -- and it lives in the same origin-isolated record
+as everything else the exchange persists (shape and caveats:
+[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)). Browsers
+without the API (Safari, Firefox) re-select the file each attended run.
 
-Re-selection carries a wrong-file risk: the operator can pick a file the
-partnership does not expect. The record's document already carries the agreed
-terms' column shape, so the app rejects a selected file whose columns cannot
-satisfy the standing terms -- a cheap guard worth naming, though it catches the
-wrong-dataset case, not a same-shaped wrong file.
+On every path -- unattended, one-action, or re-selection -- the app rejects an
+input file whose columns cannot satisfy the standing terms: the record's
+document carries the agreed terms' column shape, a cheap guard that catches the
+wrong-dataset case, though not a same-shaped wrong file.
 
 ## The durability and crash-consistency contract
 
@@ -193,11 +248,13 @@ disk.
 ## Single-device ownership
 
 Because the secret is a linear resource, a managed exchange is owned by **one
-device**. Two devices (or two runners) that both hold the secret and both run
-fork it permanently: the first to run rotates, and the other's copy is instantly
-stale with no way to reconcile automatically (there is no grace window today; see
-[Desync detection and recovery](#desync-detection-and-recovery)). Single-device
-ownership is stated as an invariant, not a recommendation.
+device** -- on the scheduled path, the one machine whose installed app runtime
+executes the runs. Two devices (or two runners) that both hold the secret and
+both run fork it permanently: the first to run rotates, and the other's copy is
+instantly stale with no way to reconcile automatically (there is no grace
+window; see [Desync detection and
+recovery](#desync-detection-and-recovery)). Single-device ownership is stated
+as an invariant, not a recommendation.
 
 Two mechanisms uphold it:
 
@@ -206,16 +263,17 @@ Two mechanisms uphold it:
 The **run+rotate** critical section is guarded by a single-writer lock (the Web
 Locks API, `navigator.locks`) keyed to the managed record's id, held for the whole
 window from "begin this run" through "rotated secret durably persisted". Two tabs
-of the same origin cannot both enter it: the second waits or is refused, so two
-tabs on one device cannot fork the secret by racing a run. The lock is a
+of the same origin cannot both enter it: the second waits or is refused, so a
+scheduled run and an operator-opened tab -- or two tabs -- on one device cannot
+fork the secret by racing a run. The lock is a
 same-profile **liveness guard**, not a persistent claim: it is auto-released when
 the holding tab or worker is destroyed, and it is taken without `steal: true` --
 a steal would defeat the single-writer property it exists to provide. Web Locks
 is origin-scoped and same-profile, so it guards concurrency **within one browser
-profile on one device** -- exactly the scope where two tabs are a realistic
-accident. It does **not** and cannot guard against a second physical device or a
-second browser profile holding a copy; the durable single-owner property rests on
-migration-not-sync (below), not on the lock.
+profile on one device** -- exactly the scope where a racing second context is a
+realistic accident. It does **not** and cannot guard against a second physical
+device or a second browser profile holding a copy; the durable single-owner
+property rests on migration-not-sync (below), not on the lock.
 
 ### Export/import is migration, not sync
 
@@ -234,10 +292,10 @@ The two export intents are distinct in the UI even though the artifact is one
 format. A **backup export** leaves the source live (see [the durability
 backbone](#the-durability-backbone-exportimport)). A **migration export** is
 "take over on another device": the source record visibly transitions to a
-spent, handed-off state -- no Run affordance, labeled with the handoff date --
-so the cooperation-not-cryptography invalidation below is legible at the one
-moment it is violable. A spent record can be deleted, or revived only by
-importing the artifact back.
+spent, handed-off state -- no Run affordance, no scheduled runs, labeled with
+the handoff date -- so the cooperation-not-cryptography invalidation below is
+legible at the one moment it is violable. A spent record can be deleted, or
+revived only by importing the artifact back.
 
 The invalidation is an **operator-cooperation property, not a cryptographic
 one**, and the design says so plainly: nothing in the protocol prevents a copied
@@ -248,8 +306,8 @@ export is therefore treated as a captured credential, live until the partnership
 rotates past it, under the standard [compromise
 response](SECURITY_DESIGN.md#compromise-response) (notify the partner
 out-of-band, re-invite). A monotonic rotation epoch carried in the record and
-checked in the handshake would let a party detect a stale or forked peer; it is
-noted as possible future core hardening, deferred alongside the grace window
+checked in the handshake would let a party detect a stale or forked peer; it is a
+future core hardening, deferred alongside the grace window
 (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md#rollback-at-rest-copies-can-silently-resurrect)).
 
 ## Desync detection and recovery
@@ -260,54 +318,61 @@ or a migration mishandled by the operator, can still strand the two parties on
 different secrets). The design must let a party tell a desync apart from an attack
 and recover quickly.
 
-### Detection: today only an implicit generic failure exists
+### Detection: an implicit generic failure
 
 When the two parties hold different secrets, the authenticated handshake simply
 **fails closed** -- the same failure a wrong secret, a tampered frame, or an
-active impersonation attempt produces. Today that surfaces as one generic
+active impersonation attempt produces. That surfaces as one generic
 authentication failure with no way to distinguish "we rotated out of sync" from
 "someone is attacking this exchange": the web handshake wrapper re-tags every
 trust failure as a single `security`-kind error (on the one-shot and managed
 flows, see
 [SECURITY_DESIGN.md](SECURITY_DESIGN.md#recurring-web-exchanges-single-use-vs-managed)). A managed
-exchange makes this ambiguity operationally worse than the one-shot flow does,
-because a desync is now a recurring-partnership event an operator will hit in
+exchange makes this ambiguity operationally sharper than the one-shot flow does,
+because a desync is a recurring-partnership event an operator will hit in
 normal operation, not a one-time setup slip.
 
-### The grace-window question
+### A missed window is neither desync nor attack
 
-Core carries a **deferred-not-foreclosed** grace-window mitigation for a rotation
-desync: on a handshake failure, briefly also accept the **previous** rotated
-secret, so a one-sided persist failure self-heals on the next run instead of
-forcing a re-invite. The deferral is recorded in [Key-agreement
-design](SECURITY_DESIGN.md#key-agreement-design), and the mitigation is **not
-implemented anywhere today** (neither the CLI nor core accepts a previous
-secret; the only current handling is the re-invite recovery procedure). The open
-question the spike must answer is whether this program pulls that mitigation
-forward or ships with implicit-only detection first.
+A scheduled run the partner's runner never arrives for is a **no-show, not a
+failed handshake**: nothing authenticated and nothing failed closed, because
+there was no one to fail against. It is recorded as its own benign outcome in
+the run bookkeeping (a `"missed"` outcome; see
+[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)) and retried at
+the next agreed window, and it never enters the desync/attack framing below --
+exactly as expiry never does. Only a handshake that actually ran and failed
+reaches that framing. A pattern of missed windows is a coordination problem,
+resolved out-of-band where the schedule itself was agreed.
 
-> **Decision (ratified at owner sign-off, 2026-07-14).** Ship the first
-> managed release with **implicit-only** desync detection plus an explicit,
-> honest recovery affordance (below), and adopt the grace window as a **core-level**
-> change in a later, separately-reviewed step -- do not invent a web-only grace
-> window. Rationale: a grace window widens the active-impersonation window for a
-> leaked secret (it accepts an extra, older secret), so it is a threat-model
-> change that belongs in core where both the CLI and the web app inherit one
-> reviewed implementation, not a web-first divergence; and the recovery path
-> (fast re-invite) already closes the operational gap without it, so the first
-> release is not blocked on it. The anticipated core shape is a brief
-> **two-secret rotation window** -- retaining the previous secret during
-> rotation -- which stays deferred and is deliberately not designed here. This
-> was decided as a threat-model call (desync-resilience against
-> impersonation-window width), not a convenience toggle.
+### The grace window
+
+A grace-window mitigation for a rotation desync -- on a handshake failure,
+briefly also accept the **previous** rotated secret, so a one-sided persist
+failure self-heals on the next run instead of forcing a re-invite -- is a
+core-level change deferred to a later, separately-reviewed step, and is **not
+implemented anywhere** (neither the CLI nor core accepts a previous secret; the
+only current handling is the re-invite recovery procedure). The first managed
+release ships with implicit-only detection plus the explicit, honest recovery
+affordance below.
+
+The grace window belongs in core rather than the web app, and later rather than
+first, because it is a threat-model change: it widens the active-impersonation
+window for a leaked secret (it accepts an extra, older secret), so both the CLI
+and the web app should inherit one reviewed implementation rather than diverge on
+a web-first version. Fast re-invite already closes the operational gap without
+it, so the first release is not blocked on it. The anticipated core shape is a
+brief **two-secret rotation window** -- retaining the previous secret during
+rotation -- which stays deferred and is not designed here.
 
 ### Telling a desync from an attack
 
-Until a grace window exists, the design cannot *cryptographically* distinguish a
+Without a grace window, the design cannot *cryptographically* distinguish a
 desync from an attack -- both are the same failed handshake. What the managed UX
 does is **tier the response by what the record already knows**, so the operator
 faces the full confirmation machinery only when nothing else explains the
-failure.
+failure. The tiers read the record's evidence, not the operator's presence: a
+failure from an unattended run surfaces through the same tiers at the
+operator's next visit.
 
 **Tier 1: local evidence explains the failure.** When the record holds a benign
 explanation -- a recorded persist failure on the last run (the structured
@@ -344,9 +409,9 @@ The partner's reply feeds a **two-outcome gate**, not a free-form judgment:
 "the partner confirmed a real failure on their side" proceeds to re-invite;
 "something does not add up" is treated as compromise and routes to the
 [compromise response](SECURITY_DESIGN.md#compromise-response). The honest
-framing is unchanged from the CLI's posture: the tool surfaces the failure and
-structures the confirmation, but the operator, not the tool, makes the
-desync-versus-attack call out-of-band.
+framing is the CLI's posture: the tool surfaces the failure and structures the
+confirmation, but the operator, not the tool, makes the desync-versus-attack
+call out-of-band.
 
 ### Expiry is its own state, never routed through attack framing
 
@@ -357,15 +422,15 @@ distinct expired-token error, which names re-invitation rather than the generic
 out-of-sync guidance -- and is never delivered through the desync/attack
 framing above.
 
-The age bound itself is a **visible cadence setting, not an invisible
-implementation constant**. At creation the exchange surfaces it with its
-cadence implication -- "this exchange must run or be renewed within N days" --
-and the operator can adjust it against their known cadence, over a sane
-default. The security rationale is unchanged: a dormant exchange does not
-rotate, so this bound is the only exposure cap on an idle stored secret (see
-[The primary controls](SECURITY_DESIGN.md#the-primary-controls)); the default's
-value remains flagged for security review, and the visible, adjustable
-creation-time surface is a spike position for owner review.
+The age bound is an **optional, operator-set creation-time policy, and it
+defaults to off** -- exactly the CLI's no-bound default (see [Token age and
+rotation policy](SECURITY_DESIGN.md#token-age-and-rotation-policy)). When the
+operator sets one, the exchange surfaces its cadence implication -- "this
+exchange must run or be renewed within N days" -- for the operator to weigh
+against the partnership's known cadence. The reason to opt in is a dormant
+partnership: rotation caps exposure only for an exchange that actually runs, so
+an idle stored secret has no automatic exposure bound unless a max-age is set
+(see [The primary controls](SECURITY_DESIGN.md#the-primary-controls)).
 
 ### Recovery: fast re-invite
 
@@ -392,7 +457,7 @@ channel the adversary may already have compromised. The confirmation checklist
 above is what breaks that loop -- it is why the confirmation must verify a real
 partner-side failure rather than rubber-stamp the benign reading. This trade --
 cheap recovery against repeated secret-in-transit exposure -- is accepted
-deliberately and is part of what the decision record below ratifies.
+deliberately.
 
 ## Surviving storage eviction
 
@@ -434,23 +499,25 @@ move (see [Export/import is migration,
 not sync](#exportimport-is-migration-not-sync)): an import re-establishes the one
 owner.
 
-The artifact is a **plaintext credential file in the operator's custody** --
-deliberately (a decision revised at owner sign-off; the spike originally
-proposed passphrase encryption). It is the browser analog of handing over
-`psilink.yaml` plus `.psilink.key`, and it adopts the key file's exact trust
-model: `.psilink.key` is a plaintext credential protected by custody and
-storage permissions, not a passphrase (see [Key file
+The artifact is a **plaintext credential file in the operator's custody**.
+Passphrase encryption is deliberately not done: the record must be usable with
+nobody present to supply a passphrase at the moment of use. The artifact
+is the browser analog of handing over `psilink.yaml` plus `.psilink.key`, and it
+adopts the key file's exact trust model: `.psilink.key` is a plaintext credential
+protected by custody and storage permissions, not a passphrase (see [Key file
 security](SECURITY_DESIGN.md#key-file-security)), and the export asks for the
 same handling -- owner-only storage, never an unencrypted transmission channel,
 an encrypted location or secrets manager if the operator wants encryption at
 rest, exactly per the key file's backup guidance. A captured or copied export
 is a captured credential until the partnership rotates past it (see the
 [compromise response](SECURITY_DESIGN.md#compromise-response)). The artifact
-does not rotate -- it snapshots the secret current at export -- so the
-`expires` it carries is what caps a stale artifact's usefulness, and re-export
-after each rotation is carried by the run-completion backup refresh and the
-backup state below. The artifact's shape and the no-anti-rollback caveat are
-specified in
+does not rotate -- it snapshots the secret current at export -- so a stale
+artifact stays usable until the partnership rotates past it or any `expires` it
+carries (stamped when a max-age policy is set) lapses. Re-export is prompted by
+the attended run's completion surface and by the backup state below; an
+unattended run rotates with nobody present, so its rotation flips the backup
+state to actionable at the next visit. The artifact's shape and the
+no-anti-rollback caveat are specified in
 [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#export-artifact).
 
 ### Moment-anchored backup surfaces
@@ -472,14 +539,19 @@ moments it changes rather than as standing chrome:
   rotation restores a stale secret and lands in the desync recovery above).
   The exchange shows one actionable state: "Back up this exchange".
 
-The refresh is offered where it is natural: the run-completion surface's
-"download updated backup" (see [The second run](#the-second-run-end-to-end)) is
-the moment the previous backup went stale, so taking it there keeps the happy
-path green and quiet. An operator who skips it sees the backup state flip to
-actionable on the next visit -- a state, not a nag. The frame throughout:
-every honest statement appears at the moment it becomes true and actionable.
+The refresh is offered where it is natural: on an attended run, the
+run-completion surface's "download updated backup" (see [The second
+run](#the-second-run-end-to-end)) is the moment the previous backup went stale,
+so taking it there keeps that path green and quiet. An unattended scheduled run
+rotates the secret with nobody present, so a scheduled exchange's standing
+export goes stale between visits **by design**; the backup state carries that
+honestly -- actionable at the next visit, a state, not a nag -- and an OS-level
+notification from the installed app is the concept for prompting a re-export
+sooner (its design belongs to the later scheduling and installed-app work). The
+frame throughout: every honest statement appears at the moment it becomes true
+and actionable.
 
-The in-browser copy is still treated as convenience and the exported credential
+The in-browser copy is treated as convenience and the exported credential
 file as the durability of record, so an operator is never surprised by a silent
 eviction they were implicitly told could not happen.
 
@@ -496,92 +568,20 @@ distinguish a first visit from a post-eviction one -- which is exactly why the
 managed-exchange list's empty state carries the import affordance standing,
 rather than surfacing it only behind a detected loss.
 
-## Decision record (owner sign-off 2026-07-14)
+## Deleting a managed exchange
 
-The spike's four decisions -- the epic's three open questions plus a fourth the
-security-review panel added on the export artifact -- were ratified at owner
-sign-off on 2026-07-14: decisions 1 and 3 as proposed, decisions 2 and 4 in the
-revised form recorded below. The epic's implementation items remain subject to
-the security-review gate
-([CONTRIBUTING](../CONTRIBUTING.md#dependency-policy)).
-
-1. **Grace window: adopt later, in core, not web-first. (Ratified as
-   proposed.)** The first managed release ships implicit-only desync detection
-   plus the honest recovery affordance; core's deferred grace-window mitigation
-   comes later as a separately-reviewed core change that both apps inherit. It
-   is a threat-model change (it widens the active-impersonation window for a
-   leaked secret), and fast re-invite already closes the operational gap. The
-   anticipated core shape is a brief two-secret rotation window -- retaining
-   the previous secret during rotation -- which stays deferred and is not
-   designed here. See [The grace-window question](#the-grace-window-question).
-
-2. **Record schema: persist this party's whole exchange-file document plus the
-   rotating secret. (Revised at sign-off.)** The record's core is the
-   exchange-file document verbatim -- the shared CLI config schema, per the
-   no-parallel-format contract in [EXCHANGE_FILE.md](spec/EXCHANGE_FILE.md) --
-   plus the secret and the local-only fields the file deliberately does not
-   carry (`sharedSecret`, `expires`, `tokenMaxAgeDays`, the label, and the run
-   bookkeeping): CLI parity, `psilink.yaml` plus `.psilink.key` as one browser
-   record. This replaces the spike's original decomposed field set, which was
-   that document taken apart -- an accidental parallel format. The exclusions
-   stand unchanged: the input CSV and any credential never persist (the
-   document is composed credential-free exactly as the mint layer composes a
-   downloadable file), and a persisted document is subject to the
-   exchange-file versioning policy, so an app upgrade can invalidate a stored
-   record and the recovery is re-invite. Full field list, composition rule, and
-   versioning note: [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md).
-
-3. **Egress: ship the `connect-src` allowlist as hardening; the
-   never-on-a-server property is not mechanically enforceable against in-origin
-   script. (Ratified as proposed -- itself the security-review revision of the
-   spike's original mechanical-enforcement claim.)** `connect-src` governs
-   fetch/XHR/WebSocket/EventSource/beacon egress but **not** the negotiated
-   WebRTC peer/relay transport, downloads, clipboard, or navigation, and no
-   shipped CSP directive can allowlist STUN/TURN hosts or peers. For the app's
-   own code the property is enforced by design and review; the `connect-src`
-   allowlist ships as hardening that narrows an injected script's exfiltration
-   surface; no first-party runtime egress guard is added (an in-origin attacker
-   bypasses first-party code by construction); and the primary control against
-   in-origin script remains XSS prevention plus the already-accepted in-origin
-   exposure. See [Egress hardening and its
-   limits](SECURITY_DESIGN.md#egress-hardening-and-its-limits).
-
-4. **Export artifact: a plaintext credential file under operator custody; no
-   anti-rollback. (Revised at sign-off: passphrase encryption dropped.)** The
-   export is the record itself -- the browser analog of handing over
-   `psilink.yaml` plus `.psilink.key` -- and adopts the CLI key file's trust
-   model: a plaintext credential protected by custody and storage permissions,
-   not a passphrase. A captured or copied export is a captured credential until
-   the partnership rotates past it (compromise response: confirm with the
-   partner out-of-band, re-invite). The artifact does not rotate; the embedded
-   `expires` caps a stale artifact's usefulness, and the export-freshness UX
-   prompts re-export after rotation. Source invalidation on export remains
-   operator cooperation, not cryptography; the no-anti-rollback statement and
-   the deferred rotation-epoch hardening stand. See [Export
-   artifact](spec/MANAGED_EXCHANGE_RECORD.md#export-artifact) and
-   [Rollback](SECURITY_DESIGN.md#rollback-at-rest-copies-can-silently-resurrect).
-
-### Spike positions since sign-off (for owner review)
-
-A second review panel (product, operator-UX, architecture) drove revisions that
-take new positions beyond the ratified record. They are spike positions, not
-ratified decisions:
-
-- **File re-selection each run (v1).** No persisted file handles; the record
-  keeps zero persisted reference to participant data; persisted-handle
-  re-permission is a possible later enhancement. See [File re-selection is
-  deliberate (v1)](#file-re-selection-is-deliberate-v1).
-- **Column-shape guard on the selected file.** The app rejects an input file
-  whose columns cannot satisfy the standing terms, using the shape the record
-  already carries.
-- **The export format is CLI-handoff separable.** The artifact stays cleanly
-  separable into the CLI's two artifacts (config file and key file) so a
-  future file-sync managed record can be handed to the CLI/appliance for
-  scheduled runs -- a compatibility commitment of the format, not v1 behavior.
-  See [Export artifact](spec/MANAGED_EXCHANGE_RECORD.md#export-artifact).
-- **The age bound is a visible, adjustable creation-time setting** over a sane
-  default; the default's value remains flagged for security review. See
-  [Expiry is its own state](#expiry-is-its-own-state-never-routed-through-attack-framing).
+Removing a managed exchange is a first-class, always-available action, and it
+removes **everything the browser holds for it in one step**: the record, the
+secret, the persisted input-file handle, the schedule, and the run bookkeeping.
+Deletion is local and unilateral -- it does not notify the partner, whose own
+copy stands until they delete it or the partnership is re-established by
+re-invite -- and it is not secret expiry: an age bound (when set) caps how long
+the stored secret stays usable, while deletion removes this party's stored
+information entirely, whatever the secret's state. One custody note: deletion
+covers the browser's storage only; an exported backup file is under the
+operator's own custody, is disposed of by the operator, and remains a
+credential until the partnership rotates past it (see [the durability
+backbone](#the-durability-backbone-exportimport)).
 
 ## See also
 
@@ -589,3 +589,4 @@ ratified decisions:
 - [SECURITY_DESIGN.md](SECURITY_DESIGN.md#hosted-at-rest-threat-model-for-managed-exchanges) - the browser at-rest threat model, the discard-secret reversal, the rollback and metadata-at-rest analyses, and the egress-hardening limits
 - [SECURITY_DESIGN.md](SECURITY_DESIGN.md#recurring-exchange-authentication) - the shared-secret rotation, `token_max_age_days`, and re-invite recovery the managed lifecycle reuses
 - [DEPLOYMENT.md](DEPLOYMENT.md) - the hosted web app deployment posture and the reverse-proxy responsibilities
+</content>
