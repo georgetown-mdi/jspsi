@@ -18,7 +18,7 @@ export function Problems({
       <h2>Problems</h2>
       <ul>
         {problems.map((problem) => (
-          <li key={problem.label}>
+          <li key={problem.key ?? problem.label}>
             {problem.onSelect !== undefined ? (
               <button
                 type="button"

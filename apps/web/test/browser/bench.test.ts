@@ -655,6 +655,89 @@ describe("inviter bench", () => {
     expect(expiresRow?.querySelector("dd")?.textContent).toMatch(/20\d\d/);
   });
 
+  test("a silent-empty cleaning field surfaces from anywhere on the bench", async () => {
+    mount(createElement(InviterBench));
+
+    await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana");
+    const fileInput = document.querySelector('input[type="file"]');
+    // The dob column cannot parse as a date, so the date_of_birth pipeline
+    // produces no value in any row -- a silent-empty collapse -- while the name
+    // fields cover fully, so the file is still linkable.
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      new File(
+        [
+          "first_name,last_name,dob\n" +
+            "Ann,Lee,NOTADATE\nBo,Ray,ALSONOTADATE\n",
+        ],
+        "clients.csv",
+        { type: "text/csv" },
+      ),
+    );
+    await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
+    await page
+      .getByRole("button", { name: "Continue to matching & sharing" })
+      .click();
+    await page
+      .getByRole("button", { name: "Continue to review & create" })
+      .click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Review & create");
+
+    // The ledger's Customize Cleaning row is a button whose first span is its
+    // label and whose fact span carries the amber attention class when failing.
+    const cleaningCustomizeRow = () =>
+      Array.from(
+        document.querySelectorAll(
+          `aside[aria-label="This exchange"] .${styles.customizeRow}`,
+        ),
+      ).find((row) => row.querySelector("span")?.textContent === "Cleaning");
+
+    // The coverage sweep is debounced (AGGREGATE_DEBOUNCE_MS), so poll until it
+    // settles: the Customize Cleaning fact turns amber and names the failing count.
+    await vi.waitFor(() => {
+      expect(
+        cleaningCustomizeRow()?.querySelector(`.${styles.valAttention}`)
+          ?.textContent,
+      ).toBe("1 field failing");
+    });
+
+    // The work column's Problems block names the field (its safe type label) and
+    // Create refuses to arm while it is open.
+    const problems = document.querySelector('section[aria-label="Problems"]');
+    expect(problems?.textContent).toContain(
+      'Cleaning: "Date of birth" produces no value in any row',
+    );
+    await expect
+      .element(page.getByText("Resolve the problem above to continue."))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Create the invitation" }))
+      .toBeDisabled();
+
+    // The Problems entry links into the Cleaning tab, where the per-field alarm
+    // and the polite coverage announcement surface the same collapse.
+    await page
+      .getByRole("button", {
+        name: 'Cleaning: "Date of birth" produces no value in any row',
+      })
+      .click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Cleaning");
+    await vi.waitFor(() => {
+      expect(
+        document.querySelector('[data-testid="coverage-silent-empty"]'),
+      ).not.toBeNull();
+    });
+    expect(
+      document.querySelector('[role="status"][aria-live="polite"]')
+        ?.textContent,
+    ).toContain("Coverage warning: Date of birth");
+  });
+
   test("browser Back walks bench steps in place, preserving the file and terms", async () => {
     mount(createElement(InviterBench));
 

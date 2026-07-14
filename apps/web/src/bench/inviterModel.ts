@@ -15,11 +15,15 @@ import {
   setDraftMetadataKeepingKeys,
   validateAdvancedInvite,
 } from "@psi/advancedInvite";
+
 import {
+  SEMANTIC_TYPE_LABELS,
   hasMultipleIdentifiers,
   setColumnDisclosure,
   setColumnType,
 } from "@psi/metadataEditing";
+
+import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
 import type {
   AdvancedField,
@@ -38,6 +42,7 @@ import type {
   SemanticType,
 } from "@psilink/core";
 import type { DisclosureChoice } from "@psi/metadataEditing";
+import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
 /**
  * Where a step stands in the exchange's progression, rendered by the bench's
@@ -71,9 +76,11 @@ export interface RailFact {
   current?: boolean;
 }
 
-/** One entry in the work column's Problems block. */
+/** One entry in the work column's Problems block. `key` is the render key when
+ * labels may repeat; absent, the label is the key. */
 export interface RailProblem {
   label: string;
+  key?: string;
   onSelect?: () => void;
 }
 
@@ -738,15 +745,67 @@ export function inviterLedgerRows(
 }
 
 /** One quiet fact for the Customize menu; `target` is the tab the
- * fact's label opens. */
+ * fact's label opens. `tone` colors the fact only when the surface needs
+ * attention (a failing cleaning pipeline); never conveyed by color alone. */
 export interface InviterRailFact {
   label: string;
   fact?: string;
+  tone?: "attention";
   target: Extract<SpineTarget, "cleaning" | "keys" | "agreement">;
 }
 
 function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+/**
+ * The Cleaning tab's Customize-menu attention state, from the effective
+ * standardization and the full-CSV coverage. A field is "failing" when its
+ * transform drops every row ({@link isSilentEmpty}); the count de-duplicates
+ * by field name. Invalid authored steps are NOT counted here -- they are
+ * {@link validateAdvancedInvite}'s to surface, so counting them would
+ * double-report in the work column's Problems block. `rates` is null before the
+ * first sweep settles; a pending sweep contributes no failing fields, so
+ * attention is computed only from a resolved map.
+ */
+export interface InviterCleaningAttention {
+  /** Whether the Cleaning tab needs attention (any failing field present). */
+  needsAttention: boolean;
+  /** The number of fields whose pipeline produces no value in any row, for the
+   * amber "N field(s) failing" value. */
+  failingFieldCount: number;
+  /** The Customize-menu fact string: undefined (em-dash) when no attention is
+   * needed, else the amber "N field(s) failing" value (matching the acceptor's). */
+  railValue: string | undefined;
+}
+
+/**
+ * Derive the Cleaning tab's attention state from the session's standardization
+ * and the full-CSV coverage. A silent-empty field ({@link isSilentEmpty}) is a
+ * failing field; the count de-duplicates by field name. No file (`editor`
+ * undefined) or a null (pending) rate map raises nothing -- coverage is not yet
+ * known, not a collapse.
+ */
+export function inviterCleaningAttention(
+  editor: InviterEditor | undefined,
+  rates: ReadonlyMap<string, FieldValueCoverage> | null,
+): InviterCleaningAttention {
+  const failing = new Set<string>();
+  if (editor !== undefined && rates !== null)
+    for (const transformation of editor.draft.standardization) {
+      const rate = rates.get(transformation.output);
+      if (rate !== undefined && isSilentEmpty(rate))
+        failing.add(transformation.output);
+    }
+  const failingFieldCount = failing.size;
+  return {
+    needsAttention: failingFieldCount > 0,
+    failingFieldCount,
+    railValue:
+      failingFieldCount > 0
+        ? `${plural(failingFieldCount, "field")} failing`
+        : undefined,
+  };
 }
 
 /** The cleaning summary ("3 fields") shared by the Customize fact and the
@@ -761,16 +820,31 @@ export function keysFact(draft: AdvancedInviteDraft): string {
   return plural(enabledKeys(draft).length, "key");
 }
 
-/** The Customize group's quiet facts, read live from the draft: cleaning
+/**
+ * The Customize group's quiet facts, read live from the draft: cleaning
  * pipeline count, authored key count, and the agreement reference. Undefined
- * facts render as the em-dash "nothing yet" mark. */
+ * facts render as the em-dash "nothing yet" mark. When the cleaning coverage
+ * is failing ({@link inviterCleaningAttention}), the Cleaning fact turns amber
+ * and names the failing-field count instead of the plain field count, matching
+ * the acceptor. `attention` is undefined before a file is read or a sweep
+ * settles, where the Cleaning row shows its plain count.
+ */
 export function inviterRailFacts(
   editor: InviterEditor | undefined,
+  attention?: InviterCleaningAttention,
 ): Array<InviterRailFact> {
+  const cleaningAttention =
+    editor !== undefined && attention?.needsAttention === true;
   return [
     {
       label: "Cleaning",
-      fact: editor === undefined ? undefined : cleaningFact(editor.draft),
+      fact:
+        editor === undefined
+          ? undefined
+          : cleaningAttention
+            ? attention.railValue
+            : cleaningFact(editor.draft),
+      tone: cleaningAttention ? "attention" : undefined,
       target: "cleaning",
     },
     {
@@ -805,10 +879,13 @@ const FIELD_TARGETS: Record<AdvancedField, SpineTarget> = {
 };
 
 /** One entry in the work column's Problems block: the message and the section
- * that can resolve it. */
+ * that can resolve it. `key` is a stable per-entry render key for entries whose
+ * messages may repeat (two same-typed failing fields bound to one column);
+ * absent, the message is the key. */
 export interface SpineProblem {
   message: string;
   target: SpineTarget;
+  key?: string;
 }
 
 /** Validate the draft for the create gate -- the AdvancedInvite model's own
@@ -818,6 +895,62 @@ export function reviewValidation(
   now: Date = new Date(),
 ): AdvancedValidation {
   return validateAdvancedInvite(editor.draft, editor.seed, now);
+}
+
+/**
+ * The work column's Problems entries for a failing cleaning pipeline: one per
+ * field whose transform produces no value in any row of the loaded file
+ * ({@link isSilentEmpty}), de-duplicated by field name (the same key
+ * {@link inviterCleaningAttention} counts by, so the rail count and the entry
+ * count agree), each naming the field's safe semantic-type label (never the
+ * partner-controlled field name) and linking into the Cleaning tab. When the
+ * draft authors more than one field of a type (the expert add-field
+ * affordance), the label alone cannot tell them apart, so the entry also names
+ * the field's input column -- the operator's own header, shown raw as the
+ * ledger's send row does. This is file-dependent, not draft-dependent
+ * (it needs the full-CSV coverage), so it lives beside {@link spineProblems}
+ * rather than inside {@link validateAdvancedInvite}; the bench merges the two at
+ * every consumption point. Empty before a file is read, before the first sweep
+ * settles (`rates` null), or when no field collapses -- so it never fires while
+ * coverage is still being computed.
+ */
+export function cleaningCoverageProblems(
+  editor: InviterEditor | undefined,
+  rates: ReadonlyMap<string, FieldValueCoverage> | null,
+): Array<SpineProblem> {
+  if (editor === undefined || rates === null) return [];
+  const typeByName = new Map(
+    authoredLinkageFields(
+      editor.draft.metadata,
+      editor.draft.standardization,
+    ).map((field) => [field.name, field.type]),
+  );
+  const authoredPerType = new Map<LinkageField["type"], number>();
+  for (const transformation of editor.draft.standardization) {
+    const type = typeByName.get(transformation.output);
+    if (type !== undefined)
+      authoredPerType.set(type, (authoredPerType.get(type) ?? 0) + 1);
+  }
+  const seen = new Set<string>();
+  const problems: Array<SpineProblem> = [];
+  for (const transformation of editor.draft.standardization) {
+    const rate = rates.get(transformation.output);
+    if (rate === undefined || !isSilentEmpty(rate)) continue;
+    if (seen.has(transformation.output)) continue;
+    seen.add(transformation.output);
+    const type = typeByName.get(transformation.output);
+    if (type === undefined) continue;
+    const label =
+      (authoredPerType.get(type) ?? 0) > 1
+        ? `"${SEMANTIC_TYPE_LABELS[type]}" (from ${transformation.input})`
+        : `"${SEMANTIC_TYPE_LABELS[type]}"`;
+    problems.push({
+      key: transformation.output,
+      message: `Cleaning: ${label} produces no value in any row`,
+      target: "cleaning",
+    });
+  }
+  return problems;
 }
 
 /**
