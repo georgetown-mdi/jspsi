@@ -119,7 +119,7 @@ PSI roles (sender / receiver) are derived from `output` after the terms exchange
 
 Whether or not to deduplicate the inputs of the party holding these terms. Deduplication results in multiple inputs potentially being matched to the same output. Each party independently decides whether to deduplicate its own records; the two values need not agree.
 
-> **Not yet implemented:** deduplication is not honored at run time yet. Every exchange currently matches with one-to-one cardinality regardless of this field, so `deduplicate: true` is validated and carried in the terms but has no effect on matching today. Set `deduplicate: false` until the deduplicating cardinality is implemented.
+> **Not yet implemented:** deduplication is not honored at run time yet. Every exchange matches with one-to-one cardinality, and a `deduplicate: true` term on either party is refused before the exchange begins -- never silently matched one-to-one under a deduplicating term. Set `deduplicate: false` until the deduplicating cardinality is implemented.
 
 ```yaml
 linkage_terms:

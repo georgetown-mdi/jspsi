@@ -170,6 +170,58 @@ export function assertAlgorithmImplemented(algorithm: Algorithm): void {
 }
 
 /**
+ * Refuse a linkage-terms `deduplicate: true` the run cannot honor, before any
+ * matching begins.
+ *
+ * Only one-to-one matching is implemented: both parties' locally-duplicated key
+ * values are excluded from every round (see `linkViaPSI`), so a deduplicating
+ * party's records can never match more than one partner record. Running a
+ * `deduplicate: true` term would silently deliver one-to-one matching under a
+ * consented many-cardinality term -- the disclosure-fidelity gap this refusal
+ * closes. Refused pre-connection in {@link prepareForExchange} for this party's
+ * own terms, and for both parties' agreed terms by
+ * {@link resolveLinkageCardinality} after the terms exchange, before the PSI
+ * rounds begin.
+ *
+ * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`, for the
+ * same reason as {@link assertAlgorithmImplemented}: on the accept side the
+ * value is adopted verbatim from the partner's invitation (see
+ * `deriveAcceptedLinkageTerms`), so it is not unconditionally this operator's
+ * own content. The message carries only fixed literals.
+ */
+export function assertDeduplicateImplemented(deduplicate: boolean): void {
+  if (!deduplicate) return;
+  throw new UsageError(
+    "linkage-terms deduplication is not yet implemented: matching currently " +
+      'runs strictly one-to-one, so a "deduplicate: true" term would be ' +
+      "silently matched one-to-one rather than honored. The exchange is " +
+      "refused before matching begins. Set deduplicate to false until " +
+      "deduplication is implemented.",
+  );
+}
+
+/**
+ * Resolve the matching cardinality {@link runExchange} passes to the linkage
+ * strategies, from the two parties' agreed `deduplicate` settings.
+ *
+ * Symmetric in its arguments, and each party calls it with the same agreed pair
+ * (its own setting plus the partner's, read off the terms exchange), so both
+ * parties always derive the same verdict from the same authenticated state --
+ * the lockstep PSI rounds cannot be desynced by a divergent resolution. Today
+ * only `one-to-one` (both parties `deduplicate: false`) is implemented; any
+ * `deduplicate: true` is refused before the rounds begin, never silently
+ * collapsed onto one-to-one (see {@link assertDeduplicateImplemented}).
+ */
+export function resolveLinkageCardinality(
+  localDeduplicate: boolean,
+  partnerDeduplicate: boolean,
+): "one-to-one" {
+  assertDeduplicateImplemented(localDeduplicate);
+  assertDeduplicateImplemented(partnerDeduplicate);
+  return "one-to-one";
+}
+
+/**
  * Prepare a local dataset for a PSI exchange.
  *
  * Given raw CSV rows and exchange parameters, this function:
@@ -212,6 +264,14 @@ export function prepareForExchange(
   // so the refusal holds even for a PreparedExchange built without going through
   // this function. See assertAlgorithmImplemented.
   assertAlgorithmImplemented(linkageTerms.algorithm);
+
+  // Fail closed on a deduplicating term before connecting: matching runs
+  // strictly one-to-one, so `deduplicate: true` cannot be honored and would
+  // silently under-deliver the consented cardinality. Refused again from both
+  // parties' agreed terms in runExchange (resolveLinkageCardinality), which
+  // holds for a PreparedExchange built without going through this function. See
+  // assertDeduplicateImplemented.
+  assertDeduplicateImplemented(linkageTerms.deduplicate);
 
   // Reject a payload data dictionary that does not match what metadata transmits.
   // `payload.send` is exchanged, consented to, written into the exchange record,
@@ -591,6 +651,16 @@ export async function runExchange(
   );
   for (const warning of warnings) onWarning(warning);
 
+  // Resolve the matching cardinality from both parties' agreed deduplicate
+  // settings as the first step after the terms exchange: the resolution is
+  // symmetric, so a refusal (any deduplicating term) aborts BOTH parties at this
+  // same point -- before the bootstrap frame and the PSI rounds -- rather than
+  // desyncing the lockstep. See resolveLinkageCardinality.
+  const cardinality = resolveLinkageCardinality(
+    linkageTerms.deduplicate,
+    partnerTerms.deduplicate,
+  );
+
   // Surface a present-but-malformed partner advertisement as a diagnostic. The
   // value was already dropped by the fail-soft parse (partnerHostKey is
   // undefined), so reconciliation below is a no-op for it; this signal lets the
@@ -715,7 +785,7 @@ export async function runExchange(
     associationTable =
       linkageTerms.linkageStrategy === "single-pass"
         ? await linkViaSinglePassPSI(
-            { cardinality: "one-to-one" },
+            { cardinality },
             participant,
             conn,
             linkageKeyIterables,
@@ -725,7 +795,7 @@ export async function runExchange(
             onStage,
           )
         : await linkViaPSI(
-            { cardinality: "one-to-one" },
+            { cardinality },
             participant,
             conn,
             linkageKeyIterables,

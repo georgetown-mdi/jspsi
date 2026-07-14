@@ -96,6 +96,50 @@ test("results are correct", () => {
   expect(serverResult[1]).toStrictEqual([2, 0, 1]);
 });
 
+// "many-to-one" stays on linkViaPSI's accepted-value surface as an alias that
+// runs the identical one-to-one matching; no production caller passes it
+// (exchange.ts resolves the cardinality from the agreed deduplicate settings and
+// refuses any that would need a genuine many-cardinality match). Pinned so the
+// accepted surface neither narrows silently nor grows behavior without a test.
+test("many-to-one is accepted and runs the identical one-to-one matching", async () => {
+  const [mServerConn, mClientConn] = createMessagePipe();
+  const mServer = new PSIParticipant(
+    "server",
+    psiLibrary,
+    { role: "starter", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+  const mClient = new PSIParticipant(
+    "client",
+    psiLibrary,
+    { role: "joiner", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+
+  let [mServerResult, mClientResult] = await Promise.all([
+    linkViaPSI(
+      { cardinality: "many-to-one" },
+      mServer,
+      mServerConn,
+      serverData,
+      -1,
+    ),
+    linkViaPSI(
+      { cardinality: "many-to-one" },
+      mClient,
+      mClientConn,
+      clientData,
+      -1,
+    ),
+  ]);
+
+  mServerResult = sortAssociationTable(mServerResult);
+  mClientResult = sortAssociationTable(mClientResult, true);
+
+  expect(mServerResult).toStrictEqual(serverResult);
+  expect(mClientResult).toStrictEqual(clientResult);
+});
+
 // --- linkViaSinglePassPSI: parity with the cascade ----------------------------
 // Single-pass batches every key into one exchange and has the receiver
 // reconstruct the cascade locally; it must produce the byte-identical association

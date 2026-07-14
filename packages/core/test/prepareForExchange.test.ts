@@ -220,3 +220,43 @@ describe("assertAlgorithmImplemented", () => {
     expect(() => assertAlgorithmImplemented("psi")).not.toThrow();
   });
 });
+
+// --- Deduplication fails closed before connecting -----------------------------
+
+describe("prepareForExchange: a deduplicating term is refused", () => {
+  // Matching runs strictly one-to-one, so deduplicate: true would be silently
+  // matched one-to-one rather than honored -- refuse it before any connection,
+  // with the actionable UsageError (CLI exit 64), never the generic mid-run
+  // cardinality throw. The output block already satisfies the schema's
+  // deduplicate-requires-output constraint.
+  const deduplicatingTerms: LinkageTerms = { ...terms, deduplicate: true };
+
+  test("deduplicate: true is refused before connecting", () => {
+    expect(() =>
+      prepareForExchange(
+        { linkageTerms: deduplicatingTerms, metadata },
+        "Tester",
+        rawRows,
+        columns,
+      ),
+    ).toThrow(UsageError);
+    expect(() =>
+      prepareForExchange(
+        { linkageTerms: deduplicatingTerms, metadata },
+        "Tester",
+        rawRows,
+        columns,
+      ),
+    ).toThrow(/deduplicate/);
+  });
+
+  test("deduplicate: false prepares normally", () => {
+    const prepared = prepareForExchange(
+      { linkageTerms: terms, metadata },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    expect(prepared.linkageTerms.deduplicate).toBe(false);
+  });
+});
