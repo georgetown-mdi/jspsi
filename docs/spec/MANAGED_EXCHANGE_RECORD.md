@@ -1,0 +1,327 @@
+---
+title: "Managed Exchange Record"
+---
+
+# Managed exchange record
+
+This document specifies the **managed exchange record**: the browser-persisted
+state that lets a two-party PPRL exchange run again on an agreed schedule from
+the web application -- unattended where the platform allows -- without
+re-authoring the exchange or re-establishing a shared secret. It covers the
+record's field-by-field shape -- what persists across runs versus what is
+supplied at each run -- the field types, the key-derivation implications of the
+persisted secret, the schedule and run bookkeeping the unattended path relies
+on, and the export artifact's custody model and rollback caveats. It is the
+implementation-level complement to the **Managed exchange lifecycle** overview in
+[MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md), which says what the feature is for,
+its automation goal and platform envelope, its durability and single-owner
+contract, and its threat posture; this document covers the on-disk (in-browser)
+shape those properties are enforced over. It does
+not cover the browser at-rest threat model (see
+[SECURITY_DESIGN.md](../SECURITY_DESIGN.md#hosted-at-rest-threat-model-for-managed-exchanges)),
+the exchange-file artifact the record is composed from (see
+[EXCHANGE_FILE.md](EXCHANGE_FILE.md)), the invitation wire format (see
+[FILE_SYNC.md](FILE_SYNC.md)), or the shared-secret rotation construction (see
+[PROTOCOL.md](PROTOCOL.md#shared-secret-rotation)). Intended readers are security
+auditors and implementors.
+
+> **Status.** The managed exchange record is not yet implemented. The
+> recurring-exchange epic implements against the shape below, and that
+> implementation is gated on security review because it persists a rotating
+> credential at rest. The persist-before-success ordering and the single-owner
+> invariant are normative for that implementation, not aspirational.
+
+## What the record is, and what it deliberately is not
+
+A managed exchange record is the minimal state a party's own browser retains so
+that a recurring exchange with the same partner, over the same terms, can be run
+again. It is **not** a saved copy of the exchange's inputs or outputs:
+
+- **It never holds the input data, nor any row value derived from it.** The
+  input file's contents are re-read at each run and never persisted (see
+  [Re-supplied each run](#re-supplied-each-run)); a managed record holds no
+  second copy of them. Where the File System Access API exists, the record
+  persists a `FileSystemFileHandle` -- a **pointer** to the operator's file,
+  never a copy of its contents (see [Persisted across
+  runs](#persisted-across-runs)). This mirrors the CLI, where `psilink.yaml`
+  references data by path and never embeds it, and the exchange-record artifact
+  commits to data rather than embedding it (see
+  [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)).
+- **It never holds a match result.** The intersection and any received payload
+  are the run's output, handled under the operator's data governance, not
+  folded back into the managed record.
+- **It holds exactly one live shared secret at a time.** The secret is a linear
+  resource (see [The secret is a linear
+  resource](#the-secret-is-a-linear-resource)); the record stores the current
+  rotated value and no history of prior values.
+
+## Record shape
+
+The record is a single object, persisted in the browser's IndexedDB under the
+app's origin -- JSON-serializable but for the optional input-file handle, a
+platform object IndexedDB stores by structured clone and the export artifact
+omits (see [Export artifact](#export-artifact)). Its core is this party's own
+**exchange-file document** -- the same shared config schema the web app mints
+and the CLI consumes -- plus the secret and the small set of local-only fields
+that document deliberately does not carry. This is the CLI-parity shape: what
+the CLI keeps as `psilink.yaml` plus `.psilink.key`, the browser keeps as one
+record. Persisting the whole document, rather than a bespoke subset of its
+fields, keeps the record from becoming a parallel format of the kind the
+no-parallel-format contract in [EXCHANGE_FILE.md](EXCHANGE_FILE.md) exists to
+prevent. `camelCase` on the TypeScript side; the persisted key names below are
+the normative field names.
+
+The CLI parity has one deliberate break. The CLI's two artifacts are separable:
+an operator can retire the secret alone (delete `.psilink.key`, keep the config)
+and permission the two files differently. The one-record design does not offer
+that separability: there is no secret-only retirement -- removing a managed
+secret means deleting the whole record and re-establishing it by re-invite --
+and one store read discloses the secret and the partnership metadata together.
+The trade buys the single persist-before-success write and one import/export
+artifact; it is stated here so a reviewer does not infer a separability the
+design does not have.
+
+### Persisted across runs
+
+These fields survive a run, a crash, a tab close, and a browser restart. They
+are the standing definition of the managed exchange.
+
+| Field | Type | Notes |
+| ----- | ---- | ----- |
+| `schemaVersion` | string literal | A single recognized literal for v1 (for example `psilink-managed-exchange/v1`); a reader rejects an unrecognized value rather than migrating it, matching the reader-rejects-unknown rule the exchange-record and verification-keys files follow (see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)). |
+| `id` | string (UUID) | A locally-generated identifier for this managed exchange, distinct from any rendezvous id. Used only to name the record in local UI; never sent on the wire. |
+| `label` | string, at most 120 characters (enforced at write) | An operator-supplied display name for the partnership. Local only; never sent -- but disclosed to any reader of the store (see [Metadata at rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). The length cap is enforced; the content guidance is not and cannot be: keeping agreement numbers, contact details, and other sensitive counterparty detail out of the label is **operator cooperation**, exactly as export-source invalidation is -- the field's only structural protections are the cap and its never-sent locality. |
+| `exchangeFile` | object | This party's exchange-file document, verbatim: the validated `ExchangeSpec` shape both applications share (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md), "The artifact is the CLI config schema") -- the linkage terms both parties validated (column **shape** and disclosed payload column **names**, never a row value), metadata, standardization, any disclosed payload columns, and the connection block. It carries **no `authentication` block** (the secret lives in `sharedSecret` below) and is composed exactly as the mint layer composes a downloadable file: assembled from a credential-free locator input, validated through the shared schema, with the **parse result** (never the raw input) persisted. A change to the agreed terms requires a re-invite, not an in-place edit. |
+| `side` | enum (`"inviter"` \| `"acceptor"`) | This party's side of the partnership; dispatches a re-run to the matching rendezvous flow (see [Role: a local `side` field](#role-a-local-side-field-not-the-document)). Local-only by design -- deliberately not the document's schema-only `connection.role`. |
+| `inputFileHandle` | `FileSystemFileHandle` or absent | A persisted **pointer** to the operator's input file, held where the File System Access API exists (Chromium), with persistent read permission where the platform grants it (an installed app), so an unattended run reads the standing file with nobody present and an attended re-run is one action. It is a reference, never a copy: no input content or row value persists, and the no-second-copy invariant holds unchanged. It is also live, not a snapshot: each run calls `getFile()` at run start and reads whatever file currently exists at the path -- a `File` object is a point-in-time reference, so `File` objects are never retained across runs -- which is what makes dropping the current period's extract over the same name the data-refresh workflow. A missing entry at run start fails the file read with a clean not-found, recorded as a benign `"input"` failure (see `lastRun`), never routed through desync/attack framing. What it does add to the store's disclosure is the input file's **name**, and the granted read permission extends an in-origin reader's reach to the file's current contents (see [Metadata at rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). Absent on browsers without the API (each attended run re-selects the file) and in any imported record: the handle is a device- and profile-local platform object stored by structured clone, with no file serialization, so the export artifact omits it and the first run after an import re-acquires one by selection. |
+| `sharedSecret` | string (base64url, 43 chars / 32 bytes) | The **current** rotated shared secret, matching `SHARED_SECRET_REGEX` (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md)) -- the `.psilink.key` analog the exchange-file document deliberately never carries. This is the one at-rest secret in the record. Rotated after every successful run and re-persisted before the run is treated as succeeded (see [Persist-before-success ordering](#persist-before-success-ordering)). |
+| `expires` | string (ISO 8601, UTC `Z`) or absent | The instant after which `sharedSecret` must not be used; the recovery when it lapses is re-invite. Absent means no bound is in force. The record inherits the CLI key file's **consumer** semantics for `expires` -- one field, one meaning to every consumer (see [Two sources, one `expires`](../SECURITY_DESIGN.md#two-sources-one-expires), a citation about meaning, not sourcing) -- while its **provenance** is single-source: only the max-age stamp below writes it, the invitation's setup lifetime having been consumed at provisioning. |
+| `tokenMaxAgeDays` | integer or absent | The operator's max-token-age policy for this exchange, the browser analog of the CLI `authentication.token_max_age_days`, and like it **off by default**: absent means no bound is in force, and a record is created with it absent unless the operator sets one. When set, each successful run stamps `expires` this many days out onto the rotated secret. The reason to opt in is a dormant partnership: rotation caps exposure only for an exchange that actually runs, so an idle stored secret has no automatic exposure bound without it (see [The primary controls](../SECURITY_DESIGN.md#the-primary-controls)). |
+| `schedule` | object or absent | The partnership-agreed run schedule the unattended path executes: the agreed recurrence and run window -- the schedule is partnership-level agreement, coordinated out-of-band exactly as the terms are -- plus the retry bookkeeping for a missed window (the next planned attempt). Closed shape: timestamps, durations, and enums, no free text, under the same no-narrative constraint as `lastRun`. Absent for an exchange run attended-only. The exact field layout is fixed by the later scheduling design work, within the security-review gate; this record commits to carrying it. |
+| `lastRun` | object or absent | Run bookkeeping the backup state and the tiered desync UX read (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md)): `at` (ISO 8601 UTC), `outcome` (`"succeeded"` \| `"failed"` \| `"desynced"` \| `"missed"`), and, for a non-succeeded outcome, an optional `failureKind` (`"auth"` \| `"transport"` \| `"storage"` \| `"input"` \| `"cancelled"`). A `"missed"` outcome records an agreed window that passed without a completed handshake (a runner no-show on either side); it is benign, retried at the next window, and never routed through the desync/attack framing (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#a-missed-window-is-neither-desync-nor-attack)). An `"input"` failure records a benign pre-run input problem -- the handle's file missing at run start, or contents the column-shape guard rejects -- detected before any connection, likewise never routed through that framing. Every field is a timestamp or a closed enum -- there is deliberately **no free-text field**, so the record structurally cannot carry a match result, a count, or a row value; the constraint is the type, not a prose promise. |
+
+Everything in this table except `sharedSecret` is non-secret but not
+non-sensitive: together the persisted fields disclose the partnership's
+existence and shape -- who links with whom, over which field categories, on
+what agreed schedule, and, when a handle is persisted, from which named input
+file -- to any reader of the store. That presence-and-shape disclosure, and why
+none of the secret-centric controls reduce it, is analyzed in [Metadata at
+rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape).
+
+#### The connection block: credential-free by composition
+
+For the browser path the document's connection block is the `webrtc` channel
+restricted to its credential-free locator subset: `server` locator fields only
+(`host`/`port`/`path` -- no `server.username`, no PeerJS `key`), and no
+`turn`, `ice_provision`, or `provider_options` entries (a TURN entry carries
+relay credentials, and the provider map is opaque and `@`-file-pathed). This
+party's side lives in the local `side` field, not the document (see [Role: a
+local `side` field](#role-a-local-side-field-not-the-document)). The full shared schema **can** represent those
+credential-bearing fields, so the guarantee comes from composition, exactly as
+in the mint layer: the record composer assembles the connection from a
+credential-free locator input and persists the schema's parse result. The mint
+layer's credential-free input union covers only the file-sync channels today (a
+webrtc exchange is coordinated live, not from a downloadable file), so this
+schema requires three concrete pieces of implementation work: a new
+credential-free `WebRTCExchangeLocator` type (`host`/`port`/`path` only); a
+`webrtc` arm in `connectionFromLocator`, the locator-to-connection expansion in
+`packages/core/src/config/exchangeFile.ts`; and the composition guarantee
+extending to the nested `server` object's two credential fields
+(`server.username` and the PeerJS `server.key`), which the flat file-sync
+locators never had to exclude. Prefer composing the webrtc locator from the
+invitation's endpoint schema (`WebRTCEndpointSchema`,
+`packages/core/src/config/invitation.ts`), which is already credential-free by
+schema, so there is one locator source of truth rather than two. The
+composition rule, not a strip pass, is the enforcement.
+
+#### Role: a local `side` field, not the document
+
+The record's local `side` field (`"inviter"` \| `"acceptor"`) dispatches a
+re-run to the right rendezvous flow: the web selects its role by **which
+function runs** -- `listenAsInviter` or `dialAsAcceptor`
+(`apps/web/src/psi/rendezvous.ts`), each hardcoding its peer-id derivation
+label and its handshake role (the inviter is the `"responder"`, the acceptor
+the `"initiator"`). The document's `connection.role` field is deliberately not
+used for this: it is schema-only, nothing reads it, and the record does not
+change that -- the document is persisted untouched.
+
+On the webrtc re-run path the document's `server` locator is likewise inert: the
+inviter derives its signaling location from `window.location`, and the
+acceptor's came from the invitation endpoint at accept time. The connection
+block is persisted for document fidelity -- the document is kept verbatim, per
+the CLI-parity contract above -- not because the webrtc re-run reads it.
+
+#### Versioning: an app upgrade can invalidate a stored record
+
+A persisted document is subject to the exchange-file versioning and
+compatibility policy (see
+[EXCHANGE_FILE.md](EXCHANGE_FILE.md#versioning-and-compatibility-policy)): the
+web app is continuously deployed, there is no back-compatibility promise for
+existing artifacts, and an unknown enum value rejects loudly at load. An app
+upgrade can therefore invalidate a stored record -- over and above the record's
+own `schemaVersion` reader-rejects-unknown rule -- and the recovery is
+re-invite: a record the new version cannot load is re-established from a fresh
+invitation rather than hand-migrated, matching the policy's guidance for every
+other artifact of this schema.
+
+That evolution path -- reject, re-invite, re-create -- is also how the shape
+grows: a future schema revision adds its fields under a new `schemaVersion`,
+rather than the v1 record carrying speculative, structurally always-absent
+seams.
+
+### Re-supplied each run
+
+These are never persisted in the record. They are supplied at each run -- by
+the scheduled runtime, or by the operator on an attended run.
+
+| Input | Why it is not persisted |
+| ----- | ----------------------- |
+| The input file's contents | Never persisted -- the record holds a pointer at most (`inputFileHandle` above), never content. Each run re-reads the operator's file: through the persisted handle (unattended, or one action attended) where the File System Access API exists, by re-selection elsewhere. The file is read in the browser and never uploaded, exactly as the one-shot flow reads it (see [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#invitation-contents-and-confidentiality)). See [The input file each run](../MANAGED_EXCHANGE.md#the-input-file-each-run). |
+| Any connection credential | The persisted document's connection block is composed from a credential-free locator (see [The connection block](#the-connection-block-credential-free-by-composition)), so no credential is representable in the record. |
+| The live rendezvous / peer id | Derived fresh each run from `sharedSecret` under the label the local `side` field selects (see [Derived, never stored](#derived-never-stored)); storing it would duplicate a value that changes with every rotation. |
+| The session key and AEAD keys | Ephemeral per run; derived by the handshake and discarded after. Never persisted. |
+
+## The secret is a linear resource
+
+The persisted `sharedSecret` is the single most consequential field, because it
+is not an ordinary cache entry: it is a **linear resource**. After a successful
+run, both parties independently derive the same replacement secret from the
+key-exchange session key and the old secret is retired; there is exactly one live
+secret shared between the two parties at any time, and neither party keeps the
+old one. Two consequences follow, and both are normative:
+
+### Single-owner invariant
+
+A managed record's `sharedSecret` must be advanced (used to run, then rotated and
+re-persisted) by **one device only**. If two devices both hold a copy and both
+run, they fork the secret permanently: after the first device rotates, the second
+device's copy is stale, and no automatic reconciliation exists (there is no grace
+window; see [Desync detection and
+recovery](../MANAGED_EXCHANGE.md#desync-detection-and-recovery)). The guard on a
+single device is a cross-tab single-writer lock over the run+rotate critical
+section (Web Locks); export/import between devices is **migration, not sync** (the
+source copy is invalidated on export). Both are specified in
+[MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#single-device-ownership).
+
+### Persist-before-success ordering
+
+The rotated secret must be durably persisted **before** this party begins the
+data exchange -- the first peer-visible act after the handshake. The protocol
+has no discrete peer-visible success signal to gate on: both sides rotate at
+handshake completion, and the exchange's terminal act is a fire-and-forget final
+send, so the data exchange itself is what the persist must precede. Concretely,
+within a single run:
+
+1. The handshake completes and yields the `AuthResult`
+   (`{ sessionKey, rotatedSecret, applyEncryption }`; see
+   [PROTOCOL.md](PROTOCOL.md#shared-secret-rotation)).
+2. `sharedSecret` (and `expires`, refreshed from `tokenMaxAgeDays` when a
+   policy is set) is written to
+   IndexedDB in a transaction opened with **`{ durability: "strict" }`**, and the
+   write is awaited to the transaction's `complete` event, before step 3. Strict
+   durability requests OS writeback before `complete` fires; the default
+   (relaxed) durability fires `complete` once the write is visible in-process,
+   **before** OS writeback -- surviving a tab or renderer crash but not an OS
+   crash or power loss. Strict narrows that gap without closing it (it is
+   honored variably across engines and is still not a forced media flush).
+3. Only then does the party begin the data exchange and, on completion, mark
+   `lastRun.outcome = "succeeded"`.
+
+This is the browser analog of the CLI's persist-then-exchange ordering, where the
+key file is written (through an atomic, fsync-durable path) immediately after the
+handshake rotates the secret and before the data exchange runs (see
+[CREDENTIAL_STORAGE.md](CREDENTIAL_STORAGE.md#posix-write-discipline)). Its
+guarantee is precisely scoped: it eliminates **this party's contribution** to
+the desync window and provides renderer-crash consistency. It does not cover the
+partner's independent persist failure -- neither side can know whether the
+other's save succeeded, the same one-sided limit the CLI states when its
+key-file write fails after rotation -- nor an OS crash or power loss under the
+durability limits above, nor wholesale storage eviction (see
+[MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#surviving-storage-eviction)). That
+residual is covered by fast re-invite, not a stronger at-rest guarantee.
+
+## Derived, never stored
+
+Two per-run values are always derived from the persisted `sharedSecret` and never
+themselves persisted, so persisting the secret is sufficient to reconstruct them
+and there is no second value to keep consistent with it:
+
+- **The rendezvous peer id.** Derived via HKDF over the decoded 32-byte secret
+  with a zero salt and info `psilink-webrtc-peerid-v1:<role>` (`<role>` being
+  `inviter` or `acceptor`), output 16 bytes, lowercase hex. Because it derives
+  from the secret, it changes with every rotation, so it cannot be a stored
+  field -- storing it would strand a stale id after a rotation. The construction
+  is specified in [PROTOCOL.md](PROTOCOL.md#webrtc-rendezvous-peer-id-derivation).
+- **The rotated replacement secret.** Derived via HKDF over the session key with
+  info `psilink-shared-secret-rotation-v1` (see
+  [PROTOCOL.md](PROTOCOL.md#shared-secret-rotation)). It is written into
+  `sharedSecret` by the persist-before-success step above; the derivation itself
+  is core's.
+
+The managed record introduces no new KDF, info string, or salt: it persists the
+same 32-byte secret the invitation and rotation already define, and every
+derived value uses the existing labels above. The record's own at-rest hygiene
+(see
+[SECURITY_DESIGN.md](../SECURITY_DESIGN.md#hosted-at-rest-threat-model-for-managed-exchanges))
+is a secondary control layered over that secret, not a change to how it is
+derived or rotated.
+
+## Export artifact
+
+The managed record can be exported to a file for device migration and
+eviction recovery (see [the durability
+backbone](../MANAGED_EXCHANGE.md#the-durability-backbone-exportimport)).
+The artifact's shape and custody model:
+
+- **Contents.** The persisted record fields above -- the exchange-file document
+  plus `sharedSecret`, `expires`, the schedule, and the local bookkeeping: the
+  browser analog of handing over `psilink.yaml` and `.psilink.key` together --
+  **minus the input-file handle**: a `FileSystemFileHandle` is a device- and
+  profile-local platform object with no file serialization, so the export omits
+  it and the first run after an import re-acquires one (a one-time selection).
+  The artifact does not rotate -- it snapshots the secret current at export --
+  so a stale artifact stays usable until the partnership rotates past it or any
+  `expires` it carries (stamped when a max-age policy is set) lapses; the
+  backup state prompts re-export after each rotation.
+- **CLI-separable format.** The record is the CLI's config-plus-key pair kept
+  as one browser object, and its export stays consumable by the CLI toolchain
+  rather than becoming a third format: the embedded document is a valid
+  `psilink.yaml`; the `sharedSecret` and `expires` pair maps onto a valid
+  `.psilink.key`; and the local fields (`id`, `label`, `side`, `schedule`,
+  `lastRun`, `tokenMaxAgeDays`) are cleanly separable and ignorable. This is a
+  format-compatibility commitment, not a claim the embedded exchange runs there
+  (the CLI has no WebRTC transport).
+- **Plaintext, custody-protected.** The artifact is a plaintext credential file,
+  not passphrase-encrypted. Passphrase encryption is deliberately not done: the
+  record must be usable with nobody present to supply a passphrase, and the
+  artifact adopts the CLI key file's trust model instead. `.psilink.key` is a
+  plaintext credential protected by custody and storage permissions, not by a
+  passphrase, and the export asks for the same handling -- owner-only storage,
+  never an unencrypted transmission channel, the backup guidance in [Key file
+  security](../SECURITY_DESIGN.md#key-file-security) (an operator who wants
+  encryption at rest stores the file in an encrypted location or secrets
+  manager, exactly as the CLI's backup guidance says).
+- **A captured export is a captured credential.** It stays usable until the
+  partnership rotates past it -- which a dormant partnership may not do for
+  months -- so the response to a lost or copied artifact is the [compromise
+  response](../SECURITY_DESIGN.md#compromise-response) (notify the partner
+  out-of-band, re-invite), not quiet deletion.
+- **No anti-rollback.** The record carries no rotation epoch and no history, and
+  the handshake gives the partner no way to recognize a superseded copy, so a
+  restored artifact (or a browser-profile/VM snapshot) silently re-arms whatever
+  secret it holds: still-current (the captured-credential case above) or
+  rotated-past (a guaranteed desync at the next run). Source invalidation on
+  export is an operator-cooperation property, not a cryptographic one. A
+  monotonic rotation epoch carried in the record and checked in the handshake
+  would let a party detect a stale or forked peer; it is a future core hardening,
+  deferred alongside the grace-window mitigation (see
+  [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#rollback-at-rest-copies-can-silently-resurrect)).
+
+## See also
+
+- [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md) - the managed exchange lifecycle: who it serves, the automation goal and platform envelope, durability contract, single-owner invariant, desync story, eviction survival, and the moment-anchored backup surfaces
+- [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#hosted-at-rest-threat-model-for-managed-exchanges) - the browser at-rest threat model for the persisted secret: the primary controls, the rollback and metadata-at-rest analyses, and the egress-hardening limits
+- [EXCHANGE_FILE.md](EXCHANGE_FILE.md) - the exchange-file artifact and the credential-free endpoint locator the record composes from
+- [PROTOCOL.md](PROTOCOL.md#shared-secret-rotation) - the shared-secret rotation and rendezvous-peer-id derivation constructions
+- [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md) - the self-attested per-run disclosure record (a distinct artifact; the managed record is not a disclosure log)
+</content>
