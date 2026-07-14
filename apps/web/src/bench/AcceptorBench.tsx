@@ -86,6 +86,19 @@ const EMPTY_STANDARDIZATION: Standardization = [];
  * CleaningTab). Only meaningful while {@link AcceptorStep} is `columns`. */
 type AcceptorColumnsSection = "columns" | "cleaning";
 
+// Exhaustive over AcceptorStep (the Record keying enforces it): the steps a
+// history entry restored by Back/Forward is allowed to name.
+const ACCEPTOR_STEP_SET: Record<AcceptorStep, true> = {
+  review: true,
+  consent: true,
+  columns: true,
+  launched: true,
+};
+
+function isAcceptorStep(value: string): value is AcceptorStep {
+  return value in ACCEPTOR_STEP_SET;
+}
+
 /** The exchange the acceptor launched: the assembled per-party edits and the
  * optional partial-coverage advisory the run surface carries forward. Drives
  * the acceptor's run surface ({@link AcceptorExchangeSection}); the run hook
@@ -254,15 +267,18 @@ export function AcceptorBench() {
   // Apply a position arriving from a browser Back/Forward: set the step and its
   // sub-section without pushing a new history entry (the browser already moved
   // the cursor). The bench stays mounted, so the loaded file, the confirmed
-  // columns, and every in-progress edit survive the transition untouched.
+  // columns, and every in-progress edit survive the transition untouched. A
+  // token naming no live step (a stale entry from before a deploy renamed one)
+  // is ignored rather than rendered as an empty work column.
   function restorePosition(token: string) {
     if (token === "columns:cleaning") {
       setColumnsSection("cleaning");
       setStep("columns");
       return;
     }
+    if (!isAcceptorStep(token)) return;
     setColumnsSection("columns");
-    setStep(token as AcceptorStep);
+    setStep(token);
   }
 
   const { pushStep } = useStepHistory("review", restorePosition);

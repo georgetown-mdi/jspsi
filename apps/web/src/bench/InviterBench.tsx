@@ -111,6 +111,25 @@ function isSpineStep(section: Section): section is SpineStep {
   return (SPINE_ORDER as ReadonlyArray<Section>).includes(section);
 }
 
+// Exhaustive over Section (the Record keying enforces it), so a history entry
+// restored by Back/Forward is admitted only when it names a live section -- a
+// stale entry from before a deploy renamed a section is ignored rather than
+// rendered as an empty work column.
+const SECTION_SET: Record<Section, true> = {
+  file: true,
+  columns: true,
+  review: true,
+  cleaning: true,
+  keys: true,
+  agreement: true,
+  share: true,
+  save: true,
+};
+
+function isSection(value: string): value is Section {
+  return value in SECTION_SET;
+}
+
 function demotionNotice(demoted: ReadonlyArray<string>): string {
   if (demoted.length === 0) return "";
   return `${demoted.join(", ")} changed to Ignored - only one column can be the row identifier.`;
@@ -245,9 +264,9 @@ export function InviterBench() {
     setSection(next);
   }
 
-  const { pushStep } = useStepHistory("file", (step) =>
-    restoreSection(step as Section),
-  );
+  const { pushStep } = useStepHistory("file", (step) => {
+    if (isSection(step)) restoreSection(step);
+  });
 
   // The unload guard arms once a file is loaded and disarms once the exchange is
   // finalized -- the invitation minted (the live run is listening) or the

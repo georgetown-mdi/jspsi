@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 
 import {
   benchStepState,
-  depthFromState,
+  benchStepStateForPush,
   stepFromPopState,
 } from "./stepHistory";
 
@@ -31,7 +31,9 @@ import {
  *   history entry so Back can restore it.
  * @param onRestore - applies a step arriving from Back/Forward; must set the
  *   step state WITHOUT pushing a new entry (the browser already moved the
- *   cursor). The hook keeps a live ref to it, so an inline closure is fine.
+ *   cursor), and must validate the step against its own union, ignoring a
+ *   foreign one (a stale entry from before a deploy renamed a step). The hook
+ *   keeps a live ref to it, so an inline closure is fine.
  */
 export function useStepHistory(
   initialStep: string,
@@ -39,32 +41,24 @@ export function useStepHistory(
 ): {
   pushStep: (step: string) => void;
 } {
-  // The bench's current depth in its own step stack. The first step sits at
-  // depth 0 (seeded below), so the first pushed step is depth 1. Kept in a ref
-  // so the popstate listener, registered once, always reads the live value.
-  const depthRef = useRef(0);
   const restoreRef = useRef(onRestore);
   restoreRef.current = onRestore;
   const initialStepRef = useRef(initialStep);
 
-  // On mount, mark the current entry as the bench's first step (depth 0) so
-  // Back from a later step restores it, while Back from the first step falls
-  // through to the pre-bench entry and leaves the route. replaceState adds no
-  // entry, so the bench occupies exactly one entry until it pushes a step; a
-  // StrictMode double-mount replays this idempotently on the same entry.
+  // Mark the current entry as the bench's first step. replaceState keeps the
+  // router history's index and entry key untouched (replace semantics), so the
+  // bench occupies exactly one entry until it pushes a step; a StrictMode
+  // double-mount replays this idempotently on the same entry.
   useEffect(() => {
-    depthRef.current = 0;
     window.history.replaceState(
-      benchStepState(initialStepRef.current, 0, window.history.state),
+      benchStepState(initialStepRef.current, window.history.state),
       "",
     );
   }, []);
 
   const pushStep = useCallback((step: string) => {
-    const nextDepth = depthRef.current + 1;
-    depthRef.current = nextDepth;
     window.history.pushState(
-      benchStepState(step, nextDepth, window.history.state),
+      benchStepStateForPush(step, window.history.state),
       "",
     );
   }, []);
@@ -76,8 +70,6 @@ export function useStepHistory(
       // or an unrelated route). Let the browser navigate normally -- nothing to
       // restore, and the component unmounts as it always did.
       if (step === undefined) return;
-      const depth = depthFromState(event.state);
-      if (depth !== undefined) depthRef.current = depth;
       restoreRef.current(step);
     }
     window.addEventListener("popstate", handlePopState);

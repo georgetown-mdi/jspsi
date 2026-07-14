@@ -938,6 +938,46 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
       .element(page.getByRole("heading", { name: "Confirm your columns" }))
       .toBeInTheDocument();
   });
+
+  test("browser Back walks the acceptor steps in place, including the cleaning tab", async () => {
+    await reachColumns("first_name,last_name\nAlice,Smith\n");
+    await userEvent.click(page.getByRole("button", { name: /Cleaning/ }));
+    await expect
+      .element(page.getByRole("heading", { name: "Cleaning" }))
+      .toBeInTheDocument();
+
+    // Back leaves the Cleaning tab for the columns confirm surface -- the
+    // sub-section is part of the restored position, not just the step.
+    window.history.back();
+    await expect
+      .element(page.getByRole("heading", { name: "Confirm your columns" }))
+      .toBeInTheDocument();
+
+    // Back again lands on consent with every input intact: the file card, the
+    // name, and the checked consent all survive in place.
+    window.history.back();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Consent & your file");
+    await expect
+      .element(page.getByText("cohort_intake.csv"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByLabelText("Your name"))
+      .toHaveValue("Sam Alvarez");
+
+    // Forward reverses the same transitions, back into the Cleaning tab, and
+    // the file was never re-parsed along the way (one parse at Accept).
+    window.history.forward();
+    await expect
+      .element(page.getByRole("heading", { name: "Confirm your columns" }))
+      .toBeInTheDocument();
+    window.history.forward();
+    await expect
+      .element(page.getByRole("heading", { name: "Cleaning" }))
+      .toBeInTheDocument();
+    expect(csvLoadHarness.called).toBe(1);
+  });
 });
 
 describe("acceptor columns step: disclosure summary sanitization", () => {

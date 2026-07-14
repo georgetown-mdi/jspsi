@@ -16,6 +16,7 @@ import { MantineProvider } from "@mantine/core";
 
 import { decodeInvitation } from "@psilink/core";
 
+import { BENCH_STEP_STATE_KEY } from "@bench/stepHistory";
 import { BenchLobby } from "@bench/BenchLobby";
 import { InvitationFileError } from "@psi/invitation";
 import { InviterBench } from "@bench/InviterBench";
@@ -786,6 +787,89 @@ describe("inviter bench", () => {
       Storage.prototype.setItem = originalLocalSet;
       indexedDB.open = indexedDbOpen;
     }
+  });
+
+  test("a history entry naming no live section is ignored, not rendered blank", async () => {
+    mount(createElement(InviterBench));
+
+    await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana");
+    const fileInput = document.querySelector('input[type="file"]');
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      new File(["first_name,last_name,dob\nAnn,Lee,01/02/1990\n"], "a.csv", {
+        type: "text/csv",
+      }),
+    );
+    await expect.element(page.getByText("a.csv")).toBeInTheDocument();
+    await page
+      .getByRole("button", { name: "Continue to matching & sharing" })
+      .click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Matching & sharing");
+
+    // A popstate into a bench entry whose step no build knows (a tab surviving
+    // a deploy that renamed a section) must not clear the work column: the
+    // restore is refused and the current section keeps rendering.
+    window.dispatchEvent(
+      new PopStateEvent("popstate", {
+        state: { [BENCH_STEP_STATE_KEY]: "retired-section" },
+      }),
+    );
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Matching & sharing");
+    // The section's own controls keep rendering with their edited state intact.
+    await expect
+      .element(page.getByLabelText("How first_name is used"))
+      .toBeInTheDocument();
+  });
+
+  test("the unload prompt arms with the file and disarms once the invitation exists", async () => {
+    // A cancelable beforeunload dispatched at the window is answered by the
+    // same listener the browser consults on a real unload; dispatchEvent
+    // returning false means the guard called preventDefault (prompt armed).
+    const unloadPrompted = () =>
+      !window.dispatchEvent(new Event("beforeunload", { cancelable: true }));
+
+    mount(createElement(InviterBench));
+    await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+    // No file yet: leaving loses nothing, so no prompt.
+    expect(unloadPrompted()).toBe(false);
+
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+    const fileInput = document.querySelector('input[type="file"]');
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      new File(
+        [
+          "client_id,first_name,last_name,dob,program_code\n" +
+            "1,Ann,Lee,01/02/1990,A\n",
+        ],
+        "clients.csv",
+        { type: "text/csv" },
+      ),
+    );
+    await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
+    // A file is loaded and nothing is created yet: leaving would lose it. The
+    // guard's listener attaches in a passive effect, so poll past the commit
+    // the file-card locator resolved on.
+    await vi.waitFor(() => expect(unloadPrompted()).toBe(true));
+
+    await page
+      .getByRole("button", { name: "Continue to matching & sharing" })
+      .click();
+    await page
+      .getByRole("button", { name: "Continue to review & create" })
+      .click();
+    await page.getByRole("button", { name: "Create the invitation" }).click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Your invitation is ready");
+    // The invitation is minted: leaving costs nothing unsecured, so the
+    // prompt disarms (again polled past the commit, for the detach effect).
+    await vi.waitFor(() => expect(unloadPrompted()).toBe(false));
   });
 
   test("customize tabs: reorder keys, author an agreement, gated settings stay inert", async () => {

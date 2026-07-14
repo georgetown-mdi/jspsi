@@ -3,30 +3,81 @@ import { describe, expect, test } from "vitest";
 import {
   BENCH_STEP_STATE_KEY,
   benchStepState,
-  depthFromState,
+  benchStepStateForPush,
   stepFromPopState,
   unloadGuardArmed,
 } from "@bench/stepHistory";
 
 describe("bench step history state", () => {
-  test("benchStepState tags an entry with the step and depth", () => {
-    const state = benchStepState("columns", 2);
-    expect(state[BENCH_STEP_STATE_KEY]).toEqual({ step: "columns", depth: 2 });
+  test("benchStepState tags an entry with the step", () => {
+    const state = benchStepState("columns");
+    expect(state[BENCH_STEP_STATE_KEY]).toBe("columns");
   });
 
   test("benchStepState preserves unrelated fields on the existing state", () => {
-    const state = benchStepState("review", 3, { scrollY: 120, other: "keep" });
+    const state = benchStepState("review", { scrollY: 120, other: "keep" });
     expect(state).toMatchObject({ scrollY: 120, other: "keep" });
-    expect(state[BENCH_STEP_STATE_KEY]).toEqual({ step: "review", depth: 3 });
+    expect(state[BENCH_STEP_STATE_KEY]).toBe("review");
+  });
+
+  test("benchStepState keeps the router's index and key as-is (replace semantics)", () => {
+    const state = benchStepState("file", {
+      __TSR_index: 4,
+      __TSR_key: "abc",
+      key: "abc",
+    });
+    expect(state).toMatchObject({
+      __TSR_index: 4,
+      __TSR_key: "abc",
+      key: "abc",
+    });
   });
 
   test("benchStepState ignores a non-object existing state", () => {
-    expect(benchStepState("file", 1, null)).toEqual({
-      [BENCH_STEP_STATE_KEY]: { step: "file", depth: 1 },
+    expect(benchStepState("file", null)).toEqual({
+      [BENCH_STEP_STATE_KEY]: "file",
     });
-    expect(benchStepState("file", 1, "not-an-object")).toEqual({
-      [BENCH_STEP_STATE_KEY]: { step: "file", depth: 1 },
+    expect(benchStepState("file", "not-an-object")).toEqual({
+      [BENCH_STEP_STATE_KEY]: "file",
     });
+  });
+});
+
+describe("benchStepStateForPush", () => {
+  // A pushed entry sits beside the router's own entries, so it must carry the
+  // router's push bookkeeping: index advanced by one, a fresh entry key. The
+  // router's patched history classifies a popstate as Back or Forward from the
+  // index delta; a frozen index would read every in-bench pop as an in-place GO.
+  test("advances the router index and mints a fresh entry key", () => {
+    const state = benchStepStateForPush("columns", {
+      __TSR_index: 4,
+      __TSR_key: "abc",
+      key: "abc",
+    }) as unknown as Record<string, unknown>;
+    expect(state[BENCH_STEP_STATE_KEY]).toBe("columns");
+    expect(state.__TSR_index).toBe(5);
+    expect(typeof state.__TSR_key).toBe("string");
+    expect(state.__TSR_key).not.toBe("abc");
+    expect(state.key).toBe(state.__TSR_key);
+  });
+
+  test("returns the marker state alone when no router index is present", () => {
+    expect(benchStepStateForPush("columns")).toEqual({
+      [BENCH_STEP_STATE_KEY]: "columns",
+    });
+    expect(benchStepStateForPush("columns", { scrollY: 7 })).toEqual({
+      scrollY: 7,
+      [BENCH_STEP_STATE_KEY]: "columns",
+    });
+  });
+
+  test("preserves unrelated fields alongside the advanced index", () => {
+    const state = benchStepStateForPush("review", {
+      __TSR_index: 0,
+      other: "keep",
+    }) as unknown as Record<string, unknown>;
+    expect(state.other).toBe("keep");
+    expect(state.__TSR_index).toBe(1);
   });
 });
 
@@ -35,9 +86,9 @@ describe("stepFromPopState", () => {
   // it names is the one the bench restores. A Forward-equivalent event is the
   // same shape at the next entry -- both round-trip through this reader.
   test("reads the step a bench entry carries", () => {
-    const backTarget = benchStepState("file", 1);
+    const backTarget = benchStepState("file");
     expect(stepFromPopState(backTarget)).toBe("file");
-    const forwardTarget = benchStepState("columns", 2);
+    const forwardTarget = benchStepStateForPush("columns", backTarget);
     expect(stepFromPopState(forwardTarget)).toBe("columns");
   });
 
@@ -48,26 +99,7 @@ describe("stepFromPopState", () => {
     expect(stepFromPopState(undefined)).toBeUndefined();
     expect(stepFromPopState({})).toBeUndefined();
     expect(stepFromPopState({ someOtherRoute: true })).toBeUndefined();
-    expect(
-      stepFromPopState({ [BENCH_STEP_STATE_KEY]: { depth: 2 } }),
-    ).toBeUndefined();
-  });
-});
-
-describe("depthFromState", () => {
-  // A smaller depth than the bench's cursor is a Back, a larger one a Forward;
-  // the reader lets the caller tell them apart without its own counter.
-  test("reads the depth a bench entry carries", () => {
-    expect(depthFromState(benchStepState("columns", 2))).toBe(2);
-    expect(depthFromState(benchStepState("file", 1))).toBe(1);
-  });
-
-  test("returns undefined for a non-bench entry", () => {
-    expect(depthFromState(null)).toBeUndefined();
-    expect(depthFromState({ other: 1 })).toBeUndefined();
-    expect(
-      depthFromState({ [BENCH_STEP_STATE_KEY]: { step: "columns" } }),
-    ).toBeUndefined();
+    expect(stepFromPopState({ [BENCH_STEP_STATE_KEY]: 42 })).toBeUndefined();
   });
 });
 

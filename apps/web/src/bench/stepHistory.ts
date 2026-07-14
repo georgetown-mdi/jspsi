@@ -1,6 +1,6 @@
 /**
  * The pure model behind the bench's Back/Forward integration: the shape of the
- * `history.state` entry each in-bench step pushes, how a `popstate` event maps
+ * `history.state` entry each in-bench step writes, how a `popstate` event maps
  * back to a step, and the predicate that arms the unload guard. No React and no
  * `window` -- the tested boundary for "Back moves the step backward", "Forward
  * moves it forward", and "the guard is armed exactly while a file is loaded and
@@ -15,34 +15,70 @@
  * corresponding runtime invariant -- no file contents written to IndexedDB,
  * localStorage, or disk during navigation -- is pinned as a browser test, not
  * asserted here.
+ *
+ * The bench's entries sit in the same stack as TanStack Router's: the app
+ * router's history (`createBrowserHistory` from `@tanstack/history`, re-exported
+ * by `@tanstack/react-router`) patches `window.history` and classifies a
+ * `popstate` as Back or Forward from the delta in `state.__TSR_index`, keying
+ * scroll restoration on `__TSR_key`/`key`. A bench push therefore advances that
+ * index and mints a fresh key -- the same bookkeeping the router applies to its
+ * own pushes -- or the router would misread every in-bench Back/Forward as an
+ * in-place GO and share one scroll slot across all bench steps. Pinned against
+ * the real patched history in `benchRouterHistory.test.ts`.
  */
 
-/** Marks a `history.state` entry as one the bench pushed, so a `popstate` into
- * an entry the bench did not create (an unrelated app route, or the pre-bench
- * entry Back from the first step lands on) is distinguishable from an in-bench
- * step move. */
+/** Marks a `history.state` entry as one the bench wrote, carrying the step name
+ * (an opaque string -- the caller's step union), so a `popstate` into an entry
+ * the bench did not create (an unrelated app route, or the pre-bench entry Back
+ * from the first step lands on) is distinguishable from an in-bench step move. */
 export const BENCH_STEP_STATE_KEY = "psilinkBenchStep";
 
-/** The `history.state` payload a single in-bench step pushes: the marker key
- * carries the step name (an opaque string -- the caller's step union), and the
- * depth pins the entry's position in the bench's step stack so a `popstate`
- * cannot be mistaken for a same-named entry at another depth. */
+/** The router history's entry-index field (see the module header). */
+const ROUTER_INDEX_KEY = "__TSR_index";
+
+/** The `history.state` payload an in-bench step writes. */
 export interface BenchStepState {
-  [BENCH_STEP_STATE_KEY]: { step: string; depth: number };
+  [BENCH_STEP_STATE_KEY]: string;
 }
 
-/** Build the `history.state` payload for `step` at stack position `depth`,
- * merging over any existing state so an unrelated entry's fields survive. */
-export function benchStepState(
-  step: string,
-  depth: number,
-  existing?: unknown,
-): BenchStepState {
+function markedState(step: string, existing: unknown): Record<string, unknown> {
   const base =
     typeof existing === "object" && existing !== null
       ? (existing as Record<string, unknown>)
       : {};
-  return { ...base, [BENCH_STEP_STATE_KEY]: { step, depth } };
+  return { ...base, [BENCH_STEP_STATE_KEY]: step };
+}
+
+/** Build the `history.state` payload for `step`, merging over any existing state
+ * so an unrelated entry's fields (including the router's) survive unchanged --
+ * the replace form: the router's index and entry key are kept as-is, matching
+ * replace semantics. */
+export function benchStepState(
+  step: string,
+  existing?: unknown,
+): BenchStepState {
+  return markedState(step, existing) as unknown as BenchStepState;
+}
+
+/** Build the `history.state` payload for pushing `step` as a NEW entry: the
+ * merged marker state with the router's index advanced by one and a fresh entry
+ * key minted -- the router's own push bookkeeping (see the module header). When
+ * no router index is present (no router history is attached, as in the bare
+ * component tests), the marker state alone is returned. */
+export function benchStepStateForPush(
+  step: string,
+  existing?: unknown,
+): BenchStepState {
+  const merged = markedState(step, existing);
+  const index = merged[ROUTER_INDEX_KEY];
+  if (typeof index !== "number") return merged as unknown as BenchStepState;
+  const freshKey = (Math.random() + 1).toString(36).substring(7);
+  return {
+    ...merged,
+    [ROUTER_INDEX_KEY]: index + 1,
+    __TSR_key: freshKey,
+    key: freshKey,
+  } as unknown as BenchStepState;
 }
 
 /** Read the bench step a `popstate` event's `state` carries, or `undefined` when
@@ -51,21 +87,8 @@ export function benchStepState(
  * caller must let ordinary browser navigation proceed. */
 export function stepFromPopState(state: unknown): string | undefined {
   if (typeof state !== "object" || state === null) return undefined;
-  const marker = (state as Record<string, unknown>)[BENCH_STEP_STATE_KEY];
-  if (typeof marker !== "object" || marker === null) return undefined;
-  const step = (marker as Record<string, unknown>).step;
+  const step = (state as Record<string, unknown>)[BENCH_STEP_STATE_KEY];
   return typeof step === "string" ? step : undefined;
-}
-
-/** Read the stack depth a bench `history.state` entry carries, or `undefined`
- * when the entry is not a bench entry. Lets the caller tell a Back (smaller
- * depth) from a Forward (larger depth) without tracking its own cursor. */
-export function depthFromState(state: unknown): number | undefined {
-  if (typeof state !== "object" || state === null) return undefined;
-  const marker = (state as Record<string, unknown>)[BENCH_STEP_STATE_KEY];
-  if (typeof marker !== "object" || marker === null) return undefined;
-  const depth = (marker as Record<string, unknown>).depth;
-  return typeof depth === "number" ? depth : undefined;
 }
 
 /**
