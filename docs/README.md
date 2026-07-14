@@ -26,7 +26,7 @@ The documentation is organized in two tiers: this **overview** tier (`docs/`) of
 
 - [DESIGN.md](DESIGN.md) - project overview, architecture, exchange specification summary, and high-level user journey
 - [SECURITY_DESIGN.md](SECURITY_DESIGN.md) - security overview, the private set intersection (PSI) privacy guarantee, threat model, authentication design, channel security, and key rotation
-- [MANAGED_EXCHANGE.md](MANAGED_EXCHANGE.md) - the managed (recurring) web exchange lifecycle: durability contract, single-device ownership, desync recovery, storage-eviction survival, and persistence-status UX
+- [MANAGED_EXCHANGE.md](MANAGED_EXCHANGE.md) - the managed (recurring) web exchange lifecycle: durability contract, single-device ownership, desync recovery, storage-eviction survival, the encrypted export artifact, and persistence-status UX
 - [COMPLIANCE.md](COMPLIANCE.md) - regulatory framings, data classification, and considerations for agency reviewers
 - [COMMUNICATION.md](COMMUNICATION.md) - channels, synchronization, error handling, and supporting services
 - [EXCHANGE_REFERENCE.md](EXCHANGE_REFERENCE.md) - complete field-level reference for exchange specification files
@@ -45,7 +45,7 @@ The documentation is organized in two tiers: this **overview** tier (`docs/`) of
 - [EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md) - format specification for the self-attested exchange record: file shapes, commitment scheme, governance metadata, and privacy properties
 - [CANONICAL_ENCODING.md](spec/CANONICAL_ENCODING.md) - the RFC 8785 byte encoding the receipts, record commitments, and agreed-terms hash are computed over
 - [CREDENTIAL_STORAGE.md](spec/CREDENTIAL_STORAGE.md) - the owner-only write path (exclusive-create, atomic rename, fsync durability, ACL narrowing) for the key file, signing identity, exchange record, and result CSV
-- [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md) - the browser-persisted managed-exchange record: field-by-field persisted-vs-re-supplied shape, the persist-before-success ordering, and the linear-secret single-owner invariant
+- [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md) - the browser-persisted managed-exchange record: field-by-field persisted-vs-re-supplied shape, the persist-before-success ordering, the linear-secret single-owner invariant, and the export artifact's keying
 - [CLI_EVENTS.md](spec/CLI_EVENTS.md) - the CLI's opt-in machine-interface event stream (`--event-stream`): the file descriptor, NDJSON framing, event types, terminal-error categories, and per-field sanitization
 - [SERVER_JOB_API.md](spec/SERVER_JOB_API.md) - the web server's job API that drives the CLI as a subprocess for the console appliance: endpoints, the injection-closed intent schema, the operator-provisioned SFTP remotes table, read-only restore of completed jobs after a restart, the workdir layout, the SSE event relay, and the gate/startup rules
 - [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md) - why the SFTP and WebRTC stacks are exact-pinned, their internal premises, and the per-stack upgrade checklists
