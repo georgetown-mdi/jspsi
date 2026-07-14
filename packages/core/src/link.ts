@@ -127,8 +127,13 @@ function removeDuplicatesAndUndefineds(
  * local dataset are excluded from that round entirely (ambiguous matches cannot
  * be attributed to a single record). They may still match on a later key.
  *
- * Only `"one-to-one"` and `"many-to-one"` cardinalities are currently
- * supported; other values throw.
+ * Only the `"one-to-one"` cardinality is implemented: both parties'
+ * locally-duplicated key values are excluded from each round, so no record
+ * matches more than one of the partner's. `"many-to-one"` is accepted but runs
+ * this identical one-to-one matching (exchange.ts resolves the cardinality from
+ * the agreed `deduplicate` settings and refuses any that would need a genuine
+ * many-cardinality match, so no production caller reaches here with it); other
+ * values throw.
  *
  * @param protocol - Exchange protocol settings; only `cardinality` is used
  *   here.

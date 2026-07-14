@@ -23,7 +23,7 @@ Work required before the 1.0 release.
 
 - SSH channel as a lower-latency alternative to SFTP polling
 - Parallelizing the commutative-encryption step
-- Many-to-many linkages with transitive-closure resolution (many-to-one is implemented today; one-to-many and many-to-many remain)
+- Deduplicating linkages (many-to-one, one-to-many, and many-to-many with transitive-closure resolution). Matching runs strictly one-to-one today, and a `deduplicate: true` term is refused before the exchange begins rather than silently matched one-to-one
 
 ## Version 1.1
 

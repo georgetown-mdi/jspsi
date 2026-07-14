@@ -1478,7 +1478,7 @@ describe("InvitationTerms: proposed-but-not-applied caveats sit at their headlin
   // psi-c- and deduplicate-specific caveat tails: both caveats share the "does not
   // yet apply it" lead, so each assertion keys on the distinguishing clause.
   const psiCCaveat = "matched records are still revealed";
-  const deduplicateCaveat = "each record still matches at most one";
+  const deduplicateCaveat = "will refuse to run";
 
   test("the psi-c count-only caveat is always-visible in the core, not one expand down", async () => {
     // psi-c proposed, not applied (APPLIED_SETTINGS.psiC is false), so the count-only

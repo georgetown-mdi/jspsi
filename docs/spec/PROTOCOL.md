@@ -42,6 +42,8 @@ In linkages that involve multiple links -- many-to-one or many-to-many -- the mu
 
 In a many-to-one exchange where both parties receive the output, the "many" party can filter its candidate set to remove linked elements after each round, as in the one-to-one cascade. If the "one" party may not receive the output, the "many" party must enforce the uniqueness constraint.
 
+> **Not yet implemented:** only the one-to-one cascade above runs today; the many-to-one and many-to-many procedures in this section are design intent. The matching cardinality is resolved from the two parties' agreed `deduplicate` settings after the terms exchange and before the first PSI round -- the resolution is a symmetric function of the pair, computed identically on both parties from the same agreed terms, so the lockstep rounds cannot diverge on it -- and any `deduplicate: true` is refused at that point (and pre-connection for a party's own terms) rather than silently matched one-to-one.
+
 Crucially, and unlike traditional PPRL, blocking under PSI is neither necessary nor appropriate. The PSI base function's computational complexity is O(n log n) in the total number of elements rather than quadratic in their product, so there is no cross-product comparison to reduce. Blocking would also compromise the privacy guarantee, by revealing to each party how many of the other's records fall into each partition.
 
 #### The memory ceiling, and the CSV intake cap

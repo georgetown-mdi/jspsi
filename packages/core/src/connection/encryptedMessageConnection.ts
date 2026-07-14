@@ -96,7 +96,7 @@ export const IV_SEQ_OFFSET = 4;
  * on a per-party empty-linkage-round skip in the matching loop that could stop
  * the two scripts at different points; that skip has been removed, so both
  * parties now run every agreed key and the premise holds unconditionally within
- * the implemented one-to-one / many-to-one cardinalities. Even when the skip
+ * the implemented one-to-one cardinality. Even when the skip
  * desynced the scripts a marker would not have fixed it - a protocol-layer
  * fault, not an absent-frame one. See docs/spec/CHANNEL_SECURITY.md.
  *
