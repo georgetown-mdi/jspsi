@@ -76,9 +76,11 @@ export interface RailFact {
   current?: boolean;
 }
 
-/** One entry in the work column's Problems block. */
+/** One entry in the work column's Problems block. `key` is the render key when
+ * labels may repeat; absent, the label is the key. */
 export interface RailProblem {
   label: string;
+  key?: string;
   onSelect?: () => void;
 }
 
@@ -877,10 +879,13 @@ const FIELD_TARGETS: Record<AdvancedField, SpineTarget> = {
 };
 
 /** One entry in the work column's Problems block: the message and the section
- * that can resolve it. */
+ * that can resolve it. `key` is a stable per-entry render key for entries whose
+ * messages may repeat (two same-typed failing fields bound to one column);
+ * absent, the message is the key. */
 export interface SpineProblem {
   message: string;
   target: SpineTarget;
+  key?: string;
 }
 
 /** Validate the draft for the create gate -- the AdvancedInvite model's own
@@ -895,9 +900,14 @@ export function reviewValidation(
 /**
  * The work column's Problems entries for a failing cleaning pipeline: one per
  * field whose transform produces no value in any row of the loaded file
- * ({@link isSilentEmpty}), de-duplicated by field name, each naming the field's
- * safe semantic-type label (never the partner-controlled field name) and
- * linking into the Cleaning tab. This is file-dependent, not draft-dependent
+ * ({@link isSilentEmpty}), de-duplicated by field name (the same key
+ * {@link inviterCleaningAttention} counts by, so the rail count and the entry
+ * count agree), each naming the field's safe semantic-type label (never the
+ * partner-controlled field name) and linking into the Cleaning tab. When the
+ * draft authors more than one field of a type (the expert add-field
+ * affordance), the label alone cannot tell them apart, so the entry also names
+ * the field's input column -- the operator's own header, shown raw as the
+ * ledger's send row does. This is file-dependent, not draft-dependent
  * (it needs the full-CSV coverage), so it lives beside {@link spineProblems}
  * rather than inside {@link validateAdvancedInvite}; the bench merges the two at
  * every consumption point. Empty before a file is read, before the first sweep
@@ -915,16 +925,28 @@ export function cleaningCoverageProblems(
       editor.draft.standardization,
     ).map((field) => [field.name, field.type]),
   );
+  const authoredPerType = new Map<LinkageField["type"], number>();
+  for (const transformation of editor.draft.standardization) {
+    const type = typeByName.get(transformation.output);
+    if (type !== undefined)
+      authoredPerType.set(type, (authoredPerType.get(type) ?? 0) + 1);
+  }
   const seen = new Set<string>();
   const problems: Array<SpineProblem> = [];
   for (const transformation of editor.draft.standardization) {
     const rate = rates.get(transformation.output);
     if (rate === undefined || !isSilentEmpty(rate)) continue;
+    if (seen.has(transformation.output)) continue;
+    seen.add(transformation.output);
     const type = typeByName.get(transformation.output);
-    if (type === undefined || seen.has(type)) continue;
-    seen.add(type);
+    if (type === undefined) continue;
+    const label =
+      (authoredPerType.get(type) ?? 0) > 1
+        ? `"${SEMANTIC_TYPE_LABELS[type]}" (from ${transformation.input})`
+        : `"${SEMANTIC_TYPE_LABELS[type]}"`;
     problems.push({
-      message: `Cleaning: "${SEMANTIC_TYPE_LABELS[type]}" produces no value in any row`,
+      key: transformation.output,
+      message: `Cleaning: ${label} produces no value in any row`,
       target: "cleaning",
     });
   }

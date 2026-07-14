@@ -420,14 +420,9 @@ export function InviterBench() {
   async function createInvitation() {
     if (editor === undefined || sourceFile === undefined) return;
     // The Create button is disabled on any open problem; this repeats the gate
-    // because spineProblems covers the identifier conflict and
-    // cleaningCoverageProblems the silent-empty coverage, neither of which
-    // canGenerate alone captures.
-    if (
-      spineProblems(editor).length > 0 ||
-      cleaningCoverageProblems(editor, rates).length > 0
-    )
-      return;
+    // because spineProblems covers the identifier conflict and coverageProblems
+    // the silent-empty coverage, neither of which canGenerate alone captures.
+    if (spineProblems(editor).length > 0 || coverageProblems.length > 0) return;
     const validation = reviewValidation(editor);
     if (!validation.canGenerate || validation.terms === undefined) return;
     // A save-file selection seals the terms exactly as the live path does but
@@ -635,6 +630,7 @@ export function InviterBench() {
     : [...spineProblems(editor), ...coverageProblems];
   const problems = openProblems.map((problem) => ({
     label: problem.message,
+    key: problem.key,
     onSelect: () => goTo(problem.target),
   }));
 

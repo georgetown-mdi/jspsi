@@ -364,13 +364,14 @@ describe("inviter cleaning attention", () => {
     const problems = cleaningCoverageProblems(editor, rates);
     expect(problems).toEqual([
       {
+        key: "date_of_birth",
         message: 'Cleaning: "Date of birth" produces no value in any row',
         target: "cleaning",
       },
     ]);
   });
 
-  test("multiple failing fields count each but one problem per type label", () => {
+  test("every failing field gets its own problem entry", () => {
     const editor = editorFromCsv("Dana", csv);
     const rates = new Map<string, FieldValueCoverage>([
       ["first_name", collapsed("first_name", "first_name")],
@@ -383,6 +384,63 @@ describe("inviter cleaning attention", () => {
     expect(problems.map((problem) => problem.message)).toEqual([
       'Cleaning: "First name" produces no value in any row',
       'Cleaning: "Last name" produces no value in any row',
+    ]);
+  });
+
+  test("same-typed failing fields each get an entry, told apart by column", () => {
+    // Two first_name-typed fields: retype a spare column into matching, then
+    // the expert add-field affordance binds the second field to it.
+    const nicknamed: AcquiredCsv = {
+      ...csv,
+      rawRows: [{ ...csv.rawRows[0], nickname: "Annie" }],
+      columns: [...csv.columns, "nickname"],
+    };
+    const retyped = editorWithColumnType(
+      editorFromCsv("Dana", nicknamed),
+      nicknamed,
+      "nickname",
+      "first_name",
+    ).editor;
+    const matched = editorWithColumnDisclosure(
+      retyped,
+      nicknamed,
+      "nickname",
+      "match",
+    ).editor;
+    const editor = editorWithFieldAdded(matched, "first_name");
+    expect(
+      editor.draft.standardization.some(
+        (transformation) => transformation.input === "nickname",
+      ),
+    ).toBe(true);
+
+    const bothFailing = new Map<string, FieldValueCoverage>([
+      ["first_name", collapsed("first_name", "first_name")],
+      ["first_name_2", collapsed("first_name_2", "nickname")],
+    ]);
+    expect(
+      inviterCleaningAttention(editor, bothFailing).failingFieldCount,
+    ).toBe(2);
+    const problems = cleaningCoverageProblems(editor, bothFailing);
+    expect(problems.map((problem) => problem.message)).toEqual([
+      'Cleaning: "First name" (from first_name) produces no value in any row',
+      'Cleaning: "First name" (from nickname) produces no value in any row',
+    ]);
+    // The render keys stay distinct even if the messages ever collide (two
+    // same-typed fields rebound to one column).
+    expect(new Set(problems.map((problem) => problem.key)).size).toBe(2);
+
+    // One failing field of a duplicated type still names its column: the
+    // ambiguity is about what was authored, not about what failed.
+    const oneFailing = new Map<string, FieldValueCoverage>([
+      ["first_name_2", collapsed("first_name_2", "nickname")],
+    ]);
+    expect(
+      cleaningCoverageProblems(editor, oneFailing).map(
+        (problem) => problem.message,
+      ),
+    ).toEqual([
+      'Cleaning: "First name" (from nickname) produces no value in any row',
     ]);
   });
 
