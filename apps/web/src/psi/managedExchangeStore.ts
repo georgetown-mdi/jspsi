@@ -123,7 +123,10 @@ async function withStore<T>(
  * and the secret format), then written. The write uses
  * `{ durability: "strict" }`, requesting OS writeback before the transaction
  * completes -- the persist-before-success discipline the secret at rest relies
- * on. Returns the persisted record, including its assigned `id`.
+ * on. Persistent storage is requested alongside the first write
+ * ({@link requestPersistentStorage}), so the record cannot land in evictable
+ * storage with the request never made. Returns the persisted record, including
+ * its assigned `id`.
  *
  * @throws {ZodError} if the fields do not form a valid record.
  */
@@ -131,6 +134,11 @@ export async function createManagedExchange(
   fields: NewManagedExchange,
 ): Promise<ManagedExchangeRecord> {
   const record = buildManagedExchangeRecord(fields);
+  // Fired, not awaited: the request must be made before the record lands, but a
+  // browser may gate the grant behind a user prompt, and a denied, absent, or
+  // pending grant must neither delay nor fail the create (the helper never
+  // rejects; the grant is never assumed).
+  void requestPersistentStorage();
   await withStore("readwrite", (store) => store.add(record), {
     durability: "strict",
   });
@@ -190,25 +198,77 @@ export async function listManagedExchanges(): Promise<
 }
 
 /**
+ * Read the record under `id` and write back `transform`'s result inside a SINGLE
+ * readwrite transaction, so no other write can land between the read and the
+ * write-back. This is the required shape for any edit that writes the whole
+ * record: a cross-transaction read-modify-write would have an await gap in which
+ * a concurrent rotation write could land, and the stale write-back would then
+ * silently revert the rotated secret -- the fork the spec's linear-resource
+ * invariant forbids. `transform` must be synchronous (it runs inside the read's
+ * success callback; Zod validation is synchronous, so it qualifies) or the
+ * transaction would auto-commit before the write is issued; it throws to abort
+ * the transaction, leaving the stored record unchanged, and receives `undefined`
+ * when no record exists under `id`.
+ */
+async function readModifyWriteRecord(
+  id: string,
+  transform: (stored: unknown) => ManagedExchangeRecord,
+): Promise<ManagedExchangeRecord> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    return await new Promise<ManagedExchangeRecord>((resolve, reject) => {
+      const transaction = db.transaction(
+        MANAGED_EXCHANGE_STORE_NAME,
+        "readwrite",
+        { durability: "strict" },
+      );
+      const store = transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME);
+      const read = store.get(id);
+      let written: ManagedExchangeRecord;
+      let failure: unknown;
+      read.onsuccess = () => {
+        try {
+          written = transform(read.result);
+          store.put(written);
+        } catch (error) {
+          failure = error;
+          transaction.abort();
+        }
+      };
+      transaction.oncomplete = () => resolve(written);
+      transaction.onerror = () => reject(failure ?? transaction.error);
+      transaction.onabort = () => reject(failure ?? transaction.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/**
  * Apply local edits (the label, schedule, and max-token-age policy -- the only
  * fields that update in place without a re-invite) to the stored record and
- * persist the result. Reads the current record, applies the edits through
- * {@link applyManagedExchangeLocalEdits} (which re-validates), and writes it back.
- * A change to the agreed terms is a re-invite, not an edit here, so the document
- * and the secret are deliberately not editable through this path.
+ * persist the result. The read, the edit application through
+ * {@link applyManagedExchangeLocalEdits} (which re-validates), and the write-back
+ * all run inside one readwrite transaction ({@link readModifyWriteRecord}), so
+ * the edit applies to the freshest stored record and cannot carry a stale secret
+ * back over a concurrent rotation write. A change to the agreed terms is a
+ * re-invite, not an edit here, so the document and the secret are deliberately
+ * not editable through this path.
  *
  * @throws {Error} if no record with `id` exists.
- * @throws {ZodError} if the edit produces an invalid record.
+ * @throws {ZodError} if the stored value is not a valid v1 record or the edit
+ *   produces an invalid one; the transaction aborts and nothing is written.
  */
 export async function updateManagedExchangeLocalFields(
   id: string,
   edits: ManagedExchangeLocalEdits,
 ): Promise<ManagedExchangeRecord> {
-  const existing = await getManagedExchange(id);
-  if (existing === undefined)
-    throw new Error(`no managed exchange with id ${id}`);
-  const next = applyManagedExchangeLocalEdits(existing, edits);
-  return putManagedExchange(next);
+  return readModifyWriteRecord(id, (stored) => {
+    if (stored === undefined)
+      throw new Error(`no managed exchange with id ${id}`);
+    const existing = parseManagedExchangeRecord(stored);
+    return applyManagedExchangeLocalEdits(existing, edits);
+  });
 }
 
 /**

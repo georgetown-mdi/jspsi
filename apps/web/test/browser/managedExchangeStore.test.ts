@@ -17,7 +17,10 @@ import {
   requestPersistentStorage,
   updateManagedExchangeLocalFields,
 } from "@psi/managedExchangeStore";
-import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
+import {
+  MAX_LABEL_LENGTH,
+  composeManagedExchangeFile,
+} from "@psi/managedExchangeRecord";
 
 import type {
   ManagedExchangeSchedule,
@@ -167,6 +170,65 @@ describe("managed exchange store CRUD", () => {
   });
 });
 
+describe("single-transaction local edits", () => {
+  test("an edit after an out-of-band rotation write preserves the rotated secret", async () => {
+    const created = await createManagedExchange(newExchange());
+    const rotatedSecret = generateSharedSecret();
+    await putManagedExchange({ ...created, sharedSecret: rotatedSecret });
+
+    const updated = await updateManagedExchangeLocalFields(created.id, {
+      label: "Riverbend monthly",
+    });
+
+    // The edit read the freshest stored record, not the caller's stale copy: the
+    // rotated secret survives the label edit.
+    expect(updated.sharedSecret).toBe(rotatedSecret);
+    expect(updated.label).toBe("Riverbend monthly");
+    expect((await getManagedExchange(created.id))?.sharedSecret).toBe(
+      rotatedSecret,
+    );
+  });
+
+  test("the edit's read and write share one readwrite transaction", async () => {
+    const created = await createManagedExchange(newExchange());
+
+    // Count the transactions the update opens. One readwrite transaction is the
+    // structural guarantee that no concurrent write can land between the read
+    // and the write-back; the former cross-transaction shape opened a readonly
+    // then a readwrite transaction, leaving a gap a rotation write could land in.
+    const realTransaction = IDBDatabase.prototype.transaction;
+    const openedModes: Array<IDBTransactionMode | undefined> = [];
+    IDBDatabase.prototype.transaction = function (
+      this: IDBDatabase,
+      storeNames: string | Array<string>,
+      mode?: IDBTransactionMode,
+      options?: IDBTransactionOptions,
+    ) {
+      openedModes.push(mode);
+      return realTransaction.call(this, storeNames, mode, options);
+    };
+    try {
+      await updateManagedExchangeLocalFields(created.id, {
+        label: "one transaction",
+      });
+    } finally {
+      IDBDatabase.prototype.transaction = realTransaction;
+    }
+
+    expect(openedModes).toEqual(["readwrite"]);
+  });
+
+  test("a rejected edit aborts the transaction and writes nothing", async () => {
+    const created = await createManagedExchange(newExchange());
+    await expect(
+      updateManagedExchangeLocalFields(created.id, {
+        label: "x".repeat(MAX_LABEL_LENGTH + 1),
+      }),
+    ).rejects.toThrow();
+    expect((await getManagedExchange(created.id))?.label).toBe(created.label);
+  });
+});
+
 describe("input-file handle persistence", () => {
   test("a FileSystemFileHandle round-trips by structured clone", async () => {
     // Acquire a real handle by round-tripping through the origin-private file
@@ -230,5 +292,35 @@ describe("persistent storage request", () => {
   test("requests persistence and returns the browser's grant decision", async () => {
     const granted = await requestPersistentStorage();
     expect(typeof granted).toBe("boolean");
+  });
+
+  test("create requests persistent storage before the record lands", async () => {
+    const realPersist = StorageManager.prototype.persist;
+    let persistCalls = 0;
+    StorageManager.prototype.persist = function (this: StorageManager) {
+      persistCalls += 1;
+      return Promise.resolve(false);
+    };
+    try {
+      const created = await createManagedExchange(newExchange());
+      expect(persistCalls).toBeGreaterThanOrEqual(1);
+      // A denied grant does not fail the create.
+      expect(await getManagedExchange(created.id)).toEqual(created);
+    } finally {
+      StorageManager.prototype.persist = realPersist;
+    }
+  });
+
+  test("create succeeds when the persistence request throws", async () => {
+    const realPersist = StorageManager.prototype.persist;
+    StorageManager.prototype.persist = function (this: StorageManager) {
+      throw new Error("persist unavailable");
+    };
+    try {
+      const created = await createManagedExchange(newExchange());
+      expect(await getManagedExchange(created.id)).toEqual(created);
+    } finally {
+      StorageManager.prototype.persist = realPersist;
+    }
   });
 });
