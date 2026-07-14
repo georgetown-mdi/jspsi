@@ -27,6 +27,7 @@ import {
 } from "@bench/acceptorColumnsModel";
 import { AcceptorBench } from "@bench/AcceptorBench";
 import { AcceptorColumnsStep } from "@bench/AcceptorColumnsStep";
+import { BENCH_STEP_STATE_KEY } from "@bench/stepHistory";
 import { BenchLobby } from "@bench/BenchLobby";
 import { stagesFor } from "@bench/exchangeRun";
 import styles from "@bench/bench.module.css";
@@ -1424,6 +1425,63 @@ describe("acceptor bench: run and completion", () => {
     await expect
       .element(page.getByRole("heading", { name: "Confirm your columns" }))
       .toBeInTheDocument();
+  });
+
+  test("Back after a back-to-columns recovery lands on columns, not the dead run surface", async () => {
+    // Reaching the run pushes a `launched` history entry; the config-failure
+    // recovery then clears the launch that entry's work column reads and pushes
+    // a fresh columns entry. The `launched` entry is now backed by nothing --
+    // pressing Back must not restore a bogus in-progress surface for a run
+    // that is not running.
+    await reachRun();
+    lifecycleCall(0).onError({
+      category: "config",
+      error: new Error("standardization output name contradicts the terms"),
+    });
+    await page.getByRole("button", { name: "Back to your columns" }).click();
+    await expect
+      .element(page.getByRole("heading", { name: "Confirm your columns" }))
+      .toBeInTheDocument();
+
+    // Back lands on the clamped columns step, and the dead entry's marker was
+    // rewritten to columns (it read `launched` when Back arrived on it).
+    window.history.back();
+    await vi.waitFor(() => {
+      expect(
+        (window.history.state as Record<string, unknown>)[BENCH_STEP_STATE_KEY],
+      ).toBe("columns");
+    });
+    await expect
+      .element(page.getByRole("heading", { name: "Confirm your columns" }))
+      .toBeInTheDocument();
+    expect(
+      page.getByRole("heading", { name: "Exchange in progress" }).query(),
+    ).toBeNull();
+
+    // Forward then Back does not resurrect the dead entry either. Both entries
+    // now carry the same columns marker, so each move is awaited on its own
+    // popstate rather than a state change.
+    const nextPopState = () =>
+      new Promise<void>((resolve) => {
+        window.addEventListener("popstate", () => resolve(), { once: true });
+      });
+    let landed = nextPopState();
+    window.history.forward();
+    await landed;
+    await expect
+      .element(page.getByRole("heading", { name: "Confirm your columns" }))
+      .toBeInTheDocument();
+    landed = nextPopState();
+    window.history.back();
+    await landed;
+    await expect
+      .element(page.getByRole("heading", { name: "Confirm your columns" }))
+      .toBeInTheDocument();
+    expect(
+      page.getByRole("heading", { name: "Exchange in progress" }).query(),
+    ).toBeNull();
+    // The discarded launch never restarted the run.
+    expect(lifecycleHarness.calls).toHaveLength(1);
   });
 
   test("an output failure offers no re-run, only a fresh setup", async () => {
