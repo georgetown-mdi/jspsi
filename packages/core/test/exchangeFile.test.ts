@@ -377,14 +377,39 @@ test("connectionFromLocator: a webrtc locator carrying an unexpected key is reje
 });
 
 test("connectionFromLocator: a webrtc locator with a nested server credential is rejected", () => {
-  // `server.username` on the locator (rather than at the top level) is likewise
-  // outside the flat locator allowlist and rejected, not stripped.
-  const rogue = {
-    channel: "webrtc",
-    host: "peer.example.org",
-    username: "someone",
-  } as unknown as WebRTCExchangeLocator;
-  expect(() => connectionFromLocator(rogue)).toThrow(ZodError);
+  // A whole `server` object on the locator is outside the flat locator
+  // allowlist, so a credential nested inside it is rejected, not stripped.
+  for (const server of [{ username: "someone" }, { key: "peerjs-secret" }]) {
+    const rogue = {
+      channel: "webrtc",
+      host: "peer.example.org",
+      server,
+    } as unknown as WebRTCExchangeLocator;
+    expect(() => connectionFromLocator(rogue)).toThrow(ZodError);
+  }
+});
+
+test("connectionFromLocator: every credential-bearing webrtc key is rejected in both casings", () => {
+  // The strict locator schema runs on the raw input, before any camelize
+  // transform, so snake_case aliases cannot slip past it either.
+  const hostileEntries: Array<[string, unknown]> = [
+    ["username", "someone"],
+    ["key", "peerjs-secret"],
+    ["turn", [{ urls: "turn:t.example.org" }]],
+    ["iceProvision", { mode: "static" }],
+    ["ice_provision", { mode: "static" }],
+    ["providerOptions", { secure: true }],
+    ["provider_options", { secure: true }],
+    ["options", { debug: 3 }],
+  ];
+  for (const [hostileKey, value] of hostileEntries) {
+    const rogue = {
+      channel: "webrtc",
+      host: "peer.example.org",
+      [hostileKey]: value,
+    } as unknown as WebRTCExchangeLocator;
+    expect(() => connectionFromLocator(rogue)).toThrow(ZodError);
+  }
 });
 
 // --- Mint surface stays file-sync-only ---------------------------------------
