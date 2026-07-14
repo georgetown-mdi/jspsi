@@ -19,6 +19,7 @@ import { deploymentProfile, isConsoleBuild } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
+import { useNonEmptyRates } from "@components/useNonEmptyRates";
 
 import {
   EMPTY_SAVE_FIELDS,
@@ -31,6 +32,7 @@ import {
   saveTrustFooter,
 } from "./saveExchangeModel";
 import {
+  cleaningCoverageProblems,
   editorFromCsv,
   editorWithAlgorithm,
   editorWithAuthoredDraft,
@@ -51,6 +53,7 @@ import {
   editorWithOutputDirection,
   editorWithRecommendedCleaning,
   editorWithTransport,
+  inviterCleaningAttention,
   inviterLedgerRows,
   inviterRailFacts,
   isCliTransport,
@@ -93,11 +96,18 @@ import type {
 import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { IntakeAlert } from "./YourFileSection";
 import type { SavedExchange } from "./SaveExchangeSection";
-import type { SemanticType } from "@psilink/core";
 import type { SftpRemoteProjection } from "@jobs/jobManager";
+
+import type { CSVRow, SemanticType, Standardization } from "@psilink/core";
 
 type Section = SpineTarget | "share" | "save";
 type SpineStep = "file" | "columns" | "review";
+
+/** Stable empty inputs for {@link useNonEmptyRates} before a file is acquired,
+ * so the hook's controller is not rebuilt every render on a fresh `[]` identity
+ * (the AcceptorBench lift). */
+const EMPTY_ROWS: ReadonlyArray<CSVRow> = [];
+const EMPTY_STANDARDIZATION: Standardization = [];
 
 const SPINE_LABELS: Record<SpineStep, string> = {
   file: "Your file",
@@ -241,6 +251,18 @@ export function InviterBench() {
     sftpRemotesConfigured,
     sftpRemote: chosenSftpRemote?.name,
   });
+
+  // Full-CSV coverage for the Cleaning tab, the Customize menu's Cleaning-attention
+  // value, and the coverage Problems entry -- one sweep shared by all three, lifted
+  // to the bench so the fact and the create gate render regardless of the active
+  // section (the AcceptorBench lift). The hook must run every render, so it takes
+  // stable empty inputs until a file is acquired.
+  const { rates, pending: ratesPending } = useNonEmptyRates(
+    acquired?.rawRows ?? EMPTY_ROWS,
+    editor?.draft.standardization ?? EMPTY_STANDARDIZATION,
+  );
+  const cleaningAttention = inviterCleaningAttention(editor, rates);
+  const coverageProblems = cleaningCoverageProblems(editor, rates);
 
   // The failure alerts' "start over with a fresh invitation": the seal lifts
   // with every input intact, the failed invitation is discarded (its run has
@@ -398,9 +420,14 @@ export function InviterBench() {
   async function createInvitation() {
     if (editor === undefined || sourceFile === undefined) return;
     // The Create button is disabled on any open problem; this repeats the gate
-    // because spineProblems covers the identifier conflict, which
-    // canGenerate alone does not.
-    if (spineProblems(editor).length > 0) return;
+    // because spineProblems covers the identifier conflict and
+    // cleaningCoverageProblems the silent-empty coverage, neither of which
+    // canGenerate alone captures.
+    if (
+      spineProblems(editor).length > 0 ||
+      cleaningCoverageProblems(editor, rates).length > 0
+    )
+      return;
     const validation = reviewValidation(editor);
     if (!validation.canGenerate || validation.terms === undefined) return;
     // A save-file selection seals the terms exactly as the live path does but
@@ -593,18 +620,23 @@ export function InviterBench() {
     { label: "Results", state: "pending" },
   ];
 
-  const facts = inviterRailFacts(editor).map((fact) => ({
+  const facts = inviterRailFacts(editor, cleaningAttention).map((fact) => ({
     ...fact,
     onSelect: editor !== undefined ? () => goTo(fact.target) : undefined,
     current: section === fact.target,
   }));
 
-  const problems = sealed
+  // The coverage problem is file-dependent (the full-CSV sweep), so it lives
+  // beside the draft-validation spineProblems rather than inside it; merged here
+  // so the work-column Problems block, the create gate, and its status line all
+  // see one problem list.
+  const openProblems = sealed
     ? []
-    : spineProblems(editor).map((problem) => ({
-        label: problem.message,
-        onSelect: () => goTo(problem.target),
-      }));
+    : [...spineProblems(editor), ...coverageProblems];
+  const problems = openProblems.map((problem) => ({
+    label: problem.message,
+    onSelect: () => goTo(problem.target),
+  }));
 
   return (
     <BenchShell
@@ -718,7 +750,7 @@ export function InviterBench() {
               <ReviewCreateSection
                 editor={editor}
                 csv={acquired}
-                problems={spineProblems(editor)}
+                problems={openProblems}
                 minting={minting}
                 sftpRemotes={sftpRemotes}
                 sftpRemoteName={sftpRemoteName}
@@ -760,6 +792,8 @@ export function InviterBench() {
               editor={editor}
               csv={acquired}
               expertMode={expertMode}
+              rates={rates}
+              pending={ratesPending}
               onFieldSteps={(output, fieldSteps) =>
                 applyEditor(editorWithFieldSteps(editor, output, fieldSteps))
               }

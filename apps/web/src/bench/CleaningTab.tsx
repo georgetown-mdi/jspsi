@@ -8,13 +8,13 @@ import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 import { CleaningErrorBoundary } from "@components/CleaningErrorBoundary";
 import { FieldCoverage } from "@components/FieldCoverage";
 import { StandardizationCards } from "@components/StandardizationCards";
-import { useNonEmptyRates } from "@components/useNonEmptyRates";
 
 import { declaredFieldsFor } from "./inviterModel";
 import styles from "./bench.module.css";
 
 import type { AcquiredCsv, InviterEditor } from "./inviterModel";
 import type { LinkageField, StandardizationStep } from "@psilink/core";
+import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
 /**
  * The Cleaning tab: per-field pipelines with previews and whole-file coverage,
@@ -26,6 +26,8 @@ export function CleaningTab({
   editor,
   csv,
   expertMode,
+  rates,
+  pending,
   onFieldSteps,
   onFieldInput,
   onFieldAdded,
@@ -37,6 +39,14 @@ export function CleaningTab({
   editor: InviterEditor;
   csv: AcquiredCsv;
   expertMode: boolean;
+  /** The full-CSV per-field coverage, swept once at the bench and shared with the
+   * Customize fact and the coverage Problems entry (`null` before the first sweep
+   * settles). Lifted so the fact and the create gate render regardless of the
+   * active section. */
+  rates: ReadonlyMap<string, FieldValueCoverage> | null;
+  /** Whether a coverage recompute is in flight (drives the per-card "Checking..."
+   * placeholder before the first result). */
+  pending: boolean;
   onFieldSteps: (output: string, steps: Array<StandardizationStep>) => void;
   onFieldInput: (output: string, input: string) => void;
   onFieldAdded: (type: LinkageField["type"]) => void;
@@ -50,10 +60,6 @@ export function CleaningTab({
   const declaredFields = useMemo(
     () => declaredFieldsFor(editor.draft),
     [editor.draft],
-  );
-  const { rates, pending } = useNonEmptyRates(
-    csv.rawRows,
-    editor.draft.standardization,
   );
   const resetKey = editor.draft.standardization
     .map((transformation) => `${transformation.output}=${transformation.input}`)

@@ -6,6 +6,7 @@ import { buildAdvancedTerms } from "@psi/advancedInvite";
 
 import {
   answersRows,
+  cleaningCoverageProblems,
   editorFromCsv,
   editorWithAlgorithm,
   editorWithAuthoredDraft,
@@ -27,6 +28,7 @@ import {
   fileCardMeta,
   identifierProblem,
   invitationUsable,
+  inviterCleaningAttention,
   inviterLedgerRows,
   inviterRailFacts,
   isCliTransport,
@@ -41,6 +43,7 @@ import {
 } from "@bench/inviterModel";
 
 import type { AcquiredCsv } from "@bench/inviterModel";
+import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
 // Headers chosen from inferMetadata's exact-match alias table: four linkage
 // types (enough to back several default keys), one _id-suffixed identifier,
@@ -283,6 +286,135 @@ describe("review and create", () => {
     const rows = inviterLedgerRows(editor, "2026-07-08T19:32:00.000Z");
     const expires = rows.find((row) => row.label === "Expires");
     expect(expires?.value).toContain("July 8, 2026");
+  });
+});
+
+describe("inviter cleaning attention", () => {
+  // A silent-empty rate: the field's transform produced a key for zero rows over
+  // a non-empty file (produced 0, total > 0, computable) -- the collapse the
+  // full-CSV sweep exists to catch.
+  function collapsed(output: string, input: string): FieldValueCoverage {
+    return {
+      output,
+      input,
+      total: 10,
+      produced: 0,
+      rate: 0,
+      unavailable: false,
+    };
+  }
+  // A field that produces a value for every row -- no collapse.
+  function covered(output: string, input: string): FieldValueCoverage {
+    return {
+      output,
+      input,
+      total: 10,
+      produced: 10,
+      rate: 1,
+      unavailable: false,
+    };
+  }
+
+  test("no file raises no attention and no coverage problems", () => {
+    const attention = inviterCleaningAttention(undefined, new Map());
+    expect(attention.needsAttention).toBe(false);
+    expect(attention.railValue).toBeUndefined();
+    expect(cleaningCoverageProblems(undefined, new Map())).toEqual([]);
+  });
+
+  test("a null (pending) rate map raises nothing", () => {
+    const editor = editorFromCsv("Dana", csv);
+    const attention = inviterCleaningAttention(editor, null);
+    expect(attention.needsAttention).toBe(false);
+    expect(attention.failingFieldCount).toBe(0);
+    expect(attention.railValue).toBeUndefined();
+    expect(cleaningCoverageProblems(editor, null)).toEqual([]);
+  });
+
+  test("fully-covered rates raise nothing", () => {
+    const editor = editorFromCsv("Dana", csv);
+    const rates = new Map(
+      editor.draft.standardization.map((t) => [
+        t.output,
+        covered(t.output, t.input),
+      ]),
+    );
+    const attention = inviterCleaningAttention(editor, rates);
+    expect(attention.needsAttention).toBe(false);
+    expect(attention.railValue).toBeUndefined();
+    expect(cleaningCoverageProblems(editor, rates)).toEqual([]);
+  });
+
+  test("a silent-empty field raises attention with the failing-field count", () => {
+    const editor = editorFromCsv("Dana", csv);
+    const rates = new Map<string, FieldValueCoverage>([
+      ["date_of_birth", collapsed("date_of_birth", "dob")],
+    ]);
+    const attention = inviterCleaningAttention(editor, rates);
+    expect(attention.needsAttention).toBe(true);
+    expect(attention.failingFieldCount).toBe(1);
+    expect(attention.railValue).toBe("1 field failing");
+  });
+
+  test("the coverage problem names the field's safe label and links to cleaning", () => {
+    const editor = editorFromCsv("Dana", csv);
+    const rates = new Map<string, FieldValueCoverage>([
+      ["date_of_birth", collapsed("date_of_birth", "dob")],
+    ]);
+    const problems = cleaningCoverageProblems(editor, rates);
+    expect(problems).toEqual([
+      {
+        message: 'Cleaning: "Date of birth" produces no value in any row',
+        target: "cleaning",
+      },
+    ]);
+  });
+
+  test("multiple failing fields count each but one problem per type label", () => {
+    const editor = editorFromCsv("Dana", csv);
+    const rates = new Map<string, FieldValueCoverage>([
+      ["first_name", collapsed("first_name", "first_name")],
+      ["last_name", collapsed("last_name", "last_name")],
+    ]);
+    const attention = inviterCleaningAttention(editor, rates);
+    expect(attention.failingFieldCount).toBe(2);
+    expect(attention.railValue).toBe("2 fields failing");
+    const problems = cleaningCoverageProblems(editor, rates);
+    expect(problems.map((problem) => problem.message)).toEqual([
+      'Cleaning: "First name" produces no value in any row',
+      'Cleaning: "Last name" produces no value in any row',
+    ]);
+  });
+
+  test("attention clears when the pipeline recovers", () => {
+    const editor = editorFromCsv("Dana", csv);
+    const failing = new Map<string, FieldValueCoverage>([
+      ["date_of_birth", collapsed("date_of_birth", "dob")],
+    ]);
+    expect(inviterCleaningAttention(editor, failing).needsAttention).toBe(true);
+    const recovered = new Map<string, FieldValueCoverage>([
+      ["date_of_birth", covered("date_of_birth", "dob")],
+    ]);
+    const attention = inviterCleaningAttention(editor, recovered);
+    expect(attention.needsAttention).toBe(false);
+    expect(attention.railValue).toBeUndefined();
+    expect(cleaningCoverageProblems(editor, recovered)).toEqual([]);
+  });
+
+  test("the Cleaning rail fact turns amber only while a field is failing", () => {
+    const editor = editorFromCsv("Dana", csv);
+    const plain = inviterRailFacts(editor)[0];
+    expect(plain.label).toBe("Cleaning");
+    expect(plain.tone).toBeUndefined();
+    expect(plain.fact).toMatch(/^\d+ fields?$/);
+
+    const rates = new Map<string, FieldValueCoverage>([
+      ["date_of_birth", collapsed("date_of_birth", "dob")],
+    ]);
+    const attention = inviterCleaningAttention(editor, rates);
+    const amber = inviterRailFacts(editor, attention)[0];
+    expect(amber.tone).toBe("attention");
+    expect(amber.fact).toBe("1 field failing");
   });
 });
 
