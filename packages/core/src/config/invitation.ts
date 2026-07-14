@@ -164,7 +164,18 @@ export const MAX_ENDPOINT_PATH_LENGTH = 4096;
 // ZodType<T> and break the union (same rationale as connection.ts). Strict
 // objects enforce the locator allowlist, so any credential field is rejected;
 // type safety is enforced at the ConnectionEndpointSchema level instead.
-const WebRTCEndpointSchema = z.strictObject(
+/**
+ * The credential-free WebRTC signaling-locator schema: `channel`/`host`/`port`/
+ * `path` only, `z.strictObject` so any field outside that allowlist -- a PeerJS
+ * `key`, a `server.username`, a `turn` entry -- is rejected rather than
+ * stripped. Exported (unlike its sftp/filedrop siblings) as the single locator
+ * source of truth the exchange-file mint layer composes a webrtc connection
+ * block from, so the invitation endpoint and the composed connection agree on
+ * the credential-free shape by construction rather than by two parallel
+ * definitions. See {@link WebRTCEndpoint} for the aligned interface and
+ * `connectionFromLocator` in exchangeFile.ts for the consumer.
+ */
+export const WebRTCEndpointSchema = z.strictObject(
   {
     channel: z.literal("webrtc"),
     host: z.string().min(1).max(MAX_ENDPOINT_HOST_LENGTH),

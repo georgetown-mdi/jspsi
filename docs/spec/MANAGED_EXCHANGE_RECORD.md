@@ -119,20 +119,23 @@ party's side lives in the local `side` field, not the document (see [Role: a
 local `side` field](#role-a-local-side-field-not-the-document)). The full shared schema **can** represent those
 credential-bearing fields, so the guarantee comes from composition, exactly as
 in the mint layer: the record composer assembles the connection from a
-credential-free locator input and persists the schema's parse result. The mint
-layer's credential-free input union covers only the file-sync channels today (a
-webrtc exchange is coordinated live, not from a downloadable file), so this
-schema requires three concrete pieces of implementation work: a new
-credential-free `WebRTCExchangeLocator` type (`host`/`port`/`path` only); a
-`webrtc` arm in `connectionFromLocator`, the locator-to-connection expansion in
-`packages/core/src/config/exchangeFile.ts`; and the composition guarantee
-extending to the nested `server` object's two credential fields
-(`server.username` and the PeerJS `server.key`), which the flat file-sync
-locators never had to exclude. Prefer composing the webrtc locator from the
+credential-free locator input and persists the schema's parse result. The
+downloadable-file mint path's credential-free input union covers only the
+file-sync channels (a webrtc exchange is coordinated live, not from a
+downloadable file), so core carries the composer's webrtc arm as three
+distinct pieces: a credential-free `WebRTCExchangeLocator` type
+(`host`/`port`/`path` only); a `webrtc` arm in `connectionFromLocator`, the
+locator-to-connection expansion in `packages/core/src/config/exchangeFile.ts`;
+and the composition guarantee extending to the nested `server` object's two
+credential fields (`server.username` and the PeerJS `server.key`), which the
+flat file-sync locators never had to exclude. The webrtc locator is the
 invitation's endpoint schema (`WebRTCEndpointSchema`,
 `packages/core/src/config/invitation.ts`), which is already credential-free by
-schema, so there is one locator source of truth rather than two. The
-composition rule, not a strip pass, is the enforcement.
+schema, so there is one locator source of truth rather than two, and the
+locator-to-connection expansion validates through it -- rejecting any field
+outside the allowlist rather than letting the non-strict webrtc connection
+schema silently strip it. The composition rule, not a strip pass, is the
+enforcement.
 
 #### Role: a local `side` field, not the document
 
