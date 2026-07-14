@@ -97,7 +97,7 @@ are the standing definition of the managed exchange.
 | `sharedSecret` | string (base64url, 43 chars / 32 bytes) | The **current** rotated shared secret, matching `SHARED_SECRET_REGEX` (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md)) -- the `.psilink.key` analog the exchange-file document deliberately never carries. This is the one at-rest secret in the record. Rotated after every successful run and re-persisted before the run is treated as succeeded (see [Persist-before-success ordering](#persist-before-success-ordering)). |
 | `expires` | string (ISO 8601, UTC `Z`) or absent | The instant after which `sharedSecret` must not be used; the recovery when it lapses is re-invite. Absent means no bound is in force. The record inherits the CLI key file's **consumer** semantics for `expires` -- one field, one meaning to every consumer (see [Two sources, one `expires`](../SECURITY_DESIGN.md#two-sources-one-expires), a citation about meaning, not sourcing) -- while its **provenance** is single-source: only the max-age stamp below writes it, the invitation's setup lifetime having been consumed at provisioning. |
 | `tokenMaxAgeDays` | integer or absent | The operator's max-token-age policy for this exchange, the browser analog of the CLI `authentication.token_max_age_days`, and like it **off by default**: absent means no bound is in force, and a record is created with it absent unless the operator sets one. When set, each successful run stamps `expires` this many days out onto the rotated secret. The reason to opt in is a dormant partnership: rotation caps exposure only for an exchange that actually runs, so an idle stored secret has no automatic exposure bound without it (see [The primary controls](../SECURITY_DESIGN.md#the-primary-controls)). |
-| `schedule` | object or absent | The partnership-agreed run schedule the unattended path executes: the agreed recurrence and run window -- the schedule is partnership-level agreement, coordinated out-of-band exactly as the terms are -- plus the retry bookkeeping for a missed window (the next planned attempt). Closed shape: timestamps, durations, and enums, no free text, under the same no-narrative constraint as `lastRun`. Absent for an exchange run attended-only. The exact field layout is fixed by the later scheduling design work, within the security-review gate; this record commits to carrying it. |
+| `schedule` | object or absent | The partnership-agreed run schedule the unattended path executes: the agreed recurrence and run window -- the schedule is partnership-level agreement, coordinated out-of-band exactly as the terms are -- plus the retry bookkeeping for a missed window (the next planned attempt). Closed shape: timestamps, durations, and enums, no free text, under the same no-narrative constraint as `lastRun`. Absent for an exchange run attended-only. The field-by-field layout is in [The `schedule` object](#the-schedule-object). |
 | `lastRun` | object or absent | Run bookkeeping the backup state and the tiered desync UX read (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md)): `at` (ISO 8601 UTC), `outcome` (`"succeeded"` \| `"failed"` \| `"desynced"` \| `"missed"`), and, for a non-succeeded outcome, an optional `failureKind` (`"auth"` \| `"transport"` \| `"storage"` \| `"input"` \| `"cancelled"`). A `"missed"` outcome records an agreed window that passed without a completed handshake (a runner no-show on either side); it is benign, retried at the next window, and never routed through the desync/attack framing (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#a-missed-window-is-neither-desync-nor-attack)). An `"input"` failure records a benign pre-run input problem -- the handle's file missing at run start, or contents the column-shape guard rejects -- detected before any connection, likewise never routed through that framing. Every field is a timestamp or a closed enum -- there is deliberately **no free-text field**, so the record structurally cannot carry a match result, a count, or a row value; the constraint is the type, not a prose promise. |
 
 Everything in this table except `sharedSecret` is non-secret but not
@@ -168,6 +168,90 @@ That evolution path -- reject, re-invite, re-create -- is also how the shape
 grows: a future schema revision adds its fields under a new `schemaVersion`,
 rather than the v1 record carrying speculative, structurally always-absent
 seams.
+
+### The schedule object
+
+The optional `schedule` object carries the partnership-agreed run cadence, the
+run window the two runners meet in, and the miss bookkeeping the retry policy
+reads. It is present only when the operator saved the exchange as recurring;
+an attended-only exchange omits it. Every field is a timestamp, an integer
+duration, or a closed enum -- no free text, the same no-narrative constraint
+`lastRun` carries -- so the object cannot accumulate the schedule narrative the
+metadata-at-rest analysis did not cover (see
+[Metadata at rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)).
+
+| Field | Type | Notes |
+| ----- | ---- | ----- |
+| `anchor` | string (ISO 8601, UTC `Z`) | The instant of the first agreed window's open, the phase the recurrence counts from. Both parties persist the **same** `anchor`, agreed out-of-band with the rest of the schedule, so both runners compute the same window opens. Stored UTC; a local-time cadence ("09:00 Tuesdays") is resolved to UTC at save and re-resolved only when the operator edits the schedule, so a daylight-saving shift does not silently move an unattended window. |
+| `intervalDays` | integer, at least 1 | The recurrence period in whole days: the run window opens every `intervalDays` after `anchor`. A whole-day integer covers the daily, weekly, and monthly-approximated (for example 28- or 30-day) cadences the persona runs; sub-day cadences are out of scope for a partnership coordinated out-of-band, and calendar-month recurrence (the drifting "1st of the month") is deliberately not modeled -- an integer period keeps both runners' window computation identical without a shared calendar library. |
+| `windowSeconds` | integer, at least 1 | The run window's width: window *n* is open from `anchor + n * intervalDays` for `windowSeconds`. The width is chosen to dwarf realistic clock skew between the two machines (see [Clock skew](#clock-skew-and-the-window-width)); a several-hour width is the intended range, not a several-minute one. The structural floor is one second, but schedule entry enforces a UX-level minimum on the order of an hour: width is the only skew mitigation the design has, so a seconds-wide window would guarantee perpetual self-inflicted misses. |
+| `nextWindow` | string (ISO 8601, UTC `Z`) | The open instant of the next window the runner plans to attempt. Derived from `anchor`, `intervalDays`, and the run bookkeeping (advanced past a completed or missed window), it is persisted rather than recomputed so a reader -- the runtime waking, or a next-visit surface -- sees the planned attempt without replaying history. After a miss it is the **next** window, never a sooner off-schedule retry: retry-at-next-window is the whole retry policy (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#retry-and-repeated-misses)). A runtime that wakes to find it in the past applies the catch-up rule below before anything else (see [Catch-up on wake](#catch-up-on-wake)). |
+| `consecutiveMisses` | integer, at least 0 | The count of consecutive agreed windows that passed without a completed handshake, **regardless of which side was absent**: a window this runner sat out waiting for a peer that never arrived counts exactly as one this runner itself slept through (the latter recorded retroactively; see [Catch-up on wake](#catch-up-on-wake)). A `"succeeded"` outcome resets it to 0; a `"missed"` outcome increments it; **any other outcome leaves it unchanged**, because only a no-show signals the two runners are not meeting. A handshake that ran and failed (`"failed"`/`"desynced"`) means the partnership *did* meet, so it is a desync/attack question, not a coordination-drift one; a benign pre-peer `"input"` failure is likewise not a partner no-show. It drives only the surfacing of a repeated-miss coordination problem, whose escalated state fires at **two** consecutive misses (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#retry-and-repeated-misses)); it never pauses the schedule and never changes `nextWindow`'s cadence. |
+
+The object holds no operator-facing recurrence label, no timezone name, and no
+window-outcome history: `anchor` plus `intervalDays` plus `windowSeconds` fully
+determine every past and future window, and `lastRun` already carries the most
+recent outcome. A per-window outcome log would be exactly the narrative the
+no-free-text constraint excludes, and it is unnecessary -- `consecutiveMisses`
+is the only cross-window state the retry policy needs.
+
+The schedule is a **local-only** field, not part of the persisted
+`exchangeFile` document: a reschedule is neither a terms change nor a credential,
+so it must not force the re-invite a document change requires (see [Record
+shape](#record-shape)), and the CLI would carry it inertly. Each party enters it
+locally at save-as-recurring, agreed out-of-band exactly as the terms and the
+setup secret are (see
+[SECURITY_DESIGN.md](../SECURITY_DESIGN.md#invitation-contents-and-confidentiality)).
+Normatively: neither the invitation wire format nor the exchange-file document
+carries the schedule, and no schedule field is ever sent to a server or to the
+partner over the wire. Two parties who enter mismatched values never share an
+overlapping window and record mutual misses until they reconcile out-of-band --
+a benign coordination failure, never a desync or an attack. The operational
+framing is in
+[MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#where-the-schedule-is-agreed-and-where-it-lives).
+
+#### Catch-up on wake
+
+A runner does not tick while its machine sleeps, so a runtime can wake -- a
+laptop reopened after a week on a daily cadence, the app relaunched after a
+reboot -- with `nextWindow` in the past and one or more windows fully elapsed.
+On wake, before attempting anything, the runner applies one catch-up rule:
+
+- Every fully-elapsed, unattempted window counts as **one miss each**:
+  `consecutiveMisses` is incremented by the count, and `lastRun` records the
+  most recent elapsed window as `"missed"`.
+- `nextWindow` advances past every fully-elapsed window to the first window not
+  yet closed: if the current instant falls inside that window, the runner
+  attempts it immediately; otherwise `nextWindow` is the first window opening
+  after the current instant.
+
+The rule keeps both fields honest. `consecutiveMisses` reflects the true count
+of elapsed misses whichever side was absent, and the runner lands on a live
+window rather than replaying stale past ones. Crossing the two-miss escalation
+threshold during catch-up fires the repeated-miss surface at the wake -- which
+is how a persistently absent party learns of a miss pattern late rather than
+never (see
+[MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#retry-and-repeated-misses)).
+
+The import path is the rule's second consumer: an imported backup carries the
+snapshot's `nextWindow`, typically in the past by the time the artifact is
+restored, and the first wake after an import applies the same catch-up --
+elapsed windows counted, `nextWindow` advanced to a live window -- before any
+attempt.
+
+### Clock skew and the window width
+
+The two runners never exchange a clock reading; each opens and closes its window
+by its own machine clock against the shared `anchor` and `intervalDays`, so an
+overlapping window depends on both clocks agreeing closely enough. The mitigation
+is width, not synchronization: `windowSeconds` is chosen to dwarf realistic skew
+(a several-hour window against the seconds-to-minutes skew of a machine with any
+working time source), so two reasonably-set clocks overlap comfortably and only a
+grossly wrong clock on one side turns a scheduled run into a benign miss. The
+design adds no time-sync protocol; a persistently miss-producing clock is a
+local operational problem the miss surfacing (see
+[MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#retry-and-repeated-misses)) points
+the operator at, resolved by fixing the machine's time source, not by the app.
 
 ### Re-supplied each run
 

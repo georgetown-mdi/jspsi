@@ -8,14 +8,16 @@ This document describes the **managed exchange** lifecycle for the hosted web
 application: how a two-party PPRL exchange, once set up, runs again on an agreed
 schedule from the browser -- unattended where the platform allows -- without
 re-authoring the terms or re-establishing a shared secret. It covers the
-automation goal and its platform envelope, the durability and crash-consistency
-contract for the rotating secret, the single-device ownership invariant and its
-rationale, how a party tells a rotation desync from an attack (and a missed run
-window from either) and recovers, how the design survives silent browser
-storage eviction, the moment-anchored backup surfaces that keep an operator
-honestly informed without training click-through, and the one-action deletion
-of an exchange's stored information. It opens with who the feature serves; the
-failure machinery follows.
+automation goal and its platform envelope, the agreed schedule and the run
+windows two runners meet in (with the retry policy for a missed one), the
+durability and crash-consistency contract for the rotating secret, the
+single-device ownership invariant and its rationale, how a party tells a
+rotation desync from an attack (and a missed run window from either) and
+recovers, how the design survives silent browser storage eviction, the
+moment-anchored backup surfaces and the between-visit OS notification that keep
+an operator honestly informed without training click-through, and the
+one-action deletion of an exchange's stored information. It opens with who the
+feature serves; the failure machinery follows.
 
 It is the operational and conceptual counterpart to two companion documents: the
 **managed exchange record** field-by-field shape in
@@ -127,11 +129,217 @@ attack](#a-missed-window-is-neither-desync-nor-attack)). The record persists
 the agreed schedule and the retry bookkeeping
 ([MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md)).
 
-Scope: this document fixes the automation goal, the platform envelope, and what
-the record persists to support them; the detailed scheduling and
-window-coordination design (run windows, retry policy, notification surfaces)
-is later, separately-designed work and is neither foreclosed nor duplicated
-here.
+The run windows both runners meet in, the retry policy for a missed one, and
+the between-visit notification surface are designed under [The schedule and its
+run windows](#the-schedule-and-its-run-windows) below; the record's closed
+field layout for them is in
+[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#the-schedule-object).
+
+## The schedule and its run windows
+
+An unattended run takes two runners awake at the same time, and neither runner
+can reach a server to be told when the other is ready. The schedule is what lets
+both arrive at the same moment without any live coordination: it is a recurrence
+and a window width both parties agree once, out-of-band, and then each runner
+executes locally against its own clock.
+
+### Where the schedule is agreed, and where it lives
+
+The schedule is **partnership-level agreement, coordinated out-of-band**,
+exactly as the linkage terms and the setup secret are (see
+[SECURITY_DESIGN.md](SECURITY_DESIGN.md#invitation-contents-and-confidentiality)).
+The two operators decide a cadence and a window together over their trusted
+channel, and each enters it locally when saving the exchange as recurring. It is
+**not** minted into the exchange-file document and **not** carried on the
+invitation wire: the document is the shared terms-and-locator config a terms
+change would force a re-invite to alter, and a reschedule is neither a terms
+change nor a credential, so the schedule is a local record field instead (the
+`schedule` object; see
+[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#the-schedule-object)).
+Nothing about the schedule is ever sent to a server or to the partner over the
+wire; there is no server-side coordination anywhere in the design.
+
+The cost of local-only entry is that each side types the same values by hand, so
+a mistyped cadence or window on one side produces windows that never overlap.
+That failure is benign and self-announcing: it shows up as mutual missed windows
+(below), which the operators resolve out-of-band where they agreed the schedule
+in the first place -- the same channel, the same reconciliation as any other
+schedule drift.
+
+### When a window opens and closes
+
+The recurrence is an anchor instant plus a whole-day interval, and each window
+stays open for the agreed width. Both parties persist the same anchor and
+interval, so both compute the same window opens independently. The closed field
+layout is in
+[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#the-schedule-object).
+
+For an unattended handshake to happen inside a window, both runners must be
+**awake and in the window at the same time**: each installed app runtime, kept
+running since OS login, wakes at its own computed window open, derives the
+rendezvous id from the current secret, and waits for the peer for the window's
+duration. If both are present and the handshake completes, the run proceeds
+through rotate-and-persist and the data exchange (see [The second
+run](#the-second-run-end-to-end)). If the window elapses with no completed
+handshake -- the peer never arrived, or arrived and left before this side did --
+the window is recorded as **missed** and the runner advances to the next planned
+window.
+
+The window width is deliberately generous -- hours, not minutes -- for two
+reasons. It absorbs clock skew between the two machines (the runners never
+exchange a clock reading, so a wide window is what guarantees overlap despite
+small clock differences; the honest bound is in
+[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#clock-skew-and-the-window-width)),
+and it absorbs the ordinary slack of two independently-kept machines -- a laptop
+that woke late, an app launched a few minutes after login. A missed window is
+never desync and never an attack: nothing authenticated and nothing failed
+closed, because there was no peer to fail against (see [A missed window is
+neither desync nor attack](#a-missed-window-is-neither-desync-nor-attack)).
+
+### Retry and repeated misses
+
+The retry policy is **retry at the next agreed window**, and nothing sooner.
+A miss does not trigger an off-schedule retry, a backoff, or an immediate
+re-attempt: the next opportunity is simply the next window the recurrence
+defines, because a sooner retry would need the partner's runner to also be
+awake off-schedule, which the whole point of an agreed window is to avoid. When
+both parties miss (neither runner ran), both advance to the next window and try
+again there; when only one misses, the present party records a miss and also
+advances -- so **whoever showed up records the miss**, and a one-sided absence
+and a two-sided absence are the same benign outcome from each present party's
+point of view. There is no "who retries" question to answer: neither party
+retries early, and both simply meet again at the next window.
+
+That bookkeeping is **one-sided by construction, and deliberately so**:
+"whoever showed up records the miss" means the escalating surface below fires
+on the party that keeps showing up -- exactly the party positioned to reach out
+-- while a persistently absent party's runtime may never be awake to see
+anything. The asymmetry is accepted because reconciliation needs only one side
+to raise it, over the channel where the schedule was agreed. Nor is the absent
+side left permanently ignorant: a runtime that wakes to find windows fully
+elapsed counts each one as a miss and lands on the next live window (the
+catch-up rule; see
+[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#catch-up-on-wake)),
+so its own repeated-miss surface fires at that wake -- it learns late, but it
+does learn.
+
+A single miss is unremarkable and demands no action -- a laptop closed for the
+evening, a machine mid-reboot at the window. What matters is a **pattern** of
+misses, which means the partnership is no longer meeting: the partner has
+stopped running the exchange, the schedules have drifted apart, or a machine's
+clock is far enough off that its windows never overlap. That is a coordination
+problem, and it is resolved **out-of-band, where the schedule was agreed** --
+not by the app guessing. The record counts consecutive misses since the last
+success (see
+[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#the-schedule-object)),
+and at **two consecutive misses** the next visit's surface and the between-visit
+notification escalate to the coordination prompt, which names **both** checks:
+check with your partner, and check this machine's own clock -- a wrong local
+time source produces exactly this pattern, and a no-IT operator pointed only at
+the partner would never look at their own machine.
+
+The threshold is a window count, not a wall-clock age, so it is deliberately
+**cadence-relative**: two misses on a monthly partnership means roughly two
+months before the escalated state. That is accepted because each miss already
+fires its own moment-anchored notification at its window (see [The between-visit
+notification](#the-between-visit-notification)), so the operator is not in the
+dark in the interim -- the threshold gates only the escalated
+coordination-problem framing, not the operator's first knowledge of a miss.
+
+#### Repeated misses surface, they do not auto-pause
+
+A design question this raises: after enough consecutive misses, should the app
+**automatically pause** the schedule (stop attempting until the operator
+re-enables it), or only **surface** the problem and keep attempting on cadence?
+
+This design chooses **surface-only, no auto-pause**, because for the no-IT
+persona this feature serves the two failure modes are not symmetric:
+
+- **Auto-pausing is silent, and the persona visits rarely.** A paused schedule
+  stops trying with no visible signal, so a partnership that quietly stopped
+  attempting is indistinguishable from a healthy one until the next in-person
+  visit -- which may be weeks away. A silently paused schedule is a silently
+  dead partnership.
+- **Continuing to attempt costs almost nothing.** Each attempt against a partner
+  who has gone away is one runner waking, deriving a rendezvous id, and waiting
+  out a window against a peer that never arrives: no wire traffic to a server,
+  no secret exposure (the secret does not rotate on a miss), and no data read
+  (the input guard and connection come only after a peer is found).
+
+The honest cost of not pausing is that the miss surface must itself be
+trustworthy: if it read as noise the operator learned to ignore, endless quiet
+retries would mask a dead partnership just as a silent pause would. That is why
+the miss surface is **moment-anchored and escalating** -- one informational
+note per miss at its window, the actionable coordination state only once the
+pattern is real -- rather than a standing warning the operator clicks through
+(the same discipline the backup surfaces follow; see [Moment-anchored backup
+surfaces](#moment-anchored-backup-surfaces)).
+
+The operator retains an explicit, manual control either way: a recurring
+exchange can be paused or its schedule edited from its detail surface at any
+time, and deleting the exchange stops all attempts (see [Deleting a managed
+exchange](#deleting-a-managed-exchange)). What the design declines to do is make
+that pause decision *for* the operator on a heuristic, because the failure mode
+of a wrong automatic pause (a silently dead partnership) is worse for this
+persona than the failure mode of not pausing (cheap, visible, ignorable
+retries).
+
+### The between-visit notification
+
+Between visits the operator is not watching the app, so the "this ran / this
+needs you" surface is an **OS-level notification** from the installed app -- the
+platform's own notification, shown from the same app runtime that executes the
+runs, the concept that reaches an operator who is not looking at a browser tab.
+It is a concept-level surface here, not a wire or storage design: it reads the
+same run bookkeeping the next-visit surfaces read and says the same things, just
+sooner.
+
+Four moments are worth a notification, and each maps to a state the design
+already defines:
+
+- **This ran, and your backup is now stale.** An unattended run rotates the
+  secret with nobody present, which flips the derived backup state to "backup
+  needed" (see [Moment-anchored backup surfaces](#moment-anchored-backup-surfaces)).
+  The notification prompts the **re-export** at that moment rather than letting
+  the standing backup silently drift stale until the next visit -- the
+  between-visit form of the attended run's "download updated backup" step. It
+  wires to the **existing** derived backup state and its transition; it does not
+  introduce a second persistence-status track (see [Surviving storage
+  eviction](#surviving-storage-eviction)).
+- **This did not run: a missed window.** Each miss fires one quiet,
+  informational notification at its window -- the run the operator expected did
+  not happen, said honestly at its moment, with the next planned window named;
+  no action is demanded, because the retry is automatic. A runtime that wakes to
+  find windows already elapsed surfaces its accrued misses **once**, at the wake
+  (the catch-up rule; see
+  [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#catch-up-on-wake)),
+  not one notification per slept-through window. Once the consecutive-miss count
+  crosses the escalation threshold, the copy becomes the coordination prompt --
+  check with your partner, and check this machine's own clock -- and further
+  misses stop firing individually while that state stands (the in-app state
+  carries it), so a dead partnership on a short cadence does not become a daily
+  nag.
+- **This needs you: the input file is missing or was rejected.** A benign
+  pre-run input failure on an unattended run -- the handle's file gone at run
+  start, or a refresh the column-shape guard rejects -- means no scheduled run
+  can succeed until the operator re-points the handle or drops a conforming
+  file, so it is actionable at its moment (see [The input file each
+  run](#the-input-file-each-run)).
+- **This needs you: a run failed with no benign explanation.** A handshake that
+  ran and failed closed with no recorded benign cause (the Tier-2 case; see
+  [Telling a desync from an attack](#telling-a-desync-from-an-attack)) is the
+  one failure that needs the operator's out-of-band confirmation work, so it is
+  worth surfacing between visits rather than waiting for the next visit.
+
+Everything else stays quiet, and nothing repeats: each notification fires once
+at its state's transition, and a condition already surfaced is carried by the
+in-app state rather than re-announced at every subsequent wake -- the same
+moment-anchored discipline as the in-app surfaces, so the notification never
+becomes the standing nag the whole surface design avoids.
+
+Because the notification is a concept over states the record already carries, a
+platform without OS notifications loses only the *sooner* prompt: every one of
+these states is still carried honestly to the operator's next in-app visit.
 
 ## The second run, end to end
 
@@ -151,9 +359,9 @@ does that the one-shot flow cannot. On the first-class path the second run is
    below, unchanged by nobody watching.
 5. **The outcome lands in the run bookkeeping**, and the next visit's surfaces
    carry it: the results, the refreshed-backup prompt, or the failure state.
-   An OS-level notification from the installed app is the natural "this ran /
-   this needs you" surface between visits; its design belongs to the later
-   scheduling and installed-app work.
+   An OS-level notification from the installed app is the "this ran / this needs
+   you" surface between visits (see [The between-visit
+   notification](#the-between-visit-notification)).
 
 The **attended re-run** -- the degradations' path, available on any platform --
 is the same run with the operator present: open the app (the exchange shows
@@ -368,7 +576,8 @@ the run bookkeeping (a `"missed"` outcome; see
 the next agreed window, and it never enters the desync/attack framing below --
 exactly as expiry never does. Only a handshake that actually ran and failed
 reaches that framing. A pattern of missed windows is a coordination problem,
-resolved out-of-band where the schedule itself was agreed.
+resolved out-of-band where the schedule itself was agreed -- surfaced, not
+auto-paused (see [Retry and repeated misses](#retry-and-repeated-misses)).
 
 ### The grace window
 
@@ -572,10 +781,10 @@ so taking it there keeps that path green and quiet. An unattended scheduled run
 rotates the secret with nobody present, so a scheduled exchange's standing
 export goes stale between visits **by design**; the backup state carries that
 honestly -- actionable at the next visit, a state, not a nag -- and an OS-level
-notification from the installed app is the concept for prompting a re-export
-sooner (its design belongs to the later scheduling and installed-app work). The
-frame throughout: every honest statement appears at the moment it becomes true
-and actionable.
+notification from the installed app prompts a re-export sooner (see [The
+between-visit notification](#the-between-visit-notification)). The frame
+throughout: every honest statement appears at the moment it becomes true and
+actionable.
 
 The in-browser copy is treated as convenience and the exported credential
 file as the durability of record, so an operator is never surprised by a silent
