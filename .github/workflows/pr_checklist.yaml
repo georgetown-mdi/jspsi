@@ -1,0 +1,51 @@
+name: PR Checklist
+
+# Validates the PR description's Checklist section on every pull request: no box
+# left unchecked, none of the required lines deleted, every checked line carrying
+# a resolution clause, and every n/a earned with a reason. This is the mechanical
+# backstop for the template's "resolve every line" rule (the honesty of a reason
+# stays a review call) -- see scripts/check-pr-checklist.mjs for the rules.
+#
+# Kept as its own workflow (rather than a job in static_checks.yaml) because it
+# runs on `edited` too: fixing the PR body re-runs the check without pushing a
+# new commit. static_checks stays commit-triggered -- its results depend only on
+# the tree, so a body edit must not re-run it.
+
+on:
+  pull_request:
+    branches: [main, staging]
+    types: [opened, edited, reopened, synchronize]
+
+# Cancel a superseded run when a newer commit or body edit lands on the same PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: the check reads the repo for the script; the PR body arrives
+# on the event payload.
+permissions:
+  contents: read
+
+jobs:
+  pr-checklist:
+    name: PR Checklist
+    # Bot PRs skip the check: bots (dependabot targets staging) do not use the PR
+    # template, and dependency PRs are gated by dependency_review.yaml instead.
+    if: github.event.pull_request.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The script is dependency-free, so a plain pinned Node suffices -- no npm
+      # ci or @psilink/core build (the ./.github/actions/setup prologue) needed.
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "26"
+      - name: PR checklist
+        # The PR body is attacker-influenceable text. Passing it via an env
+        # assignment hands it to the process without any shell parsing; a ${{ }}
+        # interpolation into the `run:` line would let a crafted body inject
+        # shell commands into the runner.
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: npm run check:pr-checklist
