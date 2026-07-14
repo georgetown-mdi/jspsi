@@ -937,6 +937,46 @@ describe("inviter bench", () => {
       .toBeInTheDocument();
   });
 
+  test("Back after a start-over lands on review, not a blank share column", async () => {
+    // Reaching the share screen pushes a `share` history entry; start-over then
+    // clears the invitation the share work column reads and routes to a fresh
+    // review. The `share` entry is now backed by nothing -- pressing Back must
+    // not restore a blank share column.
+    await createSealedInvitation();
+    lifecycleCall(0).onError({
+      category: "security",
+      error: new Error("kex failed"),
+    });
+    await page
+      .getByRole("button", { name: "Start over with a fresh invitation" })
+      .click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Review & create");
+
+    // Back lands on the clamped review, not the dead `share` entry: the heading
+    // is Review & create and the share surface never appears.
+    window.history.back();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Review & create");
+    expect(page.getByText("Share this invitation").query()).toBeNull();
+    await expect
+      .element(page.getByText("Ready to create."))
+      .toBeInTheDocument();
+    // The entry was rewritten to review, so Forward then Back does not resurrect
+    // the dead share entry either.
+    window.history.forward();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Review & create");
+    window.history.back();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Review & create");
+    expect(page.getByText("Share this invitation").query()).toBeNull();
+  });
+
   test("the unload prompt arms with the file and disarms once the invitation exists", async () => {
     // A cancelable beforeunload dispatched at the window is answered by the
     // same listener the browser consults on a real unload; dispatchEvent

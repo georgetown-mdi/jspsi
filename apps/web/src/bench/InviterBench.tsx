@@ -77,6 +77,7 @@ import { ReviewCreateSection } from "./ReviewCreateSection";
 import { SaveExchangeSection } from "./SaveExchangeSection";
 import { TopBar } from "./TopBar";
 import { YourFileSection } from "./YourFileSection";
+import { restorableSection } from "./stepRestore";
 import { selectExchangeDriver } from "./exchangeDriverSelection";
 import { sftpEndpointForRemote } from "./sftpRemoteChoice";
 import { timelineSteps } from "./exchangeRun";
@@ -84,12 +85,7 @@ import { useInviterExchange } from "./useInviterExchange";
 import { useStepHistory } from "./useStepHistory";
 import { useUnloadGuard } from "./useUnloadGuard";
 
-import type {
-  AcquiredCsv,
-  InviterEditor,
-  RailStep,
-  SpineTarget,
-} from "./inviterModel";
+import type { AcquiredCsv, InviterEditor, RailStep } from "./inviterModel";
 import type { CliTransport, SaveExchangeFields } from "./saveExchangeModel";
 import type {
   ConnectionEndpointRequest,
@@ -98,11 +94,11 @@ import type {
 import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { IntakeAlert } from "./YourFileSection";
 import type { SavedExchange } from "./SaveExchangeSection";
+import type { Section } from "./stepRestore";
 import type { SftpRemoteProjection } from "@jobs/jobManager";
 
 import type { CSVRow, SemanticType, Standardization } from "@psilink/core";
 
-type Section = SpineTarget | "share" | "save";
 type SpineStep = "file" | "columns" | "review";
 
 /** Stable empty inputs for {@link useNonEmptyRates} before a file is acquired,
@@ -265,14 +261,22 @@ export function InviterBench() {
   // Apply a section arriving from a browser Back/Forward: set the step state
   // without pushing a new history entry (the browser already moved the cursor).
   // The bench stays mounted throughout, so the loaded file, the derived terms,
-  // and every in-progress edit survive the transition untouched.
-  function restoreSection(next: Section) {
-    if (isSpineStep(next)) setLastSpineStep(next);
-    setSection(next);
+  // and every in-progress edit survive the transition untouched. A section whose
+  // backing state is gone (a `share` entry left behind by a start-over) clamps
+  // to a step that can still render; the settled section is returned so the hook
+  // rewrites the dead entry.
+  function restoreSection(next: Section): Section {
+    const settled = restorableSection(next, {
+      hasInvitation: invitation !== undefined,
+      isCliTransport: isCliTransport(transport),
+    });
+    if (isSpineStep(settled)) setLastSpineStep(settled);
+    setSection(settled);
+    return settled;
   }
 
   const { pushStep } = useStepHistory("file", (step) => {
-    if (isSection(step)) restoreSection(step);
+    if (isSection(step)) return restoreSection(step);
   });
 
   // The unload guard arms once a file is loaded and disarms once the exchange is

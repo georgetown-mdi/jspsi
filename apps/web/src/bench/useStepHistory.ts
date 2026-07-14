@@ -21,6 +21,14 @@ import {
  * step; a `popstate` that leaves the bench (Back from the first step, an
  * unrelated route) is left to proceed as ordinary navigation.
  *
+ * A restore may be clamped: the step the entry names can require backing state
+ * the bench no longer holds (its work column would render blank), so `onRestore`
+ * returns the step it actually settled on. When that differs from the entry's
+ * step, the hook rewrites the current entry's marker to the settled step with
+ * `replaceState` -- so a later Back does not land on the same dead entry again --
+ * keeping the router's index and key, since Back already moved the cursor and
+ * only the bench marker is stale.
+ *
  * On mount the hook marks the current history entry as the bench's FIRST step
  * (via `replaceState`, so it adds no entry). That baseline is what makes Back
  * from a later step land on the first step in place, while Back from the first
@@ -32,12 +40,14 @@ import {
  * @param onRestore - applies a step arriving from Back/Forward; must set the
  *   step state WITHOUT pushing a new entry (the browser already moved the
  *   cursor), and must validate the step against its own union, ignoring a
- *   foreign one (a stale entry from before a deploy renamed a step). The hook
- *   keeps a live ref to it, so an inline closure is fine.
+ *   foreign one (a stale entry from before a deploy renamed a step). Returns the
+ *   step it settled on so the hook can rewrite a clamped entry; return the
+ *   passed step (or nothing) when it was applied unchanged. The hook keeps a
+ *   live ref to it, so an inline closure is fine.
  */
 export function useStepHistory(
   initialStep: string,
-  onRestore: (step: string) => void,
+  onRestore: (step: string) => string | void,
 ): {
   pushStep: (step: string) => void;
 } {
@@ -70,7 +80,12 @@ export function useStepHistory(
       // or an unrelated route). Let the browser navigate normally -- nothing to
       // restore, and the component unmounts as it always did.
       if (step === undefined) return;
-      restoreRef.current(step);
+      const settled = restoreRef.current(step);
+      if (settled !== undefined && settled !== step)
+        window.history.replaceState(
+          benchStepState(settled, window.history.state),
+          "",
+        );
     }
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
