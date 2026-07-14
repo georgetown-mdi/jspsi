@@ -210,18 +210,41 @@ and a two-sided absence are the same benign outcome from each present party's
 point of view. There is no "who retries" question to answer: neither party
 retries early, and both simply meet again at the next window.
 
-A single miss is unremarkable and needs no operator attention -- a laptop closed
-for the evening, a machine mid-reboot at the window. What matters is a
-**pattern** of misses, which means the partnership is no longer meeting: the
-partner has stopped running the exchange, the schedules have drifted apart, or a
-machine's clock is far enough off that its windows never overlap. That is a
-coordination problem, and it is resolved **out-of-band, where the schedule was
-agreed** -- not by the app guessing. The record counts consecutive misses since
-the last success (see
+That bookkeeping is **one-sided by construction, and deliberately so**:
+"whoever showed up records the miss" means the escalating surface below fires
+on the party that keeps showing up -- exactly the party positioned to reach out
+-- while a persistently absent party's runtime may never be awake to see
+anything. The asymmetry is accepted because reconciliation needs only one side
+to raise it, over the channel where the schedule was agreed. Nor is the absent
+side left permanently ignorant: a runtime that wakes to find windows fully
+elapsed counts each one as a miss and lands on the next live window (the
+catch-up rule; see
+[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#catch-up-on-wake)),
+so its own repeated-miss surface fires at that wake -- it learns late, but it
+does learn.
+
+A single miss is unremarkable and demands no action -- a laptop closed for the
+evening, a machine mid-reboot at the window. What matters is a **pattern** of
+misses, which means the partnership is no longer meeting: the partner has
+stopped running the exchange, the schedules have drifted apart, or a machine's
+clock is far enough off that its windows never overlap. That is a coordination
+problem, and it is resolved **out-of-band, where the schedule was agreed** --
+not by the app guessing. The record counts consecutive misses since the last
+success (see
 [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#the-schedule-object)),
-and past a small threshold the next visit's surface and the between-visit
-notification say plainly: "this exchange has missed its last N runs -- check
-with your partner."
+and at **two consecutive misses** the next visit's surface and the between-visit
+notification escalate to the coordination prompt, which names **both** checks:
+check with your partner, and check this machine's own clock -- a wrong local
+time source produces exactly this pattern, and a no-IT operator pointed only at
+the partner would never look at their own machine.
+
+The threshold is a window count, not a wall-clock age, so it is deliberately
+**cadence-relative**: two misses on a monthly partnership means roughly two
+months before the escalated state. That is accepted because each miss already
+fires its own moment-anchored notification at its window (see [The between-visit
+notification](#the-between-visit-notification)), so the operator is not in the
+dark in the interim -- the threshold gates only the escalated
+coordination-problem framing, not the operator's first knowledge of a miss.
 
 #### Repeated misses surface, they do not auto-pause
 
@@ -246,10 +269,10 @@ persona this feature serves the two failure modes are not symmetric:
 The honest cost of not pausing is that the miss surface must itself be
 trustworthy: if it read as noise the operator learned to ignore, endless quiet
 retries would mask a dead partnership just as a silent pause would. That is why
-the miss surface is **moment-anchored and escalating** -- silent for a single
-miss, an actionable state and a notification only once the pattern is real --
-rather than a standing warning the operator clicks through (the same discipline
-the backup surfaces follow; see [Moment-anchored backup
+the miss surface is **moment-anchored and escalating** -- one informational
+note per miss at its window, the actionable coordination state only once the
+pattern is real -- rather than a standing warning the operator clicks through
+(the same discipline the backup surfaces follow; see [Moment-anchored backup
 surfaces](#moment-anchored-backup-surfaces)).
 
 The operator retains an explicit, manual control either way: a recurring
@@ -271,7 +294,7 @@ It is a concept-level surface here, not a wire or storage design: it reads the
 same run bookkeeping the next-visit surfaces read and says the same things, just
 sooner.
 
-Three moments are worth a notification, and each maps to a state the design
+Four moments are worth a notification, and each maps to a state the design
 already defines:
 
 - **This ran, and your backup is now stale.** An unattended run rotates the
@@ -283,21 +306,36 @@ already defines:
   wires to the **existing** derived backup state and its transition; it does not
   introduce a second persistence-status track (see [Surviving storage
   eviction](#surviving-storage-eviction)).
-- **This needs you: repeated misses.** Once the consecutive-miss count crosses
-  the threshold above, the notification carries the coordination prompt so the
-  operator learns the partnership stopped meeting without having to open the app
-  to find out.
+- **This did not run: a missed window.** Each miss fires one quiet,
+  informational notification at its window -- the run the operator expected did
+  not happen, said honestly at its moment, with the next planned window named;
+  no action is demanded, because the retry is automatic. A runtime that wakes to
+  find windows already elapsed surfaces its accrued misses **once**, at the wake
+  (the catch-up rule; see
+  [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#catch-up-on-wake)),
+  not one notification per slept-through window. Once the consecutive-miss count
+  crosses the escalation threshold, the copy becomes the coordination prompt --
+  check with your partner, and check this machine's own clock -- and further
+  misses stop firing individually while that state stands (the in-app state
+  carries it), so a dead partnership on a short cadence does not become a daily
+  nag.
+- **This needs you: the input file is missing or was rejected.** A benign
+  pre-run input failure on an unattended run -- the handle's file gone at run
+  start, or a refresh the column-shape guard rejects -- means no scheduled run
+  can succeed until the operator re-points the handle or drops a conforming
+  file, so it is actionable at its moment (see [The input file each
+  run](#the-input-file-each-run)).
 - **This needs you: a run failed with no benign explanation.** A handshake that
   ran and failed closed with no recorded benign cause (the Tier-2 case; see
   [Telling a desync from an attack](#telling-a-desync-from-an-attack)) is the
   one failure that needs the operator's out-of-band confirmation work, so it is
   worth surfacing between visits rather than waiting for the next visit.
 
-Every other outcome stays quiet: a single miss, a benign input miss, a
-successful run whose backup the operator will refresh at their next visit
-anyway. The notification follows the same moment-anchored discipline as the
-in-app surfaces -- it fires only when its condition is true and actionable, so
-it does not become the standing nag the whole surface design avoids.
+Everything else stays quiet, and nothing repeats: each notification fires once
+at its state's transition, and a condition already surfaced is carried by the
+in-app state rather than re-announced at every subsequent wake -- the same
+moment-anchored discipline as the in-app surfaces, so the notification never
+becomes the standing nag the whole surface design avoids.
 
 Because the notification is a concept over states the record already carries, a
 platform without OS notifications loses only the *sooner* prompt: every one of

@@ -184,9 +184,9 @@ metadata-at-rest analysis did not cover (see
 | ----- | ---- | ----- |
 | `anchor` | string (ISO 8601, UTC `Z`) | The instant of the first agreed window's open, the phase the recurrence counts from. Both parties persist the **same** `anchor`, agreed out-of-band with the rest of the schedule, so both runners compute the same window opens. Stored UTC; a local-time cadence ("09:00 Tuesdays") is resolved to UTC at save and re-resolved only when the operator edits the schedule, so a daylight-saving shift does not silently move an unattended window. |
 | `intervalDays` | integer, at least 1 | The recurrence period in whole days: the run window opens every `intervalDays` after `anchor`. A whole-day integer covers the daily, weekly, and monthly-approximated (for example 28- or 30-day) cadences the persona runs; sub-day cadences are out of scope for a partnership coordinated out-of-band, and calendar-month recurrence (the drifting "1st of the month") is deliberately not modeled -- an integer period keeps both runners' window computation identical without a shared calendar library. |
-| `windowSeconds` | integer, at least 1 | The run window's width: window *n* is open from `anchor + n * intervalDays` for `windowSeconds`. The width is chosen to dwarf realistic clock skew between the two machines (see [Clock skew](#clock-skew-and-the-window-width)); a several-hour width is the intended range, not a several-minute one. |
-| `nextWindow` | string (ISO 8601, UTC `Z`) | The open instant of the next window the runner plans to attempt. Derived from `anchor`, `intervalDays`, and the run bookkeeping (advanced past a completed or missed window), it is persisted rather than recomputed so a reader -- the runtime waking, or a next-visit surface -- sees the planned attempt without replaying history. After a miss it is the **next** window, never a sooner off-schedule retry: retry-at-next-window is the whole retry policy (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#retry-and-repeated-misses)). |
-| `consecutiveMisses` | integer, at least 0 | The count of consecutive agreed windows that ended in a runner no-show (a `lastRun.outcome` of `"missed"`). A `"succeeded"` outcome resets it to 0; a `"missed"` outcome increments it; **any other outcome leaves it unchanged**, because only a no-show signals the two runners are not meeting. A handshake that ran and failed (`"failed"`/`"desynced"`) means the partnership *did* meet, so it is a desync/attack question, not a coordination-drift one; a benign pre-peer `"input"` failure is likewise not a partner no-show. It drives only the surfacing of a repeated-miss coordination problem (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#retry-and-repeated-misses)); it never pauses the schedule and never changes `nextWindow`'s cadence. |
+| `windowSeconds` | integer, at least 1 | The run window's width: window *n* is open from `anchor + n * intervalDays` for `windowSeconds`. The width is chosen to dwarf realistic clock skew between the two machines (see [Clock skew](#clock-skew-and-the-window-width)); a several-hour width is the intended range, not a several-minute one. The structural floor is one second, but schedule entry enforces a UX-level minimum on the order of an hour: width is the only skew mitigation the design has, so a seconds-wide window would guarantee perpetual self-inflicted misses. |
+| `nextWindow` | string (ISO 8601, UTC `Z`) | The open instant of the next window the runner plans to attempt. Derived from `anchor`, `intervalDays`, and the run bookkeeping (advanced past a completed or missed window), it is persisted rather than recomputed so a reader -- the runtime waking, or a next-visit surface -- sees the planned attempt without replaying history. After a miss it is the **next** window, never a sooner off-schedule retry: retry-at-next-window is the whole retry policy (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#retry-and-repeated-misses)). A runtime that wakes to find it in the past applies the catch-up rule below before anything else (see [Catch-up on wake](#catch-up-on-wake)). |
+| `consecutiveMisses` | integer, at least 0 | The count of consecutive agreed windows that passed without a completed handshake, **regardless of which side was absent**: a window this runner sat out waiting for a peer that never arrived counts exactly as one this runner itself slept through (the latter recorded retroactively; see [Catch-up on wake](#catch-up-on-wake)). A `"succeeded"` outcome resets it to 0; a `"missed"` outcome increments it; **any other outcome leaves it unchanged**, because only a no-show signals the two runners are not meeting. A handshake that ran and failed (`"failed"`/`"desynced"`) means the partnership *did* meet, so it is a desync/attack question, not a coordination-drift one; a benign pre-peer `"input"` failure is likewise not a partner no-show. It drives only the surfacing of a repeated-miss coordination problem, whose escalated state fires at **two** consecutive misses (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#retry-and-repeated-misses)); it never pauses the schedule and never changes `nextWindow`'s cadence. |
 
 The object holds no operator-facing recurrence label, no timezone name, and no
 window-outcome history: `anchor` plus `intervalDays` plus `windowSeconds` fully
@@ -209,6 +209,35 @@ overlapping window and record mutual misses until they reconcile out-of-band --
 a benign coordination failure, never a desync or an attack. The operational
 framing is in
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#where-the-schedule-is-agreed-and-where-it-lives).
+
+#### Catch-up on wake
+
+A runner does not tick while its machine sleeps, so a runtime can wake -- a
+laptop reopened after a week on a daily cadence, the app relaunched after a
+reboot -- with `nextWindow` in the past and one or more windows fully elapsed.
+On wake, before attempting anything, the runner applies one catch-up rule:
+
+- Every fully-elapsed, unattempted window counts as **one miss each**:
+  `consecutiveMisses` is incremented by the count, and `lastRun` records the
+  most recent elapsed window as `"missed"`.
+- `nextWindow` advances past every fully-elapsed window to the first window not
+  yet closed: if the current instant falls inside that window, the runner
+  attempts it immediately; otherwise `nextWindow` is the first window opening
+  after the current instant.
+
+The rule keeps both fields honest. `consecutiveMisses` reflects the true count
+of elapsed misses whichever side was absent, and the runner lands on a live
+window rather than replaying stale past ones. Crossing the two-miss escalation
+threshold during catch-up fires the repeated-miss surface at the wake -- which
+is how a persistently absent party learns of a miss pattern late rather than
+never (see
+[MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#retry-and-repeated-misses)).
+
+The import path is the rule's second consumer: an imported backup carries the
+snapshot's `nextWindow`, typically in the past by the time the artifact is
+restored, and the first wake after an import applies the same catch-up --
+elapsed windows counted, `nextWindow` advanced to a live window -- before any
+attempt.
 
 ### Clock skew and the window width
 
