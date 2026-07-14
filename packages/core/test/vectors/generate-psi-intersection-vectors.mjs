@@ -441,6 +441,36 @@ const scenarios = [
     starterKeys: [["", "", "Alice"]],
     joinerKeys: [["", "Alice"]],
   },
+  {
+    name: "many-to-one-duplicate-entity-cascade",
+    description:
+      "linkViaPSI many-to-one: the joiner (the 'many' party) holds two intake " +
+      "rows for the same entity 'E1' (a re-registered record) alongside two " +
+      "singleton entities 'E2' and 'E3', against the starter's (the 'one' " +
+      "party) one row per entity. Round 0 drops both 'E1' joiner rows as a " +
+      "within-round duplicate on the joiner's own side and matches only the " +
+      "unique 'E2' and 'E3' rows; round 1's secondary key then resolves ONE of " +
+      "the two surviving 'E1' duplicates by tie-breaking against the starter's " +
+      "carried-forward value, leaving the other permanently unmatched despite " +
+      "genuinely sharing the entity. This pins today's behavior of the branch " +
+      "linkViaPSI shares between 'one-to-one' and 'many-to-one' " +
+      "(protocol.cardinality is read only to select this branch, never again " +
+      "inside it): given this dataset, 'many-to-one' and 'one-to-one' produce " +
+      "the byte-identical projection asserted here, because neither cardinality " +
+      "yet implements the fan-out consolidation ('deduplicate', " +
+      "EXCHANGE_REFERENCE.md) that would let both 'E1' rows validly link to the " +
+      "same starter row. The vector exists to fail the day that split lands.",
+    method: "linkViaPSI",
+    cardinality: "many-to-one",
+    starterKeys: [
+      ["E1", "E2", "E3"],
+      ["C2", "x", "y"],
+    ],
+    joinerKeys: [
+      ["E1", "E1", "E2", "E3"],
+      ["C1", "C2", "x", "y"],
+    ],
+  },
 ];
 
 async function project(scenario) {
