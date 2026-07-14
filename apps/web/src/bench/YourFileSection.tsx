@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { Alert, Button, Text, TextInput } from "@mantine/core";
+import { Alert, Anchor, Button, Text, TextInput } from "@mantine/core";
 import { Dropzone } from "@mantine/dropzone";
 import { IconAlertCircle } from "@tabler/icons-react";
 import log from "loglevel";
@@ -37,6 +37,8 @@ export function YourFileSection({
   linkable,
   alert,
   onContinue,
+  onLoadSample,
+  onDownloadSamples,
 }: {
   name: string;
   onNameChange: (name: string) => void;
@@ -48,6 +50,10 @@ export function YourFileSection({
   linkable: boolean;
   alert: IntakeAlert | undefined;
   onContinue: () => void;
+  /** Seed the synthetic sample into this exchange in place. */
+  onLoadSample: () => void;
+  /** Download the two sample CSVs client-side, uploading nothing. */
+  onDownloadSamples: () => void;
 }) {
   const alertRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -113,6 +119,29 @@ export function YourFileSection({
         <Text role="alert" c="red" size="sm" mt="xs">
           {rejectionMessage}
         </Text>
+      )}
+      {acquired === undefined && (
+        <p className={`${styles.small} ${styles.sub}`}>
+          Use sample data:{" "}
+          <Anchor
+            inherit
+            component="button"
+            type="button"
+            onClick={onLoadSample}
+          >
+            load it into this exchange
+          </Anchor>
+          , or{" "}
+          <Anchor
+            inherit
+            component="button"
+            type="button"
+            onClick={onDownloadSamples}
+          >
+            download the CSVs
+          </Anchor>
+          .
+        </p>
       )}
       {acquired !== undefined && (
         <div className={styles.fileCard}>

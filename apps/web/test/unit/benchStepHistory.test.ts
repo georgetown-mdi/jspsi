@@ -116,4 +116,14 @@ describe("unloadGuardArmed", () => {
     expect(unloadGuardArmed({ hasFile: true, finalized: true })).toBe(false);
     expect(unloadGuardArmed({ hasFile: false, finalized: true })).toBe(false);
   });
+
+  test("disarmed while the loaded file is the synthetic sample", () => {
+    expect(
+      unloadGuardArmed({ hasFile: true, finalized: false, demoActive: true }),
+    ).toBe(false);
+    // A real file (demoActive false) re-arms it.
+    expect(
+      unloadGuardArmed({ hasFile: true, finalized: false, demoActive: false }),
+    ).toBe(true);
+  });
 });

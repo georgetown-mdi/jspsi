@@ -63,6 +63,7 @@ import {
   spineProblems,
   unsealEditor,
 } from "./inviterModel";
+import { downloadSampleCsvs, sampleInviterFile } from "./sampleData";
 import { AgreementTab } from "./AgreementTab";
 import { BenchShell } from "./BenchShell";
 import { CleaningTab } from "./CleaningTab";
@@ -149,6 +150,10 @@ function demotionNotice(demoted: ReadonlyArray<string>): string {
 // not cut off; matches TermsImportExport's download discipline.
 const DOWNLOAD_REVOKE_DELAY_MS = 40_000;
 
+// The inviter name the sample seeds, so step 1 lands complete without the
+// visitor typing one. Plainly a placeholder, consistent with the synthetic data.
+const SAMPLE_INVITER_NAME = "Sample County Health Dept";
+
 /** Trigger a client-side download of `content` as `fileName`. The exchange file
  * never leaves the browser; this writes it to the operator's disk the same way
  * the CSV is read in (locally). */
@@ -196,6 +201,7 @@ export function InviterBench() {
   const [saveAlert, setSaveAlert] = useState<IntakeAlert>();
   const [sftpRemotes, setSftpRemotes] = useState<Array<SftpRemoteProjection>>();
   const [sftpRemoteName, setSftpRemoteName] = useState<string>();
+  const [demoActive, setDemoActive] = useState(false);
 
   const transport = editor?.transport ?? "browser";
 
@@ -297,6 +303,7 @@ export function InviterBench() {
   useUnloadGuard({
     hasFile: sourceFile !== undefined,
     finalized: invitation !== undefined || savedExchange !== undefined,
+    demoActive,
   });
 
   function goTo(next: Section) {
@@ -328,6 +335,29 @@ export function InviterBench() {
     [],
   );
 
+  // Seed the synthetic sample when the visitor arrived at `?demo=1` (the
+  // under-dropzone entry and the lobby link both route here). The param is read
+  // once and stripped from the URL with replaceState so a reload or a shared
+  // link does not re-seed; replaceState adds no history entry and leaves the
+  // step-history integration (which lives in history.state, not the URL) alone.
+  // The seed rides the same readFile intake a dropped file does, so the stale-
+  // parse guard and every derived-terms path are shared, not forked.
+  const seededDemo = useRef(false);
+  useEffect(() => {
+    if (seededDemo.current) return;
+    seededDemo.current = true;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("demo") !== "1") return;
+    params.delete("demo");
+    const query = params.toString();
+    window.history.replaceState(
+      window.history.state,
+      "",
+      window.location.pathname + (query === "" ? "" : `?${query}`),
+    );
+    loadSample();
+  }, []);
+
   // Moving between sections replaces the whole work column, so focus is sent
   // to the incoming h1 (they carry tabIndex -1) or a screen-reader user is
   // left on a control that no longer exists. Skipped on mount: initial focus
@@ -347,14 +377,23 @@ export function InviterBench() {
     setAcquired(undefined);
     setSourceFile(undefined);
     setEditor(undefined);
+    setDemoActive(false);
     setIntakeAlert(alert);
   }
 
-  async function readFile(file: File) {
+  async function readFile(file: File, seed?: { isSample: true; name: string }) {
     const id = ++parseId.current;
     parseAbort.current?.abort();
     const controller = new AbortController();
     parseAbort.current = controller;
+    // A real drop clears the sample marker; the sample seed sets it. Editing the
+    // sample's terms never re-reads, so the marker survives edits.
+    setDemoActive(seed !== undefined);
+    // The sample seed carries its own inviter name so step 1 lands complete; a
+    // real drop keeps whatever the operator typed. Applied before the read so
+    // the derived editor's identity and the name field agree.
+    const identity = seed?.name ?? name;
+    if (seed !== undefined) setName(seed.name);
     setReading(true);
     setIntakeAlert(undefined);
     try {
@@ -374,7 +413,7 @@ export function InviterBench() {
         rawRows: result.data,
         columns,
       };
-      const seeded = editorFromCsv(name, csv);
+      const seeded = editorFromCsv(identity, csv);
       setAcquired(csv);
       setSourceFile(file);
       setEditor(seeded);
@@ -396,6 +435,36 @@ export function InviterBench() {
     } finally {
       if (id === parseId.current) setReading(false);
     }
+  }
+
+  // Load the synthetic inviter sample into the live spine: build the in-memory
+  // File and pass it through the same readFile intake a dropped file uses, with
+  // a sample inviter name so step 1 lands complete. The mint path stays
+  // demo-free -- from here the visitor drives every real step by hand.
+  function loadSample() {
+    void readFile(sampleInviterFile(), {
+      isSample: true,
+      name: SAMPLE_INVITER_NAME,
+    });
+  }
+
+  // Clear the sample back to a fresh exchange: drop the read, the derived terms,
+  // and every demo-seeded field in place, and return to step 1. A parse still in
+  // flight is discarded (its resolution falls on the floor). Nothing about the
+  // demo persists.
+  function clearSample() {
+    parseId.current += 1;
+    parseAbort.current?.abort();
+    setName("");
+    setAcquired(undefined);
+    setSourceFile(undefined);
+    setEditor(undefined);
+    setIntakeAlert(undefined);
+    setReading(false);
+    setDemoActive(false);
+    setSavedExchange(undefined);
+    setInvitation(undefined);
+    goTo("file");
   }
 
   function updateName(next: string) {
@@ -658,6 +727,14 @@ export function InviterBench() {
           tag={
             sealed ? "Terms locked when the invitation was created" : undefined
           }
+          demoNotice={
+            demoActive
+              ? {
+                  label: "Sample data (synthetic records)",
+                  onClear: clearSample,
+                }
+              : undefined
+          }
           customize={sealed ? undefined : facts}
           rows={inviterLedgerRows(
             editor,
@@ -710,6 +787,8 @@ export function InviterBench() {
             onContinue={() => {
               if (fileReady) goTo("columns");
             }}
+            onLoadSample={loadSample}
+            onDownloadSamples={downloadSampleCsvs}
           />
         )}
         {section === "columns" &&

@@ -85,6 +85,7 @@ function LedgerCustomize({ facts }: { facts: ReadonlyArray<RailFact> }) {
 export function Ledger({
   title = "This exchange",
   tag,
+  demoNotice,
   rows,
   customize,
   footer,
@@ -94,6 +95,9 @@ export function Ledger({
    * invitation was created" once the invitation is minted and the ledger
    * stops being editable. */
   tag?: string;
+  /** A quiet standing notice with a Clear action, shown while the loaded file
+   * is the synthetic sample (pristine or edited). */
+  demoNotice?: { label: string; onClear: () => void };
   rows: ReadonlyArray<LedgerRow>;
   /** The optional surfaces' Customize rows; absent once the terms seal (the
    * share/save/launched phases). */
@@ -104,6 +108,18 @@ export function Ledger({
     <aside className={styles.ledger} aria-label={title}>
       <h2>{title}</h2>
       {tag !== undefined && <span className={styles.sealedTag}>{tag}</span>}
+      {demoNotice !== undefined && (
+        <div className={styles.demoNotice}>
+          <span>{demoNotice.label}</span>
+          <button
+            type="button"
+            className={styles.demoClear}
+            onClick={demoNotice.onClear}
+          >
+            Clear
+          </button>
+        </div>
+      )}
       <dl>
         {rows.map((row) => (
           <div key={row.label} className={styles.ledgerRow}>
