@@ -42,6 +42,20 @@ describe("PR checklist guard", () => {
     ).toBe(true);
   });
 
+  it("does not let a reason's free text satisfy a deleted line's presence", () => {
+    const body =
+      "## Checklist\n\n" +
+      "- [x] `CHANGELOG.md` `[Unreleased]` updated -- n/a: doc-only edit; the Docs: pages and Security review are unaffected\n";
+    const v = checklistViolations(body);
+    expect(v).toHaveLength(2);
+    expect(v.some((m) => m.includes("required Docs checklist line"))).toBe(
+      true,
+    );
+    expect(
+      v.some((m) => m.includes("required Security review checklist line")),
+    ).toBe(true);
+  });
+
   it("flags a bare n/a with no reason", () => {
     const body = passingBody.replace(
       "-- n/a: none of the listed surfaces touched",

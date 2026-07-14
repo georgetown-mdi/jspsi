@@ -72,31 +72,41 @@ export function checklistViolations(text) {
     }
   }
 
+  // Split each item at the first `--` separator: the label is the template's
+  // own line text, the clause is the author's resolution. The required-line
+  // check matches labels only, so free text in a reason clause can never
+  // satisfy a deleted line's presence requirement.
   const items = [];
   for (let i = start + 1; i < end; i++) {
     const m = /^\s*-\s*\[([ xX])\]\s*(.*)$/.exec(lines[i]);
-    if (m) items.push({ line: i + 1, checked: m[1] !== " ", text: m[2] });
+    if (!m) continue;
+    const text = m[2];
+    const separator = RESOLUTION_SEPARATOR.exec(text);
+    items.push({
+      line: i + 1,
+      checked: m[1] !== " ",
+      label: separator ? text.slice(0, separator.index) : text,
+      clause: separator
+        ? text.slice(separator.index + separator[0].length).trim()
+        : "",
+    });
   }
 
   for (const { name, substring } of REQUIRED_LINES) {
-    if (!items.some((item) => item.text.includes(substring))) {
+    if (!items.some((item) => item.label.includes(substring))) {
       violations.push(
         `required ${name} checklist line (matching "${substring}") is missing -- the template says "Do not delete lines here"`,
       );
     }
   }
 
-  for (const { line, checked, text } of items) {
+  for (const { line, checked, clause } of items) {
     if (!checked) {
       violations.push(
         `line ${line}: unchecked box -- resolve it: check when done, or check with "n/a: <reason>"`,
       );
       continue;
     }
-    const separator = RESOLUTION_SEPARATOR.exec(text);
-    const clause = separator
-      ? text.slice(separator.index + separator[0].length).trim()
-      : "";
     if (clause === "") {
       violations.push(
         `line ${line}: checked box without a "-- <resolution>" clause -- state what was done, or "n/a: <reason>"`,
