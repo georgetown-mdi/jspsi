@@ -4,7 +4,7 @@ title: "Changelog"
 
 # Changelog
 
-This changelog records, per release, the changes that affect how PSI-Link is run, deployed, or reviewed: new commands and options, changed defaults and behavior, breaking changes, and security-relevant changes. It is not a log of every commit (that is the git history), and it omits internal refactors and test, CI, and tooling changes that no operator or reviewer acts on. Each entry states the observable change and points to `docs/` for the rationale and `docs/spec/` for wire-level detail. The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); PSI-Link uses [semantic versioning](https://semver.org/).
+This changelog is a reader's summary of what PSI-Link does and how that changes per release: the major capabilities, breaking changes to them, and the headline security posture. It is not a log of every commit or every refinement (that is the git history). Each entry states the capability in a line or two and points to `docs/` for the full behavior and `docs/spec/` for wire-level detail. The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); PSI-Link uses [semantic versioning](https://semver.org/).
 
 ## [Unreleased]
 
