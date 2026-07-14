@@ -51,6 +51,8 @@ import { TopBar } from "./TopBar";
 import { acceptorTimelineSteps } from "./exchangeRun";
 import styles from "./bench.module.css";
 import { useAcceptorExchange } from "./useAcceptorExchange";
+import { useStepHistory } from "./useStepHistory";
+import { useUnloadGuard } from "./useUnloadGuard";
 
 import type {
   AcceptableInvitation,
@@ -238,6 +240,53 @@ export function AcceptorBench() {
     [],
   );
 
+  // The acceptor's position is a step plus, on the columns step, its
+  // sub-section (confirm vs. the Cleaning tab). Both fold into one opaque token
+  // so a browser Back/Forward restores the exact surface, including the tab.
+  const positionToken = (
+    nextStep: AcceptorStep,
+    nextColumnsSection: AcceptorColumnsSection,
+  ): string =>
+    nextStep === "columns" && nextColumnsSection === "cleaning"
+      ? "columns:cleaning"
+      : nextStep;
+
+  // Apply a position arriving from a browser Back/Forward: set the step and its
+  // sub-section without pushing a new history entry (the browser already moved
+  // the cursor). The bench stays mounted, so the loaded file, the confirmed
+  // columns, and every in-progress edit survive the transition untouched.
+  function restorePosition(token: string) {
+    if (token === "columns:cleaning") {
+      setColumnsSection("cleaning");
+      setStep("columns");
+      return;
+    }
+    setColumnsSection("columns");
+    setStep(token as AcceptorStep);
+  }
+
+  const { pushStep } = useStepHistory("review", restorePosition);
+
+  // The unload guard arms once the acceptor's file is chosen and disarms once
+  // the exchange is launched (the run is dialing); leaving a launched exchange
+  // costs nothing the acceptor has not already committed.
+  useUnloadGuard({
+    hasFile: file !== undefined,
+    finalized: launched !== undefined,
+  });
+
+  // Move to a new step and its sub-section, pushing a history entry so Back
+  // returns here. Every in-bench step transition routes through this.
+  function goToStep(
+    nextStep: AcceptorStep,
+    nextColumnsSection: AcceptorColumnsSection = "columns",
+  ) {
+    if (nextStep === step && nextColumnsSection === columnsSection) return;
+    setColumnsSection(nextColumnsSection);
+    setStep(nextStep);
+    pushStep(positionToken(nextStep, nextColumnsSection));
+  }
+
   function selectFile(chosen: File) {
     setRejectionMessage(undefined);
     setParseAlert(undefined);
@@ -312,8 +361,7 @@ export function AcceptorBench() {
         rawRows: result.data,
       });
       setColumnsState(acceptorInitialColumnsState(columns));
-      setColumnsSection("columns");
-      setStep("columns");
+      goToStep("columns");
     } catch (error) {
       if (id !== parseId.current) return;
       // A parse failure keeps every input: the file handle, the name, and the
@@ -403,12 +451,7 @@ export function AcceptorBench() {
       : acceptorSpine(step).map((entry) => ({
           label: entry.label,
           state: entry.state,
-          onSelect: entry.navigable
-            ? () => {
-                setColumnsSection("columns");
-                setStep(entry.step);
-              }
-            : undefined,
+          onSelect: entry.navigable ? () => goToStep(entry.step) : undefined,
         }));
 
   const customizeFacts = acceptorRailFacts(cleaningAttention?.railValue).map(
@@ -419,7 +462,7 @@ export function AcceptorBench() {
       // sub-section, as InviterBench mounts its CleaningTab.
       onSelect:
         editorState !== undefined && step === "columns"
-          ? () => setColumnsSection("cleaning")
+          ? () => goToStep("columns", "cleaning")
           : undefined,
       current: step === "columns" && columnsSection === "cleaning",
     }),
@@ -559,7 +602,7 @@ export function AcceptorBench() {
   const launchExchange = () => {
     if (verdict === undefined || editorState === undefined) return;
     setLaunched(acceptorLaunchPayload(verdict, editorState));
-    setStep("launched");
+    goToStep("launched");
   };
 
   // The config-failure recovery: discard the launch (which aborts the run via the
@@ -567,8 +610,7 @@ export function AcceptorBench() {
   // with every column-step input intact, where the acceptor fixes its settings.
   const backToColumns = () => {
     setLaunched(undefined);
-    setColumnsSection("columns");
-    setStep("columns");
+    goToStep("columns");
   };
 
   const cleaningResetKey =
@@ -610,7 +652,7 @@ export function AcceptorBench() {
               headingRef={termsHeadingRef}
             />
             <div className={styles.workFoot}>
-              <Button onClick={() => setStep("consent")}>
+              <Button onClick={() => goToStep("consent")}>
                 Continue: consent &amp; your file
               </Button>
             </div>
@@ -791,7 +833,7 @@ export function AcceptorBench() {
               onRemap={remapColumn}
               onReset={resetColumns}
               onLaunch={launchExchange}
-              onBack={() => setStep("consent")}
+              onBack={() => goToStep("consent")}
             />
           )}
         {decode.status === "ready" &&
@@ -813,7 +855,7 @@ export function AcceptorBench() {
               onFieldSteps={setFieldSteps}
               onFieldInput={setFieldInput}
               onReset={resetColumns}
-              onBack={() => setColumnsSection("columns")}
+              onBack={() => goToStep("columns")}
             />
           )}
         {decode.status === "ready" && step === "launched" && (

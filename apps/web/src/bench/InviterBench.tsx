@@ -76,6 +76,8 @@ import { selectExchangeDriver } from "./exchangeDriverSelection";
 import { sftpEndpointForRemote } from "./sftpRemoteChoice";
 import { timelineSteps } from "./exchangeRun";
 import { useInviterExchange } from "./useInviterExchange";
+import { useStepHistory } from "./useStepHistory";
+import { useUnloadGuard } from "./useUnloadGuard";
 
 import type {
   AcquiredCsv,
@@ -234,9 +236,33 @@ export function InviterBench() {
     goTo("review");
   }
 
-  function goTo(next: Section) {
+  // Apply a section arriving from a browser Back/Forward: set the step state
+  // without pushing a new history entry (the browser already moved the cursor).
+  // The bench stays mounted throughout, so the loaded file, the derived terms,
+  // and every in-progress edit survive the transition untouched.
+  function restoreSection(next: Section) {
     if (isSpineStep(next)) setLastSpineStep(next);
     setSection(next);
+  }
+
+  const { pushStep } = useStepHistory("file", (step) =>
+    restoreSection(step as Section),
+  );
+
+  // The unload guard arms once a file is loaded and disarms once the exchange is
+  // finalized -- the invitation minted (the live run is listening) or the
+  // exchange file saved. In either finalized state, leaving costs nothing the
+  // operator has not already secured.
+  useUnloadGuard({
+    hasFile: sourceFile !== undefined,
+    finalized: invitation !== undefined || savedExchange !== undefined,
+  });
+
+  function goTo(next: Section) {
+    if (next === section) return;
+    if (isSpineStep(next)) setLastSpineStep(next);
+    setSection(next);
+    pushStep(next);
   }
 
   // Non-announcing edits clear the live region (the old editor's

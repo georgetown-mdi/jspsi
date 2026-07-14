@@ -654,6 +654,140 @@ describe("inviter bench", () => {
     expect(expiresRow?.querySelector("dd")?.textContent).toMatch(/20\d\d/);
   });
 
+  test("browser Back walks bench steps in place, preserving the file and terms", async () => {
+    mount(createElement(InviterBench));
+
+    await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+    const fileInput = document.querySelector('input[type="file"]');
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      new File(
+        [
+          "client_id,first_name,last_name,dob,program_code\n" +
+            "1,Ann,Lee,01/02/1990,A\n2,Bo,Ray,03/04/1985,B\n",
+        ],
+        "clients.csv",
+        { type: "text/csv" },
+      ),
+    );
+    await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
+
+    // Walk two steps forward: Your file -> Matching & sharing -> Review &
+    // create. Each Continue pushes a history entry.
+    await page
+      .getByRole("button", { name: "Continue to matching & sharing" })
+      .click();
+    // On step 2, undisclose the sent column so there is an in-progress edit to
+    // pin as surviving the Back.
+    await page
+      .getByLabelText("How program_code is used")
+      .selectOptions("ignored");
+    await page
+      .getByRole("button", { name: "Continue to review & create" })
+      .click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Review & create");
+
+    // Browser Back moves to the previous bench step in place -- the bench never
+    // unmounts, so the file and the step-2 edit are intact.
+    window.history.back();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Matching & sharing");
+    await expect
+      .element(page.getByLabelText("How program_code is used"))
+      .toHaveValue("ignored");
+
+    // Back again lands on step 1 with the loaded file still shown -- not a
+    // remount to an empty Your file step.
+    window.history.back();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Your file");
+    await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
+    expect(document.querySelector(`.${styles.fileCard}`)).not.toBeNull();
+    await expect
+      .element(page.getByLabelText("Your name"))
+      .toHaveValue("Dana Okafor");
+
+    // Forward reverses the same transition: back to Matching & sharing with the
+    // edit still present.
+    window.history.forward();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Matching & sharing");
+    await expect
+      .element(page.getByLabelText("How program_code is used"))
+      .toHaveValue("ignored");
+  });
+
+  test("navigation never writes the file to storage or disk", async () => {
+    // The participant CSV is deliberately memory-only; walking the bench steps
+    // (including the History-integrated Back) must not spill it to IndexedDB,
+    // localStorage, or a network write. Assert the runtime invariant rather
+    // than trust a comment.
+    const SENTINEL = "Quillfeatherxyz";
+    const fileText =
+      "client_id,first_name,last_name,dob,program_code\n" +
+      `1,Zephyrine,${SENTINEL},01/02/1990,A\n`;
+    const localWrites: Array<string> = [];
+    const sessionWrites: Array<string> = [];
+    const originalLocalSet = Storage.prototype.setItem;
+    const indexedDbOpen = indexedDB.open.bind(indexedDB);
+    let indexedDbOpened = 0;
+    Storage.prototype.setItem = function setItem(
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
+      (this === window.localStorage ? localWrites : sessionWrites).push(value);
+      return originalLocalSet.call(this, key, value);
+    };
+    indexedDB.open = (...args: Parameters<typeof indexedDbOpen>) => {
+      indexedDbOpened += 1;
+      return indexedDbOpen(...args);
+    };
+    try {
+      mount(createElement(InviterBench));
+      await expect
+        .element(page.getByLabelText("Your name"))
+        .toBeInTheDocument();
+      await userEvent.fill(page.getByLabelText("Your name"), "Dana");
+      const fileInput = document.querySelector('input[type="file"]');
+      await userEvent.upload(
+        page.elementLocator(fileInput as HTMLElement),
+        new File([fileText], "clients.csv", { type: "text/csv" }),
+      );
+      await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
+      await page
+        .getByRole("button", { name: "Continue to matching & sharing" })
+        .click();
+      window.history.back();
+      await expect
+        .element(page.getByRole("heading", { level: 1 }))
+        .toHaveTextContent("Your file");
+
+      // No storage write anywhere carries the file's contents (a unique cell
+      // value stands in for the CSV bytes), and the file's rows never reach
+      // IndexedDB (no database was even opened).
+      const carries = (value: string) =>
+        value.includes(SENTINEL) || value.includes(fileText);
+      expect(localWrites.some(carries)).toBe(false);
+      expect(sessionWrites.some(carries)).toBe(false);
+      expect(indexedDbOpened).toBe(0);
+      // The bench pushes only its own marked step entries; none carries the
+      // file's contents into the serialized history state.
+      expect(JSON.stringify(window.history.state ?? {})).not.toContain(
+        SENTINEL,
+      );
+    } finally {
+      Storage.prototype.setItem = originalLocalSet;
+      indexedDB.open = indexedDbOpen;
+    }
+  });
+
   test("customize tabs: reorder keys, author an agreement, gated settings stay inert", async () => {
     mount(createElement(InviterBench));
 
