@@ -5,6 +5,7 @@ import {
   getLogger,
   encodeInvitation,
   assertAlgorithmImplemented,
+  assertDeduplicateImplemented,
   assertPayloadSendDisclosed,
   assertStandardizationMatchesTerms,
   disclosedColumnNames,
@@ -535,6 +536,14 @@ export async function validateInvite(params: {
     // online and infer paths build terms from columns via getDefaultLinkageTerms,
     // which is always `psi`). See assertAlgorithmImplemented.
     assertAlgorithmImplemented(configTerms.algorithm);
+
+    // Likewise fail closed pre-mint on a `deduplicate: true` term the run
+    // refuses (matching runs strictly one-to-one): the schema alone admits it
+    // when paired with `expects_output: true`, and only this hand-authored
+    // config-as-source path can carry it (the online and infer paths build
+    // terms via getDefaultLinkageTerms, which is always deduplicate: false).
+    // See assertDeduplicateImplemented.
+    assertDeduplicateImplemented(configTerms.deduplicate);
 
     // Carry the disclosed-columns subset only when the config declares an
     // explicit metadata block: without one the run infers metadata from the

@@ -13,9 +13,10 @@
  * the run still reveals matched identifiers would let an operator believe
  * identifiers are withheld when they are not, so the editor keeps it un-selectable
  * (and clamps it out of the built terms) and the consent screen flags a proposed
- * `psi-c`, until this flips. Matching is hard-wired one-to-one (`deduplicate`) and
- * fuzzy expansion is unimplemented (`fuzzyComparisons`); their worst case is a
- * silent no-op, but the same flag-driven gating applies.
+ * `psi-c`, until this flips. Matching is hard-wired one-to-one: a proposed
+ * `deduplicate` is refused by core before the run (like `psi-c`, below), while
+ * fuzzy expansion (`fuzzyComparisons`) is a silent no-op; the same flag-driven
+ * gating applies to all three.
  *
  * Flip a flag to `true` when the exchange wires the feature in (tracked on the
  * product board); the editor control unlocks, the clamp and import refusal stop
@@ -25,13 +26,14 @@
  * reads as a genuine runtime branch, not provably dead code lint would flag the
  * moment a flag is meant to flip.
  *
- * For `psiC` specifically, flipping this flag is NOT sufficient on its own: core
- * independently refuses a `psi-c` run at the exchange boundary
- * (`assertAlgorithmImplemented` in `@psilink/core`), so a web operator who reached
- * a `psi-c` exchange would have the run aborted regardless of this flag. That
- * refusal must be replaced by the real count-only run path in the same change. The
- * full ungate checklist across web, CLI, and core is tracked on the product board
- * (item 208371871, "Implement count-only PSI").
+ * For `psiC` and `deduplicate`, flipping the flag is NOT sufficient on its own:
+ * core independently refuses each at the exchange boundary
+ * (`assertAlgorithmImplemented` / `assertDeduplicateImplemented` in
+ * `@psilink/core`, the latter also at the CLI invite mint boundary), so a web
+ * operator who reached such an exchange would have the run aborted regardless of
+ * this flag. Each refusal must be replaced by the real run path in the same
+ * change. The full psi-c ungate checklist across web, CLI, and core is tracked on
+ * the product board (item 208371871, "Implement count-only PSI").
  */
 export const APPLIED_SETTINGS: {
   readonly psiC: boolean;

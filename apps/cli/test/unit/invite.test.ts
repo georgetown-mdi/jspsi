@@ -855,6 +855,30 @@ test("validateInvite: offline config-source refuses a psi-c algorithm before min
   }
 });
 
+test("validateInvite: offline config-source refuses a deduplicating term before minting", async () => {
+  // The mint-boundary counterpart of the run-side deduplicate refusal (matching
+  // runs strictly one-to-one): a config with `deduplicate: true` -- schema-valid
+  // when paired with `expects_output: true` -- must be refused BEFORE the token
+  // is disclosed, so `invite` never mints an invitation the config's own
+  // `psilink exchange` would then reject (exit 64). The sibling of the psi-c
+  // mint gate above; no input is passed, so it exercises the check in isolation.
+  const terms: LinkageTerms = { ...defaultTerms(), deduplicate: true };
+  const { dir, configPath, keyPath } = withConfig(terms);
+  try {
+    const invite = () =>
+      validateInvite({
+        resolved: { mode: "offline" },
+        options: testOptions({ configFile: configPath, keyFile: keyPath }),
+        acceptTimeout: 900,
+        log: silentLog,
+      });
+    await expect(invite()).rejects.toBeInstanceOf(UsageError);
+    await expect(invite()).rejects.toThrow(/deduplicate/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("validateInvite: a config's explicit metadata lets an otherwise-unsatisfying input pass", async () => {
   const terms = defaultTerms();
   // The config's metadata types tax_id as ssn; the input carries tax_id, which

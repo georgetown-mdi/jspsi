@@ -1233,14 +1233,14 @@ export function InvitationTerms({
                 by the caveat-placement rule on {@link InvitationTerms} its caveat
                 sits here with its headline one expand down -- co-hidden with it, so
                 the line above never reads as in force while the caveat is hidden.
-                Not-applied is safe in the disclosure direction: the run matches at
-                most one, fewer matches than proposed, so no more is disclosed than
-                consented. */}
+                Not-applied is safe in the disclosure direction: core refuses a
+                deduplicating term before matching begins, so nothing runs and
+                nothing is disclosed. */}
                 {summary.deduplicate && !summary.deduplicateApplied && (
                   <Text size="xs" c="dimmed">
                     Your partner proposes this, but this version of the exchange
-                    does not yet apply it; each record still matches at most
-                    one.
+                    does not yet apply it and will refuse to run; ask your
+                    partner for an invitation without deduplication.
                   </Text>
                 )}
               </Term>
