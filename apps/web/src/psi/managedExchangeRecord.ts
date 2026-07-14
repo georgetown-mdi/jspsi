@@ -22,6 +22,7 @@ import {
   ExchangeSpecSchema,
   MAX_TOKEN_MAX_AGE_DAYS,
   SHARED_SECRET_REGEX,
+  assembleExchangeSpec,
   connectionFromLocator,
 } from "@psilink/core";
 
@@ -247,13 +248,14 @@ export interface ManagedExchangeFileComposition {
 
 /**
  * Compose the persisted exchange-file document from a credential-free webrtc
- * locator, exactly as the mint layer composes a downloadable file: the connection
- * is expanded from the locator through {@link connectionFromLocator} (validated
- * through the strict `WebRTCEndpointSchema`, so any credential-bearing field is
- * rejected rather than stripped), and the assembled spec is validated through
- * {@link ExchangeSpecSchema}. The parse result -- never the raw input -- is what
- * the record persists, so no credential is representable in a stored document and
- * no `authentication` block is ever assembled.
+ * locator, exactly as the mint layer composes a downloadable file -- through the
+ * same {@link assembleExchangeSpec} the mint path serializes, so one code path
+ * carries the assembly rule for both artifacts. The connection is expanded from
+ * the locator through {@link connectionFromLocator} (validated through the strict
+ * `WebRTCEndpointSchema`, so any credential-bearing field is rejected rather than
+ * stripped), and the schema's parse result -- never the raw input -- is what the
+ * record persists, so no credential is representable in a stored document and no
+ * `authentication` block is ever assembled.
  *
  * @throws {ZodError} if the assembled spec fails validation (an out-of-range port,
  *   a malformed locator, a smuggled unknown key on the locator).
@@ -261,24 +263,10 @@ export interface ManagedExchangeFileComposition {
 export function composeManagedExchangeFile(
   composition: ManagedExchangeFileComposition,
 ): ExchangeSpec {
-  const connection = connectionFromLocator(composition.connection);
-  const assembled = {
-    connection,
-    linkageTerms: composition.linkageTerms,
-    ...(composition.metadata !== undefined
-      ? { metadata: composition.metadata }
-      : {}),
-    ...(composition.standardization !== undefined
-      ? { standardization: composition.standardization }
-      : {}),
-    ...(composition.disclosedPayloadColumns !== undefined
-      ? { disclosedPayloadColumns: composition.disclosedPayloadColumns }
-      : {}),
-    ...(composition.expectedPayloadColumns !== undefined
-      ? { expectedPayloadColumns: composition.expectedPayloadColumns }
-      : {}),
-  };
-  return ExchangeSpecSchema.parse(assembled);
+  return assembleExchangeSpec({
+    ...composition,
+    connection: connectionFromLocator(composition.connection),
+  });
 }
 
 /** The fields a caller supplies to create a new managed exchange record. The
