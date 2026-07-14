@@ -93,24 +93,32 @@ export function stepFromPopState(state: unknown): string | undefined {
 
 /**
  * Whether the browser unload guard (`beforeunload`) should be armed: exactly
- * while a participant file is loaded AND the exchange has not yet been finalized
- * (created and listening, or its exchange file saved/sent). The in-bench
- * Back/Forward this model integrates keeps the component mounted, so the guard
- * exists only to catch the navigation paths History integration cannot handle
- * gracefully -- closing the tab, reloading, typing a URL, or following an
- * external link -- before the loaded file and in-progress terms would be lost.
+ * while a REAL participant file is loaded AND the exchange has not yet been
+ * finalized (created and listening, or its exchange file saved/sent). The
+ * in-bench Back/Forward this model integrates keeps the component mounted, so
+ * the guard exists only to catch the navigation paths History integration
+ * cannot handle gracefully -- closing the tab, reloading, typing a URL, or
+ * following an external link -- before the loaded file and in-progress terms
+ * would be lost.
  *
  * `finalized` covers every state past the point of no data loss: once the
  * invitation is minted (the live run is listening) or the exchange file is
  * saved, leaving costs nothing the operator has not already secured, so the
  * guard disarms.
+ *
+ * `demoActive` disarms it too: the loaded file is the synthetic sample (pristine
+ * or with edited terms), which the visitor did not bring and nothing regrets
+ * losing. A real file replacing the sample clears `demoActive`, re-arming the
+ * guard.
  */
 export function unloadGuardArmed({
   hasFile,
   finalized,
+  demoActive = false,
 }: {
   hasFile: boolean;
   finalized: boolean;
+  demoActive?: boolean;
 }): boolean {
-  return hasFile && !finalized;
+  return hasFile && !finalized && !demoActive;
 }

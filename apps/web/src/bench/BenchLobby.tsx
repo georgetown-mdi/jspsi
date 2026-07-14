@@ -7,6 +7,7 @@ import { tokenFromInput } from "@psi/invitation";
 
 import { BenchPage } from "./BenchPage";
 import { FILE_ASSURANCE_LINE } from "./fileAssurance";
+import { downloadSampleCsvs } from "./sampleData";
 import styles from "./bench.module.css";
 
 /**
@@ -38,6 +39,13 @@ export function BenchLobby() {
   }
 
   const invitationToken = tokenFromInput(invitation);
+
+  // A full navigation, not the SPA Link: the bench reads `?demo=1` from the
+  // real URL on mount, and the route has no typed search schema to carry it.
+  function loadSample() {
+    downloadSampleCsvs();
+    window.location.assign("/exchange?demo=1");
+  }
 
   return (
     <BenchPage>
@@ -104,8 +112,16 @@ export function BenchLobby() {
           file for the command-line tool.
         </p>
         <p className={`${styles.sub} ${styles.small}`}>
+          No data to link yet?{" "}
+          <Anchor inherit component="button" type="button" onClick={loadSample}>
+            Start with sample data
+          </Anchor>{" "}
+          seeds an exchange with synthetic records and downloads the two CSVs so
+          you can run both sides.
+        </p>
+        <p className={`${styles.sub} ${styles.small}`}>
           Already have an exchange record?{" "}
-          <Anchor component={Link} to="/verify">
+          <Anchor inherit component={Link} to="/verify">
             Verify a receipt
           </Anchor>{" "}
           checks it&apos;s internally consistent, entirely in your browser.

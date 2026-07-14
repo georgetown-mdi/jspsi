@@ -17,46 +17,12 @@ import {
   importedConstraintDivergenceMessage,
 } from "@psi/advancedInvite";
 
+import { triggerBlobDownload } from "./blobDownload";
+
 import type { CSVRow, LinkageTerms } from "@psilink/core";
 import type { AdvancedInviteSeed } from "@psi/advancedInvite";
 
-/** How long to keep a download's object URL alive after the click before revoking
- * it. The browser may copy the blob asynchronously, so revoking too soon (even on
- * the next task) can abort the save; a generous fixed delay outlives the transfer
- * while still freeing the URL rather than leaking it for the document lifetime.
- * A fixed multi-second delay in the same spirit as the long-used file-saver
- * approach (which defers its own revoke by tens of seconds). */
-const REVOKE_DELAY_MS = 60_000;
-
 const IMPORT_SUCCESS = "Imported. Review the loaded terms before generating.";
-
-/** Trigger a client-side download of `content` as `filename`. The terms never
- * leave the browser; this writes them to the user's disk the same way the file is
- * read in (locally). */
-function downloadDocument(
-  filename: string,
-  content: string,
-  mime: string,
-): void {
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  // Some environments (older Firefox/Safari, certain sandboxed contexts) only
-  // honor the download attribute when the anchor is in the live document; append
-  // it before clicking and remove it after so the save fires everywhere.
-  document.body.appendChild(anchor);
-  try {
-    anchor.click();
-  } finally {
-    anchor.remove();
-    // Defer the revoke well past the click (see REVOKE_DELAY_MS): a synchronous or
-    // next-task revoke can abort a save in browsers that copy the blob
-    // asynchronously. The finally makes cleanup unconditional even if click throws.
-    setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
-  }
-}
 
 /**
  * The JSON/YAML escape hatch: export the current linkage terms to a portable
@@ -147,7 +113,7 @@ export function TermsImportExport({
           size="xs"
           leftSection={<IconDownload size={14} aria-hidden />}
           onClick={() =>
-            downloadDocument(
+            triggerBlobDownload(
               "linkage-terms.json",
               exportLinkageTerms(currentTerms, "json"),
               "application/json",
@@ -161,7 +127,7 @@ export function TermsImportExport({
           size="xs"
           leftSection={<IconDownload size={14} aria-hidden />}
           onClick={() =>
-            downloadDocument(
+            triggerBlobDownload(
               "linkage-terms.yaml",
               exportLinkageTerms(currentTerms, "yaml"),
               "application/yaml",

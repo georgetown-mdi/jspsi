@@ -34,16 +34,19 @@ import type { Root } from "react-dom/client";
 vi.mock("@tanstack/react-router", () => ({
   Link: ({
     to,
-    className,
     children,
+    ...rest
   }: {
     to?: string;
-    className?: string;
     children?: ReactNode;
+    [prop: string]: unknown;
   }) =>
+    // Forward the remaining props (className plus the data-* attributes Mantine
+    // sets from its polymorphic component, e.g. the `inherit` marker) so a
+    // rendered Anchor styled via those attributes is faithful, not stripped.
     createElement(
       "a",
-      { href: typeof to === "string" ? to : "#", className },
+      { ...rest, href: typeof to === "string" ? to : "#" },
       children,
     ),
   useNavigate: () => () => undefined,
@@ -361,6 +364,31 @@ describe("bench lobby", () => {
     expect(getComputedStyle(surface as Element).backgroundColor).toBe(
       "rgb(246, 245, 241)",
     );
+  });
+
+  test("the sample-data line and the verify link both sit at the small-print size", async () => {
+    mount(createElement(BenchLobby));
+
+    const demoLink = page.getByRole("button", {
+      name: "Start with sample data",
+    });
+    await expect.element(demoLink).toBeInTheDocument();
+    const verifyLink = page.getByRole("link", { name: "Verify a receipt" });
+    await expect.element(verifyLink).toBeInTheDocument();
+
+    // Each link's enclosing small-print paragraph, and the link itself, share
+    // one font size: the `inherit` fix keeps the Anchor from rendering larger.
+    const demoElement = demoLink.element() as HTMLElement;
+    const verifyElement = verifyLink.element() as HTMLElement;
+    const paragraphSize = (element: HTMLElement) =>
+      getComputedStyle(element.closest("p") as Element).fontSize;
+    const linkSize = (element: HTMLElement) =>
+      getComputedStyle(element).fontSize;
+
+    expect(paragraphSize(demoElement)).toBe("14px");
+    expect(linkSize(demoElement)).toBe(paragraphSize(demoElement));
+    expect(paragraphSize(verifyElement)).toBe("14px");
+    expect(linkSize(verifyElement)).toBe(paragraphSize(verifyElement));
   });
 });
 
@@ -953,6 +981,175 @@ describe("inviter bench", () => {
     // The invitation is minted: leaving costs nothing unsecured, so the
     // prompt disarms (again polled past the commit, for the detach effect).
     await vi.waitFor(() => expect(unloadPrompted()).toBe(false));
+  });
+
+  test("the sample-data entry shows only until a file is read, then disappears", async () => {
+    mount(createElement(InviterBench));
+
+    // On the empty step 1 the under-dropzone entry is present.
+    const sampleEntry = page.getByRole("button", {
+      name: "load it into this exchange",
+    });
+    await expect.element(sampleEntry).toBeInTheDocument();
+
+    // Reading any file removes it -- it is a no-file-state affordance only.
+    const fileInput = document.querySelector('input[type="file"]');
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      new File(["first_name,last_name,dob\nAnn,Lee,01/02/1990\n"], "mine.csv", {
+        type: "text/csv",
+      }),
+    );
+    await expect.element(page.getByText("mine.csv")).toBeInTheDocument();
+    expect(sampleEntry.query()).toBeNull();
+  });
+
+  test("?demo=1 seeds the sample, strips the param, and walks through to a real mint", async () => {
+    const before = window.location.href;
+    window.history.replaceState(window.history.state, "", "/exchange?demo=1");
+    try {
+      mount(createElement(InviterBench));
+
+      // The seed lands on step 1 with the sample file read, the sample name
+      // filled, and the default-terms callout showing -- Continue is enabled.
+      await expect
+        .element(page.getByText("psilink-sample-inviter.csv"))
+        .toBeInTheDocument();
+      await expect
+        .element(page.getByLabelText("Your name"))
+        .toHaveValue("Sample County Health Dept");
+      await expect
+        .element(page.getByText("Default terms are ready", { exact: false }))
+        .toBeInTheDocument();
+      await expect
+        .element(
+          page.getByRole("button", { name: "Continue to matching & sharing" }),
+        )
+        .toBeEnabled();
+
+      // The demo param is stripped without adding a history entry (replaceState).
+      expect(window.location.search).toBe("");
+
+      // The visitor drives the real spine by hand from the seeded step 1 through
+      // to minting a real invitation -- no demo branch on the mint path.
+      await page
+        .getByRole("button", { name: "Continue to matching & sharing" })
+        .click();
+      await page
+        .getByRole("button", { name: "Continue to review & create" })
+        .click();
+      await page.getByRole("button", { name: "Create the invitation" }).click();
+      await expect
+        .element(page.getByRole("heading", { level: 1 }))
+        .toHaveTextContent("Your invitation is ready");
+      await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(1));
+
+      // Post-mint the synthetic-data reminder persists (the live invitation
+      // was minted from sample records), but the one-click Clear is withheld
+      // once the terms seal: tearing down a listening run is startOver's
+      // deliberate path.
+      const ledger = document.querySelector(
+        'aside[aria-label="This exchange"]',
+      ) as Element;
+      expect(ledger.textContent).toContain("Sample data (synthetic records)");
+      expect(page.getByRole("button", { name: "Clear" }).query()).toBeNull();
+    } finally {
+      window.history.replaceState(window.history.state, "", before);
+    }
+  });
+
+  test("the sample indicator persists across steps and Clear resets to a fresh exchange", async () => {
+    const before = window.location.href;
+    window.history.replaceState(window.history.state, "", "/exchange?demo=1");
+    try {
+      mount(createElement(InviterBench));
+      await expect
+        .element(page.getByText("psilink-sample-inviter.csv"))
+        .toBeInTheDocument();
+
+      const ledger = () =>
+        document.querySelector('aside[aria-label="This exchange"]') as Element;
+      expect(ledger().textContent).toContain("Sample data (synthetic records)");
+
+      // The indicator rides along as the visitor advances steps.
+      await page
+        .getByRole("button", { name: "Continue to matching & sharing" })
+        .click();
+      await expect
+        .element(page.getByRole("heading", { level: 1 }))
+        .toHaveTextContent("Matching & sharing");
+      expect(ledger().textContent).toContain("Sample data (synthetic records)");
+
+      // Clear resets to a fresh step 1: no file read, the sample name gone, the
+      // indicator gone.
+      await page.getByRole("button", { name: "Clear" }).click();
+      await expect
+        .element(page.getByRole("heading", { level: 1 }))
+        .toHaveTextContent("Your file");
+      expect(page.getByText("psilink-sample-inviter.csv").query()).toBeNull();
+      await expect.element(page.getByLabelText("Your name")).toHaveValue("");
+      expect(ledger().textContent).not.toContain(
+        "Sample data (synthetic records)",
+      );
+      // The sample-data entry is offered again on the fresh step 1.
+      await expect
+        .element(
+          page.getByRole("button", {
+            name: "load it into this exchange",
+          }),
+        )
+        .toBeInTheDocument();
+    } finally {
+      window.history.replaceState(window.history.state, "", before);
+    }
+  });
+
+  test("the guard stays disarmed for the sample (pristine and edited) and re-arms on a real swap", async () => {
+    const unloadPrompted = () =>
+      !window.dispatchEvent(new Event("beforeunload", { cancelable: true }));
+    const before = window.location.href;
+    window.history.replaceState(window.history.state, "", "/exchange?demo=1");
+    try {
+      mount(createElement(InviterBench));
+      await expect
+        .element(page.getByText("psilink-sample-inviter.csv"))
+        .toBeInTheDocument();
+
+      // The sample is loaded but nothing regrets losing it: the guard never arms
+      // (the listener attaches in a passive effect, so give it a beat first).
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unloadPrompted()).toBe(false);
+
+      // Editing the sample's terms (undisclose the sent identifier on step 2)
+      // does not arm it -- it is still the sample.
+      await page
+        .getByRole("button", { name: "Continue to matching & sharing" })
+        .click();
+      await page
+        .getByLabelText("How member_id is used")
+        .selectOptions("ignored");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unloadPrompted()).toBe(false);
+
+      // Swapping in a real file re-arms the guard: there is now unsaved work.
+      window.history.back();
+      await expect
+        .element(page.getByRole("heading", { level: 1 }))
+        .toHaveTextContent("Your file");
+      const fileInput = document.querySelector('input[type="file"]');
+      await userEvent.upload(
+        page.elementLocator(fileInput as HTMLElement),
+        new File(
+          ["first_name,last_name,dob\nAnn,Lee,01/02/1990\n"],
+          "mine.csv",
+          { type: "text/csv" },
+        ),
+      );
+      await expect.element(page.getByText("mine.csv")).toBeInTheDocument();
+      await vi.waitFor(() => expect(unloadPrompted()).toBe(true));
+    } finally {
+      window.history.replaceState(window.history.state, "", before);
+    }
   });
 
   test("customize tabs: reorder keys, author an agreement, gated settings stay inert", async () => {
