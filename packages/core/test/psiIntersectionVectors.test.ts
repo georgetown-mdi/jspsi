@@ -154,6 +154,7 @@ test("the fixture covers every consolidated source", () => {
     "empty-key-all-empty-column-no-match",
     "empty-key-carried-forward-later-round",
     "empty-key-duplicate-dropped-unique-still-matches",
+    "many-to-one-duplicate-entity-cascade",
   ]);
 });
 
