@@ -128,7 +128,7 @@ linkage_terms:
 
 Any party indicating `true` must have `expects_output: true`. The requirement to receive output is already captured by the cross-party `output` consistency check, so no separate consistency check is applied to this field.
 
-In a many-to-one exchange where the "one" party has `expects_output: false`, the "many" party (with `deduplicate: true`) is additionally responsible for enforcing uniqueness on the "one" party's side, ensuring that each partner record is matched to at most one of its own records.
+Design intent for the unimplemented deduplicating cardinality: in a many-to-one exchange where the "one" party has `expects_output: false`, the "many" party (with `deduplicate: true`) would additionally be responsible for enforcing uniqueness on the "one" party's side, ensuring that each partner record is matched to at most one of its own records.
 
 ### `linkage_terms.linkage_fields`
 

@@ -130,6 +130,16 @@ test("accepts a zip_code linkage field referenced by a key", () => {
 
 // --- Cross-field constraint: deduplicate → expectsOutput ---------------------
 
+test("a missing or non-boolean deduplicate is rejected", () => {
+  for (const malformed of [undefined, null, "true", 1, {}, []]) {
+    const result = safeParseLinkageTerms({ ...base, deduplicate: malformed });
+    expect(result.success).toBe(false);
+    if (result.success) continue;
+    const paths = result.error.issues.map((i) => i.path.join("."));
+    expect(paths).toContain("deduplicate");
+  }
+});
+
 test("deduplicate: true with expectsOutput: true is valid", () => {
   const result = safeParseLinkageTerms({
     ...base,
