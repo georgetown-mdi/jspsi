@@ -18,6 +18,7 @@ import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 import { deploymentProfile, isConsoleBuild } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
+import { triggerBlobDownload } from "@components/blobDownload";
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 import { useNonEmptyRates } from "@components/useNonEmptyRates";
 
@@ -146,31 +147,9 @@ function demotionNotice(demoted: ReadonlyArray<string>): string {
   return `${demoted.join(", ")} changed to Ignored - only one column can be the row identifier.`;
 }
 
-// Deferred well past the click so a browser copying the blob asynchronously is
-// not cut off; matches TermsImportExport's download discipline.
-const DOWNLOAD_REVOKE_DELAY_MS = 40_000;
-
 // The inviter name the sample seeds, so step 1 lands complete without the
 // visitor typing one. Plainly a placeholder, consistent with the synthetic data.
 const SAMPLE_INVITER_NAME = "Sample County Health Dept";
-
-/** Trigger a client-side download of `content` as `fileName`. The exchange file
- * never leaves the browser; this writes it to the operator's disk the same way
- * the CSV is read in (locally). */
-function triggerDownload(fileName: string, content: string): void {
-  const blob = new Blob([content], { type: "application/yaml" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = fileName;
-  document.body.appendChild(anchor);
-  try {
-    anchor.click();
-  } finally {
-    anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_REVOKE_DELAY_MS);
-  }
-}
 
 /**
  * The inviter's working surface: one bench whose top bar walks the three-step
@@ -606,7 +585,7 @@ export function InviterBench() {
         exchangeFileInputFor(cliTransport, saveFields, minted),
       );
       const fileName = exchangeFileName(new Date());
-      triggerDownload(fileName, yaml);
+      triggerBlobDownload(fileName, yaml, "application/yaml");
       setSavedExchange({ invitation: minted, fileName });
     } catch (error) {
       if (error instanceof InvitationFileError) {
@@ -731,7 +710,7 @@ export function InviterBench() {
             demoActive
               ? {
                   label: "Sample data (synthetic records)",
-                  onClear: clearSample,
+                  ...(sealed ? {} : { onClear: clearSample }),
                 }
               : undefined
           }

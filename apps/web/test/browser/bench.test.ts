@@ -1043,6 +1043,16 @@ describe("inviter bench", () => {
         .element(page.getByRole("heading", { level: 1 }))
         .toHaveTextContent("Your invitation is ready");
       await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(1));
+
+      // Post-mint the synthetic-data reminder persists (the live invitation
+      // was minted from sample records), but the one-click Clear is withheld
+      // once the terms seal: tearing down a listening run is startOver's
+      // deliberate path.
+      const ledger = document.querySelector(
+        'aside[aria-label="This exchange"]',
+      ) as Element;
+      expect(ledger.textContent).toContain("Sample data (synthetic records)");
+      expect(page.getByRole("button", { name: "Clear" }).query()).toBeNull();
     } finally {
       window.history.replaceState(window.history.state, "", before);
     }

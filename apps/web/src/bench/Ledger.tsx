@@ -95,9 +95,11 @@ export function Ledger({
    * invitation was created" once the invitation is minted and the ledger
    * stops being editable. */
   tag?: string;
-  /** A quiet standing notice with a Clear action, shown while the loaded file
-   * is the synthetic sample (pristine or edited). */
-  demoNotice?: { label: string; onClear: () => void };
+  /** A quiet standing notice shown while the loaded file is the synthetic
+   * sample (pristine or edited). `onClear` renders its Clear action; the
+   * hosting bench withholds it once the terms seal (an invitation minted or an
+   * exchange file saved), where a one-click teardown would be destructive. */
+  demoNotice?: { label: string; onClear?: () => void };
   rows: ReadonlyArray<LedgerRow>;
   /** The optional surfaces' Customize rows; absent once the terms seal (the
    * share/save/launched phases). */
@@ -111,13 +113,15 @@ export function Ledger({
       {demoNotice !== undefined && (
         <div className={styles.demoNotice}>
           <span>{demoNotice.label}</span>
-          <button
-            type="button"
-            className={styles.demoClear}
-            onClick={demoNotice.onClear}
-          >
-            Clear
-          </button>
+          {demoNotice.onClear !== undefined && (
+            <button
+              type="button"
+              className={styles.demoClear}
+              onClick={demoNotice.onClear}
+            >
+              Clear
+            </button>
+          )}
         </div>
       )}
       <dl>

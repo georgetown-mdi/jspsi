@@ -11,15 +11,22 @@
  * identifier, so the default terms infer every column and several default keys
  * fire with zero customization.
  *
- * The records are structurally synthetic, not annotated: every SSN sits in the
- * never-issued 900 area (and avoids the placeholder values the default SSN
- * cleaning drops), the names are plainly invented, and the dates and ZIPs are
- * made up. Seven pairs are engineered to match across the two files under
- * default cleaning -- including near-misses the default pipeline resolves
+ * The records are structurally synthetic, not annotated: every SSN carries
+ * area 900, which the SSA has never issued and which core's
+ * `isStructurallyValidSsn` treats as structurally INVALID (`area < 900`). That
+ * check runs only under the `validOnly` constraint, which the default SSN
+ * pipeline does not enforce -- the sample relies on that, so these values
+ * standardize and match under default cleaning while avoiding the placeholder
+ * values the pipeline does drop. The names are plainly invented, and the dates
+ * and ZIPs are made up. Seven pairs are engineered to match across the two
+ * files under default cleaning -- including near-misses the default pipeline
+ * resolves
  * (case, whitespace, accents, an affix, SSN punctuation) -- and two pairs look
  * close to a reader but do not match once cleaned. Every other row is unique to
  * its side.
  */
+
+import { triggerBlobDownload } from "@components/blobDownload";
 
 /** The filename the inviter's sample downloads and seeds under. */
 export const SAMPLE_INVITER_FILE_NAME = "psilink-sample-inviter.csv";
@@ -97,32 +104,11 @@ export const SAMPLE_PARTNER_CSV = [
   "",
 ].join("\n");
 
-// Deferred well past the click so a browser copying the blob asynchronously is
-// not cut off; matches the download discipline in TermsImportExport and the
-// exchange-file save.
-const DOWNLOAD_REVOKE_DELAY_MS = 40_000;
-
-/** Trigger a client-side download of one sample CSV. Nothing is uploaded; the
- * bytes come from this module and are written straight to the visitor's disk. */
-function downloadSampleCsv(fileName: string, content: string): void {
-  const blob = new Blob([content], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = fileName;
-  document.body.appendChild(anchor);
-  try {
-    anchor.click();
-  } finally {
-    anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_REVOKE_DELAY_MS);
-  }
-}
-
-/** Download both sample CSVs (inviter then partner) client-side. */
+/** Download both sample CSVs (inviter then partner) client-side. Nothing is
+ * uploaded; the bytes come from this module. */
 export function downloadSampleCsvs(): void {
-  downloadSampleCsv(SAMPLE_INVITER_FILE_NAME, SAMPLE_INVITER_CSV);
-  downloadSampleCsv(SAMPLE_PARTNER_FILE_NAME, SAMPLE_PARTNER_CSV);
+  triggerBlobDownload(SAMPLE_INVITER_FILE_NAME, SAMPLE_INVITER_CSV, "text/csv");
+  triggerBlobDownload(SAMPLE_PARTNER_FILE_NAME, SAMPLE_PARTNER_CSV, "text/csv");
 }
 
 /** Build the in-memory {@link File} the inviter seed reads: the inviter sample
