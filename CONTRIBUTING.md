@@ -128,12 +128,12 @@ Documentation-tier placement is in scope for code review: a reviewer flags spec-
 
 ## Changelog
 
-`CHANGELOG.md` is reader-facing release notes for whoever runs or vets PSI-Link from outside this repo -- an operator deciding whether to upgrade, or a security reviewer -- not a second copy of the git history. For each change, ask who reads it and why they act on it.
+`CHANGELOG.md` is reader-facing release notes for whoever runs or vets PSI-Link from outside this repo, browsing to learn what it does and whether it is worth adopting -- not a second copy of the git history. It is a short list of the product's headline capabilities, not a record of the work done.
 
-- Add an entry for an observable change a reader acts on: a command, flag, or config field; a changed default, behavior, exit code, or wire/on-disk format; a breaking change; a perceptible performance change; a security-relevant change.
-- Skip what no reader acts on: internal refactors, test/CI/tooling changes, `@psilink/core` API reshapes (the apps are its only consumer), and doc-only edits. If a refactor also changes one of the above, the observable part still gets an entry.
-- One or two lines per entry, stating the observable change; push rationale and wire detail to `docs/`, `docs/spec/`, or the PR and link it with a trailing `See docs/...`.
-- Group under Added / Changed / Deprecated / Removed / Fixed / Security; prefix a breaking change `BREAKING:`. Pre-release, keep security entries to the headline changes; record them more exhaustively after release.
+- Pre-release, the default answer to "does this PR need a changelog entry?" is no. Add one only for a genuinely major feature -- a new capability a reader browsing the repo needs to know exists -- or a breaking change to something already listed. Everything else is skipped: individual flags and config fields, UI polish, operational and error-handling refinements, bug fixes, changed defaults, exit-code and format tweaks, internal refactors, test/CI/tooling changes, `@psilink/core` API reshapes, and doc-only edits. When in doubt, leave it out; a reviewer adds an entry back far more cheaply than the log recovers from bloat.
+- One or two lines per entry, stating the capability; push rationale and wire detail to `docs/`, `docs/spec/`, or the PR and link it with a trailing `See docs/...`.
+- Group under Added / Changed / Deprecated / Removed / Fixed / Security; prefix a breaking change `BREAKING:`. Keep the Security section to the headline security posture, not each hardening change.
+- Once there are releases operators upgrade between, the bar drops to any change a reader acts on when deciding whether to upgrade -- a changed default, behavior, exit code, wire/on-disk format, or security fix -- and security entries are recorded exhaustively per release. Until then, hold the higher bar.
 
 ## Commit Messages
 
