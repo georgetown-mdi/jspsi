@@ -8,6 +8,8 @@ import type { Metadata } from "./metadata.js";
 import type { Standardization } from "./standardization.js";
 import { snakeizeKeys } from "../utils/camelizeKeys.js";
 import { PLACEHOLDER_SSH_USERNAME } from "./endpointProducer.js";
+import { WebRTCEndpointSchema } from "./invitation.js";
+import type { WebRTCEndpoint } from "./invitation.js";
 
 // --- Locator-only connection description -------------------------------------
 
@@ -66,15 +68,46 @@ export interface FiledropExchangeLocator {
 }
 
 /**
- * A credential-free connection description for a web-composed exchange,
- * discriminated by `channel`. Carries ONLY locator fields -- by construction no
- * credential (username/password/private key/fingerprint) is representable, so the
- * minted file cannot leak one even if a caller tried. Deliberately covers only
- * the file-sync channels the browser mints a downloadable config for (`sftp`,
- * `filedrop`); a webrtc exchange is coordinated live, not from a minted file.
+ * The credential-free WebRTC locator a web-composed exchange config carries:
+ * WHERE the PeerJS peer-coordination server is (`host`/optional `port`/optional
+ * `path`), never HOW to reach it privately. It is the invitation's
+ * {@link WebRTCEndpoint} -- one locator type, not a second parallel definition --
+ * so the endpoint the code carries and the connection block a managed record
+ * persists agree on the credential-free shape by construction.
+ *
+ * By composition NO credential is representable: the type carries no PeerJS
+ * `server.key`, no `server.username`, and no `turn`, `ice_provision`, or
+ * `provider_options` entry (a TURN entry carries relay credentials and the
+ * provider map is opaque and `@`-file-pathed). The full webrtc connection block
+ * CAN represent those fields, so the guarantee is the composition rule --
+ * {@link connectionFromLocator} expands only these locator fields and
+ * {@link WebRTCEndpointSchema} rejects any other -- not a runtime strip.
+ */
+export type WebRTCExchangeLocator = WebRTCEndpoint;
+
+/**
+ * A credential-free connection description the browser mints a DOWNLOADABLE
+ * exchange config from, discriminated by `channel`. Carries ONLY locator fields
+ * -- by construction no credential (username/password/private key/fingerprint)
+ * is representable, so the minted file cannot leak one even if a caller tried.
+ * Deliberately covers only the file-sync channels a downloadable config targets
+ * (`sftp`, `filedrop`); a webrtc exchange is coordinated live, not from a minted
+ * file, so {@link WebRTCExchangeLocator} is intentionally NOT a member here --
+ * this narrowness is what keeps {@link mintExchangeFile}'s surface file-sync-only
+ * (see the mint-surface guard test).
  */
 export type ExchangeFileConnection =
   SftpExchangeLocator | FiledropExchangeLocator;
+
+/**
+ * The full credential-free locator union {@link connectionFromLocator} expands:
+ * the file-sync {@link ExchangeFileConnection} channels plus
+ * {@link WebRTCExchangeLocator}. Broader than {@link ExchangeFileConnection}
+ * because the locator-to-connection expansion also serves the managed-record
+ * composer, which composes a live webrtc connection block; the downloadable-file
+ * mint path stays on the narrower file-sync-only {@link ExchangeFileConnection}.
+ */
+export type ExchangeLocator = ExchangeFileConnection | WebRTCExchangeLocator;
 
 // --- Mint --------------------------------------------------------------------
 
@@ -164,15 +197,36 @@ export function mintExchangeFile(input: ExchangeFileInput): string {
 }
 
 /**
- * Expand a credential-free {@link ExchangeFileConnection} into the CLI's
+ * Expand a credential-free {@link ExchangeLocator} into the CLI's
  * {@link ConnectionConfig} shape. The single-vs-split directory form is carried
- * through verbatim; the schema (applied by {@link mintExchangeFile}) enforces the
- * both-or-neither and mutual-exclusion rules. For SFTP the placeholder username
- * is seeded -- the one identity field a locator cannot carry.
+ * through verbatim; the schema (applied by {@link mintExchangeFile}, or by the
+ * managed-record composer for the webrtc arm) enforces the both-or-neither and
+ * mutual-exclusion rules. For SFTP the placeholder username is seeded -- the one
+ * identity field a locator cannot carry.
+ *
+ * For WebRTC the guarantee extends into the nested `server` object, which the
+ * flat file-sync locators never had to exclude: the expansion copies only the
+ * {@link WebRTCEndpointSchema}-validated `host`/`port`/`path` into `server`, so
+ * neither the PeerJS `server.key` nor `server.username`, and no sibling `turn`,
+ * `ice_provision`, or `provider_options` entry, is representable in the result.
+ * The locator is validated through {@link WebRTCEndpointSchema} first, so a
+ * type-bypassed caller's unexpected key is rejected (the strict object) rather
+ * than silently stripped by the webrtc connection schema's non-strict object.
  */
-function connectionFromLocator(
-  locator: ExchangeFileConnection,
+export function connectionFromLocator(
+  locator: ExchangeLocator,
 ): ConnectionConfig {
+  if (locator.channel === "webrtc") {
+    const endpoint = WebRTCEndpointSchema.parse(locator);
+    return {
+      channel: "webrtc",
+      server: {
+        host: endpoint.host,
+        ...(endpoint.port !== undefined ? { port: endpoint.port } : {}),
+        ...(endpoint.path !== undefined ? { path: endpoint.path } : {}),
+      },
+    };
+  }
   if (locator.channel === "sftp") {
     return {
       channel: "sftp",

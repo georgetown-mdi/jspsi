@@ -2,8 +2,14 @@ import { ZodError } from "zod";
 import { expect, test } from "vitest";
 import { parse as parseYaml } from "yaml";
 
-import { mintExchangeFile } from "../src/config/exchangeFile";
-import type { ExchangeFileInput } from "../src/config/exchangeFile";
+import {
+  mintExchangeFile,
+  connectionFromLocator,
+} from "../src/config/exchangeFile";
+import type {
+  ExchangeFileInput,
+  WebRTCExchangeLocator,
+} from "../src/config/exchangeFile";
 import { PLACEHOLDER_SSH_USERNAME } from "../src/config/endpointProducer";
 import {
   parseExchangeSpec,
@@ -280,4 +286,148 @@ test("mintExchangeFile: camelize(parse(mint(x))) equals the schema parse of the 
     metadata: baseMetadata,
   });
   expect(viaYaml).toEqual(expected);
+});
+
+// --- WebRTC locator expansion (the managed-record composer's arm) ------------
+
+// The credential fields the webrtc connection block CAN carry but the locator
+// arm must never emit -- the nested server credentials the flat file-sync
+// locators never had to exclude, plus the credential-bearing siblings.
+const forbiddenWebrtcKeys = [
+  "username",
+  "key",
+  "turn",
+  "iceProvision",
+  "providerOptions",
+  "provision",
+];
+
+test("connectionFromLocator: a webrtc locator expands to a valid webrtc connection block", () => {
+  const connection = connectionFromLocator({
+    channel: "webrtc",
+    host: "peer.example.org",
+    port: 9000,
+    path: "/psilink",
+  });
+  // The expansion is exactly the credential-free server locator, nothing more.
+  expect(connection).toEqual({
+    channel: "webrtc",
+    server: { host: "peer.example.org", port: 9000, path: "/psilink" },
+  });
+  // And it validates as the shared exchange-file schema's own connection would:
+  // the parse result (not the raw input) is what a composer persists.
+  const spec = ExchangeSpecSchema.parse({
+    connection,
+    linkageTerms: baseTerms,
+  });
+  expect(spec.connection).toEqual(connection);
+});
+
+test("connectionFromLocator: a minimal webrtc locator omits absent optional fields", () => {
+  const connection = connectionFromLocator({
+    channel: "webrtc",
+    host: "peer.example.org",
+  });
+  // Absent port/path are omitted keys, not explicit undefined the persist step
+  // would render, exactly as the file-sync arms and the mint layer treat them.
+  expect(connection).toEqual({
+    channel: "webrtc",
+    server: { host: "peer.example.org" },
+  });
+  expect(
+    connection.channel === "webrtc" && connection.server,
+  ).not.toHaveProperty("port");
+  expect(
+    connection.channel === "webrtc" && connection.server,
+  ).not.toHaveProperty("path");
+});
+
+test("connectionFromLocator: no credential field appears in a webrtc expansion, including the nested server", () => {
+  const connection = connectionFromLocator({
+    channel: "webrtc",
+    host: "peer.example.org",
+    port: 9000,
+    path: "/psilink",
+  });
+  if (connection.channel !== "webrtc")
+    throw new Error("expected webrtc connection");
+  // The nested server object is where the PeerJS key and username would live;
+  // assert neither is present, and no credential-bearing sibling either.
+  for (const forbidden of forbiddenWebrtcKeys) {
+    expect(connection.server).not.toHaveProperty(forbidden);
+    expect(connection).not.toHaveProperty(forbidden);
+  }
+  // The server object carries ONLY the three locator fields.
+  expect(Object.keys(connection.server).sort()).toEqual(
+    ["host", "path", "port"].sort(),
+  );
+});
+
+test("connectionFromLocator: a webrtc locator carrying an unexpected key is rejected", () => {
+  // A type-bypassed caller cannot smuggle a credential through: the locator is
+  // validated by the invitation's strict WebRTCEndpointSchema, which rejects any
+  // field outside the allowlist rather than letting the non-strict webrtc
+  // connection schema silently strip it into the persisted block.
+  const rogue = {
+    channel: "webrtc",
+    host: "peer.example.org",
+    key: "peerjs-secret-api-key",
+  } as unknown as WebRTCExchangeLocator;
+  expect(() => connectionFromLocator(rogue)).toThrow(ZodError);
+});
+
+test("connectionFromLocator: a webrtc locator with a nested server credential is rejected", () => {
+  // A whole `server` object on the locator is outside the flat locator
+  // allowlist, so a credential nested inside it is rejected, not stripped.
+  for (const server of [{ username: "someone" }, { key: "peerjs-secret" }]) {
+    const rogue = {
+      channel: "webrtc",
+      host: "peer.example.org",
+      server,
+    } as unknown as WebRTCExchangeLocator;
+    expect(() => connectionFromLocator(rogue)).toThrow(ZodError);
+  }
+});
+
+test("connectionFromLocator: every credential-bearing webrtc key is rejected in both casings", () => {
+  // The strict locator schema runs on the raw input, before any camelize
+  // transform, so snake_case aliases cannot slip past it either.
+  const hostileEntries: Array<[string, unknown]> = [
+    ["username", "someone"],
+    ["key", "peerjs-secret"],
+    ["turn", [{ urls: "turn:t.example.org" }]],
+    ["iceProvision", { mode: "static" }],
+    ["ice_provision", { mode: "static" }],
+    ["providerOptions", { secure: true }],
+    ["provider_options", { secure: true }],
+    ["options", { debug: 3 }],
+  ];
+  for (const [hostileKey, value] of hostileEntries) {
+    const rogue = {
+      channel: "webrtc",
+      host: "peer.example.org",
+      [hostileKey]: value,
+    } as unknown as WebRTCExchangeLocator;
+    expect(() => connectionFromLocator(rogue)).toThrow(ZodError);
+  }
+});
+
+// --- Mint surface stays file-sync-only ---------------------------------------
+
+test("mintExchangeFile: a webrtc locator is not an admissible mint input (compile-time guard)", () => {
+  // The downloadable-file mint path is file-sync-only: a webrtc exchange is
+  // coordinated live, not from a minted file. This is enforced structurally --
+  // ExchangeFileInput.connection is the file-sync-only ExchangeFileConnection,
+  // which does not include WebRTCExchangeLocator -- and this @ts-expect-error is
+  // that guard as a check: if webrtc ever became assignable to the mint input,
+  // the suppression would go unused and typecheck would fail here, flagging the
+  // silent widening the union addition must not cause.
+  const input = {
+    // @ts-expect-error webrtc is deliberately outside the mint's locator input
+    connection: { channel: "webrtc", host: "peer.example.org" },
+    linkageTerms: baseTerms,
+  } satisfies ExchangeFileInput;
+  // Reference `input` so it is not an unused binding; the assertion under test is
+  // the compile-time @ts-expect-error above, not a runtime property.
+  expect(input.linkageTerms).toBe(baseTerms);
 });
