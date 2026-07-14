@@ -45,14 +45,14 @@ New tests cover: <the specific behaviors verified, or n/a -- reason>
 ## Checklist
 
 <!--
-Pre-merge obligations CI does not verify. Resolve every line: check it when done OR when genuinely not applicable -- a checked box means "resolved", and the trailing clause says which. Checking n/a items too keeps the PR-list progress badge honest (it counts only checked boxes); never leave a box unchecked to mean n/a. Every n/a MUST carry a reason tied to this diff; a bare "n/a" does not count. Do not delete lines here.
-  done:  - [x] CHANGELOG.md [Unreleased] updated -- added under Fixed
-  n/a:   - [x] CHANGELOG.md [Unreleased] updated -- n/a: internal refactor, no operator- or reviewer-visible change
-A CHANGELOG entry is needed only when the change is visible to an operator/deployer or a security reviewer (a command, flag, config field, default, behavior, exit code, wire or on-disk format, breaking change, or security change). Mark it n/a for an internal refactor, a test/CI/tooling change, a @psilink/core API reshape, or a doc-only edit. See CONTRIBUTING.md, Changelog.
+Pre-merge obligations whose substance CI cannot verify. Resolve every line: check it when done OR when genuinely not applicable -- a checked box means "resolved", and the trailing clause says which. Checking n/a items too keeps the PR-list progress badge honest (it counts only checked boxes); never leave a box unchecked to mean n/a. Every n/a MUST carry a reason tied to this diff; a bare "n/a" does not count. Do not delete lines here. CI (the PR Checklist workflow) fails an unchecked box, a missing required line, a checked box with no `--` resolution clause, or an n/a without a reason; whether the reason is honest stays a review call.
+  done:  - [x] CHANGELOG.md [Unreleased] updated -- added under Added
+  n/a:   - [x] CHANGELOG.md [Unreleased] updated -- n/a: bug fix, not a major feature
+Pre-release, the default is n/a: a CHANGELOG entry is needed only for a genuinely major feature (a headline capability a reader browsing the repo needs to know exists) or a breaking change to something already listed. For everything else mark it n/a with the skipped class the diff falls into: a bug fix, UI polish, an individual flag or config field, an operational or error-handling refinement, a changed default, an internal refactor, a test/CI/tooling change, a @psilink/core API reshape, or a doc-only edit. When in doubt, leave it out. See CONTRIBUTING.md, Changelog.
 -->
 
 - [ ] Docs: enumerated `docs/` and `docs/spec/` and updated affected pages or added new ones at the appropriate level of detail for the document tier (`/docs` high level + design; `/docs/spec` low level + details) -- <which pages, or n/a: no documented behavior changed>
-- [ ] `CHANGELOG.md` `[Unreleased]` updated -- <the entry, or n/a: reason>
+- [ ] `CHANGELOG.md` `[Unreleased]` updated -- <the entry, or n/a: not a major feature or breaking change>
 <!--
 Security review applies if this PR touches any of -- do it and record the type, else n/a:
 - cryptographic code or its inputs: the PSI / key-exchange protocol, key derivation, or canonical encoding

@@ -4,7 +4,7 @@ title: "PSI-Link Roadmap"
 
 # PSI-Link roadmap
 
-This document lists planned work, grouped by the release in which it is targeted. Functionality that has already shipped is recorded in [CHANGELOG.md](../CHANGELOG.md), not here. Project overview and architecture are in [DESIGN.md](DESIGN.md).
+This document lists planned work, grouped by the release in which it is targeted. Major functionality that has already shipped is summarized in [CHANGELOG.md](../CHANGELOG.md), not here. Project overview and architecture are in [DESIGN.md](DESIGN.md).
 
 Targeting is aspirational; the maintainers do not commit to a release date for any item below.
 
@@ -47,6 +47,6 @@ Captured in [DESIGN.md#possible-extensions](DESIGN.md#possible-extensions). Thes
 
 ## See also
 
-- [CHANGELOG.md](../CHANGELOG.md) - functionality that has already shipped
+- [CHANGELOG.md](../CHANGELOG.md) - major functionality that has already shipped
 - [DESIGN.md](DESIGN.md) - project overview and architecture
 - [SECURITY.md](../SECURITY.md) - supported versions and end-of-life policy
