@@ -265,15 +265,20 @@ async function readModifyWriteRecord(
 }
 
 /**
- * Persist a rotation to the stored record AND clear its backup marker in one
- * transaction spanning both stores. Advancing the secret invalidates any prior
+ * Persist a rotation to the stored record AND clear its backup and import markers in
+ * one transaction spanning both stores. Advancing the secret invalidates any prior
  * export -- an export taken before this rotation restores a stale secret -- so the
- * marker must fall in the same atomic step: "marker present" then structurally
+ * backup marker must fall in the same atomic step: "marker present" then structurally
  * means "an export containing the current secret was taken since the last
- * rotation", regardless of how the run was classified afterward. A cross-store
- * transaction is the required shape: clearing the marker in a separate transaction
- * would leave a window in which the rotated record reads green over a stale export.
- * Only the marker is cleared; any spent state is left untouched.
+ * rotation", regardless of how the run was classified afterward. The import marker
+ * falls in the same step for the same reason: a rotation is driven by a completed
+ * handshake, which proves the two parties held the same secret, so a restored-stale
+ * secret can no longer explain a failure -- the import evidence is consumed and must
+ * not shield a later, genuinely-unexplained handshake failure (the desync tiering's
+ * secret-farming caveat; see {@link ./managedFailureTiers.ts}). A cross-store
+ * transaction is the required shape: clearing a marker in a separate transaction
+ * would leave a window in which the rotated record reads over stale sibling evidence.
+ * Only the backup and import markers are cleared; any spent state is left untouched.
  *
  * The record write is field-scoped through `transform` exactly as
  * {@link readModifyWriteRecord}, so it cannot carry a stale secret or document;
@@ -304,7 +309,7 @@ async function readModifyWriteRotation(
         try {
           written = transform(read.result);
           records.put(written);
-          clearBackupOnLocalStore(local, id, readLocal.result);
+          clearRotationSiblingsOnLocalStore(local, id, readLocal.result);
         } catch (error) {
           failure = error;
           transaction.abort();
@@ -322,13 +327,15 @@ async function readModifyWriteRotation(
 }
 
 /**
- * Drop only the backup marker from a record's sibling local-state entry, on an
- * already-open local-state object store inside a live transaction. A `null`-ing of
- * the whole entry when no spent state remains keeps the store from carrying an
- * empty sibling. The stored value is re-validated ({@link parseManagedLocalState})
- * so a corrupted sibling aborts the transaction rather than being silently kept.
+ * Drop the backup and import markers from a record's sibling local-state entry, on
+ * an already-open local-state object store inside a live transaction -- the sibling
+ * evidence a rotation consumes (a stale export and a stale-secret restore are both
+ * invalidated by the completed-handshake rotation). A `null`-ing of the whole entry
+ * when no spent state remains keeps the store from carrying an empty sibling. The
+ * stored value is re-validated ({@link parseManagedLocalState}) so a corrupted
+ * sibling aborts the transaction rather than being silently kept.
  */
-function clearBackupOnLocalStore(
+function clearRotationSiblingsOnLocalStore(
   store: IDBObjectStore,
   id: string,
   raw: unknown,
@@ -542,7 +549,8 @@ export async function persistManagedExchangeInputHandle(
  * of a spent, unrun-since record carries exactly its secret; compared in memory, so
  * nothing secret-derived is ever persisted), and, if one exists, updates that
  * record's fields from the artifact (keeping its own `id` and any persisted input
- * handle), clears its spent state, and stamps the backup marker as of `backedUpAt`.
+ * handle), clears its spent state, and stamps the backup and import markers as of
+ * `at` (a revive is itself an import event -- the desync tiering's restore evidence).
  * It returns the revived record, or `undefined` when no spent secret-match exists --
  * in which case the caller installs a fresh record instead of duplicating the husk.
  *
@@ -558,7 +566,7 @@ export async function persistManagedExchangeInputHandle(
  */
 export async function reviveSpentManagedExchange(
   reconstructed: ManagedExchangeRecord,
-  backedUpAt: string,
+  at: string,
 ): Promise<ManagedExchangeRecord | undefined> {
   const db = await openManagedExchangeDatabase();
   try {
@@ -608,7 +616,10 @@ export async function reviveSpentManagedExchange(
                 : {}),
             });
             records.put(revived);
-            local.put({ backup: { backedUpAt } }, match.id);
+            local.put(
+              { backup: { backedUpAt: at }, imported: { importedAt: at } },
+              match.id,
+            );
           } catch (error) {
             failure = error;
             transaction.abort();

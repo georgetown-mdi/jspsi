@@ -36,6 +36,7 @@ import { managedLocalStateSchema } from "./managedLocalStateShape";
 import type { ManagedLocalState } from "./managedLocalStateShape";
 
 export type {
+  ManagedImportMarker,
   ManagedLocalState,
   ManagedSpentState,
 } from "./managedLocalStateShape";
@@ -207,5 +208,27 @@ export async function markManagedExchangeSpent(
   await readModifyWriteLocalState(id, (current) => ({
     ...current,
     spent: { spentAt },
+  }));
+}
+
+/**
+ * Mark a record imported and backed-up as of the import instant -- a fresh install
+ * from a backup artifact, which is itself a current backup of the installed secret.
+ * Both markers are stamped in one read-modify-write, so the record reads green and
+ * carries its restore evidence together. The import marker is what the desync tiering
+ * reads to tell an import-since-last-success apart from an unexplained handshake
+ * failure (see {@link ./managedFailureTiers.ts}); the backup marker keeps the freshly
+ * installed record from immediately prompting a re-export. A revive-in-place instead
+ * stamps both inside its own cross-store transaction (see
+ * {@link ./managedExchangeStore.ts}, `reviveSpentManagedExchange`).
+ */
+export async function markManagedExchangeImported(
+  id: string,
+  at: string,
+): Promise<void> {
+  await readModifyWriteLocalState(id, (current) => ({
+    ...current,
+    backup: { backedUpAt: at },
+    imported: { importedAt: at },
   }));
 }

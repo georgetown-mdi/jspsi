@@ -431,11 +431,11 @@ The artifact's shape and custody model:
   deferred alongside the grace-window mitigation (see
   [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#rollback-at-rest-copies-can-silently-resurrect)).
 
-### The backup marker and the spent state: local siblings, never in the artifact
+### The backup marker, the spent state, and the import marker: local siblings, never in the artifact
 
-Two pieces of derived-backup and migration state live **beside** the record, in a
-separate origin-local store keyed by the record `id`, and are **neither record
-fields nor artifact contents**:
+Three pieces of derived-backup, migration, and restore state live **beside** the
+record, in a separate origin-local store keyed by the record `id`, and are
+**neither record fields nor artifact contents**:
 
 - **The backup marker** (`backedUpAt`, an ISO 8601 UTC instant) records when a
   backup was last taken. It is the input to the derived backup state the UI
@@ -474,16 +474,40 @@ fields nor artifact contents**:
   plain timestamp, no secret material and no epoch; importing the artifact back
   clears it (a **revive-in-place**: an import whose secret matches the spent record's
   updates that record's fields, keeps its `id` and input handle, clears the spent
-  state, and marks it backed-up, rather than installing a duplicate).
+  state, and marks it imported and backed-up, rather than installing a duplicate).
+- **The import marker** (`importedAt`, an ISO 8601 UTC instant) records that this
+  device installed or revived the record from a backup artifact. It is the evidence
+  the desync tiering reads to tell an **import/restore since the last successful run**
+  apart from an unexplained handshake failure (Tier 1 versus Tier 2; see
+  [Telling a desync from an attack](../MANAGED_EXCHANGE.md#telling-a-desync-from-an-attack)):
+  a restored copy can hold a secret the partnership has rotated past, so a
+  handshake failure while this marker stands is the benign import tier (recovery:
+  re-invite), not the attack path. "Since the last successful run" is enforced
+  **structurally**, not by comparing timestamps, by two write-side rules that mirror
+  the backup marker's:
+  - **Import stamps it.** A fresh install and a revive-in-place both stamp
+    `importedAt` (alongside the backup marker) as of the import instant, so a
+    restored record carries the evidence from the moment it lands.
+  - **Rotation clears it.** The persist-before-success rotation write clears the
+    import marker in the **same** transaction that advances the secret. A rotation is
+    driven by a completed handshake, which proves the two parties held the same
+    secret, so a successful run **consumes** the evidence -- the marker's mere
+    presence therefore means "restored and not yet successfully run since". This is
+    what stops a stale import from shielding a later, genuinely-unexplained handshake
+    failure (the secret-farming caveat: a benign reading is offered only when the
+    record's own structured evidence still explains the failure).
 
-Both are **local siblings by design**: the marker's currency input and this
-device's spent status must not travel in the export artifact -- an imported copy is
-a fresh live owner, for which "the source last backed up on X" or "the source was
-spent" is meaningless -- and the record schema is reader-rejects-unknown, so
-carrying either on the record would force a new `schemaVersion` or leak into the
-artifact. Keeping them siblings makes their non-inclusion **structural**: the
-exporter reads only the record. Deleting a managed exchange removes the record and
-its sibling state together (see [Deleting a managed
+  It too is a **plain timestamp**, no secret material and no rotation epoch.
+
+All three are **local siblings by design**: the marker's currency input, this
+device's spent status, and this device's restore history must not travel in the
+export artifact -- an imported copy is a fresh live owner, for which "the source
+last backed up on X", "the source was spent", or "the source was imported on X" is
+meaningless -- and the record schema is reader-rejects-unknown, so carrying any of
+them on the record would force a new `schemaVersion` or leak into the artifact.
+Keeping them siblings makes their non-inclusion **structural**: the exporter reads
+only the record. Deleting a managed exchange removes the record and its sibling
+state together (see [Deleting a managed
 exchange](../MANAGED_EXCHANGE.md#deleting-a-managed-exchange)).
 
 ## See also

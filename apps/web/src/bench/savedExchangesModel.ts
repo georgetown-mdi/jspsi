@@ -13,6 +13,7 @@
  */
 
 import { deriveManagedBackupState } from "@psi/managedBackupState";
+import { deriveManagedFailureTier } from "@psi/managedFailureTiers";
 import { managedExchangeLapsed } from "@psi/managedExpiry";
 
 import { dateLabel, dateTimeLabel } from "./inviterModel";
@@ -21,6 +22,7 @@ import type {
   ManagedExchangeRecord,
   ManagedExchangeSide,
 } from "@psi/managedExchangeRecord";
+import type { ManagedFailureTier } from "@psi/managedFailureTiers";
 import type { ManagedLocalState } from "@psi/managedLocalState";
 
 /** This party's side, as the run list names it: the operator recognizes "you
@@ -59,18 +61,55 @@ export interface SavedExchangeRow {
   spentAsOf?: string;
 }
 
-/** The last-run status line for a record, before the expiry note. A record that
- * has never run reads as never-run; a succeeded run names its date; a
- * non-succeeded outcome names the outcome so the operator knows the last attempt
- * did not complete. Deliberately a plain summary -- the tiered desync/attack copy
- * is a later item, so a failed run reads as a neutral "last run did not complete"
- * here, never attack framing. */
-function lastRunStatus(record: ManagedExchangeRecord): string {
-  if (record.lastRun === undefined) return "Not run yet";
-  const at = dateTimeLabel(new Date(record.lastRun.at));
-  if (record.lastRun.outcome === "succeeded") return `Last run succeeded ${at}`;
-  if (record.lastRun.outcome === "missed") return `Last window missed ${at}`;
-  return `Last run did not complete (${at})`;
+/** The one-line status a failure tier reads as in the list -- a specific but quiet
+ * line naming the state and its recovery gist, deferring the full copy (and, for the
+ * unexplained tier, the attack framing and the out-of-band confirmation) to the
+ * per-exchange surface the row opens. A benign tier never reads as attack framing here;
+ * the unexplained tier reads as "needs you to check with your partner", the honest
+ * lead without the checklist. `at` is the last run's phrased instant. */
+function tierStatus(tier: ManagedFailureTier, at: string): string {
+  switch (tier) {
+    case "expired":
+      return "Stored secret lapsed; re-invite to run again";
+    case "input":
+      return `Last run could not use your input file (${at})`;
+    case "storage":
+      return `Last run could not be saved (${at}); re-invite to reconnect`;
+    case "imported":
+      return "Restored from a backup; re-invite to reconnect";
+    case "unexplained":
+      return `Last run failed (${at}); check with your partner`;
+    case "transport":
+      return `Last run did not complete (${at})`;
+    case "missed":
+      return `Last window missed (${at})`;
+    case "none":
+      // A "none" tier means never-run or a succeeded last run; the caller phrases
+      // those directly and never asks this for them.
+      return "";
+  }
+}
+
+/** The last-run status line for a record. A record that has never run reads as
+ * never-run; a succeeded run names its date; a non-succeeded outcome is tiered from the
+ * record's own bookkeeping ({@link deriveManagedFailureTier}) into its specific,
+ * non-alarming state -- the list's quiet form of the tiers the run surface expands. */
+function lastRunStatus(
+  record: ManagedExchangeRecord,
+  local: ManagedLocalState | undefined,
+  now: number,
+): string {
+  const tier = deriveManagedFailureTier(record, local, now);
+  if (tier === "none") {
+    if (record.lastRun === undefined) return "Not run yet";
+    // The only "none" with a recorded run is a succeeded one.
+    return `Last run succeeded ${dateTimeLabel(new Date(record.lastRun.at))}`;
+  }
+  const at =
+    record.lastRun !== undefined
+      ? dateTimeLabel(new Date(record.lastRun.at))
+      : "";
+  return tierStatus(tier, at);
 }
 
 /** The backup state phrased for a row, from the record's local backup marker. A
@@ -96,16 +135,12 @@ export function savedExchangeRow(
   local: ManagedLocalState | undefined,
   now: number,
 ): SavedExchangeRow {
-  const expired = managedExchangeLapsed(record, now);
-  const status = expired
-    ? `${lastRunStatus(record)} - stored secret lapsed; re-invite to run again`
-    : lastRunStatus(record);
   return {
     id: record.id,
     label: record.label,
     sideLabel: SIDE_LABEL[record.side],
-    status,
-    expired,
+    status: lastRunStatus(record, local, now),
+    expired: managedExchangeLapsed(record, now),
     backup: backupFor(local),
     ...(local?.spent !== undefined
       ? { spentAsOf: dateLabel(new Date(local.spent.spentAt)) }

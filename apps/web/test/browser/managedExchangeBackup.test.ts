@@ -27,10 +27,14 @@ import {
   getManagedLocalState,
   listManagedLocalState,
   markManagedExchangeBackedUp,
+  markManagedExchangeImported,
   markManagedExchangeSpent,
 } from "@psi/managedLocalState";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
+import { deriveManagedFailureTier } from "@psi/managedFailureTiers";
+import { failedRun } from "@psi/managedRunRotate";
 import { importManagedExchange } from "@psi/managedExchangeImport";
+import { managedRunFailureFromRecord } from "@bench/managedRunLaunchModel";
 import { savedExchangeRows } from "@bench/savedExchangesModel";
 
 import type { NewManagedExchange } from "@psi/managedExchangeRecord";
@@ -128,6 +132,93 @@ describe("the backup marker persists beside the record", () => {
       Date.now(),
     );
     expect(after[0].backup.kind).toBe("backed-up");
+  });
+});
+
+describe("the import marker is the restore evidence the desync tiering reads", () => {
+  test("an import stamps importedAt beside the record, out of the artifact", async () => {
+    const source = await createManagedExchange(newExchange());
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(source),
+    );
+    // The artifact carries no import marker (a sibling, never in the export).
+    expect(bytes).not.toMatch(/importedAt/);
+
+    await deleteManagedExchange(source.id);
+    const installed = await importManagedExchange(bytes);
+    const local = await getManagedLocalState(installed.id);
+    // Both markers are stamped: the restore evidence and the current-backup marker.
+    expect(local?.imported).toBeDefined();
+    expect(local?.backup).toBeDefined();
+  });
+
+  test("a rotation consumes the import marker (a completed handshake proves sync)", async () => {
+    const record = await createManagedExchange(newExchange());
+    await markManagedExchangeImported(record.id, new Date().toISOString());
+    expect((await getManagedLocalState(record.id))?.imported).toBeDefined();
+
+    // A successful run rotates the secret, clearing the import (and backup) marker in
+    // the same cross-store transaction.
+    await persistManagedExchangeRotation(record.id, {
+      sharedSecret: generateSharedSecret(),
+      expires: null,
+    });
+    const local = await getManagedLocalState(record.id);
+    expect(local?.imported).toBeUndefined();
+    expect(local?.backup).toBeUndefined();
+  });
+
+  test("an auth failure on a freshly imported record tiers as imported, not unexplained", async () => {
+    const source = await createManagedExchange(newExchange());
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(source),
+    );
+    await deleteManagedExchange(source.id);
+    const installed = await importManagedExchange(bytes);
+
+    // The first run after the import fails closed. Its bookkeeping lands as auth.
+    await recordManagedExchangeLastRun(
+      installed.id,
+      failedRun(Date.now(), "failed", "auth"),
+    );
+    const [record, local] = [
+      await getManagedExchange(installed.id),
+      await getManagedLocalState(installed.id),
+    ];
+    // The record's own evidence (an import not yet run-through) explains the failure:
+    // the benign imported tier, never the attack path.
+    expect(deriveManagedFailureTier(record!, local, Date.now())).toBe(
+      "imported",
+    );
+  });
+});
+
+describe("an unattended run's failure surfaces through the same tiers at the next visit", () => {
+  test("a stored auth failure with no benign evidence reads as the unexplained tier", async () => {
+    const record = await createManagedExchange(newExchange());
+    // An unattended run failed closed and recorded auth -- nothing else explains it.
+    await recordManagedExchangeLastRun(
+      record.id,
+      failedRun(Date.now(), "failed", "auth"),
+    );
+    const reloaded = await getManagedExchange(record.id);
+    const local = await getManagedLocalState(record.id);
+    const failure = managedRunFailureFromRecord(reloaded!, local, Date.now());
+    expect(failure?.kind).toBe("unexplained");
+    expect(failure?.recovery).toBe("confirm");
+  });
+
+  test("a stored storage failure reads as the benign storage tier at the next visit", async () => {
+    const record = await createManagedExchange(newExchange());
+    await recordManagedExchangeLastRun(
+      record.id,
+      failedRun(Date.now(), "failed", "storage"),
+    );
+    const reloaded = await getManagedExchange(record.id);
+    const local = await getManagedLocalState(record.id);
+    const failure = managedRunFailureFromRecord(reloaded!, local, Date.now());
+    expect(failure?.kind).toBe("storage");
+    expect(failure?.recovery).toBe("reinvite");
   });
 });
 
