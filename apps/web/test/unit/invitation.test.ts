@@ -419,27 +419,33 @@ describe("generateInvitation", () => {
 
   test("quick path carries the disclosed-columns subset on the token", async () => {
     const disclosed = disclosedColumnNames(inferMetadata(DISCLOSING_COLUMNS));
-    const { encoded } = await generateInvitation({
+    const result = await generateInvitation({
       inviterName: "Org",
       file: csvStream(DISCLOSING_CSV),
       location,
     });
-    const token = await decodeInvitation(encoded);
+    const token = await decodeInvitation(result.encoded);
     // The dedicated wire field carries exactly what preparePayload transmits.
     expect(token.disclosedPayloadColumns).toEqual(disclosed);
+    // The surfaced field is the token's value, so a persisting caller (the
+    // managed-exchange deposit) records the same commitment the token published.
+    expect(result.disclosedPayloadColumns).toEqual(
+      token.disclosedPayloadColumns,
+    );
   });
 
   test("quick path carries an empty disclosed subset when the file discloses nothing", async () => {
     // The web inviter always knows its metadata, so the field is always carried --
     // here the EMPTY set, which locks the acceptor in to "receive nothing" (a later
     // non-empty payload aborts) rather than reconciling lazily.
-    const { encoded } = await generateInvitation({
+    const result = await generateInvitation({
       inviterName: "Org",
       file: csvStream(ALL_COLUMNS_CSV),
       location,
     });
-    const token = await decodeInvitation(encoded);
+    const token = await decodeInvitation(result.encoded);
     expect(token.disclosedPayloadColumns).toEqual([]);
+    expect(result.disclosedPayloadColumns).toEqual([]);
   });
 
   test("summarizeInvitation derives the received set from the carried subset with no payload.send authored", () => {

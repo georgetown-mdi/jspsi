@@ -13,6 +13,7 @@ import {
   HandleReadPermissionError,
   acquireManagedInput,
   acquireValidatedManagedInput,
+  capturedInputHandle,
   ensureHandleReadPermission,
   fileSystemAccessSupported,
 } from "@psi/managedInputHandle";
@@ -509,5 +510,31 @@ describe("run seam composition: the input guard gates the handshake", () => {
     const stored = await getManagedExchange(created.id);
     expect(stored?.lastRun?.outcome).toBe("succeeded");
     expect(stored?.sharedSecret).toBe(rotatedSecret);
+  });
+});
+
+describe("capturedInputHandle", () => {
+  // The bench's Dropzone (over file-selector) attaches a `handle` to a dropped
+  // File in a secure context on Chromium; capturedInputHandle reads it back so a
+  // deposit persists a reusable pointer without a second picker dialog. Here the
+  // handle is a real OPFS FileSystemFileHandle attached the same way file-selector
+  // attaches a picker handle.
+  test("returns a handle attached to the selected file where the API exists", async () => {
+    expect(fileSystemAccessSupported()).toBe(true);
+    const handle = await writeOpfsFile("captured.csv", CONFORMING_HEADER);
+    const file = await handle.getFile();
+    (file as File & { handle?: FileSystemFileHandle }).handle = handle;
+    expect(capturedInputHandle(file)).toBe(handle);
+  });
+
+  test("returns undefined for a plain File with no attached handle", () => {
+    const plain = new File(["a,b\n1,2\n"], "plain.csv", { type: "text/csv" });
+    expect(capturedInputHandle(plain)).toBeUndefined();
+  });
+
+  test("ignores a non-handle value on the handle property", () => {
+    const file = new File(["a,b\n1,2\n"], "spoofed.csv", { type: "text/csv" });
+    (file as File & { handle?: unknown }).handle = { name: "not-a-handle.csv" };
+    expect(capturedInputHandle(file)).toBeUndefined();
   });
 });

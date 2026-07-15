@@ -26,10 +26,11 @@ the exchange-file artifact the record is composed from (see
 auditors and implementors.
 
 > **Status.** The record store, the run+rotate critical section (the
-> single-writer lock and the persist-before-success write-back), and the
+> single-writer lock and the persist-before-success write-back), the
 > input-acquisition seam (the persisted handle, its permission discipline, and
-> the pre-connection column-shape guard) are implemented; the runner,
-> scheduling, and management surfaces that use them are not yet. The
+> the pre-connection column-shape guard), and the record-creating deposits (the
+> manage offers at invite creation and at accept) are implemented; the runner,
+> scheduling, and list/detail management surfaces that use them are not yet. The
 > recurring-exchange epic implements against the shape below, security-reviewed
 > at each step because the record persists a rotating credential at rest. The
 > persist-before-success ordering and the single-owner invariant are normative,

@@ -43,6 +43,7 @@ function invitationStub(
     columns: ["program_code", "dob"],
     metadata,
     standardization: undefined,
+    disclosedPayloadColumns: ["program_code"],
     ...overrides,
   };
 }
