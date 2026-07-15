@@ -139,14 +139,73 @@ export interface ExchangeFileInput {
 }
 
 /**
+ * The inputs {@link assembleExchangeSpec} assembles into a validated
+ * {@link ExchangeSpec}: an already-expanded connection block plus the shared
+ * optional blocks. This is {@link ExchangeFileInput} with the connection past
+ * its locator expansion -- the seam between the two composers' locator types
+ * (file-sync for the downloadable mint, webrtc for the managed record) and the
+ * one assembly rule they share.
+ */
+export interface ExchangeSpecAssembly {
+  connection: ConnectionConfig;
+  linkageTerms: LinkageTerms;
+  metadata?: Metadata;
+  standardization?: Standardization;
+  /** See {@link ExchangeFileInput.disclosedPayloadColumns}. */
+  disclosedPayloadColumns?: string[];
+  /** See {@link ExchangeFileInput.expectedPayloadColumns}. */
+  expectedPayloadColumns?: string[];
+}
+
+/**
+ * Assemble an exchange spec on the camelCase side and validate it through
+ * {@link ExchangeSpecSchema}, returning the PARSE RESULT (never the raw input)
+ * so only the schema's own fields reach a consumer -- the same "use what the
+ * schema returns" discipline encodeInvitation follows. The input is already
+ * camelCase (built in TS), so no camelize pre-pass. Optional blocks are attached
+ * only when present, so an absent field is an omitted key, not an explicit
+ * `undefined` a snakeize/serialize step would render.
+ *
+ * The single assembly rule behind both composers: {@link mintExchangeFile}
+ * serializes this result to the downloadable YAML, and the web app's
+ * managed-record composer persists it directly, so the two artifacts cannot
+ * drift apart in how a spec is assembled. No `authentication` block is ever
+ * assembled -- the shared secret is not representable in the input.
+ *
+ * @throws {ZodError} if the assembled spec fails {@link ExchangeSpecSchema}
+ *   validation (an invalid connection, an out-of-range port, a malformed split
+ *   pair, ...).
+ */
+export function assembleExchangeSpec(
+  input: ExchangeSpecAssembly,
+): ExchangeSpec {
+  const assembled: ExchangeSpec = {
+    connection: input.connection,
+    linkageTerms: input.linkageTerms,
+    ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+    ...(input.standardization !== undefined
+      ? { standardization: input.standardization }
+      : {}),
+    ...(input.disclosedPayloadColumns !== undefined
+      ? { disclosedPayloadColumns: input.disclosedPayloadColumns }
+      : {}),
+    ...(input.expectedPayloadColumns !== undefined
+      ? { expectedPayloadColumns: input.expectedPayloadColumns }
+      : {}),
+  };
+  return ExchangeSpecSchema.parse(assembled);
+}
+
+/**
  * Assemble a browser-composed exchange into the CLI's exact config schema and
  * serialize it to the snake_case YAML the CLI loads verbatim.
  *
- * The artifact IS the CLI config: it validates through {@link ExchangeSpecSchema}
- * (the camelCase side) before serializing and fails loudly on any mismatch, then
- * is written with the same {@link snakeizeKeys} + yaml `stringify` discipline the
- * CLI's `saveConfig` uses, so a downloaded file parses through the CLI's config
- * load path without edits.
+ * The artifact IS the CLI config: it validates through
+ * {@link assembleExchangeSpec} (the camelCase side) before serializing and fails
+ * loudly on any mismatch -- a ZodError surfaces here, on the minting side, rather
+ * than when the CLI later loads a malformed file -- then is written with the same
+ * {@link snakeizeKeys} + yaml `stringify` discipline the CLI's `saveConfig` uses,
+ * so a downloaded file parses through the CLI's config load path without edits.
  *
  * The secret never enters the file. There is NO `authentication` block: the CLI
  * injects the shared secret from `.psilink.key` at runtime and its `saveConfig`
@@ -165,34 +224,10 @@ export interface ExchangeFileInput {
  *   pair, ...).
  */
 export function mintExchangeFile(input: ExchangeFileInput): string {
-  const connection = connectionFromLocator(input.connection);
-
-  // Assemble the spec on the camelCase side, then validate it as the schema's
-  // own parse would -- the input is already camelCase (built in TS), so the spec
-  // is fed straight to ExchangeSpecSchema without a camelize pre-pass. Optional
-  // blocks are attached only when present so an absent field is an omitted key,
-  // not an explicit `undefined` the snakeize/serialize step would render.
-  const assembled: ExchangeSpec = {
-    connection,
-    linkageTerms: input.linkageTerms,
-    ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
-    ...(input.standardization !== undefined
-      ? { standardization: input.standardization }
-      : {}),
-    ...(input.disclosedPayloadColumns !== undefined
-      ? { disclosedPayloadColumns: input.disclosedPayloadColumns }
-      : {}),
-    ...(input.expectedPayloadColumns !== undefined
-      ? { expectedPayloadColumns: input.expectedPayloadColumns }
-      : {}),
-  };
-
-  // Validate through the schema, and serialize the PARSE RESULT (not `assembled`)
-  // so only the schema's own fields reach the YAML -- the same "serialize what the
-  // schema returns" discipline encodeInvitation uses. A validation failure throws
-  // a ZodError here, on the minting side, rather than surfacing when the CLI later
-  // loads a malformed file.
-  const validated = ExchangeSpecSchema.parse(assembled);
+  const validated = assembleExchangeSpec({
+    ...input,
+    connection: connectionFromLocator(input.connection),
+  });
   return stringifyYaml(snakeizeKeys(validated));
 }
 
