@@ -17,50 +17,28 @@
  *   sync").
  *
  * This is the thin IndexedDB layer over the sibling store the records database also
- * holds ({@link MANAGED_EXCHANGE_LOCAL_STORE_NAME}); the pure backup-state
- * derivation is in {@link ./managedBackupState.ts}. The state is validated on read
- * and write through {@link managedLocalStateSchema}, so a corrupted or
- * app-upgrade-invalidated sibling entry rejects loudly rather than loading, the
- * same reader-rejects-unknown discipline the record store follows.
+ * holds ({@link MANAGED_EXCHANGE_LOCAL_STORE_NAME}); the state's shape and its
+ * reader-rejects-unknown validation are the pure {@link ./managedLocalStateShape.ts}
+ * (shared with the record store's rotation write, which clears the backup marker in
+ * the same cross-store transaction), and the pure backup-state derivation is in
+ * {@link ./managedBackupState.ts}. Every read and write validates through
+ * {@link managedLocalStateSchema}, so a corrupted or app-upgrade-invalidated sibling
+ * entry rejects loudly rather than loading, the same discipline the record store
+ * follows.
  */
-
-import { z } from "zod";
 
 import {
   MANAGED_EXCHANGE_LOCAL_STORE_NAME,
   openManagedExchangeDatabase,
 } from "./managedExchangeStore";
+import { managedLocalStateSchema } from "./managedLocalStateShape";
 
-import type { ManagedBackupMarker } from "./managedBackupState";
-import type { ZodType } from "zod";
+import type { ManagedLocalState } from "./managedLocalStateShape";
 
-/** This device's spent state for a record: set by a migration export, which hands
- * the copy off and transitions the source to a visible spent state (no Run
- * affordance, no scheduled runs). A plain handoff timestamp -- no secret material,
- * no rotation epoch. Cleared by importing the artifact back (a revive). */
-export interface ManagedSpentState {
-  /** ISO 8601 UTC instant the copy was handed off by a migration export. */
-  spentAt: string;
-}
-
-/** The local sibling state for a record: the optional backup marker and the
- * optional spent state, either present independently. An entry with neither is
- * meaningless and never written (a cleared state deletes the entry). */
-export interface ManagedLocalState {
-  /** When a backup was last taken (see {@link ManagedBackupMarker}); absent until
-   * the first export. */
-  backup?: ManagedBackupMarker;
-  /** This device's spent state (see {@link ManagedSpentState}); absent unless a
-   * migration export handed the copy off. */
-  spent?: ManagedSpentState;
-}
-
-const managedLocalStateSchema: ZodType<ManagedLocalState> = z
-  .object({
-    backup: z.object({ backedUpAt: z.iso.datetime() }).strict().optional(),
-    spent: z.object({ spentAt: z.iso.datetime() }).strict().optional(),
-  })
-  .strict();
+export type {
+  ManagedLocalState,
+  ManagedSpentState,
+} from "./managedLocalStateShape";
 
 /** Run `work` inside a transaction over the local-state store, resolving on the
  * transaction's `complete` event, so a caller awaiting this has the write visible
@@ -219,6 +197,8 @@ export async function markManagedExchangeBackedUp(
 /**
  * Mark a record spent as of `spentAt` -- a migration export handed this device's
  * copy off. Advances only the spent state, leaving the backup marker untouched.
+ * Cleared by importing the artifact back, which revives the record in place (see
+ * {@link ./managedExchangeStore.ts}, `reviveSpentManagedExchange`).
  */
 export async function markManagedExchangeSpent(
   id: string,
@@ -228,18 +208,4 @@ export async function markManagedExchangeSpent(
     ...current,
     spent: { spentAt },
   }));
-}
-
-/**
- * Clear a record's spent state -- an import of the artifact back revives it.
- * Removes only the spent state; if no backup marker remains either, the whole
- * sibling entry is deleted so nothing empty is left behind.
- */
-export async function clearManagedExchangeSpent(id: string): Promise<void> {
-  await readModifyWriteLocalState(id, (current) => {
-    if (current === undefined) return null;
-    const { spent: _spent, ...rest } = current;
-    if (rest.backup === undefined) return null;
-    return rest;
-  });
 }

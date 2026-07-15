@@ -382,22 +382,27 @@ The artifact's shape and custody model:
   stays usable until the partnership rotates past it or any `expires` it carries
   (stamped when a max-age policy is set) lapses; the backup state prompts
   re-export after each rotation.
-- **Top-level shape.** The artifact is a JSON document with an
-  `artifact_version` tag (its own reader-rejects-unknown literal, distinct from
-  the record's `schemaVersion` -- the on-disk artifact format versions
-  independently of the stored record) and three parts that keep the two CLI
-  halves separable from the browser-only fields: `exchange_document` embeds the
-  exchange-file document as a valid `psilink.yaml` (the snake_case YAML the CLI
-  loads, serialized through the same discipline the mint layer applies to a
-  validated spec); `key` is the `.psilink.key` pair (`shared_secret` and, when a
-  bound is in force, `expires`); and `local` carries the browser-only fields the
-  two CLI artifacts do not (`label`, `side`, `schedule`, `last_run`,
-  `token_max_age_days`).
+- **Top-level shape.** The artifact is a JSON document with an `artifactVersion`
+  tag (its own reader-rejects-unknown literal, distinct from the record's
+  `schemaVersion` -- the on-disk artifact format versions independently of the
+  stored record) and three parts that keep the two CLI halves separable from the
+  browser-only fields: `exchangeDocument` embeds the exchange-file document as a
+  valid `psilink.yaml` (the snake_case YAML the CLI loads, serialized through the
+  same discipline the mint layer applies to a validated spec); `key` is the
+  `.psilink.key` pair (`sharedSecret` and, when a bound is in force, `expires`);
+  and `local` carries the browser-only fields the two CLI artifacts do not
+  (`label`, `side`, `schedule`, `lastRun`, `tokenMaxAgeDays`). The artifact's own
+  JSON keys are `camelCase`, deliberately: the `.psilink.key` file the CLI reads is
+  itself `camelCase` JSON (`sharedSecret`, `expires`), parsed without a
+  `snake_case` conversion, so a `camelCase` `key` block is what maps onto a valid
+  key file with no renaming. Only the embedded `exchangeDocument` is `snake_case`,
+  because the CLI loads it as YAML through `camelizeKeys`.
 - **CLI-separable format.** The record is the CLI's config-plus-key pair kept
   as one browser object, and its export stays consumable by the CLI toolchain
-  rather than becoming a third format: the embedded `exchange_document` is a
-  valid `psilink.yaml`; the `key` block's `shared_secret` and `expires` pair
-  maps onto a valid `.psilink.key`; and the `local` block's fields are cleanly
+  rather than becoming a third format: the embedded `exchangeDocument` is a
+  valid `psilink.yaml`; the `key` block's `sharedSecret` and `expires` pair maps
+  onto a valid `.psilink.key` (the block can be lifted out verbatim -- the field
+  names already match the key file's); and the `local` block's fields are cleanly
   separable and ignorable. This is a format-compatibility commitment, not a
   claim the embedded exchange runs there (the CLI has no WebRTC transport).
 - **Plaintext, custody-protected.** The artifact is a plaintext credential file,
@@ -432,27 +437,44 @@ Two pieces of derived-backup and migration state live **beside** the record, in 
 separate origin-local store keyed by the record `id`, and are **neither record
 fields nor artifact contents**:
 
-- **The backup marker** (`backed_up_at`, an ISO 8601 UTC instant) records when a
+- **The backup marker** (`backedUpAt`, an ISO 8601 UTC instant) records when a
   backup was last taken. It is the input to the derived backup state the UI
   surfaces (see [Moment-anchored backup
-  surfaces](../MANAGED_EXCHANGE.md#moment-anchored-backup-surfaces)): a backup is
-  **current** when it was taken **at or after the last successful run** -- the last
-  rotation, since the secret rotates exactly at a successful run and the record
-  already carries that instant honestly (`lastRun.at` with `outcome: "succeeded"`).
-  A record that has never run successfully has rotated no secret since it was
-  established, so any backup of it is current. A non-succeeded `lastRun` (a miss, a
-  failure, a benign input problem) did not rotate, so it does not stale a backup.
+  surfaces](../MANAGED_EXCHANGE.md#moment-anchored-backup-surfaces)), which is
+  simply **marker present / absent**: a present marker is "backed up", no marker is
+  "backup needed". "Taken since the last rotation" is enforced **structurally**, not
+  re-derived from `lastRun`, by two write-side rules:
+  - **Export binds the marker to the bytes it serialized.** Every export reads the
+    current record and stamps the marker in one atomic store step (a cross-store
+    read-and-mark), then downloads exactly the bytes it read, so the marker can only
+    ever attest the secret the file carries. A stale tab or a stale in-memory record
+    cannot mark a secret it did not serialize.
+  - **Rotation clears the marker.** The persist-before-success rotation write clears
+    the marker in the **same** transaction that advances the secret, so a rotation
+    stales any prior export the instant it lands -- independent of how the run is
+    later classified (a run that rotates and then fails in the data exchange has
+    still rotated, and its marker is already gone). "Marker present" therefore means
+    "an export containing the current secret was taken since the last rotation".
+
   The marker is a **plain timestamp**, honoring the derived-never-stored rule: it is
   no digest, fingerprint, or other secret-derived value, and there is no rotation
   epoch. `navigator.storage.persisted()` is never an input to the derivation, so a
   granted persist cannot suppress the actionable "backup needed" state (see
   [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#hosted-at-rest-threat-model-for-managed-exchanges)).
-- **The spent state** (`spent_at`, an ISO 8601 UTC instant) records that a
+- **The spent state** (`spentAt`, an ISO 8601 UTC instant) records that a
   migration export handed this device's copy off. It transitions the source to a
   visible spent state -- no Run affordance, no scheduled runs, labeled with the
   handoff date -- so the operator-cooperation invalidation is legible at the one
-  moment it is violable. It too is a plain timestamp, no secret material and no
-  epoch; importing the artifact back clears it (a revive).
+  moment it is violable. The spend is **operator-attested, not dispatch-anchored**:
+  a download dispatch (`anchor.click()`) gives no landing signal, so a cancelled or
+  failed save must not spend the source. The migration export downloads the artifact
+  and marks the source backed-up on dispatch (a spent source has a current artifact
+  by construction), then writes `spentAt` only after the operator confirms the file
+  is saved; a dismissed dialog leaves the source live and recoverable. It too is a
+  plain timestamp, no secret material and no epoch; importing the artifact back
+  clears it (a **revive-in-place**: an import whose secret matches the spent record's
+  updates that record's fields, keeps its `id` and input handle, clears the spent
+  state, and marks it backed-up, rather than installing a duplicate).
 
 Both are **local siblings by design**: the marker's currency input and this
 device's spent status must not travel in the export artifact -- an imported copy is

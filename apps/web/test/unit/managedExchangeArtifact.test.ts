@@ -143,16 +143,39 @@ describe("CLI separability", () => {
     expect(artifact.exchangeDocument).not.toContain(record.sharedSecret);
   });
 
-  test("the secret/expires pair satisfies the key-file shape", () => {
+  test("the key block is a lift-out .psilink.key: exact CLI field names, camelCase", () => {
     const record = buildManagedExchangeRecord(
       newExchange({ expires: "2026-04-06T14:00:00.000Z" }),
     );
     const artifact = encodeManagedExchangeArtifact(record);
-    // The key half maps onto a valid .psilink.key: sharedSecret matches the regex,
-    // expires is an ISO datetime, and no unknown key rides along.
+    // The .psilink.key file the CLI reads is camelCase JSON (sharedSecret, expires),
+    // parsed without a snake_case conversion, so the key block's JSON keys must be
+    // exactly those names -- the block lifts out verbatim into a valid key file with
+    // no renaming. Pin the literal key names, not just the values.
+    expect(Object.keys(artifact.key).sort()).toEqual([
+      "expires",
+      "sharedSecret",
+    ]);
+    expect(artifact.key).not.toHaveProperty("shared_secret");
+    // And it validates against the shared key-file shape (keyFileFieldsSchema is the
+    // one the CLI's key file and this artifact both use).
     const key = keyFileFieldsSchema.parse(artifact.key);
     expect(key.sharedSecret).toBe(record.sharedSecret);
     expect(key.expires).toBe(record.expires);
+  });
+
+  test("a tampered schedule with intervalDays: 0 is rejected (artifact no laxer than record)", () => {
+    const record = buildManagedExchangeRecord(newExchange({ schedule }));
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(record),
+    );
+    const artifact = JSON.parse(bytes);
+    artifact.local.schedule.intervalDays = 0;
+    // The artifact schema reuses the canonical schedule schema (min bounds), so a
+    // zero interval is rejected at the artifact parse, not merely at reconstruction.
+    expect(() =>
+      parseManagedExchangeArtifact(JSON.stringify(artifact)),
+    ).toThrow();
   });
 
   test("the local fields are cleanly separated into their own block", () => {

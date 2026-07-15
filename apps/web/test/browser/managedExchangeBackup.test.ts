@@ -10,9 +10,17 @@ import {
   deleteManagedExchange,
   getManagedExchange,
   listManagedExchanges,
+  persistManagedExchangeRotation,
+  readRecordAndMarkBackedUp,
+  recordManagedExchangeLastRun,
 } from "@psi/managedExchangeStore";
 import {
+  dispatchManagedMigration,
+  exportManagedBackup,
+} from "@psi/managedExchangeExport";
+import {
   encodeManagedExchangeArtifact,
+  importManagedExchangeArtifact,
   serializeManagedExchangeArtifact,
 } from "@psi/managedExchangeArtifact";
 import {
@@ -139,9 +147,165 @@ describe("a migration spends the source", () => {
     // The list names the handoff; the surface suppresses the run action for it.
     expect(rows[0].spentAsOf).toBeDefined();
 
-    // The spent record revives only by importing the artifact back (a fresh owner).
+    // The spent record revives by importing the artifact back -- in place (same id),
+    // not as a duplicate (see the revive suite below).
     const revived = await importManagedExchange(bytes);
+    expect(revived.id).toBe(source.id);
     expect(revived.sharedSecret).toBe(source.sharedSecret);
+  });
+});
+
+describe("the export binds the marker to the bytes it serialized", () => {
+  // The seams a real export drives against the live store: read-and-mark atomically,
+  // then download the bytes read. The download is captured so the test can inspect
+  // the exact bytes the marker attests.
+  function exportDeps(): {
+    downloaded: Array<string>;
+    readAndMark: typeof readRecordAndMarkBackedUp;
+    download: (fileName: string, content: string) => void;
+    now: () => Date;
+  } {
+    const downloaded: Array<string> = [];
+    return {
+      downloaded,
+      readAndMark: readRecordAndMarkBackedUp,
+      download: (_fileName, content) => downloaded.push(content),
+      now: () => new Date(),
+    };
+  }
+
+  test("the post-run completion export carries the ROTATED secret, not the mount-time one", async () => {
+    const record = await createManagedExchange(newExchange());
+    const original = record.sharedSecret;
+    // Simulate a run: the rotation persist advances the stored secret (and clears any
+    // marker) exactly as runManagedExchange's persist-before-success write does.
+    const rotated = generateSharedSecret();
+    await persistManagedExchangeRotation(record.id, {
+      sharedSecret: rotated,
+      expires: null,
+    });
+
+    // The completion surface exports by id (never a stale React snapshot of the
+    // pre-rotation record), so it serializes the rotated secret the store now holds.
+    const deps = exportDeps();
+    await exportManagedBackup(record.id, deps);
+    const restored = importManagedExchangeArtifact(deps.downloaded[0]);
+    expect(restored.sharedSecret).toBe(rotated);
+    expect(restored.sharedSecret).not.toBe(original);
+
+    // And the exchange reads green against the rotated store.
+    const rows = savedExchangeRows(
+      await listManagedExchanges(),
+      await listManagedLocalState(),
+      Date.now(),
+    );
+    expect(rows[0].backup.kind).toBe("backed-up");
+  });
+
+  test("a rotation stales the marker even when the run then fails in the data exchange", async () => {
+    const record = await createManagedExchange(newExchange());
+    // Take a backup: green.
+    await exportManagedBackup(record.id, exportDeps());
+    expect(
+      savedExchangeRows(
+        await listManagedExchanges(),
+        await listManagedLocalState(),
+        Date.now(),
+      )[0].backup.kind,
+    ).toBe("backed-up");
+
+    // A run rotates and persists, THEN the data exchange fails: the rotation cleared
+    // the marker in its own transaction, and a failed lastRun does not restore it.
+    await persistManagedExchangeRotation(record.id, {
+      sharedSecret: generateSharedSecret(),
+      expires: null,
+    });
+    await recordManagedExchangeLastRun(record.id, {
+      at: new Date().toISOString(),
+      outcome: "failed",
+      failureKind: "transport",
+    });
+
+    expect(await getManagedLocalState(record.id)).toBeUndefined();
+    expect(
+      savedExchangeRows(
+        await listManagedExchanges(),
+        await listManagedLocalState(),
+        Date.now(),
+      )[0].backup.kind,
+    ).toBe("backup-needed");
+  });
+
+  test("a stale-tab export cannot mark green over a newer rotation", async () => {
+    const record = await createManagedExchange(newExchange());
+    // Another context rotates the secret (and clears the marker).
+    const rotated = generateSharedSecret();
+    await persistManagedExchangeRotation(record.id, {
+      sharedSecret: rotated,
+      expires: null,
+    });
+
+    // A stale tab holding the pre-rotation record exports. Because the export reads
+    // and marks atomically by id, it serializes the ROTATED secret and marks that --
+    // it structurally cannot stamp a marker over a secret it did not serialize.
+    const deps = exportDeps();
+    await exportManagedBackup(record.id, deps);
+    const restored = importManagedExchangeArtifact(deps.downloaded[0]);
+    expect(restored.sharedSecret).toBe(rotated);
+    expect(await getManagedExchange(record.id)).toMatchObject({
+      sharedSecret: rotated,
+    });
+  });
+
+  test("a migration dispatch marks green but spends only on confirm", async () => {
+    const record = await createManagedExchange(newExchange());
+    const downloaded: Array<string> = [];
+    const dispatch = await dispatchManagedMigration(record.id, {
+      readAndMark: readRecordAndMarkBackedUp,
+      download: (_fileName, content) => downloaded.push(content),
+      markSpent: markManagedExchangeSpent,
+      now: () => new Date(),
+    });
+    // Dispatched: backed up, but the source is still live (no spent state yet).
+    expect((await getManagedLocalState(record.id))?.backup).toBeDefined();
+    expect((await getManagedLocalState(record.id))?.spent).toBeUndefined();
+
+    await dispatch.confirm(new Date());
+    expect((await getManagedLocalState(record.id))?.spent).toBeDefined();
+  });
+});
+
+describe("importing a spent secret-match revives in place", () => {
+  test("a re-import onto the spending device revives the husk, not a duplicate", async () => {
+    const source = await createManagedExchange(newExchange());
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(source),
+    );
+    // Spend the source (a migration handed it off from this device).
+    await markManagedExchangeSpent(source.id, new Date().toISOString());
+
+    // Importing the artifact back revives the SAME record (same id), clears spent,
+    // and marks it backed-up -- no duplicate row.
+    const revived = await importManagedExchange(bytes);
+    expect(revived.id).toBe(source.id);
+    expect(revived.sharedSecret).toBe(source.sharedSecret);
+    const all = await listManagedExchanges();
+    expect(all.map((r) => r.id)).toEqual([source.id]);
+    const local = await getManagedLocalState(source.id);
+    expect(local?.spent).toBeUndefined();
+    expect(local?.backup).toBeDefined();
+  });
+
+  test("importing over a LIVE secret-match installs fresh (never forks a live owner)", async () => {
+    const source = await createManagedExchange(newExchange());
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(source),
+    );
+    // The source is live (not spent): an import is a second owner, installed fresh.
+    const installed = await importManagedExchange(bytes);
+    expect(installed.id).not.toBe(source.id);
+    const all = await listManagedExchanges();
+    expect(all).toHaveLength(2);
   });
 });
 

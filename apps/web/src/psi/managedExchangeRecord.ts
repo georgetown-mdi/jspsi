@@ -162,7 +162,12 @@ export interface ManagedExchangeRecord {
   lastRun?: ManagedExchangeLastRun;
 }
 
-const scheduleSchema: ZodType<ManagedExchangeSchedule> = z.object({
+/** The canonical `schedule` validator, with the schema's own bounds (`intervalDays`
+ * and `windowSeconds` at least 1, `consecutiveMisses` at least 0). Exported so the
+ * export/import artifact reuses it rather than re-declaring a laxer copy -- a
+ * tampered artifact with `intervalDays: 0` must be rejected exactly as a stored
+ * record would be. */
+export const scheduleSchema: ZodType<ManagedExchangeSchedule> = z.object({
   anchor: z.iso.datetime(),
   intervalDays: z.int().min(1),
   windowSeconds: z.int().min(1),
@@ -170,13 +175,23 @@ const scheduleSchema: ZodType<ManagedExchangeSchedule> = z.object({
   consecutiveMisses: z.int().min(0),
 });
 
-const lastRunSchema: ZodType<ManagedExchangeLastRun> = z.object({
+/** The canonical `lastRun` validator. Exported so the export/import artifact reuses
+ * it rather than re-declaring a laxer copy. */
+export const lastRunSchema: ZodType<ManagedExchangeLastRun> = z.object({
   at: z.iso.datetime(),
   outcome: z.enum(["succeeded", "failed", "desynced", "missed"]),
   failureKind: z
     .enum(["auth", "transport", "storage", "input", "cancelled"])
     .optional(),
 });
+
+/** The canonical `tokenMaxAgeDays` validator (a positive integer bounded by
+ * {@link MAX_TOKEN_MAX_AGE_DAYS}). Exported so the export/import artifact reuses it
+ * rather than re-declaring a laxer copy. */
+export const tokenMaxAgeDaysSchema = z
+  .int()
+  .positive()
+  .max(MAX_TOKEN_MAX_AGE_DAYS);
 
 /**
  * The persisted exchange-file document, as validated when a record is read back:
@@ -227,7 +242,7 @@ export const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> =
     inputFileHandle: z.custom<FileSystemFileHandle>().optional(),
     sharedSecret: z.string().regex(SHARED_SECRET_REGEX),
     expires: z.iso.datetime().optional(),
-    tokenMaxAgeDays: z.int().positive().max(MAX_TOKEN_MAX_AGE_DAYS).optional(),
+    tokenMaxAgeDays: tokenMaxAgeDaysSchema.optional(),
     schedule: scheduleSchema.optional(),
     lastRun: lastRunSchema.optional(),
   });

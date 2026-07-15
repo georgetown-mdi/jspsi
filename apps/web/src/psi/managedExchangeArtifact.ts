@@ -50,7 +50,10 @@ import {
   MANAGED_EXCHANGE_ARTIFACT_VERSION,
   buildManagedExchangeRecord,
   keyFileFieldsSchema,
+  lastRunSchema,
   parseManagedExchangeRecord,
+  scheduleSchema,
+  tokenMaxAgeDaysSchema,
 } from "./managedExchangeRecord";
 
 import type {
@@ -64,6 +67,14 @@ import type { ZodType } from "zod";
 
 /** The MIME type the artifact downloads as; it is a JSON document. */
 export const MANAGED_EXCHANGE_ARTIFACT_MIME = "application/json";
+
+/** Upper bound, in bytes, on an artifact file the web import path will read. The
+ * artifact is a small JSON document (an exchange-file document, a 43-char secret,
+ * and a handful of local fields), so a generous fixed cap comfortably above any real
+ * artifact rejects a pathological file before {@link parseSensitiveJson} runs -- the
+ * length cap that module's header notes the web import applies before the bounded
+ * parse. Mirrors the linkage-terms import's own fixed pre-parse cap. */
+export const MAX_ARTIFACT_IMPORT_BYTES = 1_000_000;
 
 /** The `.psilink.key` pair the artifact carries: the current shared secret and,
  * when a bound is in force, the `expires` instant it lapses at. This is exactly the
@@ -153,35 +164,18 @@ export function serializeManagedExchangeArtifact(
   return `${JSON.stringify(artifact, null, 2)}\n`;
 }
 
-/** The local block's validator: reader-rejects-unknown (strict), the label cap and
- * schedule/lastRun shapes reused from the record schema through the reconstructed
- * record's own re-validation, so this schema bounds only what it must to
- * reconstruct. */
+/** The local block's validator: reader-rejects-unknown (strict), reusing the
+ * canonical `schedule`, `lastRun`, and `tokenMaxAgeDays` schemas from the record
+ * module so the artifact cannot be laxer than the record it reconstructs -- a
+ * tampered artifact with `intervalDays: 0` is rejected here exactly as a stored
+ * record would be, not merely at the reconstructed record's later re-validation. */
 const artifactLocalSchema: ZodType<ManagedExchangeArtifactLocal> = z
   .object({
     label: z.string(),
     side: z.enum(["inviter", "acceptor"]),
-    schedule: z
-      .object({
-        anchor: z.iso.datetime(),
-        intervalDays: z.int(),
-        windowSeconds: z.int(),
-        nextWindow: z.iso.datetime(),
-        consecutiveMisses: z.int(),
-      })
-      .strict()
-      .optional(),
-    lastRun: z
-      .object({
-        at: z.iso.datetime(),
-        outcome: z.enum(["succeeded", "failed", "desynced", "missed"]),
-        failureKind: z
-          .enum(["auth", "transport", "storage", "input", "cancelled"])
-          .optional(),
-      })
-      .strict()
-      .optional(),
-    tokenMaxAgeDays: z.int().optional(),
+    schedule: scheduleSchema.optional(),
+    lastRun: lastRunSchema.optional(),
+    tokenMaxAgeDays: tokenMaxAgeDaysSchema.optional(),
   })
   .strict();
 

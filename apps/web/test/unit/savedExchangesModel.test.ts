@@ -92,13 +92,16 @@ describe("savedExchangeRow", () => {
 });
 
 describe("savedExchangeRow backup state", () => {
+  // Currency is now structural: a rotation clears the marker atomically and an export
+  // binds its bytes to the marker, so the row derives state from marker presence
+  // alone, independent of the record's lastRun.
   test("no marker at all is backup-needed", () => {
     expect(savedExchangeRow(record(), undefined, NOW).backup).toEqual({
       kind: "backup-needed",
     });
   });
 
-  test("a marker with no successful run reads backed-up", () => {
+  test("a present marker reads backed-up, carrying its date", () => {
     const local: ManagedLocalState = {
       backup: { backedUpAt: "2026-07-10T09:00:00.000Z" },
     };
@@ -106,23 +109,12 @@ describe("savedExchangeRow backup state", () => {
     expect(row.backup.kind).toBe("backed-up");
   });
 
-  test("a marker older than the last successful run reads backup-needed", () => {
+  test("a present marker reads backed-up regardless of the last run's instant", () => {
+    // A marker chronologically before the last successful run still reads backed-up:
+    // the rotation would have cleared a stale marker, so a marker present at all is
+    // by construction current -- the model no longer re-derives staleness here.
     const local: ManagedLocalState = {
       backup: { backedUpAt: "2026-07-09T09:00:00.000Z" },
-    };
-    const row = savedExchangeRow(
-      record({
-        lastRun: { at: "2026-07-10T09:00:00.000Z", outcome: "succeeded" },
-      }),
-      local,
-      NOW,
-    );
-    expect(row.backup).toEqual({ kind: "backup-needed" });
-  });
-
-  test("a marker at or after the last successful run reads backed-up", () => {
-    const local: ManagedLocalState = {
-      backup: { backedUpAt: "2026-07-11T09:00:00.000Z" },
     };
     const row = savedExchangeRow(
       record({

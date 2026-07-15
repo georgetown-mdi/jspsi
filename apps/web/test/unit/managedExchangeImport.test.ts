@@ -36,12 +36,15 @@ function goodBytes(): string {
   );
 }
 
-function recordingDeps(): ManagedImportDeps & {
+function recordingDeps(revive?: ManagedExchangeRecord): ManagedImportDeps & {
   installed: Array<ManagedExchangeRecord>;
+  reviveSpent: ReturnType<typeof vi.fn>;
+  markBackedUp: ReturnType<typeof vi.fn>;
 } {
   const installed: Array<ManagedExchangeRecord> = [];
   return {
     installed,
+    reviveSpent: vi.fn(() => Promise.resolve(revive)),
     install: (record) => {
       installed.push(record);
       return Promise.resolve(record);
@@ -55,11 +58,41 @@ describe("importManagedExchange", () => {
   test("installs the reconstructed record and marks it backed-up", async () => {
     const deps = recordingDeps();
     const installed = await importManagedExchange(goodBytes(), deps);
+    expect(deps.reviveSpent).toHaveBeenCalledOnce();
     expect(deps.installed).toHaveLength(1);
     expect(deps.markBackedUp).toHaveBeenCalledWith(
       installed.id,
       "2026-07-14T12:00:00.000Z",
     );
+  });
+
+  test("revives a spent secret-match in place instead of installing a duplicate", async () => {
+    const existing = buildManagedExchangeRecord({
+      label: "Riverbend quarterly",
+      exchangeFile: composeManagedExchangeFile({
+        connection: { channel: "webrtc", host: "signaling.example.org" },
+        linkageTerms,
+      }),
+      side: "inviter",
+      sharedSecret: generateSharedSecret(),
+    });
+    const deps = recordingDeps(existing);
+    const result = await importManagedExchange(goodBytes(), deps);
+    // The revived record is returned; nothing fresh is installed and no separate
+    // marker write runs (the revive stamped it in its own transaction).
+    expect(result).toBe(existing);
+    expect(deps.installed).toHaveLength(0);
+    expect(deps.markBackedUp).not.toHaveBeenCalled();
+  });
+
+  test("a marker-write failure after a fresh install still reports success", async () => {
+    const deps = recordingDeps();
+    deps.markBackedUp.mockRejectedValueOnce(new Error("marker write failed"));
+    const installed = await importManagedExchange(goodBytes(), deps);
+    // The record is durable; a best-effort marker failure must not fail the import
+    // (a retry would duplicate it).
+    expect(deps.installed).toHaveLength(1);
+    expect(installed).toBe(deps.installed[0]);
   });
 
   test("the installed record carries no input-file handle", async () => {

@@ -7,6 +7,7 @@ import {
   listManagedExchanges,
   requestPersistentStorage,
 } from "@psi/managedExchangeStore";
+import { MAX_ARTIFACT_IMPORT_BYTES } from "@psi/managedExchangeArtifact";
 import { importManagedExchange } from "@psi/managedExchangeImport";
 import { listManagedLocalState } from "@psi/managedLocalState";
 
@@ -82,19 +83,17 @@ export function SavedExchanges() {
                   </span>
                   <BackupLine row={row} />
                 </div>
-                {row.spentAsOf === undefined ? (
-                  <Button
-                    variant="default"
-                    onClick={() =>
-                      void navigate({
-                        to: "/saved/$id",
-                        params: { id: row.id },
-                      })
-                    }
-                  >
-                    Run
-                  </Button>
-                ) : null}
+                <Button
+                  variant={row.spentAsOf === undefined ? "default" : "subtle"}
+                  onClick={() =>
+                    void navigate({
+                      to: "/saved/$id",
+                      params: { id: row.id },
+                    })
+                  }
+                >
+                  {row.spentAsOf === undefined ? "Run" : "Open"}
+                </Button>
               </li>
             ))}
           </ul>
@@ -116,8 +115,7 @@ function BackupLine({ row }: { row: SavedExchangeRow }) {
   if (row.spentAsOf !== undefined)
     return (
       <span className={`${styles.small} ${styles.sub}`}>
-        Handed off {row.spentAsOf}. Import the backup to run it here again, or
-        delete it.
+        Handed off {row.spentAsOf}. Import the backup to run it here again.
       </span>
     );
   if (row.backup.kind === "backed-up")
@@ -143,6 +141,13 @@ function SavedExchangesEmpty() {
   function onFile(file: File | null) {
     if (file === null) return;
     setImportFailed(false);
+    // Cap the file size before reading it: the artifact is a small JSON document, so
+    // an over-cap file is rejected with the same import-failure copy rather than read
+    // into memory ahead of the bounded parse.
+    if (file.size > MAX_ARTIFACT_IMPORT_BYTES) {
+      setImportFailed(true);
+      return;
+    }
     void (async () => {
       try {
         const source = await file.text();

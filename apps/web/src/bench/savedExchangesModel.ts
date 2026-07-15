@@ -73,14 +73,11 @@ function lastRunStatus(record: ManagedExchangeRecord): string {
   return `Last run did not complete (${at})`;
 }
 
-/** The backup state phrased for a row, from the record's run bookkeeping and its
- * local backup marker. A `"backed-up"` state carries the marker's date; a
- * `"backup-needed"` state is the one actionable prompt. */
-function backupFor(
-  record: ManagedExchangeRecord,
-  local: ManagedLocalState | undefined,
-): SavedExchangeBackup {
-  const state = deriveManagedBackupState(record, local?.backup);
+/** The backup state phrased for a row, from the record's local backup marker. A
+ * `"backed-up"` state carries the marker's date; a `"backup-needed"` state is the
+ * one actionable prompt. */
+function backupFor(local: ManagedLocalState | undefined): SavedExchangeBackup {
+  const state = deriveManagedBackupState(local?.backup);
   if (state.kind === "backed-up")
     return { kind: "backed-up", asOf: dateLabel(new Date(state.backedUpAt)) };
   return { kind: "backup-needed" };
@@ -90,9 +87,9 @@ function backupFor(
  * Derive the display row for a stored record as of `now`, given its local sibling
  * state (the backup marker and any spent state). The last-run status carries a
  * lapsed-`expires` note when the secret has lapsed; the backup state is derived from
- * the marker and the last successful run; a spent record names its handoff date and
- * the list suppresses its run action. `now` is injected so the expiry note is pure
- * and testable.
+ * the marker's presence; a spent record names its handoff date and the list
+ * suppresses its run action. `now` is injected so the expiry note is pure and
+ * testable.
  */
 export function savedExchangeRow(
   record: ManagedExchangeRecord,
@@ -109,7 +106,7 @@ export function savedExchangeRow(
     sideLabel: SIDE_LABEL[record.side],
     status,
     expired,
-    backup: backupFor(record, local),
+    backup: backupFor(local),
     ...(local?.spent !== undefined
       ? { spentAsOf: dateLabel(new Date(local.spent.spentAt)) }
       : {}),

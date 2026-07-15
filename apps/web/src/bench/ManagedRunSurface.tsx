@@ -6,18 +6,20 @@ import { Link } from "@tanstack/react-router";
 import { triggerBlobDownload } from "@components/blobDownload";
 
 import {
+  dispatchManagedMigration,
   exportManagedBackup,
-  exportManagedMigration,
 } from "@psi/managedExchangeExport";
 import {
+  getManagedExchange,
+  readRecordAndMarkBackedUp,
+} from "@psi/managedExchangeStore";
+import {
   getManagedLocalState,
-  markManagedExchangeBackedUp,
   markManagedExchangeSpent,
 } from "@psi/managedLocalState";
 import { MANAGED_EXCHANGE_ARTIFACT_MIME } from "@psi/managedExchangeArtifact";
 import { deriveManagedBackupState } from "@psi/managedBackupState";
 import { fileSystemAccessSupported } from "@psi/managedInputHandle";
-import { getManagedExchange } from "@psi/managedExchangeStore";
 import { managedRerunCompletion } from "@psi/managedCompletionSurface";
 import { runManagedExchangeInBrowser } from "@psi/managedRunDriver";
 import { whenDiagnostic } from "@utils/diagnostics";
@@ -34,6 +36,7 @@ import styles from "./bench.module.css";
 import type { ManagedBackupMarker } from "@psi/managedBackupState";
 import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
 import type { ManagedInputSource } from "@psi/managedInputHandle";
+import type { ManagedMigrationDispatch } from "@psi/managedExchangeExport";
 import type { ManagedRunFailure } from "./managedRunLaunchModel";
 import type { RunOutputs } from "./runOutputs";
 
@@ -64,6 +67,11 @@ export function ManagedRunSurface({ id }: { id: string }) {
   const [spentAt, setSpentAt] = useState<string>();
   const [backupMarker, setBackupMarker] = useState<ManagedBackupMarker>();
   const [exportBusy, setExportBusy] = useState(false);
+  const [exportFailed, setExportFailed] = useState(false);
+  // A dispatched migration whose download fired but whose spend awaits the operator
+  // attesting "the file is saved"; a dismissed save leaves the source live.
+  const [migrationDispatch, setMigrationDispatch] =
+    useState<ManagedMigrationDispatch>();
   const [migrated, setMigrated] = useState(false);
   const [reselected, setReselected] = useState<File>();
   const [running, setRunning] = useState(false);
@@ -175,55 +183,88 @@ export function ManagedRunSurface({ id }: { id: string }) {
   const downloadArtifact = (fileName: string, content: string) =>
     triggerBlobDownload(fileName, content, MANAGED_EXCHANGE_ARTIFACT_MIME);
 
-  // A backup export leaves the source live; a migration export spends it (this
-  // device's copy transitions to the spent load state on the next visit) and hands
-  // the secret off. Both write a fresh backup marker, so the source reads green after
-  // a backup and the spent copy carries a current artifact by construction.
+  // Every export reads the record fresh from the store and marks it in one atomic
+  // step (readRecordAndMarkBackedUp), so a mount-time React snapshot -- with a
+  // pre-rotation secret -- is never what an export serializes or the marker attests.
+  const exportDeps = {
+    readAndMark: readRecordAndMarkBackedUp,
+    download: downloadArtifact,
+    now: () => new Date(),
+  };
+
+  // A backup export leaves the source live; a migration export hands the secret off
+  // and spends this device's copy -- but only once the operator attests the file is
+  // saved (a dismissed save leaves the source live). Both read the current record and
+  // mark backed-up atomically, so the source reads green after a backup and a spent
+  // copy carries a current artifact by construction.
   function backUp() {
     if (record === undefined || exportBusy) return;
     setExportBusy(true);
-    void exportManagedBackup(record, {
-      download: downloadArtifact,
-      markBackedUp: markManagedExchangeBackedUp,
-      now: () => new Date(),
-    })
-      .then(() => setBackupMarker({ backedUpAt: new Date().toISOString() }))
+    setExportFailed(false);
+    void exportManagedBackup(record.id, exportDeps)
+      .then((result) =>
+        setBackupMarker({ backedUpAt: result.backedUpAt.toISOString() }),
+      )
+      .catch(() => setExportFailed(true))
       .finally(() => setExportBusy(false));
   }
 
   function migrate() {
     if (record === undefined || exportBusy) return;
     setExportBusy(true);
-    void exportManagedMigration(record, {
-      download: downloadArtifact,
-      markBackedUp: markManagedExchangeBackedUp,
+    setExportFailed(false);
+    void dispatchManagedMigration(record.id, {
+      ...exportDeps,
       markSpent: markManagedExchangeSpent,
-      now: () => new Date(),
     })
-      .then(() => setMigrated(true))
+      .then((dispatch) => {
+        setBackupMarker({ backedUpAt: dispatch.backedUpAt.toISOString() });
+        setMigrationDispatch(dispatch);
+      })
+      .catch(() => setExportFailed(true))
+      .finally(() => setExportBusy(false));
+  }
+
+  // The operator attested the downloaded migration file is saved: spend the source
+  // (this device's copy transitions to the spent load state on the next visit).
+  function confirmMigration() {
+    if (migrationDispatch === undefined || exportBusy) return;
+    setExportBusy(true);
+    setExportFailed(false);
+    void migrationDispatch
+      .confirm(new Date())
+      .then(() => {
+        setMigrationDispatch(undefined);
+        setMigrated(true);
+      })
+      .catch(() => setExportFailed(true))
       .finally(() => setExportBusy(false));
   }
 
   // The run just rotated the secret, so the previous backup is stale; the completion
-  // surface offers "download updated backup", which exports the artifact and records
-  // the backup marker (returning the exchange to green). The record used is the
-  // just-run one; the export snapshots the rotated secret it now holds.
+  // surface offers "download updated backup", which reads the just-rotated secret
+  // fresh from the store and marks the backup current (returning the exchange to
+  // green). It reads by id, never the mount-time React record, so it exports the
+  // rotated secret the store now holds.
   const completion =
     record === undefined
       ? managedRerunCompletion()
       : managedRerunCompletion({
           downloadUpdatedBackup: () =>
-            exportManagedBackup(record, {
-              download: (fileName, content) =>
-                triggerBlobDownload(
-                  fileName,
-                  content,
-                  MANAGED_EXCHANGE_ARTIFACT_MIME,
-                ),
-              markBackedUp: markManagedExchangeBackedUp,
-              now: () => new Date(),
-            }),
+            exportManagedBackup(record.id, exportDeps).then(() => undefined),
         });
+
+  // Drive the completion surface's refreshed backup with the shared busy/failure
+  // state, so a failed export surfaces without claiming the backup was taken.
+  function downloadUpdatedBackup() {
+    if (completion.backupHook === undefined || exportBusy) return;
+    setExportBusy(true);
+    setExportFailed(false);
+    void completion.backupHook
+      .downloadUpdatedBackup()
+      .catch(() => setExportFailed(true))
+      .finally(() => setExportBusy(false));
+  }
 
   return (
     <BenchPage>
@@ -256,7 +297,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
                 ? ` on ${dateLabel(new Date(spentAt))}`
                 : ""}
               , so it can no longer run here. Import the backup to run it on
-              this device again, or delete it.
+              this device again.
             </p>
             <SavedExchangesFoot />
           </>
@@ -309,11 +350,20 @@ export function ManagedRunSurface({ id }: { id: string }) {
                   text. Keep it somewhere only you can read, and never send it
                   over an unencrypted channel.
                 </p>
+                {exportFailed && (
+                  <Alert
+                    color="red"
+                    title="That export could not be completed"
+                    mb="sm"
+                  >
+                    The backup could not be saved. Nothing changed here; try
+                    again.
+                  </Alert>
+                )}
                 <Button
                   mt="sm"
-                  onClick={() =>
-                    void completion.backupHook?.downloadUpdatedBackup()
-                  }
+                  onClick={downloadUpdatedBackup}
+                  loading={exportBusy}
                 >
                   Download updated backup
                 </Button>
@@ -330,6 +380,38 @@ export function ManagedRunSurface({ id }: { id: string }) {
               device to run it there. Keep the file somewhere only you can read.
             </p>
             <SavedExchangesFoot />
+          </>
+        ) : migrationDispatch !== undefined ? (
+          <>
+            <h1>Confirm the move</h1>
+            <p className={styles.sub}>
+              Your exchange&apos;s backup file was downloaded. Confirm you saved
+              it before this device gives up its copy: once you confirm, this
+              exchange no longer runs here and you import the file on the other
+              device to run it there.
+            </p>
+            {exportFailed && (
+              <Alert color="red" title="That could not be completed" mb="md">
+                This device&apos;s copy could not be handed off. It is still
+                live here; try again.
+              </Alert>
+            )}
+            <p className={styles.small}>
+              Keep the file somewhere only you can read, and never send it over
+              an unencrypted channel.
+            </p>
+            <p>
+              <Button onClick={confirmMigration} loading={exportBusy}>
+                I saved the file; hand off this exchange
+              </Button>{" "}
+              <Button
+                variant="subtle"
+                disabled={exportBusy}
+                onClick={() => setMigrationDispatch(undefined)}
+              >
+                Keep it on this device
+              </Button>
+            </p>
           </>
         ) : (
           <>
@@ -384,8 +466,8 @@ export function ManagedRunSurface({ id }: { id: string }) {
             )}
             <BackupPanel
               marker={backupMarker}
-              record={record}
               busy={exportBusy}
+              failed={exportFailed}
               onBackUp={backUp}
               onMigrate={migrate}
             />
@@ -406,18 +488,18 @@ export function ManagedRunSurface({ id }: { id: string }) {
  * the file is a plaintext credential to keep under owner-only custody. */
 function BackupPanel({
   marker,
-  record,
   busy,
+  failed,
   onBackUp,
   onMigrate,
 }: {
   marker: ManagedBackupMarker | undefined;
-  record: ManagedExchangeRecord;
   busy: boolean;
+  failed: boolean;
   onBackUp: () => void;
   onMigrate: () => void;
 }) {
-  const state = deriveManagedBackupState(record, marker);
+  const state = deriveManagedBackupState(marker);
   return (
     <div className={styles.callout}>
       {state.kind === "backed-up" ? (
@@ -432,6 +514,11 @@ function BackupPanel({
         somewhere only you can read, and never send it over an unencrypted
         channel.
       </p>
+      {failed && (
+        <Alert color="red" title="That export could not be completed" mb="sm">
+          The backup could not be saved. Nothing changed here; try again.
+        </Alert>
+      )}
       <Button mt="sm" variant="default" onClick={onBackUp} loading={busy}>
         Download a backup
       </Button>{" "}
