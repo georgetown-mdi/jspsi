@@ -22,6 +22,7 @@
  */
 
 import {
+  applyManagedExchangeInputHandle,
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
   applyManagedExchangeRotation,
@@ -325,6 +326,33 @@ export async function recordManagedExchangeLastRun(
       throw new Error(`no managed exchange with id ${id}`);
     const existing = parseManagedExchangeRecord(stored);
     return applyManagedExchangeLastRun(existing, lastRun);
+  });
+}
+
+/**
+ * Persist an input-file handle onto the stored record, or drop it with `null`,
+ * advancing only `inputFileHandle` and nothing else. The read, the field-scoped
+ * application through {@link applyManagedExchangeInputHandle} (which re-validates),
+ * and the write-back run inside one strict-durability readwrite transaction
+ * ({@link readModifyWriteRecord}), so persisting a handle applies to the freshest
+ * stored record and is structurally incapable of carrying a stale secret or a
+ * stale document back over a concurrent rotation write. This is the write the save
+ * flow uses to persist the handle at save-as-recurring or first run, and the write
+ * the surfaces use to re-point a handle after a missing-file failure.
+ *
+ * @throws {Error} if no record with `id` exists.
+ * @throws {ZodError} if the stored value is not a valid v1 record or the result is
+ *   invalid; the transaction aborts and nothing is written.
+ */
+export async function persistManagedExchangeInputHandle(
+  id: string,
+  handle: FileSystemFileHandle | null,
+): Promise<ManagedExchangeRecord> {
+  return readModifyWriteRecord(id, (stored) => {
+    if (stored === undefined)
+      throw new Error(`no managed exchange with id ${id}`);
+    const existing = parseManagedExchangeRecord(stored);
+    return applyManagedExchangeInputHandle(existing, handle);
   });
 }
 

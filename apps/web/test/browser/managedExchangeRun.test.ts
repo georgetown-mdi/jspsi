@@ -210,6 +210,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
 
     const result = await runManagedExchange({
       record: created,
+      acquireInput: () => Promise.resolve(undefined),
       handshake: () => {
         order.push("handshake");
         return Promise.resolve({ rotatedSecret, handshake: "carried" });
@@ -253,6 +254,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     try {
       await runManagedExchange({
         record: created,
+        acquireInput: () => Promise.resolve(undefined),
         handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
         dataExchange: () => Promise.resolve("done"),
       });
@@ -273,6 +275,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     const rotatedSecret = generateSharedSecret();
     await runManagedExchange({
       record: created,
+      acquireInput: () => Promise.resolve(undefined),
       handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
       dataExchange: () => Promise.resolve("done"),
     });
@@ -291,6 +294,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     const rotationAt = Date.parse("2026-07-14T12:00:00.000Z");
     await runManagedExchange({
       record: created,
+      acquireInput: () => Promise.resolve(undefined),
       handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
       dataExchange: () => Promise.resolve("done"),
       now: () => rotationAt,
@@ -308,6 +312,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     const rotatedSecret = generateSharedSecret();
     await runManagedExchange({
       record: created,
+      acquireInput: () => Promise.resolve(undefined),
       handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
       dataExchange: () => Promise.resolve("done"),
     });
@@ -352,6 +357,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     try {
       await runManagedExchange({
         record: created,
+        acquireInput: () => Promise.resolve(undefined),
         handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
         dataExchange: () => {
           dataExchangeRan = true;
@@ -407,6 +413,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     try {
       await runManagedExchange({
         record: created,
+        acquireInput: () => Promise.resolve(undefined),
         handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
         dataExchange: () => {
           dataExchangeRan = true;
@@ -445,6 +452,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     // first's committed secret, never reverting it.
     const first = runManagedExchange({
       record: created,
+      acquireInput: () => Promise.resolve(undefined),
       handshake: () =>
         Promise.resolve({ rotatedSecret: firstRotated, handshake: "1" }),
       dataExchange: async () => {
@@ -463,6 +471,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
 
       second = runManagedExchange({
         record: { id: created.id },
+        acquireInput: () => Promise.resolve(undefined),
         handshake: () =>
           Promise.resolve({ rotatedSecret: secondRotated, handshake: "2" }),
         dataExchange: () => Promise.resolve("2"),
@@ -487,6 +496,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
 
     const error: unknown = await runManagedExchange({
       record: created,
+      acquireInput: () => Promise.resolve(undefined),
       handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
       dataExchange: () => Promise.reject(failure),
     }).then(
@@ -521,6 +531,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     // second run completes fully in between, recording the newer outcome.
     const first = runManagedExchange({
       record: created,
+      acquireInput: () => Promise.resolve(undefined),
       handshake: () =>
         Promise.resolve({
           rotatedSecret: generateSharedSecret(),
@@ -538,6 +549,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     try {
       await runManagedExchange({
         record: { id: created.id },
+        acquireInput: () => Promise.resolve(undefined),
         handshake: () =>
           Promise.resolve({
             rotatedSecret: generateSharedSecret(),

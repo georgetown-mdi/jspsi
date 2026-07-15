@@ -8,6 +8,7 @@ import { describe, expect, test } from "vitest";
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
   MAX_LABEL_LENGTH,
+  applyManagedExchangeInputHandle,
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
   applyManagedExchangeRotation,
@@ -299,6 +300,52 @@ describe("applyManagedExchangeRotation", () => {
     });
     expect(record.sharedSecret).toBe(originalSecret);
     expect(record.expires).toBe("2026-04-06T14:00:00.000Z");
+  });
+});
+
+describe("applyManagedExchangeInputHandle", () => {
+  // A FileSystemFileHandle is an opaque platform object the schema carries through
+  // as an optional unknown (no runtime shape assertion; see the schema note), so a
+  // stand-in object exercises the set path in Node -- the real handle's structured-
+  // clone round-trip is the browser suite's.
+  const fakeHandle = { kind: "file", name: "input.csv" } as unknown as never;
+
+  test("sets the handle, touching nothing else", () => {
+    const record = buildManagedExchangeRecord(
+      newExchange({ tokenMaxAgeDays: 90, schedule }),
+    );
+    const pointed = applyManagedExchangeInputHandle(record, fakeHandle);
+    expect(pointed.inputFileHandle).toBe(fakeHandle);
+    expect(pointed.sharedSecret).toBe(record.sharedSecret);
+    expect(pointed.exchangeFile).toEqual(record.exchangeFile);
+    expect(pointed.label).toBe(record.label);
+    expect(pointed.schedule).toEqual(schedule);
+  });
+
+  test("re-points to a replacement handle", () => {
+    const record = applyManagedExchangeInputHandle(
+      buildManagedExchangeRecord(newExchange()),
+      fakeHandle,
+    );
+    const other = { kind: "file", name: "other.csv" } as unknown as never;
+    expect(applyManagedExchangeInputHandle(record, other).inputFileHandle).toBe(
+      other,
+    );
+  });
+
+  test("a null drops the handle, deleting the key", () => {
+    const record = applyManagedExchangeInputHandle(
+      buildManagedExchangeRecord(newExchange()),
+      fakeHandle,
+    );
+    const dropped = applyManagedExchangeInputHandle(record, null);
+    expect(dropped).not.toHaveProperty("inputFileHandle");
+  });
+
+  test("does not mutate the input record", () => {
+    const record = buildManagedExchangeRecord(newExchange());
+    applyManagedExchangeInputHandle(record, fakeHandle);
+    expect(record.inputFileHandle).toBeUndefined();
   });
 });
 
