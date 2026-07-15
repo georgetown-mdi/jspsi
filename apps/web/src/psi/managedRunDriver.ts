@@ -36,7 +36,6 @@ import { authenticateExchange } from "./authenticateExchange";
 import { beginManagedRendezvous } from "./managedRendezvous";
 import { createBrowserPsiEngineFactory } from "./psiCryptoController";
 import { defaultSpawnPsiCryptoWorker } from "./psiCryptoWorkerClient";
-import { loadCSVFileOffMainThread } from "./csvParseController";
 import { openPeerMessageConnection } from "./peerMessageConnection";
 import { prepareManagedRerunExchange } from "./managedPreparedExchange";
 import { runManagedRerun } from "./managedRun";
@@ -89,7 +88,9 @@ interface ManagedRerunCarried {
 export interface ManagedRunDriverConfig {
   /** The stored record to run from. Its `side` dispatches the rendezvous, its
    * current `sharedSecret` authenticates and derives the peer id, and its
-   * `exchangeFile` supplies the terms and the acceptor's dial endpoint. */
+   * `exchangeFile` supplies the terms (the connection block is read only for the
+   * webrtc dispatchability check -- the signaling location is the app's own; see
+   * {@link beginManagedRendezvous}). */
   record: ManagedExchangeRecord;
   /** The per-run input source: read through the persisted handle (attended may
    * prompt once for a gone permission), or an operator-re-selected file. Its
@@ -129,19 +130,16 @@ export function runManagedExchangeInBrowser(
     {
       // The input is acquired and its columns validated against the standing terms
       // BEFORE any connection; its contents are never taken from the record. The
-      // carried value is assembled in the handshake, so the acquired input is
-      // parsed for rows here and threaded through.
+      // acquired rows ride the same single parse the column guard ran on, so the
+      // input is read and parsed exactly once per run.
       acquireInput: async () => {
         const acquired = await acquireValidatedManagedInput(
           record.exchangeFile,
           source,
         );
-        // The column guard already ran on `acquired.columns`; re-read the File for
-        // its rows (the File is this run's point-in-time reference, never retained).
-        const parsed = await loadCSVFileOffMainThread(acquired.file);
         const prepared = prepareManagedRerunExchange(
           record.exchangeFile,
-          parsed.data,
+          acquired.rows,
           acquired.columns,
         );
         return { prepared };
@@ -179,17 +177,25 @@ export function runManagedExchangeInBrowser(
           throw error;
         }
 
-        let mc: MessageConnection;
-        let psiLibrary: PSILibrary;
+        // Closure-scoped so the catch's teardown reads whatever the try assigned:
+        // a failure AFTER the wrapper opened (a failed authentication) drains it
+        // through mc.close(), and only a pre-open failure hard-closes the raw
+        // channel -- the same at-call-time read the one-shot lifecycle's teardown
+        // uses.
+        let mc: MessageConnection | undefined;
         try {
           mc = await openPeerMessageConnection(conn);
+          // record.expires stays enforced at the handshake (core's pre- and
+          // post-handshake guards), covering a bound that lapses between the
+          // pre-connection expiry check and here; the orchestration re-maps that
+          // failure to the benign expiry state (see runManagedRerun).
           const auth = await authenticateExchange(
             mc,
             exchangeRole,
             record.sharedSecret,
             record.expires,
           );
-          psiLibrary = await psiPromise;
+          const psiLibrary = await psiPromise;
           const carried: ManagedRerunCarried = {
             mc,
             psiLibrary,
@@ -201,8 +207,8 @@ export function runManagedExchangeInBrowser(
         } catch (error) {
           // The handshake failed after the channel opened but before the data
           // exchange: tear down so a failed run never leaks a registered peer or an
-          // open channel. The connection wrapper may not exist yet on an early throw.
-          await teardown(peer, conn, undefined);
+          // open channel.
+          await teardown(peer, conn, mc);
           throw error;
         }
       },
@@ -227,7 +233,12 @@ export function runManagedExchangeInBrowser(
         }
       },
     },
-    config.options,
+    {
+      ...config.options,
+      // The abort probe the failure bookkeeping classifies "cancelled" on: an
+      // operator-torn-down run is recorded as cancelled, not a transport fault.
+      aborted: () => signal.aborted,
+    },
   );
 }
 

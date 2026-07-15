@@ -13,12 +13,15 @@ import { ManagedInputError } from "@psi/managedInputGuard";
 // the generic message -- no desync or attack copy is invented here.
 
 describe("classifyManagedRunFailure", () => {
-  test("a lapsed secret is the benign expiry state with re-invite copy", () => {
+  test("a lapsed secret is the benign expiry state with re-invite copy naming the lapse", () => {
     const failure = classifyManagedRunFailure(
       new ManagedExchangeExpiredError("2026-07-01T00:00:00.000Z"),
     );
     expect(failure.kind).toBe("expired");
     expect(failure.message).toMatch(/re-invite/i);
+    // The lapsed instant the error carries is named for the operator (the exact
+    // rendering is locale/timezone formatting; the year pins its presence).
+    expect(failure.message).toMatch(/2026/);
     // Benign framing, never attack copy.
     expect(failure.message).not.toMatch(/attack|tamper|impersonat/i);
   });

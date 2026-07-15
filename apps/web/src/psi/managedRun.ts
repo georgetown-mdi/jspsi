@@ -2,12 +2,13 @@
  * The pure orchestration of a managed (recurring) exchange re-run -- the attended
  * path: launch a run from a stored record, reconnecting to the partner without a
  * new invitation and completing through the durable rotate-and-persist path. It
- * is the tested boundary for the re-run's decisions and ordering, with every
- * platform operation injected: the pre-connection checks (expiry, then input),
+ * is the tested boundary for the re-run's decisions and ordering, with the
+ * platform operations injected: the pre-connection checks (expiry, then input),
  * the side dispatch, the phase assembly into {@link runManagedExchange}, and the
  * `lastRun` classification of a failure the runner (not the critical section)
- * owns. No IndexedDB, no Web Locks, no broker, no WASM -- those are the injected
- * seams, wired for real in {@link ./managedRunDriver.ts}.
+ * owns -- the classification itself pure ({@link rerunFailureLastRun}), its write
+ * the store's monotonic bookkeeping write, best-effort. No broker, no WASM --
+ * those are the injected seams, wired for real in {@link ./managedRunDriver.ts}.
  *
  * Normative shape (docs/spec/MANAGED_EXCHANGE_RECORD.md, docs/MANAGED_EXCHANGE.md):
  *
@@ -26,6 +27,8 @@
  *   module only supplies the phases it gates.
  */
 
+import { ConnectionError } from "@psilink/core";
+
 import {
   ManagedExchangeExpiredError,
   managedExchangeLapsed,
@@ -34,14 +37,19 @@ import {
   ManagedExchangeLockUnavailableError,
   runManagedExchange,
 } from "./managedExchangeRun";
+import { RotationPersistError, failedRun } from "./managedRunRotate";
 import { ManagedInputError } from "./managedInputGuard";
-import { RotationPersistError } from "./managedRunRotate";
+import { hasRecoveryHint } from "./authenticateExchange";
+import { recordManagedExchangeLastRun } from "./managedExchangeStore";
 
+import type {
+  ManagedExchangeLastRun,
+  ManagedExchangeRecord,
+} from "./managedExchangeRecord";
 import type {
   ManagedExchangeLockOptions,
   ManagedExchangeRunResult,
 } from "./managedExchangeRun";
-import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 
 /** The handshake result a re-run's handshake phase yields: the rotated secret the
  * persist-before-success write advances, plus whatever the data-exchange phase
@@ -95,6 +103,13 @@ export interface ManagedRerunOptions {
    * too, so this is the caller's choice.
    */
   lock?: ManagedExchangeLockOptions;
+  /**
+   * Whether the run's owner has cancelled it (the driver passes the run signal's
+   * `aborted`). Read only when classifying a failed run's bookkeeping, so a
+   * teardown-provoked error on an operator-cancelled run records `"cancelled"`
+   * rather than a transport fault. Defaults to never-cancelled.
+   */
+  aborted?: () => boolean;
 }
 
 /**
@@ -114,14 +129,20 @@ export interface ManagedRerunOptions {
  *
  * The lock's own unavailability ({@link ManagedExchangeLockUnavailableError}: a run
  * is already in progress in another tab) propagates for the caller to surface as
- * the benign "already running elsewhere" state -- not a failure of this run. Every
- * benign pre-run state (expiry, input, lock-unavailable) and the storage tier are
- * classified here or in runManagedExchange; a handshake or data-exchange failure
- * propagates unchanged for the caller to surface through the existing generic
- * path.
+ * the benign "already running elsewhere" state -- not a failure of this run. A
+ * handshake or data-exchange failure is the runner's to classify and record (the
+ * contract runManagedExchange states): it is stamped into the record's `lastRun`
+ * best-effort here ({@link rerunFailureLastRun}) and then propagates unchanged for
+ * the caller's generic failure surface. A bound that lapses mid-run -- after the
+ * pre-connection check but before the handshake completes -- fails the handshake
+ * through core's own expiry guards and is re-mapped to the same benign
+ * {@link ManagedExchangeExpiredError} the pre-connection check raises
+ * ({@link remapLapsedRunFailure}), so expiry is never routed through attack
+ * framing even in that race window.
  *
- * @throws {ManagedExchangeExpiredError} if the stored secret has lapsed (checked
- *   before any connection).
+ * @throws {ManagedExchangeExpiredError} if the stored secret has lapsed -- before
+ *   any connection (the pre-connection check), or during the run (re-mapped from
+ *   the handshake's own expiry failure).
  * @throws {ManagedInputError} if the input guard rejects (a missing file, a gone
  *   permission, or an unsatisfiable column shape); no connection was attempted.
  * @throws {ManagedExchangeLockUnavailableError} if a run is already in progress in
@@ -147,19 +168,111 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
 
   // The input guard, the single-writer lock, the persist-before-success rotation,
   // and the data exchange are runManagedExchange's, wired to this record's seams.
-  return runManagedExchange<TInput, THandshake, TExchange>({
-    record: {
-      id: record.id,
-      ...(record.tokenMaxAgeDays !== undefined
-        ? { tokenMaxAgeDays: record.tokenMaxAgeDays }
-        : {}),
-    },
-    acquireInput: seams.acquireInput,
-    handshake: seams.handshake,
-    dataExchange: seams.dataExchange,
-    ...(options.lock !== undefined ? { lock: options.lock } : {}),
-    now,
-  });
+  try {
+    return await runManagedExchange<TInput, THandshake, TExchange>({
+      record: {
+        id: record.id,
+        ...(record.tokenMaxAgeDays !== undefined
+          ? { tokenMaxAgeDays: record.tokenMaxAgeDays }
+          : {}),
+      },
+      acquireInput: seams.acquireInput,
+      handshake: seams.handshake,
+      dataExchange: seams.dataExchange,
+      ...(options.lock !== undefined ? { lock: options.lock } : {}),
+      now,
+    });
+  } catch (error) {
+    // A bound that lapsed mid-run failed the handshake through core's expiry
+    // guards; surface it as the same benign expiry state the pre-connection check
+    // raises, never attack framing.
+    const lapsed = remapLapsedRunFailure(error, record, now());
+    if (lapsed !== undefined) throw lapsed;
+    // The bookkeeping boundary: the critical section records its own tiers
+    // best-effort (the benign `input` rejection and the `storage` persist
+    // failure); a pre-run expiry and a lock already held stay deliberately
+    // unrecorded (no run began, and the record's own `expires` already carries a
+    // lapse). Everything else -- the handshake, transport, and cancelled failures
+    // runManagedExchange documents as the runner's to classify and record -- is
+    // stamped here.
+    const lastRun = rerunFailureLastRun(
+      error,
+      now(),
+      options.aborted?.() ?? false,
+    );
+    if (lastRun !== undefined) {
+      // Best-effort, mirroring the critical section's own bookkeeping writes: a
+      // failed lastRun write must never replace the run's own failure, which the
+      // caller classifies on.
+      try {
+        await recordManagedExchangeLastRun(record.id, lastRun);
+      } catch {
+        // Swallowed: the original failure still reaches the caller on the rethrow.
+      }
+    }
+    throw error;
+  }
+}
+
+/**
+ * Re-map a run failure caused by the bound lapsing MID-RUN -- after the
+ * pre-connection expiry check passed but before the handshake completed -- to the
+ * benign {@link ManagedExchangeExpiredError}, or `undefined` when the failure is
+ * not that case. Core's pre- and post-handshake expiry guards throw errors tagged
+ * `psilinkRecoveryHintEmitted` (the tag survives the security re-wrap; see
+ * {@link hasRecoveryHint}); the tag alone also covers a malformed-secret error, so
+ * the re-map additionally requires that the record's bound has in fact lapsed by
+ * `now` -- and core throws its expiry error only when it has, so the pair is
+ * exact, not a heuristic. (A stored record's secret is regex-validated on every
+ * read, so the malformed-tag case cannot arise here regardless; the lapse check
+ * covers it anyway.)
+ */
+export function remapLapsedRunFailure(
+  error: unknown,
+  record: Pick<ManagedExchangeRecord, "expires">,
+  now: number,
+): ManagedExchangeExpiredError | undefined {
+  if (!hasRecoveryHint(error)) return undefined;
+  if (!managedExchangeLapsed(record, now)) return undefined;
+  // expires is defined here: managedExchangeLapsed returns true only when it is
+  // set and in the past.
+  return new ManagedExchangeExpiredError(record.expires as string);
+}
+
+/**
+ * The `lastRun` bookkeeping for a failed run the runner (not the critical section)
+ * classifies, or `undefined` for a failure whose bookkeeping is owned elsewhere or
+ * deliberately absent:
+ *
+ * - {@link ManagedInputError} and {@link RotationPersistError}: recorded
+ *   best-effort inside the critical section (the `input` and `storage` tiers).
+ * - {@link ManagedExchangeExpiredError} and
+ *   {@link ManagedExchangeLockUnavailableError}: deliberately unrecorded -- no
+ *   run began, and a lapse is already carried by the record's own `expires`.
+ *
+ * Everything else is this run's to stamp: a cancelled run (`aborted`, checked
+ * first so a teardown-provoked error on a cancelled run is not misread) records
+ * `"cancelled"`; a `security`-kind {@link ConnectionError} (the authenticated
+ * handshake failing closed) records `"auth"`; any other failure records
+ * `"transport"`. The outcome is always `"failed"` -- `"desynced"` is the later
+ * desync-tiering item's call, not this classifier's.
+ */
+export function rerunFailureLastRun(
+  error: unknown,
+  at: number,
+  aborted: boolean,
+): ManagedExchangeLastRun | undefined {
+  if (
+    error instanceof ManagedExchangeExpiredError ||
+    error instanceof ManagedExchangeLockUnavailableError ||
+    error instanceof ManagedInputError ||
+    error instanceof RotationPersistError
+  )
+    return undefined;
+  if (aborted) return failedRun(at, "failed", "cancelled");
+  if (error instanceof ConnectionError && error.kind === "security")
+    return failedRun(at, "failed", "auth");
+  return failedRun(at, "failed", "transport");
 }
 
 /** The benign, pre-connection outcomes of a launch a surface classifies without

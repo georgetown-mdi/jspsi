@@ -9,7 +9,7 @@ import {
 } from "@psilink/core";
 
 import {
-  acceptorEndpointFromRecord,
+  assertManagedRerunDispatchable,
   beginManagedRendezvous,
 } from "@psi/managedRendezvous";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
@@ -25,18 +25,22 @@ import type Peer from "peerjs";
 import type { ManagedRendezvousFlows } from "@psi/managedRendezvous";
 
 // The side-dispatched rendezvous, tested in Node with the rendezvous flows faked:
-// the record's local `side` selects listenAsInviter vs dialAsAcceptor, and the
+// the record's local `side` selects listenAsInviter vs dialAsAcceptor, the
 // record's CURRENT sharedSecret is passed to whichever runs (so its peer id
-// derives fresh, never from storage). One test drives the REAL listenAsInviter
-// through an injected peer factory to prove the constructed id is
-// deriveRendezvousPeerId over the current secret -- the "derived, never stored"
-// property by construction.
+// derives fresh, never from storage), and the acceptor's dial endpoint comes from
+// the app's OWN location -- the stored document's server locator is inert per the
+// spec (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Role: a local side field"). One
+// test drives the REAL listenAsInviter through an injected peer factory to prove
+// the constructed id is deriveRendezvousPeerId over the current secret -- the
+// "derived, never stored" property by construction.
 
+// Every locator field deliberately differs from the stubbed app location below,
+// so an assertion on the dial endpoint distinguishes the two sources.
 const webrtcLocator: WebRTCExchangeLocator = {
   channel: "webrtc",
   host: "signaling.example.org",
-  port: 3000,
-  path: "/api/",
+  port: 9999,
+  path: "/stored-locator/",
 };
 
 function exchangeFile(
@@ -79,6 +83,23 @@ function recordingFlows(): {
   return { flows, inviterCalls, acceptorCalls };
 }
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+/** The app's own location, stubbed: what the acceptor's dial endpoint must derive
+ * from. */
+function stubAppLocation(): void {
+  vi.stubGlobal("window", {
+    location: {
+      origin: "https://app.example.test:3000",
+      hostname: "app.example.test",
+      port: "3000",
+      protocol: "https:",
+    },
+  });
+}
+
 describe("beginManagedRendezvous: side dispatch", () => {
   test("side inviter runs listenAsInviter with the current secret, not dialAsAcceptor", async () => {
     const secret = generateSharedSecret();
@@ -97,7 +118,8 @@ describe("beginManagedRendezvous: side dispatch", () => {
     expect(acceptorCalls).toHaveLength(0);
   });
 
-  test("side acceptor runs dialAsAcceptor with the current secret and the record endpoint", async () => {
+  test("side acceptor runs dialAsAcceptor with the current secret", async () => {
+    stubAppLocation();
     const secret = generateSharedSecret();
     const { flows, inviterCalls, acceptorCalls } = recordingFlows();
 
@@ -112,18 +134,37 @@ describe("beginManagedRendezvous: side dispatch", () => {
     expect(inviterCalls).toHaveLength(0);
     expect(acceptorCalls).toHaveLength(1);
     expect(acceptorCalls[0].secret).toBe(secret);
-    // The dial endpoint is the record's persisted webrtc connection block.
-    expect(acceptorCalls[0].endpoint).toEqual({
+  });
+
+  test("the acceptor dials the app's own location; the stored locator is inert", async () => {
+    stubAppLocation();
+    const { flows, acceptorCalls } = recordingFlows();
+
+    await beginManagedRendezvous(
+      "acceptor",
+      generateSharedSecret(),
+      exchangeFile(),
+      { flows },
+    );
+
+    // The dial endpoint derives from the app's own location (origin isolation: a
+    // record exists only at the origin it was deposited at), never from the
+    // document's persisted server locator, which the spec keeps inert.
+    const endpoint = acceptorCalls[0].endpoint;
+    expect(endpoint).toEqual({
       channel: "webrtc",
-      host: webrtcLocator.host,
-      port: webrtcLocator.port,
-      path: webrtcLocator.path,
+      host: "app.example.test",
+      port: 3000,
+      path: "/api/",
     });
+    expect(endpoint.host).not.toBe(webrtcLocator.host);
+    expect(endpoint.port).not.toBe(webrtcLocator.port);
+    expect(endpoint.path).not.toBe(webrtcLocator.path);
   });
 
   test("a non-webrtc stored connection cannot re-run and fails before any flow", async () => {
     // A record whose connection is not webrtc is not live-coordinated; the dispatch
-    // must fail before either flow runs.
+    // must fail before either flow runs, on either side.
     const notWebrtc = {
       ...exchangeFile(),
       connection: { channel: "filedrop" },
@@ -134,18 +175,24 @@ describe("beginManagedRendezvous: side dispatch", () => {
         flows,
       }),
     ).rejects.toThrow(/webrtc/);
+    await expect(
+      beginManagedRendezvous("inviter", generateSharedSecret(), notWebrtc, {
+        flows,
+      }),
+    ).rejects.toThrow(/webrtc/);
     expect(inviterCalls).toHaveLength(0);
     expect(acceptorCalls).toHaveLength(0);
   });
 });
 
-describe("acceptorEndpointFromRecord", () => {
-  test("reshapes the persisted connection block, dropping an absent optional", () => {
-    const hostOnly = exchangeFile({ channel: "webrtc", host: "peer.example" });
-    expect(acceptorEndpointFromRecord(hostOnly)).toEqual({
-      channel: "webrtc",
-      host: "peer.example",
-    });
+describe("assertManagedRerunDispatchable", () => {
+  test("accepts a webrtc record and rejects any other channel", () => {
+    expect(() => assertManagedRerunDispatchable(exchangeFile())).not.toThrow();
+    const notWebrtc = {
+      ...exchangeFile(),
+      connection: { channel: "sftp" },
+    } as unknown as ExchangeSpec;
+    expect(() => assertManagedRerunDispatchable(notWebrtc)).toThrow(/sftp/);
   });
 });
 
@@ -155,10 +202,6 @@ class FakePeer extends EventEmitter {
   destroy = vi.fn();
   disconnect = vi.fn();
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
 
 describe("per-run peer id derives fresh from the current secret", () => {
   test("the inviter registers on deriveRendezvousPeerId(currentSecret, inviter)", async () => {

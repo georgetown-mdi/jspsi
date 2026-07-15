@@ -35,6 +35,8 @@ import { loadCSVFileOffMainThread } from "./csvParseController";
 
 import type { ExchangeSpec } from "@psilink/core";
 
+import type { CSVParseRows } from "./csvParseController";
+
 /**
  * Whether the File System Access API's file handles exist in this runtime, so a
  * managed exchange can persist a live pointer to the operator's input file
@@ -186,13 +188,21 @@ export async function ensureHandleReadPermission(
     throw new HandleReadPermissionError(afterPrompt);
 }
 
-/** A read input for one run: the `File` read through the handle at run start (never
- * retained across runs) and its CSV column names, the two the column-shape guard
- * and the exchange consume. */
+/** A read input for one run: the `File` read through the handle at run start
+ * (never retained across runs), its parsed CSV rows, and its column names -- what
+ * the column-shape guard and the exchange consume. The rows ride the same parse
+ * that produced the columns, so a run reads and parses the input exactly once;
+ * like the `File`, they are this run's only and are never persisted or retained
+ * across runs (the no-second-copy invariant is about the record, which never
+ * holds them). */
 export interface AcquiredManagedInput {
   /** The `File` read through the handle at THIS run start (a point-in-time
    * reference; never persisted or retained across runs). */
   file: File;
+  /** The read file's parsed CSV rows, from the same parse as {@link columns}, so
+   * the run does not parse the file a second time. This run's only; never
+   * persisted. */
+  rows: CSVParseRows;
   /** The read file's CSV column names, for the column-shape guard and the
    * exchange. */
   columns: Array<string>;
@@ -254,14 +264,16 @@ export async function acquireManagedInput(
     throw new ManagedInputError({ reason: "acquire", cause });
   }
 
+  let rows: CSVParseRows;
   let columns: Array<string>;
   try {
     const parsed = await loadCSVFileOffMainThread(file);
+    rows = parsed.data;
     columns = parsed.meta.fields ?? [];
   } catch (cause) {
     throw new ManagedInputError({ reason: "acquire", cause });
   }
-  return { file, columns };
+  return { file, rows, columns };
 }
 
 /**

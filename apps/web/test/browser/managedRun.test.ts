@@ -1,8 +1,12 @@
 /// <reference types="@vitest/browser-playwright/context" />
 /// <reference types="vite/client" />
 
+import {
+  ConnectionError,
+  generateSharedSecret,
+  getDefaultLinkageTerms,
+} from "@psilink/core";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
 import {
   clearManagedExchanges,
@@ -164,5 +168,110 @@ describe("runManagedRerun launched from a stored record", () => {
     expect((await getManagedExchange(created.id))?.sharedSecret).toBe(
       rotatedSecret,
     );
+  });
+});
+
+describe("runManagedRerun: the runner's failure bookkeeping", () => {
+  test("a failed-closed handshake records an auth-kind failed run", async () => {
+    const created = await createManagedExchange(newExchange());
+
+    await expect(
+      runManagedRerun(created, {
+        acquireInput: () => Promise.resolve(undefined),
+        handshake: () =>
+          Promise.reject(
+            new ConnectionError(
+              "key exchange authentication failed",
+              "security",
+            ),
+          ),
+        dataExchange: () => Promise.resolve("unreached"),
+      }),
+    ).rejects.toBeInstanceOf(ConnectionError);
+
+    // The failure landed in the record's bookkeeping (the evidence the desync
+    // tiering later reads), and the secret did not rotate.
+    const stored = await getManagedExchange(created.id);
+    expect(stored?.lastRun?.outcome).toBe("failed");
+    expect(stored?.lastRun?.failureKind).toBe("auth");
+    expect(stored?.sharedSecret).toBe(created.sharedSecret);
+  });
+
+  test("a data-exchange drop records a transport-kind failed run, rotation kept", async () => {
+    const created = await createManagedExchange(newExchange());
+    const rotatedSecret = generateSharedSecret();
+
+    await expect(
+      runManagedRerun(created, {
+        acquireInput: () => Promise.resolve(undefined),
+        handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
+        dataExchange: () =>
+          Promise.reject(new Error("data channel dropped mid-exchange")),
+      }),
+    ).rejects.toThrow("data channel dropped mid-exchange");
+
+    const stored = await getManagedExchange(created.id);
+    // The rotation is real (both parties rotated at handshake completion) and the
+    // failed outcome is recorded so the list does not keep showing a stale success.
+    expect(stored?.sharedSecret).toBe(rotatedSecret);
+    expect(stored?.lastRun?.outcome).toBe("failed");
+    expect(stored?.lastRun?.failureKind).toBe("transport");
+  });
+
+  test("a cancelled run records cancelled", async () => {
+    const created = await createManagedExchange(newExchange());
+
+    await expect(
+      runManagedRerun(
+        created,
+        {
+          acquireInput: () => Promise.resolve(undefined),
+          handshake: () => Promise.reject(new Error("torn down mid-listen")),
+          dataExchange: () => Promise.resolve("unreached"),
+        },
+        { aborted: () => true },
+      ),
+    ).rejects.toThrow("torn down mid-listen");
+
+    const stored = await getManagedExchange(created.id);
+    expect(stored?.lastRun?.outcome).toBe("failed");
+    expect(stored?.lastRun?.failureKind).toBe("cancelled");
+  });
+
+  test("a bound that lapses mid-run surfaces as the benign expiry state, unrecorded", async () => {
+    // Live at the pre-connection check, lapsed by the time the handshake fails:
+    // the clock advances past the bound inside the run, and the handshake throws
+    // core's tagged expiry error (as the real handshake would with expires
+    // enforced). The orchestration re-maps it to the benign expiry error; no
+    // lastRun is written (the record's own expires carries the lapse).
+    const expires = "2026-07-14T12:05:00.000Z";
+    const created = await createManagedExchange(newExchange({ expires }));
+    let clock = Date.parse("2026-07-14T12:00:00.000Z");
+
+    await expect(
+      runManagedRerun(
+        created,
+        {
+          acquireInput: () => Promise.resolve(undefined),
+          handshake: () => {
+            clock = Date.parse("2026-07-14T12:10:00.000Z");
+            return Promise.reject(
+              Object.assign(
+                new Error(
+                  `shared secret expired at ${expires} during the round-trip`,
+                ),
+                { psilinkRecoveryHintEmitted: true },
+              ),
+            );
+          },
+          dataExchange: () => Promise.resolve("unreached"),
+        },
+        { now: () => clock },
+      ),
+    ).rejects.toBeInstanceOf(ManagedExchangeExpiredError);
+
+    const stored = await getManagedExchange(created.id);
+    expect(stored?.lastRun).toBeUndefined();
+    expect(stored?.sharedSecret).toBe(created.sharedSecret);
   });
 });

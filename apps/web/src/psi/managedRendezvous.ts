@@ -10,13 +10,18 @@
  * "Derived, never stored").
  *
  * The dispatch is on the local `side` field, never the document's
- * `connection.role`: the document is persisted verbatim for fidelity and nothing
- * reads its role (see docs/spec/MANAGED_EXCHANGE_RECORD.md, "Role: a local `side`
- * field"). The acceptor's dial target is the document's persisted webrtc
- * connection block -- the endpoint the invitation carried at accept time, kept in
- * the document -- reshaped back to a {@link WebRTCEndpoint}; the inviter needs no
- * endpoint (it derives its signaling location from `window.location` inside
- * `listenAsInviter`).
+ * `connection.role`, and the document's `server` locator is likewise INERT on
+ * the re-run path: the connection block is persisted for document fidelity, not
+ * read (see docs/spec/MANAGED_EXCHANGE_RECORD.md, "Role: a local `side` field").
+ * Both sides derive their signaling location from the app's own location -- the
+ * inviter inside `listenAsInviter` (from `window.location`), the acceptor's dial
+ * endpoint here from the same {@link webrtcEndpointFromLocation} the inviter-side
+ * mint uses. Origin isolation makes this airtight: a record exists only at the
+ * origin it was deposited at, so the app's own location is always the correct
+ * signaling source -- it cannot go stale against a redeployment and cannot be
+ * poisoned at rest. The stored connection block is read for exactly one bit, its
+ * `channel` discriminant, to reject a non-webrtc record as not re-runnable in
+ * the browser before any connection.
  *
  * The two rendezvous functions are injected (defaulting to the real
  * {@link listenAsInviter} / {@link dialAsAcceptor}) so the dispatch and the
@@ -24,9 +29,11 @@
  */
 
 import { dialAsAcceptor, listenAsInviter } from "./rendezvous";
+import { invitationLocation } from "./invitationLocation";
+import { webrtcEndpointFromLocation } from "./invitation";
 
-import type { ExchangeSpec, WebRTCEndpoint } from "@psilink/core";
 import type { DataConnection } from "peerjs";
+import type { ExchangeSpec } from "@psilink/core";
 import type Peer from "peerjs";
 
 import type { ManagedExchangeSide } from "./managedExchangeRecord";
@@ -53,39 +60,29 @@ const defaultFlows: ManagedRendezvousFlows = {
 };
 
 /**
- * Reshape the record's persisted webrtc connection block back into the
- * {@link WebRTCEndpoint} the acceptor dials. The persisted block is credential-
- * free by composition (`server.host`/`port`/`path` only; see
- * docs/spec/MANAGED_EXCHANGE_RECORD.md, "The connection block"), so this only
- * re-shapes it, dropping an absent optional rather than carrying an explicit
- * `undefined`. Throws when the connection is not the webrtc channel: only a
- * webrtc exchange is coordinated live, so a stored record whose channel is
- * anything else cannot re-run in the browser and fails before any connection.
+ * Reject a stored record whose exchange is not the webrtc channel: only a webrtc
+ * exchange is coordinated live from the browser, so any other channel cannot
+ * re-run here and fails before any connection. This dispatchability check reads
+ * only the connection's `channel` discriminant -- the locator fields stay inert
+ * per the spec (the block is persisted for document fidelity, not read).
  */
-export function acceptorEndpointFromRecord(
+export function assertManagedRerunDispatchable(
   exchangeFile: ExchangeSpec,
-): WebRTCEndpoint {
-  const connection = exchangeFile.connection;
-  if (connection.channel !== "webrtc")
+): void {
+  const channel = exchangeFile.connection.channel;
+  if (channel !== "webrtc")
     throw new Error(
       "managed re-run requires a webrtc exchange; stored connection channel is " +
-        connection.channel,
+        channel,
     );
-  const { server } = connection;
-  return {
-    channel: "webrtc",
-    host: server.host,
-    ...(server.port !== undefined ? { port: server.port } : {}),
-    ...(server.path !== undefined ? { path: server.path } : {}),
-  };
 }
 
 /**
  * Acquire the rendezvous for a re-run, dispatched on the record's local `side`:
  * the inviter listens on its derived id ({@link listenAsInviter}); the acceptor
- * dials the inviter's derived id at the persisted endpoint
- * ({@link dialAsAcceptor}). The current `sharedSecret` is passed to whichever
- * flow runs, so its peer id derives fresh from that secret under the side's label
+ * dials the inviter's derived id ({@link dialAsAcceptor}) at this app's own
+ * signaling location. The current `sharedSecret` is passed to whichever flow
+ * runs, so its peer id derives fresh from that secret under the side's label
  * -- no derived value is read from storage.
  *
  * The inviter returns its registered peer with no channel yet (the caller then
@@ -102,9 +99,11 @@ export type ManagedRendezvousAcquisition =
  * Begin the side-dispatched rendezvous. Returns the inviter's registered peer
  * (the caller awaits the inbound channel) or the acceptor's opened `[peer, conn]`
  * pair. The `sharedSecret` is the record's CURRENT secret, so the derived
- * rendezvous id is fresh for this run; `exchangeFile` supplies the acceptor's
- * dial endpoint. `signal` cancels the listen/dial; `flows` injects the rendezvous
- * functions for tests.
+ * rendezvous id is fresh for this run. `exchangeFile` is read only for the
+ * webrtc-channel dispatchability check ({@link assertManagedRerunDispatchable});
+ * the acceptor's dial endpoint comes from the app's own location, never the
+ * stored locator. `signal` cancels the listen/dial; `flows` injects the
+ * rendezvous functions for tests.
  */
 export async function beginManagedRendezvous(
   side: ManagedExchangeSide,
@@ -114,11 +113,12 @@ export async function beginManagedRendezvous(
 ): Promise<ManagedRendezvousAcquisition> {
   const flows = options.flows ?? defaultFlows;
   const signal = options.signal;
+  assertManagedRerunDispatchable(exchangeFile);
   if (side === "inviter") {
     const peer = await flows.listenAsInviter(sharedSecret, { signal });
     return { side: "inviter", peer };
   }
-  const endpoint = acceptorEndpointFromRecord(exchangeFile);
+  const endpoint = webrtcEndpointFromLocation(invitationLocation());
   const [peer, conn] = await flows.dialAsAcceptor(sharedSecret, endpoint, {
     signal,
   });

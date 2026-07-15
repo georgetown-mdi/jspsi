@@ -1,5 +1,9 @@
+import {
+  ConnectionError,
+  generateSharedSecret,
+  getDefaultLinkageTerms,
+} from "@psilink/core";
 import { describe, expect, test } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
@@ -8,6 +12,8 @@ import {
 import {
   ManagedExchangeExpiredError,
   benignRerunOutcome,
+  remapLapsedRunFailure,
+  rerunFailureLastRun,
   runManagedRerun,
 } from "@psi/managedRun";
 import { ManagedExchangeLockUnavailableError } from "@psi/managedExchangeRun";
@@ -115,5 +121,123 @@ describe("benignRerunOutcome", () => {
     expect(
       benignRerunOutcome(new RotationPersistError(0, new Error("db"))),
     ).toBeUndefined();
+  });
+});
+
+describe("rerunFailureLastRun: the runner's failure bookkeeping", () => {
+  const AT = Date.parse("2026-07-14T12:00:00.000Z");
+
+  test("a security-kind handshake failure records an auth-kind failed run", () => {
+    const lastRun = rerunFailureLastRun(
+      new ConnectionError("key exchange authentication failed", "security"),
+      AT,
+      false,
+    );
+    expect(lastRun).toEqual({
+      at: new Date(AT).toISOString(),
+      outcome: "failed",
+      failureKind: "auth",
+    });
+  });
+
+  test("any other run failure records a transport-kind failed run", () => {
+    expect(
+      rerunFailureLastRun(new Error("channel dropped"), AT, false),
+    ).toEqual({
+      at: new Date(AT).toISOString(),
+      outcome: "failed",
+      failureKind: "transport",
+    });
+  });
+
+  test("a cancelled run records cancelled, even when the error looks like a trust failure", () => {
+    // Teardown on an operator abort can provoke a security-shaped error; the
+    // abort probe wins so the bookkeeping reads cancelled, not auth.
+    const lastRun = rerunFailureLastRun(
+      new ConnectionError("closed mid-handshake", "security"),
+      AT,
+      true,
+    );
+    expect(lastRun?.failureKind).toBe("cancelled");
+  });
+
+  test("failures whose bookkeeping is owned elsewhere or deliberately absent record nothing", () => {
+    // Input and storage: recorded best-effort inside the critical section.
+    expect(
+      rerunFailureLastRun(
+        new ManagedInputError({ reason: "acquire", cause: new Error("x") }),
+        AT,
+        false,
+      ),
+    ).toBeUndefined();
+    expect(
+      rerunFailureLastRun(
+        new RotationPersistError(AT, new Error("db")),
+        AT,
+        false,
+      ),
+    ).toBeUndefined();
+    // Expiry and lock-unavailable: no run began; a lapse is carried by `expires`.
+    expect(
+      rerunFailureLastRun(
+        new ManagedExchangeExpiredError("2026-07-01T00:00:00.000Z"),
+        AT,
+        false,
+      ),
+    ).toBeUndefined();
+    expect(
+      rerunFailureLastRun(
+        new ManagedExchangeLockUnavailableError("id"),
+        AT,
+        false,
+      ),
+    ).toBeUndefined();
+  });
+});
+
+describe("remapLapsedRunFailure: a bound that lapses mid-run", () => {
+  const NOW = Date.parse("2026-07-14T12:00:00.000Z");
+
+  /** Core's expiry errors carry the recovery-hint tag (preserved across the
+   * security re-wrap). */
+  function taggedExpiryError(): Error {
+    return Object.assign(
+      new Error("shared secret expired during the key-exchange round-trip"),
+      { psilinkRecoveryHintEmitted: true },
+    );
+  }
+
+  test("a tagged handshake failure on a now-lapsed record re-maps to the benign expiry error", () => {
+    const remapped = remapLapsedRunFailure(
+      taggedExpiryError(),
+      { expires: "2026-07-14T11:59:00.000Z" },
+      NOW,
+    );
+    expect(remapped).toBeInstanceOf(ManagedExchangeExpiredError);
+    expect(remapped?.expires).toBe("2026-07-14T11:59:00.000Z");
+  });
+
+  test("a tagged failure with a still-live bound does not re-map", () => {
+    expect(
+      remapLapsedRunFailure(
+        taggedExpiryError(),
+        { expires: "2026-08-01T00:00:00.000Z" },
+        NOW,
+      ),
+    ).toBeUndefined();
+  });
+
+  test("an untagged trust failure never re-maps, even on a lapsed record", () => {
+    expect(
+      remapLapsedRunFailure(
+        new ConnectionError("key exchange authentication failed", "security"),
+        { expires: "2026-07-14T11:59:00.000Z" },
+        NOW,
+      ),
+    ).toBeUndefined();
+  });
+
+  test("a record with no bound never re-maps", () => {
+    expect(remapLapsedRunFailure(taggedExpiryError(), {}, NOW)).toBeUndefined();
   });
 });

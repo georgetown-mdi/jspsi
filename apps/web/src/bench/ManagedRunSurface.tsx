@@ -35,7 +35,12 @@ import type { RunOutputs } from "./runOutputs";
  */
 export function ManagedRunSurface({ id }: { id: string }) {
   const [record, setRecord] = useState<ManagedExchangeRecord>();
-  const [loadFailed, setLoadFailed] = useState(false);
+  // The two load failures are distinct states with distinct recoveries: a MISSING
+  // record (the store resolves undefined -- deleted or cleared) versus an
+  // UNLOADABLE one (the read rejects: a stored record this app version can no
+  // longer load, the documented app-upgrade case, whose recovery is re-invite --
+  // see docs/spec/MANAGED_EXCHANGE_RECORD.md, "Versioning").
+  const [loadFailure, setLoadFailure] = useState<"missing" | "unloadable">();
   const [reselected, setReselected] = useState<File>();
   const [running, setRunning] = useState(false);
   const [outputs, setOutputs] = useState<RunOutputs>();
@@ -51,11 +56,11 @@ export function ManagedRunSurface({ id }: { id: string }) {
     getManagedExchange(id)
       .then((loaded) => {
         if (!live) return;
-        if (loaded === undefined) setLoadFailed(true);
+        if (loaded === undefined) setLoadFailure("missing");
         else setRecord(loaded);
       })
       .catch(() => {
-        if (live) setLoadFailed(true);
+        if (live) setLoadFailure("unloadable");
       });
     return () => {
       live = false;
@@ -142,12 +147,22 @@ export function ManagedRunSurface({ id }: { id: string }) {
   return (
     <BenchPage>
       <main className={styles.lobby}>
-        {loadFailed ? (
+        {loadFailure === "missing" ? (
           <>
             <h1>Exchange not found</h1>
             <p className={styles.sub}>
               This exchange&apos;s browser copy was not found. It may have been
               deleted or cleared.
+            </p>
+            <SavedExchangesFoot />
+          </>
+        ) : loadFailure === "unloadable" ? (
+          <>
+            <h1>This exchange cannot be loaded</h1>
+            <p className={styles.sub}>
+              This exchange&apos;s stored copy can no longer be loaded by this
+              version of the app. Re-invite your partner to set up the exchange
+              again.
             </p>
             <SavedExchangesFoot />
           </>
