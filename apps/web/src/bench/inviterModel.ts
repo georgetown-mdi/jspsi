@@ -627,6 +627,17 @@ export function dateTimeLabel(moment: Date): string {
   }).format(moment);
 }
 
+/** A calendar day phrased for display, e.g. `July 8, 2026` -- the date-granularity
+ * form the backup surfaces read ("backed up as of <date>"), where the minute is
+ * noise. */
+export function dateLabel(moment: Date): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(moment);
+}
+
 /** The absolute moment an invitation shared `now` would expire, phrased for
  * the live expiry hint. */
 export function expiryLabel(lifetimeSeconds: number, now: Date): string {

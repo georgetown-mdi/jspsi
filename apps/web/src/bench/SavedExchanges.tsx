@@ -1,9 +1,14 @@
 import { useEffect, useState } from "react";
 
-import { Anchor, Button, Loader } from "@mantine/core";
+import { Alert, Anchor, Button, FileButton, Loader } from "@mantine/core";
 import { Link, useNavigate } from "@tanstack/react-router";
 
-import { listManagedExchanges } from "@psi/managedExchangeStore";
+import {
+  listManagedExchanges,
+  requestPersistentStorage,
+} from "@psi/managedExchangeStore";
+import { importManagedExchange } from "@psi/managedExchangeImport";
+import { listManagedLocalState } from "@psi/managedLocalState";
 
 import { BenchPage } from "./BenchPage";
 import { savedExchangeRows } from "./savedExchangesModel";
@@ -13,12 +18,19 @@ import type { SavedExchangeRow } from "./savedExchangesModel";
 
 /**
  * The saved-exchanges affordance: a minimal list of stored managed-exchange
- * records -- label, side, and a one-line last-run status -- each with a run
- * action that opens the attended re-run surface. It is the entry point into a
- * re-run from a stored record, reached from the lobby.
+ * records -- label, side, a one-line last-run status, and the derived backup
+ * state -- each with a run action that opens the attended re-run surface. It is
+ * the entry point into a re-run from a stored record, reached from the lobby.
  *
- * Deliberately NOT the management list: no add/remove, no per-exchange detail,
- * no edit. Those are separate items. The list reads the store once on mount and
+ * The list joins each record to its local sibling state (the backup marker and any
+ * spent state): a spent record (handed off by a migration export) shows no Run
+ * action and names its handoff date. The empty state carries the import affordance
+ * standing -- a wholesale eviction erases the evidence anything existed, so restore-
+ * from-backup lives here rather than only behind a detected loss (see
+ * docs/MANAGED_EXCHANGE.md, "Eviction recovery is the import flow").
+ *
+ * Deliberately NOT the management list: no add/remove, no per-exchange detail, no
+ * edit. Those are separate items. The list reads the two stores once on mount and
  * derives its rows through the pure {@link savedExchangeRows}.
  */
 export function SavedExchanges() {
@@ -28,9 +40,9 @@ export function SavedExchanges() {
 
   useEffect(() => {
     let live = true;
-    listManagedExchanges()
-      .then((records) => {
-        if (live) setRows(savedExchangeRows(records, Date.now()));
+    Promise.all([listManagedExchanges(), listManagedLocalState()])
+      .then(([records, localState]) => {
+        if (live) setRows(savedExchangeRows(records, localState, Date.now()));
       })
       .catch(() => {
         if (live) setLoadFailed(true);
@@ -56,10 +68,7 @@ export function SavedExchanges() {
         ) : rows === undefined ? (
           <Loader />
         ) : rows.length === 0 ? (
-          <p className={styles.sub}>
-            You have no saved exchanges yet. When you set up or accept an
-            exchange, choose &quot;Manage this exchange&quot; to save it here.
-          </p>
+          <SavedExchangesEmpty />
         ) : (
           <ul className={styles.savedList}>
             {rows.map((row) => (
@@ -71,15 +80,21 @@ export function SavedExchanges() {
                   <span className={`${styles.small} ${styles.sub}`}>
                     {row.sideLabel} - {row.status}
                   </span>
+                  <BackupLine row={row} />
                 </div>
-                <Button
-                  variant="default"
-                  onClick={() =>
-                    void navigate({ to: "/saved/$id", params: { id: row.id } })
-                  }
-                >
-                  Run
-                </Button>
+                {row.spentAsOf === undefined ? (
+                  <Button
+                    variant="default"
+                    onClick={() =>
+                      void navigate({
+                        to: "/saved/$id",
+                        params: { id: row.id },
+                      })
+                    }
+                  >
+                    Run
+                  </Button>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -91,5 +106,83 @@ export function SavedExchanges() {
         </p>
       </main>
     </BenchPage>
+  );
+}
+
+/** The per-row backup line: a quiet "backed up as of <date>" when a current export
+ * exists, or the actionable "Back up this exchange" when none does. A spent row
+ * names its handoff and the recovery instead. */
+function BackupLine({ row }: { row: SavedExchangeRow }) {
+  if (row.spentAsOf !== undefined)
+    return (
+      <span className={`${styles.small} ${styles.sub}`}>
+        Handed off {row.spentAsOf}. Import the backup to run it here again, or
+        delete it.
+      </span>
+    );
+  if (row.backup.kind === "backed-up")
+    return (
+      <span className={`${styles.small} ${styles.statusLineOk}`}>
+        Backed up as of {row.backup.asOf}
+      </span>
+    );
+  return (
+    <span className={`${styles.small} ${styles.sub}`}>
+      Back up this exchange
+    </span>
+  );
+}
+
+/** The empty state: the standing import affordance for post-eviction recovery, plus
+ * the plain first-visit guidance. A wholesale eviction cannot be told from a first
+ * visit, so the import is offered here standing rather than behind a detected loss. */
+function SavedExchangesEmpty() {
+  const navigate = useNavigate();
+  const [importFailed, setImportFailed] = useState(false);
+
+  function onFile(file: File | null) {
+    if (file === null) return;
+    setImportFailed(false);
+    void (async () => {
+      try {
+        const source = await file.text();
+        // Best-effort persistence on the imported record's origin, the same request
+        // a create makes; a denied grant does not fail the import.
+        void requestPersistentStorage();
+        const installed = await importManagedExchange(source);
+        await navigate({ to: "/saved/$id", params: { id: installed.id } });
+      } catch {
+        setImportFailed(true);
+      }
+    })();
+  }
+
+  return (
+    <>
+      <p className={styles.sub}>
+        You have no saved exchanges in this browser. When you set up or accept
+        an exchange, choose &quot;Manage this exchange&quot; to save it here.
+      </p>
+      <div className={styles.callout}>
+        <p className={styles.calloutLead}>Restore from a backup.</p>
+        <p className={styles.small}>
+          If this browser was cleared or you are moving to a new device, import
+          the backup file you exported to bring the exchange back here.
+        </p>
+        {importFailed && (
+          <Alert color="red" title="That file could not be imported" mb="sm">
+            The backup file could not be read. Check that you chose the backup
+            file you exported and that it was not modified.
+          </Alert>
+        )}
+        <FileButton accept="application/json,.json" onChange={onFile}>
+          {(props) => (
+            <Button mt="sm" variant="default" {...props}>
+              Import a backup file
+            </Button>
+          )}
+        </FileButton>
+      </div>
+    </>
   );
 }

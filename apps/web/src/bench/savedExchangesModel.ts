@@ -1,24 +1,27 @@
 /**
  * The pure model behind the saved-exchanges affordance: turning a stored managed
- * record into the small, honest summary the lobby's run list shows -- the label,
- * this party's side, and a one-line status derived from `lastRun` and `expires`.
- * No React, no IndexedDB: the store read and the run action live in the
- * components, so the display derivation is unit-testable in Node.
+ * record and its local sibling state into the small, honest summary the lobby's run
+ * list shows -- the label, this party's side, a one-line last-run status, the
+ * derived backup state, and the spent (handed-off) state. No React, no IndexedDB:
+ * the store reads and the actions live in the components, so the display derivation
+ * is unit-testable in Node.
  *
  * This is deliberately NOT the management list: it lists stored records with a run
- * action and nothing more. Add/remove, per-exchange detail, and the full derived
- * backup state are separate items. The status here is a plain summary of the last
- * run, so the operator can recognize a partnership and launch a re-run.
+ * action, the backup state, and (for a spent record) no run action. Add/remove and
+ * per-exchange detail are separate items. The last-run status here is a plain
+ * summary, so the operator can recognize a partnership and launch a re-run.
  */
 
+import { deriveManagedBackupState } from "@psi/managedBackupState";
 import { managedExchangeLapsed } from "@psi/managedExpiry";
 
-import { dateTimeLabel } from "./inviterModel";
+import { dateLabel, dateTimeLabel } from "./inviterModel";
 
 import type {
   ManagedExchangeRecord,
   ManagedExchangeSide,
 } from "@psi/managedExchangeRecord";
+import type { ManagedLocalState } from "@psi/managedLocalState";
 
 /** This party's side, as the run list names it: the operator recognizes "you
  * invite" / "you accept" more readily than the wire roles. */
@@ -26,6 +29,12 @@ const SIDE_LABEL: Record<ManagedExchangeSide, string> = {
   inviter: "You invite",
   acceptor: "You accept",
 };
+
+/** The derived backup state a row surfaces, phrased for the list. `"backed-up"`
+ * carries the date phrase for the quiet green line; `"backup-needed"` is the one
+ * actionable state. */
+export type SavedExchangeBackup =
+  { kind: "backed-up"; asOf: string } | { kind: "backup-needed" };
 
 /** One row in the saved-exchanges run list: everything the list renders for a
  * stored record, plus the record `id` the run action dispatches on. */
@@ -42,6 +51,12 @@ export interface SavedExchangeRow {
    * is still offered (the launch surfaces the benign expiry state and points at
    * re-invite), but the list names the lapse so it is not a surprise. */
   expired: boolean;
+  /** The derived backup state for the row (see {@link SavedExchangeBackup}). */
+  backup: SavedExchangeBackup;
+  /** When set, this device's copy was handed off by a migration export as of this
+   * date phrase: the row shows no Run affordance and names the handoff. Deleting or
+   * importing the artifact back is the only path forward. */
+  spentAsOf?: string;
 }
 
 /** The last-run status line for a record, before the expiry note. A record that
@@ -58,14 +73,30 @@ function lastRunStatus(record: ManagedExchangeRecord): string {
   return `Last run did not complete (${at})`;
 }
 
+/** The backup state phrased for a row, from the record's run bookkeeping and its
+ * local backup marker. A `"backed-up"` state carries the marker's date; a
+ * `"backup-needed"` state is the one actionable prompt. */
+function backupFor(
+  record: ManagedExchangeRecord,
+  local: ManagedLocalState | undefined,
+): SavedExchangeBackup {
+  const state = deriveManagedBackupState(record, local?.backup);
+  if (state.kind === "backed-up")
+    return { kind: "backed-up", asOf: dateLabel(new Date(state.backedUpAt)) };
+  return { kind: "backup-needed" };
+}
+
 /**
- * Derive the display row for a stored record as of `now`. The status line is the
- * last-run summary, with a lapsed-`expires` note appended (the record's secret
- * has lapsed and re-invite is the recovery). `now` is injected so the expiry note
- * is pure and testable.
+ * Derive the display row for a stored record as of `now`, given its local sibling
+ * state (the backup marker and any spent state). The last-run status carries a
+ * lapsed-`expires` note when the secret has lapsed; the backup state is derived from
+ * the marker and the last successful run; a spent record names its handoff date and
+ * the list suppresses its run action. `now` is injected so the expiry note is pure
+ * and testable.
  */
 export function savedExchangeRow(
   record: ManagedExchangeRecord,
+  local: ManagedLocalState | undefined,
   now: number,
 ): SavedExchangeRow {
   const expired = managedExchangeLapsed(record, now);
@@ -78,14 +109,21 @@ export function savedExchangeRow(
     sideLabel: SIDE_LABEL[record.side],
     status,
     expired,
+    backup: backupFor(record, local),
+    ...(local?.spent !== undefined
+      ? { spentAsOf: dateLabel(new Date(local.spent.spentAt)) }
+      : {}),
   };
 }
 
 /** Derive the display rows for the stored records as of `now`, in the store's
- * order. */
+ * order, each joined to its local sibling state by record id. */
 export function savedExchangeRows(
   records: ReadonlyArray<ManagedExchangeRecord>,
+  localState: ReadonlyMap<string, ManagedLocalState>,
   now: number,
 ): Array<SavedExchangeRow> {
-  return records.map((record) => savedExchangeRow(record, now));
+  return records.map((record) =>
+    savedExchangeRow(record, localState.get(record.id), now),
+  );
 }

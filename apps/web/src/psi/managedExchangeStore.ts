@@ -44,16 +44,28 @@ export const MANAGED_EXCHANGE_DB_NAME = "psilink-managed-exchanges";
 /** The object store holding one {@link ManagedExchangeRecord} per key. */
 export const MANAGED_EXCHANGE_STORE_NAME = "records";
 
+/**
+ * The object store holding the local sibling state for a record (the backup marker
+ * and the spent state), keyed by the record's `id`. It is deliberately a SEPARATE
+ * store, not a record field: that state must never appear in the export artifact,
+ * and the record schema is reader-rejects-unknown -- keeping it a sibling makes its
+ * non-inclusion structural (the exporter reads only the records store). Its shape
+ * is governed by {@link ./managedLocalState.ts}.
+ */
+export const MANAGED_EXCHANGE_LOCAL_STORE_NAME = "localState";
+
 /** The database schema version this build opens. Bump only for an IndexedDB
  * structural migration (a new object store or index), never for a change to the
- * record's own `schemaVersion`, which the record schema governs. */
-const IDB_VERSION = 1;
+ * record's own `schemaVersion`, which the record schema governs. Bumped to 2 to add
+ * the local-sibling-state store. */
+const IDB_VERSION = 2;
 
 /**
- * Open (creating or upgrading) the managed-exchange database. The object store is
- * keyed by the record's `id` (an in-line key path), so a record is its own key
- * and a delete needs only that id. Callers usually go through the higher-level
- * CRUD functions below rather than opening the database themselves.
+ * Open (creating or upgrading) the managed-exchange database. The records store is
+ * keyed by the record's `id` (an in-line key path), so a record is its own key and
+ * a delete needs only that id; the local-state store is keyed out-of-line by the
+ * same id. Callers usually go through the higher-level CRUD functions below rather
+ * than opening the database themselves.
  */
 export function openManagedExchangeDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -62,6 +74,8 @@ export function openManagedExchangeDatabase(): Promise<IDBDatabase> {
       const db = request.result;
       if (!db.objectStoreNames.contains(MANAGED_EXCHANGE_STORE_NAME))
         db.createObjectStore(MANAGED_EXCHANGE_STORE_NAME, { keyPath: "id" });
+      if (!db.objectStoreNames.contains(MANAGED_EXCHANGE_LOCAL_STORE_NAME))
+        db.createObjectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -358,19 +372,51 @@ export async function persistManagedExchangeInputHandle(
 
 /**
  * Delete a managed exchange in one step, removing everything the browser holds
- * for it -- the record, the secret, the input-file handle, the schedule, and the
- * run bookkeeping -- because all of it is one object under one key. Idempotent: a
- * delete of a missing id resolves without error.
+ * for it -- the record, the secret, the input-file handle, the schedule, the run
+ * bookkeeping, AND the local sibling state (the backup marker and any spent
+ * state) -- so nothing is left behind. The record and its sibling state are removed
+ * in one transaction spanning both stores, so a delete cannot leave a stranded
+ * sibling entry. Idempotent: a delete of a missing id resolves without error.
  */
 export async function deleteManagedExchange(id: string): Promise<void> {
-  await withStore("readwrite", (store) => store.delete(id));
+  const db = await openManagedExchangeDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(
+        [MANAGED_EXCHANGE_STORE_NAME, MANAGED_EXCHANGE_LOCAL_STORE_NAME],
+        "readwrite",
+      );
+      transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME).delete(id);
+      transaction.objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME).delete(id);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally {
+    db.close();
+  }
 }
 
 /**
- * Delete every managed exchange record. Used to reset the store; each record's
- * whole contents are removed with it, as {@link deleteManagedExchange} removes
- * one.
+ * Delete every managed exchange record and all local sibling state. Used to reset
+ * the store; both stores are cleared in one transaction, so no sibling entry
+ * outlives the records it belonged to.
  */
 export async function clearManagedExchanges(): Promise<void> {
-  await withStore("readwrite", (store) => store.clear());
+  const db = await openManagedExchangeDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(
+        [MANAGED_EXCHANGE_STORE_NAME, MANAGED_EXCHANGE_LOCAL_STORE_NAME],
+        "readwrite",
+      );
+      transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME).clear();
+      transaction.objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME).clear();
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally {
+    db.close();
+  }
 }

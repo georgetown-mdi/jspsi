@@ -1,0 +1,87 @@
+import { describe, expect, test, vi } from "vitest";
+import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
+
+import {
+  buildManagedExchangeRecord,
+  composeManagedExchangeFile,
+} from "@psi/managedExchangeRecord";
+import {
+  encodeManagedExchangeArtifact,
+  serializeManagedExchangeArtifact,
+} from "@psi/managedExchangeArtifact";
+import { importManagedExchange } from "@psi/managedExchangeImport";
+
+import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
+import type { ManagedImportDeps } from "@psi/managedExchangeImport";
+
+// The import take-over, tested in Node with injected seams: a valid artifact installs
+// one owner and marks it backed-up; a malformed or tampered file is rejected before
+// any install, so the store is left untouched. The store-backed install (real
+// IndexedDB) is the browser suite's.
+
+const linkageTerms = getDefaultLinkageTerms("County Health Dept");
+
+function goodBytes(): string {
+  const record = buildManagedExchangeRecord({
+    label: "Riverbend quarterly",
+    exchangeFile: composeManagedExchangeFile({
+      connection: { channel: "webrtc", host: "signaling.example.org" },
+      linkageTerms,
+    }),
+    side: "inviter",
+    sharedSecret: generateSharedSecret(),
+  });
+  return serializeManagedExchangeArtifact(
+    encodeManagedExchangeArtifact(record),
+  );
+}
+
+function recordingDeps(): ManagedImportDeps & {
+  installed: Array<ManagedExchangeRecord>;
+} {
+  const installed: Array<ManagedExchangeRecord> = [];
+  return {
+    installed,
+    install: (record) => {
+      installed.push(record);
+      return Promise.resolve(record);
+    },
+    markBackedUp: vi.fn(() => Promise.resolve()),
+    now: () => new Date("2026-07-14T12:00:00.000Z"),
+  };
+}
+
+describe("importManagedExchange", () => {
+  test("installs the reconstructed record and marks it backed-up", async () => {
+    const deps = recordingDeps();
+    const installed = await importManagedExchange(goodBytes(), deps);
+    expect(deps.installed).toHaveLength(1);
+    expect(deps.markBackedUp).toHaveBeenCalledWith(
+      installed.id,
+      "2026-07-14T12:00:00.000Z",
+    );
+  });
+
+  test("the installed record carries no input-file handle", async () => {
+    const deps = recordingDeps();
+    const installed = await importManagedExchange(goodBytes(), deps);
+    expect(installed).not.toHaveProperty("inputFileHandle");
+  });
+
+  test("a malformed file installs nothing (store left untouched)", async () => {
+    const deps = recordingDeps();
+    await expect(importManagedExchange("not json {{{", deps)).rejects.toThrow();
+    expect(deps.installed).toHaveLength(0);
+    expect(deps.markBackedUp).not.toHaveBeenCalled();
+  });
+
+  test("a tampered secret installs nothing", async () => {
+    const deps = recordingDeps();
+    const artifact = JSON.parse(goodBytes());
+    artifact.key.sharedSecret = "not-a-secret";
+    await expect(
+      importManagedExchange(JSON.stringify(artifact), deps),
+    ).rejects.toThrow();
+    expect(deps.installed).toHaveLength(0);
+  });
+});

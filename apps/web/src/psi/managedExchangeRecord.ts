@@ -41,6 +41,17 @@ import type { ZodType } from "zod";
 export const MANAGED_EXCHANGE_SCHEMA_VERSION = "psilink-managed-exchange/v1";
 
 /**
+ * The single recognized `artifactVersion` literal for the v1 export/import
+ * artifact (see {@link ./managedExchangeArtifact.ts}). Distinct from
+ * {@link MANAGED_EXCHANGE_SCHEMA_VERSION}: the artifact is a separate on-disk
+ * format (the embedded document plus the key pair plus the local block), so it
+ * versions independently of the stored record. A reader rejects any other value
+ * rather than migrating it.
+ */
+export const MANAGED_EXCHANGE_ARTIFACT_VERSION =
+  "psilink-managed-exchange-backup/v1";
+
+/**
  * Upper bound on the operator's {@link ManagedExchangeRecord.label}, in
  * characters (UTF-16 code units), enforced at write. The cap is the field's only
  * structural protection; keeping sensitive counterparty detail out of the label
@@ -183,6 +194,21 @@ const persistedExchangeFileSchema = ExchangeSpecSchema.refine(
 );
 
 /**
+ * The `.psilink.key` field shape the record's secret half maps onto: a
+ * `sharedSecret` matching {@link SHARED_SECRET_REGEX} and, when a bound is in
+ * force, an ISO 8601 `expires`. Reused by the export/import artifact so the
+ * artifact's key half is validated against the exact key-file shape rather than a
+ * looser copy, keeping the CLI-separability commitment one source of truth. Strict
+ * so a reader rejects an unknown key on the pair rather than silently accepting it.
+ */
+export const keyFileFieldsSchema = z
+  .object({
+    sharedSecret: z.string().regex(SHARED_SECRET_REGEX),
+    expires: z.iso.datetime().optional(),
+  })
+  .strict();
+
+/**
  * The record validator. The interface is defined first and the schema derived as
  * a `z.ZodType<ManagedExchangeRecord>`, per the repo's validation convention. The
  * input-file handle is validated only for its presence, not its structure: a
@@ -291,6 +317,10 @@ export interface NewManagedExchange {
   expires?: string;
   /** The agreed run schedule, when saved as recurring. */
   schedule?: ManagedExchangeSchedule;
+  /** Prior run bookkeeping to carry forward. Set only by an import, which restores
+   * the artifact's snapshot of `lastRun` so the first wake after an import reads the
+   * same catch-up state the source had; a freshly-created record has no run yet. */
+  lastRun?: ManagedExchangeLastRun;
 }
 
 /**
@@ -322,6 +352,7 @@ export function buildManagedExchangeRecord(
       : {}),
     ...(fields.expires !== undefined ? { expires: fields.expires } : {}),
     ...(fields.schedule !== undefined ? { schedule: fields.schedule } : {}),
+    ...(fields.lastRun !== undefined ? { lastRun: fields.lastRun } : {}),
   };
   return parseManagedExchangeRecord(record);
 }
