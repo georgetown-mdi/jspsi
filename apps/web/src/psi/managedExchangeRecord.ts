@@ -410,6 +410,34 @@ export function applyManagedExchangeRotation(
   return parseManagedExchangeRecord(next);
 }
 
+/**
+ * Apply a re-invite rotation to a record: advance the rotated secret and the
+ * `expires` bound exactly as {@link applyManagedExchangeRotation}, AND drop any
+ * `lastRun` bookkeeping. A re-invite is the recovery for the failure `lastRun`
+ * recorded, so leaving that entry in place would re-derive the consumed failure at
+ * the next visit -- and once the import marker is cleared in the same rotation, a
+ * stale `auth` failure would re-derive as the attack tier, resurrecting the framing
+ * the operator already recovered from. Clearing it in the same field-scoped write
+ * makes the post-re-invite record read as "no failure to tier" (see
+ * {@link ./managedFailureTiers.ts}). The document, the label, the schedule, and the
+ * handle are carried through untouched; the input record is not mutated.
+ *
+ * @throws {ZodError} if the rotated record is invalid (a malformed secret).
+ */
+export function applyManagedExchangeReinviteRotation(
+  record: ManagedExchangeRecord,
+  rotation: ManagedExchangeRotation,
+): ManagedExchangeRecord {
+  const next: ManagedExchangeRecord = {
+    ...record,
+    sharedSecret: rotation.sharedSecret,
+  };
+  if (rotation.expires === null) delete next.expires;
+  else next.expires = rotation.expires;
+  delete next.lastRun;
+  return parseManagedExchangeRecord(next);
+}
+
 /** Apply a `lastRun` bookkeeping entry to a record, producing a validated new
  * record with only `lastRun` changed. The document and the secret are carried
  * through untouched. Separate from a rotation write so the run outcome is recorded

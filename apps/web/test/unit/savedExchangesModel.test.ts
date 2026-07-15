@@ -63,7 +63,7 @@ describe("savedExchangeRow", () => {
     expect(row.status).toMatch(/^Last run succeeded /);
   });
 
-  test("a non-succeeded run reads neutrally, never attack framing", () => {
+  test("an unexplained auth failure reads as a check-with-partner line, never attack framing", () => {
     const row = savedExchangeRow(
       record({
         lastRun: {
@@ -75,7 +75,44 @@ describe("savedExchangeRow", () => {
       undefined,
       NOW,
     );
-    expect(row.status).toMatch(/did not complete/);
+    // The list's quiet form of the unexplained tier: the honest lead, not the
+    // attack checklist (that lives on the exchange's own surface).
+    expect(row.status).toMatch(/check with your partner/i);
+    expect(row.status).not.toMatch(/attack|tamper|desync|impersonat/i);
+  });
+
+  test("a recorded storage failure reads as its specific benign line", () => {
+    const row = savedExchangeRow(
+      record({
+        lastRun: {
+          at: "2026-07-10T09:00:00.000Z",
+          outcome: "failed",
+          failureKind: "storage",
+        },
+      }),
+      undefined,
+      NOW,
+    );
+    expect(row.status).toMatch(/could not be saved/i);
+    expect(row.status).toMatch(/re-invite/i);
+  });
+
+  test("an auth failure on a restored record reads as the benign restore line", () => {
+    const local: ManagedLocalState = {
+      imported: { importedAt: "2026-07-09T00:00:00.000Z" },
+    };
+    const row = savedExchangeRow(
+      record({
+        lastRun: {
+          at: "2026-07-10T09:00:00.000Z",
+          outcome: "failed",
+          failureKind: "auth",
+        },
+      }),
+      local,
+      NOW,
+    );
+    expect(row.status).toMatch(/restored from a backup/i);
     expect(row.status).not.toMatch(/attack|tamper|desync/i);
   });
 

@@ -26,9 +26,22 @@ export interface ManagedSpentState {
   spentAt: string;
 }
 
-/** The local sibling state for a record: the optional backup marker and the
- * optional spent state, either present independently. An entry with neither is
- * meaningless and never written (a cleared state deletes the entry). */
+/** This device's import marker for a record: stamped when the record was installed
+ * or revived from a backup artifact. It is the evidence the desync tiering reads to
+ * tell an import-since-last-success apart from an unexplained handshake failure: a
+ * restored copy can hold a secret the partnership has rotated past, so a handshake
+ * failure after an import newer than the last success is the benign import/restore
+ * tier, not the attack path. A plain instant -- no secret material, no rotation
+ * epoch -- and a local sibling by design: it is this device's own restore history,
+ * meaningless to an imported copy, so it must never enter the export artifact. */
+export interface ManagedImportMarker {
+  /** ISO 8601 UTC instant the record was installed or revived from a backup. */
+  importedAt: string;
+}
+
+/** The local sibling state for a record: the optional backup marker, the optional
+ * spent state, and the optional import marker, each present independently. An entry
+ * with none is meaningless and never written (a cleared state deletes the entry). */
 export interface ManagedLocalState {
   /** When a backup was last taken (see {@link ManagedBackupMarker}); absent until
    * the first export. */
@@ -36,6 +49,10 @@ export interface ManagedLocalState {
   /** This device's spent state (see {@link ManagedSpentState}); absent unless a
    * migration export handed the copy off. */
   spent?: ManagedSpentState;
+  /** When this device installed or revived the record from a backup (see
+   * {@link ManagedImportMarker}); absent for a record created by an invite/accept
+   * deposit rather than an import. */
+  imported?: ManagedImportMarker;
 }
 
 /** The sibling-state validator: reader-rejects-unknown at every level, so a
@@ -44,6 +61,7 @@ export const managedLocalStateSchema: ZodType<ManagedLocalState> = z
   .object({
     backup: z.object({ backedUpAt: z.iso.datetime() }).strict().optional(),
     spent: z.object({ spentAt: z.iso.datetime() }).strict().optional(),
+    imported: z.object({ importedAt: z.iso.datetime() }).strict().optional(),
   })
   .strict();
 

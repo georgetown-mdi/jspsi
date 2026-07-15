@@ -1,10 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 
-import { Alert, Button, FileButton, Loader } from "@mantine/core";
+import { Alert, Button, CopyButton, FileButton, Loader } from "@mantine/core";
 import { Link } from "@tanstack/react-router";
 
 import { triggerBlobDownload } from "@components/blobDownload";
 
+import {
+  COMPROMISE_RESPONSE_MESSAGE,
+  COMPROMISE_RESPONSE_TITLE,
+  composeManagedFailureConfirmation,
+  routeConfirmationReply,
+} from "@psi/managedFailureConfirmation";
 import {
   dispatchManagedMigration,
   exportManagedBackup,
@@ -18,25 +24,34 @@ import {
   markManagedExchangeSpent,
 } from "@psi/managedLocalState";
 import { MANAGED_EXCHANGE_ARTIFACT_MIME } from "@psi/managedExchangeArtifact";
+import { canReinviteFromRecord } from "@psi/managedReinvite";
 import { deriveManagedBackupState } from "@psi/managedBackupState";
 import { fileSystemAccessSupported } from "@psi/managedInputHandle";
 import { managedRerunCompletion } from "@psi/managedCompletionSurface";
+import { reinviteManagedExchange } from "@psi/managedReinviteDriver";
 import { runManagedExchangeInBrowser } from "@psi/managedRunDriver";
 import { whenDiagnostic } from "@utils/diagnostics";
 
-import { DonePanel, DownloadRow, WithheldResultInset } from "./BenchRunSurface";
+import {
+  CopyRow,
+  DonePanel,
+  DownloadRow,
+  WithheldResultInset,
+} from "./BenchRunSurface";
 import {
   classifyManagedRunFailure,
+  managedRunReinvites,
   managedRunRetryable,
 } from "./managedRunLaunchModel";
+import { dateLabel, dateTimeLabel } from "./inviterModel";
 import { BenchPage } from "./BenchPage";
-import { dateLabel } from "./inviterModel";
 import styles from "./bench.module.css";
 
 import type { ManagedBackupMarker } from "@psi/managedBackupState";
 import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
 import type { ManagedInputSource } from "@psi/managedInputHandle";
 import type { ManagedMigrationDispatch } from "@psi/managedExchangeExport";
+import type { ManagedReinvite } from "@psi/managedReinvite";
 import type { ManagedRunFailure } from "./managedRunLaunchModel";
 import type { RunOutputs } from "./runOutputs";
 
@@ -78,6 +93,16 @@ export function ManagedRunSurface({ id }: { id: string }) {
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [finishedAt, setFinishedAt] = useState<Date>();
   const [failure, setFailure] = useState<ManagedRunFailure>();
+  // The Tier-2 confirmation gate: once the operator confirms a real partner-side
+  // failure, the surface proceeds to re-invite; a "does not add up" reply routes to
+  // the compromise-response copy instead.
+  const [confirmationGated, setConfirmationGated] = useState(false);
+  const [compromiseResponse, setCompromiseResponse] = useState(false);
+  // A fresh re-invite the operator forwards out-of-band. Present once a re-invite is
+  // composed and the fresh secret persisted onto the record.
+  const [reinvite, setReinvite] = useState<ManagedReinvite>();
+  const [reinviting, setReinviting] = useState(false);
+  const [reinviteFailed, setReinviteFailed] = useState(false);
 
   // A single AbortController per in-flight run, aborted on unmount so a torn-down
   // surface stops the rendezvous, the connection, and the exchange.
@@ -149,6 +174,10 @@ export function ManagedRunSurface({ id }: { id: string }) {
     abortRef.current = controller;
     setRunning(true);
     setFailure(undefined);
+    setConfirmationGated(false);
+    setCompromiseResponse(false);
+    setReinvite(undefined);
+    setReinviteFailed(false);
     void (async () => {
       try {
         const result = await runManagedExchangeInBrowser({
@@ -172,7 +201,36 @@ export function ManagedRunSurface({ id }: { id: string }) {
         // internal message, so it stays in the dev-gated console; the surface shows
         // the classified, sanitized copy.
         whenDiagnostic(() => console.error(error));
-        setFailure(classifyManagedRunFailure(error));
+        // The tier is derived from the record's OWN bookkeeping, which the run path
+        // just stamped (the auth/transport/input/storage failureKind), so the record
+        // and its import marker are reloaded before classifying -- an unattended run's
+        // failure would surface through the same tiers at the next visit. A corrupted
+        // record or sibling entry makes the reload reject (a ZodError); rather than
+        // skip setFailure entirely (spinner clears, no error UI, unhandled rejection),
+        // fall back to the closure's own record and no sibling state, so the original
+        // error still surfaces through the generic tier.
+        const [reloaded, local] = await Promise.all([
+          getManagedExchange(record.id),
+          getManagedLocalState(record.id),
+        ]).catch(() => {
+          whenDiagnostic(() =>
+            console.error("managed run failure reload failed"),
+          );
+          return [undefined, undefined] as const;
+        });
+        // The reload can resolve after the surface unmounts; the getter can flip true
+        // across the await even though the earlier catch check narrowed it (ESLint
+        // models the getter as a literal, hence the disable).
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (controller.signal.aborted) return;
+        setFailure(
+          classifyManagedRunFailure(
+            error,
+            reloaded ?? record,
+            local,
+            Date.now(),
+          ),
+        );
       } finally {
         if (!controller.signal.aborted) setRunning(false);
         abortRef.current = undefined;
@@ -264,6 +322,45 @@ export function ManagedRunSurface({ id }: { id: string }) {
       .downloadUpdatedBackup()
       .catch(() => setExportFailed(true))
       .finally(() => setExportBusy(false));
+  }
+
+  // Fast re-invite: compose a fresh invitation from the record's OWN document (terms
+  // and locator), persist the fresh secret onto the record, and hand the operator the
+  // shareable artifacts to forward out-of-band. The operator re-authors nothing. The
+  // driver returns the rotated record; adopting it drops the stale in-memory secret so
+  // a subsequent run derives the rendezvous from the fresh one, and clearing the
+  // consumed failure surfaces "fresh invitation sent" rather than the recovered tier.
+  function reinviteNow() {
+    if (record === undefined || reinviting) return;
+    setReinviting(true);
+    setReinviteFailed(false);
+    void reinviteManagedExchange(record)
+      .then((result) => {
+        setRecord(result.record);
+        setFailure(undefined);
+        setReinvite(result.reinvite);
+      })
+      .catch((error) => {
+        whenDiagnostic(() => console.error(error));
+        setReinviteFailed(true);
+      })
+      .finally(() => setReinviting(false));
+  }
+
+  // The two-outcome gate: a confirmed real partner-side failure proceeds to re-invite;
+  // anything that does not add up routes to the compromise response (no quiet
+  // re-invite on the possibly-compromised channel). The inviter side mints the fresh
+  // invitation right away; the acceptor side cannot mint one from its mirrored
+  // document, so the gated recovery names asking the partner instead.
+  function resolveConfirmation(
+    outcome: Parameters<typeof routeConfirmationReply>[0],
+  ) {
+    if (routeConfirmationReply(outcome) === "compromise-response") {
+      setCompromiseResponse(true);
+      return;
+    }
+    setConfirmationGated(true);
+    if (record !== undefined && canReinviteFromRecord(record)) reinviteNow();
   }
 
   return (
@@ -420,12 +517,32 @@ export function ManagedRunSurface({ id }: { id: string }) {
               Run this exchange again with the same partner, without a new
               invitation. Your partner must run their side at the same time.
             </p>
-            {failure !== undefined && (
-              <Alert color="red" title={failure.title} mb="md">
-                <span style={{ whiteSpace: "pre-line" }}>
-                  {failure.message}
-                </span>
-              </Alert>
+            {reinvite !== undefined ? (
+              // A re-invite has superseded the failure: the record is rotated to the
+              // fresh secret and its consumed failure cleared, so the stale tier alert
+              // and its recovery are gone -- the operator forwards the fresh invitation
+              // and the next run derives from the new secret.
+              <ReinvitePanel record={record} reinvite={reinvite} />
+            ) : (
+              failure !== undefined && (
+                <>
+                  <Alert color="red" title={failure.title} mb="md">
+                    <span style={{ whiteSpace: "pre-line" }}>
+                      {failure.message}
+                    </span>
+                  </Alert>
+                  <FailureRecovery
+                    failure={failure}
+                    record={record}
+                    confirmationGated={confirmationGated}
+                    compromiseResponse={compromiseResponse}
+                    reinviting={reinviting}
+                    reinviteFailed={reinviteFailed}
+                    onReinvite={reinviteNow}
+                    onResolveConfirmation={resolveConfirmation}
+                  />
+                </>
+              )
             )}
             {!hasHandle && (
               <div className={styles.callout}>
@@ -478,6 +595,248 @@ export function ManagedRunSurface({ id }: { id: string }) {
         )}
       </main>
     </BenchPage>
+  );
+}
+
+/** The recovery affordance a classified failure offers, below its alert: fast
+ * re-invite for the re-invite tiers, the out-of-band confirmation and two-outcome gate
+ * for the unexplained tier, and nothing extra for a retry/wait state (the run button
+ * and the input picker are the recovery there). Thin over the pure model: the copy and
+ * the routing are the model's; this renders the buttons. A composed re-invite renders
+ * above this (the {@link ReinvitePanel}), so this never handles the minted artifacts. */
+function FailureRecovery({
+  failure,
+  record,
+  confirmationGated,
+  compromiseResponse,
+  reinviting,
+  reinviteFailed,
+  onReinvite,
+  onResolveConfirmation,
+}: {
+  failure: ManagedRunFailure;
+  record: ManagedExchangeRecord;
+  confirmationGated: boolean;
+  compromiseResponse: boolean;
+  reinviting: boolean;
+  reinviteFailed: boolean;
+  onReinvite: () => void;
+  onResolveConfirmation: (
+    outcome: Parameters<typeof routeConfirmationReply>[0],
+  ) => void;
+}) {
+  if (failure.recovery === "confirm") {
+    if (compromiseResponse)
+      return (
+        <Alert color="red" title={COMPROMISE_RESPONSE_TITLE} mb="md">
+          <span style={{ whiteSpace: "pre-line" }}>
+            {COMPROMISE_RESPONSE_MESSAGE}
+          </span>
+        </Alert>
+      );
+    // Past the gate on a confirmed partner-side failure, the recovery is fast
+    // re-invite -- the same panel a direct re-invite tier shows (which mints for the
+    // inviter and names asking the partner for the acceptor, with a retry on failure).
+    if (confirmationGated)
+      return (
+        <ReinviteRecovery
+          record={record}
+          reinviting={reinviting}
+          reinviteFailed={reinviteFailed}
+          onReinvite={onReinvite}
+        />
+      );
+    return (
+      <ConfirmationPanel record={record} onResolve={onResolveConfirmation} />
+    );
+  }
+
+  if (managedRunReinvites(failure))
+    return (
+      <ReinviteRecovery
+        record={record}
+        reinviting={reinviting}
+        reinviteFailed={reinviteFailed}
+        onReinvite={onReinvite}
+      />
+    );
+
+  return null;
+}
+
+/** The re-invite recovery for a re-invite tier (lapsed, storage, imported). The
+ * inviter side re-mints from the stored document; the acceptor side cannot mint an
+ * inviter-namespace invitation from its mirrored perspective, so its recovery is to
+ * ask the partner to send a fresh invitation and accept it -- the surface names which,
+ * from the record's own `side`. */
+function ReinviteRecovery({
+  record,
+  reinviting,
+  reinviteFailed,
+  onReinvite,
+}: {
+  record: ManagedExchangeRecord;
+  reinviting: boolean;
+  reinviteFailed: boolean;
+  onReinvite: () => void;
+}) {
+  if (!canReinviteFromRecord(record))
+    return (
+      <div className={styles.callout}>
+        <p className={styles.calloutLead}>Ask your partner to re-invite.</p>
+        <p className={styles.small}>
+          Ask your partner to send you a fresh invitation for this exchange over
+          your usual trusted channel, then accept it from the bench&apos;s home
+          page. That re-establishes the connection with a new secret; your terms
+          are unchanged.
+        </p>
+      </div>
+    );
+  return (
+    <div className={styles.callout}>
+      <p className={styles.calloutLead}>Re-invite your partner.</p>
+      <p className={styles.small}>
+        This keeps your agreed terms and only replaces the secret. The fresh
+        invitation carries a new one-time secret, so send it over your usual
+        trusted channel, exactly as you did the first time.
+      </p>
+      {reinviteFailed && (
+        <Alert color="red" title="That could not be completed" mb="sm">
+          The fresh invitation could not be created. Nothing changed here; try
+          again.
+        </Alert>
+      )}
+      <Button mt="sm" onClick={onReinvite} loading={reinviting}>
+        Create a fresh invitation
+      </Button>
+    </div>
+  );
+}
+
+/** A forwardable, multi-paragraph message the operator must READ before sending: the
+ * whole prose is shown in a visible, wrapped, readonly area with a copy action --
+ * unlike {@link CopyRow}, which collapses a secret to a one-line head/tail preview. The
+ * message carries no secret (it interpolates only this record's own label and failure
+ * time), so showing it in full is correct, not a leak. */
+function ForwardableMessage({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className={styles.copyRow}>
+      <span className={styles.copyLabel}>{label}</span>
+      <textarea
+        className={styles.forwardableMessage}
+        readOnly
+        value={value}
+        aria-label={label}
+        rows={value.split("\n").length}
+      />
+      {
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        typeof navigator !== "undefined" && navigator.clipboard ? (
+          <CopyButton value={value} timeout={1000}>
+            {({ copied, copy }) => (
+              <Button
+                mt="sm"
+                variant="default"
+                onClick={copy}
+                aria-label={
+                  copied ? `${label} copied` : `Copy ${label.toLowerCase()}`
+                }
+              >
+                {copied ? "Copied" : "Copy message"}
+              </Button>
+            )}
+          </CopyButton>
+        ) : null
+      }
+    </div>
+  );
+}
+
+/** The Tier-2 out-of-band confirmation: the forwardable, pre-filled message the
+ * operator copies and sends the partner, then the two-outcome gate. The message and
+ * the gate labels are the pure model's; this renders them. */
+function ConfirmationPanel({
+  record,
+  onResolve,
+}: {
+  record: ManagedExchangeRecord;
+  onResolve: (outcome: Parameters<typeof routeConfirmationReply>[0]) => void;
+}) {
+  const confirmation = composeManagedFailureConfirmation(record);
+  return (
+    <div className={styles.callout}>
+      <p className={styles.calloutLead}>Confirm with your partner first.</p>
+      <p className={styles.small}>
+        Copy this message and send it to your partner on the trusted channel you
+        use for this partnership (not a reply to whatever arrived here). It asks
+        them to confirm their identity, report what their own tool saw, and say
+        whether they ran from more than one place.
+      </p>
+      <ForwardableMessage
+        label="Message to your partner"
+        value={confirmation.message}
+      />
+      <p className={styles.small} style={{ marginTop: "0.75rem" }}>
+        When they reply:
+      </p>
+      <p>
+        <Button onClick={() => onResolve("confirmed-partner-failure")}>
+          {confirmation.confirmedOption}
+        </Button>{" "}
+        <Button
+          color="red"
+          variant="light"
+          onClick={() => onResolve("does-not-add-up")}
+        >
+          {confirmation.doesNotAddUpOption}
+        </Button>
+      </p>
+    </div>
+  );
+}
+
+/** The composed re-invite artifacts the operator forwards: the link and code carrying
+ * the fresh setup secret, and the honest ongoing cost -- every re-invite puts a fresh
+ * live secret on the out-of-band channel, so the confidentiality requirement is
+ * ongoing, not one-time. */
+function ReinvitePanel({
+  record,
+  reinvite,
+}: {
+  record: ManagedExchangeRecord;
+  reinvite: ManagedReinvite;
+}) {
+  return (
+    <div className={styles.callout}>
+      <p className={styles.calloutLead}>Send this fresh invitation.</p>
+      <p className={styles.small}>
+        Send this to your partner over your usual trusted channel (for example,
+        secure email). It carries a new one-time secret, so treat it as
+        confidential -- every re-invite puts a fresh secret on that channel, so
+        it must stay trusted each time. Your partner accepts it from the
+        bench&apos;s home page.
+      </p>
+      <CopyRow label="Invitation link" value={reinvite.deepLink} />
+      <CopyRow label="Invitation code" value={reinvite.encoded} />
+      <p className={styles.small}>
+        <strong>
+          This invitation expires{" "}
+          <span className={styles.mono}>
+            {dateTimeLabel(new Date(reinvite.tokenExpires))}
+          </span>
+          .
+        </strong>{" "}
+        {record.label === ""
+          ? "The exchange keeps its terms."
+          : `"${record.label}" keeps its terms.`}
+      </p>
+    </div>
   );
 }
 
