@@ -147,6 +147,15 @@ export interface GeneratedInvitation {
    * downstream. Local-only.
    */
   standardization?: Standardization;
+  /**
+   * The disclosed-column subset the token carries -- the value already inside
+   * `encoded`, surfaced so a persisting caller (the managed-exchange deposit)
+   * records the SAME send-side commitment the token published rather than
+   * re-deriving one that could drift. Always set, including the EMPTY set (a
+   * strict "sends nothing" commitment, not the absent/lazy case); see
+   * docs/spec/FILE_SYNC.md, "Which mint paths persist disclosedPayloadColumns".
+   */
+  disclosedPayloadColumns: Array<string>;
 }
 
 /** Why {@link generateInvitation} refused to mint an invitation for the given
@@ -530,5 +539,6 @@ export async function generateInvitation(params: {
     columns,
     metadata: params.metadata,
     standardization: params.standardization,
+    disclosedPayloadColumns,
   };
 }

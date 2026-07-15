@@ -11,10 +11,12 @@ import { describe, expect, test } from "vitest";
 import {
   LABEL_GUIDANCE,
   MAX_LABEL_LENGTH,
+  MAX_TOKEN_MAX_AGE_DAYS,
   buildManagedDeposit,
   composeManagedDocument,
   labelWithinCap,
   maxAgeCadenceNote,
+  maxAgeDaysError,
   webrtcLocatorFromEndpoint,
 } from "@bench/manageOfferModel";
 
@@ -40,8 +42,8 @@ const invitationEndpoint: WebRTCEndpoint = {
 };
 
 // ssn/first_name/last_name/dob infer matching keys; program_code is not in the
-// alias map, so it infers a disclosed payload column -- a non-trivial disclosed
-// set for composeManagedDocument to derive.
+// alias map, so it infers a disclosed payload column -- a non-trivial published
+// set for the inviter deposit to carry.
 const inviterColumns = [
   "ssn",
   "first_name",
@@ -55,13 +57,21 @@ const inviterTerms = getDefaultLinkageTerms(
   inviterMetadata,
 );
 
+// The set the token publishes -- generateInvitation derives it from this same
+// metadata, so the fixture mirrors the mint (["program_code"] here).
+const tokenDisclosedColumns = disclosedColumnNames(inviterMetadata);
+
 function depositInputs(
   overrides: Partial<ManagedDepositInputs> = {},
 ): ManagedDepositInputs {
   return {
     side: "inviter",
     exchangeFile: composeManagedDocument(
-      { linkageTerms: inviterTerms, metadata: inviterMetadata },
+      {
+        linkageTerms: inviterTerms,
+        metadata: inviterMetadata,
+        disclosedPayloadColumns: tokenDisclosedColumns,
+      },
       webrtcLocatorFromEndpoint(inviterEndpoint),
     ),
     sharedSecret: generateSharedSecret(),
@@ -108,22 +118,43 @@ describe("composeManagedDocument", () => {
     expect(JSON.stringify(doc)).not.toContain('"key"');
   });
 
-  test("derives disclosed payload columns from this party's metadata", () => {
+  test("carries caller-supplied payload commitments verbatim, never re-derived", () => {
     const doc = composeManagedDocument(
+      {
+        linkageTerms: inviterTerms,
+        metadata: inviterMetadata,
+        // Deliberately NOT what this metadata would derive, so the assertion
+        // proves the caller's set is carried as-is (one source: the token).
+        disclosedPayloadColumns: ["program_code", "extra_committed"],
+        expectedPayloadColumns: ["partner_col"],
+      },
+      webrtcLocatorFromEndpoint(inviterEndpoint),
+    );
+    expect(doc.disclosedPayloadColumns).toEqual([
+      "program_code",
+      "extra_committed",
+    ]);
+    expect(doc.expectedPayloadColumns).toEqual(["partner_col"]);
+  });
+
+  test("preserves an EMPTY commitment (strict), distinct from an absent one (lazy)", () => {
+    const strict = composeManagedDocument(
+      {
+        linkageTerms: inviterTerms,
+        disclosedPayloadColumns: [],
+        expectedPayloadColumns: [],
+      },
+      webrtcLocatorFromEndpoint(inviterEndpoint),
+    );
+    expect(strict.disclosedPayloadColumns).toEqual([]);
+    expect(strict.expectedPayloadColumns).toEqual([]);
+
+    const lazy = composeManagedDocument(
       { linkageTerms: inviterTerms, metadata: inviterMetadata },
       webrtcLocatorFromEndpoint(inviterEndpoint),
     );
-    expect(doc.disclosedPayloadColumns).toEqual(
-      disclosedColumnNames(inviterMetadata),
-    );
-  });
-
-  test("omits disclosed payload columns when there is no metadata", () => {
-    const doc = composeManagedDocument(
-      { linkageTerms: inviterTerms },
-      webrtcLocatorFromEndpoint(inviterEndpoint),
-    );
-    expect(doc).not.toHaveProperty("disclosedPayloadColumns");
+    expect(lazy).not.toHaveProperty("disclosedPayloadColumns");
+    expect(lazy).not.toHaveProperty("expectedPayloadColumns");
   });
 });
 
@@ -139,6 +170,12 @@ describe("buildManagedDeposit (inviter)", () => {
     expect(deposit.exchangeFile.connection.channel).toBe("webrtc");
     expect(deposit.exchangeFile.authentication).toBeUndefined();
     expect(deposit.label).toBe("Riverbend quarterly");
+    // The persisted send-side commitment is the token's published set; the
+    // received set is unknowable at mint, so no receive lock-in is persisted.
+    expect(deposit.exchangeFile.disclosedPayloadColumns).toEqual(
+      tokenDisclosedColumns,
+    );
+    expect(deposit.exchangeFile).not.toHaveProperty("expectedPayloadColumns");
   });
 
   test("tokenMaxAgeDays and expires are absent unless the operator opts in", () => {
@@ -176,32 +213,61 @@ describe("buildManagedDeposit (inviter)", () => {
 });
 
 describe("buildManagedDeposit (acceptor)", () => {
-  test("deposits side acceptor composing from the invitation endpoint and derived terms", () => {
-    const acceptorColumns = ["ssn", "first_name", "last_name", "dob"];
-    const acceptorMetadata = inferMetadata(acceptorColumns);
-    // The acceptor's own perspective: identity replaced, output/payload mirrored.
-    const acceptorTerms = deriveAcceptedLinkageTerms(inviterTerms, "Clinic A");
-    const secret = generateSharedSecret();
-    const deposit = buildManagedDeposit(
+  const acceptorColumns = ["ssn", "first_name", "last_name", "dob"];
+  const acceptorMetadata = inferMetadata(acceptorColumns);
+  // The acceptor's own perspective: identity replaced, output/payload mirrored.
+  const acceptorTerms = deriveAcceptedLinkageTerms(inviterTerms, "Clinic A");
+
+  function acceptorDeposit(tokenSet: Array<string> | undefined) {
+    return buildManagedDeposit(
       {
         side: "acceptor",
         exchangeFile: composeManagedDocument(
-          { linkageTerms: acceptorTerms, metadata: acceptorMetadata },
+          {
+            linkageTerms: acceptorTerms,
+            metadata: acceptorMetadata,
+            ...(tokenSet !== undefined
+              ? { expectedPayloadColumns: tokenSet }
+              : {}),
+          },
           webrtcLocatorFromEndpoint(invitationEndpoint),
         ),
-        sharedSecret: secret,
+        sharedSecret: generateSharedSecret(),
         choices: { label: "Clinic A partnership" },
       },
       Date.now(),
     );
+  }
+
+  test("deposits side acceptor composing from the invitation endpoint and derived terms", () => {
+    const deposit = acceptorDeposit(tokenDisclosedColumns);
     expect(deposit.side).toBe("acceptor");
-    expect(deposit.sharedSecret).toBe(secret);
     // The connection block is composed from the INVITATION's endpoint.
     expect(deposit.exchangeFile.connection).toEqual(
       connectionFromLocator(webrtcLocatorFromEndpoint(invitationEndpoint)),
     );
     expect(deposit.exchangeFile.linkageTerms.identity).toBe("Clinic A");
     expect(deposit.exchangeFile.authentication).toBeUndefined();
+  });
+
+  test("locks in the token's disclosed set as expectedPayloadColumns", () => {
+    const deposit = acceptorDeposit(tokenDisclosedColumns);
+    expect(deposit.exchangeFile.expectedPayloadColumns).toEqual(
+      tokenDisclosedColumns,
+    );
+    // The acceptor persists no send-side commitment field: its send commitment
+    // rides the mirrored payload.send (docs/spec/FILE_SYNC.md).
+    expect(deposit.exchangeFile).not.toHaveProperty("disclosedPayloadColumns");
+  });
+
+  test("an EMPTY token set persists as a strict receive-nothing lock-in", () => {
+    const deposit = acceptorDeposit([]);
+    expect(deposit.exchangeFile.expectedPayloadColumns).toEqual([]);
+  });
+
+  test("a token with no set leaves the lock-in absent (lazy)", () => {
+    const deposit = acceptorDeposit(undefined);
+    expect(deposit.exchangeFile).not.toHaveProperty("expectedPayloadColumns");
   });
 });
 
@@ -246,6 +312,30 @@ describe("maxAgeCadenceNote", () => {
 
   test("returns undefined when no policy is set (the default)", () => {
     expect(maxAgeCadenceNote(undefined)).toBeUndefined();
+  });
+});
+
+describe("maxAgeDaysError", () => {
+  test("accepts a positive whole day count up to the schema's cap", () => {
+    expect(maxAgeDaysError(1)).toBeUndefined();
+    expect(maxAgeDaysError(90)).toBeUndefined();
+    expect(maxAgeDaysError(MAX_TOKEN_MAX_AGE_DAYS)).toBeUndefined();
+  });
+
+  test("rejects a cleared field (the input reports a string), not silently no-bound", () => {
+    expect(maxAgeDaysError("")).toBeDefined();
+    expect(maxAgeDaysError("12.")).toBeDefined();
+  });
+
+  test("rejects zero, negatives, and fractions", () => {
+    expect(maxAgeDaysError(0)).toBeDefined();
+    expect(maxAgeDaysError(-7)).toBeDefined();
+    expect(maxAgeDaysError(2.5)).toBeDefined();
+  });
+
+  test("rejects a value past the record schema's cap, naming the bound", () => {
+    const error = maxAgeDaysError(MAX_TOKEN_MAX_AGE_DAYS + 1);
+    expect(error).toContain(String(MAX_TOKEN_MAX_AGE_DAYS));
   });
 });
 

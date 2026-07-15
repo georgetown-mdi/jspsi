@@ -304,6 +304,10 @@ export function InviterBench() {
           ...(invitation.standardization !== undefined
             ? { standardization: invitation.standardization }
             : {}),
+          // The token's own published set (including the strict empty set), so
+          // the persisted send-side commitment is the one the partner locked in
+          // -- never a re-derivation that could drift from it.
+          disclosedPayloadColumns: invitation.disclosedPayloadColumns,
         },
         connection,
       );
@@ -1023,14 +1027,18 @@ export function InviterBench() {
             {/* The manage offer is webrtc-only (its record composes a webrtc
                 locator) and is skippable: leaving it untouched keeps the exchange
                 one-time. It stands from the share screen through completion, so
-                either party can manage the partnership. */}
-            {transport === "browser" && failure === undefined && (
-              <ManageExchangeOffer
-                status={manageStatus}
-                handleCaptured={sourceHandle !== undefined}
-                onManage={(choices) => void manageExchange(choices)}
-              />
-            )}
+                either party can manage the partnership. The sample demo is
+                excluded: a standing record of synthetic terms armed with a real
+                secret is not a partnership to manage. */}
+            {transport === "browser" &&
+              failure === undefined &&
+              !demoActive && (
+                <ManageExchangeOffer
+                  status={manageStatus}
+                  handleCaptured={sourceHandle !== undefined}
+                  onManage={(choices) => void manageExchange(choices)}
+                />
+              )}
           </>
         )}
         {section === "save" && isCliTransport(transport) && (

@@ -6,8 +6,10 @@ import { IconCircleCheck } from "@tabler/icons-react";
 import {
   LABEL_GUIDANCE,
   MAX_LABEL_LENGTH,
+  MAX_TOKEN_MAX_AGE_DAYS,
   labelWithinCap,
   maxAgeCadenceNote,
+  maxAgeDaysError,
 } from "./manageOfferModel";
 import styles from "./bench.module.css";
 
@@ -48,7 +50,10 @@ export function ManageExchangeOffer({
 }) {
   const [label, setLabel] = useState("");
   const [maxAgeEnabled, setMaxAgeEnabled] = useState(false);
-  const [maxAgeDays, setMaxAgeDays] = useState<number>(90);
+  // Held as the NumberInput reports it (a string when cleared or mid-edit), so
+  // an invalid state is representable and can block the deposit rather than
+  // being coerced to a sentinel that silently drops the opted-in bound.
+  const [maxAgeDays, setMaxAgeDays] = useState<number | string>(90);
 
   if (status === "deposited")
     return (
@@ -69,14 +74,19 @@ export function ManageExchangeOffer({
       </div>
     );
 
+  // An enabled policy with an invalid day count blocks the deposit (the field
+  // error below names why): resolving it to "no bound" would silently drop the
+  // opted-in exposure bound the operator asked for.
+  const maxAgeError = maxAgeEnabled ? maxAgeDaysError(maxAgeDays) : undefined;
   const tokenMaxAgeDays =
-    maxAgeEnabled && Number.isInteger(maxAgeDays) && maxAgeDays > 0
+    maxAgeEnabled && maxAgeError === undefined && typeof maxAgeDays === "number"
       ? maxAgeDays
       : undefined;
   const cadenceNote = maxAgeCadenceNote(tokenMaxAgeDays);
   const labelValid = labelWithinCap(label);
   const depositing = status === "depositing";
-  const canManage = labelValid && !depositing;
+  const canManage =
+    labelValid && !depositing && (!maxAgeEnabled || maxAgeError === undefined);
 
   return (
     <div className={styles.callout}>
@@ -111,11 +121,11 @@ export function ManageExchangeOffer({
           label="Maximum age in days"
           value={maxAgeDays}
           min={1}
+          max={MAX_TOKEN_MAX_AGE_DAYS}
           step={1}
           allowDecimal={false}
-          onChange={(value) =>
-            setMaxAgeDays(typeof value === "number" ? value : 0)
-          }
+          error={maxAgeError}
+          onChange={setMaxAgeDays}
           mt="xs"
         />
       )}

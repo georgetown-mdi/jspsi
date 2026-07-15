@@ -22,7 +22,7 @@
  * "compose then throw away" path here -- a caller that declines never composes.
  */
 
-import { disclosedColumnNames } from "@psilink/core";
+import { MAX_TOKEN_MAX_AGE_DAYS } from "@psilink/core";
 
 import {
   MAX_LABEL_LENGTH,
@@ -69,11 +69,16 @@ export function webrtcLocatorFromEndpoint(
  * {@link MAX_LABEL_LENGTH}). */
 export { MAX_LABEL_LENGTH };
 
+/** The maximum max-token-age policy in days, re-exported at the offer boundary
+ * so the component bounds its input at the same cap the record schema enforces
+ * at write (core's {@link MAX_TOKEN_MAX_AGE_DAYS}). */
+export { MAX_TOKEN_MAX_AGE_DAYS };
+
 /** This party's own exchange-file substance at the completion surface, the parts
  * of the persisted document that are not the connection: the linkage terms this
- * party runs on (its own perspective), and the optional per-party blocks. The
- * connection is supplied separately as a webrtc locator, so this shape is
- * transport-agnostic and identical for both sides. */
+ * party runs on (its own perspective), the optional per-party blocks, and the
+ * payload-column commitments. The connection is supplied separately as a webrtc
+ * locator, so this shape is transport-agnostic and identical for both sides. */
 export interface ManagedExchangeDocumentParts {
   /** This party's linkage terms -- the inviter's minted terms, or the acceptor's
    * derived perspective (identity replaced, output/payload mirrored). */
@@ -82,17 +87,40 @@ export interface ManagedExchangeDocumentParts {
   metadata?: Metadata;
   /** This party's per-party standardization, when authored. */
   standardization?: Standardization;
+  /**
+   * This party's SEND-side disclosure commitment -- the inviter supplies the
+   * token's own `disclosedPayloadColumns` (one source: the set the partner
+   * consented to and locked in, never a re-derivation that could drift from it).
+   * Empty means a strict "sends nothing" commitment; absent means no commitment
+   * on record (the acceptor, whose send commitment rides its mirrored
+   * `payload.send` instead -- see docs/spec/FILE_SYNC.md, "Which mint paths
+   * persist disclosedPayloadColumns").
+   */
+  disclosedPayloadColumns?: Array<string>;
+  /**
+   * This party's RECEIVE-side lock-in -- the acceptor supplies the invitation
+   * token's `disclosedPayloadColumns` (the partner's committed send set, in the
+   * partner's column namespace), so a managed re-run fails CLOSED if the partner
+   * transmits a different set than was consented to at accept, exactly as the
+   * CLI accept persists it (docs/spec/FILE_SYNC.md, "Runtime lock-in"). Empty
+   * means a strict "receive nothing" lock-in; absent means lazy (a token that
+   * carried no set). The inviter omits it: its received set is unknowable at
+   * mint (the CLI inviter crystallizes it only by observing the first exchange).
+   */
+  expectedPayloadColumns?: Array<string>;
 }
 
 /**
  * Compose this party's persisted exchange-file document from its own document
- * parts and the credential-free webrtc locator. The disclosed and expected
- * payload columns are derived from this party's metadata exactly as the
- * downloadable-file mint derives them (`disclosedColumnNames` over the same
- * metadata), so the persisted document's commitments match the run the terms were
- * authored for; both are omitted when there is no metadata to derive them from.
- * The document carries no `authentication` block and no credential by
- * construction (see {@link composeManagedExchangeFile}).
+ * parts and the credential-free webrtc locator. The payload-column commitments
+ * are caller-supplied and carried verbatim -- `disclosedPayloadColumns` is the
+ * token's published set (the inviter's send commitment), and
+ * `expectedPayloadColumns` is the token's set from the partner's side (the
+ * acceptor's receive lock-in) -- never re-derived here, so the persisted
+ * commitment cannot disagree with the one the token carried. An empty array is
+ * a strict commitment and is preserved; only an absent field is omitted. The
+ * document carries no `authentication` block and no credential by construction
+ * (see {@link composeManagedExchangeFile}).
  *
  * @throws {ZodError} if the assembled document fails schema validation (a
  *   malformed locator, an out-of-range port).
@@ -101,10 +129,6 @@ export function composeManagedDocument(
   parts: ManagedExchangeDocumentParts,
   connection: WebRTCExchangeLocator,
 ): ExchangeSpec {
-  const disclosed =
-    parts.metadata !== undefined
-      ? disclosedColumnNames(parts.metadata)
-      : undefined;
   return composeManagedExchangeFile({
     connection,
     linkageTerms: parts.linkageTerms,
@@ -112,13 +136,17 @@ export function composeManagedDocument(
     ...(parts.standardization !== undefined
       ? { standardization: parts.standardization }
       : {}),
-    ...(disclosed !== undefined ? { disclosedPayloadColumns: disclosed } : {}),
+    ...(parts.disclosedPayloadColumns !== undefined
+      ? { disclosedPayloadColumns: parts.disclosedPayloadColumns }
+      : {}),
+    ...(parts.expectedPayloadColumns !== undefined
+      ? { expectedPayloadColumns: parts.expectedPayloadColumns }
+      : {}),
   });
 }
 
 /** The operator's choices on the manage offer: the display label and whether to
- * opt into a max-age policy. The label cap is enforced by
- * {@link buildManagedDeposit}; the schedule is a later surface (a managed re-run
+ * opt into a max-age policy. The schedule is a later surface (a managed re-run
  * item), so it is deliberately not offered here. */
 export interface ManageOfferChoices {
   /** The operator-supplied display label for the partnership. */
@@ -149,16 +177,17 @@ export interface ManagedDepositInputs {
 }
 
 /**
- * Assemble the {@link NewManagedExchange} fields a deposit persists. The label
- * cap is enforced here (rejecting an over-long label before the store write, the
- * same cap {@link buildManagedExchangeRecord} re-checks), and the max-age policy
- * drives `expires`: when the operator opts in, `expires` is stamped `now +
- * tokenMaxAgeDays` through {@link rotationWriteBack} (reusing the run-rotate date
- * math and its guards, not duplicating them), so a creation-time bound is applied
- * exactly as a rotation would restamp it; when they do not, `tokenMaxAgeDays` and
- * `expires` are both absent -- the opt-in default. The invitation's setup lifetime
- * never flows into `expires`: the record's `expires` provenance is single-source
- * (see docs/spec/MANAGED_EXCHANGE_RECORD.md, the `expires` row).
+ * Assemble the {@link NewManagedExchange} fields a deposit persists. The label is
+ * carried verbatim -- its cap is enforced by the record schema at the store write
+ * ({@link buildManagedExchangeRecord}), with {@link labelWithinCap} as the UI
+ * gate. The max-age policy drives `expires`: when the operator opts in, `expires`
+ * is stamped `now + tokenMaxAgeDays` through {@link rotationWriteBack} (reusing
+ * the run-rotate date math and its guards, not duplicating them), so a
+ * creation-time bound is applied exactly as a rotation would restamp it; when
+ * they do not, `tokenMaxAgeDays` and `expires` are both absent -- the opt-in
+ * default. The invitation's setup lifetime never flows into `expires`: the
+ * record's `expires` provenance is single-source (see
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `expires` row).
  *
  * @param now The instant the max-age stamp counts from, injected so the deposit
  *   stays pure and testable.
@@ -191,6 +220,26 @@ export function buildManagedDeposit(
  * operator cooperation, not enforced. */
 export function labelWithinCap(label: string): boolean {
   return label.length <= MAX_LABEL_LENGTH;
+}
+
+/**
+ * Validate an opted-in max-age day count as the operator typed it (a number, or
+ * the string a cleared/partial number input reports), returning the field error
+ * to show, or `undefined` when the value is a usable policy. The offer must not
+ * resolve an enabled-but-invalid count to "no bound": the max-age policy is the
+ * only control bounding a dormant partnership's stored-secret exposure, so a
+ * cleared field silently converting opt-in to no-bound would deposit an unbounded
+ * secret the operator believes is bounded -- an invalid value blocks the deposit
+ * with this error instead. The bounds are the record schema's (a positive integer
+ * at most {@link MAX_TOKEN_MAX_AGE_DAYS}), checked here so an out-of-range value
+ * fails at the field, not as a generic store-write failure after the click.
+ */
+export function maxAgeDaysError(value: number | string): string | undefined {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1)
+    return "Enter a whole number of days.";
+  if (value > MAX_TOKEN_MAX_AGE_DAYS)
+    return `Enter at most ${MAX_TOKEN_MAX_AGE_DAYS} days.`;
+  return undefined;
 }
 
 /**
