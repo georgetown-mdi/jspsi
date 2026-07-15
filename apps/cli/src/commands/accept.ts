@@ -27,7 +27,12 @@ import {
 import { detectFileConflicts } from "../fileUtils";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { decodeAndValidateInvitation } from "../invitationDecode";
-import { configureLogging, promptConfirm, runOrExit } from "../util/cli";
+import {
+  assertNoUnknownOptions,
+  configureLogging,
+  promptConfirm,
+  runOrExit,
+} from "../util/cli";
 import { resolveRecordOutput } from "../recordFile";
 import {
   checkLinkageSatisfiability,
@@ -605,6 +610,11 @@ export async function handler(argv: Arguments): Promise<void> {
       });
       closeLogging = close;
       const positionals = (argv["args"] as Array<string> | undefined) ?? [];
+      // This command sets unknown-options-as-args (so a `-`-leading invitation
+      // survives as a positional), which also lets a mistyped `--flag` reach the
+      // positionals rather than the top-level strictOptions; reject it here,
+      // before the invitation decode, any connection, or any file write.
+      assertNoUnknownOptions(positionals);
       const resolved = resolveAcceptPositionals(positionals);
       // --consent-to-terms records advance consent to the invitation's terms and
       // bypasses the confirmation prompt for unattended runs. Read as `=== true`

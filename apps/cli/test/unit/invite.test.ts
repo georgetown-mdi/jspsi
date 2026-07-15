@@ -88,6 +88,16 @@ test("an online invitation without an input file is a usage error", () => {
   );
 });
 
+test("a `-`-leading positional is kept as the offline input file", () => {
+  // The unknown-option check rejects only `--`-prefixed tokens, so a single-`-`
+  // positional (an unusual input path, or `-` for stdin) reaches the resolver
+  // unchanged.
+  const r = resolveInvitePositionals(["-not-a-flag.csv"]);
+  expect(r.mode).toBe("offline");
+  if (r.mode !== "offline") return;
+  expect(r.input).toBe("-not-a-flag.csv");
+});
+
 // --- validateInvite (the no-commit phase) ------------------------------------
 
 test("validateInvite: an unsupported (webrtc) URL is rejected with no side effect", async () => {
@@ -1411,6 +1421,47 @@ test("handler: an unrecognized --linkage-strategy is rejected (exit 64) before a
     expect(fs.existsSync(configFile)).toBe(false);
     expect(fs.existsSync(keyFile)).toBe(false);
   } finally {
+    logSpy.mockRestore();
+    exit.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: a mistyped --flag exits 64 naming it, before any side effect", async () => {
+  // invite sets unknown-options-as-args, so a mistyped --server-usernam lands in
+  // the positionals; it must be rejected before any conflict gate, input read, or
+  // token mint, not absorbed as an input path.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-unknown-"));
+  const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+  const configFile = path.join(dir, "psilink.yaml");
+  const keyFile = path.join(dir, ".psilink.key");
+  const errors: string[] = [];
+  const logErr = vi
+    .spyOn(getLogger("invite"), "error")
+    .mockImplementation((...a: unknown[]) => {
+      errors.push(a.map(String).join(" "));
+    });
+  const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      args: ["--server-usernam", "u", input],
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).toHaveBeenCalledWith(64);
+    expect(errors.join("\n")).toContain("--server-usernam");
+    expect(logSpy).not.toHaveBeenCalled();
+    expect(fs.existsSync(configFile)).toBe(false);
+    expect(fs.existsSync(keyFile)).toBe(false);
+  } finally {
+    logErr.mockRestore();
     logSpy.mockRestore();
     exit.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });

@@ -8,6 +8,7 @@ import type { Arguments } from "yargs";
 import { loadCSVFile, MAX_RECONNECT_ATTEMPTS, UsageError } from "@psilink/core";
 
 import {
+  assertNoUnknownOptions,
   durationFlagMs,
   durationFlagSeconds,
   exitWithError,
@@ -23,6 +24,46 @@ import { streamOf, ttyStream, withStdin } from "../stdinStream";
 function argv(extra: Record<string, unknown>): Arguments {
   return { _: [], $0: "psilink", ...extra } as unknown as Arguments;
 }
+
+// --- assertNoUnknownOptions --------------------------------------------------
+
+test("assertNoUnknownOptions: a --prefixed token is a usage error naming it", () => {
+  // The commands that set unknown-options-as-args capture a mistyped --flag in
+  // their positionals; this is where it is rejected, in yargs' own wording.
+  expect(() =>
+    assertNoUnknownOptions(["--server-usernam", "u", "input.csv"]),
+  ).toThrow(UsageError);
+  expect(() =>
+    assertNoUnknownOptions(["--server-usernam", "u", "input.csv"]),
+  ).toThrow("Unknown argument: --server-usernam");
+});
+
+test("assertNoUnknownOptions: several --prefixed tokens are all named", () => {
+  expect(() =>
+    assertNoUnknownOptions(["--retain-file", "--identit", "x"]),
+  ).toThrow("Unknown arguments: --retain-file, --identit");
+});
+
+test("assertNoUnknownOptions: a --flag=value token is rejected whole", () => {
+  expect(() => assertNoUnknownOptions(["--server-usernam=x", "ABC"])).toThrow(
+    "Unknown argument: --server-usernam=x",
+  );
+});
+
+test("assertNoUnknownOptions: single-`-` and plain positionals pass", () => {
+  // A `-`-leading invitation string, a bare `-` stdin token, a URL, and a plain
+  // file path are all legitimate positionals: only a `--`-prefixed token is an
+  // option-shaped mistype.
+  expect(() =>
+    assertNoUnknownOptions([
+      "-eyJ2ZXJzaW9uIjoiMSJ9abcDEF",
+      "-",
+      "sftp://h/p",
+      "input.csv",
+    ]),
+  ).not.toThrow();
+  expect(() => assertNoUnknownOptions([])).not.toThrow();
+});
 
 // --- singleValue -------------------------------------------------------------
 

@@ -12,6 +12,7 @@ import {
 import { renderConfigTemplate } from "../configTemplate";
 import type { TemplateDataSpec } from "../configTemplate";
 import {
+  assertNoUnknownOptions,
   configureLogging,
   LOG_LEVELS,
   promptConfirm,
@@ -102,9 +103,13 @@ export async function handler(argv: Arguments): Promise<void> {
       const identity =
         (singleValue(argv, "identity") as string | undefined) ??
         PLACEHOLDER_IDENTITY;
-      const input = resolveInitInput(
-        (argv["args"] as Array<string> | undefined) ?? [],
-      );
+      const positionals = (argv["args"] as Array<string> | undefined) ?? [];
+      // This command sets unknown-options-as-args (so a bare `-` stdin token
+      // survives as a positional), which also lets a mistyped `--flag` reach the
+      // positionals rather than the top-level strictOptions; reject it here,
+      // before any input read or file write.
+      assertNoUnknownOptions(positionals);
+      const input = resolveInitInput(positionals);
 
       // Decide whether to (over)write before reading the input, so a `-` stdin CSV
       // is never consumed when the answer is "fail-closed" or "leave it" -- the
