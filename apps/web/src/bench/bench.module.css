@@ -949,6 +949,16 @@
   margin: 1.8rem 0 1.2rem 0;
 }
 
+/* Below-cards copy should read at the cards' width, not the standing
+   68ch prose measure (.page p): the general-sibling combinator only
+   reaches markup after .lobbyActions inside .lobby, so the tagline and
+   file-assurance line above the cards keep their narrower measure, and
+   no other .page using .sub/.small/.howItWorks is affected. */
+.lobby .lobbyActions ~ p,
+.lobby .lobbyActions ~ .howItWorks p {
+  max-width: none;
+}
+
 .actionCard {
   background: var(--bench-column);
   border: 2px solid var(--bench-rule);
