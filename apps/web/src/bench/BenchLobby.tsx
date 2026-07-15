@@ -120,6 +120,14 @@ export function BenchLobby() {
           you can run both sides.
         </p>
         <p className={`${styles.sub} ${styles.small}`}>
+          Saved an exchange to run again?{" "}
+          <Anchor inherit component={Link} to="/saved">
+            Saved exchanges
+          </Anchor>{" "}
+          lists the ones stored in this browser so you can run one without a new
+          invitation.
+        </p>
+        <p className={`${styles.sub} ${styles.small}`}>
           Already have an exchange record?{" "}
           <Anchor inherit component={Link} to="/verify">
             Verify a receipt

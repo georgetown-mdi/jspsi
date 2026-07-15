@@ -14,7 +14,9 @@ import { Route as ExchangeRouteImport } from './routes/exchange'
 import { Route as AcceptRouteImport } from './routes/accept'
 import { Route as BenchRouteRouteImport } from './routes/bench/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SavedIndexRouteImport } from './routes/saved.index'
 import { Route as BenchIndexRouteImport } from './routes/bench/index'
+import { Route as SavedIdRouteImport } from './routes/saved.$id'
 import { Route as BenchVerifyRouteImport } from './routes/bench/verify'
 import { Route as BenchExchangeRouteImport } from './routes/bench/exchange'
 import { Route as BenchAcceptRouteImport } from './routes/bench/accept'
@@ -55,10 +57,20 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SavedIndexRoute = SavedIndexRouteImport.update({
+  id: '/saved/',
+  path: '/saved/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const BenchIndexRoute = BenchIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => BenchRouteRoute,
+} as any)
+const SavedIdRoute = SavedIdRouteImport.update({
+  id: '/saved/$id',
+  path: '/saved/$id',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const BenchVerifyRoute = BenchVerifyRouteImport.update({
   id: '/verify',
@@ -140,7 +152,9 @@ export interface FileRoutesByFullPath {
   '/bench/accept': typeof BenchAcceptRoute
   '/bench/exchange': typeof BenchExchangeRoute
   '/bench/verify': typeof BenchVerifyRoute
+  '/saved/$id': typeof SavedIdRoute
   '/bench/': typeof BenchIndexRoute
+  '/saved/': typeof SavedIndexRoute
   '/api/jobs/remotes': typeof ApiJobsRemotesRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
   '/api/jobs/': typeof ApiJobsIndexRoute
@@ -161,7 +175,9 @@ export interface FileRoutesByTo {
   '/bench/accept': typeof BenchAcceptRoute
   '/bench/exchange': typeof BenchExchangeRoute
   '/bench/verify': typeof BenchVerifyRoute
+  '/saved/$id': typeof SavedIdRoute
   '/bench': typeof BenchIndexRoute
+  '/saved': typeof SavedIndexRoute
   '/api/jobs/remotes': typeof ApiJobsRemotesRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
   '/api/jobs': typeof ApiJobsIndexRoute
@@ -184,7 +200,9 @@ export interface FileRoutesById {
   '/bench/accept': typeof BenchAcceptRoute
   '/bench/exchange': typeof BenchExchangeRoute
   '/bench/verify': typeof BenchVerifyRoute
+  '/saved/$id': typeof SavedIdRoute
   '/bench/': typeof BenchIndexRoute
+  '/saved/': typeof SavedIndexRoute
   '/api/jobs/remotes': typeof ApiJobsRemotesRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
   '/api/jobs/': typeof ApiJobsIndexRoute
@@ -208,7 +226,9 @@ export interface FileRouteTypes {
     | '/bench/accept'
     | '/bench/exchange'
     | '/bench/verify'
+    | '/saved/$id'
     | '/bench/'
+    | '/saved/'
     | '/api/jobs/remotes'
     | '/api/peerjs/id'
     | '/api/jobs/'
@@ -229,7 +249,9 @@ export interface FileRouteTypes {
     | '/bench/accept'
     | '/bench/exchange'
     | '/bench/verify'
+    | '/saved/$id'
     | '/bench'
+    | '/saved'
     | '/api/jobs/remotes'
     | '/api/peerjs/id'
     | '/api/jobs'
@@ -251,7 +273,9 @@ export interface FileRouteTypes {
     | '/bench/accept'
     | '/bench/exchange'
     | '/bench/verify'
+    | '/saved/$id'
     | '/bench/'
+    | '/saved/'
     | '/api/jobs/remotes'
     | '/api/peerjs/id'
     | '/api/jobs/'
@@ -271,6 +295,8 @@ export interface RootRouteChildren {
   AcceptRoute: typeof AcceptRoute
   ExchangeRoute: typeof ExchangeRoute
   VerifyRoute: typeof VerifyRoute
+  SavedIdRoute: typeof SavedIdRoute
+  SavedIndexRoute: typeof SavedIndexRoute
   ApiJobsRemotesRoute: typeof ApiJobsRemotesRoute
   ApiPeerjsIdRoute: typeof ApiPeerjsIdRoute
   ApiJobsIndexRoute: typeof ApiJobsIndexRoute
@@ -321,12 +347,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/saved/': {
+      id: '/saved/'
+      path: '/saved'
+      fullPath: '/saved/'
+      preLoaderRoute: typeof SavedIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/bench/': {
       id: '/bench/'
       path: '/'
       fullPath: '/bench/'
       preLoaderRoute: typeof BenchIndexRouteImport
       parentRoute: typeof BenchRouteRoute
+    }
+    '/saved/$id': {
+      id: '/saved/$id'
+      path: '/saved/$id'
+      fullPath: '/saved/$id'
+      preLoaderRoute: typeof SavedIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/bench/verify': {
       id: '/bench/verify'
@@ -453,6 +493,8 @@ const rootRouteChildren: RootRouteChildren = {
   AcceptRoute: AcceptRoute,
   ExchangeRoute: ExchangeRoute,
   VerifyRoute: VerifyRoute,
+  SavedIdRoute: SavedIdRoute,
+  SavedIndexRoute: SavedIndexRoute,
   ApiJobsRemotesRoute: ApiJobsRemotesRoute,
   ApiPeerjsIdRoute: ApiPeerjsIdRoute,
   ApiJobsIndexRoute: ApiJobsIndexRoute,

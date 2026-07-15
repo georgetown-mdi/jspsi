@@ -162,6 +162,16 @@ describe("read through the handle at run start", () => {
       "last_name",
       "date_of_birth",
     ]);
+    // The parsed rows ride the same single parse as the columns, so the run
+    // consumes the input without a second read.
+    expect(first.rows).toEqual([
+      {
+        ssn: "123456789",
+        first_name: "ADA",
+        last_name: "LOVELACE",
+        date_of_birth: "01/01/1990",
+      },
+    ]);
 
     // Drop the next period's extract over the same name -- the data-refresh
     // workflow -- and the same handle reads the new contents, no re-selection.
@@ -175,6 +185,7 @@ describe("read through the handle at run start", () => {
       attendance: "unattended",
     });
     expect(second.columns).toEqual(["email_address"]);
+    expect(second.rows).toEqual([{ email_address: "ada@example.org" }]);
   });
 
   test("a missing file fails as a benign acquire rejection", async () => {

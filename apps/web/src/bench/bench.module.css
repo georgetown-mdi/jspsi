@@ -969,6 +969,39 @@
   font-size: 15px;
 }
 
+/* ---------- saved exchanges ---------- */
+
+.savedList {
+  list-style: none;
+  margin: 1.4rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.savedRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--bench-column);
+  border: 2px solid var(--bench-rule);
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+
+.savedRowMain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.savedRowLabel {
+  font-weight: 600;
+}
+
 /* ---------- responsive ---------- */
 
 @media (max-width: 1080px) {
