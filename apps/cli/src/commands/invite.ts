@@ -31,6 +31,7 @@ import { detectFileConflicts } from "../fileUtils";
 import { resolveRecordOutput } from "../recordFile";
 import { DURATION_VALUE_HELP, parseDuration } from "../util/duration";
 import {
+  assertNoUnknownOptions,
   configureLogging,
   durationFlagSeconds,
   MAX_TIMEOUT_SECONDS,
@@ -665,6 +666,11 @@ export async function handler(argv: Arguments): Promise<void> {
       // repeat first.
       const linkageStrategy = parseLinkageStrategyFlag(argv);
       const positionals = (argv["args"] as Array<string> | undefined) ?? [];
+      // This command sets unknown-options-as-args, so a mistyped `--flag` lands
+      // in the positionals rather than being rejected by the top-level
+      // strictOptions; reject it here, before any conflict gate, input read, or
+      // token mint.
+      assertNoUnknownOptions(positionals);
       const resolved = resolveInvitePositionals(positionals);
       const ready = await validateInvite({
         resolved,

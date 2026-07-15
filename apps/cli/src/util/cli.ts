@@ -40,6 +40,36 @@ export function singleValue(argv: Arguments, name: string): unknown {
 }
 
 /**
+ * Reject any `--`-prefixed token captured among a command's positionals as an
+ * unrecognized option, with a {@link UsageError} (exit 64) that names it in the
+ * same "Unknown argument(s): ..." wording yargs' own `strictOptions` uses. The
+ * `invite`, `accept`, and `init` commands set `unknown-options-as-args` so a
+ * `-`-leading invitation string survives as a positional, which also
+ * reclassifies a mistyped `--flag` into the captured positional array before
+ * `strictOptions` would reject it -- so those commands cannot use `strictOptions`
+ * and reject a typo through this scan instead.
+ *
+ * A legitimate positional never begins with `--`: an invitation string,
+ * `@path` reference, input/output file, or server URL is single-`-`-leading at
+ * most (a base64url invitation may begin with one `-`, and `-` alone is the
+ * stdin positional), so a double-dash token is always an option-shaped mistype,
+ * not data. Single-`-` tokens are deliberately left untouched, since one cannot
+ * be told from a `-`-leading invitation without decoding it, and the invitation
+ * positional is validated by the command's own schema check downstream. yargs
+ * consumes a lone `--` end-of-options separator before the positionals are
+ * captured, so it never reaches this scan.
+ */
+export function assertNoUnknownOptions(positionals: Array<unknown>): void {
+  const unknown = positionals
+    .map(String)
+    .filter((token) => token.startsWith("--"));
+  if (unknown.length === 0) return;
+  throw new UsageError(
+    `Unknown argument${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}`,
+  );
+}
+
+/**
  * Sanity ceiling, in seconds, for the duration-valued CLI timeout flags
  * (`--connection-timeout`, `--peer-timeout`, `--accept-timeout`): seven days. A
  * timeout is a coordination window, and even a generous async setup waits hours,

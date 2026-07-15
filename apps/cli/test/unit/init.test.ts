@@ -526,6 +526,59 @@ test("handler: an unrecognized --log-level exits 64", async () => {
   logErr.mockRestore();
 });
 
+test("handler: a mistyped --flag exits 64 naming it, writing no config", async () => {
+  // init sets unknown-options-as-args, so a mistyped --identit lands in the
+  // positionals; it must be rejected before any file is written, not absorbed as
+  // an input path.
+  const dir = scratchDir();
+  const configFile = path.join(dir, "psilink.yaml");
+  const errors: string[] = [];
+  const logErr = vi
+    .spyOn(getLogger("init"), "error")
+    .mockImplementation((...a: unknown[]) => {
+      errors.push(a.map(String).join(" "));
+    });
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => {}) as never);
+
+  await initHandler(
+    argvFor({ "config-file": configFile, args: ["--identit", "x"] }),
+  );
+
+  expect(exit).toHaveBeenCalledWith(64);
+  expect(errors.join("\n")).toContain("--identit");
+  expect(fs.existsSync(configFile)).toBe(false);
+  expect(writeFileOwnerOnlyMock).not.toHaveBeenCalled();
+  logErr.mockRestore();
+});
+
+test("handler: a `-`-leading input positional is not treated as an option", async () => {
+  // A single-`-`-leading token is a positional, not an option: it reaches
+  // resolveInitInput/buildTemplateData, which rejects it as an unreadable file
+  // (exit 64) -- not the unknown-option path, and never a silently-dropped flag.
+  const dir = scratchDir();
+  const configFile = path.join(dir, "psilink.yaml");
+  const errors: string[] = [];
+  const logErr = vi
+    .spyOn(getLogger("init"), "error")
+    .mockImplementation((...a: unknown[]) => {
+      errors.push(a.map(String).join(" "));
+    });
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => {}) as never);
+
+  await initHandler(
+    argvFor({ "config-file": configFile, args: ["-not-a-flag.csv"] }),
+  );
+
+  expect(exit).toHaveBeenCalledWith(64);
+  expect(errors.join("\n")).not.toContain("Unknown argument");
+  expect(errors.join("\n")).toContain("-not-a-flag.csv");
+  logErr.mockRestore();
+});
+
 // --- helpers -----------------------------------------------------------------
 
 /**
