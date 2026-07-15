@@ -8,7 +8,9 @@ import { describe, expect, test } from "vitest";
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
   MAX_LABEL_LENGTH,
+  applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
+  applyManagedExchangeRotation,
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
   parseManagedExchangeRecord,
@@ -16,6 +18,7 @@ import {
 } from "@psi/managedExchangeRecord";
 
 import type {
+  ManagedExchangeLastRun,
   ManagedExchangeSchedule,
   NewManagedExchange,
 } from "@psi/managedExchangeRecord";
@@ -233,5 +236,145 @@ describe("applyManagedExchangeLocalEdits", () => {
         label: "x".repeat(MAX_LABEL_LENGTH + 1),
       }),
     ).toThrow();
+  });
+});
+
+describe("applyManagedExchangeRotation", () => {
+  test("a string expires sets the bound; the secret advances", () => {
+    const record = buildManagedExchangeRecord(newExchange());
+    const rotatedSecret = generateSharedSecret();
+    const rotated = applyManagedExchangeRotation(record, {
+      sharedSecret: rotatedSecret,
+      expires: "2026-10-06T14:00:00.000Z",
+    });
+    expect(rotated.sharedSecret).toBe(rotatedSecret);
+    expect(rotated.expires).toBe("2026-10-06T14:00:00.000Z");
+  });
+
+  test("a null expires deletes the key, not merely sets it undefined", () => {
+    const record = buildManagedExchangeRecord(
+      newExchange({ expires: "2026-04-06T14:00:00.000Z" }),
+    );
+    const rotated = applyManagedExchangeRotation(record, {
+      sharedSecret: generateSharedSecret(),
+      expires: null,
+    });
+    expect(rotated).not.toHaveProperty("expires");
+  });
+
+  test("touches only the rotation fields; everything else survives", () => {
+    const record = buildManagedExchangeRecord(
+      newExchange({ tokenMaxAgeDays: 90, schedule }),
+    );
+    const rotated = applyManagedExchangeRotation(record, {
+      sharedSecret: generateSharedSecret(),
+      expires: null,
+    });
+    expect(rotated.id).toBe(record.id);
+    expect(rotated.label).toBe(record.label);
+    expect(rotated.exchangeFile).toEqual(record.exchangeFile);
+    expect(rotated.side).toBe(record.side);
+    expect(rotated.tokenMaxAgeDays).toBe(90);
+    expect(rotated.schedule).toEqual(schedule);
+  });
+
+  test("rejects a malformed rotated secret at this pure layer", () => {
+    const record = buildManagedExchangeRecord(newExchange());
+    expect(() =>
+      applyManagedExchangeRotation(record, {
+        sharedSecret: "not-a-secret",
+        expires: null,
+      }),
+    ).toThrow();
+  });
+
+  test("does not mutate the input record", () => {
+    const record = buildManagedExchangeRecord(
+      newExchange({ expires: "2026-04-06T14:00:00.000Z" }),
+    );
+    const originalSecret = record.sharedSecret;
+    applyManagedExchangeRotation(record, {
+      sharedSecret: generateSharedSecret(),
+      expires: null,
+    });
+    expect(record.sharedSecret).toBe(originalSecret);
+    expect(record.expires).toBe("2026-04-06T14:00:00.000Z");
+  });
+});
+
+describe("applyManagedExchangeLastRun", () => {
+  const olderRun: ManagedExchangeLastRun = {
+    at: "2026-07-14T12:00:00.000Z",
+    outcome: "succeeded",
+  };
+  const newerRun: ManagedExchangeLastRun = {
+    at: "2026-07-14T13:00:00.000Z",
+    outcome: "failed",
+    failureKind: "storage",
+  };
+
+  test("records an outcome, leaving the secret and document untouched", () => {
+    const record = buildManagedExchangeRecord(newExchange());
+    const updated = applyManagedExchangeLastRun(record, olderRun);
+    expect(updated.lastRun).toEqual(olderRun);
+    expect(updated.sharedSecret).toBe(record.sharedSecret);
+    expect(updated.exchangeFile).toEqual(record.exchangeFile);
+    // The input record is not mutated.
+    expect(record).not.toHaveProperty("lastRun");
+  });
+
+  test("a newer entry overwrites an older stored one", () => {
+    const record = applyManagedExchangeLastRun(
+      buildManagedExchangeRecord(newExchange()),
+      olderRun,
+    );
+    expect(applyManagedExchangeLastRun(record, newerRun).lastRun).toEqual(
+      newerRun,
+    );
+  });
+
+  test("an entry staler than the stored one is a no-op", () => {
+    const record = applyManagedExchangeLastRun(
+      buildManagedExchangeRecord(newExchange()),
+      newerRun,
+    );
+    const applied = applyManagedExchangeLastRun(record, olderRun);
+    expect(applied.lastRun).toEqual(newerRun);
+  });
+
+  test("an entry with the same instant overwrites (only strictly-staler no-ops)", () => {
+    const record = applyManagedExchangeLastRun(
+      buildManagedExchangeRecord(newExchange()),
+      olderRun,
+    );
+    const sameInstant: ManagedExchangeLastRun = {
+      at: olderRun.at,
+      outcome: "missed",
+    };
+    expect(applyManagedExchangeLastRun(record, sameInstant).lastRun).toEqual(
+      sameInstant,
+    );
+  });
+
+  test("staleness compares instants, not strings, across ISO precisions", () => {
+    // A whole-second ISO stamp sorts lexicographically AFTER a fractional stamp
+    // of a later instant ("...00Z" > "...00.500Z" as strings); the guard must
+    // still treat it as the older instant and keep the newer entry.
+    const fractionalNewer: ManagedExchangeLastRun = {
+      at: "2026-07-14T12:00:00.500Z",
+      outcome: "failed",
+      failureKind: "storage",
+    };
+    const wholeSecondOlder: ManagedExchangeLastRun = {
+      at: "2026-07-14T12:00:00Z",
+      outcome: "succeeded",
+    };
+    const record = applyManagedExchangeLastRun(
+      buildManagedExchangeRecord(newExchange()),
+      fractionalNewer,
+    );
+    expect(
+      applyManagedExchangeLastRun(record, wholeSecondOlder).lastRun,
+    ).toEqual(fractionalNewer);
   });
 });

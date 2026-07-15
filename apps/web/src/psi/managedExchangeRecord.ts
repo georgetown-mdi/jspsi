@@ -326,6 +326,68 @@ export function buildManagedExchangeRecord(
   return parseManagedExchangeRecord(record);
 }
 
+/** The rotation fields a successful run advances on the stored record: the
+ * rotated secret always, and the `expires` bound restamped from the max-age
+ * policy (a string to set it, `null` to clear any standing bound). Deliberately
+ * the only fields {@link applyManagedExchangeRotation} touches, so a rotation
+ * write cannot carry a stale secret or a stale document -- the persist-before-
+ * success write is structurally incapable of it (see
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md, "Persist-before-success ordering"). */
+export interface ManagedExchangeRotation {
+  /** The rotated shared secret (base64url) to persist as the current secret. */
+  sharedSecret: string;
+  /** The restamped bound to set, or `null` to clear any standing bound. */
+  expires: string | null;
+}
+
+/**
+ * Apply a rotation to a record, producing a validated new record with only the
+ * rotated secret and the `expires` bound changed -- the document, the label, the
+ * schedule, the handle, and the bookkeeping are carried through untouched. A
+ * string `expires` sets the bound; `null` clears it (a policy dropped between runs
+ * must not leave a stale bound armed). The result is re-validated through the
+ * schema, so a malformed rotated secret is rejected here. The input record is not
+ * mutated.
+ *
+ * @throws {ZodError} if the rotated record is invalid (a malformed secret).
+ */
+export function applyManagedExchangeRotation(
+  record: ManagedExchangeRecord,
+  rotation: ManagedExchangeRotation,
+): ManagedExchangeRecord {
+  const next: ManagedExchangeRecord = {
+    ...record,
+    sharedSecret: rotation.sharedSecret,
+  };
+  if (rotation.expires === null) delete next.expires;
+  else next.expires = rotation.expires;
+  return parseManagedExchangeRecord(next);
+}
+
+/** Apply a `lastRun` bookkeeping entry to a record, producing a validated new
+ * record with only `lastRun` changed. The document and the secret are carried
+ * through untouched. Separate from a rotation write so the run outcome is recorded
+ * without re-touching the rotated secret. The input record is not mutated.
+ *
+ * Monotonic on `at`: an entry older than the stored one leaves the record
+ * unchanged. Two runs' bookkeeping tails are not serialized by the run+rotate
+ * lock (it covers only handshake through persist), so a slow earlier run's late
+ * write could otherwise land after -- and mask -- a newer run's outcome; the
+ * guard makes the stale write a no-op instead. Compared as parsed instants, not
+ * strings: the schema admits ISO datetimes of varying fractional precision, whose
+ * lexicographic order diverges from chronological. */
+export function applyManagedExchangeLastRun(
+  record: ManagedExchangeRecord,
+  lastRun: ManagedExchangeLastRun,
+): ManagedExchangeRecord {
+  if (
+    record.lastRun !== undefined &&
+    Date.parse(record.lastRun.at) > Date.parse(lastRun.at)
+  )
+    return parseManagedExchangeRecord(record);
+  return parseManagedExchangeRecord({ ...record, lastRun });
+}
+
 /** The local fields an operator may edit in place without a re-invite: the
  * display label, the run schedule, and the max-token-age policy. A change to the
  * agreed terms is a re-invite, not an in-place record edit, so the document and
