@@ -544,6 +544,7 @@ export function AcceptorBench() {
         ).map((row) => ({
           label: row.label,
           muted: row.muted,
+          shareBar: row.shareBar,
           value: Array.isArray(row.value) ? (
             <>
               {row.value.map((line, index) => (

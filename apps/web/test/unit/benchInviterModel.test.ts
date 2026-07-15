@@ -119,6 +119,26 @@ describe("spine derivation from the read file", () => {
     }
   });
 
+  test("the narrow share bar's marked subset holds across every phase", () => {
+    const marked = (rows: ReturnType<typeof inviterLedgerRows>) =>
+      rows.filter((row) => row.shareBar === true).map((row) => row.label);
+    const subset = ["You will send", "Matched on", "Expires"];
+    expect(marked(inviterLedgerRows(undefined))).toEqual(subset);
+    expect(marked(inviterLedgerRows(editorFromCsv("Dana", csv)))).toEqual(
+      subset,
+    );
+    // Settled (outcome present): the labels hold, so the subset does too.
+    expect(
+      marked(
+        inviterLedgerRows(
+          editorFromCsv("Dana", csv),
+          "2026-07-08T19:32:00.000Z",
+          { matchedRecordCount: 3 },
+        ),
+      ),
+    ).toEqual(subset);
+  });
+
   test("rail facts count the derived cleaning and keys", () => {
     const editor = editorFromCsv("Dana", csv);
     const facts = inviterRailFacts(editor);

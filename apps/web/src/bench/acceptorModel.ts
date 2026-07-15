@@ -122,11 +122,15 @@ function acceptorResultsGoTo(output: LinkageTerms["output"]): string {
 
 /** One row of the acceptor's disclosure ledger: the value renders in the data
  * voice, `muted` in the empty-state voice, `value` may be a multi-line list (the
- * per-key matched-on rows). */
+ * per-key matched-on rows). `shareBar` marks the row as one of the headline
+ * disclosure facts the narrow viewport's condensed "What you will share" bar
+ * keeps -- declared here by the producer, so a relabel can never silently drop
+ * a row from that trust surface. */
 export interface AcceptorLedgerRow {
   label: string;
   value?: string | ReadonlyArray<string>;
   muted?: string;
+  shareBar?: boolean;
 }
 
 /** The forward-reference wording the pre-file send rows carry, before any file is
@@ -146,12 +150,16 @@ function acceptorSendRow(
   label: string,
   disclosure: ReadonlyArray<string> | undefined,
 ): AcceptorLedgerRow {
+  // Whatever its tense, the outbound row is the share bar's headline fact --
+  // what leaves (or left) this machine.
   if (disclosure === undefined)
-    return { label, muted: ACCEPTOR_SEND_FORWARD_REFERENCE };
-  if (disclosure.length === 0) return { label, muted: "No additional columns" };
+    return { label, muted: ACCEPTOR_SEND_FORWARD_REFERENCE, shareBar: true };
+  if (disclosure.length === 0)
+    return { label, muted: "No additional columns", shareBar: true };
   return {
     label,
     value: disclosure.map((name) => sanitizeForDisplay(name)).join(", "),
+    shareBar: true,
   };
 }
 
@@ -208,14 +216,16 @@ export function acceptorLedgerRows(
           value: summary.linkageKeys.map(
             (key, index) => `${index + 1}. ${key.name}`,
           ),
+          shareBar: true,
         }
-      : { label: "Matched on", muted: "No keys" },
+      : { label: "Matched on", muted: "No keys", shareBar: true },
     {
       label: "Expires",
       value:
         summary.expires !== undefined
           ? dateTimeLabel(new Date(summary.expires))
           : "No expiry",
+      shareBar: true,
     },
     {
       label: "Results go to",
@@ -282,15 +292,18 @@ export function acceptorDoneLedgerRows(
         )} matched rows${receivedSuffix}`;
   return [
     acceptorSendRow("You sent", disclosedColumnNames(metadata)),
-    { label: "You received", value: receivedValue },
+    // The expiry row is gone (the invitation is consumed), so the settled
+    // condensed subset is what left, what arrived, and what matched.
+    { label: "You received", value: receivedValue, shareBar: true },
     summary.linkageKeys.length > 0
       ? {
           label: "Matched on",
           value: summary.linkageKeys.map(
             (key, index) => `${index + 1}. ${key.name}`,
           ),
+          shareBar: true,
         }
-      : { label: "Matched on", muted: "No keys" },
+      : { label: "Matched on", muted: "No keys", shareBar: true },
     {
       label: "Results went to",
       value: acceptorResultsGoTo(token.linkageTerms.output),

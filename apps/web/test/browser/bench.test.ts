@@ -167,7 +167,7 @@ function mount(content: ReactNode) {
   root.render(createElement(MantineProvider, null, content));
 }
 
-afterEach(() => {
+afterEach(async () => {
   // Backstop for the fake-Date test below: a failure between useFakeTimers and
   // its finally must not leak a frozen clock into the rest of the suite.
   vi.useRealTimers();
@@ -181,6 +181,10 @@ afterEach(() => {
   csvLoadHarness.lastSignal = undefined;
   csvLoadHarness.resolve = undefined;
   lifecycleHarness.calls.length = 0;
+  // The bench reads the viewport width to choose its wide vs narrow layout, so
+  // a test that narrows the page must not leak that width into the next:
+  // restore the browser project's configured wide default (vite.config.ts).
+  await page.viewport(1280, 800);
 });
 
 // Walk the spine to a sealed invitation: name, file, straight through to
@@ -2194,5 +2198,193 @@ describe("inviter bench", () => {
     } finally {
       downloads.restore();
     }
+  });
+});
+
+describe("bench at a narrow viewport", () => {
+  const SAMPLE_CSV = new File(
+    [
+      "client_id,first_name,last_name,dob,program_code\n" +
+        "1,Ann,Lee,01/02/1990,A\n2,Bo,Ray,03/04/1985,B\n",
+    ],
+    "clients.csv",
+    { type: "text/csv" },
+  );
+
+  // Mount already narrow so the layout hook renders the small-viewport IA from
+  // the first paint, read the sample file so the ledger fills and the Customize
+  // surfaces become reachable, then walk to Matching & sharing (spine step 2).
+  async function reachMatchingSharingNarrow() {
+    await page.viewport(400, 800);
+    mount(createElement(InviterBench));
+    await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+    const fileInput = document.querySelector('input[type="file"]');
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      SAMPLE_CSV,
+    );
+    await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
+    await page
+      .getByRole("button", { name: "Continue to matching & sharing" })
+      .click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Matching & sharing");
+  }
+
+  test("the spine compresses to a step strip naming the current position", async () => {
+    await reachMatchingSharingNarrow();
+
+    // The setup nav no longer renders the full Mantine Stepper (no step-label
+    // nodes, the selector the wide-layout tests read); it carries the one-line
+    // step strip naming step 2 of the three-step spine.
+    const nav = document.querySelector('nav[aria-label="Exchange setup"]');
+    expect(nav).not.toBeNull();
+    expect(
+      (nav as Element).querySelectorAll(".mantine-Stepper-stepLabel"),
+    ).toHaveLength(0);
+    expect((nav as Element).textContent).toContain(
+      "Step 2 of 3 - Matching & sharing",
+    );
+
+    // The decorative "N/M" badge is hidden from assistive tech -- the sentence
+    // already carries the position.
+    const badge = (nav as Element).querySelector('[aria-hidden="true"]');
+    expect(badge?.textContent).toBe("2/3");
+  });
+
+  test("the Customize tabs fold behind a disclosure keeping each fact value", async () => {
+    await reachMatchingSharingNarrow();
+
+    // The optional surfaces are behind a collapsed "Customize" disclosure, not
+    // the standing ledger group.
+    const customizeToggle = page.getByRole("button", { name: "Customize" });
+    await expect.element(customizeToggle).toBeInTheDocument();
+    await expect
+      .element(customizeToggle)
+      .toHaveAttribute("aria-expanded", "false");
+
+    // The group note and each surface's right-aligned fact are inside it.
+    await customizeToggle.click();
+    await expect
+      .element(customizeToggle)
+      .toHaveAttribute("aria-expanded", "true");
+    await expect
+      .element(page.getByText("Filled in from your file."))
+      .toBeInTheDocument();
+    const cleaningRow = page.getByRole("button", { name: /Cleaning/ });
+    await expect.element(cleaningRow).toBeInTheDocument();
+    expect((cleaningRow.element() as HTMLElement).textContent).toMatch(
+      /Cleaning.*field/,
+    );
+    const keysRow = page.getByRole("button", { name: /Matching keys/ });
+    expect((keysRow.element() as HTMLElement).textContent).toMatch(
+      /Matching keys.*key/,
+    );
+
+    // Opening the disclosure reaches each tab: the Matching keys surface opens
+    // its work column.
+    await keysRow.click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Matching keys");
+  });
+
+  test("the share bar is the first interactive element and collapses", async () => {
+    await reachMatchingSharingNarrow();
+
+    // The first focusable control on the page is the share bar's toggle: it
+    // sits ahead of every work-column control in DOM order, so tabbing from the
+    // document start reaches it first. "Interactive" means tab-reachable
+    // (tabIndex >= 0), enabled, and laid out -- excluding, e.g., the hidden
+    // tabindex="-1" measurement textarea Mantine's autosize input parks on
+    // document.body.
+    const focusable = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        "button, a[href], input, select, textarea, [tabindex]",
+      ),
+    ).filter(
+      (element) =>
+        element.tabIndex >= 0 &&
+        !element.matches(":disabled") &&
+        element.offsetParent !== null,
+    );
+    const shareToggle = page.getByRole("button", {
+      name: "What you will share",
+    });
+    await expect.element(shareToggle).toBeInTheDocument();
+    // It is the very first focusable control in the document -- nothing
+    // interactive precedes the trust surface at any viewport.
+    expect(focusable[0]).toBe(shareToggle.element() as HTMLElement);
+    // And it precedes the first work-column control in DOM order.
+    const firstWorkControl = document.querySelector<HTMLElement>(
+      `main.${styles.work} button, main.${styles.work} select, main.${styles.work} input`,
+    );
+    expect(firstWorkControl).not.toBeNull();
+    expect(
+      focusable.indexOf(shareToggle.element() as HTMLElement),
+    ).toBeLessThan(focusable.indexOf(firstWorkControl as HTMLElement));
+
+    // Present but collapsed: one tap reveals the condensed subset.
+    await expect.element(shareToggle).toHaveAttribute("aria-expanded", "false");
+    await shareToggle.click();
+    await expect.element(shareToggle).toHaveAttribute("aria-expanded", "true");
+
+    // The share bar shows the condensed three-row subset, not the ledger's full
+    // seven rows.
+    const shareBar = document.querySelector(`.${styles.shareBar}`) as Element;
+    const rows = Array.from(
+      shareBar.querySelectorAll(`.${styles.ledgerRow}`),
+    ).map((row) => row.querySelector("dt")?.childNodes[0].textContent);
+    expect(rows).toEqual(["You will send", "Matched on", "Expires"]);
+
+    // Collapsing again reports the closed state.
+    await shareToggle.click();
+    await expect.element(shareToggle).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("the narrow layout holds without horizontal overflow", async () => {
+    await reachMatchingSharingNarrow();
+
+    // Expanding both disclosures must not push the document past the viewport.
+    await page.getByRole("button", { name: "What you will share" }).click();
+    await page.getByRole("button", { name: "Customize" }).click();
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(400);
+  });
+
+  test("a live breakpoint crossing preserves the work column's state", async () => {
+    // Mounted wide (the project's default viewport) and sealed, with
+    // component-local state armed in the work column: the reveal toggle's
+    // open textarea, whose state lives inside the copy row, not the bench.
+    await createSealedInvitation();
+    const reveal = page.getByRole("button", { name: "Show full link" });
+    await reveal.click();
+    await expect.element(reveal).toHaveAttribute("aria-expanded", "true");
+    const revealArea = document.querySelector(
+      `.${styles.revealArea}`,
+    ) as HTMLTextAreaElement;
+    expect(revealArea).not.toBeNull();
+    const deepLink = revealArea.value;
+
+    // Crossing to narrow reorders the regions as a keyed move, not a
+    // remount: the reveal stays open, on the very same DOM node, while the
+    // ledger folds to the share bar.
+    await page.viewport(400, 800);
+    await expect
+      .element(page.getByRole("button", { name: "What you will share" }))
+      .toBeInTheDocument();
+    await expect.element(reveal).toHaveAttribute("aria-expanded", "true");
+    expect(document.querySelector(`.${styles.revealArea}`)).toBe(revealArea);
+    expect(revealArea.value).toBe(deepLink);
+
+    // And back out to wide: the full ledger aside returns, the reveal still
+    // open on the same node.
+    await page.viewport(1280, 800);
+    await expect
+      .element(page.getByRole("heading", { name: "This exchange" }))
+      .toBeInTheDocument();
+    await expect.element(reveal).toHaveAttribute("aria-expanded", "true");
+    expect(document.querySelector(`.${styles.revealArea}`)).toBe(revealArea);
   });
 });

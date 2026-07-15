@@ -649,12 +649,16 @@ export const RESULTS_DIRECTION_LABELS: Record<OutputDirection, string> = {
 
 /** One disclosure-ledger row: `value` renders in the data voice, `muted`
  * renders in the empty-state voice ("None", "Nothing"), neither renders the
- * em-dash placeholder. */
+ * em-dash placeholder. `shareBar` marks the row as one of the headline
+ * disclosure facts the narrow viewport's condensed "What you will share" bar
+ * keeps -- declared here by the producer, so a relabel can never silently
+ * drop a row from that trust surface. */
 export interface InviterLedgerRow {
   label: string;
   reference?: string;
   value?: string | ReadonlyArray<string>;
   muted?: string;
+  shareBar?: boolean;
 }
 
 /** What a completed exchange settled, folded into the ledger: the invitation
@@ -681,10 +685,10 @@ export function inviterLedgerRows(
 ): Array<InviterLedgerRow> {
   if (editor === undefined) {
     return [
-      { label: "You will send", reference: "Step 2" },
+      { label: "You will send", reference: "Step 2", shareBar: true },
       { label: "You will receive", reference: "Step 2" },
-      { label: "Matched on", reference: "Step 2" },
-      { label: "Expires", reference: "Step 3" },
+      { label: "Matched on", reference: "Step 2", shareBar: true },
+      { label: "Expires", reference: "Step 3", shareBar: true },
       { label: "Results go to", reference: "Step 3" },
       { label: "Agreement" },
       { label: "Transport", reference: "Step 3" },
@@ -694,11 +698,17 @@ export function inviterLedgerRows(
   const keys = enabledKeys(editor.draft);
   return [
     sent.length > 0
-      ? { label: "You will send", reference: "Step 2", value: sent.join(", ") }
+      ? {
+          label: "You will send",
+          reference: "Step 2",
+          value: sent.join(", "),
+          shareBar: true,
+        }
       : {
           label: "You will send",
           reference: "Step 2",
           muted: "Nothing - matching only",
+          shareBar: true,
         },
     {
       label: "You will receive",
@@ -715,8 +725,14 @@ export function inviterLedgerRows(
           label: "Matched on",
           reference: "Step 2",
           value: keys.map((key, index) => `${index + 1}. ${key.name}`),
+          shareBar: true,
         }
-      : { label: "Matched on", reference: "Step 2", muted: "No keys" },
+      : {
+          label: "Matched on",
+          reference: "Step 2",
+          muted: "No keys",
+          shareBar: true,
+        },
     {
       label: "Expires",
       reference: "Step 3",
@@ -726,6 +742,7 @@ export function inviterLedgerRows(
           : expiresIso !== undefined
             ? dateTimeLabel(new Date(expiresIso))
             : lifetimeLabel(editor.draft.lifetimeSeconds),
+      shareBar: true,
     },
     {
       label: "Results go to",

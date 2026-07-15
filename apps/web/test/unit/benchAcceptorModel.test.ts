@@ -244,6 +244,13 @@ describe("acceptor ledger rows", () => {
     const rows = acceptorLedgerRows(makeToken({ legalAgreement: undefined }));
     expect(rowMuted(rows, "Agreement")).toBe("None");
   });
+
+  test("the narrow share bar's marked subset is send, matched on, expires", () => {
+    const marked = acceptorLedgerRows(makeToken(), DISCLOSING_METADATA)
+      .filter((row) => row.shareBar === true)
+      .map((row) => row.label);
+    expect(marked).toEqual(["You will send", "Matched on", "Expires"]);
+  });
 });
 
 describe("acceptor completion ledger", () => {
@@ -316,6 +323,19 @@ describe("acceptor completion ledger", () => {
     );
     // No received columns, so no suffix -- just the count.
     expect(rowValue(rows, "You received")).toBe("0 matched rows");
+  });
+
+  test("the settled share-bar subset keeps the past-tense disclosure row", () => {
+    // The expiry row is consumed with the invitation, so the settled condensed
+    // subset is what left, what arrived, and what matched -- "You sent" first.
+    const marked = acceptorDoneLedgerRows(
+      makeToken(),
+      { matchedRecordCount: 1847 },
+      DISCLOSING_METADATA,
+    )
+      .filter((row) => row.shareBar === true)
+      .map((row) => row.label);
+    expect(marked).toEqual(["You sent", "You received", "Matched on"]);
   });
 });
 
