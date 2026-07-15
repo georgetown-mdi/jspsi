@@ -1,7 +1,42 @@
+import { useState } from "react";
+
+import { DisclosureSection } from "../components/DisclosureSection";
 import styles from "./bench.module.css";
+import { useNarrowBench } from "./narrowViewport";
 
 import type { RailFact } from "./inviterModel";
 import type { ReactNode } from "react";
+
+/** The narrow share bar condenses the ledger to three headline disclosure
+ * facts: the primary outbound row, the matched-on keys, and the expiry -- the
+ * mock's subset. The inviter sends and the acceptor receives, so the primary
+ * row is "You will send" when present and the receive row otherwise (either
+ * tense). Labels are model-authored constants; a producer that renames one of
+ * these must update the matching list here -- a share-bar row silently
+ * dropping is a review tell. */
+const SHARE_BAR_SENT_LABEL = "You will send";
+const SHARE_BAR_RECEIVED_LABELS: ReadonlyArray<string> = [
+  "You will receive",
+  "You received",
+];
+const SHARE_BAR_MATCHED_LABEL = "Matched on";
+const SHARE_BAR_EXPIRES_LABEL = "Expires";
+
+/** The share bar's rows in ledger order: the primary outbound fact, matched-on,
+ * and expires. Falls back to the leading rows if a producer's labels do not
+ * match, so the bar is never empty. */
+function shareBarRows(
+  rows: ReadonlyArray<LedgerRow>,
+): ReadonlyArray<LedgerRow> {
+  const hasSend = rows.some((row) => row.label === SHARE_BAR_SENT_LABEL);
+  const headline = rows.filter((row) => {
+    if (row.label === SHARE_BAR_MATCHED_LABEL) return true;
+    if (row.label === SHARE_BAR_EXPIRES_LABEL) return true;
+    if (hasSend) return row.label === SHARE_BAR_SENT_LABEL;
+    return SHARE_BAR_RECEIVED_LABELS.includes(row.label);
+  });
+  return headline.length > 0 ? headline : rows.slice(0, 3);
+}
 
 /**
  * One row of the disclosure ledger: an uppercase label, the value in the
@@ -42,12 +77,32 @@ function CustomizeFactValue({ entry }: { entry: RailFact }) {
  * plain button per optional surface (normal tab order, no menu semantics),
  * pairing the surface's label with its quiet fact. The open tab's row carries
  * `aria-current="true"` and the accent style; a surface not yet reachable
- * (no file read) renders its row disabled.
+ * (no file read) renders its row disabled. `groupNote` is the line above the
+ * rows -- the "Customize" heading on the wide ledger, the "Filled in from your
+ * file." note inside the narrow disclosure whose toggle already reads
+ * "Customize".
  */
-function LedgerCustomize({ facts }: { facts: ReadonlyArray<RailFact> }) {
+function LedgerCustomize({
+  facts,
+  groupNote,
+}: {
+  facts: ReadonlyArray<RailFact>;
+  /** The line above the rows. Absent on the wide ledger (the uppercase
+   * "Customize" heading); the narrow disclosure passes the softer "Filled in
+   * from your file." note, its toggle already carrying the "Customize" name. */
+  groupNote?: string;
+}) {
   return (
     <div className={styles.ledgerCustomize}>
-      <p className={styles.ledgerGroupLabel}>Customize</p>
+      <p
+        className={
+          groupNote === undefined
+            ? styles.ledgerGroupLabel
+            : styles.customizeGroupNote
+        }
+      >
+        {groupNote ?? "Customize"}
+      </p>
       <ul>
         {facts.map((entry) => (
           <li key={entry.label}>
@@ -74,6 +129,60 @@ function LedgerCustomize({ facts }: { facts: ReadonlyArray<RailFact> }) {
   );
 }
 
+/** The sealed-terms tag and sample-data notice shown under the ledger title:
+ * standing trust state that survives every viewport, so it renders above the
+ * disclosures on a narrow layout too. */
+function LedgerStanding({
+  tag,
+  demoNotice,
+}: {
+  tag?: string;
+  demoNotice?: { label: string; onClear?: () => void };
+}) {
+  return (
+    <>
+      {tag !== undefined && <span className={styles.sealedTag}>{tag}</span>}
+      {demoNotice !== undefined && (
+        <div className={styles.demoNotice}>
+          <span>{demoNotice.label}</span>
+          {demoNotice.onClear !== undefined && (
+            <button
+              type="button"
+              className={styles.demoClear}
+              onClick={demoNotice.onClear}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** The ledger's fact rows as a definition list. */
+function LedgerRows({ rows }: { rows: ReadonlyArray<LedgerRow> }) {
+  return (
+    <dl>
+      {rows.map((row) => (
+        <div key={row.label} className={styles.ledgerRow}>
+          <dt>
+            {row.label}
+            {row.reference !== undefined && (
+              <span className={styles.ledgerRef}>{row.reference}</span>
+            )}
+          </dt>
+          <dd>
+            {row.value ?? (
+              <span className={styles.dash}>{row.muted ?? "\u2014"}</span>
+            )}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 /**
  * The standing disclosure ledger on the bench's right: always visible,
  * filling in as the exchange takes shape -- the running answer to "what leaves
@@ -81,6 +190,12 @@ function LedgerCustomize({ facts }: { facts: ReadonlyArray<RailFact> }) {
  * the terms are editable it also hosts the Customize group's surface rows
  * ({@link LedgerCustomize}); the hosting bench withholds `customize` once the
  * terms seal or the run launches.
+ *
+ * At or below the narrow cut-over the aside folds to a collapsible "What you
+ * will share" bar (a condensed three-row subset plus the trust footer) and,
+ * when editable, a separate Customize disclosure. The hosting {@link
+ * BenchShell} pins this aside ahead of the work column at that width, making
+ * the share bar the page's first interactive element.
  */
 export function Ledger({
   title = "This exchange",
@@ -106,43 +221,87 @@ export function Ledger({
   customize?: ReadonlyArray<RailFact>;
   footer?: ReactNode;
 }) {
+  const narrow = useNarrowBench();
+  if (narrow) {
+    return (
+      <NarrowLedger
+        title={title}
+        tag={tag}
+        demoNotice={demoNotice}
+        rows={rows}
+        customize={customize}
+        footer={footer}
+      />
+    );
+  }
   return (
     <aside className={styles.ledger} aria-label={title}>
       <h2>{title}</h2>
-      {tag !== undefined && <span className={styles.sealedTag}>{tag}</span>}
-      {demoNotice !== undefined && (
-        <div className={styles.demoNotice}>
-          <span>{demoNotice.label}</span>
-          {demoNotice.onClear !== undefined && (
-            <button
-              type="button"
-              className={styles.demoClear}
-              onClick={demoNotice.onClear}
-            >
-              Clear
-            </button>
-          )}
-        </div>
-      )}
-      <dl>
-        {rows.map((row) => (
-          <div key={row.label} className={styles.ledgerRow}>
-            <dt>
-              {row.label}
-              {row.reference !== undefined && (
-                <span className={styles.ledgerRef}>{row.reference}</span>
-              )}
-            </dt>
-            <dd>
-              {row.value ?? (
-                <span className={styles.dash}>{row.muted ?? "\u2014"}</span>
-              )}
-            </dd>
-          </div>
-        ))}
-      </dl>
+      <LedgerStanding tag={tag} demoNotice={demoNotice} />
+      <LedgerRows rows={rows} />
       {customize !== undefined && <LedgerCustomize facts={customize} />}
       {footer !== undefined && <p className={styles.trust}>{footer}</p>}
+    </aside>
+  );
+}
+
+/**
+ * The ledger at a narrow viewport: a collapsible "What you will share" bar
+ * over the condensed top rows plus the trust footer, and -- while the terms
+ * are editable -- a separate Customize disclosure holding the same surface
+ * rows. Both default collapsed but present, one tap from their contents.
+ * Still an `<aside>` named by the ledger title, so the trust landmark survives
+ * the fold. The share bar comes first so it is the page's first interactive
+ * element ahead of the sample notice's Clear action; the standing tag and
+ * sample notice follow it, always visible.
+ */
+function NarrowLedger({
+  title,
+  tag,
+  demoNotice,
+  rows,
+  customize,
+  footer,
+}: {
+  title: string;
+  tag?: string;
+  demoNotice?: { label: string; onClear?: () => void };
+  rows: ReadonlyArray<LedgerRow>;
+  customize?: ReadonlyArray<RailFact>;
+  footer?: ReactNode;
+}) {
+  const [shareOpen, setShareOpen] = useState(false);
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+  return (
+    <aside className={styles.narrowLedger} aria-label={title}>
+      <div className={styles.shareBar}>
+        <DisclosureSection
+          label="What you will share"
+          headingOrder={2}
+          open={shareOpen}
+          onToggle={setShareOpen}
+        >
+          <div className={styles.shareBarBody}>
+            <LedgerRows rows={shareBarRows(rows)} />
+            {footer !== undefined && <p className={styles.trust}>{footer}</p>}
+          </div>
+        </DisclosureSection>
+      </div>
+      {customize !== undefined && (
+        <div className={styles.customizeDisclosure}>
+          <DisclosureSection
+            label="Customize"
+            open={customizeOpen}
+            onToggle={setCustomizeOpen}
+          >
+            <LedgerCustomize
+              facts={customize}
+              groupNote="Filled in from your file."
+            />
+          </DisclosureSection>
+        </div>
+      )}
+      <LedgerStanding tag={tag} demoNotice={demoNotice} />
     </aside>
   );
 }
