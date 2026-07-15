@@ -49,6 +49,7 @@ import { Ledger } from "./Ledger";
 import { Problems } from "./Problems";
 import { TopBar } from "./TopBar";
 import { acceptorTimelineSteps } from "./exchangeRun";
+import { restorablePosition } from "./stepRestore";
 import styles from "./bench.module.css";
 import { useAcceptorExchange } from "./useAcceptorExchange";
 import { useStepHistory } from "./useStepHistory";
@@ -269,16 +270,23 @@ export function AcceptorBench() {
   // the cursor). The bench stays mounted, so the loaded file, the confirmed
   // columns, and every in-progress edit survive the transition untouched. A
   // token naming no live step (a stale entry from before a deploy renamed one)
-  // is ignored rather than rendered as an empty work column.
-  function restorePosition(token: string) {
-    if (token === "columns:cleaning") {
+  // is ignored rather than rendered as an empty work column. A position whose
+  // backing state is gone (a `launched` entry left behind by a back-to-columns
+  // recovery) clamps to a step that can still render; the settled token is
+  // returned so the hook rewrites the dead entry.
+  function restorePosition(token: string): string | void {
+    const settled = restorablePosition(token, {
+      hasLaunch: launched !== undefined,
+    });
+    if (settled === "columns:cleaning") {
       setColumnsSection("cleaning");
       setStep("columns");
-      return;
+      return settled;
     }
-    if (!isAcceptorStep(token)) return;
+    if (!isAcceptorStep(settled)) return;
     setColumnsSection("columns");
-    setStep(token);
+    setStep(settled);
+    return settled;
   }
 
   const { pushStep } = useStepHistory("review", restorePosition);
