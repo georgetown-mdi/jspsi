@@ -147,19 +147,24 @@ export interface ManagedExchangeRunResult<TExchange> {
  * data exchange.
  *
  * A persist failure after rotation records a `storage`-kind `lastRun` inside the
- * lock (so the next handshake failure surfaces through the benign tier, not the
- * attack framing) and re-raises, without beginning the data exchange. A handshake
- * or data-exchange failure propagates unchanged for the runner to classify and
- * record; this module owns only the two outcomes the critical section itself
- * decides (succeeded, and the storage failure). Because the bookkeeping tail runs
- * outside the lock, its write is monotonic on `at` (see
+ * lock, best-effort (so the next handshake failure surfaces through the benign
+ * tier, not the attack framing) and re-raises, without beginning the data
+ * exchange. A handshake or data-exchange failure propagates unchanged for the
+ * runner to classify and record; this module owns only the two outcomes the
+ * critical section itself decides (succeeded, and the storage failure). Because
+ * the bookkeeping tail runs outside the lock, its write is monotonic on `at` (see
  * {@link recordManagedExchangeLastRun}): a slow run's stale tail cannot mask a
- * newer run's recorded outcome.
+ * newer run's recorded outcome. The success stamp is likewise an unlocked,
+ * individually failable write: if it fails after a completed exchange, the NEXT
+ * run's tiering degrades to the stricter Tier-2 surface -- an operator
+ * inconvenience, not a correctness break (the rotated secret is already durable).
  *
  * @throws {ManagedExchangeLockUnavailableError} if `lock.ifAvailable` is set and a
  *   run is already in progress on this device.
  * @throws {RotationPersistError} if the rotation write fails; the `storage`
- *   `lastRun` is recorded before this propagates.
+ *   `lastRun` is recorded best-effort before this propagates, and the error
+ *   carries it either way -- a bookkeeping-write failure never replaces this
+ *   error.
  */
 export async function runManagedExchange<THandshake, TExchange>(
   phases: ManagedExchangeRunPhases<THandshake, TExchange>,
@@ -186,8 +191,18 @@ export async function runManagedExchange<THandshake, TExchange>(
         // failure to the benign tier. Record it inside the lock (the record is
         // this run's until the lock releases), then re-raise for the runner. Every
         // other failure is the runner's to classify and record.
-        if (error instanceof RotationPersistError)
-          await recordLastRun(record.id, error.lastRun);
+        if (error instanceof RotationPersistError) {
+          // Best-effort: the storage subsystem that just failed the rotation
+          // persist may fail this write too, and a second storage rejection must
+          // never replace the RotationPersistError -- the runner's instanceof
+          // classification, and the storage lastRun the error itself carries,
+          // depend on the original propagating.
+          try {
+            await recordLastRun(record.id, error.lastRun);
+          } catch {
+            // Swallowed: error.lastRun still reaches the runner on the rethrow.
+          }
+        }
         throw error;
       }
     },

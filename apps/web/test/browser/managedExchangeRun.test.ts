@@ -15,6 +15,7 @@ import {
   createManagedExchange,
   getManagedExchange,
 } from "@psi/managedExchangeStore";
+import { RotationPersistError } from "@psi/managedRunRotate";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 
 import type { NewManagedExchange } from "@psi/managedExchangeRecord";
@@ -200,9 +201,12 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     const created = await createManagedExchange(newExchange());
     const rotatedSecret = generateSharedSecret();
     const order: Array<string> = [];
-    // The stored secret as seen at the moment the data exchange begins -- it must
-    // already be the rotated one, proving the persist resolved first.
-    let secretAtDataExchange: string | undefined;
+    // The stored record as seen at the moment the data exchange begins -- the
+    // secret must already be the rotated one (the persist resolved first), and
+    // no success stamp may exist yet (it is recorded only after the data
+    // exchange completes).
+    let storedAtDataExchange:
+      Awaited<ReturnType<typeof getManagedExchange>> | undefined;
 
     const result = await runManagedExchange({
       record: created,
@@ -212,14 +216,15 @@ describe("runManagedExchange: persist-before-success end to end", () => {
       },
       dataExchange: async (carried: string) => {
         order.push("dataExchange");
-        secretAtDataExchange = (await getManagedExchange(created.id))
-          ?.sharedSecret;
+        storedAtDataExchange = await getManagedExchange(created.id);
         return `exchanged:${carried}`;
       },
     });
 
     expect(order).toEqual(["handshake", "dataExchange"]);
-    expect(secretAtDataExchange).toBe(rotatedSecret);
+    expect(storedAtDataExchange?.sharedSecret).toBe(rotatedSecret);
+    // No success stamp during the data exchange: succeeded lands strictly after.
+    expect(storedAtDataExchange?.lastRun).toBeUndefined();
     expect(result.exchange).toBe("exchanged:carried");
     // The success outcome landed on the store.
     const stored = await getManagedExchange(created.id);
@@ -315,9 +320,10 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     const rotatedSecret = generateSharedSecret();
     let dataExchangeRan = false;
 
-    // Force the rotation persist to fail by aborting every readwrite transaction
-    // the run opens. The put's own transaction abort surfaces as a rejected
-    // persist, which the ordering turns into the storage-tier failure.
+    // Force the rotation persist to fail by aborting the FIRST readwrite
+    // transaction the run opens, sparing the follow-up bookkeeping write. The
+    // put's own transaction abort surfaces as a rejected persist, which the
+    // ordering turns into the storage-tier failure.
     const realTransaction = IDBDatabase.prototype.transaction;
     let failNextReadwrite = true;
     IDBDatabase.prototype.transaction = function (
@@ -358,7 +364,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
       IDBDatabase.prototype.transaction = realTransaction;
     }
 
-    expect(error).toBeDefined();
+    expect(error).toBeInstanceOf(RotationPersistError);
     expect(dataExchangeRan).toBe(false);
     // The record still holds the pre-rotation secret (the rotation did not commit),
     // and the run is recorded as a benign-tier storage failure.
@@ -366,6 +372,63 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     expect(stored?.sharedSecret).toBe(created.sharedSecret);
     expect(stored?.lastRun?.outcome).toBe("failed");
     expect(stored?.lastRun?.failureKind).toBe("storage");
+  });
+
+  test("a total storage fault still surfaces the RotationPersistError, not the bookkeeping failure", async () => {
+    const created = await createManagedExchange(newExchange());
+    const rotatedSecret = generateSharedSecret();
+    let dataExchangeRan = false;
+
+    // Fail EVERY readwrite the run opens: the rotation persist fails, and so
+    // does the in-catch storage bookkeeping write. The second rejection must not
+    // replace the RotationPersistError -- the runner's classification, and the
+    // storage lastRun the error carries, depend on the original propagating.
+    const realTransaction = IDBDatabase.prototype.transaction;
+    IDBDatabase.prototype.transaction = function (
+      this: IDBDatabase,
+      storeNames: string | Array<string>,
+      mode?: IDBTransactionMode,
+      options?: IDBTransactionOptions,
+    ) {
+      const transaction = realTransaction.call(this, storeNames, mode, options);
+      if (mode === "readwrite") {
+        queueMicrotask(() => {
+          try {
+            transaction.abort();
+          } catch {
+            // Already settled; nothing to abort.
+          }
+        });
+      }
+      return transaction;
+    };
+
+    let error: unknown;
+    try {
+      await runManagedExchange({
+        record: created,
+        handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
+        dataExchange: () => {
+          dataExchangeRan = true;
+          return Promise.resolve("done");
+        },
+      });
+    } catch (reason) {
+      error = reason;
+    } finally {
+      IDBDatabase.prototype.transaction = realTransaction;
+    }
+
+    // The original error survives the failed bookkeeping write, still carrying
+    // the storage lastRun for the runner to classify on.
+    expect(error).toBeInstanceOf(RotationPersistError);
+    expect((error as RotationPersistError).lastRun.failureKind).toBe("storage");
+    expect(dataExchangeRan).toBe(false);
+    // Nothing committed: the old secret is retained and no bookkeeping landed
+    // (the write failed; the evidence travels on the error instead).
+    const stored = await getManagedExchange(created.id);
+    expect(stored?.sharedSecret).toBe(created.sharedSecret);
+    expect(stored?.lastRun).toBeUndefined();
   });
 
   test("two contended runs serialize: the second sees the first's rotated secret", async () => {
