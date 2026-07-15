@@ -175,6 +175,21 @@ describe("single-writer lock", () => {
     expect(seenOptions[0]?.mode).toBe("exclusive");
   });
 
+  test("the lock releases when the critical section rejects", async () => {
+    await expect(
+      withManagedExchangeLock("record-a", () =>
+        Promise.reject(new Error("run failed inside the lock")),
+      ),
+    ).rejects.toThrow("run failed inside the lock");
+    // A failed run must not strand the lock; ifAvailable would refuse (not
+    // wait) if it were still held.
+    await expect(
+      withManagedExchangeLock("record-a", () => Promise.resolve("ran"), {
+        ifAvailable: true,
+      }),
+    ).resolves.toBe("ran");
+  });
+
   test("the lock name is namespaced to the record id", () => {
     expect(managedExchangeLockName("abc")).toBe("psilink-managed-exchange:abc");
   });
@@ -399,6 +414,84 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     // The second rotation advanced the secret without reverting the first's write.
     expect((await getManagedExchange(created.id))?.sharedSecret).toBe(
       secondRotated,
+    );
+  });
+
+  test("a data-exchange failure propagates unchanged, with the rotation kept and no success recorded", async () => {
+    const created = await createManagedExchange(newExchange());
+    const rotatedSecret = generateSharedSecret();
+    const failure = new Error("data channel dropped mid-exchange");
+
+    const error: unknown = await runManagedExchange({
+      record: created,
+      handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
+      dataExchange: () => Promise.reject(failure),
+    }).then(
+      () => {
+        throw new Error(
+          "the run should have rejected with the exchange failure",
+        );
+      },
+      (reason: unknown) => reason,
+    );
+
+    // The exact instance propagates -- not wrapped, not re-tagged -- for the
+    // runner to classify and record.
+    expect(error).toBe(failure);
+    const stored = await getManagedExchange(created.id);
+    // The rotation is real even though the exchange then failed: both parties
+    // rotated at handshake completion, so the persisted secret must stay rotated.
+    expect(stored?.sharedSecret).toBe(rotatedSecret);
+    // No succeeded outcome was recorded; the failure bookkeeping is the runner's.
+    expect(stored?.lastRun).toBeUndefined();
+  });
+
+  test("a slow run's stale success tail cannot mask a newer run's outcome", async () => {
+    const created = await createManagedExchange(newExchange());
+    const earlierRunAt = Date.parse("2026-07-14T12:00:00.000Z");
+    const laterRunAt = Date.parse("2026-07-14T13:00:00.000Z");
+    const firstInExchange = deferred<void>();
+    const releaseFirst = deferred<void>();
+
+    // The first run rotates, releases the lock, and parks in its data exchange;
+    // its success bookkeeping will land last, stamped with the older clock. The
+    // second run completes fully in between, recording the newer outcome.
+    const first = runManagedExchange({
+      record: created,
+      handshake: () =>
+        Promise.resolve({
+          rotatedSecret: generateSharedSecret(),
+          handshake: "1",
+        }),
+      dataExchange: async () => {
+        firstInExchange.resolve();
+        await releaseFirst.promise;
+        return "1";
+      },
+      now: () => earlierRunAt,
+    });
+
+    await firstInExchange.promise;
+    try {
+      await runManagedExchange({
+        record: { id: created.id },
+        handshake: () =>
+          Promise.resolve({
+            rotatedSecret: generateSharedSecret(),
+            handshake: "2",
+          }),
+        dataExchange: () => Promise.resolve("2"),
+        now: () => laterRunAt,
+      });
+    } finally {
+      releaseFirst.resolve();
+      await first;
+    }
+
+    // The first run's tail wrote after the second's, but with an older stamp:
+    // the monotonic bookkeeping write no-ops, keeping the newer run's outcome.
+    expect((await getManagedExchange(created.id))?.lastRun?.at).toBe(
+      new Date(laterRunAt).toISOString(),
     );
   });
 });

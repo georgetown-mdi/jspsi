@@ -367,11 +367,24 @@ export function applyManagedExchangeRotation(
 /** Apply a `lastRun` bookkeeping entry to a record, producing a validated new
  * record with only `lastRun` changed. The document and the secret are carried
  * through untouched. Separate from a rotation write so the run outcome is recorded
- * without re-touching the rotated secret. The input record is not mutated. */
+ * without re-touching the rotated secret. The input record is not mutated.
+ *
+ * Monotonic on `at`: an entry older than the stored one leaves the record
+ * unchanged. Two runs' bookkeeping tails are not serialized by the run+rotate
+ * lock (it covers only handshake through persist), so a slow earlier run's late
+ * write could otherwise land after -- and mask -- a newer run's outcome; the
+ * guard makes the stale write a no-op instead. Compared as parsed instants, not
+ * strings: the schema admits ISO datetimes of varying fractional precision, whose
+ * lexicographic order diverges from chronological. */
 export function applyManagedExchangeLastRun(
   record: ManagedExchangeRecord,
   lastRun: ManagedExchangeLastRun,
 ): ManagedExchangeRecord {
+  if (
+    record.lastRun !== undefined &&
+    Date.parse(record.lastRun.at) > Date.parse(lastRun.at)
+  )
+    return parseManagedExchangeRecord(record);
   return parseManagedExchangeRecord({ ...record, lastRun });
 }
 

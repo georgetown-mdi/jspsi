@@ -125,11 +125,13 @@ export interface ManagedExchangeRunPhases<THandshake, TExchange> {
 }
 
 /** The outcome of a completed managed exchange run: the data-exchange result and
- * the `succeeded` `lastRun` recorded on the store. */
+ * the `succeeded` `lastRun` this run stamped. The store keeps the newest entry
+ * across racing runs' tails (the monotonic guard in the bookkeeping write), so
+ * this is this run's outcome, not necessarily the stored one. */
 export interface ManagedExchangeRunResult<TExchange> {
   /** The data-exchange phase's return value. */
   exchange: TExchange;
-  /** The `succeeded` `lastRun` recorded on the store for this run. */
+  /** The `succeeded` `lastRun` this run stamped. */
   lastRun: ManagedExchangeLastRun;
 }
 
@@ -149,7 +151,10 @@ export interface ManagedExchangeRunResult<TExchange> {
  * attack framing) and re-raises, without beginning the data exchange. A handshake
  * or data-exchange failure propagates unchanged for the runner to classify and
  * record; this module owns only the two outcomes the critical section itself
- * decides (succeeded, and the storage failure).
+ * decides (succeeded, and the storage failure). Because the bookkeeping tail runs
+ * outside the lock, its write is monotonic on `at` (see
+ * {@link recordManagedExchangeLastRun}): a slow run's stale tail cannot mask a
+ * newer run's recorded outcome.
  *
  * @throws {ManagedExchangeLockUnavailableError} if `lock.ifAvailable` is set and a
  *   run is already in progress on this device.

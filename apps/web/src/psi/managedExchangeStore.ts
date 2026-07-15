@@ -309,7 +309,9 @@ export async function persistManagedExchangeRotation(
  * concurrent rotation write. Separate from {@link persistManagedExchangeRotation}
  * so the run outcome is recorded (succeeded after the data exchange, or a
  * `storage` failure when the rotation persist itself failed) without re-touching
- * the secret.
+ * the secret. The application is monotonic on `at` (see
+ * {@link applyManagedExchangeLastRun}): a write staler than the stored entry is a
+ * no-op, so a slow run's late bookkeeping tail cannot mask a newer run's outcome.
  *
  * @throws {Error} if no record with `id` exists.
  * @throws {ZodError} if the stored value or the resulting record is invalid.
