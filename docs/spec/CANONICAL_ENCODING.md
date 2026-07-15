@@ -6,7 +6,7 @@ title: "Canonical Encoding for Receipts"
 
 PSI-Link receipts -- the [self-attested record](EXCHANGE_RECORD.md) and the
 certificate-backed non-repudiation receipt (see
-[PROTOCOL.md](PROTOCOL.md#non-repudiation)) -- are
+[PROTOCOL.md](PROTOCOL.md#third-party-verifiable-proof-of-a-data-flow)) -- are
 hashed and signed over a byte string. For a hash or signature to verify, every
 party that produces or checks a receipt must derive exactly the same bytes from
 the same logical object. That includes an independent third party -- an auditor
@@ -198,7 +198,7 @@ The canonical **byte** string is the **UTF-8** encoding of the canonical
 character string defined by the rules above. UTF-8 is emitted without a byte
 order mark. This byte string is what is hashed and signed; hashing and signature
 details belong to the receipt itself (see
-[PROTOCOL.md](PROTOCOL.md#non-repudiation)).
+[PROTOCOL.md](PROTOCOL.md#third-party-verifiable-proof-of-a-data-flow)).
 
 ## Worked examples
 
@@ -280,7 +280,7 @@ transitive bump does remediate them for the CJS-based CLI.)
 
 - [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#canonical-encoding) - the Canonical
   encoding overview: what the encoding is for and what it protects against
-- [PROTOCOL.md](PROTOCOL.md#non-repudiation) - how receipts use these bytes
+- [PROTOCOL.md](PROTOCOL.md#third-party-verifiable-proof-of-a-data-flow) - how receipts use these bytes
 - [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md) - the self-attested record whose
   commitments and agreed-terms hash are computed over these bytes
 - [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md) - the exchange specification whose

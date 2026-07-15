@@ -34,7 +34,8 @@ export const FINGERPRINT_REGEX = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
 /**
  * Receipt signing mode. Mirrors the two modes described in
- * docs/spec/PROTOCOL.md#non-repudiation, plus an explicit `none`:
+ * docs/spec/PROTOCOL.md#third-party-verifiable-proof-of-a-data-flow, plus an
+ * explicit `none`:
  * - `none` -- no receipt is signed (only the unsigned self-attested record).
  * - `session-derived` -- a MAC under the shared session key; tamper-evident
  *   but not non-repudiation and not third-party verifiable.
