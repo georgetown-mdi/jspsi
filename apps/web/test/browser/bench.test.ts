@@ -182,8 +182,8 @@ afterEach(async () => {
   csvLoadHarness.resolve = undefined;
   lifecycleHarness.calls.length = 0;
   // The bench reads the viewport width to choose its wide vs narrow layout, so
-  // a test that narrows the page must not leak that width into the next: reset
-  // to a wide default (above the one-column and the narrow cut-overs).
+  // a test that narrows the page must not leak that width into the next:
+  // restore the browser project's configured wide default (vite.config.ts).
   await page.viewport(1280, 800);
 });
 
@@ -2296,14 +2296,19 @@ describe("bench at a narrow viewport", () => {
 
     // The first focusable control on the page is the share bar's toggle: it
     // sits ahead of every work-column control in DOM order, so tabbing from the
-    // document start reaches it first.
+    // document start reaches it first. "Interactive" means tab-reachable
+    // (tabIndex >= 0), enabled, and laid out -- excluding, e.g., the hidden
+    // tabindex="-1" measurement textarea Mantine's autosize input parks on
+    // document.body.
     const focusable = Array.from(
       document.querySelectorAll<HTMLElement>(
-        'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        "button, a[href], input, select, textarea, [tabindex]",
       ),
     ).filter(
       (element) =>
-        element.offsetParent !== null || element === document.activeElement,
+        element.tabIndex >= 0 &&
+        !element.matches(":disabled") &&
+        element.offsetParent !== null,
     );
     const shareToggle = page.getByRole("button", {
       name: "What you will share",
