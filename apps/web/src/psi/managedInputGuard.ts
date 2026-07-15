@@ -26,9 +26,10 @@ import type { ExchangeSpec, LinkageField } from "@psilink/core";
  * routes through desync/attack framing:
  *
  * - `"acquire"` -- the file could not be read at run start: the entry is missing
- *   (deleted, moved, or renamed away), the read permission is gone, or no handle
- *   is held where one is required. The underlying error is carried for the caller
- *   to surface (sanitized) and log.
+ *   (deleted, moved, or renamed away), the read permission is gone, no handle is
+ *   held where one is required, or the file is unreadable or malformed (the CSV
+ *   parse fails). The underlying error is carried for the caller to surface
+ *   (sanitized) and log.
  * - `"columns"` -- the file was read, but its columns cannot satisfy any of the
  *   standing terms' linkage keys, so an exchange would match nothing and yield a
  *   result byte-indistinguishable from a legitimately empty intersection. The
@@ -38,7 +39,8 @@ import type { ExchangeSpec, LinkageField } from "@psilink/core";
 export type ManagedInputRejection =
   | {
       /** The input could not be read at run start (missing file, gone permission,
-       * or an absent required handle). */
+       * an absent required handle, or an unreadable/malformed file the CSV parse
+       * rejects). */
       reason: "acquire";
       /** The underlying acquisition error, for the caller to surface and log. */
       cause: unknown;
