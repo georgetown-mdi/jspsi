@@ -1193,6 +1193,59 @@ describe("acceptor bench: run and completion", () => {
     expect(another?.getAttribute("href")).toBe("/");
   });
 
+  test("at a narrow viewport the settled share bar keeps the You sent row", async () => {
+    // The condensed "What you will share" bar selects rows by the producers'
+    // shareBar markers, so the settled ledger's past-tense relabel ("You
+    // sent") cannot drop the one row naming what was disclosed to the partner.
+    await page.viewport(400, 800);
+    try {
+      await reachRun();
+      const call = lifecycleCall(0);
+      call.onStages(stagesFor(preparedWith("cascade", 2), "acceptor"));
+      call.onStage("waiting for peer");
+      call.onStage("confirming protocol");
+      call.onResult({
+        resultsUrl: URL.createObjectURL(new Blob(["a,b\n"])),
+        matchedRecordCount: 1847,
+        record: {
+          recordUrl: URL.createObjectURL(new Blob(["{}"])),
+          recordFileName: "psilink-record-2026-07-08T14-32.json",
+          keysUrl: URL.createObjectURL(new Blob(["{}"])),
+          keysFileName: "psilink-record-2026-07-08T14-32.keys.json",
+        },
+      });
+      await expect
+        .element(page.getByRole("heading", { level: 1 }))
+        .toHaveTextContent("Exchange complete");
+
+      const shareToggle = page.getByRole("button", {
+        name: "What you will share",
+      });
+      await expect.element(shareToggle).toBeInTheDocument();
+      await shareToggle.click();
+      await expect
+        .element(shareToggle)
+        .toHaveAttribute("aria-expanded", "true");
+
+      // The settled condensed subset: what left, what arrived, what matched.
+      const shareBar = document.querySelector(`.${styles.shareBar}`) as Element;
+      const rows = Array.from(
+        shareBar.querySelectorAll(`.${styles.ledgerRow}`),
+      ).map((row) => row.querySelector("dt")?.textContent);
+      expect(rows).toEqual(["You sent", "You received", "Matched on"]);
+      const sentRow = Array.from(
+        shareBar.querySelectorAll(`.${styles.ledgerRow}`),
+      ).find((row) => row.querySelector("dt")?.textContent === "You sent");
+      // This run disclosed no extra columns, and the row says so rather than
+      // disappearing.
+      expect(sentRow?.querySelector("dd")?.textContent).toBe(
+        "No additional columns",
+      );
+    } finally {
+      await page.viewport(1280, 800);
+    }
+  });
+
   test("the settled ledger's You sent names the launched disclosed column", async () => {
     // The full flow with an extra unrecognized `comment` column against a run token
     // whose terms request no payload from the acceptor. The column transmits (infers

@@ -732,6 +732,7 @@ export function InviterBench() {
             label: row.label,
             reference: row.reference,
             muted: row.muted,
+            shareBar: row.shareBar,
             value: Array.isArray(row.value) ? (
               <>
                 {row.value.map((line, index) => (

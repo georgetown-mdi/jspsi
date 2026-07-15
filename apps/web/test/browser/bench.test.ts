@@ -2352,4 +2352,39 @@ describe("bench at a narrow viewport", () => {
     await page.getByRole("button", { name: "Customize" }).click();
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(400);
   });
+
+  test("a live breakpoint crossing preserves the work column's state", async () => {
+    // Mounted wide (the project's default viewport) and sealed, with
+    // component-local state armed in the work column: the reveal toggle's
+    // open textarea, whose state lives inside the copy row, not the bench.
+    await createSealedInvitation();
+    const reveal = page.getByRole("button", { name: "Show full link" });
+    await reveal.click();
+    await expect.element(reveal).toHaveAttribute("aria-expanded", "true");
+    const revealArea = document.querySelector(
+      `.${styles.revealArea}`,
+    ) as HTMLTextAreaElement;
+    expect(revealArea).not.toBeNull();
+    const deepLink = revealArea.value;
+
+    // Crossing to narrow reorders the regions as a keyed move, not a
+    // remount: the reveal stays open, on the very same DOM node, while the
+    // ledger folds to the share bar.
+    await page.viewport(400, 800);
+    await expect
+      .element(page.getByRole("button", { name: "What you will share" }))
+      .toBeInTheDocument();
+    await expect.element(reveal).toHaveAttribute("aria-expanded", "true");
+    expect(document.querySelector(`.${styles.revealArea}`)).toBe(revealArea);
+    expect(revealArea.value).toBe(deepLink);
+
+    // And back out to wide: the full ledger aside returns, the reveal still
+    // open on the same node.
+    await page.viewport(1280, 800);
+    await expect
+      .element(page.getByRole("heading", { name: "This exchange" }))
+      .toBeInTheDocument();
+    await expect.element(reveal).toHaveAttribute("aria-expanded", "true");
+    expect(document.querySelector(`.${styles.revealArea}`)).toBe(revealArea);
+  });
 });

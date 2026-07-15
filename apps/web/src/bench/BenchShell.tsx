@@ -1,3 +1,5 @@
+import { Fragment } from "react";
+
 import { BenchPage } from "./BenchPage";
 import styles from "./bench.module.css";
 import { useNarrowBench } from "./narrowViewport";
@@ -17,7 +19,12 @@ import type { ReactNode } from "react";
  * At or below the narrow cut-over the ledger is placed AHEAD of the work
  * column in the DOM, so its collapsible share bar (see {@link Ledger}) is the
  * page's first interactive element -- a focus/DOM-order commitment CSS
- * reordering alone cannot make.
+ * reordering alone cannot make. The two regions render as a keyed array so a
+ * live breakpoint crossing (docking, rotation, devtools) is a reconciler MOVE:
+ * both subtrees keep their instances and local state (in-progress fields,
+ * reveal toggles, live-region identity). The browser does drop focus when the
+ * node containing the focused element moves -- inherent to the DOM move, not
+ * something keying can prevent.
  */
 export function BenchShell({
   topBar,
@@ -40,22 +47,22 @@ export function BenchShell({
         : topBar === undefined
           ? `${styles.grid} ${styles.gridLedger}`
           : `${styles.grid} ${styles.gridLedger} ${styles.gridUnderBar}`;
-  const work = <main className={styles.work}>{children}</main>;
+  const work = (
+    <main key="work" className={styles.work}>
+      {children}
+    </main>
+  );
+  const ledgerRegion =
+    ledger === undefined ? undefined : (
+      <Fragment key="ledger">{ledger}</Fragment>
+    );
   return (
     <BenchPage>
       {topBar}
       <div className={gridClass}>
-        {narrow && ledger !== undefined ? (
-          <>
-            {ledger}
-            {work}
-          </>
-        ) : (
-          <>
-            {work}
-            {ledger}
-          </>
-        )}
+        {narrow && ledgerRegion !== undefined
+          ? [ledgerRegion, work]
+          : [work, ledgerRegion]}
       </div>
     </BenchPage>
   );

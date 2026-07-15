@@ -7,34 +7,16 @@ import { useNarrowBench } from "./narrowViewport";
 import type { RailFact } from "./inviterModel";
 import type { ReactNode } from "react";
 
-/** The narrow share bar condenses the ledger to three headline disclosure
- * facts: the primary outbound row, the matched-on keys, and the expiry -- the
- * mock's subset. The inviter sends and the acceptor receives, so the primary
- * row is "You will send" when present and the receive row otherwise (either
- * tense). Labels are model-authored constants; a producer that renames one of
- * these must update the matching list here -- a share-bar row silently
- * dropping is a review tell. */
-const SHARE_BAR_SENT_LABEL = "You will send";
-const SHARE_BAR_RECEIVED_LABELS: ReadonlyArray<string> = [
-  "You will receive",
-  "You received",
-];
-const SHARE_BAR_MATCHED_LABEL = "Matched on";
-const SHARE_BAR_EXPIRES_LABEL = "Expires";
-
-/** The share bar's rows in ledger order: the primary outbound fact, matched-on,
- * and expires. Falls back to the leading rows if a producer's labels do not
- * match, so the bar is never empty. */
+/** The narrow share bar's rows in ledger order: the headline disclosure facts
+ * each row producer marked `shareBar` -- the producer declares its own
+ * condensed subset, so a relabel cannot silently drop a row from the trust
+ * surface. The leading-rows fallback is a best-effort backstop only, keeping
+ * the bar non-empty should a producer mark nothing; the unit suite pins each
+ * producer's marked subset, so it is not a guarantee anything relies on. */
 function shareBarRows(
   rows: ReadonlyArray<LedgerRow>,
 ): ReadonlyArray<LedgerRow> {
-  const hasSend = rows.some((row) => row.label === SHARE_BAR_SENT_LABEL);
-  const headline = rows.filter((row) => {
-    if (row.label === SHARE_BAR_MATCHED_LABEL) return true;
-    if (row.label === SHARE_BAR_EXPIRES_LABEL) return true;
-    if (hasSend) return row.label === SHARE_BAR_SENT_LABEL;
-    return SHARE_BAR_RECEIVED_LABELS.includes(row.label);
-  });
+  const headline = rows.filter((row) => row.shareBar === true);
   return headline.length > 0 ? headline : rows.slice(0, 3);
 }
 
@@ -43,13 +25,15 @@ function shareBarRows(
  * bench's monospace data voice, and an optional reference to the spine step
  * that owns the value ("Step 2"). `muted` is the named empty state ("None",
  * "Nothing - matching only"), rendered in the placeholder voice; with neither
- * the row shows the em-dash "not decided yet" mark.
+ * the row shows the em-dash "not decided yet" mark. `shareBar` carries the
+ * producer's marker for the narrow condensed bar (see {@link shareBarRows}).
  */
 export interface LedgerRow {
   label: string;
   value?: ReactNode;
   muted?: string;
   reference?: string;
+  shareBar?: boolean;
 }
 
 const FACT_TONE_CLASS = {
