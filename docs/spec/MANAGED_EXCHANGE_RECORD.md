@@ -25,9 +25,11 @@ the exchange-file artifact the record is composed from (see
 [PROTOCOL.md](PROTOCOL.md#shared-secret-rotation)). Intended readers are security
 auditors and implementors.
 
-> **Status.** The record store and the run+rotate critical section (the
-> single-writer lock and the persist-before-success write-back) are implemented;
-> the runner, scheduling, and management surfaces that use them are not yet. The
+> **Status.** The record store, the run+rotate critical section (the
+> single-writer lock and the persist-before-success write-back), and the
+> input-acquisition seam (the persisted handle, its permission discipline, and
+> the pre-connection column-shape guard) are implemented; the runner,
+> scheduling, and management surfaces that use them are not yet. The
 > recurring-exchange epic implements against the shape below, security-reviewed
 > at each step because the record persists a rotating credential at rest. The
 > persist-before-success ordering and the single-owner invariant are normative,
