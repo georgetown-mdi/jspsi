@@ -388,6 +388,28 @@ export function applyManagedExchangeLastRun(
   return parseManagedExchangeRecord({ ...record, lastRun });
 }
 
+/**
+ * Apply an input-file handle to a record, producing a validated new record with
+ * only `inputFileHandle` changed -- the document, the secret, and the bookkeeping
+ * are carried through untouched. A `FileSystemFileHandle` sets (or re-points) the
+ * handle; `null` drops it. This is the field-scoped write the save flow uses to
+ * persist a handle and the surfaces use to re-point one after a missing-file
+ * failure; separate from a rotation or a local edit so persisting a handle cannot
+ * carry a stale secret or a stale document back over a concurrent write. The input
+ * record is not mutated.
+ *
+ * @throws {ZodError} if the resulting record is invalid.
+ */
+export function applyManagedExchangeInputHandle(
+  record: ManagedExchangeRecord,
+  handle: FileSystemFileHandle | null,
+): ManagedExchangeRecord {
+  const next: ManagedExchangeRecord = { ...record };
+  if (handle === null) delete next.inputFileHandle;
+  else next.inputFileHandle = handle;
+  return parseManagedExchangeRecord(next);
+}
+
 /** The local fields an operator may edit in place without a re-invite: the
  * display label, the run schedule, and the max-token-age policy. A change to the
  * agreed terms is a re-invite, not an in-place record edit, so the document and

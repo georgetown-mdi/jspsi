@@ -3,12 +3,20 @@
  * section: the Web Locks single-writer acquisition and the strict-durability,
  * field-scoped store write that the pure ordering logic in
  * {@link ./managedRunRotate.ts} drives. This is the seam the future managed-
- * exchange runner calls -- it passes its handshake and data-exchange phases in and
- * cannot get the persist-before-success ordering wrong, because the data-exchange
- * phase is a callback this module invokes only after the durable persist resolves.
+ * exchange runner calls -- it passes its input-guard, handshake, and data-exchange
+ * phases in and cannot get the ordering wrong: the input guard gates the handshake
+ * (its result is the handshake's argument), and the data-exchange phase is a
+ * callback this module invokes only after the durable persist resolves.
  *
- * Two invariants this module owns (normative in docs/MANAGED_EXCHANGE.md and
+ * Three invariants this module owns (normative in docs/MANAGED_EXCHANGE.md and
  * docs/spec/MANAGED_EXCHANGE_RECORD.md):
+ *
+ * - **Input guard before connection.** The input file is acquired and its columns
+ *   validated against the standing terms BEFORE the handshake opens any connection;
+ *   the guard's result is the handshake's argument, so a runner cannot reorder the
+ *   guard after the handshake. A benign input rejection (missing file, gone
+ *   permission, unsatisfiable columns) records the `"input"` bookkeeping and
+ *   re-raises with no connection attempted, never through desync/attack framing.
  *
  * - **Single-writer exclusion.** A Web Locks lock keyed to the record's id is held
  *   from "begin this run" through "rotated secret durably persisted", so a second
@@ -29,6 +37,7 @@
 
 import {
   RotationPersistError,
+  failedRun,
   runRotationCriticalSection,
   succeededRun,
 } from "./managedRunRotate";
@@ -36,6 +45,7 @@ import {
   persistManagedExchangeRotation,
   recordManagedExchangeLastRun,
 } from "./managedExchangeStore";
+import { ManagedInputError } from "./managedInputGuard";
 
 import type { ManagedExchangeLastRun } from "./managedExchangeRecord";
 import type { RotationWriteBack } from "./managedRunRotate";
@@ -103,17 +113,31 @@ export async function withManagedExchangeLock<T>(
   });
 }
 
-/** The handshake and data-exchange phases the runner supplies to
+/** The input, handshake, and data-exchange phases the runner supplies to
  * {@link runManagedExchange}, plus the record's rotation policy. The persist and
  * lock are this module's; the runner cannot reach the data exchange before the
- * persist resolves. */
-export interface ManagedExchangeRunPhases<THandshake, TExchange> {
+ * persist resolves, nor the handshake before the input is acquired and validated. */
+export interface ManagedExchangeRunPhases<TInput, THandshake, TExchange> {
   /** The record whose secret this run rotates. Its `id` keys the lock and the
    * field-scoped store writes; `tokenMaxAgeDays` restamps `expires`. */
   record: { id: string; tokenMaxAgeDays?: number };
+  /**
+   * Acquire and validate the input file BEFORE any connection: read it through the
+   * persisted handle (or the re-selected file), then reject a missing file, a gone
+   * permission, or a column shape the standing terms cannot satisfy as a benign
+   * pre-run `"input"` failure (the `acquireValidatedManagedInput` seam in
+   * {@link ./managedInputHandle.ts} raises a {@link ManagedInputError} for each).
+   * Its result is handed to {@link handshake}, so the handshake -- and the
+   * connection it opens -- is structurally unreachable until the guard passes: a
+   * runner cannot reorder the guard after the handshake.
+   */
+  acquireInput: () => Promise<TInput>;
   /** Run the authenticated handshake and yield the rotated secret (from the
-   * `AuthResult`) plus whatever the data exchange needs. Runs inside the lock. */
-  handshake: () => Promise<{ rotatedSecret: string; handshake: THandshake }>;
+   * `AuthResult`) plus whatever the data exchange needs. Runs inside the lock, after
+   * the input guard passed; receives the acquired input. */
+  handshake: (
+    input: TInput,
+  ) => Promise<{ rotatedSecret: string; handshake: THandshake }>;
   /** Begin and complete the data exchange -- reachable only after the durable
    * persist resolves. Receives the handshake's carried value. */
   dataExchange: (handshake: THandshake) => Promise<TExchange>;
@@ -137,49 +161,79 @@ export interface ManagedExchangeRunResult<TExchange> {
 
 /**
  * Run a managed exchange's run+rotate critical section: the seam the future runner
- * calls. The single-writer lock is held across the handshake and the durable,
- * field-scoped rotation write -- exactly "begin this run" through "rotated secret
- * durably persisted". The data exchange then runs AFTER the lock releases, and on
- * its completion the `succeeded` outcome is recorded. The data exchange still
- * cannot begin before the persist resolves: it consumes the gate the locked
+ * calls. The single-writer lock is held across the input guard, the handshake, and
+ * the durable, field-scoped rotation write -- "begin this run" through "rotated
+ * secret durably persisted". The data exchange then runs AFTER the lock releases,
+ * and on its completion the `succeeded` outcome is recorded. The data exchange
+ * still cannot begin before the persist resolves: it consumes the gate the locked
  * section resolves only after the persist commits, so the ordering is structural,
  * not the caller's to uphold, and the lock is not held for the (potentially long)
  * data exchange.
+ *
+ * The input guard runs FIRST, before the handshake opens any connection: its
+ * result is the handshake's argument, so a runner structurally cannot reorder the
+ * guard after the handshake. A benign {@link ManagedInputError} (a missing file, a
+ * gone permission, or a column shape the standing terms cannot satisfy) records the
+ * `"input"`-kind `lastRun` inside the lock, best-effort, and re-raises without a
+ * handshake -- never routed through desync/attack framing, and no connection is
+ * attempted.
  *
  * A persist failure after rotation records a `storage`-kind `lastRun` inside the
  * lock, best-effort (so the next handshake failure surfaces through the benign
  * tier, not the attack framing) and re-raises, without beginning the data
  * exchange. A handshake or data-exchange failure propagates unchanged for the
- * runner to classify and record; this module owns only the two outcomes the
- * critical section itself decides (succeeded, and the storage failure). Because
- * the bookkeeping tail runs outside the lock, its write is monotonic on `at` (see
- * {@link recordManagedExchangeLastRun}): a slow run's stale tail cannot mask a
- * newer run's recorded outcome. The success stamp is likewise an unlocked,
- * individually failable write: if it fails after a completed exchange, the NEXT
- * run's tiering degrades to the stricter Tier-2 surface -- an operator
+ * runner to classify and record; this module owns only the outcomes the critical
+ * section itself decides (succeeded, the storage failure, and the benign input
+ * failure). Because the bookkeeping tail runs outside the lock, its write is
+ * monotonic on `at` (see {@link recordManagedExchangeLastRun}): a slow run's stale
+ * tail cannot mask a newer run's recorded outcome. The success stamp is likewise an
+ * unlocked, individually failable write: if it fails after a completed exchange,
+ * the NEXT run's tiering degrades to the stricter Tier-2 surface -- an operator
  * inconvenience, not a correctness break (the rotated secret is already durable).
  *
  * @throws {ManagedExchangeLockUnavailableError} if `lock.ifAvailable` is set and a
  *   run is already in progress on this device.
+ * @throws {ManagedInputError} if the input guard rejects (a missing file, a gone
+ *   permission, or an unsatisfiable column shape); the benign `"input"` `lastRun`
+ *   is recorded best-effort before this propagates, and no connection was made.
  * @throws {RotationPersistError} if the rotation write fails; the `storage`
  *   `lastRun` is recorded best-effort before this propagates, and the error
  *   carries it either way -- a bookkeeping-write failure never replaces this
  *   error.
  */
-export async function runManagedExchange<THandshake, TExchange>(
-  phases: ManagedExchangeRunPhases<THandshake, TExchange>,
+export async function runManagedExchange<TInput, THandshake, TExchange>(
+  phases: ManagedExchangeRunPhases<TInput, THandshake, TExchange>,
 ): Promise<ManagedExchangeRunResult<TExchange>> {
   const { record } = phases;
   const now = phases.now ?? Date.now;
 
-  // The locked window: handshake through rotated-secret-durably-persisted. The
+  // The locked window: input guard through rotated-secret-durably-persisted. The
   // gate is resolvable only once the persist has committed.
   const gate = await withManagedExchangeLock(
     record.id,
     async () => {
+      // The input guard runs before the handshake opens any connection. A benign
+      // input rejection records the `input` bookkeeping inside the lock (this run's
+      // record until the lock releases), then re-raises with no handshake attempted.
+      let input: TInput;
+      try {
+        input = await phases.acquireInput();
+      } catch (error) {
+        if (error instanceof ManagedInputError) {
+          // Best-effort, for the same reason the storage tier is below: a failed
+          // bookkeeping write must not replace the ManagedInputError the runner
+          // classifies on.
+          try {
+            await recordLastRun(record.id, failedRun(now(), "failed", "input"));
+          } catch {
+            // Swallowed: the ManagedInputError still reaches the runner on the rethrow.
+          }
+        }
+        throw error;
+      }
       try {
         return await runRotationCriticalSection<THandshake>({
-          handshake: phases.handshake,
+          handshake: () => phases.handshake(input),
           persist: (writeBack: RotationWriteBack) =>
             persistRotation(record.id, writeBack),
           tokenMaxAgeDays: record.tokenMaxAgeDays,

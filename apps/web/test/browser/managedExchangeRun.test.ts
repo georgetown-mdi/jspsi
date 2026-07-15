@@ -15,6 +15,7 @@ import {
   createManagedExchange,
   getManagedExchange,
 } from "@psi/managedExchangeStore";
+import { ManagedInputError } from "@psi/managedInputGuard";
 import { RotationPersistError } from "@psi/managedRunRotate";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 
@@ -210,6 +211,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
 
     const result = await runManagedExchange({
       record: created,
+      acquireInput: () => Promise.resolve(undefined),
       handshake: () => {
         order.push("handshake");
         return Promise.resolve({ rotatedSecret, handshake: "carried" });
@@ -253,6 +255,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     try {
       await runManagedExchange({
         record: created,
+        acquireInput: () => Promise.resolve(undefined),
         handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
         dataExchange: () => Promise.resolve("done"),
       });
@@ -273,6 +276,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     const rotatedSecret = generateSharedSecret();
     await runManagedExchange({
       record: created,
+      acquireInput: () => Promise.resolve(undefined),
       handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
       dataExchange: () => Promise.resolve("done"),
     });
@@ -291,6 +295,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     const rotationAt = Date.parse("2026-07-14T12:00:00.000Z");
     await runManagedExchange({
       record: created,
+      acquireInput: () => Promise.resolve(undefined),
       handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
       dataExchange: () => Promise.resolve("done"),
       now: () => rotationAt,
@@ -308,6 +313,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     const rotatedSecret = generateSharedSecret();
     await runManagedExchange({
       record: created,
+      acquireInput: () => Promise.resolve(undefined),
       handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
       dataExchange: () => Promise.resolve("done"),
     });
@@ -352,6 +358,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     try {
       await runManagedExchange({
         record: created,
+        acquireInput: () => Promise.resolve(undefined),
         handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
         dataExchange: () => {
           dataExchangeRan = true;
@@ -407,6 +414,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     try {
       await runManagedExchange({
         record: created,
+        acquireInput: () => Promise.resolve(undefined),
         handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
         dataExchange: () => {
           dataExchangeRan = true;
@@ -431,6 +439,69 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     expect(stored?.lastRun).toBeUndefined();
   });
 
+  test("a total storage fault still surfaces the ManagedInputError, not the bookkeeping failure", async () => {
+    const created = await createManagedExchange(newExchange());
+    let handshakeRan = false;
+
+    // Fail EVERY readwrite the run opens: the input tier's best-effort `input`
+    // bookkeeping write fails alongside the input rejection. The second rejection
+    // must not replace the ManagedInputError -- the runner's classification
+    // depends on the original propagating, exactly as in the storage tier above.
+    const realTransaction = IDBDatabase.prototype.transaction;
+    IDBDatabase.prototype.transaction = function (
+      this: IDBDatabase,
+      storeNames: string | Array<string>,
+      mode?: IDBTransactionMode,
+      options?: IDBTransactionOptions,
+    ) {
+      const transaction = realTransaction.call(this, storeNames, mode, options);
+      if (mode === "readwrite") {
+        queueMicrotask(() => {
+          try {
+            transaction.abort();
+          } catch {
+            // Already settled; nothing to abort.
+          }
+        });
+      }
+      return transaction;
+    };
+
+    const inputFailure = new ManagedInputError({
+      reason: "acquire",
+      cause: new Error("the entry was not found"),
+    });
+    let error: unknown;
+    try {
+      await runManagedExchange({
+        record: created,
+        acquireInput: () => Promise.reject(inputFailure),
+        handshake: () => {
+          handshakeRan = true;
+          return Promise.resolve({
+            rotatedSecret: generateSharedSecret(),
+            handshake: "c",
+          });
+        },
+        dataExchange: () => Promise.resolve("done"),
+      });
+    } catch (reason) {
+      error = reason;
+    } finally {
+      IDBDatabase.prototype.transaction = realTransaction;
+    }
+
+    // The exact instance survives the failed bookkeeping write -- not wrapped,
+    // not replaced by the bookkeeping rejection.
+    expect(error).toBe(inputFailure);
+    // No connection was attempted and nothing committed: the guard failed before
+    // the handshake, the pre-run secret is intact, and no bookkeeping landed.
+    expect(handshakeRan).toBe(false);
+    const stored = await getManagedExchange(created.id);
+    expect(stored?.sharedSecret).toBe(created.sharedSecret);
+    expect(stored?.lastRun).toBeUndefined();
+  });
+
   test("two contended runs serialize: the second sees the first's rotated secret", async () => {
     const created = await createManagedExchange(newExchange());
     const firstRotated = generateSharedSecret();
@@ -445,6 +516,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     // first's committed secret, never reverting it.
     const first = runManagedExchange({
       record: created,
+      acquireInput: () => Promise.resolve(undefined),
       handshake: () =>
         Promise.resolve({ rotatedSecret: firstRotated, handshake: "1" }),
       dataExchange: async () => {
@@ -463,6 +535,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
 
       second = runManagedExchange({
         record: { id: created.id },
+        acquireInput: () => Promise.resolve(undefined),
         handshake: () =>
           Promise.resolve({ rotatedSecret: secondRotated, handshake: "2" }),
         dataExchange: () => Promise.resolve("2"),
@@ -487,6 +560,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
 
     const error: unknown = await runManagedExchange({
       record: created,
+      acquireInput: () => Promise.resolve(undefined),
       handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
       dataExchange: () => Promise.reject(failure),
     }).then(
@@ -521,6 +595,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     // second run completes fully in between, recording the newer outcome.
     const first = runManagedExchange({
       record: created,
+      acquireInput: () => Promise.resolve(undefined),
       handshake: () =>
         Promise.resolve({
           rotatedSecret: generateSharedSecret(),
@@ -538,6 +613,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     try {
       await runManagedExchange({
         record: { id: created.id },
+        acquireInput: () => Promise.resolve(undefined),
         handshake: () =>
           Promise.resolve({
             rotatedSecret: generateSharedSecret(),
