@@ -173,20 +173,25 @@ const UNEXPLAINED_FAILURE: ManagedRunFailure = {
   recovery: "confirm",
 };
 
-/** The surface state for a derived failure tier, reading `record.expires` for the
- * expired tier so no instant is fabricated. `"none"` and `"missed"` do not surface as
- * a launch failure (a success records nothing; a missed window is informational), so
- * they fall back to the transport copy as a safe generic -- the callers below never
- * pass them here. */
+/** The surface state for a derived failure tier. The expired tier reads
+ * `record.expires` to name the real lapsed instant; the transport, missed, and none
+ * tiers all map to the generic transport copy -- a success and a missed window do not
+ * surface as a launch failure ({@link managedRunFailureFromRecord} filters them
+ * first), but {@link classifyManagedRunFailure} can route any tier here, so they are
+ * handled explicitly rather than left to fabricate an instant or fall off the end. */
 function tierFailure(
   tier: ManagedFailureTier,
   record: ManagedExchangeRecord,
 ): ManagedRunFailure {
   switch (tier) {
     case "expired":
-      // `record.expires` is defined when the tier is expired (the lapse check reads
-      // it), so the benign expiry copy names the real lapsed instant.
-      return expiredFailure(record.expires as string);
+      // A defined `expires` names the lapsed instant; the expired tier is derived from
+      // the lapse check, which only fires on a defined bound, so an absent value here
+      // would be a derivation bug -- route it to the generic tier rather than fabricate
+      // an instant, so no `undefined` reaches the date formatter.
+      return record.expires !== undefined
+        ? expiredFailure(record.expires)
+        : TRANSPORT_FAILURE;
     case "input":
       return INPUT_FAILURE;
     case "storage":

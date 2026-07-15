@@ -25,6 +25,7 @@ import {
   applyManagedExchangeInputHandle,
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
+  applyManagedExchangeReinviteRotation,
   applyManagedExchangeRotation,
   buildManagedExchangeRecord,
   parseManagedExchangeRecord,
@@ -483,6 +484,37 @@ export async function persistManagedExchangeRotation(
       throw new Error(`no managed exchange with id ${id}`);
     const existing = parseManagedExchangeRecord(stored);
     return applyManagedExchangeRotation(existing, rotation);
+  });
+}
+
+/**
+ * Persist a re-invite's rotation to the stored record: advance the fresh setup
+ * secret and re-derive the `expires` bound exactly as
+ * {@link persistManagedExchangeRotation}, AND drop any `lastRun` bookkeeping -- all
+ * in the one cross-store transaction that also clears the backup and import markers
+ * ({@link readModifyWriteRotation}). Distinct from the run's rotation write because a
+ * re-invite consumes the failure `lastRun` recorded (its recovery is exactly this
+ * re-invite), so the post-re-invite record must read as "no failure to tier": leaving
+ * the stale `lastRun` in place would re-derive the consumed benign tier, and -- with
+ * the import marker now cleared in the same step -- would re-derive a stale `auth`
+ * failure as the attack tier, resurrecting the framing the operator already recovered
+ * from (see {@link ./managedFailureTiers.ts}). The record write is field-scoped
+ * through {@link applyManagedExchangeReinviteRotation} (which re-validates), so it
+ * cannot carry a stale secret or document.
+ *
+ * @throws {Error} if no record with `id` exists.
+ * @throws {ZodError} if the stored value is not a valid v1 record or the rotation
+ *   produces an invalid one; the transaction aborts and nothing is written.
+ */
+export async function persistManagedExchangeReinvite(
+  id: string,
+  rotation: ManagedExchangeRotation,
+): Promise<ManagedExchangeRecord> {
+  return readModifyWriteRotation(id, (stored) => {
+    if (stored === undefined)
+      throw new Error(`no managed exchange with id ${id}`);
+    const existing = parseManagedExchangeRecord(stored);
+    return applyManagedExchangeReinviteRotation(existing, rotation);
   });
 }
 

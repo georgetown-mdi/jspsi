@@ -11,5 +11,10 @@ export const Route = createFileRoute("/saved/$id")({
 
 function RunRoute() {
   const { id } = Route.useParams();
-  return <ManagedRunSurface id={id} />;
+  // Key by id so a client-side navigation between two saved exchanges (this route
+  // matches once on the dynamic param and would otherwise NOT remount) tears down and
+  // rebuilds the surface: every per-exchange state slot resets, so exchange A's
+  // leftover state -- including a live re-invite token in its panel -- can never render
+  // on exchange B's page.
+  return <ManagedRunSurface key={id} id={id} />;
 }

@@ -26,7 +26,7 @@
  * calls {@link routeConfirmationReply} with the operator's chosen outcome.
  */
 
-import { dateTimeLabel } from "../bench/inviterModel";
+import { dateTimeLabel } from "@bench/inviterModel";
 
 import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 

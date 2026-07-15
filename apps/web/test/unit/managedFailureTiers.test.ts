@@ -8,7 +8,6 @@ import {
 import {
   deriveManagedFailureTier,
   importedSinceLastSuccess,
-  tierRecoversByReinvite,
 } from "@psi/managedFailureTiers";
 
 import type {
@@ -153,6 +152,20 @@ describe("deriveManagedFailureTier: the import/restore tier", () => {
     ).toBe("unexplained");
   });
 
+  test("a transport drop with a standing import marker is still the transport tier", () => {
+    // The import marker explains only a failed-CLOSED (auth) handshake -- a stale
+    // restored secret cannot authenticate. A transport drop is a connection problem the
+    // marker does not bear on, so it stays the retryable transport tier, not mis-tiered
+    // as "restored from a backup".
+    expect(
+      deriveManagedFailureTier(
+        record({ lastRun: failed("transport") }),
+        imported,
+        NOW,
+      ),
+    ).toBe("transport");
+  });
+
   test("importedSinceLastSuccess reads the marker's presence alone", () => {
     // The marker is cleared on the first rotation after an import (a completed
     // handshake proves sync), so its mere presence is the "restored and not yet
@@ -187,24 +200,5 @@ describe("deriveManagedFailureTier: the unexplained tier and the secret-farming 
         NOW,
       ),
     ).toBe("unexplained");
-  });
-});
-
-describe("tierRecoversByReinvite", () => {
-  test("the lapsed, storage, and imported tiers recover by re-invite", () => {
-    expect(tierRecoversByReinvite("expired")).toBe(true);
-    expect(tierRecoversByReinvite("storage")).toBe(true);
-    expect(tierRecoversByReinvite("imported")).toBe(true);
-  });
-
-  test("the unexplained tier does NOT re-invite directly (only through the gate)", () => {
-    expect(tierRecoversByReinvite("unexplained")).toBe(false);
-  });
-
-  test("in-place and no-op tiers do not re-invite", () => {
-    expect(tierRecoversByReinvite("input")).toBe(false);
-    expect(tierRecoversByReinvite("transport")).toBe(false);
-    expect(tierRecoversByReinvite("missed")).toBe(false);
-    expect(tierRecoversByReinvite("none")).toBe(false);
   });
 });

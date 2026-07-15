@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { Alert, Button, FileButton, Loader } from "@mantine/core";
+import { Alert, Button, CopyButton, FileButton, Loader } from "@mantine/core";
 import { Link } from "@tanstack/react-router";
 
 import { triggerBlobDownload } from "@components/blobDownload";
@@ -204,11 +204,20 @@ export function ManagedRunSurface({ id }: { id: string }) {
         // The tier is derived from the record's OWN bookkeeping, which the run path
         // just stamped (the auth/transport/input/storage failureKind), so the record
         // and its import marker are reloaded before classifying -- an unattended run's
-        // failure would surface through the same tiers at the next visit.
+        // failure would surface through the same tiers at the next visit. A corrupted
+        // record or sibling entry makes the reload reject (a ZodError); rather than
+        // skip setFailure entirely (spinner clears, no error UI, unhandled rejection),
+        // fall back to the closure's own record and no sibling state, so the original
+        // error still surfaces through the generic tier.
         const [reloaded, local] = await Promise.all([
           getManagedExchange(record.id),
           getManagedLocalState(record.id),
-        ]);
+        ]).catch(() => {
+          whenDiagnostic(() =>
+            console.error("managed run failure reload failed"),
+          );
+          return [undefined, undefined] as const;
+        });
         // The reload can resolve after the surface unmounts; the getter can flip true
         // across the await even though the earlier catch check narrowed it (ESLint
         // models the getter as a literal, hence the disable).
@@ -317,13 +326,20 @@ export function ManagedRunSurface({ id }: { id: string }) {
 
   // Fast re-invite: compose a fresh invitation from the record's OWN document (terms
   // and locator), persist the fresh secret onto the record, and hand the operator the
-  // shareable artifacts to forward out-of-band. The operator re-authors nothing.
+  // shareable artifacts to forward out-of-band. The operator re-authors nothing. The
+  // driver returns the rotated record; adopting it drops the stale in-memory secret so
+  // a subsequent run derives the rendezvous from the fresh one, and clearing the
+  // consumed failure surfaces "fresh invitation sent" rather than the recovered tier.
   function reinviteNow() {
     if (record === undefined || reinviting) return;
     setReinviting(true);
     setReinviteFailed(false);
     void reinviteManagedExchange(record)
-      .then(setReinvite)
+      .then((result) => {
+        setRecord(result.record);
+        setFailure(undefined);
+        setReinvite(result.reinvite);
+      })
       .catch((error) => {
         whenDiagnostic(() => console.error(error));
         setReinviteFailed(true);
@@ -501,25 +517,32 @@ export function ManagedRunSurface({ id }: { id: string }) {
               Run this exchange again with the same partner, without a new
               invitation. Your partner must run their side at the same time.
             </p>
-            {failure !== undefined && (
-              <Alert color="red" title={failure.title} mb="md">
-                <span style={{ whiteSpace: "pre-line" }}>
-                  {failure.message}
-                </span>
-              </Alert>
-            )}
-            {failure !== undefined && (
-              <FailureRecovery
-                failure={failure}
-                record={record}
-                confirmationGated={confirmationGated}
-                compromiseResponse={compromiseResponse}
-                reinvite={reinvite}
-                reinviting={reinviting}
-                reinviteFailed={reinviteFailed}
-                onReinvite={reinviteNow}
-                onResolveConfirmation={resolveConfirmation}
-              />
+            {reinvite !== undefined ? (
+              // A re-invite has superseded the failure: the record is rotated to the
+              // fresh secret and its consumed failure cleared, so the stale tier alert
+              // and its recovery are gone -- the operator forwards the fresh invitation
+              // and the next run derives from the new secret.
+              <ReinvitePanel record={record} reinvite={reinvite} />
+            ) : (
+              failure !== undefined && (
+                <>
+                  <Alert color="red" title={failure.title} mb="md">
+                    <span style={{ whiteSpace: "pre-line" }}>
+                      {failure.message}
+                    </span>
+                  </Alert>
+                  <FailureRecovery
+                    failure={failure}
+                    record={record}
+                    confirmationGated={confirmationGated}
+                    compromiseResponse={compromiseResponse}
+                    reinviting={reinviting}
+                    reinviteFailed={reinviteFailed}
+                    onReinvite={reinviteNow}
+                    onResolveConfirmation={resolveConfirmation}
+                  />
+                </>
+              )
             )}
             {!hasHandle && (
               <div className={styles.callout}>
@@ -579,14 +602,13 @@ export function ManagedRunSurface({ id }: { id: string }) {
  * re-invite for the re-invite tiers, the out-of-band confirmation and two-outcome gate
  * for the unexplained tier, and nothing extra for a retry/wait state (the run button
  * and the input picker are the recovery there). Thin over the pure model: the copy and
- * the routing are the model's; this renders the buttons and threads the composed
- * re-invite artifacts. */
+ * the routing are the model's; this renders the buttons. A composed re-invite renders
+ * above this (the {@link ReinvitePanel}), so this never handles the minted artifacts. */
 function FailureRecovery({
   failure,
   record,
   confirmationGated,
   compromiseResponse,
-  reinvite,
   reinviting,
   reinviteFailed,
   onReinvite,
@@ -596,7 +618,6 @@ function FailureRecovery({
   record: ManagedExchangeRecord;
   confirmationGated: boolean;
   compromiseResponse: boolean;
-  reinvite: ManagedReinvite | undefined;
   reinviting: boolean;
   reinviteFailed: boolean;
   onReinvite: () => void;
@@ -604,11 +625,6 @@ function FailureRecovery({
     outcome: Parameters<typeof routeConfirmationReply>[0],
   ) => void;
 }) {
-  // The composed re-invite (once minted) is the same panel whether it was reached
-  // directly (a re-invite tier) or through the confirmation gate.
-  if (reinvite !== undefined)
-    return <ReinvitePanel record={record} reinvite={reinvite} />;
-
   if (failure.recovery === "confirm") {
     if (compromiseResponse)
       return (
@@ -697,6 +713,51 @@ function ReinviteRecovery({
   );
 }
 
+/** A forwardable, multi-paragraph message the operator must READ before sending: the
+ * whole prose is shown in a visible, wrapped, readonly area with a copy action --
+ * unlike {@link CopyRow}, which collapses a secret to a one-line head/tail preview. The
+ * message carries no secret (it interpolates only this record's own label and failure
+ * time), so showing it in full is correct, not a leak. */
+function ForwardableMessage({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className={styles.copyRow}>
+      <span className={styles.copyLabel}>{label}</span>
+      <textarea
+        className={styles.forwardableMessage}
+        readOnly
+        value={value}
+        aria-label={label}
+        rows={value.split("\n").length}
+      />
+      {
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        typeof navigator !== "undefined" && navigator.clipboard ? (
+          <CopyButton value={value} timeout={1000}>
+            {({ copied, copy }) => (
+              <Button
+                mt="sm"
+                variant="default"
+                onClick={copy}
+                aria-label={
+                  copied ? `${label} copied` : `Copy ${label.toLowerCase()}`
+                }
+              >
+                {copied ? "Copied" : "Copy message"}
+              </Button>
+            )}
+          </CopyButton>
+        ) : null
+      }
+    </div>
+  );
+}
+
 /** The Tier-2 out-of-band confirmation: the forwardable, pre-filled message the
  * operator copies and sends the partner, then the two-outcome gate. The message and
  * the gate labels are the pure model's; this renders them. */
@@ -717,7 +778,10 @@ function ConfirmationPanel({
         them to confirm their identity, report what their own tool saw, and say
         whether they ran from more than one place.
       </p>
-      <CopyRow label="Message to your partner" value={confirmation.message} />
+      <ForwardableMessage
+        label="Message to your partner"
+        value={confirmation.message}
+      />
       <p className={styles.small} style={{ marginTop: "0.75rem" }}>
         When they reply:
       </p>

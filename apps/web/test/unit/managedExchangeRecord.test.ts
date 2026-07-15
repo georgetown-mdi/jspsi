@@ -11,6 +11,7 @@ import {
   applyManagedExchangeInputHandle,
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
+  applyManagedExchangeReinviteRotation,
   applyManagedExchangeRotation,
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
@@ -300,6 +301,62 @@ describe("applyManagedExchangeRotation", () => {
     });
     expect(record.sharedSecret).toBe(originalSecret);
     expect(record.expires).toBe("2026-04-06T14:00:00.000Z");
+  });
+});
+
+describe("applyManagedExchangeReinviteRotation", () => {
+  const authFailure: ManagedExchangeLastRun = {
+    at: "2026-07-14T09:00:00.000Z",
+    outcome: "failed",
+    failureKind: "auth",
+  };
+
+  test("rotates the secret AND drops the consumed lastRun", () => {
+    const record = buildManagedExchangeRecord(
+      newExchange({ lastRun: authFailure }),
+    );
+    const rotatedSecret = generateSharedSecret();
+    const rotated = applyManagedExchangeReinviteRotation(record, {
+      sharedSecret: rotatedSecret,
+      expires: null,
+    });
+    expect(rotated.sharedSecret).toBe(rotatedSecret);
+    // The failure the re-invite recovers from must not re-derive at the next visit.
+    expect(rotated).not.toHaveProperty("lastRun");
+  });
+
+  test("clears lastRun even when there was none (a no-op drop)", () => {
+    const record = buildManagedExchangeRecord(newExchange());
+    const rotated = applyManagedExchangeReinviteRotation(record, {
+      sharedSecret: generateSharedSecret(),
+      expires: null,
+    });
+    expect(rotated).not.toHaveProperty("lastRun");
+  });
+
+  test("restamps expires from the rotation and touches nothing else", () => {
+    const record = buildManagedExchangeRecord(
+      newExchange({ tokenMaxAgeDays: 90, schedule, lastRun: authFailure }),
+    );
+    const rotated = applyManagedExchangeReinviteRotation(record, {
+      sharedSecret: generateSharedSecret(),
+      expires: "2026-10-06T14:00:00.000Z",
+    });
+    expect(rotated.expires).toBe("2026-10-06T14:00:00.000Z");
+    expect(rotated.exchangeFile).toEqual(record.exchangeFile);
+    expect(rotated.tokenMaxAgeDays).toBe(90);
+    expect(rotated.schedule).toEqual(schedule);
+  });
+
+  test("does not mutate the input record", () => {
+    const record = buildManagedExchangeRecord(
+      newExchange({ lastRun: authFailure }),
+    );
+    applyManagedExchangeReinviteRotation(record, {
+      sharedSecret: generateSharedSecret(),
+      expires: null,
+    });
+    expect(record.lastRun).toEqual(authFailure);
   });
 });
 

@@ -122,16 +122,16 @@ export function deriveManagedFailureTier(
   // desynced the parties, so the recovery is re-invite -- Tier 1, no attack checklist.
   if (lastRun.failureKind === "storage") return "storage";
 
-  // A restore since the last success explains a handshake failure benignly: the
-  // restored copy can hold a secret the partnership rotated past, so a re-invite
-  // recovers it. This precedes the unexplained reading precisely because naming a
-  // benign cause is only honest when the record's own evidence supplies it -- the
-  // marker is consumed by any successful run, so its presence is real evidence, not a
-  // guess.
-  if (
-    (lastRun.failureKind === "auth" || lastRun.failureKind === "transport") &&
-    importedSinceLastSuccess(local)
-  )
+  // A restore since the last success explains a failed-CLOSED handshake benignly: the
+  // restored copy can hold a secret the partnership rotated past, so the handshake
+  // fails to authenticate and a re-invite recovers it. Only an `auth` failure is what
+  // a stale-secret restore explains -- a transport drop is a connection problem the
+  // marker does not bear on, so it stays the retryable transport tier regardless of a
+  // standing marker (see docs/MANAGED_EXCHANGE.md, "Telling a desync from an attack").
+  // This precedes the unexplained reading precisely because naming a benign cause is
+  // only honest when the record's own evidence supplies it -- the marker is consumed by
+  // any successful run, so its presence is real evidence, not a guess.
+  if (lastRun.failureKind === "auth" && importedSinceLastSuccess(local))
     return "imported";
 
   // A connection or data-exchange drop that is not a failed-closed handshake: a
@@ -144,16 +144,4 @@ export function deriveManagedFailureTier(
   // A handshake that failed closed (`auth`) with no recorded benign explanation: the
   // one failure that needs the operator's out-of-band confirmation work.
   return "unexplained";
-}
-
-/**
- * Whether a tier's recovery is fast re-invite (both parties discard the desynced
- * secret and re-establish one from a fresh invitation). The lapsed, storage, and
- * imported tiers recover by re-invite; the unexplained tier reaches re-invite only
- * through the two-outcome gate (a confirmed partner-side failure), so it is NOT a
- * direct re-invite tier. Input/missed/transport recover in place (fix the file, wait
- * for the next window, retry), and `"none"` has nothing to recover.
- */
-export function tierRecoversByReinvite(tier: ManagedFailureTier): boolean {
-  return tier === "expired" || tier === "storage" || tier === "imported";
 }

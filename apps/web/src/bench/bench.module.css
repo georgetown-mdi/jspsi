@@ -748,6 +748,25 @@
   color: inherit;
 }
 
+/* A forwardable prose message shown in full: wrapped, readable multi-line text
+   (not the one-line nowrap secret preview), sized to its content by rows. */
+.forwardableMessage {
+  display: block;
+  width: 100%;
+  overflow-y: auto;
+  resize: vertical;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--bench-code-bg);
+  border: 1px solid var(--bench-rule);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-top: 6px;
+  color: inherit;
+  font: inherit;
+  line-height: 1.5;
+}
+
 .copyBtn {
   flex: none;
   align-self: center;
