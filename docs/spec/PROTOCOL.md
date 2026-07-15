@@ -234,7 +234,7 @@ The `NULL`/absent omission above is distinct from a realized key that is the *em
 
 # Post-linkage steps
 
-## Non-repudiation
+## Third-party-verifiable proof of a data flow
 
 > **Partially implemented:** The signing identity that certificate-backed receipts rest on -- key generation, the self-signed certificate, fingerprint pinning, and the identity binding -- is implemented today and specified under [Signing identity and certificate pinning](#signing-identity-and-certificate-pinning) below. Receipt assembly, signing, and the receipt swap are not yet wired up; they are targeted for the 1.0 release (see [ROADMAP.md](../ROADMAP.md)). The receipt-content description in this section is the intended design.
 
@@ -246,6 +246,8 @@ Each receipt records the timestamp, a hash of the exchange agreement, each party
 - **Certificate-backed (asymmetric).** The signature is made with a party's long-lived signing private key, whose self-signed certificate the partner has pinned by fingerprint out-of-band at setup. Only the holder of that key could have produced the signature, and the pin ties the key to the partner, so the signature is verifiable by anyone who holds (or is given) the pinned fingerprint -- it does not depend on a certificate-authority chain. This is the only mode that provides non-repudiation, and the only mode in which the `identity` field carries evidentiary weight: the certificate binds the asserted identity to the pinned key, whereas a session-derived receipt leaves it an unverified label. The signing identity, certificate format, fingerprint pinning, and the identity-binding rule are specified under [Signing identity and certificate pinning](#signing-identity-and-certificate-pinning) below.
 
 Because the receipt is collected after the result already exists on both sides, the signature swap is best-effort evidence, not a fairness or atomicity guarantee. Two limitations follow directly. First, the swap is not a fair exchange: a party may receive the partner's signature and then decline to send its own, and no protocol step can compel the second signature once the first has been handed over. Second, aborting does not undo the data exchange: because both parties already hold the result, terminating the program and restarting does not roll the data back. An aborting party can capture the partner's signature, withhold its own, and still keep the intersection. Restarting the exchange is not a remedy for data already transferred; it only repeats the work.
+
+Even under the certificate-backed mode, a receipt proves narrowly. It evidences only that a specific data set flowed between these two parties -- the agreement and result it commits to, produced third-party-verifiable in that mode. It does not prove where either party's data came from (provenance), that the data is accurate, or that either party satisfied a legal or contractual obligation; those remain matters outside what the receipt can attest.
 
 Retention, access controls, and log integrity beyond the receipt remain each party's internal compliance obligation.
 
