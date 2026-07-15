@@ -29,6 +29,7 @@ import {
   buildManagedExchangeRecord,
   parseManagedExchangeRecord,
 } from "./managedExchangeRecord";
+import { parseManagedLocalState } from "./managedLocalStateShape";
 
 import type {
   ManagedExchangeLastRun,
@@ -44,16 +45,28 @@ export const MANAGED_EXCHANGE_DB_NAME = "psilink-managed-exchanges";
 /** The object store holding one {@link ManagedExchangeRecord} per key. */
 export const MANAGED_EXCHANGE_STORE_NAME = "records";
 
+/**
+ * The object store holding the local sibling state for a record (the backup marker
+ * and the spent state), keyed by the record's `id`. It is deliberately a SEPARATE
+ * store, not a record field: that state must never appear in the export artifact,
+ * and the record schema is reader-rejects-unknown -- keeping it a sibling makes its
+ * non-inclusion structural (the exporter reads only the records store). Its shape
+ * is governed by {@link ./managedLocalState.ts}.
+ */
+export const MANAGED_EXCHANGE_LOCAL_STORE_NAME = "localState";
+
 /** The database schema version this build opens. Bump only for an IndexedDB
  * structural migration (a new object store or index), never for a change to the
- * record's own `schemaVersion`, which the record schema governs. */
-const IDB_VERSION = 1;
+ * record's own `schemaVersion`, which the record schema governs. Bumped to 2 to add
+ * the local-sibling-state store. */
+const IDB_VERSION = 2;
 
 /**
- * Open (creating or upgrading) the managed-exchange database. The object store is
- * keyed by the record's `id` (an in-line key path), so a record is its own key
- * and a delete needs only that id. Callers usually go through the higher-level
- * CRUD functions below rather than opening the database themselves.
+ * Open (creating or upgrading) the managed-exchange database. The records store is
+ * keyed by the record's `id` (an in-line key path), so a record is its own key and
+ * a delete needs only that id; the local-state store is keyed out-of-line by the
+ * same id. Callers usually go through the higher-level CRUD functions below rather
+ * than opening the database themselves.
  */
 export function openManagedExchangeDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -62,6 +75,8 @@ export function openManagedExchangeDatabase(): Promise<IDBDatabase> {
       const db = request.result;
       if (!db.objectStoreNames.contains(MANAGED_EXCHANGE_STORE_NAME))
         db.createObjectStore(MANAGED_EXCHANGE_STORE_NAME, { keyPath: "id" });
+      if (!db.objectStoreNames.contains(MANAGED_EXCHANGE_LOCAL_STORE_NAME))
+        db.createObjectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -250,6 +265,165 @@ async function readModifyWriteRecord(
 }
 
 /**
+ * Persist a rotation to the stored record AND clear its backup marker in one
+ * transaction spanning both stores. Advancing the secret invalidates any prior
+ * export -- an export taken before this rotation restores a stale secret -- so the
+ * marker must fall in the same atomic step: "marker present" then structurally
+ * means "an export containing the current secret was taken since the last
+ * rotation", regardless of how the run was classified afterward. A cross-store
+ * transaction is the required shape: clearing the marker in a separate transaction
+ * would leave a window in which the rotated record reads green over a stale export.
+ * Only the marker is cleared; any spent state is left untouched.
+ *
+ * The record write is field-scoped through `transform` exactly as
+ * {@link readModifyWriteRecord}, so it cannot carry a stale secret or document;
+ * `transform` must be synchronous (Zod validation is) or the transaction
+ * auto-commits before the writes are issued.
+ */
+async function readModifyWriteRotation(
+  id: string,
+  transform: (stored: unknown) => ManagedExchangeRecord,
+): Promise<ManagedExchangeRecord> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    return await new Promise<ManagedExchangeRecord>((resolve, reject) => {
+      const transaction = db.transaction(
+        [MANAGED_EXCHANGE_STORE_NAME, MANAGED_EXCHANGE_LOCAL_STORE_NAME],
+        "readwrite",
+        { durability: "strict" },
+      );
+      const records = transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME);
+      const local = transaction.objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME);
+      const read = records.get(id);
+      const readLocal = local.get(id);
+      let written: ManagedExchangeRecord;
+      let failure: unknown;
+      const applyWhenReady = () => {
+        if (read.readyState !== "done" || readLocal.readyState !== "done")
+          return;
+        try {
+          written = transform(read.result);
+          records.put(written);
+          clearBackupOnLocalStore(local, id, readLocal.result);
+        } catch (error) {
+          failure = error;
+          transaction.abort();
+        }
+      };
+      read.onsuccess = applyWhenReady;
+      readLocal.onsuccess = applyWhenReady;
+      transaction.oncomplete = () => resolve(written);
+      transaction.onerror = () => reject(failure ?? transaction.error);
+      transaction.onabort = () => reject(failure ?? transaction.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Drop only the backup marker from a record's sibling local-state entry, on an
+ * already-open local-state object store inside a live transaction. A `null`-ing of
+ * the whole entry when no spent state remains keeps the store from carrying an
+ * empty sibling. The stored value is re-validated ({@link parseManagedLocalState})
+ * so a corrupted sibling aborts the transaction rather than being silently kept.
+ */
+function clearBackupOnLocalStore(
+  store: IDBObjectStore,
+  id: string,
+  raw: unknown,
+): void {
+  if (raw === undefined) return;
+  const current = parseManagedLocalState(raw);
+  if (current.spent === undefined) {
+    store.delete(id);
+    return;
+  }
+  store.put({ spent: current.spent }, id);
+}
+
+/**
+ * Read the current stored record for `id` AND stamp its backup marker as of
+ * `backedUpAt`, both inside one transaction spanning the record and sibling stores,
+ * returning the record read. This is the atomic read-and-mark every export binds
+ * to: the bytes an export serializes come from the record this call returns, and the
+ * marker it writes attests exactly those bytes, so a stale-tab or stale-React-state
+ * export cannot stamp a marker over a secret it did not serialize. Because the mark
+ * is cross-store-atomic with the read, a rotation write (which clears the marker in
+ * its own cross-store transaction) that lands first is never masked: either this
+ * transaction reads the pre-rotation record and marks it -- then the rotation clears
+ * that marker -- or it reads the rotated record and marks the rotated secret. The
+ * marker advances only when it is set to a later instant, so a slow export's late
+ * mark cannot revert a newer one; the spent state is left untouched.
+ *
+ * @throws {Error} if no record with `id` exists.
+ * @throws {ZodError} if the stored record or sibling entry is invalid.
+ */
+export async function readRecordAndMarkBackedUp(
+  id: string,
+  backedUpAt: string,
+): Promise<ManagedExchangeRecord> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    return await new Promise<ManagedExchangeRecord>((resolve, reject) => {
+      const transaction = db.transaction(
+        [MANAGED_EXCHANGE_STORE_NAME, MANAGED_EXCHANGE_LOCAL_STORE_NAME],
+        "readwrite",
+        { durability: "strict" },
+      );
+      const records = transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME);
+      const local = transaction.objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME);
+      const read = records.get(id);
+      const readLocal = local.get(id);
+      let record: ManagedExchangeRecord;
+      let failure: unknown;
+      const applyWhenReady = () => {
+        if (read.readyState !== "done" || readLocal.readyState !== "done")
+          return;
+        try {
+          if (read.result === undefined)
+            throw new Error(`no managed exchange with id ${id}`);
+          record = parseManagedExchangeRecord(read.result);
+          markBackupOnLocalStore(local, id, readLocal.result, backedUpAt);
+        } catch (error) {
+          failure = error;
+          transaction.abort();
+        }
+      };
+      read.onsuccess = applyWhenReady;
+      readLocal.onsuccess = applyWhenReady;
+      transaction.oncomplete = () => resolve(record);
+      transaction.onerror = () => reject(failure ?? transaction.error);
+      transaction.onabort = () => reject(failure ?? transaction.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Advance the backup marker on a record's sibling entry to `backedUpAt`, on an
+ * already-open local-state object store inside a live transaction, preserving any
+ * spent state. The marker only moves forward: a stamp older than the stored marker
+ * is a no-op, so a slow export's late mark cannot revert a newer one. Compared as
+ * parsed instants, since the schema admits ISO stamps of differing precision.
+ */
+function markBackupOnLocalStore(
+  store: IDBObjectStore,
+  id: string,
+  raw: unknown,
+  backedUpAt: string,
+): void {
+  const current = raw === undefined ? undefined : parseManagedLocalState(raw);
+  if (
+    current?.backup !== undefined &&
+    Date.parse(current.backup.backedUpAt) > Date.parse(backedUpAt)
+  )
+    return;
+  store.put({ ...current, backup: { backedUpAt } }, id);
+}
+
+/**
  * Apply local edits (the label, schedule, and max-token-age policy -- the only
  * fields that update in place without a re-invite) to the stored record and
  * persist the result. The read, the edit application through
@@ -278,13 +452,16 @@ export async function updateManagedExchangeLocalFields(
 
 /**
  * Persist a rotation to the stored record: advance the rotated secret and the
- * `expires` bound, and nothing else. The read, the field-scoped application
- * through {@link applyManagedExchangeRotation} (which re-validates), and the
- * write-back run inside one strict-durability readwrite transaction
- * ({@link readModifyWriteRecord}), so the rotation applies to the freshest stored
- * record and the write is structurally incapable of carrying a stale secret or a
- * stale document. This is the durable write the persist-before-success ordering
- * awaits before the data exchange begins (see docs/spec/MANAGED_EXCHANGE_RECORD.md).
+ * `expires` bound, and nothing else, AND clear the record's backup marker -- both
+ * in one strict-durability transaction spanning the record and sibling stores
+ * ({@link readModifyWriteRotation}). Advancing the secret invalidates any prior
+ * export, so the marker falls in the same atomic step: "marker present" then means
+ * "an export containing the current secret was taken since the last rotation",
+ * independent of how the run was later classified. The record write is field-scoped
+ * through {@link applyManagedExchangeRotation} (which re-validates), so it is
+ * structurally incapable of carrying a stale secret or a stale document. This is
+ * the durable write the persist-before-success ordering awaits before the data
+ * exchange begins (see docs/spec/MANAGED_EXCHANGE_RECORD.md).
  *
  * @throws {Error} if no record with `id` exists.
  * @throws {ZodError} if the stored value is not a valid v1 record or the rotation
@@ -294,7 +471,7 @@ export async function persistManagedExchangeRotation(
   id: string,
   rotation: ManagedExchangeRotation,
 ): Promise<ManagedExchangeRecord> {
-  return readModifyWriteRecord(id, (stored) => {
+  return readModifyWriteRotation(id, (stored) => {
     if (stored === undefined)
       throw new Error(`no managed exchange with id ${id}`);
     const existing = parseManagedExchangeRecord(stored);
@@ -357,20 +534,146 @@ export async function persistManagedExchangeInputHandle(
 }
 
 /**
- * Delete a managed exchange in one step, removing everything the browser holds
- * for it -- the record, the secret, the input-file handle, the schedule, and the
- * run bookkeeping -- because all of it is one object under one key. Idempotent: a
- * delete of a missing id resolves without error.
+ * Revive a SPENT record whose stored secret matches the reconstructed artifact's,
+ * in place -- an import of the migration artifact back onto the device that spent
+ * it. The whole reconciliation runs in one transaction spanning both stores: it
+ * reads every record and every sibling entry, finds a record that is spent AND
+ * holds the same `sharedSecret` as `reconstructed` (the honest match -- the artifact
+ * of a spent, unrun-since record carries exactly its secret; compared in memory, so
+ * nothing secret-derived is ever persisted), and, if one exists, updates that
+ * record's fields from the artifact (keeping its own `id` and any persisted input
+ * handle), clears its spent state, and stamps the backup marker as of `backedUpAt`.
+ * It returns the revived record, or `undefined` when no spent secret-match exists --
+ * in which case the caller installs a fresh record instead of duplicating the husk.
+ *
+ * Only a SPENT match revives: a live record holding the same secret is a genuine
+ * second owner (a re-import onto a device that never spent), so importing over it
+ * would be the fork the single-owner invariant forbids; that case installs fresh and
+ * the operator resolves the duplicate. The field update is re-validated through the
+ * record schema, so a malformed revive aborts the transaction and leaves the store
+ * untouched.
+ *
+ * @throws {ZodError} if any stored record or sibling entry is invalid, or the
+ *   revived record is invalid.
  */
-export async function deleteManagedExchange(id: string): Promise<void> {
-  await withStore("readwrite", (store) => store.delete(id));
+export async function reviveSpentManagedExchange(
+  reconstructed: ManagedExchangeRecord,
+  backedUpAt: string,
+): Promise<ManagedExchangeRecord | undefined> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    return await new Promise<ManagedExchangeRecord | undefined>(
+      (resolve, reject) => {
+        const transaction = db.transaction(
+          [MANAGED_EXCHANGE_STORE_NAME, MANAGED_EXCHANGE_LOCAL_STORE_NAME],
+          "readwrite",
+          { durability: "strict" },
+        );
+        const records = transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME);
+        const local = transaction.objectStore(
+          MANAGED_EXCHANGE_LOCAL_STORE_NAME,
+        );
+        const readRecords = records.getAll();
+        const readKeys = local.getAllKeys();
+        const readValues = local.getAll();
+        let revived: ManagedExchangeRecord | undefined;
+        let failure: unknown;
+        const applyWhenReady = () => {
+          if (
+            readRecords.readyState !== "done" ||
+            readKeys.readyState !== "done" ||
+            readValues.readyState !== "done"
+          )
+            return;
+          try {
+            const spent = new Set<string>();
+            const keys = readKeys.result;
+            const values = readValues.result;
+            for (let index = 0; index < keys.length; index += 1)
+              if (parseManagedLocalState(values[index]).spent !== undefined)
+                spent.add(String(keys[index]));
+            const match = readRecords.result
+              .map((raw) => parseManagedExchangeRecord(raw))
+              .find(
+                (existing) =>
+                  spent.has(existing.id) &&
+                  existing.sharedSecret === reconstructed.sharedSecret,
+              );
+            if (match === undefined) return;
+            revived = parseManagedExchangeRecord({
+              ...reconstructed,
+              id: match.id,
+              ...(match.inputFileHandle !== undefined
+                ? { inputFileHandle: match.inputFileHandle }
+                : {}),
+            });
+            records.put(revived);
+            local.put({ backup: { backedUpAt } }, match.id);
+          } catch (error) {
+            failure = error;
+            transaction.abort();
+          }
+        };
+        readRecords.onsuccess = applyWhenReady;
+        readKeys.onsuccess = applyWhenReady;
+        readValues.onsuccess = applyWhenReady;
+        transaction.oncomplete = () => resolve(revived);
+        transaction.onerror = () => reject(failure ?? transaction.error);
+        transaction.onabort = () => reject(failure ?? transaction.error);
+      },
+    );
+  } finally {
+    db.close();
+  }
 }
 
 /**
- * Delete every managed exchange record. Used to reset the store; each record's
- * whole contents are removed with it, as {@link deleteManagedExchange} removes
- * one.
+ * Delete a managed exchange in one step, removing everything the browser holds
+ * for it -- the record, the secret, the input-file handle, the schedule, the run
+ * bookkeeping, AND the local sibling state (the backup marker and any spent
+ * state) -- so nothing is left behind. The record and its sibling state are removed
+ * in one transaction spanning both stores, so a delete cannot leave a stranded
+ * sibling entry. Idempotent: a delete of a missing id resolves without error.
+ */
+export async function deleteManagedExchange(id: string): Promise<void> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(
+        [MANAGED_EXCHANGE_STORE_NAME, MANAGED_EXCHANGE_LOCAL_STORE_NAME],
+        "readwrite",
+      );
+      transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME).delete(id);
+      transaction.objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME).delete(id);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Delete every managed exchange record and all local sibling state. Used to reset
+ * the store; both stores are cleared in one transaction, so no sibling entry
+ * outlives the records it belonged to.
  */
 export async function clearManagedExchanges(): Promise<void> {
-  await withStore("readwrite", (store) => store.clear());
+  const db = await openManagedExchangeDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(
+        [MANAGED_EXCHANGE_STORE_NAME, MANAGED_EXCHANGE_LOCAL_STORE_NAME],
+        "readwrite",
+      );
+      transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME).clear();
+      transaction.objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME).clear();
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally {
+    db.close();
+  }
 }
