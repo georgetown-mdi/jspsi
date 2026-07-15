@@ -46,6 +46,38 @@ export function fileSystemAccessSupported(): boolean {
   return typeof globalThis.FileSystemFileHandle !== "undefined";
 }
 
+/** A selected file that MAY carry a File System Access handle. The bench's file
+ * intake (Mantine's Dropzone over `file-selector`) attaches a `handle` to a
+ * dropped file in a secure context on Chromium, so a managed deposit can capture
+ * the operator's existing selection without a second picker dialog; every other
+ * selection path (a click-to-open input, a browser without the API) yields a plain
+ * `File` and no handle. Declared locally because the DOM `File` lib does not type
+ * the `file-selector` extension. */
+interface FileWithOptionalHandle {
+  handle?: FileSystemFileHandle;
+}
+
+/**
+ * Read the File System Access handle a drop attached to `file`, or `undefined`
+ * when the selection path did not yield one. On Chromium in a secure context,
+ * `file-selector` (under the bench's Dropzone) calls
+ * `DataTransferItem.getAsFileSystemHandle()` on a drop and attaches the handle to
+ * the `File`; a click-to-open selection and a browser without the API leave it
+ * absent. The presence of the handle is also gated on
+ * {@link fileSystemAccessSupported}, so a foreign object carrying a `handle`
+ * property on a runtime without the API is not mistaken for a real handle. This is
+ * the capture-at-deposit seam: no extra dialog is shown to obtain a handle the
+ * operator's existing selection already carries, and no handle is persisted when
+ * the selection cannot yield one (the record field is optional).
+ */
+export function capturedInputHandle(
+  file: File,
+): FileSystemFileHandle | undefined {
+  if (!fileSystemAccessSupported()) return undefined;
+  const handle = (file as File & FileWithOptionalHandle).handle;
+  return handle instanceof FileSystemFileHandle ? handle : undefined;
+}
+
 /**
  * The read-permission state a handle reports: `"granted"` reads through without a
  * prompt, `"denied"` cannot be read, and `"prompt"` needs an operator gesture to

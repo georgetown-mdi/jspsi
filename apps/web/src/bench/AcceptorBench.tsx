@@ -5,13 +5,20 @@ import { Dropzone } from "@mantine/dropzone";
 import { IconAlertCircle } from "@tabler/icons-react";
 import log from "loglevel";
 
-import { describeDecodeError, sanitizeErrorForDisplay } from "@psilink/core";
+import {
+  deriveAcceptedLinkageTerms,
+  describeDecodeError,
+  sanitizeErrorForDisplay,
+} from "@psilink/core";
 
 import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
+import { capturedInputHandle } from "@psi/managedInputHandle";
+import { createManagedExchange } from "@psi/managedExchangeStore";
 import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
 import { deploymentProfile } from "@utils/clientConfig";
+import { whenDiagnostic } from "@utils/diagnostics";
 
 import { InvitationTerms } from "@components/InvitationTerms";
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
@@ -40,12 +47,18 @@ import {
   acceptorLaunchPayload,
   acceptorVerdict,
 } from "./acceptorColumnsModel";
+import {
+  buildManagedDeposit,
+  composeManagedDocument,
+  webrtcLocatorFromEndpoint,
+} from "./manageOfferModel";
 import { AcceptorCleaningStep } from "./AcceptorCleaningStep";
 import { AcceptorColumnsStep } from "./AcceptorColumnsStep";
 import { AcceptorExchangeSection } from "./AcceptorExchangeSection";
 import { BenchShell } from "./BenchShell";
 import { FILE_ASSURANCE_LINE } from "./fileAssurance";
 import { Ledger } from "./Ledger";
+import { ManageExchangeOffer } from "./ManageExchangeOffer";
 import { Problems } from "./Problems";
 import { TopBar } from "./TopBar";
 import { acceptorTimelineSteps } from "./exchangeRun";
@@ -75,6 +88,8 @@ import type { AlertContent } from "@components/csvIntake";
 import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 import type { FileRejection } from "@mantine/dropzone";
 import type { IntakeAlert } from "./YourFileSection";
+import type { ManageOfferChoices } from "./manageOfferModel";
+import type { ManageOfferStatus } from "./ManageExchangeOffer";
 import type { RailStep } from "./inviterModel";
 
 /** Stable empty inputs for {@link useNonEmptyRates} before a file is acquired, so the
@@ -174,7 +189,13 @@ export function AcceptorBench() {
   // so the server-job path submits the exact bytes the browser path parsed (no
   // re-serialization of rawRows). Fixed alongside `acquired` and the committed name.
   const [acceptedFile, setAcceptedFile] = useState<File>();
+  // The File System Access handle the committed file's selection yielded, where
+  // the platform gave one (a drop on Chromium in a secure context); captured so a
+  // managed deposit can persist a reusable pointer to the input without a second
+  // picker dialog. Absent for a click-selected file and a browser without the API.
+  const [sourceHandle, setSourceHandle] = useState<FileSystemFileHandle>();
   const [columnsState, setColumnsState] = useState<AcceptorColumnsState>();
+  const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
   // The launched exchange (the assembled edits + optional advisory); rendering the
   // minimal run stub the next package replaces.
   const [launched, setLaunched] = useState<AcceptorLaunched>();
@@ -378,6 +399,7 @@ export function AcceptorBench() {
       // edited (the input stays editable; the committed identity does not drift).
       setCommittedName(name);
       setAcceptedFile(file);
+      setSourceHandle(capturedInputHandle(file));
       setAcquired({
         fileName: file.name,
         sizeBytes: file.size,
@@ -635,8 +657,63 @@ export function AcceptorBench() {
   // with every column-step input intact, where the acceptor fixes its settings.
   const backToColumns = () => {
     setLaunched(undefined);
+    setManageStatus("idle");
     goToStep("columns");
   };
+
+  // Deposit a managed-exchange record for this exchange as the acceptor: this
+  // party's own perspective of the terms plus the secret carried in the
+  // invitation link, so the same partnership can run again later. The connection
+  // block is composed from the INVITATION's endpoint (the acceptor's rendezvous
+  // is the inviter's signaling location, not this browser's), and this party's
+  // linkage terms are its derived perspective (identity replaced, output/payload
+  // mirrored) with its own authored metadata and standardization -- the exact
+  // spec this run used. The secret is the invitation's; the one-shot run discards
+  // its own derived rotation, so the record stays coherent at this value until a
+  // managed re-run rotates it. Declining is simply not pressing Manage.
+  async function manageExchange(choices: ManageOfferChoices) {
+    if (decode.status !== "ready" || launched === undefined) return;
+    const { token: invitationToken, endpoint } = decode.invitation;
+    if (endpoint.channel !== "webrtc") return;
+    setManageStatus("depositing");
+    try {
+      const exchangeFile = composeManagedDocument(
+        {
+          linkageTerms: deriveAcceptedLinkageTerms(
+            invitationToken.linkageTerms,
+            committedName,
+          ),
+          metadata: launched.edits.metadata,
+          standardization: launched.edits.standardization,
+        },
+        webrtcLocatorFromEndpoint(endpoint),
+      );
+      await createManagedExchange(
+        buildManagedDeposit(
+          {
+            side: "acceptor",
+            exchangeFile,
+            sharedSecret: invitationToken.sharedSecret,
+            ...(sourceHandle !== undefined
+              ? { inputFileHandle: sourceHandle }
+              : {}),
+            choices,
+          },
+          Date.now(),
+        ),
+      );
+      setManageStatus("deposited");
+    } catch (error) {
+      console.error(
+        "managed exchange deposit failed:",
+        error instanceof Error ? error.name : typeof error,
+      );
+      whenDiagnostic(() =>
+        console.error("managed exchange deposit failed (detail):", error),
+      );
+      setManageStatus("error");
+    }
+  }
 
   const cleaningResetKey =
     editorState?.standardization
@@ -884,15 +961,30 @@ export function AcceptorBench() {
             />
           )}
         {decode.status === "ready" && step === "launched" && (
-          <AcceptorExchangeSection
-            invitation={decode.invitation}
-            run={run}
-            outputs={outputs}
-            failure={failure}
-            warning={launched?.warning}
-            onTryAgain={tryAgain}
-            onFixColumns={backToColumns}
-          />
+          <>
+            <AcceptorExchangeSection
+              invitation={decode.invitation}
+              run={run}
+              outputs={outputs}
+              failure={failure}
+              warning={launched?.warning}
+              onTryAgain={tryAgain}
+              onFixColumns={backToColumns}
+            />
+            {/* The manage offer is webrtc-only (its record composes a webrtc
+                locator from the invitation's endpoint) and is skippable: leaving
+                it untouched keeps the exchange one-time. It stands from launch
+                through completion, so this party can manage the partnership. */}
+            {decode.invitation.endpoint.channel === "webrtc" &&
+              launched !== undefined &&
+              failure === undefined && (
+                <ManageExchangeOffer
+                  status={manageStatus}
+                  handleCaptured={sourceHandle !== undefined}
+                  onManage={(choices) => void manageExchange(choices)}
+                />
+              )}
+          </>
         )}
       </div>
     </BenchShell>

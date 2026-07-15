@@ -9,8 +9,14 @@ import {
   sanitizeForDisplay,
 } from "@psilink/core";
 
-import { InvitationFileError, generateInvitation } from "@psi/invitation";
+import {
+  InvitationFileError,
+  generateInvitation,
+  webrtcEndpointFromLocation,
+} from "@psi/invitation";
 import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
+import { capturedInputHandle } from "@psi/managedInputHandle";
+import { createManagedExchange } from "@psi/managedExchangeStore";
 import { fetchSftpRemotes } from "@psi/serverJobExchangeDriver";
 import { invitationLocation } from "@psi/invitationLocation";
 import { loadCSVFileOffMainThread } from "@psi/csvParseController";
@@ -32,6 +38,11 @@ import {
   saveRailNote,
   saveTrustFooter,
 } from "./saveExchangeModel";
+import {
+  buildManagedDeposit,
+  composeManagedDocument,
+  webrtcLocatorFromEndpoint,
+} from "./manageOfferModel";
 import {
   cleaningCoverageProblems,
   editorFromCsv,
@@ -71,6 +82,7 @@ import { CleaningTab } from "./CleaningTab";
 import { InviterExchangeSection } from "./InviterExchangeSection";
 import { KeysTab } from "./KeysTab";
 import { Ledger } from "./Ledger";
+import { ManageExchangeOffer } from "./ManageExchangeOffer";
 import { MatchingSharingSection } from "./MatchingSharingSection";
 import { Problems } from "./Problems";
 import { ReviewCreateSection } from "./ReviewCreateSection";
@@ -93,6 +105,8 @@ import type {
 } from "@psi/invitation";
 import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { IntakeAlert } from "./YourFileSection";
+import type { ManageOfferChoices } from "./manageOfferModel";
+import type { ManageOfferStatus } from "./ManageExchangeOffer";
 import type { SavedExchange } from "./SaveExchangeSection";
 import type { Section } from "./stepRestore";
 import type { SftpRemoteProjection } from "@jobs/jobManager";
@@ -160,6 +174,11 @@ export function InviterBench() {
   const [lastSpineStep, setLastSpineStep] = useState<SpineStep>("file");
   const [acquired, setAcquired] = useState<AcquiredCsv>();
   const [sourceFile, setSourceFile] = useState<File>();
+  // The File System Access handle a drop attached to the selected file, where the
+  // platform yielded one; captured so a managed deposit can persist a reusable
+  // pointer to the input without a second picker dialog. Absent for a
+  // click-selected file, a browser without the API, and the in-memory sample.
+  const [sourceHandle, setSourceHandle] = useState<FileSystemFileHandle>();
   const [editor, setEditor] = useState<InviterEditor>();
   const [intakeAlert, setIntakeAlert] = useState<IntakeAlert>();
   const [reading, setReading] = useState(false);
@@ -177,6 +196,7 @@ export function InviterBench() {
   const [sftpRemotes, setSftpRemotes] = useState<Array<SftpRemoteProjection>>();
   const [sftpRemoteName, setSftpRemoteName] = useState<string>();
   const [demoActive, setDemoActive] = useState(false);
+  const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
 
   const transport = editor?.transport ?? "browser";
 
@@ -255,7 +275,63 @@ export function InviterBench() {
     );
     setInvitation(undefined);
     setSavedExchange(undefined);
+    setManageStatus("idle");
     goTo("review");
+  }
+
+  // Deposit a managed-exchange record for this exchange as the inviter: the
+  // standing terms plus the secret embedded in the just-minted invitation, so the
+  // same partnership can run again later. The connection block is composed from
+  // this app's own signaling location -- the same window.location source the
+  // invitation's endpoint was built from -- not read back off the encoded token.
+  // The secret is the minted invitation's; the one-shot run that follows discards
+  // its own derived rotation, so the record stays coherent at this value until a
+  // managed re-run rotates it. Declining is simply not pressing Manage, so there
+  // is no discard path here.
+  async function manageExchange(choices: ManageOfferChoices) {
+    if (invitation === undefined || editor === undefined) return;
+    setManageStatus("depositing");
+    try {
+      const connection = webrtcLocatorFromEndpoint(
+        webrtcEndpointFromLocation(invitationLocation()),
+      );
+      const exchangeFile = composeManagedDocument(
+        {
+          linkageTerms: invitation.linkageTerms,
+          ...(invitation.metadata !== undefined
+            ? { metadata: invitation.metadata }
+            : {}),
+          ...(invitation.standardization !== undefined
+            ? { standardization: invitation.standardization }
+            : {}),
+        },
+        connection,
+      );
+      await createManagedExchange(
+        buildManagedDeposit(
+          {
+            side: "inviter",
+            exchangeFile,
+            sharedSecret: invitation.sharedSecret,
+            ...(sourceHandle !== undefined
+              ? { inputFileHandle: sourceHandle }
+              : {}),
+            choices,
+          },
+          Date.now(),
+        ),
+      );
+      setManageStatus("deposited");
+    } catch (error) {
+      console.error(
+        "managed exchange deposit failed:",
+        error instanceof Error ? error.name : typeof error,
+      );
+      whenDiagnostic(() =>
+        console.error("managed exchange deposit failed (detail):", error),
+      );
+      setManageStatus("error");
+    }
   }
 
   // Apply a section arriving from a browser Back/Forward: set the step state
@@ -359,6 +435,7 @@ export function InviterBench() {
   function discardRead(alert: IntakeAlert) {
     setAcquired(undefined);
     setSourceFile(undefined);
+    setSourceHandle(undefined);
     setEditor(undefined);
     setDemoActive(false);
     setIntakeAlert(alert);
@@ -399,6 +476,7 @@ export function InviterBench() {
       const seeded = editorFromCsv(identity, csv);
       setAcquired(csv);
       setSourceFile(file);
+      setSourceHandle(capturedInputHandle(file));
       setEditor(seeded);
       // A fresh file re-seeds the terms and resets the transport to browser;
       // any exchange file saved for the prior read no longer describes them.
@@ -441,12 +519,14 @@ export function InviterBench() {
     setName("");
     setAcquired(undefined);
     setSourceFile(undefined);
+    setSourceHandle(undefined);
     setEditor(undefined);
     setIntakeAlert(undefined);
     setReading(false);
     setDemoActive(false);
     setSavedExchange(undefined);
     setInvitation(undefined);
+    setManageStatus("idle");
     goTo("file");
   }
 
@@ -516,6 +596,7 @@ export function InviterBench() {
       });
       setEditor(sealEditor(editor));
       setInvitation(minted);
+      setManageStatus("idle");
       goTo("share");
     } catch (error) {
       if (error instanceof InvitationFileError) {
@@ -928,16 +1009,29 @@ export function InviterBench() {
           />
         )}
         {section === "share" && invitation !== undefined && (
-          <InviterExchangeSection
-            invitation={invitation}
-            run={run}
-            outputs={outputs}
-            failure={failure}
-            warnings={warnings}
-            partnerAcceptsByCli={isCliTransport(transport)}
-            onTryAgain={tryAgain}
-            onStartOver={startOver}
-          />
+          <>
+            <InviterExchangeSection
+              invitation={invitation}
+              run={run}
+              outputs={outputs}
+              failure={failure}
+              warnings={warnings}
+              partnerAcceptsByCli={isCliTransport(transport)}
+              onTryAgain={tryAgain}
+              onStartOver={startOver}
+            />
+            {/* The manage offer is webrtc-only (its record composes a webrtc
+                locator) and is skippable: leaving it untouched keeps the exchange
+                one-time. It stands from the share screen through completion, so
+                either party can manage the partnership. */}
+            {transport === "browser" && failure === undefined && (
+              <ManageExchangeOffer
+                status={manageStatus}
+                handleCaptured={sourceHandle !== undefined}
+                onManage={(choices) => void manageExchange(choices)}
+              />
+            )}
+          </>
         )}
         {section === "save" && isCliTransport(transport) && (
           <SaveExchangeSection
