@@ -13,7 +13,9 @@ import {
   getManagedExchange,
   listManagedExchanges,
   openManagedExchangeDatabase,
+  persistManagedExchangeRotation,
   putManagedExchange,
+  recordManagedExchangeLastRun,
   requestPersistentStorage,
   updateManagedExchangeLocalFields,
 } from "@psi/managedExchangeStore";
@@ -226,6 +228,113 @@ describe("single-transaction local edits", () => {
       }),
     ).rejects.toThrow();
     expect((await getManagedExchange(created.id))?.label).toBe(created.label);
+  });
+});
+
+describe("field-scoped rotation write", () => {
+  test("advances the secret and expires, leaving the document and label untouched", async () => {
+    const created = await createManagedExchange(
+      newExchange({ label: "Riverbend quarterly" }),
+    );
+    const rotatedSecret = generateSharedSecret();
+    const rotated = await persistManagedExchangeRotation(created.id, {
+      sharedSecret: rotatedSecret,
+      expires: "2026-10-06T14:00:00.000Z",
+    });
+    expect(rotated.sharedSecret).toBe(rotatedSecret);
+    expect(rotated.expires).toBe("2026-10-06T14:00:00.000Z");
+    expect(rotated.label).toBe("Riverbend quarterly");
+    expect(rotated.exchangeFile).toEqual(created.exchangeFile);
+    expect((await getManagedExchange(created.id))?.sharedSecret).toBe(
+      rotatedSecret,
+    );
+  });
+
+  test("a null expires clears any standing bound", async () => {
+    const created = await createManagedExchange(
+      newExchange({ expires: "2026-04-06T14:00:00.000Z" }),
+    );
+    const rotatedSecret = generateSharedSecret();
+    const rotated = await persistManagedExchangeRotation(created.id, {
+      sharedSecret: rotatedSecret,
+      expires: null,
+    });
+    expect(rotated.expires).toBeUndefined();
+    expect((await getManagedExchange(created.id))?.expires).toBeUndefined();
+  });
+
+  test("a rotation cannot carry a stale label over a concurrent local edit", async () => {
+    // The store holds a rotation write and a label edit as two field-scoped
+    // read-modify-writes, each reading the freshest record inside its own
+    // transaction. A rotation applied after a label edit keeps the new label -- the
+    // rotation write is structurally incapable of reverting a field it does not
+    // touch, the property the persist-before-success write depends on.
+    const created = await createManagedExchange(newExchange());
+    await updateManagedExchangeLocalFields(created.id, {
+      label: "edited after create",
+    });
+    const rotatedSecret = generateSharedSecret();
+    const rotated = await persistManagedExchangeRotation(created.id, {
+      sharedSecret: rotatedSecret,
+      expires: null,
+    });
+    expect(rotated.sharedSecret).toBe(rotatedSecret);
+    expect(rotated.label).toBe("edited after create");
+  });
+
+  test("a malformed rotated secret aborts and writes nothing", async () => {
+    const created = await createManagedExchange(newExchange());
+    await expect(
+      persistManagedExchangeRotation(created.id, {
+        sharedSecret: "not-a-secret",
+        expires: null,
+      }),
+    ).rejects.toThrow();
+    expect((await getManagedExchange(created.id))?.sharedSecret).toBe(
+      created.sharedSecret,
+    );
+  });
+
+  test("rotating a missing id rejects", async () => {
+    await expect(
+      persistManagedExchangeRotation("no-such-id", {
+        sharedSecret: generateSharedSecret(),
+        expires: null,
+      }),
+    ).rejects.toThrow();
+  });
+});
+
+describe("field-scoped lastRun write", () => {
+  test("records the outcome, leaving the secret and document untouched", async () => {
+    const created = await createManagedExchange(newExchange());
+    const updated = await recordManagedExchangeLastRun(created.id, {
+      at: "2026-07-14T12:00:00.000Z",
+      outcome: "succeeded",
+    });
+    expect(updated.lastRun).toEqual({
+      at: "2026-07-14T12:00:00.000Z",
+      outcome: "succeeded",
+    });
+    expect(updated.sharedSecret).toBe(created.sharedSecret);
+    expect(updated.exchangeFile).toEqual(created.exchangeFile);
+  });
+
+  test("recording an outcome cannot revert a concurrent rotation write", async () => {
+    const created = await createManagedExchange(newExchange());
+    const rotatedSecret = generateSharedSecret();
+    await persistManagedExchangeRotation(created.id, {
+      sharedSecret: rotatedSecret,
+      expires: null,
+    });
+    const updated = await recordManagedExchangeLastRun(created.id, {
+      at: "2026-07-14T12:00:00.000Z",
+      outcome: "failed",
+      failureKind: "storage",
+    });
+    // The lastRun read the freshest record: the rotated secret survives.
+    expect(updated.sharedSecret).toBe(rotatedSecret);
+    expect(updated.lastRun?.failureKind).toBe("storage");
   });
 });
 

@@ -22,14 +22,18 @@
  */
 
 import {
+  applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
+  applyManagedExchangeRotation,
   buildManagedExchangeRecord,
   parseManagedExchangeRecord,
 } from "./managedExchangeRecord";
 
 import type {
+  ManagedExchangeLastRun,
   ManagedExchangeLocalEdits,
   ManagedExchangeRecord,
+  ManagedExchangeRotation,
   NewManagedExchange,
 } from "./managedExchangeRecord";
 
@@ -268,6 +272,57 @@ export async function updateManagedExchangeLocalFields(
       throw new Error(`no managed exchange with id ${id}`);
     const existing = parseManagedExchangeRecord(stored);
     return applyManagedExchangeLocalEdits(existing, edits);
+  });
+}
+
+/**
+ * Persist a rotation to the stored record: advance the rotated secret and the
+ * `expires` bound, and nothing else. The read, the field-scoped application
+ * through {@link applyManagedExchangeRotation} (which re-validates), and the
+ * write-back run inside one strict-durability readwrite transaction
+ * ({@link readModifyWriteRecord}), so the rotation applies to the freshest stored
+ * record and the write is structurally incapable of carrying a stale secret or a
+ * stale document. This is the durable write the persist-before-success ordering
+ * awaits before the data exchange begins (see docs/spec/MANAGED_EXCHANGE_RECORD.md).
+ *
+ * @throws {Error} if no record with `id` exists.
+ * @throws {ZodError} if the stored value is not a valid v1 record or the rotation
+ *   produces an invalid one; the transaction aborts and nothing is written.
+ */
+export async function persistManagedExchangeRotation(
+  id: string,
+  rotation: ManagedExchangeRotation,
+): Promise<ManagedExchangeRecord> {
+  return readModifyWriteRecord(id, (stored) => {
+    if (stored === undefined)
+      throw new Error(`no managed exchange with id ${id}`);
+    const existing = parseManagedExchangeRecord(stored);
+    return applyManagedExchangeRotation(existing, rotation);
+  });
+}
+
+/**
+ * Record a run's `lastRun` bookkeeping on the stored record, leaving the rotated
+ * secret and the document untouched. The read, the field-scoped application
+ * through {@link applyManagedExchangeLastRun}, and the write-back run inside one
+ * strict-durability readwrite transaction, so recording an outcome cannot revert a
+ * concurrent rotation write. Separate from {@link persistManagedExchangeRotation}
+ * so the run outcome is recorded (succeeded after the data exchange, or a
+ * `storage` failure when the rotation persist itself failed) without re-touching
+ * the secret.
+ *
+ * @throws {Error} if no record with `id` exists.
+ * @throws {ZodError} if the stored value or the resulting record is invalid.
+ */
+export async function recordManagedExchangeLastRun(
+  id: string,
+  lastRun: ManagedExchangeLastRun,
+): Promise<ManagedExchangeRecord> {
+  return readModifyWriteRecord(id, (stored) => {
+    if (stored === undefined)
+      throw new Error(`no managed exchange with id ${id}`);
+    const existing = parseManagedExchangeRecord(stored);
+    return applyManagedExchangeLastRun(existing, lastRun);
   });
 }
 

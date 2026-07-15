@@ -47,9 +47,12 @@ const NON_TRUST_KINDS: ReadonlySet<ConnectionErrorKind> = new Set([
  * flip this to `true`). The 32-byte session key is still derived: it is the
  * fruit of authenticating the peer, and the deferred web-encryption work (board
  * item 195802633) consumes it to key {@link EncryptedMessageConnection} once a
- * relay can force the wrap on. This call discards the rotated secret -- web has
- * no key-file persistence, so web exchanges are single-use (also per
- * docs/SECURITY_DESIGN.md).
+ * relay can force the wrap on. The returned {@link AuthResult} carries the rotated
+ * secret unchanged; what a caller does with it is the caller's, not this
+ * function's: the one-shot flow discards it (single-use, no key-file persistence
+ * -- see docs/SECURITY_DESIGN.md), while a managed exchange feeds it to the
+ * run+rotate write-back (see {@link ./managedExchangeRun.ts}). This function
+ * neither persists nor rotates; it authenticates and returns.
  *
  * Failure handling fails closed. A handshake failure aborts the exchange before
  * any PSI frame is sent (the caller runs this strictly before `runExchange`).
