@@ -18,6 +18,7 @@ import {
   formatReconcileDiffs,
   loadConfigLinkageSource,
   persistDisclosedPayloadColumns,
+  persistExpectedPayloadColumns,
   persistHostKeyFingerprint,
   saveConfig,
 } from "../../src/config";
@@ -1259,6 +1260,169 @@ test("persistDisclosedPayloadColumns does not echo an inline credential via an u
   let caught: unknown;
   try {
     persistDisclosedPayloadColumns(configPath, ["notes"]);
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  expect((caught as Error).message).toContain(
+    "could not be serialized as YAML",
+  );
+  expect((caught as Error).message).not.toContain(SECRET);
+  expect(fs.readFileSync(configPath, "utf8")).toContain(`*${SECRET}`);
+});
+
+// --- persistExpectedPayloadColumns -------------------------------------------
+
+test("persistExpectedPayloadColumns adds the field and preserves comments and other fields", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    [
+      "# hand-authored config",
+      "connection:",
+      "  channel: sftp",
+      "  server:",
+      "    host: sftp.example.org # the drop",
+      "",
+    ].join("\n"),
+  );
+  persistExpectedPayloadColumns(configPath, ["diagnosis", "notes"]);
+  const raw = fs.readFileSync(configPath, "utf8");
+  // Operator comments and other fields survive the surgical write.
+  expect(raw).toContain("# hand-authored config");
+  expect(raw).toContain("host: sftp.example.org # the drop");
+  const parsed = YAML.parse(raw) as {
+    expected_payload_columns: string[];
+  };
+  expect(parsed.expected_payload_columns).toEqual(["diagnosis", "notes"]);
+});
+
+test("persistExpectedPayloadColumns refreshes a stale value (the accept-reuse fix)", () => {
+  // A config carrying an OLD consented set, re-accepted over a changed disclosed
+  // subset: the field must be overwritten to the newly-consented set, never left
+  // stale (else the next recurring exchange false-aborts against a set the partner
+  // no longer discloses).
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    [
+      "connection:",
+      "  channel: sftp",
+      "  server:",
+      "    host: h",
+      "expected_payload_columns:",
+      "  - old_col",
+      "",
+    ].join("\n"),
+  );
+  persistExpectedPayloadColumns(configPath, ["new_col"]);
+  const raw = fs.readFileSync(configPath, "utf8");
+  expect(raw).not.toContain("old_col");
+  const parsed = YAML.parse(raw) as { expected_payload_columns: string[] };
+  expect(parsed.expected_payload_columns).toEqual(["new_col"]);
+});
+
+test("persistExpectedPayloadColumns removes the field when the consented set is undefined", () => {
+  // A re-accept whose invitation carried no disclosed subset records no consented
+  // set, so a previously-recorded lock-in must be cleared, not retained stale --
+  // the exchange then reconciles lazily.
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    [
+      "connection:",
+      "  channel: sftp",
+      "  server:",
+      "    host: h",
+      "expected_payload_columns:",
+      "  - old_col",
+      "",
+    ].join("\n"),
+  );
+  persistExpectedPayloadColumns(configPath, undefined);
+  const raw = fs.readFileSync(configPath, "utf8");
+  expect(raw).not.toContain("expected_payload_columns");
+  expect(raw).not.toContain("old_col");
+  // The rest of the config is intact.
+  const parsed = YAML.parse(raw) as {
+    connection: { channel: string };
+    expected_payload_columns?: string[];
+  };
+  expect(parsed.connection.channel).toBe("sftp");
+  expect(parsed.expected_payload_columns).toBeUndefined();
+});
+
+test("persistExpectedPayloadColumns writes an empty array verbatim (strict receive-nothing)", () => {
+  // Empty is a real consent ("receive nothing"), distinct from absent; it must be
+  // written, not dropped.
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    "connection:\n  channel: sftp\n  server:\n    host: h\n",
+  );
+  persistExpectedPayloadColumns(configPath, []);
+  const raw = fs.readFileSync(configPath, "utf8");
+  const parsed = YAML.parse(raw) as { expected_payload_columns: string[] };
+  expect(parsed.expected_payload_columns).toEqual([]);
+});
+
+test("persistExpectedPayloadColumns writes the config owner-read-only (0600)", () => {
+  if (process.platform === "win32") return;
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    "connection:\n  channel: sftp\n  server:\n    host: h\n",
+  );
+  persistExpectedPayloadColumns(configPath, ["diagnosis"]);
+  expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+});
+
+test("persistExpectedPayloadColumns throws (not silently) on a malformed config", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(configPath, "connection: [unbalanced\n");
+  // Classified as a local usage error (exit 64), like persistDisclosedPayloadColumns,
+  // not a bare Error that would fall through to the generic exit code.
+  expect(() =>
+    persistExpectedPayloadColumns(configPath, ["diagnosis"]),
+  ).toThrow(UsageError);
+});
+
+test("persistExpectedPayloadColumns does not echo an inline credential on a malformed config", () => {
+  // Parity with persistDisclosedPayloadColumns: a syntax error's message embeds a
+  // snippet of the offending source; the shared path-only guard must not echo it,
+  // or an inline credential near the malformed line leaks into the (logged) error.
+  const SECRET = "S3cr3tSFTPPassw0rd";
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    `connection:\n  server:\n\t  password: ${SECRET}\n`,
+  );
+  let caught: unknown;
+  try {
+    persistExpectedPayloadColumns(configPath, ["diagnosis"]);
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  expect((caught as Error).message).toContain("could not be parsed as YAML");
+  expect((caught as Error).message).not.toContain(SECRET);
+});
+
+test("persistExpectedPayloadColumns does not echo an inline credential via an unresolved alias", () => {
+  // Parity with persistDisclosedPayloadColumns: an unresolved alias clears
+  // doc.errors and setIn succeeds; the failure surfaces only at doc.toString(),
+  // whose message echoes the alias token. The path-only guard at serialization must
+  // not echo it, and the original file must be left untouched (the throw precedes
+  // the write).
+  const SECRET = "S3cr3tSFTPPassw0rd";
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    `connection:\n  channel: sftp\n  server:\n    password: *${SECRET}\n`,
+  );
+  let caught: unknown;
+  try {
+    persistExpectedPayloadColumns(configPath, ["diagnosis"]);
   } catch (err) {
     caught = err;
   }

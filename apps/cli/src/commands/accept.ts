@@ -22,6 +22,7 @@ import type {
 import {
   diffLinkageTerms,
   formatReconcileDiffs,
+  persistExpectedPayloadColumns,
   type ReconcileDiff,
 } from "../config";
 import { detectFileConflicts } from "../fileUtils";
@@ -721,12 +722,28 @@ export async function handler(argv: Arguments): Promise<void> {
         { reuseExistingConfig: ready.reuseExistingConfig },
       );
 
-      if (ready.reuseExistingConfig)
+      if (ready.reuseExistingConfig) {
+        // Refresh the consented received-column lock-in in the reused config. The
+        // operator has just re-consented to THIS invitation's terms (the prompt
+        // above, or --consent-to-terms, gates every write here), so the lock-in is
+        // rewritten to the set they consented to on this acceptance -- the token's
+        // disclosed subset, in the inviter's namespace. Unlike the connection and
+        // linkage blocks (operator prose provisionConfigAndKey deliberately leaves
+        // untouched under reuse), this is a machine-managed consent record: leaving
+        // a prior acceptance's value stale would false-abort the next recurring
+        // exchange after a legitimate re-consent to a changed disclosure. A surgical
+        // one-field write; undefined (an older or metadata-unknown mint) removes the
+        // field so the exchange reconciles lazily, an empty set is a strict "receive
+        // nothing". The fresh-config paths persist the same set via their own write.
+        persistExpectedPayloadColumns(
+          configPath,
+          ready.token.disclosedPayloadColumns,
+        );
         log.info(
           `reused the existing configuration at ${configPath}; it already matches ` +
             "the invitation, so the connection and linkage settings are unchanged.",
         );
-      else if (ready.seeded)
+      } else if (ready.seeded)
         log.info(
           `wrote config to ${configPath}, seeding the connection block from the ` +
             "invitation's endpoint; review it and add your own credentials " +

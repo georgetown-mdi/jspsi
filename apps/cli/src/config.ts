@@ -925,6 +925,65 @@ export function persistDisclosedPayloadColumns(
   writeFileOwnerOnly(configPath, serialized);
 }
 
+/**
+ * Write, overwrite, or remove the top-level `expected_payload_columns` in an
+ * existing `psilink.yaml`. This is the RECEIVE-side consent lock-in (the
+ * PARTNER's column namespace): the disclosed subset the operator consented to on
+ * the acceptance it just made, which a later recurring `psilink exchange` holds
+ * the received payload to ({@link reconcileReceivedPayload} in core).
+ *
+ * Used by the offline accept-reuse path, which keeps the operator's existing
+ * config rather than rewriting it. Like {@link persistDisclosedPayloadColumns}
+ * -- its send-side twin -- and unlike {@link saveConfig}, which re-serializes the
+ * whole spec and would strip comments, this edits the file in place through the
+ * YAML document model so the operator's comments, key order, and formatting
+ * survive: the lock-in is one machine-managed field, not operator prose. Binding
+ * this write to the accept-reuse path is what keeps the consent record from going
+ * stale relative to what the operator consented to on the latest acceptance (a
+ * re-accept over a changed disclosed set refreshes it here; an exchange with no
+ * re-accept keeps the prior lock-in).
+ *
+ * `columns === undefined` REMOVES the field (deleteIn), never leaves a stale
+ * value: an acceptance whose invitation carried no disclosed subset (an older or
+ * metadata-unknown mint) records no consented set (the exchange reconciles
+ * lazily), so any lock-in previously recorded must be cleared rather than
+ * silently retained. An empty array is written verbatim -- a strict "receive
+ * nothing" consent, distinct from absent.
+ *
+ * The columns are the partner's (token-derived), non-secret, but the file is
+ * rewritten with the same owner-only permissions {@link saveConfig} uses (a
+ * config may carry an SFTP credential). The key is written snake_case to match
+ * the on-disk convention. Throws if the file cannot be read or parsed -- the
+ * caller has just reconciled the same file, so a failure here is unexpected and
+ * must not be silently swallowed (it would leave the operator believing the
+ * lock-in was refreshed).
+ */
+export function persistExpectedPayloadColumns(
+  configPath: string,
+  columns: string[] | undefined,
+): void {
+  // Parse, edit, and re-serialize through the sensitive-file chokepoint (see
+  // persistHostKeyFingerprint), preserving the operator's comments and key order
+  // on this surgical one-field write.
+  const serialized = editSensitiveYamlDocument(
+    fs.readFileSync(configPath, "utf8"),
+    `config file ${configPath}`,
+    (doc) => {
+      if (columns === undefined) {
+        // No consented subset on record for this acceptance: remove any stale
+        // field rather than leave a value the latest consent no longer backs.
+        doc.deleteIn(["expected_payload_columns"]);
+        return;
+      }
+      // createNode turns the JS array into a proper YAML sequence node (a bare
+      // value is not reliably wrapped by setIn across versions); setIn creates or
+      // overwrites the single top-level key, leaving everything else untouched.
+      doc.setIn(["expected_payload_columns"], doc.createNode(columns));
+    },
+  );
+  writeFileOwnerOnly(configPath, serialized);
+}
+
 // --- Config reader -----------------------------------------------------------
 
 /**
