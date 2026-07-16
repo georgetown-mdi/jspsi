@@ -230,6 +230,20 @@ describe("runPipeline — string functions", () => {
     ).toBe("XXAB");
   });
 
+  test("pad_left with a non-string char does not throw and falls back to the default", () => {
+    // A partner-crafted non-string `char` is schema-valid (transform params are
+    // z.unknown(), count-bounded only); normalizing it once threw. It must fall
+    // back to the "0" default, identically to an absent char.
+    for (const badChar of [42, [], {}, true, null]) {
+      const run = () =>
+        runPipeline("AB", [
+          { function: "pad_left", params: { length: 4, char: badChar } },
+        ]);
+      expect(run, JSON.stringify(badChar)).not.toThrow();
+      expect(run(), JSON.stringify(badChar)).toBe("00AB");
+    }
+  });
+
   test("pad_left throws when length is missing", () => {
     expect(() =>
       runPipeline("123", [{ function: "pad_left", params: {} }]),
@@ -381,6 +395,39 @@ describe("runPipeline — parse_date", () => {
       ]),
     ).toBe("20210615");
   });
+
+  test("a non-string output format does not throw and falls back to the default", () => {
+    // A partner-crafted non-string `output_format` is schema-valid (transform
+    // params are z.unknown(), count-bounded only); a matched row once threw from
+    // `.replace` on the non-string. It must fall back to the absent default, so a
+    // valid MM/DD/YYYY date round-trips to YYYYMMDD.
+    for (const bad of [42, [], {}, true, null]) {
+      const badOutput = () =>
+        runPipeline("06/15/2021", [
+          {
+            function: "parse_date",
+            params: { inputFormat: "MM/DD/YYYY", outputFormat: bad },
+          },
+        ]);
+      expect(badOutput, JSON.stringify(bad)).not.toThrow();
+      expect(badOutput(), JSON.stringify(bad)).toBe("20210615");
+    }
+  });
+
+  test("a non-string input format drops the record without throwing", () => {
+    // A partner-crafted non-string `input_format` is a dead key by design; an
+    // array once threw from `.startsWith` while building the pattern. Every
+    // non-string subtype (number, array, object, boolean) must now drop uniformly
+    // rather than crash, matching the satisfiability pre-flight's dead verdict.
+    for (const bad of [42, ["MM"], {}, true]) {
+      const badInput = () =>
+        runPipeline("06/15/2021", [
+          { function: "parse_date", params: { inputFormat: bad } },
+        ]);
+      expect(badInput, JSON.stringify(bad)).not.toThrow();
+      expect(badInput(), JSON.stringify(bad)).toBeNull();
+    }
+  });
 });
 
 // --- runPipeline: phonetic ---------------------------------------------------
@@ -448,18 +495,42 @@ describe("runPipeline — null-producing functions", () => {
     ).toBe("987654321");
   });
 
-  test("null_if with a null value/values param does not throw and excludes nothing", () => {
-    // Partner-crafted nullish params are schema-valid (transform params are
-    // z.unknown()); a null exclusion once threw normalizing null, so both a null
-    // `value` and a null `values` must read as an absent exclusion.
-    const nullValue = () =>
-      runPipeline("SMITH", [{ function: "null_if", params: { value: null } }]);
-    const nullValues = () =>
-      runPipeline("SMITH", [{ function: "null_if", params: { values: null } }]);
-    expect(nullValue).not.toThrow();
-    expect(nullValues).not.toThrow();
-    expect(nullValue()).toBe("SMITH");
-    expect(nullValues()).toBe("SMITH");
+  test("null_if with a non-string value/values param does not throw and excludes nothing", () => {
+    // Partner-crafted params are schema-valid (transform params are z.unknown(),
+    // count-bounded only); normalizing a non-string entry once threw. A null,
+    // number, or object scalar, a non-string array element, and a non-array
+    // `values` must each read as no exclusion (a non-string can never equal a
+    // string cell), so the input passes through unchanged.
+    const cases: Record<string, unknown>[] = [
+      { value: null },
+      { values: null },
+      { value: 42 },
+      { value: {} },
+      { values: [null] },
+      { values: [42] },
+      { values: 42 },
+      { values: "SMITH" },
+    ];
+    for (const params of cases) {
+      const run = () => runPipeline("SMITH", [{ function: "null_if", params }]);
+      expect(run, JSON.stringify(params)).not.toThrow();
+      expect(run(), JSON.stringify(params)).toBe("SMITH");
+    }
+  });
+
+  test("null_if drops non-string entries but keeps string entries in a mixed array", () => {
+    // A mixed array excludes only its string members; the non-string entries are
+    // dropped rather than crashing normalization.
+    expect(
+      runPipeline("SMITH", [
+        { function: "null_if", params: { values: [42, "SMITH"] } },
+      ]),
+    ).toBeNull();
+    expect(
+      runPipeline("JONES", [
+        { function: "null_if", params: { values: [42, "SMITH"] } },
+      ]),
+    ).toBe("JONES");
   });
 
   test("filter_regex passes through matching value", () => {
@@ -512,6 +583,23 @@ describe("runPipeline — null-producing functions", () => {
       ]),
     ).toBe("ABC");
   });
+
+  test("replace_regex with a non-string replacement does not throw and falls back to empty", () => {
+    // A partner-crafted non-string `replacement` is schema-valid (transform
+    // params are z.unknown(), count-bounded only); normalizing it once threw. It
+    // must fall back to the empty replacement, identically to an absent param.
+    for (const badReplacement of [42, [], {}, true, null]) {
+      const run = () =>
+        runPipeline("A1B2C3", [
+          {
+            function: "replace_regex",
+            params: { pattern: "\\d", replacement: badReplacement },
+          },
+        ]);
+      expect(run, JSON.stringify(badReplacement)).not.toThrow();
+      expect(run(), JSON.stringify(badReplacement)).toBe("ABC");
+    }
+  });
 });
 
 // --- runPipeline: coalesce ---------------------------------------------------
@@ -544,32 +632,37 @@ describe("runPipeline — coalesce", () => {
     ).toBe("UNKNOWN");
   });
 
-  test("coalesce with a null default does not throw and behaves as absent", () => {
-    // A partner-crafted `default: null` is schema-valid (transform params are
-    // z.unknown(), count-bounded only), so it reaches compileStep and once threw a
-    // TypeError from `.normalize` on null. It must now leave a dropped value
-    // dropped, identically to an absent default.
-    const nullDefault = () =>
-      runPipeline("", [
-        { function: "null_if", params: { value: "" } },
-        { function: "coalesce", params: { default: null } },
-      ]);
-    expect(nullDefault).not.toThrow();
-    expect(nullDefault()).toBeNull();
-    expect(nullDefault()).toBe(
-      runPipeline("", [
-        { function: "null_if", params: { value: "" } },
-        { function: "coalesce" },
-      ]),
-    );
+  test("coalesce with a non-string default does not throw and behaves as absent", () => {
+    // A partner-crafted non-string `default` is schema-valid (transform params
+    // are z.unknown(), count-bounded only), so it reaches compileStep and once
+    // threw a TypeError from `.normalize`. A null, number, array, or object
+    // default must leave a dropped value dropped, identically to an absent
+    // default -- never String()-coerced into a bogus substitution.
+    const absent = runPipeline("", [
+      { function: "null_if", params: { value: "" } },
+      { function: "coalesce" },
+    ]);
+    for (const badDefault of [null, 42, [], {}, true]) {
+      const run = () =>
+        runPipeline("", [
+          { function: "null_if", params: { value: "" } },
+          { function: "coalesce", params: { default: badDefault } },
+        ]);
+      expect(run, JSON.stringify(badDefault)).not.toThrow();
+      expect(run(), JSON.stringify(badDefault)).toBeNull();
+      expect(run(), JSON.stringify(badDefault)).toBe(absent);
+    }
   });
 
-  test("coalesce with a null default passes a present value through", () => {
-    expect(
-      runPipeline("SMITH", [
-        { function: "coalesce", params: { default: null } },
-      ]),
-    ).toBe("SMITH");
+  test("coalesce with a non-string default passes a present value through", () => {
+    for (const badDefault of [null, 42, [], {}, true]) {
+      expect(
+        runPipeline("SMITH", [
+          { function: "coalesce", params: { default: badDefault } },
+        ]),
+        JSON.stringify(badDefault),
+      ).toBe("SMITH");
+    }
   });
 });
 
@@ -1546,39 +1639,100 @@ describe("buildKeyStrings", () => {
     expect(buildKeyStrings(keyWithNullTransform, dataset, 0)).toBeNull();
   });
 
-  test("element transform coalesce with a null default does not crash the key build", () => {
+  test("element transform coalesce with a non-string default does not crash the key build", () => {
     // The partner-reachable path: a crafted invitation carries a linkage-key
-    // element transform whose coalesce declares `default: null`. This once threw a
-    // TypeError from compileStep while building the first row's key. With a present
-    // value the coalesce is a no-op; the key must build identically to an absent
-    // default, never throw.
-    const keyWithNullCoalesce = {
+    // element transform whose coalesce declares a non-string `default`. This once
+    // threw a TypeError from compileStep while building the first row's key. With
+    // a present value the coalesce is a no-op; the key must build identically to
+    // an absent default, never throw.
+    const keyWith = (params: Record<string, unknown> | undefined) => ({
       name: "SSN+LN",
       elements: [
         {
           field: "ssn",
-          transform: [{ function: "coalesce", params: { default: null } }],
+          transform: [{ function: "coalesce", ...(params ? { params } : {}) }],
         },
         { field: "last_name" },
       ],
-    };
-    const keyWithAbsentCoalesce = {
-      name: "SSN+LN",
-      elements: [
-        { field: "ssn", transform: [{ function: "coalesce" }] },
-        { field: "last_name" },
-      ],
-    };
+    });
     const dataset = makeDataset({ ssn: "000000000", last_name: "SMITH" });
-    expect(() =>
-      buildKeyStrings(keyWithNullCoalesce, dataset, 0),
-    ).not.toThrow();
-    expect(buildKeyStrings(keyWithNullCoalesce, dataset, 0)).toEqual(
-      buildKeyStrings(keyWithAbsentCoalesce, dataset, 0),
-    );
-    expect(buildKeyStrings(keyWithNullCoalesce, dataset, 0)).toEqual(
-      new Set(["000000000SMITH"]),
-    );
+    const absent = buildKeyStrings(keyWith(undefined), dataset, 0);
+    for (const badDefault of [null, 42, [], {}, true]) {
+      const key = keyWith({ default: badDefault });
+      expect(
+        () => buildKeyStrings(key, dataset, 0),
+        JSON.stringify(badDefault),
+      ).not.toThrow();
+      expect(
+        buildKeyStrings(key, dataset, 0),
+        JSON.stringify(badDefault),
+      ).toEqual(absent);
+      expect(
+        buildKeyStrings(key, dataset, 0),
+        JSON.stringify(badDefault),
+      ).toEqual(new Set(["000000000SMITH"]));
+    }
+  });
+
+  test("element transform null_if / replace_regex / pad_left with non-string params do not crash the key build", () => {
+    // The partner-reachable path for the other three normalize-a-param factories:
+    // a crafted linkage-key element transform carries a non-string param that once
+    // threw from `.normalize` while building the first row's key. Each must fall
+    // back to its absent/default behavior and build the key rather than throw.
+    const dataset = makeDataset({ ssn: "123456789", last_name: "SMITH" });
+    const key = (
+      transform: Array<{ function: string; params?: Record<string, unknown> }>,
+    ) => ({
+      name: "SSN+LN",
+      elements: [{ field: "ssn", transform }, { field: "last_name" }],
+    });
+    const cases: Array<{
+      function: string;
+      params: Record<string, unknown>;
+    }> = [
+      { function: "null_if", params: { values: [null] } },
+      { function: "null_if", params: { value: 42 } },
+      { function: "null_if", params: { values: 42 } },
+      {
+        function: "replace_regex",
+        params: { pattern: "\\d", replacement: 42 },
+      },
+      { function: "pad_left", params: { length: 9, char: 42 } },
+    ];
+    for (const step of cases) {
+      const built = () => buildKeyStrings(key([step]), dataset, 0);
+      expect(built, JSON.stringify(step)).not.toThrow();
+      expect(built(), JSON.stringify(step)).not.toBeNull();
+    }
+    // null_if with non-string entries excludes nothing: the SSN survives.
+    expect(
+      buildKeyStrings(
+        key([{ function: "null_if", params: { values: [null] } }]),
+        dataset,
+        0,
+      ),
+    ).toEqual(new Set(["123456789SMITH"]));
+    // replace_regex non-string replacement falls back to empty: digits stripped.
+    expect(
+      buildKeyStrings(
+        key([
+          {
+            function: "replace_regex",
+            params: { pattern: "\\d", replacement: 42 },
+          },
+        ]),
+        dataset,
+        0,
+      ),
+    ).toEqual(new Set(["SMITH"]));
+    // pad_left non-string char falls back to "0": already 9 long, unchanged.
+    expect(
+      buildKeyStrings(
+        key([{ function: "pad_left", params: { length: 9, char: 42 } }]),
+        dataset,
+        0,
+      ),
+    ).toEqual(new Set(["123456789SMITH"]));
   });
 
   test("swap is applied when isReceiver is true", () => {
@@ -2447,10 +2601,9 @@ describe("assessLinkageSatisfiability dead keys", () => {
 
   test("a non-string parse_date input format is a dead key, without crashing the check", () => {
     // Wire params are z.unknown(), so a partner can supply a non-string input
-    // format. None yields a value at runtime (a number/boolean/object tokenizes to
-    // an all-dropping pattern; an array makes the factory throw), so each is dead --
-    // and assessLinkageSatisfiability must report it rather than throw on the array
-    // case (a regression would surface as this test throwing).
+    // format. None yields a value at runtime (every non-string tokenizes to an
+    // all-dropping pattern), so each is dead -- and assessLinkageSatisfiability
+    // must report it without ever tokenizing the non-string itself.
     for (const inputFormat of [5, true, ["MM"], { x: 1 }]) {
       const { deadKeys } = assessLinkageSatisfiability(
         columns,
@@ -2460,19 +2613,25 @@ describe("assessLinkageSatisfiability dead keys", () => {
     }
   });
 
-  test("the builder also drops every record for a numeric input format (differential)", () => {
-    // The non-string case that drops (rather than throwing): the detector's "dead"
-    // verdict must match the builder, the same differential the string case pins.
-    const terms = dobTerms([
-      { function: "parse_date", params: { inputFormat: 5 } },
-    ]);
-    const dataset = buildStandardizedDataset(
-      undefined,
-      [{ dob: "01/15/1990" }],
-      inferMetadata(columns),
-      terms,
-    );
-    expect(buildKeyStrings(terms.linkageKeys[0], dataset, 0)).toBeNull();
+  test("the builder also drops every record for a non-string input format (differential)", () => {
+    // The detector's "dead" verdict must match the builder for every non-string
+    // subtype, the same differential the string case pins. The array case is the
+    // one that once threw at the factory instead of dropping.
+    for (const inputFormat of [5, ["MM"], { x: 1 }, true]) {
+      const terms = dobTerms([
+        { function: "parse_date", params: { inputFormat } },
+      ]);
+      const dataset = buildStandardizedDataset(
+        undefined,
+        [{ dob: "01/15/1990" }],
+        inferMetadata(columns),
+        terms,
+      );
+      expect(
+        buildKeyStrings(terms.linkageKeys[0], dataset, 0),
+        JSON.stringify(inputFormat),
+      ).toBeNull();
+    }
   });
 
   test("a complete parse_date input format is not a dead key", () => {

@@ -242,10 +242,23 @@ function parseDateFormat(inputFormat: string): ParsedDateFormat {
 // string tokens YYYY / MM / DD stay as written; delimiter characters are
 // literal. Params arrive as camelCase after camelizeKeys (e.g. inputFormat).
 function parseDateFactory(params: Params): StandardizingFn {
+  // The wire params are z.unknown() and only count-bounded, so a partner can
+  // declare either format as a non-string. An absent input format falls back to
+  // the complete default; a present non-string is a dead key by design (the
+  // satisfiability pre-flight is pinned to that verdict), realized here as an
+  // empty format that tokenizes to an all-dropping pattern -- a raw non-string
+  // would instead throw in parseDateFormat (`.startsWith` on an array). Guard the
+  // output format by type too: a non-string there reaches `.replace` on a matched
+  // row and throws, so it falls back to the absent default.
+  const rawInputFormat = params.inputFormat;
   const inputFormat =
-    (params.inputFormat as string | undefined) ?? "MM/DD/YYYY";
+    rawInputFormat == null
+      ? "MM/DD/YYYY"
+      : typeof rawInputFormat === "string"
+        ? rawInputFormat
+        : "";
   const outputFormat =
-    (params.outputFormat as string | undefined) ?? "YYYYMMDD";
+    typeof params.outputFormat === "string" ? params.outputFormat : "YYYYMMDD";
 
   const { source, order } = parseDateFormat(inputFormat);
   // Compile the anchored source under the linear-time engine, not `new RegExp`:
@@ -362,24 +375,35 @@ function padLeftFactory(params: Params): StandardizingFn {
   // code-unit count -- a singleton like U+2126 -> U+03A9 stays one unit, but a
   // combining mark like U+0344 -> U+0308 U+0301 expands to two -- and padStart
   // treats a multi-unit fill as a cycling pattern, so the one-character contract
-  // must hold on the normalized value that actually pads.
-  const char = ((params.char as string | undefined) ?? "0").normalize("NFC");
+  // must hold on the normalized value that actually pads. Guard by type, not just
+  // nullish: the wire params are z.unknown() and only count-bounded, so a partner
+  // can declare `char` as a non-string, and calling `.normalize` on it would
+  // throw. A non-string falls back to the "0" default, consistent with the absent
+  // default.
+  const char = (typeof params.char === "string" ? params.char : "0").normalize(
+    "NFC",
+  );
   if (char.length !== 1)
     throw new Error(`pad_left: "char" must be exactly one character`);
   return (s) => s.padStart(length, char);
 }
 
 function nullIfFactory(params: Params): StandardizingFn {
-  // Nullish (not just undefined) reads as absent: the wire params are
-  // z.unknown(), so a partner can declare `values: null` or `value: null`, and
-  // normalizing that null below would throw. A declared null therefore behaves as
-  // an absent exclusion, like coalesce's nullish default.
-  const values =
-    params.values != null
-      ? (params.values as string[])
-      : params.value != null
-        ? [params.value as string]
+  // Build the exclusion set from string entries only. The wire params are
+  // z.unknown() and only count-bounded, so a partner can declare `values` as a
+  // non-array or with non-string elements, or `value` as a non-string scalar;
+  // normalizing any of those below would throw. A non-string can never equal a
+  // string cell, so a non-array `values` and any non-string entry contribute no
+  // exclusion rather than crashing.
+  const rawValues =
+    params.values !== undefined
+      ? Array.isArray(params.values)
+        ? params.values
+        : []
+      : params.value !== undefined
+        ? [params.value]
         : [];
+  const values = rawValues.filter((v): v is string => typeof v === "string");
   // NFC-normalize the exclusion values so one authored in a different form
   // (e.g. NFD from a YAML file written on macOS) still matches the runtime
   // value.
@@ -396,10 +420,15 @@ function replaceRegexFactory(params: Params): StandardizingFn {
   const pattern = coerceToPatternString(params.pattern);
   // NFC-normalize the replacement literal so it cannot inject a non-NFC byte
   // sequence into the key (the pattern itself is matched as authored; author it
-  // in NFC to match NFC runtime values).
-  const replacement = (
-    (params.replacement as string | undefined) ?? ""
-  ).normalize("NFC");
+  // in NFC to match NFC runtime values). Guard by type, not just nullish: the
+  // wire params are z.unknown() and only count-bounded, so a partner can declare
+  // `replacement` as a non-string, and calling `.normalize` on it would throw. A
+  // non-string falls back to the empty replacement, consistent with the absent
+  // default.
+  const replacement =
+    typeof params.replacement === "string"
+      ? params.replacement.normalize("NFC")
+      : "";
   const re = compileLinearRegex(pattern);
   // Normalize before matching (see the STANDARDIZING_FUNCTIONS contract) so an
   // authored-NFC pattern matches a value left non-NFC by an upstream case-fold;
@@ -938,15 +967,19 @@ function compileStep(step: {
   if (step.function === "coalesce") {
     // NFC-normalize the literal default so coalesce cannot substitute a non-NFC
     // value into the key (it replaces the whole value, often as the last step).
-    // Nullish (not just undefined) falls back to no default: the wire params are
-    // z.unknown(), so a partner can declare `default: null`, and calling
-    // `.normalize` on it would throw while building the first row's key. A
-    // declared null therefore executes identically to an absent default, matching
-    // the sibling factories' `?? fallback` handling of a nullish param.
-    const rawDefault = params.default as string | null | undefined;
+    // Guard by type, not just nullish: the wire params are z.unknown() and only
+    // count-bounded, so a partner can declare `default` as any JSON value, and
+    // calling `.normalize` on a non-string (null, number, array, object) would
+    // throw while building the first row's key. Any non-string behaves as an
+    // absent default; it is not String()-coerced, which would mangle an array or
+    // object into a bogus substitution value.
+    const rawDefault = params.default;
     return {
       kind: "coalesce",
-      default: rawDefault == null ? undefined : rawDefault.normalize("NFC"),
+      default:
+        typeof rawDefault === "string"
+          ? rawDefault.normalize("NFC")
+          : undefined,
     };
   }
   const factory = STANDARDIZING_FUNCTIONS[step.function];
@@ -1634,14 +1667,13 @@ const PARSE_DATE_REQUIRED_COMPONENTS: readonly DateFormatToken[] = [
  * drift from the runtime. A nullish input format falls back to the factory's
  * complete `"MM/DD/YYYY"`, which drops nothing. A non-nullish NON-string (wire
  * params are `z.unknown()`, so a partner can supply one) never yields a value at
- * runtime -- the factory either tokenizes it to an all-dropping pattern (a number,
- * whose `.length` is undefined, yields an empty token order) or throws building
- * the pattern (an array) -- so it is dead either way, and is reported so WITHOUT
- * calling {@link parseDateFormat} on it, which would itself throw on an array and
- * crash this pre-flight. For a string input format the present component set is
- * recovered from core's OWN tokenizer ({@link parseDateFormat}), not a
- * re-implemented scan -- the encode-the-runtime-invariant-as-a-check rule, here
- * over a "this never produces a value" claim.
+ * runtime -- the factory coerces any non-string to an empty format that tokenizes
+ * to an all-dropping pattern -- so it is dead, and is reported so WITHOUT calling
+ * {@link parseDateFormat} on the non-string (which would throw on an array). For a
+ * string input format the present component set is recovered from core's OWN
+ * tokenizer ({@link parseDateFormat}), not a re-implemented scan -- the
+ * encode-the-runtime-invariant-as-a-check rule, here over a "this never produces a
+ * value" claim.
  */
 export function parseDateInputDropsEveryRecord(
   params: Params | undefined,
