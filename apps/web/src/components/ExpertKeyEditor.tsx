@@ -51,8 +51,8 @@ import type { KeyVerdict } from "@bench/inviterModel";
 
 /** The expert-editor badge copy and Mantine color for each per-key verdict
  * ({@link KeyVerdict}), reading consistently with the guided list. A dead key is
- * warn-only (amber "review"): its columns resolve, but a self-defeating transform
- * would run the key to a silent empty result. */
+ * warn-only (amber "won't match"): its columns resolve, but a self-defeating
+ * transform would run the key to a silent empty result. */
 const KEY_VERDICT_BADGES: Record<
   KeyVerdict,
   { label: string; color: string; ariaLabel: string }
@@ -68,7 +68,7 @@ const KEY_VERDICT_BADGES: Record<
     ariaLabel: "Your columns cannot satisfy this key",
   },
   dead: {
-    label: "review",
+    label: "won't match",
     color: "yellow",
     ariaLabel:
       "This key's cleaning can never produce a value; review the transform",

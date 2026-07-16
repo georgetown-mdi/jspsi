@@ -30,14 +30,15 @@ import type { Algorithm, LinkageStrategy, LinkageTerms } from "@psilink/core";
 import type { AdvancedInviteDraft } from "@psi/advancedInvite";
 
 /** The guided-list badge copy and CSS class for each per-key verdict
- * ({@link KeyVerdict}). A dead key warns ("review", amber) rather than blocking:
- * its columns resolve but a self-defeating transform would run it to a silent
- * empty result, so the author is nudged to fix the terms. */
+ * ({@link KeyVerdict}). A dead key warns ("won't match", amber) rather than
+ * blocking: its columns resolve but a self-defeating transform would run it to
+ * a silent empty result, so the author is nudged to fix the terms. */
 const KEY_VERDICT_BADGES: Record<
   KeyVerdict,
   {
     label: string;
     className: "keyBadgeSatisfiable" | "keyBadgeUnsatisfiable" | "keyBadgeDead";
+    ariaLabel?: string;
   }
 > = {
   satisfiable: { label: "satisfiable", className: "keyBadgeSatisfiable" },
@@ -45,7 +46,12 @@ const KEY_VERDICT_BADGES: Record<
     label: "not satisfiable",
     className: "keyBadgeUnsatisfiable",
   },
-  dead: { label: "review", className: "keyBadgeDead" },
+  dead: {
+    label: "won't match",
+    className: "keyBadgeDead",
+    ariaLabel:
+      "This key's cleaning can never produce a value; review the transform",
+  },
 };
 
 /**
@@ -126,6 +132,9 @@ export function KeysTab({
                     <span className={styles.mono}>{displayName}</span>
                     <span
                       className={`${styles.keyBadge} ${styles[badge.className]}`}
+                      {...(badge.ariaLabel
+                        ? { role: "img", "aria-label": badge.ariaLabel }
+                        : {})}
                     >
                       {badge.label}
                     </span>
