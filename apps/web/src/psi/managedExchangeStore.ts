@@ -74,6 +74,12 @@ export const IDB_VERSION = 2;
  */
 export function openManagedExchangeDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
+    // Per the IndexedDB spec, `blocked` does not abort the request: it stays pending,
+    // and once the blocking connection closes, this SAME request's onupgradeneeded/
+    // onsuccess still fire. This flag lets that late success tell it already lost the
+    // promise (settled by `onblocked` below) and must close the connection instead of
+    // leaking it or resolving a second time.
+    let blocked = false;
     const request = indexedDB.open(MANAGED_EXCHANGE_DB_NAME, IDB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
@@ -84,6 +90,10 @@ export function openManagedExchangeDatabase(): Promise<IDBDatabase> {
     };
     request.onsuccess = () => {
       const db = request.result;
+      if (blocked) {
+        db.close();
+        return;
+      }
       // Close on a later open's version-change so this connection stops holding an
       // older version open. Without it a long-lived page's connection blocks the next
       // build's upgrade open indefinitely, which is the condition that fires `blocked`
@@ -98,10 +108,12 @@ export function openManagedExchangeDatabase(): Promise<IDBDatabase> {
     // store-unavailable (the degrade-to-quick-path branch) rather than hanging a
     // caller. The blocked state is transient and self-healing -- the `onversionchange`
     // close above lets the other connection yield -- so a reload recovers it.
-    request.onblocked = () =>
+    request.onblocked = () => {
+      blocked = true;
       reject(
         new Error("managed-exchange database open blocked by another tab"),
       );
+    };
   });
 }
 

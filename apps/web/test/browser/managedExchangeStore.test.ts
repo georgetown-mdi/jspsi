@@ -1,7 +1,7 @@
 /// <reference types="@vitest/browser-playwright/context" />
 /// <reference types="vite/client" />
 
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
 import {
@@ -755,6 +755,39 @@ describe("a blocked open settles instead of hanging", () => {
       expect(db.version).toBe(IDB_VERSION);
     } finally {
       db.close();
+    }
+  });
+
+  test("a late success after blocked-rejection closes the connection instead of leaking it", async () => {
+    // The blocked request never aborts: it stays pending, and once `held` closes, this
+    // SAME request's onupgradeneeded/onsuccess fire late -- after the promise already
+    // rejected. A leaked (never-closed) connection here would still self-close on the
+    // VERY NEXT version-change open via its own onversionchange handler, so probing with
+    // a higher-version open cannot distinguish "closed immediately" from "left open
+    // until the next version bump happens to come along" -- both would pass that probe.
+    // The real proof is that `close()` is called on the late connection itself (a THIRD
+    // instance, distinct from `held`); a spy on IDBDatabase.prototype.close, checked by
+    // instance identity, pins exactly that -- with the leak this never happens and the
+    // wait below times out.
+    const closeSpy = vi.spyOn(IDBDatabase.prototype, "close");
+    try {
+      await deleteDatabase();
+      const held = await openRawHeldConnection(IDB_VERSION - 1);
+      await expect(openManagedExchangeDatabase()).rejects.toThrow();
+      held.close();
+      // Give the same request's now-unblocked onupgradeneeded/onsuccess a beat to fire,
+      // by polling the spy itself (no new IDB opens per attempt, so no risk of stacking
+      // probe connections) rather than a fixed sleep.
+      await vi.waitFor(() => {
+        const closedInstances = new Set(
+          closeSpy.mock.instances as Array<IDBDatabase>,
+        );
+        expect(closedInstances.has(held)).toBe(true);
+        expect(closedInstances.size).toBeGreaterThanOrEqual(2);
+      });
+    } finally {
+      closeSpy.mockRestore();
+      await deleteDatabase();
     }
   });
 
