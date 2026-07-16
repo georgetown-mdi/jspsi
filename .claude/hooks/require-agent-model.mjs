@@ -79,12 +79,14 @@ function main() {
     process.exit(0);
   }
 
-  // Bare spawn (no explicit model). This path fails CLOSED: any error in reading
-  // the allowlist blocks rather than allows.
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || event.cwd;
-  const agentsDir = join(projectDir, ".claude", "agents");
+  // Bare spawn (no explicit model). This path fails CLOSED: any error in resolving
+  // the project dir or reading the allowlist blocks rather than allows, so the path
+  // construction stays inside the try (an event missing both CLAUDE_PROJECT_DIR and
+  // cwd would otherwise throw out here and reach the fail-open outer catch).
   let pinned;
   try {
+    const projectDir = process.env.CLAUDE_PROJECT_DIR || event.cwd;
+    const agentsDir = join(projectDir, ".claude", "agents");
     pinned = pinnedDefinitions(agentsDir);
   } catch {
     block(
