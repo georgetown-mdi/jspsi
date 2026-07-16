@@ -12,6 +12,7 @@ import {
 
 import {
   checkValueConstraints,
+  readRowColumn,
   runPipeline,
   sanitizeForDisplay,
 } from "@psilink/core";
@@ -46,9 +47,10 @@ function sampleInputValues(
 ): Array<string> {
   const values: Array<string> = [];
   for (const row of rawRows) {
-    // A short row may lack the column, so the read is honestly `string | undefined`
-    // (CSVRow's value type); the absence check below handles it.
-    const raw = row[inputColumn];
+    // Read by own-property so a short row lacking the column reads as absent even
+    // when the column is named an Object.prototype member (readRowColumn); a bare
+    // row[inputColumn] would surface the inherited function past the check below.
+    const raw = readRowColumn(row, inputColumn);
     if (raw !== undefined && raw.trim() !== "") {
       values.push(raw);
       if (values.length >= limit) break;

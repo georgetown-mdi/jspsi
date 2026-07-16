@@ -1,4 +1,5 @@
 import { computeTermsHash, verifyCommitmentOpening } from "./exchangeRecord.js";
+import { readRowColumn } from "./file.js";
 
 import type {
   CommitmentName,
@@ -301,7 +302,7 @@ export function reconstructCommittedData(
     idToRow = new Map();
     let anyDuplicate = false;
     inputRows.forEach((row, index) => {
-      const value = row[ourIdColumn];
+      const value = readRowColumn(row, ourIdColumn);
       if (value === undefined) return;
       if (idToRow!.has(value)) anyDuplicate = true;
       else idToRow!.set(value, index);
@@ -358,9 +359,12 @@ export function reconstructCommittedData(
       ? { columns: [], rows: [] }
       : {
           columns: sentColumns,
-          rows: ourIndices.map((index) =>
-            sentColumns.map((column) => inputRows[index]?.[column] ?? null),
-          ),
+          rows: ourIndices.map((index) => {
+            const row = inputRows[index];
+            return sentColumns.map((column) =>
+              row ? (readRowColumn(row, column) ?? null) : null,
+            );
+          }),
         };
   data.localPayloadSent = localPayloadSent as CanonicalValue;
 

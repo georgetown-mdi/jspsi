@@ -100,6 +100,38 @@ test("preparePayload: missing column value becomes null", () => {
   expect(result.rows[0]).toEqual(["P0", null]);
 });
 
+test("preparePayload: a short row omitting a prototype-member column sends null, not the inherited function", () => {
+  // A payload column named exactly an Object.prototype member, omitted by a short
+  // row: a bare row[col] would read the INHERITED function off the prototype chain
+  // and transmit it to the partner. The own-property read sends null instead.
+  const metaProto: Metadata = [
+    { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+    { name: "toString", type: "other", role: "payload", isPayload: true },
+    { name: "constructor", type: "other", role: "payload", isPayload: true },
+  ];
+  const sparse = [{ ssn: "001" }]; // omits both 'toString' and 'constructor'
+  const result = preparePayload(sparse, metaProto, [[0], [0]]);
+  if (!result.hasData) throw new Error("expected hasData:true");
+  expect(result.columns).toEqual(["toString", "constructor"]);
+  expect(result.rows[0]).toEqual([null, null]);
+  for (const cell of result.rows[0])
+    expect(typeof cell === "string" || cell === null).toBe(true);
+});
+
+test("preparePayload: a present prototype-member column sends its real value", () => {
+  // The shadowing guard must not swallow a real value: a row that DOES carry a
+  // 'toString' column transmits that value verbatim.
+  const metaProto: Metadata = [
+    { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+    { name: "toString", type: "other", role: "payload", isPayload: true },
+  ];
+  const rows = [{ ssn: "001", toString: "real-value" }];
+  const result = preparePayload(rows, metaProto, [[0], [0]]);
+  if (!result.hasData) throw new Error("expected hasData:true");
+  expect(result.columns).toEqual(["toString"]);
+  expect(result.rows[0]).toEqual(["real-value"]);
+});
+
 test("preparePayload: ignored column is never transmitted, even with isPayload:true", () => {
   // The role: ignored opt-out wins over isPayload (accept-but-ignore resolution
   // of the is_payload + ignored open question). diagnosis is a normal payload
@@ -149,6 +181,61 @@ test("buildOutputTable: an ignored column is not treated as the identifier", () 
     partnerPayload,
   );
   expect(headers[0]).toBe("row_id");
+});
+
+test("buildOutputTable: a short row omitting a prototype-member identifier column falls back to the row index, not the inherited function", () => {
+  // The identifier column is named exactly an Object.prototype member and the
+  // matched row omits it: a bare rawRows[ourIdx]?.[ourIdCol.name] would read the
+  // INHERITED function and write it into the on-disk identifier cell. The own-
+  // property read falls back to String(ourIdx) as it does for any absent column.
+  const metaProtoId: Metadata = [
+    { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+    {
+      name: "toString",
+      type: "identifier",
+      role: "identifier",
+      isPayload: false,
+    },
+  ];
+  const sparse = [{ ssn: "001" }]; // omits the 'toString' identifier column
+  const partnerPayload: PartnerPayload = {
+    columns: ["partner_id"],
+    rowIndices: [0],
+    rows: [["Q0"]],
+  };
+  const { headers, rows } = buildOutputTable(
+    [[0], [0]],
+    sparse,
+    metaProtoId,
+    partnerPayload,
+  );
+  expect(headers[0]).toBe("toString");
+  expect(rows[0][0]).toBe("0");
+});
+
+test("buildOutputTable: a present prototype-member identifier column emits its real value", () => {
+  const metaProtoId: Metadata = [
+    { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+    {
+      name: "toString",
+      type: "identifier",
+      role: "identifier",
+      isPayload: false,
+    },
+  ];
+  const rows = [{ ssn: "001", toString: "real-id" }];
+  const partnerPayload: PartnerPayload = {
+    columns: ["partner_id"],
+    rowIndices: [0],
+    rows: [["Q0"]],
+  };
+  const { rows: outRows } = buildOutputTable(
+    [[0], [0]],
+    rows,
+    metaProtoId,
+    partnerPayload,
+  );
+  expect(outRows[0][0]).toBe("real-id");
 });
 
 // --- assertPayloadSendDisclosed ----------------------------------------------

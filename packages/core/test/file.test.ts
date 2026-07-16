@@ -10,6 +10,7 @@ import {
   loadCSVFile,
 } from "../src/file";
 import { inferDateFormat, columnValues } from "../src/utils/date";
+import type { CSVRow } from "../src/file";
 
 /** A readable emitting `content` then EOF, standing in for a CSV file/stream. */
 function streamOf(content: string): Readable {
@@ -154,6 +155,26 @@ test("loadCSVColumnSample: the bounded sample reproduces a full-scan date format
   const fromFull = inferDateFormat(columnValues(allRows, "dob"));
   expect(fromSample).toBe("YYYY-MM-DD");
   expect(fromSample).toBe(fromFull);
+});
+
+test("columnValues: a short row omitting a prototype-member column yields the empty-string absent marker, not the inherited function", () => {
+  // The column is named exactly an Object.prototype member and the row omits it:
+  // a bare row[column] would yield the INHERITED function, which inferDateFormat
+  // (expecting a string) would then trip over. The own-property read yields the
+  // "" absent marker instead. Test one present row and one short row so the
+  // present value still flows through.
+  const rows: CSVRow[] = [{ toString: "1990-01-01" }, { other: "x" }];
+  const values = [...columnValues(rows, "toString")];
+  expect(values).toEqual(["1990-01-01", ""]);
+  for (const value of values) expect(typeof value).toBe("string");
+});
+
+test("columnValues: a present prototype-member column yields its real value", () => {
+  const rows = [{ constructor: "1990-01-01" }, { constructor: "1990-01-02" }];
+  expect([...columnValues(rows, "constructor")]).toEqual([
+    "1990-01-01",
+    "1990-01-02",
+  ]);
 });
 
 test("loadCSVColumnSample: an empty input yields an empty header and sample", async () => {

@@ -27,6 +27,7 @@ import {
 } from "./config/linkageTerms.js";
 import { inferMetadata } from "./config/metadata.js";
 import type { ColumnMetadata } from "./config/metadata.js";
+import { readRowColumn } from "./file.js";
 import type { CSVRow } from "./file.js";
 
 const logger = getLogger("cleaning");
@@ -1112,7 +1113,7 @@ export class StandardizedField {
     if (cached !== undefined) return cached;
 
     const row = this.rawRows[index];
-    const raw = row?.[this.inputColumn];
+    const raw = row ? readRowColumn(row, this.inputColumn) : undefined;
     if (raw === undefined) {
       this.cache.set(index, []);
       return [];
