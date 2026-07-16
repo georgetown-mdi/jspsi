@@ -28,11 +28,13 @@ import {
   applyManagedExchangeReinviteRotation,
   applyManagedExchangeRotation,
   buildManagedExchangeRecord,
+  diagnoseManagedExchangeRecord,
   parseManagedExchangeRecord,
 } from "./managedExchangeRecord";
 import { parseManagedLocalState } from "./managedLocalStateShape";
 
 import type {
+  ManagedExchangeDiagnosticEssentials,
   ManagedExchangeLastRun,
   ManagedExchangeLocalEdits,
   ManagedExchangeRecord,
@@ -234,6 +236,73 @@ export async function listManagedExchanges(): Promise<
 > {
   const raws = await withStore("readonly", (store) => store.getAll());
   return raws.map((raw) => parseManagedExchangeRecord(raw));
+}
+
+/**
+ * One entry in the diagnostic read: for a stored key, either the display essentials
+ * the entry parsed to (`readable`) or an unreadable marker (`unreadable`) carrying
+ * only the key. Both carry the stored `id` so a delete-by-key acts on either --
+ * deleting an unreadable entry must not require a successful parse.
+ */
+export type ManagedExchangeDiagnosticEntry =
+  | { kind: "readable"; essentials: ManagedExchangeDiagnosticEssentials }
+  | { kind: "unreadable"; id: string };
+
+/**
+ * Read every stored entry for the read-failed recovery listing, per-record and
+ * NEVER rejecting wholesale -- unlike {@link listManagedExchanges}, whose strict
+ * contract is deliberately untouched so a single bad record still fails the normal
+ * list read. This diagnostic read exists ONLY for the recovery surface: it walks
+ * the raw keys and values, attempts {@link diagnoseManagedExchangeRecord} on each,
+ * and returns for each stored key either its display essentials or an unreadable
+ * marker, so an operator can identify and discard the offending record even when
+ * the normal list cannot load.
+ *
+ * SECURITY: the entries carry display essentials only (the label, side, dates, and
+ * key); the `sharedSecret`, the document, and the input handle never leave the
+ * diagnostic extraction, so no secret material reaches the recovery surface. Keyed
+ * off the store's own keys rather than the parsed records, so an unreadable entry
+ * still yields a key to delete by.
+ */
+export async function listManagedExchangesDiagnostic(): Promise<
+  Array<ManagedExchangeDiagnosticEntry>
+> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    return await new Promise<Array<ManagedExchangeDiagnosticEntry>>(
+      (resolve, reject) => {
+        const transaction = db.transaction(
+          MANAGED_EXCHANGE_STORE_NAME,
+          "readonly",
+        );
+        const store = transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME);
+        const keysRequest = store.getAllKeys();
+        const valuesRequest = store.getAll();
+        transaction.oncomplete = () => {
+          const keys = keysRequest.result;
+          const values = valuesRequest.result;
+          const entries: Array<ManagedExchangeDiagnosticEntry> = [];
+          for (let index = 0; index < keys.length; index += 1) {
+            try {
+              entries.push({
+                kind: "readable",
+                essentials: diagnoseManagedExchangeRecord(values[index]),
+              });
+            } catch {
+              // The parse failed, so the record's own `id` is untrusted; the store
+              // key is the delete target instead, and the only field surfaced.
+              entries.push({ kind: "unreadable", id: String(keys[index]) });
+            }
+          }
+          resolve(entries);
+        };
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      },
+    );
+  } finally {
+    db.close();
+  }
 }
 
 /**

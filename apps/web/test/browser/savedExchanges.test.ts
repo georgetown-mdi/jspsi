@@ -17,8 +17,11 @@ import {
   clearManagedExchanges,
   createManagedExchange,
 } from "@psi/managedExchangeStore";
+import {
+  markManagedExchangeBackedUp,
+  markManagedExchangeSpent,
+} from "@psi/managedLocalState";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
-import { markManagedExchangeBackedUp } from "@psi/managedLocalState";
 
 import type { NewManagedExchange } from "@psi/managedExchangeRecord";
 import type { ReactNode } from "react";
@@ -211,5 +214,138 @@ describe("saved list route: the always-list surface", () => {
     });
     await expect.element(quick).toBeInTheDocument();
     expect((await quick.element()).getAttribute("href")).toBe("/quick");
+  });
+
+  test("a populated list offers a first-class create entry into the invite/configure flow", async () => {
+    await createManagedExchange(newExchange());
+
+    mount(createElement(SavedExchanges));
+
+    const create = page.getByRole("link", {
+      name: "Set up a recurring exchange",
+    });
+    await expect.element(create).toBeInTheDocument();
+    expect((await create.element()).getAttribute("href")).toBe("/exchange");
+  });
+
+  test("the side facet is readable at a glance: an inviter and an acceptor row", async () => {
+    await createManagedExchange(
+      newExchange({ label: "Invited partnership", side: "inviter" }),
+    );
+    await createManagedExchange(
+      newExchange({ label: "Accepted partnership", side: "acceptor" }),
+    );
+
+    mount(createElement(SavedExchanges));
+
+    await expect
+      .element(page.getByText("You invite", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("You accept", { exact: false }))
+      .toBeInTheDocument();
+  });
+});
+
+describe("saved list route: delete is a first-class, always-available action", () => {
+  test("delete confirms, then removes the exchange from the list", async () => {
+    await createManagedExchange(newExchange({ label: "Riverbend quarterly" }));
+
+    mount(createElement(SavedExchanges));
+
+    await expect
+      .element(page.getByText("Riverbend quarterly"))
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Delete" }).click();
+
+    // The confirm names the exchange and says the partner is not notified.
+    await expect
+      .element(
+        page.getByText('Delete "Riverbend quarterly"?', { exact: false }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("your partner is not notified", { exact: false }))
+      .toBeInTheDocument();
+
+    // Confirm the delete: the modal's own Delete, scoped to the dialog so the row's
+    // Delete (behind the overlay) is never the target.
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Delete" })
+      .click();
+
+    // The row is gone and the empty state stands in its place.
+    await expect
+      .element(page.getByText("You have none saved yet.", { exact: false }))
+      .toBeInTheDocument();
+    expect(page.getByText("Riverbend quarterly").query()).toBeNull();
+  });
+
+  test("a backed-up exchange's confirm carries the exported-backup custody note", async () => {
+    const created = await createManagedExchange(
+      newExchange({ label: "Backed up partnership" }),
+    );
+    await markManagedExchangeBackedUp(created.id, "2026-07-10T09:00:00.000Z");
+
+    mount(createElement(SavedExchanges));
+
+    await expect
+      .element(page.getByText("Backed up as of", { exact: false }))
+      .toBeInTheDocument();
+    await page.getByRole("button", { name: "Delete" }).click();
+
+    await expect
+      .element(
+        page.getByText("A backup file you exported stays in your custody", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("remains a credential until the partnership rotates", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("a never-backed-up exchange's confirm carries no custody note", async () => {
+    await createManagedExchange(newExchange({ label: "Fresh partnership" }));
+
+    mount(createElement(SavedExchanges));
+
+    await page.getByRole("button", { name: "Delete" }).click();
+
+    await expect
+      .element(page.getByText("your partner is not notified", { exact: false }))
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByText("A backup file you exported stays in your custody", {
+          exact: false,
+        })
+        .query(),
+    ).toBeNull();
+  });
+
+  test("a spent (handed-off) row offers Open and Delete", async () => {
+    const created = await createManagedExchange(
+      newExchange({ label: "Handed off partnership" }),
+    );
+    await markManagedExchangeSpent(created.id, "2026-07-12T09:00:00.000Z");
+
+    mount(createElement(SavedExchanges));
+
+    await expect
+      .element(page.getByRole("button", { name: "Open" }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Delete" }))
+      .toBeInTheDocument();
+    // A spent row does not offer Run.
+    expect(page.getByRole("button", { name: "Run" }).query()).toBeNull();
   });
 });

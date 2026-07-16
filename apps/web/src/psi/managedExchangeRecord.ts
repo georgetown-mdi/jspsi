@@ -266,6 +266,53 @@ export function safeParseManagedExchangeRecord(raw: unknown) {
   return ManagedExchangeRecordSchema.safeParse(raw);
 }
 
+/**
+ * The display essentials a diagnostic read surfaces for one stored entry, when the
+ * entry parses: only the fields a recovery listing renders -- the label, this
+ * party's side, and the last run's instant when recorded. Deliberately NOT the
+ * whole record: the diagnostic path must never return the `sharedSecret` or any
+ * document field to a component, so this type structurally cannot carry secret
+ * material (see docs/MANAGED_EXCHANGE.md, "Deleting a managed exchange", and the
+ * read-failed recovery listing). The `id` is the stored key a delete-by-key acts
+ * on.
+ */
+export interface ManagedExchangeDiagnosticEssentials {
+  /** The stored key, the delete acts on it (matches the record's `id`). */
+  id: string;
+  /** The operator's display label; may be empty. */
+  label: string;
+  /** This party's side of the partnership. */
+  side: ManagedExchangeSide;
+  /** ISO 8601 UTC instant of the last recorded run, when one exists. */
+  lastRunAt?: string;
+}
+
+/**
+ * Extract only the display essentials from a stored value for the read-failed
+ * recovery listing: the `id`, `label`, `side`, and last-run instant, and nothing
+ * else. Structurally incapable of returning secret material -- it reads named
+ * scalar fields off the validated record and copies them into a
+ * {@link ManagedExchangeDiagnosticEssentials}, so the `sharedSecret`, the document,
+ * and the input handle never leave this function. Full record validation still
+ * runs first, so a value that would fail {@link parseManagedExchangeRecord}
+ * (unknown `schemaVersion`, malformed secret, a document carrying an
+ * `authentication` block) throws here exactly as it would on the strict read; the
+ * caller catches that to mark the entry unreadable.
+ *
+ * @throws {ZodError} if the value is not a valid v1 record.
+ */
+export function diagnoseManagedExchangeRecord(
+  raw: unknown,
+): ManagedExchangeDiagnosticEssentials {
+  const record = parseManagedExchangeRecord(raw);
+  return {
+    id: record.id,
+    label: record.label,
+    side: record.side,
+    ...(record.lastRun !== undefined ? { lastRunAt: record.lastRun.at } : {}),
+  };
+}
+
 /** Everything a caller supplies to compose the persisted exchange-file document
  * from a credential-free webrtc locator. The linkage terms and connection locator
  * are the document's substance; the optional blocks mirror
