@@ -68,8 +68,7 @@ export function ManageExchangeOffer({
         </p>
         <p className={styles.small}>
           Its terms and secret are stored in this browser so you can run it
-          again with the same partner. Find it in your recurring exchanges, the
-          app&apos;s home screen.
+          again with the same partner. Find it in your recurring exchanges.
         </p>
       </div>
     );

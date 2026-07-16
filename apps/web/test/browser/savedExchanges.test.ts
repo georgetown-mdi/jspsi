@@ -12,11 +12,11 @@ import "@mantine/core/styles.css";
 
 import { MantineProvider } from "@mantine/core";
 
+import { SavedExchanges, SavedExchangesHome } from "@bench/SavedExchanges";
 import {
   clearManagedExchanges,
   createManagedExchange,
 } from "@psi/managedExchangeStore";
-import { SavedExchanges } from "@bench/SavedExchanges";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 import { markManagedExchangeBackedUp } from "@psi/managedLocalState";
 
@@ -24,12 +24,16 @@ import type { NewManagedExchange } from "@psi/managedExchangeRecord";
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
 
-// The managed-exchange home list, exercised against real Chromium (real IndexedDB
-// and the sibling object store): the loading -> populated and loading -> empty
-// transitions, the derived backup state rendering both of its values, the quick-path
-// entry, and the first-run empty state's create/accept/import affordances. The
-// unavailable degrade is a separate file (it mocks the store open); the pure load
-// ordering and its failure classification are unit-tested without a database.
+// The managed-exchange list and its conditional home route, exercised against real
+// Chromium (real IndexedDB and the sibling object store). The home route at `/`
+// (SavedExchangesHome) is the management interface only once an exchange exists: a
+// populated store renders the list, an empty store renders the quick path (the
+// first-run landing), never an empty list at `/`. The canonical list route at `/saved`
+// (SavedExchanges) always renders the full surface -- rows, the derived backup state's
+// two values, the quick-path entry, and the designed first-run empty state's
+// create/accept/import affordances. The unavailable degrade is a separate file (it
+// mocks the store open); the pure load ordering and its failure classification are
+// unit-tested without a database.
 
 // Assert on hrefs rather than navigation: the router seam is stubbed to a plain
 // anchor, so a rendered Link is an <a href> and useNavigate is a no-op.
@@ -90,8 +94,49 @@ afterEach(async () => {
   await clearManagedExchanges();
 });
 
-describe("managed exchange home list", () => {
-  test("loading -> populated: a stored exchange appears as a runnable row", async () => {
+describe("home route: conditional on a stored exchange existing", () => {
+  test("populated -> the list surface renders at the home route", async () => {
+    await createManagedExchange(newExchange({ label: "Riverbend quarterly" }));
+
+    mount(createElement(SavedExchangesHome));
+
+    await expect
+      .element(page.getByText("Riverbend quarterly"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Run" }))
+      .toBeInTheDocument();
+  });
+
+  test("empty -> the quick path renders at the home route, not an empty list", async () => {
+    mount(createElement(SavedExchangesHome));
+
+    // The first-run landing is the quick (invite/accept) path: its two primary
+    // actions, not the list's designed empty state.
+    await expect
+      .element(page.getByRole("heading", { name: "Set up an exchange" }))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("heading", {
+          name: "Accept an invitation you were sent",
+        }),
+      )
+      .toBeInTheDocument();
+
+    // Neither the empty-list affordances nor any run rows leak into the home route.
+    expect(
+      page.getByRole("button", { name: "Import a backup file" }).query(),
+    ).toBeNull();
+    expect(
+      page.getByText("You have none saved yet.", { exact: false }).query(),
+    ).toBeNull();
+    expect(page.getByRole("button", { name: "Run" }).query()).toBeNull();
+  });
+});
+
+describe("saved list route: the always-list surface", () => {
+  test("populated: a stored exchange appears as a runnable row", async () => {
     await createManagedExchange(newExchange({ label: "Riverbend quarterly" }));
 
     mount(createElement(SavedExchanges));
@@ -104,7 +149,7 @@ describe("managed exchange home list", () => {
       .toBeInTheDocument();
   });
 
-  test("loading -> empty: the designed empty state, not a blank list", async () => {
+  test("empty: the designed empty state, not a blank list", async () => {
     mount(createElement(SavedExchanges));
 
     // The empty state explains what a managed exchange is and offers create,

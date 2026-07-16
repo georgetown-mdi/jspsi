@@ -1,18 +1,19 @@
 /**
- * The async load model behind the managed-exchange home list: it opens the store,
+ * The async load model behind the managed-exchange surfaces: it opens the store,
  * reads the records and their local sibling state, and derives the display rows,
- * resolving to one of three outcomes the home surface renders directly. No React:
- * the ordering and the failure classification are unit-testable in Node with the
- * store reads injected.
+ * resolving to one of three outcomes the home route and the list route each render
+ * on. No React: the ordering and the failure classification are unit-testable in
+ * Node with the store reads injected.
  *
  * The two failure outcomes are deliberately distinct. A store that cannot be opened
  * at all -- private mode with storage blocked, or an engine without IndexedDB -- is
- * `"unavailable"`, which the home surface degrades to the quick path for: the
- * operator can still run a one-off exchange. A store that opens but whose read
- * fails (a corrupted or app-upgrade-invalidated record) is `"failed"`: the records
- * exist but cannot be shown, which is not the same as no store at all. The open
- * probe is what separates them, so the classification is a real failed-open, never
- * a user-agent guess.
+ * `"unavailable"`: the operator can still run a one-off exchange, so the home route
+ * renders the quick path and the list route shows an explicit degrade. A store that
+ * opens but whose read fails (a corrupted or app-upgrade-invalidated record) is
+ * `"failed"`: the records exist but cannot be shown, which is not the same as no
+ * store at all -- both routes surface the read failure rather than the quick path.
+ * The open probe is what separates them, so the classification is a real
+ * failed-open, never a user-agent guess.
  */
 
 import { savedExchangeRows } from "./savedExchangesModel";

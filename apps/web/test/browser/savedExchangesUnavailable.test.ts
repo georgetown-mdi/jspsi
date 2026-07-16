@@ -11,17 +11,19 @@ import "@mantine/core/styles.css";
 
 import { MantineProvider } from "@mantine/core";
 
-import { SavedExchanges } from "@bench/SavedExchanges";
+import { SavedExchanges, SavedExchangesHome } from "@bench/SavedExchanges";
 
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
 
-// The store-unavailable degrade, rendered: when the managed store cannot be opened
-// at all (private mode with storage blocked, an engine without IndexedDB), the home
-// route degrades to the quick path with a clear message rather than erroring. The
-// unavailability is a real failed-open -- the store's open here rejects -- not a
-// user-agent guess. The load ordering and its classification are unit-tested; this
-// file proves the degrade renders and links to the quick path.
+// The store-unavailable behavior, rendered, for both routes. When the managed store
+// cannot be opened at all (private mode with storage blocked, an engine without
+// IndexedDB), the home route at `/` renders the quick path directly -- a visitor whose
+// browser cannot store recurring exchanges gets exactly the one-off flow, with no scary
+// banner -- while the always-list route at `/saved` shows the explicit degrade message
+// with a link to the quick path. The unavailability is a real failed-open -- the
+// store's open here rejects -- not a user-agent guess. The load ordering and its
+// classification are unit-tested; this file proves both renders.
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({
@@ -69,8 +71,33 @@ afterEach(() => {
   container = undefined;
 });
 
-describe("managed exchange home list, store unavailable", () => {
-  test("degrades to the quick path with a clear message, not an error", async () => {
+describe("store unavailable", () => {
+  test("the home route renders the quick path directly, no degrade banner", async () => {
+    mount(createElement(SavedExchangesHome));
+
+    // The one-off flow itself, not the list's degrade message.
+    await expect
+      .element(page.getByRole("heading", { name: "Set up an exchange" }))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("heading", {
+          name: "Accept an invitation you were sent",
+        }),
+      )
+      .toBeInTheDocument();
+
+    // No degrade banner on landing, and no error surfaced.
+    expect(
+      page
+        .getByText("This browser cannot store recurring exchanges", {
+          exact: false,
+        })
+        .query(),
+    ).toBeNull();
+  });
+
+  test("the always-list route degrades with a clear message, not an error", async () => {
     mount(createElement(SavedExchanges));
 
     await expect

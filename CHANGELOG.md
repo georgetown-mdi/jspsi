@@ -21,7 +21,7 @@ This changelog is a reader's summary of what PSI-Link does and how that changes 
 
 ### Changed
 
-- BREAKING: the redesigned web app opens on the browser's list of recurring (managed) exchanges at `/`, run again without a new invitation, with a designed first-run empty state and a degrade to the quick path when the browser cannot store exchanges. Setting up or accepting a one-off exchange is the quick path (`/quick`, with `/exchange`, `/accept`, and `/verify` behind it), and the legacy web interface is removed. See `docs/DESIGN.md`, `docs/MANAGED_EXCHANGE.md`, and `docs/COMMUNICATION.md`.
+- BREAKING: the redesigned web app's home route at `/` opens on the browser's list of recurring (managed) exchanges once one exists, run again without a new invitation; a first-run visitor (or a browser that cannot store exchanges) lands on the quick path instead. The full recurring-exchange list, with its designed empty state and restore-from-backup import, is always reachable at `/saved`. Setting up or accepting a one-off exchange is the quick path (`/quick`, with `/exchange`, `/accept`, and `/verify` behind it), and the legacy web interface is removed. See `docs/DESIGN.md`, `docs/MANAGED_EXCHANGE.md`, and `docs/COMMUNICATION.md`.
 
 ### Security
 

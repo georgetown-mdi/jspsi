@@ -11,11 +11,13 @@ import { downloadSampleCsvs } from "./sampleData";
 import styles from "./bench.module.css";
 
 /**
- * The quick path's screen at `/quick`, reached from the recurring-exchange list
- * home at `/`: two primary actions side by side -- set up a one-off exchange, or
- * accept an invitation you were sent -- above the standing how-it-works
+ * The quick path's screen: two primary actions side by side -- set up a one-off
+ * exchange, or accept an invitation you were sent -- above the standing how-it-works
  * explanation. Verifying a receipt is a secondary action, given as an inline text
- * link below the two cards rather than equal billing.
+ * link below the two cards rather than equal billing. It has its own route at
+ * `/quick` and is also the home route's first-run landing (an empty or
+ * unavailable managed store at `/` renders it directly, with no redirect); the
+ * recurring-exchange list lives at `/saved`, which this screen links to.
  */
 export function BenchLobby() {
   const navigate = useNavigate();
@@ -122,7 +124,7 @@ export function BenchLobby() {
         </p>
         <p className={`${styles.sub} ${styles.small}`}>
           Saved an exchange to run again?{" "}
-          <Anchor inherit component={Link} to="/">
+          <Anchor inherit component={Link} to="/saved">
             Recurring exchanges
           </Anchor>{" "}
           lists the ones stored in this browser so you can run one without a new

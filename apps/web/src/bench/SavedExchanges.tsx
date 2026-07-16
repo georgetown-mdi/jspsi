@@ -12,6 +12,7 @@ import { MAX_ARTIFACT_IMPORT_BYTES } from "@psi/managedExchangeArtifact";
 import { importManagedExchange } from "@psi/managedExchangeImport";
 import { listManagedLocalState } from "@psi/managedLocalState";
 
+import { BenchLobby } from "./BenchLobby";
 import { BenchPage } from "./BenchPage";
 import { loadSavedExchanges } from "./savedExchangesLoad";
 import styles from "./bench.module.css";
@@ -19,33 +20,11 @@ import styles from "./bench.module.css";
 import type { SavedExchangeRow } from "./savedExchangesModel";
 import type { SavedExchangesLoad } from "./savedExchangesLoad";
 
-/**
- * The managed-exchange home list: the app's default route. It lists the recurring
- * exchanges stored in this browser -- label, side, a one-line last-run status, and
- * the derived backup state -- each with a run action that opens the attended re-run
- * surface, above a standing entry into the quick (invite/accept) path.
- *
- * The list reads asynchronously before first paint resolves ({@link loadSavedExchanges}):
- * it shows a loading state, then either the exchanges, the designed empty state, or --
- * when the store cannot be opened at all (private mode with storage blocked, an engine
- * without IndexedDB) -- a degrade to the quick path. It never flashes an empty list
- * while the store is still loading.
- *
- * The empty state is a designed first-run surface, not a blank list: it explains what a
- * managed exchange is and offers creating one, accepting a recurring invitation, and a
- * standing import affordance -- a wholesale eviction erases the evidence anything
- * existed, so restore-from-backup lives here rather than only behind a detected loss
- * (see docs/MANAGED_EXCHANGE.md, "Eviction recovery is the import flow").
- *
- * Deliberately NOT the management list: no add/remove, no per-exchange detail, no edit.
- * Those are separate items. Each row joins its record to the local sibling state (the
- * backup marker and any spent state): a spent record shows no Run action and names its
- * handoff date.
- */
-export function SavedExchanges() {
-  const navigate = useNavigate();
+/** Run the managed-exchange home load once on mount, cancelling its state write if
+ * the component unmounts before the reads settle. Returns `undefined` while the read
+ * is in flight, then one of the {@link SavedExchangesLoad} outcomes. */
+function useSavedExchangesLoad(): SavedExchangesLoad | undefined {
   const [load, setLoad] = useState<SavedExchangesLoad>();
-
   useEffect(() => {
     let live = true;
     void loadSavedExchanges({
@@ -60,8 +39,87 @@ export function SavedExchanges() {
       live = false;
     };
   }, []);
+  return load;
+}
+
+/**
+ * The app's home route at `/`: the management interface is the home only once a
+ * recurring exchange exists here, so this reads the store and routes on the outcome,
+ * inline with no URL redirect. It holds an explicit loading state while the read
+ * settles, then: a `ready` store with one or more rows renders the list surface; an
+ * empty `ready` store renders the quick (invite/accept) path, so a first-run visitor
+ * lands on the one-off flow rather than an empty list; an `unavailable` store (this
+ * browser cannot store recurring exchanges) likewise renders the quick path, with no
+ * scary banner on landing; a `failed` store (it opened but its records cannot be read)
+ * renders the read-failed surface, never the quick path -- records likely exist, and
+ * silently showing the lobby would hide that.
+ *
+ * The canonical always-list route is `/saved` ({@link SavedExchanges}); a visitor
+ * whose browser was evicted lands here on the quick path, and the quick path links to
+ * `/saved` so the empty state's restore-from-backup affordance stays discoverable.
+ */
+export function SavedExchangesHome() {
+  const load = useSavedExchangesLoad();
+
+  if (load === undefined)
+    return (
+      <BenchPage>
+        <main className={styles.lobby}>
+          <Loader />
+        </main>
+      </BenchPage>
+    );
+  if (
+    load.kind === "unavailable" ||
+    (load.kind === "ready" && load.rows.length === 0)
+  )
+    return <BenchLobby />;
+  return <SavedExchangesSurface load={load} />;
+}
+
+/**
+ * The managed-exchange list, the canonical always-list route at `/saved`. It lists the
+ * recurring exchanges stored in this browser -- label, side, a one-line last-run
+ * status, and the derived backup state -- each with a run action that opens the
+ * attended re-run surface, above a standing entry into the quick (invite/accept) path.
+ *
+ * Unlike the home route, it renders the full surface unconditionally: the loading
+ * state, then the exchanges, the designed empty state, the read-failed state, or --
+ * when the store cannot be opened at all (private mode with storage blocked, an engine
+ * without IndexedDB) -- the degrade message. This keeps eviction recovery discoverable:
+ * a first-run visitor is routed to the quick path at `/`, and the quick path links here
+ * so the restore-from-backup affordance in the empty state stays reachable.
+ *
+ * The empty state is a designed first-run surface, not a blank list: it explains what a
+ * managed exchange is and offers creating one, accepting a recurring invitation, and a
+ * standing import affordance -- a wholesale eviction erases the evidence anything
+ * existed, so restore-from-backup lives here rather than only behind a detected loss
+ * (see docs/MANAGED_EXCHANGE.md, "Eviction recovery is the import flow").
+ *
+ * Deliberately NOT the management list: no add/remove, no per-exchange detail, no edit.
+ * Those are separate items. Each row joins its record to the local sibling state (the
+ * backup marker and any spent state): a spent record shows no Run action and names its
+ * handoff date.
+ */
+export function SavedExchanges() {
+  const load = useSavedExchangesLoad();
 
   if (load?.kind === "unavailable") return <StorageUnavailable />;
+
+  return <SavedExchangesSurface load={load} />;
+}
+
+/** The list surface itself: the loading loader, the exchanges, the designed empty
+ * state, or the read-failed state, inside the shared page frame. Its prop type
+ * excludes the `unavailable` case -- both routes intercept that ahead of it (the home
+ * route to the quick path, the list route to its degrade message), so the surface never
+ * receives it. */
+function SavedExchangesSurface({
+  load,
+}: {
+  load: Exclude<SavedExchangesLoad, { kind: "unavailable" }> | undefined;
+}) {
+  const navigate = useNavigate();
 
   return (
     <BenchPage>
@@ -123,7 +181,7 @@ export function SavedExchanges() {
 }
 
 /** The store-unavailable degrade: when the managed store cannot be opened at all
- * (private mode with storage blocked, an engine without IndexedDB), the home route
+ * (private mode with storage blocked, an engine without IndexedDB), the list route
  * cannot list anything, so it hands the operator the quick path -- they can still run
  * a one-off exchange -- rather than erroring. */
 function StorageUnavailable() {

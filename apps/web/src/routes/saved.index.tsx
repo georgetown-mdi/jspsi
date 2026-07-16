@@ -1,11 +1,21 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
+
+import { SavedExchanges } from "@bench/SavedExchanges";
+import { seo } from "@utils/seo";
 
 export const Route = createFileRoute("/saved/")({
-  // The saved-exchange list is the home route now; /saved redirects there so a
-  // bookmark or an in-app link to the old path still lands on the list. Client-only
-  // to keep the redirect uniform with the /saved/$id run leaf and to carry any hash.
+  // The canonical always-list route: it renders the full recurring-exchange list
+  // surface unconditionally, including the designed empty state and the store-degrade
+  // message. The home route at `/` shows this list only once an exchange exists; this
+  // path always shows it, so eviction recovery's import affordance stays discoverable.
+  // Client-only because it reads the managed-exchange store (IndexedDB).
   ssr: false,
-  beforeLoad: () => {
-    throw redirect({ to: "/", hash: true, replace: true });
-  },
+  component: SavedExchanges,
+  head: () => ({
+    meta: seo({
+      title: "Recurring exchanges - psilink",
+      description:
+        "The recurring exchanges saved in this browser, run again without a new invitation.",
+    }),
+  }),
 });
