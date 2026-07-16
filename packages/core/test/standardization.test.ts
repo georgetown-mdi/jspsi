@@ -1249,6 +1249,39 @@ describe("StandardizedField", () => {
     expect(field.get(0)).toEqual([]);
   });
 
+  test("short row omitting a prototype-member input column reads as absent, not the inherited function", () => {
+    // The input column is named exactly an Object.prototype member and the row
+    // omits it: a bare row[inputColumn] would read the INHERITED function off the
+    // prototype chain, which then flows into the pipeline where a string is
+    // expected. The own-property read excludes the record instead.
+    for (const proto of [
+      "toString",
+      "valueOf",
+      "constructor",
+      "hasOwnProperty",
+    ]) {
+      const field = new StandardizedField(
+        "last_name",
+        proto,
+        [],
+        [{ other: "x" }],
+      );
+      expect(field.get(0)).toEqual([]);
+    }
+  });
+
+  test("present prototype-member input column standardizes its real value", () => {
+    // The shadowing guard must not swallow a real value: a row carrying a
+    // 'toString' column standardizes that value as any other column would.
+    const field = new StandardizedField(
+      "last_name",
+      "toString",
+      [{ function: "to_upper_case" }],
+      [{ toString: "smith" }],
+    );
+    expect(field.get(0)).toEqual(["SMITH"]);
+  });
+
   test("out-of-bounds index returns empty array (excluded from linkage)", () => {
     const field = new StandardizedField(
       "last_name",

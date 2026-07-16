@@ -75,6 +75,7 @@ export {
   loadCSVFile,
   loadCSVColumns,
   loadCSVColumnSample,
+  readRowColumn,
   CSV_LINE_BYTE_CEILING,
 } from "./file";
 export type { CSVRow } from "./file";

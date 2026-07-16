@@ -1,5 +1,6 @@
 import { DateTime } from "luxon";
 
+import { readRowColumn } from "../file.js";
 import type { CSVRow } from "../file.js";
 
 /**
@@ -129,5 +130,5 @@ export function* columnValues(
   rows: Iterable<CSVRow>,
   column: string,
 ): Generator<string> {
-  for (const row of rows) yield row[column] ?? "";
+  for (const row of rows) yield readRowColumn(row, column) ?? "";
 }

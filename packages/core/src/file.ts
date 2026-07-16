@@ -220,6 +220,28 @@ function releaseSource(detachGuard: () => void, source: StreamSource): void {
 export type CSVRow = Record<string, string | undefined>;
 
 /**
+ * Read one column's value from a parsed {@link CSVRow} by name, returning
+ * `undefined` when the row omits that column.
+ *
+ * A parsed row is a plain object, so `row[column]` for a column the row lacks
+ * walks the prototype chain: a column named exactly an `Object.prototype` member
+ * (`toString`, `valueOf`, `constructor`, `hasOwnProperty`, ...) would read the
+ * INHERITED function rather than `undefined`, and that non-string value slips
+ * past a nullish/undefined guard into standardization, the transmitted payload,
+ * and the on-disk table. A short row omitting such a column is the realistic
+ * trigger (a malformed but operator-local CSV). An own-property check
+ * ({@link Object.hasOwn}) reads a missing column as absent regardless of the
+ * prototype chain, so every by-name row read must go through here rather than
+ * index `row[column]` directly.
+ *
+ * @internal used across the core row consumers (standardization, payload
+ * extraction, date inference); not a supported public entry point.
+ */
+export function readRowColumn(row: CSVRow, column: string): string | undefined {
+  return Object.hasOwn(row, column) ? row[column] : undefined;
+}
+
+/**
  * Normalize one raw PapaParse row to a {@link CSVRow}, dropping any non-string
  * cell -- in practice the `__parsed_extra` array PapaParse attaches to a row longer
  * than the header -- so every retained value is a genuine string. A row that is

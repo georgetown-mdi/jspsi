@@ -8,6 +8,7 @@ import {
 } from "./config/metadata.js";
 import type { Payload } from "./config/linkageTerms.js";
 import { MAX_NAME_LENGTH } from "./config/linkageTerms.js";
+import { readRowColumn } from "./file.js";
 import type { CSVRow } from "./file.js";
 import type { CommittedPayload } from "./exchangeRecord.js";
 import type { MessageConnection } from "./connection/messageConnection.js";
@@ -149,9 +150,12 @@ export function preparePayload(
 
   const columns = payloadCols.map((col) => col.name);
   const rowIndices = [...associationTable[0]];
-  const rows = rowIndices.map((idx) =>
-    columns.map((col) => rawRows[idx]?.[col] ?? null),
-  );
+  const rows = rowIndices.map((idx) => {
+    const row = rawRows[idx];
+    return columns.map((col) =>
+      row ? (readRowColumn(row, col) ?? null) : null,
+    );
+  });
 
   return { hasData: true, columns, rowIndices, rows };
 }
@@ -621,11 +625,10 @@ export function buildOutputTable(
 
   const rows = associationTable[0].map((ourIdx, i) => {
     const theirIdx = associationTable[1][i];
-    const ourId = quoteCsvField(
-      ourIdCol
-        ? (rawRows[ourIdx]?.[ourIdCol.name] ?? String(ourIdx))
-        : String(ourIdx),
-    );
+    const ourRow = rawRows[ourIdx];
+    const ourIdValue =
+      ourIdCol && ourRow ? readRowColumn(ourRow, ourIdCol.name) : undefined;
+    const ourId = quoteCsvField(ourIdValue ?? String(ourIdx));
     const partnerIndexCell = quoteCsvField(String(theirIdx));
 
     if (!hasPartnerCols) {
