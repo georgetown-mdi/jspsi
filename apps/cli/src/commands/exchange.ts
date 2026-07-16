@@ -29,6 +29,11 @@ import {
   type KeyFileExpiryStatus,
 } from "../keyFile";
 import { resolveRecordOutput } from "../recordFile";
+import { resolveReceiptOutput } from "../receiptFile";
+import {
+  defaultSigningIdentityPath,
+  loadSigningIdentity,
+} from "../signingIdentityFile";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { resolveAtSignRefs, resolveExchangeSpecRefs } from "../util/atSignRefs";
 import {
@@ -52,7 +57,9 @@ import {
   runProtocol,
   type AuthPersist,
   type ProtocolConnectionConfig,
+  type SigningPersist,
 } from "../protocol";
+import type { SigningConfig } from "@psilink/core";
 
 export function builder(cmd: Argv): Argv {
   return addCommonBootstrapOptions(
@@ -649,6 +656,47 @@ export async function prepareDataset(
   return prepared;
 }
 
+/**
+ * Resolve the signed-receipt inputs from the exchange config's `signing` block,
+ * loading this party's signing identity from disk. Returns `null` (skip the
+ * signing step, leaving the unsigned-record path unchanged) unless the block sets
+ * `mode: certificate` -- the only mode this step supports; `none` and
+ * `session-derived` are no-ops here. A `certificate`-mode block with no readable
+ * identity file is a usage error (exit 64, via {@link loadSigningIdentity}), the
+ * same classification a malformed key file gets: an operator who asked for signed
+ * receipts but has no identity should be told, not silently given an unsigned
+ * exchange.
+ *
+ * The identity-file path is the config's `signing.identity_file` (tilde-expanded
+ * at use, as `psilink fingerprint` does), falling back to the per-user default.
+ * The pinned partner fingerprint is passed through verbatim; when absent the
+ * signing step fails closed on verification (no partner certificate can be
+ * trusted).
+ *
+ * @throws {UsageError} when `mode: certificate` is set but no signing identity
+ *   exists at the resolved path, or the file is malformed/unreadable.
+ */
+export function resolveSigningPersist(
+  signing: SigningConfig | undefined,
+): SigningPersist | null {
+  if (signing === undefined || signing.mode !== "certificate") return null;
+  const identityPath = expandTilde(
+    signing.identityFile ?? defaultSigningIdentityPath(),
+  );
+  const identity = loadSigningIdentity(identityPath);
+  if (identity === undefined)
+    throw new UsageError(
+      `signing is configured (mode: certificate) but no signing identity was ` +
+        `found at ${identityPath}; run 'psilink fingerprint' to create one, or ` +
+        `set signing.identity_file to the correct path`,
+    );
+  return {
+    identity,
+    partnerFingerprint: signing.partnerFingerprint,
+    receiptOutput: resolveReceiptOutput(signing.receiptOutput),
+  };
+}
+
 export async function handler(argv: Arguments): Promise<void> {
   // parseArgs resolves the log level and reads every option, so it runs before
   // the logger exists. parseOrExit reports its usage errors -- a repeated
@@ -793,6 +841,17 @@ export async function handler(argv: Arguments): Promise<void> {
       recordFile: options.recordFile,
     });
 
+    // Resolve the signed-receipt inputs from the config's `signing` block before
+    // connecting, so a certificate-mode block with no signing identity fails fast
+    // (exit 64) rather than after the handshake. `null` when signing is not
+    // configured for certificate mode, which leaves the exchange unsigned.
+    let signing: SigningPersist | null;
+    try {
+      signing = resolveSigningPersist(exchangeDataSpec.signing);
+    } catch (err) {
+      exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+    }
+
     let exchangeError: unknown;
     try {
       await runProtocol(
@@ -805,10 +864,11 @@ export async function handler(argv: Arguments): Promise<void> {
         recordOutput,
         // saveIntent and onAuthenticated are both undefined on the authenticated
         // exchange path; the trailing object carries the CLI-only sweep controls
-        // and the --event-stream toggle.
+        // and the --event-stream toggle, then the signed-receipt inputs.
         undefined,
         undefined,
         { sweepExchangeFiles, forceRetainSweep, eventStream },
+        signing,
       );
     } catch (err) {
       // Capture rather than exit here so the expiry advisory below can run on the

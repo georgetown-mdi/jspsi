@@ -36,7 +36,12 @@ import {
   reconcileReceivedPayload,
 } from "./payloadExchange.js";
 import type { PayloadWireMessage } from "./payloadExchange.js";
-import { buildExchangeRecord } from "./exchangeRecord.js";
+import { buildExchangeRecord, computeTermsHash } from "./exchangeRecord.js";
+import {
+  buildReceiptContent,
+  deriveReceiptBinder,
+  exchangeSignedReceipt,
+} from "./signedReceipt.js";
 import { UsageError } from "./errors.js";
 import type { Metadata } from "./config/metadata.js";
 import type { LinkageTerms } from "./config/linkageTerms.js";
@@ -54,6 +59,8 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { ExchangeSpec } from "./config/exchangeSpec.js";
 import type { PartnerPayload } from "./payloadExchange.js";
 import type { BuiltExchangeRecord } from "./exchangeRecord.js";
+import type { SigningIdentity } from "./signingIdentity.js";
+import type { DualSignedRecord, ReceiptContent } from "./signedReceipt.js";
 
 /**
  * The subset of an exchange specification that governs data preparation.
@@ -504,6 +511,18 @@ export interface ExchangeResult {
    * non-fatal and never discards the exchange result.
    */
   audit?: BuiltExchangeRecord;
+  /**
+   * The dual-signed record (Phase 2 of exchange receipts): the mutually-verifiable
+   * receipt content plus both parties' certificates and signatures. Present only
+   * when a {@link RunExchangeOptions.signingIdentity} and
+   * {@link RunExchangeOptions.sessionKey} were supplied AND the signature exchange
+   * completed; the caller persists it. Absent on the unsigned path (no signing
+   * identity) -- the self-attested record path is unaffected. On a failed signature
+   * exchange {@link runExchange} throws (a security {@link ConnectionError}), so a
+   * partner signature received without completing the local swap is never returned
+   * as a valid artifact.
+   */
+  signedReceipt?: DualSignedRecord;
 }
 
 export interface RunExchangeOptions {
@@ -581,6 +600,33 @@ export interface RunExchangeOptions {
    * content into a log is an injection risk.
    */
   onPartnerHostKeyMalformed?: () => void;
+  /**
+   * This party's long-lived signing identity, from `signing.identity_file`. When
+   * present (together with {@link sessionKey}), the signing step runs at the
+   * conclusion of the exchange: both parties sign the same canonical receipt
+   * content and swap signatures, yielding {@link ExchangeResult.signedReceipt}.
+   * Absent (the default) skips the step entirely, so the unsigned-record path --
+   * the web app (no keys/key-exchange) and a CLI exchange without a signing
+   * identity -- runs {@link runExchange} unchanged. The CLI threads it only on the
+   * authenticated file-sync path, which is the only path that holds a session key.
+   */
+  signingIdentity?: SigningIdentity;
+  /**
+   * The pinned partner certificate fingerprint (`signing.partner_fingerprint`),
+   * consulted only when {@link signingIdentity} is present. The signing step
+   * verifies the partner's presented certificate against this pin BEFORE the
+   * signature; absent, the step fails closed (no partner certificate can be
+   * trusted). Field-shape-validated by the config schema.
+   */
+  partnerFingerprint?: string;
+  /**
+   * The 32-byte session key from the authenticated key exchange, needed to derive
+   * the per-exchange replay binder that the signed receipt commits to. Present only
+   * on the authenticated path (the CLI discards it otherwise; the web has no key
+   * exchange). Required for the signing step: {@link signingIdentity} without it
+   * leaves the step un-runnable, so the caller threads them together or not at all.
+   */
+  sessionKey?: Uint8Array<ArrayBuffer>;
   verbosity?: number;
 }
 
@@ -881,6 +927,48 @@ export async function runExchange(
     );
   }
 
+  // Signed-receipt step: at the conclusion of a successful exchange, both parties
+  // sign the SAME canonical receipt content (the agreed-terms hash and the record
+  // commitments, plus a session-derived binder) and swap signatures over the live
+  // channel, producing one dual-signed record. Gated on a signing identity AND a
+  // session key both being present, so the unsigned-record path -- the web app (no
+  // keys) and a CLI exchange without a signing identity -- runs this function
+  // unchanged. Unlike the audit record above, a failure here is NOT swallowed: a
+  // fingerprint-pin or signature failure is a security event that terminates the
+  // exchange (exchangeSignedReceipt throws a security ConnectionError). Placed
+  // after exchangePayloads and the record build so the receipt commits to the full
+  // result, including payloads.
+  let signedReceipt: DualSignedRecord | undefined;
+  if (
+    options.signingIdentity !== undefined &&
+    options.sessionKey !== undefined
+  ) {
+    // The receipt content is built from the mutually-verifiable facts directly --
+    // the agreed-terms hash and salt-free digests of the two directional payloads
+    // -- NOT from the salted record commitments (per-party salts are not
+    // byte-identical across parties). It is therefore independent of the non-fatal
+    // audit build above; a party that could not build its local record can still
+    // sign a receipt. The binder is derived from the initiator's role by BOTH
+    // parties, so both compute the one shared binder with no extra messages; see
+    // deriveReceiptBinder.
+    const [binder, termsHash] = await Promise.all([
+      deriveReceiptBinder(options.sessionKey, "initiator"),
+      computeTermsHash(linkageTerms, partnerTerms),
+    ]);
+    const content: ReceiptContent = await buildReceiptContent(
+      handshakeRole,
+      termsHash,
+      toCommittedPayload(localPayload),
+      toCommittedPayload(partnerPayload),
+      binder,
+    );
+    signedReceipt = await exchangeSignedReceipt(conn, handshakeRole, {
+      identity: options.signingIdentity,
+      pinnedFingerprint: options.partnerFingerprint,
+      content,
+    });
+  }
+
   return {
     // Withheld (undefined) from a party whose agreed terms give it no output, so
     // a non-receiving helper does not get the result table to write; the receiver
@@ -891,5 +979,6 @@ export async function runExchange(
     partnerPayload,
     audit,
     bootstrap,
+    signedReceipt,
   };
 }

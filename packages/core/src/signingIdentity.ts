@@ -165,10 +165,20 @@ const CertificateBodyShape = {
   publicKey: Ed25519PublicJwkSchema,
 };
 
-const SigningCertificateSchema: z.ZodType<SigningCertificate> = z.object({
-  ...CertificateBodyShape,
-  signature: base64UrlSchema,
-});
+/**
+ * Field-shape schema for a {@link SigningCertificate}: the signed body plus the
+ * base64url self-signature. Exported so a wire frame or record that embeds a
+ * certificate (the signed-receipt module) can nest it in its own schema. Shape
+ * only -- it does NOT self-verify; a caller that trusts the certificate runs
+ * {@link assertPartnerCertificateTrusted} / {@link verifyPresentedCertificate},
+ * which check the self-signature and the fingerprint pin.
+ */
+export const SigningCertificateSchema: z.ZodType<SigningCertificate> = z.object(
+  {
+    ...CertificateBodyShape,
+    signature: base64UrlSchema,
+  },
+);
 
 const SigningIdentitySchema: z.ZodType<SigningIdentity> = z.object({
   version: z.literal(SIGNING_IDENTITY_VERSION),
