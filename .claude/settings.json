@@ -37,6 +37,10 @@
           {
             "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/require-agent-model.mjs\""
+          },
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/require-declared-worktree-isolation.mjs\""
           }
         ]
       },

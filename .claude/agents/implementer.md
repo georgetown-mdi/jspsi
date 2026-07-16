@@ -18,6 +18,9 @@ produce is your final message to the caller. Never end expecting a reply.
   and review enforce.
 - Work only on the branch or worktree the prompt names. Never commit to staging or
   main; never attribute yourself on a commit.
+- If the prompt drops you in a fresh isolated worktree (no `node_modules` -- check
+  with `ls node_modules`), run `bash .claude/scripts/worktree-init.sh` once before
+  you build or test; it provisions deps and builds core so the suite runs.
 - Before you report, run `npm run typecheck && npm run lint && npm run format` and
   the tests relevant to your change (a core change means every workspace unit
   suite), and state in your report whether the work is committed.
