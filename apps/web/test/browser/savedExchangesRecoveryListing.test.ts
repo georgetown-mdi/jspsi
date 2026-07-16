@@ -13,12 +13,17 @@ import "@mantine/core/styles.css";
 import { MantineProvider } from "@mantine/core";
 
 import {
+  MANAGED_EXCHANGE_LOCAL_STORE_NAME,
   MANAGED_EXCHANGE_STORE_NAME,
   clearManagedExchanges,
   createManagedExchange,
   listManagedExchanges,
   openManagedExchangeDatabase,
 } from "@psi/managedExchangeStore";
+import {
+  listManagedLocalState,
+  markManagedExchangeBackedUp,
+} from "@psi/managedLocalState";
 import { SavedExchanges } from "@bench/SavedExchanges";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 
@@ -81,6 +86,26 @@ async function rawPut(value: unknown): Promise<void> {
         "readwrite",
       );
       transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME).put(value);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/** Seed a corrupted sibling local-state value under a key, bypassing the validating
+ * write, so a test can prove the diagnostic read treats an unparseable sibling
+ * conservatively (backed up on doubt). */
+async function rawLocalPut(id: string, value: unknown): Promise<void> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(
+        MANAGED_EXCHANGE_LOCAL_STORE_NAME,
+        "readwrite",
+      );
+      transaction.objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME).put(value, id);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
     });
@@ -179,5 +204,103 @@ describe("read-failed recovery listing", () => {
       .toBeInTheDocument();
     // The secret must not appear anywhere on the recovery surface.
     expect(document.body.textContent).not.toContain(good.sharedSecret);
+  });
+});
+
+describe("recovery listing: the delete confirm's backup custody note", () => {
+  /** Seed a good record (so a readable recovery row exists to delete) beside a bad
+   * one (so the surface is the read-failed one), run `seedState` to stamp any sibling
+   * state on the good record BEFORE the single mount, then render the always-list
+   * route. Returns the good record. Its row is first in store-key order (a hex-first
+   * randomUUID sorts before "zzz-bad-record"), so the `.first()` Delete opens it. */
+  async function mountReadFailedWith(
+    label: string,
+    seedState?: (id: string) => Promise<void>,
+  ): Promise<Awaited<ReturnType<typeof createManagedExchange>>> {
+    const good = await createManagedExchange(newExchange({ label }));
+    await rawPut({
+      ...good,
+      id: "zzz-bad-record",
+      schemaVersion: "psilink-managed-exchange/v2",
+    });
+    if (seedState) await seedState(good.id);
+    await expect(listManagedExchanges()).rejects.toThrow();
+    mount(createElement(SavedExchanges));
+    await expect
+      .element(page.getByText(label === "" ? "(unnamed exchange)" : label))
+      .toBeInTheDocument();
+    return good;
+  }
+
+  test("marker present -> the custody note shows on the recovery confirm", async () => {
+    await mountReadFailedWith("Backed up partnership", (id) =>
+      markManagedExchangeBackedUp(id, "2026-07-10T09:00:00.000Z"),
+    );
+
+    await page.getByRole("button", { name: "Delete" }).first().click();
+    await expect
+      .element(
+        page.getByText("A backup file you exported stays in your custody", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("marker absent -> the custody note is not shown on the recovery confirm", async () => {
+    await mountReadFailedWith("Fresh partnership");
+
+    await page.getByRole("button", { name: "Delete" }).first().click();
+    await expect
+      .element(page.getByText("your partner is not notified", { exact: false }))
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByText("A backup file you exported stays in your custody", {
+          exact: false,
+        })
+        .query(),
+    ).toBeNull();
+  });
+
+  test("an unparseable sibling entry -> the custody note shows (conservative on doubt)", async () => {
+    // No bad record here: a corrupted sibling entry alone fails the strict local-state
+    // read, which routes the surface to read-failed on its own. The diagnostic read
+    // then treats that unparseable sibling conservatively -- backed up on doubt -- so
+    // the good record's delete confirm carries the custody note.
+    const good = await createManagedExchange(
+      newExchange({ label: "Doubtful partnership" }),
+    );
+    await rawLocalPut(good.id, { backup: { backedUpAt: "not-an-instant" } });
+    await expect(listManagedLocalState()).rejects.toThrow();
+
+    mount(createElement(SavedExchanges));
+    await expect
+      .element(page.getByText("Doubtful partnership"))
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Delete" }).first().click();
+    await expect
+      .element(
+        page.getByText("A backup file you exported stays in your custody", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("an unlabeled readable entry's confirm reads 'Delete this exchange?', not the row's display text", async () => {
+    // The row text is the display transform "(unnamed exchange)", but the confirm
+    // must name the raw (empty) label, so the button's own empty-label branch fires.
+    await mountReadFailedWith("");
+
+    // The good (unlabeled) record's row is first; open its confirm.
+    await page.getByRole("button", { name: "Delete" }).first().click();
+    await expect
+      .element(page.getByText("Delete this exchange?", { exact: false }))
+      .toBeInTheDocument();
+    expect(
+      page.getByText('Delete "(unnamed exchange)"?', { exact: false }).query(),
+    ).toBeNull();
   });
 });

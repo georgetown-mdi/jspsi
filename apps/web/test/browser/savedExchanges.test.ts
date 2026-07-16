@@ -27,6 +27,22 @@ import type { NewManagedExchange } from "@psi/managedExchangeRecord";
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
 
+// The component's delete goes through this module. It is mocked so the delete-failure
+// test can make a single delete reject while every other case uses the real
+// transaction; `deleteOverride`, when set, replaces the real delete for one test.
+let deleteOverride: ((id: string) => Promise<void>) | undefined;
+vi.mock("@psi/managedExchangeStore", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  const realDelete = actual.deleteManagedExchange as (
+    id: string,
+  ) => Promise<void>;
+  return {
+    ...actual,
+    deleteManagedExchange: (id: string) =>
+      deleteOverride ? deleteOverride(id) : realDelete(id),
+  };
+});
+
 // The managed-exchange list and its conditional home route, exercised against real
 // Chromium (real IndexedDB and the sibling object store). The home route at `/`
 // (SavedExchangesHome) is the management interface only once an exchange exists: a
@@ -94,6 +110,7 @@ afterEach(async () => {
   container?.remove();
   root = undefined;
   container = undefined;
+  deleteOverride = undefined;
   await clearManagedExchanges();
 });
 
@@ -347,5 +364,38 @@ describe("saved list route: delete is a first-class, always-available action", (
       .toBeInTheDocument();
     // A spent row does not offer Run.
     expect(page.getByRole("button", { name: "Run" }).query()).toBeNull();
+  });
+
+  test("a rejected delete surfaces an error and leaves the row standing", async () => {
+    await createManagedExchange(newExchange({ label: "Riverbend quarterly" }));
+    // The delete rejects (a transaction abort, quota, or blocked open): the confirm
+    // must not close silently over a row that is still there.
+    deleteOverride = () => Promise.reject(new Error("delete failed"));
+
+    mount(createElement(SavedExchanges));
+
+    await expect
+      .element(page.getByText("Riverbend quarterly"))
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Delete" }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Delete" })
+      .click();
+
+    // The failure is visible, the modal stays open, and the row is still listed.
+    await expect
+      .element(
+        page.getByText("Removing it from this browser failed", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    // The row's own label span still stands (exact, so the modal's "Delete
+    // "Riverbend quarterly"?" copy is not what this matches).
+    await expect
+      .element(page.getByText("Riverbend quarterly", { exact: true }))
+      .toBeInTheDocument();
   });
 });

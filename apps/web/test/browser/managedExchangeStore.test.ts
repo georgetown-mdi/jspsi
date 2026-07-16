@@ -135,6 +135,26 @@ async function rawPut(value: unknown): Promise<void> {
   }
 }
 
+/** Overwrite the sibling local-state value under a key with an arbitrary object,
+ * bypassing the validating write path, so a test can seed a corrupted sibling entry
+ * the diagnostic read must treat conservatively (backed up on a parse failure). */
+async function rawLocalPut(id: string, value: unknown): Promise<void> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(
+        MANAGED_EXCHANGE_LOCAL_STORE_NAME,
+        "readwrite",
+      );
+      transaction.objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME).put(value, id);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
 beforeEach(async () => {
   await clearManagedExchanges();
 });
@@ -545,8 +565,41 @@ describe("diagnostic read never rejects wholesale", () => {
       label: "Riverbend quarterly",
       side: "acceptor",
     });
+    // A fresh record has no exported backup, and no marker's timestamp reaches the
+    // entry -- only the boolean.
+    expect(entry.backedUp).toBe(false);
     // The secret must never reach the diagnostic surface.
     expect(JSON.stringify(entries)).not.toContain(created.sharedSecret);
+  });
+
+  test("a backup marker present reads as backedUp; the timestamp never surfaces", async () => {
+    const created = await createManagedExchange(
+      newExchange({ label: "Backed up" }),
+    );
+    await markManagedExchangeBackedUp(created.id, "2026-07-10T09:00:00.000Z");
+
+    const [entry] = await listManagedExchangesDiagnostic();
+    expect(entry.backedUp).toBe(true);
+    // The marker's own instant is never surfaced -- a boolean suffices.
+    expect(JSON.stringify(entry)).not.toContain("2026-07-10T09:00:00.000Z");
+  });
+
+  test("an absent sibling entry reads as not backed up", async () => {
+    await createManagedExchange(newExchange({ label: "Fresh" }));
+    const [entry] = await listManagedExchangesDiagnostic();
+    expect(entry.backedUp).toBe(false);
+  });
+
+  test("an unparseable sibling entry reads as backed up (conservative on doubt)", async () => {
+    const created = await createManagedExchange(
+      newExchange({ label: "Doubtful" }),
+    );
+    // Corrupt the sibling entry so its parse fails: a wrongly-shown custody warning
+    // is harmless; a wrongly-suppressed one is not, so doubt reads as backed up.
+    await rawLocalPut(created.id, { backup: { backedUpAt: "not-an-instant" } });
+
+    const [entry] = await listManagedExchangesDiagnostic();
+    expect(entry.backedUp).toBe(true);
   });
 
   test("one unreadable record does not fail the read; it yields an unreadable marker keyed for delete", async () => {
@@ -567,7 +620,31 @@ describe("diagnostic read never rejects wholesale", () => {
     const readable = entries.find((entry) => entry.kind === "readable");
     const unreadable = entries.find((entry) => entry.kind === "unreadable");
     expect(readable).toBeDefined();
-    expect(unreadable).toEqual({ kind: "unreadable", id: "bad-record" });
+    expect(unreadable).toEqual({
+      kind: "unreadable",
+      id: "bad-record",
+      backedUp: false,
+    });
+  });
+
+  test("an unreadable record with a live sibling backup marker still reads as backed up", async () => {
+    const good = await createManagedExchange(newExchange({ label: "Good" }));
+    await rawPut({
+      ...good,
+      id: "bad-record",
+      schemaVersion: "psilink-managed-exchange/v2",
+    });
+    // The sibling backup marker survives the record's unreadability: a delete of the
+    // bad record must still warn about the exported backup's custody.
+    await markManagedExchangeBackedUp("bad-record", "2026-07-10T09:00:00.000Z");
+
+    const entries = await listManagedExchangesDiagnostic();
+    const unreadable = entries.find((entry) => entry.kind === "unreadable");
+    expect(unreadable).toEqual({
+      kind: "unreadable",
+      id: "bad-record",
+      backedUp: true,
+    });
   });
 
   test("an unreadable record is deletable by key without a successful parse", async () => {

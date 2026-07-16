@@ -302,17 +302,24 @@ function DeleteExchangeButton({
 }) {
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteFailed, setDeleteFailed] = useState(false);
   const named = label === "" ? "this exchange" : `"${label}"`;
 
   function confirmDelete() {
     setDeleting(true);
+    setDeleteFailed(false);
     void (async () => {
       try {
         await deleteManagedExchange(id);
         onDeleted();
+        setConfirming(false);
+      } catch {
+        // A rejected delete (transaction abort, quota, a blocked open) leaves the
+        // row standing: keep the modal open and surface the failure so the operator
+        // can retry rather than the row silently vanishing from confirm.
+        setDeleteFailed(true);
       } finally {
         setDeleting(false);
-        setConfirming(false);
       }
     })();
   }
@@ -349,6 +356,12 @@ function DeleteExchangeButton({
             yourself if you no longer want it. It remains a credential until the
             partnership rotates past it.
           </p>
+        )}
+        {deleteFailed && (
+          <Alert color="red" title="That exchange could not be removed" mb="sm">
+            Removing it from this browser failed. Nothing was deleted; try
+            again.
+          </Alert>
         )}
         <div className={styles.savedRowActions} style={{ marginTop: "1rem" }}>
           <Button variant="default" onClick={() => setConfirming(false)}>
@@ -461,8 +474,8 @@ function RecoveryListing({ reload }: { reload: () => void }) {
           </div>
           <DeleteExchangeButton
             id={row.id}
-            label={row.unreadable ? "" : row.label}
-            backedUp={false}
+            label={row.deleteLabel}
+            backedUp={row.backedUp}
             onDeleted={reload}
           />
         </li>

@@ -242,11 +242,19 @@ export async function listManagedExchanges(): Promise<
  * One entry in the diagnostic read: for a stored key, either the display essentials
  * the entry parsed to (`readable`) or an unreadable marker (`unreadable`) carrying
  * only the key. Both carry the stored `id` so a delete-by-key acts on either --
- * deleting an unreadable entry must not require a successful parse.
+ * deleting an unreadable entry must not require a successful parse. Both also carry
+ * `backedUp`, derived from the sibling local-state store (the backup marker survives
+ * independently of record validity), so the delete confirm's custody note shows on
+ * the recovery path exactly as on the normal list. A boolean suffices: the marker's
+ * timestamp is never surfaced here.
  */
 export type ManagedExchangeDiagnosticEntry =
-  | { kind: "readable"; essentials: ManagedExchangeDiagnosticEssentials }
-  | { kind: "unreadable"; id: string };
+  | {
+      kind: "readable";
+      essentials: ManagedExchangeDiagnosticEssentials;
+      backedUp: boolean;
+    }
+  | { kind: "unreadable"; id: string; backedUp: boolean };
 
 /**
  * Read every stored entry for the read-failed recovery listing, per-record and
@@ -259,10 +267,18 @@ export type ManagedExchangeDiagnosticEntry =
  * the normal list cannot load.
  *
  * SECURITY: the entries carry display essentials only (the label, side, dates, and
- * key); the `sharedSecret`, the document, and the input handle never leave the
- * diagnostic extraction, so no secret material reaches the recovery surface. Keyed
- * off the store's own keys rather than the parsed records, so an unreadable entry
- * still yields a key to delete by.
+ * key) plus the `backedUp` boolean; the `sharedSecret`, the document, the input
+ * handle, and the marker's timestamp never leave the diagnostic extraction, so no
+ * secret material reaches the recovery surface. Keyed off the store's own keys
+ * rather than the parsed records, so an unreadable entry still yields a key to
+ * delete by.
+ *
+ * The transaction spans the record store AND the sibling local-state store so each
+ * entry's `backedUp` is read in the same read. The backup marker survives
+ * independently of record validity, so an entry whose record is unreadable can still
+ * hold a live exported backup. `backedUp` is CONSERVATIVE on doubt: if the sibling
+ * entry exists but cannot be parsed it reads as backed up (a wrongly-shown custody
+ * warning is harmless; a wrongly-suppressed one is not).
  */
 export async function listManagedExchangesDiagnostic(): Promise<
   Array<ManagedExchangeDiagnosticEntry>
@@ -272,26 +288,38 @@ export async function listManagedExchangesDiagnostic(): Promise<
     return await new Promise<Array<ManagedExchangeDiagnosticEntry>>(
       (resolve, reject) => {
         const transaction = db.transaction(
-          MANAGED_EXCHANGE_STORE_NAME,
+          [MANAGED_EXCHANGE_STORE_NAME, MANAGED_EXCHANGE_LOCAL_STORE_NAME],
           "readonly",
         );
-        const store = transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME);
-        const keysRequest = store.getAllKeys();
-        const valuesRequest = store.getAll();
+        const records = transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME);
+        const local = transaction.objectStore(
+          MANAGED_EXCHANGE_LOCAL_STORE_NAME,
+        );
+        const keysRequest = records.getAllKeys();
+        const valuesRequest = records.getAll();
+        const localKeysRequest = local.getAllKeys();
+        const localValuesRequest = local.getAll();
         transaction.oncomplete = () => {
           const keys = keysRequest.result;
           const values = valuesRequest.result;
+          const backedUpByKey = backedUpMarkersByKey(
+            localKeysRequest.result,
+            localValuesRequest.result,
+          );
           const entries: Array<ManagedExchangeDiagnosticEntry> = [];
           for (let index = 0; index < keys.length; index += 1) {
+            const key = String(keys[index]);
+            const backedUp = backedUpByKey.get(key) ?? false;
             try {
               entries.push({
                 kind: "readable",
                 essentials: diagnoseManagedExchangeRecord(values[index]),
+                backedUp,
               });
             } catch {
               // The parse failed, so the record's own `id` is untrusted; the store
               // key is the delete target instead, and the only field surfaced.
-              entries.push({ kind: "unreadable", id: String(keys[index]) });
+              entries.push({ kind: "unreadable", id: key, backedUp });
             }
           }
           resolve(entries);
@@ -303,6 +331,30 @@ export async function listManagedExchangesDiagnostic(): Promise<
   } finally {
     db.close();
   }
+}
+
+/** Derive, per sibling-store key, whether an exported backup marker is present --
+ * the `backedUp` boolean the diagnostic entries carry. CONSERVATIVE on doubt: a
+ * sibling entry that cannot be parsed reads as backed up (a wrongly-shown custody
+ * warning is harmless; a wrongly-suppressed one is not). The marker's timestamp is
+ * never surfaced -- only its presence. */
+function backedUpMarkersByKey(
+  keys: ReadonlyArray<IDBValidKey>,
+  values: ReadonlyArray<unknown>,
+): Map<string, boolean> {
+  const backedUpByKey = new Map<string, boolean>();
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = String(keys[index]);
+    try {
+      backedUpByKey.set(
+        key,
+        parseManagedLocalState(values[index]).backup !== undefined,
+      );
+    } catch {
+      backedUpByKey.set(key, true);
+    }
+  }
+  return backedUpByKey;
 }
 
 /**
