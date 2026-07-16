@@ -111,7 +111,8 @@ function ConfigRowItem({ row }: { row: ConfigRow }) {
  * is a new exchange, not an in-place edit (see docs/spec/MANAGED_EXCHANGE_RECORD.md,
  * the `exchangeFile` row). The re-invite affordance here refreshes the partnership
  * with a new secret on the SAME terms, honestly labeled: the inviter mints a fresh
- * invitation; the acceptor is told to ask the partner.
+ * invitation; the acceptor is told the terms cannot change by re-invite and that
+ * different terms mean a new exchange from the partner.
  */
 function ConfigurationView({
   record,
@@ -164,8 +165,11 @@ function ConfigurationView({
         </>
       ) : (
         <p className={styles.small}>
-          To change the terms, ask your partner to send you a fresh invitation
-          with the new terms over your usual trusted channel, then accept it.
+          These agreed terms are fixed for this partnership; your partner cannot
+          re-invite you onto different ones. To exchange on different terms,
+          your partner sets up a new exchange with those terms and sends you its
+          invitation -- accept it and you can save it as a new recurring
+          exchange, then delete this one if you no longer want it.
         </p>
       )}
     </div>

@@ -13,9 +13,11 @@
  * party's whole minted exchange-file document verbatim (no `authentication`
  * block) plus the one at-rest secret and the small set of local-only fields the
  * document deliberately does not carry. It never holds input content or a row
- * value: at most a `FileSystemFileHandle` pointer to the operator's file. A
- * change to the agreed terms is a re-invite, not an in-place edit; only the local
- * fields (`label`, `schedule`, `tokenMaxAgeDays`) update in place.
+ * value: at most a `FileSystemFileHandle` pointer to the operator's file. The
+ * document is fixed for the partnership: a re-invite re-issues it verbatim with
+ * only a fresh secret, and a change to the agreed terms is a new exchange, not a
+ * re-invite or an in-place edit; only the local fields (`label`, `schedule`,
+ * `tokenMaxAgeDays`) update in place.
  */
 
 import {
@@ -534,8 +536,9 @@ export function applyManagedExchangeInputHandle(
 }
 
 /** The local fields an operator may edit in place without a re-invite: the
- * display label, the run schedule, and the max-token-age policy. A change to the
- * agreed terms is a re-invite, not an in-place record edit, so the document and
+ * display label, the run schedule, and the max-token-age policy. The agreed
+ * terms are fixed for the partnership -- a re-invite only refreshes the secret,
+ * and a terms change is a new exchange, not a re-invite -- so the document and
  * the secret are deliberately not editable here. */
 export interface ManagedExchangeLocalEdits {
   /** A new display label (validated to {@link MAX_LABEL_LENGTH}). */

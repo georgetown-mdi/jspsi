@@ -135,7 +135,7 @@ describe("managed exchange detail configuration", () => {
     ).toBeNull();
   });
 
-  test("the acceptor is told to ask the partner rather than shown a mint button", async () => {
+  test("the acceptor is told different terms mean a new exchange, not shown a mint button", async () => {
     mount(
       createElement(ManagedExchangeDetail, {
         record: record("acceptor"),
@@ -149,7 +149,7 @@ describe("managed exchange detail configuration", () => {
 
     await expect
       .element(
-        page.getByText("ask your partner to send you a fresh invitation", {
+        page.getByText("your partner cannot re-invite you onto different", {
           exact: false,
         }),
       )
