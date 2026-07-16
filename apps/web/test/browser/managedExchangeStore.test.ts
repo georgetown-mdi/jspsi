@@ -6,12 +6,14 @@ import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
 import {
   MANAGED_EXCHANGE_DB_NAME,
+  MANAGED_EXCHANGE_LOCAL_STORE_NAME,
   MANAGED_EXCHANGE_STORE_NAME,
   clearManagedExchanges,
   createManagedExchange,
   deleteManagedExchange,
   getManagedExchange,
   listManagedExchanges,
+  listManagedExchangesDiagnostic,
   openManagedExchangeDatabase,
   persistManagedExchangeRotation,
   putManagedExchange,
@@ -23,6 +25,12 @@ import {
   MAX_LABEL_LENGTH,
   composeManagedExchangeFile,
 } from "@psi/managedExchangeRecord";
+import {
+  getManagedLocalState,
+  markManagedExchangeBackedUp,
+  markManagedExchangeSpent,
+} from "@psi/managedLocalState";
+import { buildManagedDeposit } from "@bench/manageOfferModel";
 
 import type {
   ManagedExchangeSchedule,
@@ -88,6 +96,25 @@ async function rawStored(id: string): Promise<unknown> {
   }
 }
 
+/** The raw sibling local-state value under a key, read straight from the local-state
+ * store (bypassing the validating read path) so the delete test can assert the
+ * sibling entry is gone too, not merely absent through a validating read. */
+async function rawLocalStored(id: string): Promise<unknown> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    return await new Promise<unknown>((resolve, reject) => {
+      const request = db
+        .transaction(MANAGED_EXCHANGE_LOCAL_STORE_NAME, "readonly")
+        .objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME)
+        .get(id);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
 /** Overwrite the stored value under a key with an arbitrary object, so a test can
  * seed a corrupted or future-version record the validating read path must
  * reject. */
@@ -100,6 +127,26 @@ async function rawPut(value: unknown): Promise<void> {
         "readwrite",
       );
       transaction.objectStore(MANAGED_EXCHANGE_STORE_NAME).put(value);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/** Overwrite the sibling local-state value under a key with an arbitrary object,
+ * bypassing the validating write path, so a test can seed a corrupted sibling entry
+ * the diagnostic read must treat conservatively (backed up on a parse failure). */
+async function rawLocalPut(id: string, value: unknown): Promise<void> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(
+        MANAGED_EXCHANGE_LOCAL_STORE_NAME,
+        "readwrite",
+      );
+      transaction.objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME).put(value, id);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
     });
@@ -358,6 +405,94 @@ describe("input-file handle persistence", () => {
   });
 });
 
+describe("deposit persists a managed record of the party's side", () => {
+  const NOW = Date.parse("2026-02-01T14:00:00.000Z");
+
+  test("the inviter's save-as-recurring deposit adds an inviter record", async () => {
+    const secret = generateSharedSecret();
+    const deposit = buildManagedDeposit(
+      {
+        side: "inviter",
+        exchangeFile: composeManagedExchangeFile({
+          connection: webrtcLocator,
+          linkageTerms,
+        }),
+        sharedSecret: secret,
+        choices: { label: "Riverbend quarterly" },
+      },
+      NOW,
+    );
+
+    const created = await createManagedExchange(deposit);
+
+    const stored = await listManagedExchanges();
+    expect(stored).toHaveLength(1);
+    expect(stored[0].id).toBe(created.id);
+    expect(stored[0].side).toBe("inviter");
+    expect(stored[0].sharedSecret).toBe(secret);
+  });
+
+  test("the acceptor's save-as-recurring deposit adds an acceptor record to the same store", async () => {
+    const secret = generateSharedSecret();
+    const deposit = buildManagedDeposit(
+      {
+        side: "acceptor",
+        exchangeFile: composeManagedExchangeFile({
+          connection: webrtcLocator,
+          linkageTerms,
+        }),
+        sharedSecret: secret,
+        choices: { label: "Riverbend quarterly" },
+      },
+      NOW,
+    );
+
+    const created = await createManagedExchange(deposit);
+
+    const stored = await listManagedExchanges();
+    expect(stored).toHaveLength(1);
+    expect(stored[0].id).toBe(created.id);
+    expect(stored[0].side).toBe("acceptor");
+  });
+
+  test("both sides deposit into one list carrying both", async () => {
+    await createManagedExchange(
+      buildManagedDeposit(
+        {
+          side: "inviter",
+          exchangeFile: composeManagedExchangeFile({
+            connection: webrtcLocator,
+            linkageTerms,
+          }),
+          sharedSecret: generateSharedSecret(),
+          choices: { label: "Invited partnership" },
+        },
+        NOW,
+      ),
+    );
+    await createManagedExchange(
+      buildManagedDeposit(
+        {
+          side: "acceptor",
+          exchangeFile: composeManagedExchangeFile({
+            connection: webrtcLocator,
+            linkageTerms,
+          }),
+          sharedSecret: generateSharedSecret(),
+          choices: { label: "Accepted partnership" },
+        },
+        NOW,
+      ),
+    );
+
+    const stored = await listManagedExchanges();
+    expect(stored.map((record) => record.side).sort()).toEqual([
+      "acceptor",
+      "inviter",
+    ]);
+  });
+});
+
 describe("reader rejects unknown on a store read", () => {
   test("a future schemaVersion in the store rejects rather than loading", async () => {
     const created = await createManagedExchange(newExchange());
@@ -368,7 +503,7 @@ describe("reader rejects unknown on a store read", () => {
 });
 
 describe("one-step delete leaves nothing behind", () => {
-  test("delete removes the record, secret, handle, schedule, and bookkeeping", async () => {
+  test("delete removes the record, secret, handle, schedule, bookkeeping, and every local sibling marker", async () => {
     const root = await navigator.storage.getDirectory();
     const handle = await root.getFileHandle("managed-input.csv", {
       create: true,
@@ -381,19 +516,151 @@ describe("one-step delete leaves nothing behind", () => {
         schedule,
       }),
     );
-    // Everything the browser holds for the exchange is one object under one key.
+    await recordManagedExchangeLastRun(created.id, {
+      at: "2026-02-01T14:00:00.000Z",
+      outcome: "succeeded",
+    });
+    // Also stamp both sibling markers, so the delete must clear the local-state
+    // entry as well as the record -- the two stores the browser holds an exchange
+    // in.
+    await markManagedExchangeBackedUp(created.id, "2026-02-01T14:05:00.000Z");
+    await markManagedExchangeSpent(created.id, "2026-02-02T09:00:00.000Z");
+    // Everything the browser holds for the exchange -- the record under its key,
+    // and the sibling local-state entry -- exists before the delete.
     expect(await rawStored(created.id)).toBeDefined();
+    expect(await rawLocalStored(created.id)).toBeDefined();
 
     await deleteManagedExchange(created.id);
 
+    // Enumerate every location and assert emptiness, not merely that the row is
+    // gone: the record store (raw and through both validating reads) AND the
+    // sibling local-state store (raw and through its validating read).
     expect(await rawStored(created.id)).toBeUndefined();
     expect(await getManagedExchange(created.id)).toBeUndefined();
     expect(await listManagedExchanges()).toEqual([]);
+    expect(await rawLocalStored(created.id)).toBeUndefined();
+    expect(await getManagedLocalState(created.id)).toBeUndefined();
     await root.removeEntry("managed-input.csv");
   });
 
   test("delete of a missing id is idempotent", async () => {
     await expect(deleteManagedExchange("no-such-id")).resolves.toBeUndefined();
+  });
+});
+
+describe("diagnostic read never rejects wholesale", () => {
+  test("readable entries carry display essentials only, never the secret", async () => {
+    const created = await createManagedExchange(
+      newExchange({ label: "Riverbend quarterly", side: "acceptor" }),
+    );
+
+    const entries = await listManagedExchangesDiagnostic();
+
+    expect(entries).toHaveLength(1);
+    const entry = entries[0];
+    expect(entry.kind).toBe("readable");
+    if (entry.kind !== "readable") throw new Error("expected a readable entry");
+    expect(entry.essentials).toEqual({
+      id: created.id,
+      label: "Riverbend quarterly",
+      side: "acceptor",
+    });
+    // A fresh record has no exported backup, and no marker's timestamp reaches the
+    // entry -- only the boolean.
+    expect(entry.backedUp).toBe(false);
+    // The secret must never reach the diagnostic surface.
+    expect(JSON.stringify(entries)).not.toContain(created.sharedSecret);
+  });
+
+  test("a backup marker present reads as backedUp; the timestamp never surfaces", async () => {
+    const created = await createManagedExchange(
+      newExchange({ label: "Backed up" }),
+    );
+    await markManagedExchangeBackedUp(created.id, "2026-07-10T09:00:00.000Z");
+
+    const [entry] = await listManagedExchangesDiagnostic();
+    expect(entry.backedUp).toBe(true);
+    // The marker's own instant is never surfaced -- a boolean suffices.
+    expect(JSON.stringify(entry)).not.toContain("2026-07-10T09:00:00.000Z");
+  });
+
+  test("an absent sibling entry reads as not backed up", async () => {
+    await createManagedExchange(newExchange({ label: "Fresh" }));
+    const [entry] = await listManagedExchangesDiagnostic();
+    expect(entry.backedUp).toBe(false);
+  });
+
+  test("an unparseable sibling entry reads as backed up (conservative on doubt)", async () => {
+    const created = await createManagedExchange(
+      newExchange({ label: "Doubtful" }),
+    );
+    // Corrupt the sibling entry so its parse fails: a wrongly-shown custody warning
+    // is harmless; a wrongly-suppressed one is not, so doubt reads as backed up.
+    await rawLocalPut(created.id, { backup: { backedUpAt: "not-an-instant" } });
+
+    const [entry] = await listManagedExchangesDiagnostic();
+    expect(entry.backedUp).toBe(true);
+  });
+
+  test("one unreadable record does not fail the read; it yields an unreadable marker keyed for delete", async () => {
+    const good = await createManagedExchange(newExchange({ label: "Good" }));
+    // Seed a future-version record under its own key: the strict list read rejects
+    // wholesale on it, but the diagnostic read must still enumerate both.
+    await rawPut({
+      ...good,
+      id: "bad-record",
+      schemaVersion: "psilink-managed-exchange/v2",
+    });
+
+    // The strict read still rejects wholesale -- the untouched contract.
+    await expect(listManagedExchanges()).rejects.toThrow();
+
+    const entries = await listManagedExchangesDiagnostic();
+    expect(entries).toHaveLength(2);
+    const readable = entries.find((entry) => entry.kind === "readable");
+    const unreadable = entries.find((entry) => entry.kind === "unreadable");
+    expect(readable).toBeDefined();
+    expect(unreadable).toEqual({
+      kind: "unreadable",
+      id: "bad-record",
+      backedUp: false,
+    });
+  });
+
+  test("an unreadable record with a live sibling backup marker still reads as backed up", async () => {
+    const good = await createManagedExchange(newExchange({ label: "Good" }));
+    await rawPut({
+      ...good,
+      id: "bad-record",
+      schemaVersion: "psilink-managed-exchange/v2",
+    });
+    // The sibling backup marker survives the record's unreadability: a delete of the
+    // bad record must still warn about the exported backup's custody.
+    await markManagedExchangeBackedUp("bad-record", "2026-07-10T09:00:00.000Z");
+
+    const entries = await listManagedExchangesDiagnostic();
+    const unreadable = entries.find((entry) => entry.kind === "unreadable");
+    expect(unreadable).toEqual({
+      kind: "unreadable",
+      id: "bad-record",
+      backedUp: true,
+    });
+  });
+
+  test("an unreadable record is deletable by key without a successful parse", async () => {
+    const good = await createManagedExchange(newExchange({ label: "Good" }));
+    await rawPut({
+      ...good,
+      id: "bad-record",
+      schemaVersion: "psilink-managed-exchange/v2",
+    });
+
+    await deleteManagedExchange("bad-record");
+
+    // The offending record is gone, so the strict list read recovers.
+    expect(await rawStored("bad-record")).toBeUndefined();
+    const recovered = await listManagedExchanges();
+    expect(recovered.map((record) => record.id)).toEqual([good.id]);
   });
 });
 

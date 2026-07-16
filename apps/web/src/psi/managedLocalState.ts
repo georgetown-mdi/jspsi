@@ -115,15 +115,23 @@ export async function listManagedLocalState(): Promise<
         const keysRequest = store.getAllKeys();
         const valuesRequest = store.getAll();
         transaction.oncomplete = () => {
-          const map = new Map<string, ManagedLocalState>();
-          const keys = keysRequest.result;
-          const values = valuesRequest.result;
-          for (let index = 0; index < keys.length; index += 1)
-            map.set(
-              String(keys[index]),
-              managedLocalStateSchema.parse(values[index]),
-            );
-          resolve(map);
+          try {
+            const map = new Map<string, ManagedLocalState>();
+            const keys = keysRequest.result;
+            const values = valuesRequest.result;
+            for (let index = 0; index < keys.length; index += 1)
+              map.set(
+                String(keys[index]),
+                managedLocalStateSchema.parse(values[index]),
+              );
+            resolve(map);
+          } catch (error) {
+            // A parse throws inside `oncomplete`, outside the executor's own scope:
+            // reject with it so a corrupted sibling entry rejects the read (the
+            // documented contract) rather than throwing unhandled and leaving the
+            // promise unsettled.
+            reject(error);
+          }
         };
         transaction.onerror = () => reject(transaction.error);
         transaction.onabort = () => reject(transaction.error);

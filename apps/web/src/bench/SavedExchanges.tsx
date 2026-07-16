@@ -1,10 +1,19 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-import { Alert, Anchor, Button, FileButton, Loader } from "@mantine/core";
+import {
+  Alert,
+  Anchor,
+  Button,
+  FileButton,
+  Loader,
+  Modal,
+} from "@mantine/core";
 import { Link, useNavigate } from "@tanstack/react-router";
 
 import {
+  deleteManagedExchange,
   listManagedExchanges,
+  listManagedExchangesDiagnostic,
   openManagedExchangeDatabase,
   requestPersistentStorage,
 } from "@psi/managedExchangeStore";
@@ -15,16 +24,24 @@ import { listManagedLocalState } from "@psi/managedLocalState";
 import { BenchLobby } from "./BenchLobby";
 import { BenchPage } from "./BenchPage";
 import { loadSavedExchanges } from "./savedExchangesLoad";
+import { recoveryRows } from "./savedExchangesRecovery";
 import styles from "./bench.module.css";
 
+import type { RecoveryRow } from "./savedExchangesRecovery";
 import type { SavedExchangeRow } from "./savedExchangesModel";
 import type { SavedExchangesLoad } from "./savedExchangesLoad";
 
-/** Run the managed-exchange home load once on mount, cancelling its state write if
- * the component unmounts before the reads settle. Returns `undefined` while the read
- * is in flight, then one of the {@link SavedExchangesLoad} outcomes. */
-function useSavedExchangesLoad(): SavedExchangesLoad | undefined {
+/** Run the managed-exchange home load on mount and on demand, cancelling its state
+ * write if the component unmounts before the reads settle. Returns the current
+ * {@link SavedExchangesLoad} (or `undefined` while a read is in flight) and a
+ * `reload` that re-runs the load -- the delete affordance calls it so a delete that
+ * removes the offending record recovers a now-readable list to the normal surface. */
+function useSavedExchangesLoad(): {
+  load: SavedExchangesLoad | undefined;
+  reload: () => void;
+} {
   const [load, setLoad] = useState<SavedExchangesLoad>();
+  const [nonce, setNonce] = useState(0);
   useEffect(() => {
     let live = true;
     void loadSavedExchanges({
@@ -38,8 +55,12 @@ function useSavedExchangesLoad(): SavedExchangesLoad | undefined {
     return () => {
       live = false;
     };
+  }, [nonce]);
+  const reload = useCallback(() => {
+    setLoad(undefined);
+    setNonce((current) => current + 1);
   }, []);
-  return load;
+  return { load, reload };
 }
 
 /**
@@ -59,7 +80,7 @@ function useSavedExchangesLoad(): SavedExchangesLoad | undefined {
  * `/saved` so the empty state's restore-from-backup affordance stays discoverable.
  */
 export function SavedExchangesHome() {
-  const load = useSavedExchangesLoad();
+  const { load, reload } = useSavedExchangesLoad();
 
   if (load === undefined)
     return (
@@ -74,7 +95,7 @@ export function SavedExchangesHome() {
     (load.kind === "ready" && load.rows.length === 0)
   )
     return <BenchLobby />;
-  return <SavedExchangesSurface load={load} />;
+  return <SavedExchangesSurface load={load} reload={reload} />;
 }
 
 /**
@@ -102,11 +123,11 @@ export function SavedExchangesHome() {
  * handoff date.
  */
 export function SavedExchanges() {
-  const load = useSavedExchangesLoad();
+  const { load, reload } = useSavedExchangesLoad();
 
   if (load?.kind === "unavailable") return <StorageUnavailable />;
 
-  return <SavedExchangesSurface load={load} />;
+  return <SavedExchangesSurface load={load} reload={reload} />;
 }
 
 /** The list surface itself: the loading loader, the exchanges, the designed empty
@@ -116,11 +137,11 @@ export function SavedExchanges() {
  * receives it. */
 function SavedExchangesSurface({
   load,
+  reload,
 }: {
   load: Exclude<SavedExchangesLoad, { kind: "unavailable" }> | undefined;
+  reload: () => void;
 }) {
-  const navigate = useNavigate();
-
   return (
     <BenchPage>
       <main className={styles.lobby}>
@@ -133,48 +154,80 @@ function SavedExchangesSurface({
         {load === undefined ? (
           <Loader />
         ) : load.kind === "failed" ? (
-          <SavedExchangesFailed />
+          <SavedExchangesFailed reload={reload} />
         ) : load.rows.length === 0 ? (
           <SavedExchangesEmpty />
         ) : (
-          <>
-            <ul className={styles.savedList}>
-              {load.rows.map((row) => (
-                <li key={row.id} className={styles.savedRow}>
-                  <div className={styles.savedRowMain}>
-                    <span className={styles.savedRowLabel}>
-                      {row.label === "" ? "(unnamed exchange)" : row.label}
-                    </span>
-                    <span className={`${styles.small} ${styles.sub}`}>
-                      {row.sideLabel} - {row.status}
-                    </span>
-                    <BackupLine row={row} />
-                  </div>
-                  <Button
-                    variant={row.spentAsOf === undefined ? "default" : "subtle"}
-                    onClick={() =>
-                      void navigate({
-                        to: "/saved/$id",
-                        params: { id: row.id },
-                      })
-                    }
-                  >
-                    {row.spentAsOf === undefined ? "Run" : "Open"}
-                  </Button>
-                </li>
-              ))}
-            </ul>
-            <p className={`${styles.sub} ${styles.small}`}>
-              Need a one-off instead?{" "}
-              <Anchor inherit component={Link} to="/quick">
-                Set up or accept an exchange
-              </Anchor>{" "}
-              without saving it here.
-            </p>
-          </>
+          <SavedExchangesList rows={load.rows} reload={reload} />
         )}
       </main>
     </BenchPage>
+  );
+}
+
+/** The populated run list: a row per stored exchange with a run/open action and the
+ * always-available delete, above a first-class create entry into the invite/configure
+ * flow (where saving as recurring happens at share time) and the one-off quick-path
+ * alternative. Deleting a row calls `reload`, so the list reflects the removal without
+ * a page navigation. */
+function SavedExchangesList({
+  rows,
+  reload,
+}: {
+  rows: Array<SavedExchangeRow>;
+  reload: () => void;
+}) {
+  const navigate = useNavigate();
+
+  return (
+    <>
+      <ul className={styles.savedList}>
+        {rows.map((row) => (
+          <li key={row.id} className={styles.savedRow}>
+            <div className={styles.savedRowMain}>
+              <span className={styles.savedRowLabel}>
+                {row.label === "" ? "(unnamed exchange)" : row.label}
+              </span>
+              <span className={`${styles.small} ${styles.sub}`}>
+                {row.sideLabel} - {row.status}
+              </span>
+              <BackupLine row={row} />
+            </div>
+            <div className={styles.savedRowActions}>
+              <Button
+                variant={row.spentAsOf === undefined ? "default" : "subtle"}
+                onClick={() =>
+                  void navigate({
+                    to: "/saved/$id",
+                    params: { id: row.id },
+                  })
+                }
+              >
+                {row.spentAsOf === undefined ? "Run" : "Open"}
+              </Button>
+              <DeleteExchangeButton
+                id={row.id}
+                label={row.label}
+                backedUp={row.backup.kind === "backed-up"}
+                onDeleted={reload}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
+      <p>
+        <Button component={Link} to="/exchange" variant="default">
+          Set up a recurring exchange
+        </Button>
+      </p>
+      <p className={`${styles.sub} ${styles.small}`}>
+        Need a one-off instead?{" "}
+        <Anchor inherit component={Link} to="/quick">
+          Set up or accept an exchange
+        </Anchor>{" "}
+        without saving it here.
+      </p>
+    </>
   );
 }
 
@@ -226,6 +279,106 @@ function BackupLine({ row }: { row: SavedExchangeRow }) {
   );
 }
 
+/** The always-available per-row delete: a first-class action with one simple confirm.
+ * The confirm names the exchange, and -- only when a backup was exported (the row's
+ * backed-up state) -- carries the custody note that the exported file remains a
+ * credential the operator disposes of; a never-exported exchange needs no such note.
+ * Deletion removes everything the browser holds for the exchange in one step
+ * ({@link deleteManagedExchange}); it is local and unilateral, so the confirm says the
+ * partner is not notified. On success it calls {@link onDeleted} so the list reflects
+ * the removal. */
+function DeleteExchangeButton({
+  id,
+  label,
+  backedUp,
+  onDeleted,
+}: {
+  id: string;
+  label: string;
+  /** Whether a backup was exported for this exchange (the custody note shows only
+   * then; a never-exported exchange has nothing under the operator's custody). */
+  backedUp: boolean;
+  onDeleted: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteFailed, setDeleteFailed] = useState(false);
+  const named = label === "" ? "this exchange" : `"${label}"`;
+
+  function confirmDelete() {
+    setDeleting(true);
+    setDeleteFailed(false);
+    void (async () => {
+      try {
+        await deleteManagedExchange(id);
+        onDeleted();
+        setConfirming(false);
+      } catch {
+        // A rejected delete (transaction abort, quota, a blocked open) leaves the
+        // row standing: keep the modal open and surface the failure so the operator
+        // can retry rather than the row silently vanishing from confirm.
+        setDeleteFailed(true);
+      } finally {
+        setDeleting(false);
+      }
+    })();
+  }
+
+  return (
+    <>
+      <Button
+        variant="subtle"
+        color="red"
+        disabled={deleting}
+        onClick={() => {
+          setDeleteFailed(false);
+          setConfirming(true);
+        }}
+      >
+        Delete
+      </Button>
+      <Modal
+        opened={confirming}
+        onClose={() => setConfirming(false)}
+        title="Remove from this browser"
+        centered
+        transitionProps={{ duration: 0 }}
+      >
+        <p>
+          Delete {named}? This removes everything this browser holds for it --
+          the terms, the stored secret, and its run history -- in one step. It
+          cannot be undone here.
+        </p>
+        <p className={`${styles.small} ${styles.sub}`}>
+          This only removes your copy: your partner is not notified, and their
+          own copy stands until they remove it or you re-invite.
+        </p>
+        {backedUp && (
+          <p className={`${styles.small} ${styles.sub}`}>
+            A backup file you exported stays in your custody -- delete it
+            yourself if you no longer want it. It remains a credential until the
+            partnership rotates past it.
+          </p>
+        )}
+        {deleteFailed && (
+          <Alert color="red" title="That exchange could not be removed" mb="sm">
+            Removing it from this browser failed. Nothing was deleted; try
+            again.
+          </Alert>
+        )}
+        <div className={styles.savedRowActions} style={{ marginTop: "1rem" }}>
+          <Button variant="default" onClick={() => setConfirming(false)}>
+            Cancel
+          </Button>
+          <Button color="red" loading={deleting} onClick={confirmDelete}>
+            Delete
+          </Button>
+        </div>
+      </Modal>
+    </>
+  );
+}
+
 /** The first-run empty state: a designed surface, not a blank list. It explains what a
  * managed exchange is, offers creating one and accepting a recurring invitation into the
  * quick path, and carries the standing import affordance for post-eviction recovery. A
@@ -257,23 +410,80 @@ function SavedExchangesEmpty() {
   );
 }
 
-/** The read-failed surface: the list opened but its records could not be read, so it
- * cannot show them. The read rejects wholesale on any single invalid record
- * ({@link listManagedExchanges}), so a fresh import cannot mend the list here -- the bad
- * record still fails the read. What the import can still do is store the exchange it
- * carries and take the operator straight to its run surface, sidestepping the unreadable
- * list. The copy is honest about that: the same restore affordance the empty state
- * carries, under a lead that does not promise the list will then display. */
-function SavedExchangesFailed() {
+/** The read-failed surface: the list opened but its records could not be read, so the
+ * normal list ({@link listManagedExchanges}) rejects wholesale on the one offending
+ * record. This surface adds a recovery listing built from a separate diagnostic read
+ * ({@link listManagedExchangesDiagnostic}) that never rejects wholesale: each stored
+ * entry appears with its label and side/date when parseable, or "Unreadable record"
+ * when not, each with the same one-step delete-by-key. Discarding the offending record
+ * and reloading lets a now-readable list recover to the normal surface. A fresh import
+ * still cannot mend the list while the bad record stands, so the restore-from-backup
+ * affordance stays as a way straight to a run surface. */
+function SavedExchangesFailed({ reload }: { reload: () => void }) {
   return (
     <>
       <p className={styles.sub}>
-        Your recurring exchanges could not be read from this browser. If you
-        have a backup file, you can still restore an exchange and go straight to
-        running it.
+        Your recurring exchanges could not be read from this browser. One or
+        more stored records is unreadable -- likely from an old app version.
+        Remove the record below to recover the rest, or import a backup file.
       </p>
+      <RecoveryListing reload={reload} />
       <RestoreFromBackup />
     </>
+  );
+}
+
+/** The recovery listing on the read-failed surface: the diagnostic read's per-entry
+ * result, each row with the one-step delete-by-key. It loads on mount from the
+ * diagnostic read (which never rejects wholesale), so an unreadable record is
+ * identifiable and discardable even when the normal list cannot load. A delete calls
+ * `reload`, which re-runs the whole load -- once the offending record is gone the
+ * normal list read can succeed and the surface recovers to the run list. If the
+ * diagnostic read itself fails (the store's own failure, not a single bad record),
+ * the listing is simply omitted and the restore affordance below still stands. */
+function RecoveryListing({ reload }: { reload: () => void }) {
+  const [rows, setRows] = useState<Array<RecoveryRow>>();
+  useEffect(() => {
+    let live = true;
+    void listManagedExchangesDiagnostic()
+      .then((entries) => {
+        if (live) setRows(recoveryRows(entries));
+      })
+      .catch(() => {
+        if (live) setRows([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (rows === undefined) return <Loader />;
+  if (rows.length === 0) return null;
+
+  return (
+    <ul className={styles.savedList}>
+      {rows.map((row) => (
+        <li key={row.id} className={styles.savedRow}>
+          <div className={styles.savedRowMain}>
+            <span className={styles.savedRowLabel}>{row.label}</span>
+            {!row.unreadable && (
+              <span className={`${styles.small} ${styles.sub}`}>
+                {row.sideLabel}
+                {row.lastRunAt !== undefined
+                  ? ` - last run ${row.lastRunAt}`
+                  : ""}
+              </span>
+            )}
+          </div>
+          <DeleteExchangeButton
+            id={row.id}
+            label={row.deleteLabel}
+            backedUp={row.backedUp}
+            onDeleted={reload}
+          />
+        </li>
+      ))}
+    </ul>
   );
 }
 

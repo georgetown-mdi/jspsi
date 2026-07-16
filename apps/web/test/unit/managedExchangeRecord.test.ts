@@ -15,6 +15,7 @@ import {
   applyManagedExchangeRotation,
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
+  diagnoseManagedExchangeRecord,
   parseManagedExchangeRecord,
   safeParseManagedExchangeRecord,
 } from "@psi/managedExchangeRecord";
@@ -480,5 +481,47 @@ describe("applyManagedExchangeLastRun", () => {
     expect(
       applyManagedExchangeLastRun(record, wholeSecondOlder).lastRun,
     ).toEqual(fractionalNewer);
+  });
+});
+
+describe("diagnoseManagedExchangeRecord", () => {
+  test("returns only the display essentials -- id, label, side, and last-run date", () => {
+    const record = buildManagedExchangeRecord(
+      newExchange({ label: "Riverbend quarterly", side: "acceptor" }),
+    );
+    const withRun = applyManagedExchangeLastRun(record, {
+      at: "2026-07-10T09:00:00.000Z",
+      outcome: "succeeded",
+    });
+    expect(diagnoseManagedExchangeRecord(withRun)).toEqual({
+      id: withRun.id,
+      label: "Riverbend quarterly",
+      side: "acceptor",
+      lastRunAt: "2026-07-10T09:00:00.000Z",
+    });
+  });
+
+  test("omits the last-run date for a never-run record", () => {
+    const record = buildManagedExchangeRecord(newExchange());
+    expect(diagnoseManagedExchangeRecord(record).lastRunAt).toBeUndefined();
+  });
+
+  test("never surfaces the secret or the document", () => {
+    const record = buildManagedExchangeRecord(newExchange());
+    const essentials = diagnoseManagedExchangeRecord(record);
+    // The essentials object is display-only: the secret, the document, and the
+    // handle must not be reachable through it.
+    expect(Object.keys(essentials).sort()).toEqual(["id", "label", "side"]);
+    expect(JSON.stringify(essentials)).not.toContain(record.sharedSecret);
+  });
+
+  test("throws on a value the strict read would reject", () => {
+    const record = buildManagedExchangeRecord(newExchange());
+    expect(() =>
+      diagnoseManagedExchangeRecord({
+        ...record,
+        schemaVersion: "psilink-managed-exchange/v2",
+      }),
+    ).toThrow();
   });
 });

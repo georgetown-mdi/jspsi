@@ -26,8 +26,9 @@ import type { ManagedFailureTier } from "@psi/managedFailureTiers";
 import type { ManagedLocalState } from "@psi/managedLocalState";
 
 /** This party's side, as the run list names it: the operator recognizes "you
- * invite" / "you accept" more readily than the wire roles. */
-const SIDE_LABEL: Record<ManagedExchangeSide, string> = {
+ * invite" / "you accept" more readily than the wire roles. Shared with the
+ * read-failed recovery listing so both surfaces name the side identically. */
+export const SIDE_LABEL: Record<ManagedExchangeSide, string> = {
   inviter: "You invite",
   acceptor: "You accept",
 };

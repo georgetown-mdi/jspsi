@@ -17,12 +17,31 @@ import {
   clearManagedExchanges,
   createManagedExchange,
 } from "@psi/managedExchangeStore";
+import {
+  markManagedExchangeBackedUp,
+  markManagedExchangeSpent,
+} from "@psi/managedLocalState";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
-import { markManagedExchangeBackedUp } from "@psi/managedLocalState";
 
 import type { NewManagedExchange } from "@psi/managedExchangeRecord";
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
+
+// The component's delete goes through this module. It is mocked so the delete-failure
+// test can make a single delete reject while every other case uses the real
+// transaction; `deleteOverride`, when set, replaces the real delete for one test.
+let deleteOverride: ((id: string) => Promise<void>) | undefined;
+vi.mock("@psi/managedExchangeStore", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  const realDelete = actual.deleteManagedExchange as (
+    id: string,
+  ) => Promise<void>;
+  return {
+    ...actual,
+    deleteManagedExchange: (id: string) =>
+      deleteOverride ? deleteOverride(id) : realDelete(id),
+  };
+});
 
 // The managed-exchange list and its conditional home route, exercised against real
 // Chromium (real IndexedDB and the sibling object store). The home route at `/`
@@ -91,6 +110,7 @@ afterEach(async () => {
   container?.remove();
   root = undefined;
   container = undefined;
+  deleteOverride = undefined;
   await clearManagedExchanges();
 });
 
@@ -211,5 +231,219 @@ describe("saved list route: the always-list surface", () => {
     });
     await expect.element(quick).toBeInTheDocument();
     expect((await quick.element()).getAttribute("href")).toBe("/quick");
+  });
+
+  test("a populated list offers a first-class create entry into the invite/configure flow", async () => {
+    await createManagedExchange(newExchange());
+
+    mount(createElement(SavedExchanges));
+
+    const create = page.getByRole("link", {
+      name: "Set up a recurring exchange",
+    });
+    await expect.element(create).toBeInTheDocument();
+    expect((await create.element()).getAttribute("href")).toBe("/exchange");
+  });
+
+  test("the side facet is readable at a glance: an inviter and an acceptor row", async () => {
+    await createManagedExchange(
+      newExchange({ label: "Invited partnership", side: "inviter" }),
+    );
+    await createManagedExchange(
+      newExchange({ label: "Accepted partnership", side: "acceptor" }),
+    );
+
+    mount(createElement(SavedExchanges));
+
+    await expect
+      .element(page.getByText("You invite", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("You accept", { exact: false }))
+      .toBeInTheDocument();
+  });
+});
+
+describe("saved list route: delete is a first-class, always-available action", () => {
+  test("delete confirms, then removes the exchange from the list", async () => {
+    await createManagedExchange(newExchange({ label: "Riverbend quarterly" }));
+
+    mount(createElement(SavedExchanges));
+
+    await expect
+      .element(page.getByText("Riverbend quarterly"))
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Delete" }).click();
+
+    // The confirm names the exchange and says the partner is not notified.
+    await expect
+      .element(
+        page.getByText('Delete "Riverbend quarterly"?', { exact: false }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("your partner is not notified", { exact: false }))
+      .toBeInTheDocument();
+
+    // Confirm the delete: the modal's own Delete, scoped to the dialog so the row's
+    // Delete (behind the overlay) is never the target.
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Delete" })
+      .click();
+
+    // The row is gone and the empty state stands in its place.
+    await expect
+      .element(page.getByText("You have none saved yet.", { exact: false }))
+      .toBeInTheDocument();
+    expect(page.getByText("Riverbend quarterly").query()).toBeNull();
+  });
+
+  test("a backed-up exchange's confirm carries the exported-backup custody note", async () => {
+    const created = await createManagedExchange(
+      newExchange({ label: "Backed up partnership" }),
+    );
+    await markManagedExchangeBackedUp(created.id, "2026-07-10T09:00:00.000Z");
+
+    mount(createElement(SavedExchanges));
+
+    await expect
+      .element(page.getByText("Backed up as of", { exact: false }))
+      .toBeInTheDocument();
+    await page.getByRole("button", { name: "Delete" }).click();
+
+    await expect
+      .element(
+        page.getByText("A backup file you exported stays in your custody", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("remains a credential until the partnership rotates", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("a never-backed-up exchange's confirm carries no custody note", async () => {
+    await createManagedExchange(newExchange({ label: "Fresh partnership" }));
+
+    mount(createElement(SavedExchanges));
+
+    await page.getByRole("button", { name: "Delete" }).click();
+
+    await expect
+      .element(page.getByText("your partner is not notified", { exact: false }))
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByText("A backup file you exported stays in your custody", {
+          exact: false,
+        })
+        .query(),
+    ).toBeNull();
+  });
+
+  test("a spent (handed-off) row offers Open and Delete", async () => {
+    const created = await createManagedExchange(
+      newExchange({ label: "Handed off partnership" }),
+    );
+    await markManagedExchangeSpent(created.id, "2026-07-12T09:00:00.000Z");
+
+    mount(createElement(SavedExchanges));
+
+    await expect
+      .element(page.getByRole("button", { name: "Open" }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Delete" }))
+      .toBeInTheDocument();
+    // A spent row does not offer Run.
+    expect(page.getByRole("button", { name: "Run" }).query()).toBeNull();
+  });
+
+  test("a rejected delete surfaces an error and leaves the row standing", async () => {
+    await createManagedExchange(newExchange({ label: "Riverbend quarterly" }));
+    // The delete rejects (a transaction abort, quota, or blocked open): the confirm
+    // must not close silently over a row that is still there.
+    deleteOverride = () => Promise.reject(new Error("delete failed"));
+
+    mount(createElement(SavedExchanges));
+
+    await expect
+      .element(page.getByText("Riverbend quarterly"))
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Delete" }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Delete" })
+      .click();
+
+    // The failure is visible, the modal stays open, and the row is still listed.
+    await expect
+      .element(
+        page.getByText("Removing it from this browser failed", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    // The row's own label span still stands (exact, so the modal's "Delete
+    // "Riverbend quarterly"?" copy is not what this matches).
+    await expect
+      .element(page.getByText("Riverbend quarterly", { exact: true }))
+      .toBeInTheDocument();
+  });
+
+  test("reopening the confirm after a failed delete starts clean, and a retry succeeds", async () => {
+    await createManagedExchange(newExchange({ label: "Riverbend quarterly" }));
+    deleteOverride = () => Promise.reject(new Error("delete failed"));
+
+    mount(createElement(SavedExchanges));
+
+    await page.getByRole("button", { name: "Delete" }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Delete" })
+      .click();
+    await expect
+      .element(
+        page.getByText("Removing it from this browser failed", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+
+    // Cancel the modal, then reopen it via the row's Delete button: the failure
+    // from the last attempt must not carry over into the fresh confirm.
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await page.getByRole("button", { name: "Delete" }).click();
+
+    expect(
+      page
+        .getByText("Removing it from this browser failed", { exact: false })
+        .query(),
+    ).toBeNull();
+    await expect
+      .element(
+        page.getByText('Delete "Riverbend quarterly"?', { exact: false }),
+      )
+      .toBeInTheDocument();
+
+    // Let a successful delete proceed to prove the retry path actually works.
+    deleteOverride = undefined;
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Delete" })
+      .click();
+
+    await expect
+      .element(page.getByText("You have none saved yet.", { exact: false }))
+      .toBeInTheDocument();
+    expect(page.getByText("Riverbend quarterly").query()).toBeNull();
   });
 });
