@@ -686,9 +686,9 @@ function ReinviteRecovery({
         <p className={styles.calloutLead}>Ask your partner to re-invite.</p>
         <p className={styles.small}>
           Ask your partner to send you a fresh invitation for this exchange over
-          your usual trusted channel, then accept it from the bench&apos;s home
-          page. That re-establishes the connection with a new secret; your terms
-          are unchanged.
+          your usual trusted channel, then open its link to accept it. That
+          re-establishes the connection with a new secret; your terms are
+          unchanged.
         </p>
       </div>
     );
@@ -819,8 +819,8 @@ function ReinvitePanel({
         Send this to your partner over your usual trusted channel (for example,
         secure email). It carries a new one-time secret, so treat it as
         confidential -- every re-invite puts a fresh secret on that channel, so
-        it must stay trusted each time. Your partner accepts it from the
-        bench&apos;s home page.
+        it must stay trusted each time. Your partner accepts it by opening the
+        link.
       </p>
       <CopyRow label="Invitation link" value={reinvite.deepLink} />
       <CopyRow label="Invitation code" value={reinvite.encoded} />
@@ -894,7 +894,7 @@ function SavedExchangesFoot() {
   return (
     <div className={styles.workFoot}>
       <Button component={Link} to="/saved" variant="default">
-        Back to saved exchanges
+        Back to recurring exchanges
       </Button>
     </div>
   );

@@ -57,7 +57,7 @@ Column disclosure and cleaning are per-party and local: they are threaded into t
 
 ## Web acceptance and consent
 
-On the web, the acceptor reaches the accept flow either by opening the invitation deep link or by pasting the link or bare code into the lobby's "Review invitation" box; both carry the token in the URL fragment, which never reaches the server. Decoding the token enforces the invitation's expiry before any rendezvous or connect: an expired or invalid token fails closed, with no consent action offered. Otherwise it renders the inviter's proposed linkage terms for review, then gates the connection on affirmative consent and a prepared file. No rendezvous, key-exchange handshake, or PSI frame is set up before consent commits.
+On the web, the acceptor reaches the accept flow either by opening the invitation deep link or by pasting the link or bare code into the quick path's "Review invitation" box; both carry the token in the URL fragment, which never reaches the server. Decoding the token enforces the invitation's expiry before any rendezvous or connect: an expired or invalid token fails closed, with no consent action offered. Otherwise it renders the inviter's proposed linkage terms for review, then gates the connection on affirmative consent and a prepared file. No rendezvous, key-exchange handshake, or PSI frame is set up before consent commits.
 
 ### The consent review
 

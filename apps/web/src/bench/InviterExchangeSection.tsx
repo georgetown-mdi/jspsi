@@ -142,8 +142,8 @@ export function InviterExchangeSection({
               Send this link to your partner over a trusted channel (for
               example, secure email). It carries a one-time secret, so treat it
               as confidential. If the link arrives broken, your partner can
-              paste the whole link into the accept form on the bench&apos;s home
-              page. Keep this tab open while your partner accepts.
+              paste the whole link into the accept form. Keep this tab open
+              while your partner accepts.
             </p>
           )}
           <CopyRow label="Invitation link" value={invitation.deepLink} />

@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as VerifyRouteImport } from './routes/verify'
+import { Route as QuickRouteImport } from './routes/quick'
 import { Route as ExchangeRouteImport } from './routes/exchange'
 import { Route as AcceptRouteImport } from './routes/accept'
 import { Route as BenchRouteRouteImport } from './routes/bench/route'
@@ -35,6 +36,11 @@ import { Route as ApiJobsJobIdCancelRouteImport } from './routes/api/jobs/$jobId
 const VerifyRoute = VerifyRouteImport.update({
   id: '/verify',
   path: '/verify',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QuickRoute = QuickRouteImport.update({
+  id: '/quick',
+  path: '/quick',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ExchangeRoute = ExchangeRouteImport.update({
@@ -148,6 +154,7 @@ export interface FileRoutesByFullPath {
   '/bench': typeof BenchRouteRouteWithChildren
   '/accept': typeof AcceptRoute
   '/exchange': typeof ExchangeRoute
+  '/quick': typeof QuickRoute
   '/verify': typeof VerifyRoute
   '/bench/accept': typeof BenchAcceptRoute
   '/bench/exchange': typeof BenchExchangeRoute
@@ -171,6 +178,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/accept': typeof AcceptRoute
   '/exchange': typeof ExchangeRoute
+  '/quick': typeof QuickRoute
   '/verify': typeof VerifyRoute
   '/bench/accept': typeof BenchAcceptRoute
   '/bench/exchange': typeof BenchExchangeRoute
@@ -196,6 +204,7 @@ export interface FileRoutesById {
   '/bench': typeof BenchRouteRouteWithChildren
   '/accept': typeof AcceptRoute
   '/exchange': typeof ExchangeRoute
+  '/quick': typeof QuickRoute
   '/verify': typeof VerifyRoute
   '/bench/accept': typeof BenchAcceptRoute
   '/bench/exchange': typeof BenchExchangeRoute
@@ -222,6 +231,7 @@ export interface FileRouteTypes {
     | '/bench'
     | '/accept'
     | '/exchange'
+    | '/quick'
     | '/verify'
     | '/bench/accept'
     | '/bench/exchange'
@@ -245,6 +255,7 @@ export interface FileRouteTypes {
     | '/'
     | '/accept'
     | '/exchange'
+    | '/quick'
     | '/verify'
     | '/bench/accept'
     | '/bench/exchange'
@@ -269,6 +280,7 @@ export interface FileRouteTypes {
     | '/bench'
     | '/accept'
     | '/exchange'
+    | '/quick'
     | '/verify'
     | '/bench/accept'
     | '/bench/exchange'
@@ -294,6 +306,7 @@ export interface RootRouteChildren {
   BenchRouteRoute: typeof BenchRouteRouteWithChildren
   AcceptRoute: typeof AcceptRoute
   ExchangeRoute: typeof ExchangeRoute
+  QuickRoute: typeof QuickRoute
   VerifyRoute: typeof VerifyRoute
   SavedIdRoute: typeof SavedIdRoute
   SavedIndexRoute: typeof SavedIndexRoute
@@ -317,6 +330,13 @@ declare module '@tanstack/react-router' {
       path: '/verify'
       fullPath: '/verify'
       preLoaderRoute: typeof VerifyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/quick': {
+      id: '/quick'
+      path: '/quick'
+      fullPath: '/quick'
+      preLoaderRoute: typeof QuickRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/exchange': {
@@ -492,6 +512,7 @@ const rootRouteChildren: RootRouteChildren = {
   BenchRouteRoute: BenchRouteRouteWithChildren,
   AcceptRoute: AcceptRoute,
   ExchangeRoute: ExchangeRoute,
+  QuickRoute: QuickRoute,
   VerifyRoute: VerifyRoute,
   SavedIdRoute: SavedIdRoute,
   SavedIndexRoute: SavedIndexRoute,

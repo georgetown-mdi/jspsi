@@ -1190,7 +1190,7 @@ describe("acceptor bench: run and completion", () => {
     const another = Array.from(document.querySelectorAll("a")).find(
       (anchor) => anchor.textContent === "Set up another exchange",
     );
-    expect(another?.getAttribute("href")).toBe("/");
+    expect(another?.getAttribute("href")).toBe("/quick");
   });
 
   test("at a narrow viewport the settled share bar keeps the You sent row", async () => {
@@ -1390,11 +1390,11 @@ describe("acceptor bench: run and completion", () => {
           ),
         ).toBe(true);
       });
-      // The fresh-start recovery is a lobby link (the acceptor cannot mint).
+      // The fresh-start recovery is a quick-path link (the acceptor cannot mint).
       const link = Array.from(document.querySelectorAll("a")).find(
         (anchor) => anchor.textContent === "Start over with a fresh invitation",
       );
-      expect(link?.getAttribute("href")).toBe("/");
+      expect(link?.getAttribute("href")).toBe("/quick");
       expect(
         Array.from(document.querySelectorAll("button")).some(
           (button) => button.textContent === "Try again",
@@ -1420,11 +1420,11 @@ describe("acceptor bench: run and completion", () => {
       .element(page.getByText("Do not retry", { exact: false }))
       .toBeInTheDocument();
     expect(page.getByRole("button", { name: "Try again" }).query()).toBeNull();
-    // The acceptor cannot mint, so the only recovery is a link to the lobby.
+    // The acceptor cannot mint, so the only recovery is a link to the quick path.
     const link = Array.from(document.querySelectorAll("a")).find(
       (anchor) => anchor.textContent === "Start over with a fresh invitation",
     );
-    expect(link?.getAttribute("href")).toBe("/");
+    expect(link?.getAttribute("href")).toBe("/quick");
   });
 
   test("an expired-invitation security failure names itself, not the partner", async () => {
@@ -1452,7 +1452,7 @@ describe("acceptor bench: run and completion", () => {
     const link = Array.from(document.querySelectorAll("a")).find(
       (anchor) => anchor.textContent === "Start over with a fresh invitation",
     );
-    expect(link?.getAttribute("href")).toBe("/");
+    expect(link?.getAttribute("href")).toBe("/quick");
   });
 
   test("a config failure surfaces its message and returns to the columns step", async () => {
@@ -1568,7 +1568,7 @@ describe("acceptor bench: run and completion", () => {
     const another = Array.from(document.querySelectorAll("a")).find(
       (anchor) => anchor.textContent === "Set up another exchange",
     );
-    expect(another?.getAttribute("href")).toBe("/");
+    expect(another?.getAttribute("href")).toBe("/quick");
   });
 
   test("the partial-coverage advisory shows in Problems and the work column", async () => {
