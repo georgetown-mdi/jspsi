@@ -29,10 +29,12 @@ auditors and implementors.
 > single-writer lock and the persist-before-success write-back), the
 > input-acquisition seam (the persisted handle, its permission discipline, and
 > the pre-connection column-shape guard), the record-creating deposits (the
-> manage offers at invite creation and at accept), and the attended re-run (the
-> saved-exchanges entry point and its side-dispatched runner) are implemented;
-> scheduling, the unattended runner, and the full list/detail management
-> surfaces are not yet. The
+> manage offers at invite creation and at accept), the attended re-run (the
+> saved-exchanges entry point and its side-dispatched runner), and the
+> list and per-exchange detail management surfaces (the recurring-exchange list,
+> and the per-partnership detail view with its read-only configuration,
+> local-field editing, run history, and self-attested record view) are
+> implemented; scheduling and the unattended runner are not yet. The
 > recurring-exchange epic implements against the shape below, security-reviewed
 > at each step because the record persists a rotating credential at rest. The
 > persist-before-success ordering and the single-owner invariant are normative,

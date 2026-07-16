@@ -581,6 +581,11 @@ function markBackupOnLocalStore(
  * re-invite, not an edit here, so the document and the secret are deliberately
  * not editable through this path.
  *
+ * An edit to the max-token-age policy re-derives `expires` conservatively (an
+ * edit never extends the stored credential's life without a rotation; see
+ * {@link applyManagedExchangeLocalEdits}). The clock is captured once before the
+ * transaction opens, since the field-scoped transform must be synchronous.
+ *
  * @throws {Error} if no record with `id` exists.
  * @throws {ZodError} if the stored value is not a valid v1 record or the edit
  *   produces an invalid one; the transaction aborts and nothing is written.
@@ -589,11 +594,12 @@ export async function updateManagedExchangeLocalFields(
   id: string,
   edits: ManagedExchangeLocalEdits,
 ): Promise<ManagedExchangeRecord> {
+  const now = Date.now();
   return readModifyWriteRecord(id, (stored) => {
     if (stored === undefined)
       throw new Error(`no managed exchange with id ${id}`);
     const existing = parseManagedExchangeRecord(stored);
-    return applyManagedExchangeLocalEdits(existing, edits);
+    return applyManagedExchangeLocalEdits(existing, edits, now);
   });
 }
 

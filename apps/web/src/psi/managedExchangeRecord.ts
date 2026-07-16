@@ -28,6 +28,8 @@ import {
 
 import { z } from "zod";
 
+import { deriveEditedExpiry } from "./managedTokenAgeEdit";
+
 import type { ExchangeSpec, WebRTCExchangeLocator } from "@psilink/core";
 import type { ZodType } from "zod";
 
@@ -551,11 +553,22 @@ export interface ManagedExchangeLocalEdits {
  * an over-long label is rejected here exactly as at create. The input record is
  * not mutated.
  *
+ * An edit to `tokenMaxAgeDays` re-derives `expires` conservatively through
+ * {@link deriveEditedExpiry}: a shorter policy recomputes the bound from the
+ * reconstructed advance anchor, a longer one keeps the current bound (it takes
+ * effect only at the next rotation), an added policy stamps `now + days`, and a
+ * cleared policy drops the bound. The rule never moves `expires` later, so an edit
+ * cannot stretch a stored credential's life without a rotation (see
+ * {@link ./managedTokenAgeEdit.ts}). `now` is the anchor for an added policy;
+ * default `Date.now()` for callers that do not inject a clock. An edit that does
+ * not touch `tokenMaxAgeDays` leaves `expires` untouched.
+ *
  * @throws {ZodError} if the edited record is invalid.
  */
 export function applyManagedExchangeLocalEdits(
   record: ManagedExchangeRecord,
   edits: ManagedExchangeLocalEdits,
+  now: number = Date.now(),
 ): ManagedExchangeRecord {
   const next: ManagedExchangeRecord = { ...record };
   if (edits.label !== undefined) next.label = edits.label;
@@ -566,6 +579,9 @@ export function applyManagedExchangeLocalEdits(
   if (edits.tokenMaxAgeDays !== undefined) {
     if (edits.tokenMaxAgeDays === null) delete next.tokenMaxAgeDays;
     else next.tokenMaxAgeDays = edits.tokenMaxAgeDays;
+    const expires = deriveEditedExpiry(record, edits.tokenMaxAgeDays, now);
+    if (expires === null) delete next.expires;
+    else next.expires = expires;
   }
   return parseManagedExchangeRecord(next);
 }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Alert, Button, CopyButton, FileButton, Loader } from "@mantine/core";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 
 import { triggerBlobDownload } from "@components/blobDownload";
 
@@ -18,6 +18,7 @@ import {
 import {
   getManagedExchange,
   readRecordAndMarkBackedUp,
+  updateManagedExchangeLocalFields,
 } from "@psi/managedExchangeStore";
 import {
   getManagedLocalState,
@@ -45,10 +46,15 @@ import {
 } from "./managedRunLaunchModel";
 import { dateLabel, dateTimeLabel } from "./inviterModel";
 import { BenchPage } from "./BenchPage";
+import { DeleteExchangeButton } from "./SavedExchanges";
+import { ManagedExchangeDetail } from "./ManagedExchangeDetail";
 import styles from "./bench.module.css";
 
+import type {
+  ManagedExchangeLocalEdits,
+  ManagedExchangeRecord,
+} from "@psi/managedExchangeRecord";
 import type { ManagedBackupMarker } from "@psi/managedBackupState";
-import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
 import type { ManagedInputSource } from "@psi/managedInputHandle";
 import type { ManagedMigrationDispatch } from "@psi/managedExchangeExport";
 import type { ManagedReinvite } from "@psi/managedReinvite";
@@ -107,6 +113,8 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // A single AbortController per in-flight run, aborted on unmount so a torn-down
   // surface stops the rendezvous, the connection, and the exchange.
   const abortRef = useRef<AbortController | undefined>(undefined);
+
+  const navigate = useNavigate();
 
   useEffect(() => {
     let live = true;
@@ -363,6 +371,19 @@ export function ManagedRunSurface({ id }: { id: string }) {
     if (record !== undefined && canReinviteFromRecord(record)) reinviteNow();
   }
 
+  // Persist an in-place edit to the local fields (label, max-token-age policy)
+  // through the single-transaction store path, then adopt the returned record so
+  // the surface reflects the edit -- including the conservatively re-derived
+  // `expires` an age-policy edit produces. The detail editor surfaces the failure;
+  // rethrowing keeps its form and its "not saved" message honest.
+  async function saveLocalFields(
+    edits: ManagedExchangeLocalEdits,
+  ): Promise<void> {
+    if (record === undefined) return;
+    const updated = await updateManagedExchangeLocalFields(record.id, edits);
+    setRecord(updated);
+  }
+
   return (
     <BenchPage>
       <main className={styles.lobby}>
@@ -588,6 +609,22 @@ export function ManagedRunSurface({ id }: { id: string }) {
               onBackUp={backUp}
               onMigrate={migrate}
             />
+            <ManagedExchangeDetail
+              record={record}
+              onSaveLocalFields={saveLocalFields}
+              onReinviteToChangeTerms={reinviteNow}
+              canReinvite={canReinviteFromRecord(record)}
+            />
+            <div className={styles.workFoot}>
+              <DeleteExchangeButton
+                id={record.id}
+                label={record.label}
+                backedUp={
+                  deriveManagedBackupState(backupMarker).kind === "backed-up"
+                }
+                onDeleted={() => void navigate({ to: "/saved" })}
+              />
+            </div>
             {failure !== undefined && !managedRunRetryable(failure) && (
               <SavedExchangesFoot />
             )}

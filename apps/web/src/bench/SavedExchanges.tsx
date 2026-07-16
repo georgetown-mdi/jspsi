@@ -286,8 +286,9 @@ function BackupLine({ row }: { row: SavedExchangeRow }) {
  * Deletion removes everything the browser holds for the exchange in one step
  * ({@link deleteManagedExchange}); it is local and unilateral, so the confirm says the
  * partner is not notified. On success it calls {@link onDeleted} so the list reflects
- * the removal. */
-function DeleteExchangeButton({
+ * the removal. Exported so the per-exchange detail surface reuses the one confirm
+ * component rather than duplicating it. */
+export function DeleteExchangeButton({
   id,
   label,
   backedUp,
