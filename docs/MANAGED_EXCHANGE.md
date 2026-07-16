@@ -151,9 +151,10 @@ exactly as the linkage terms and the setup secret are (see
 The two operators decide a cadence and a window together over their trusted
 channel, and each enters it locally when saving the exchange as recurring. It is
 **not** minted into the exchange-file document and **not** carried on the
-invitation wire: the document is the shared terms-and-locator config a terms
-change would force a re-invite to alter, and a reschedule is neither a terms
-change nor a credential, so the schedule is a local record field instead (the
+invitation wire: the document is the shared terms-and-locator config, fixed for
+the partnership -- changing the terms means setting up a new exchange, not
+altering this one -- and a reschedule is neither a terms change nor a credential,
+so the schedule is a local record field instead (the
 `schedule` object; see
 [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#the-schedule-object)).
 Nothing about the schedule is ever sent to a server or to the partner over the

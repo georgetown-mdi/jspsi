@@ -85,6 +85,19 @@ describe("deriveEditedExpiry", () => {
     ).toBeNull();
   });
 
+  test("policy present but bound absent stamps now + days, not an anchor-derived value", () => {
+    // The import-reachable {tokenMaxAgeDays present, expires absent} state: there is
+    // a policy but no reconstructable bound, so the arm discriminates on bound-
+    // existence and anchors on now (the edit instant), exactly as an add-where-none
+    // does -- never an anchor derived from a non-existent bound.
+    const result = deriveEditedExpiry(
+      { expires: undefined, tokenMaxAgeDays: 90 },
+      30,
+      NOW,
+    );
+    expect(result).toBe(new Date(NOW + 30 * MS_PER_DAY).toISOString());
+  });
+
   test("an unparseable stored bound falls back to now as the anchor rather than extending", () => {
     // A corrupted or unparseable `expires` gives no anchor to reconstruct, so the
     // stamp anchors on now; with no parseable current bound to floor against, it is

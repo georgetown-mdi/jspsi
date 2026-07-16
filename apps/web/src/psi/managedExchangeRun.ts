@@ -141,6 +141,14 @@ export interface ManagedExchangeRunPhases<TInput, THandshake, TExchange> {
   /** Begin and complete the data exchange -- reachable only after the durable
    * persist resolves. Receives the handshake's carried value. */
   dataExchange: (handshake: THandshake) => Promise<TExchange>;
+  /** Invoked once, synchronously, at the instant the data exchange begins (after
+   * the persist resolves and the lock releases, immediately before
+   * {@link dataExchange} is called). It marks the phase boundary a failure
+   * classifier reads to tell a pre-data-exchange failure from one that could
+   * postdate the first peer-visible payload -- a `security`-kind error before this
+   * fires is the handshake failing closed, one after it can arise on a tampered
+   * frame mid-exchange. */
+  onDataExchangeStart?: () => void;
   /** Lock acquisition discipline (queue vs. fail-fast). */
   lock?: ManagedExchangeLockOptions;
   /** The clock, injected so a test can pin the rotation and bookkeeping stamps.
@@ -264,7 +272,10 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
   );
 
   // Lock released: the peer-visible data exchange runs outside the single-writer
-  // window, then the success outcome is recorded.
+  // window, then the success outcome is recorded. The boundary is marked before
+  // the first peer-visible payload, so a classifier can tell a handshake failure
+  // from one that could postdate it.
+  phases.onDataExchangeStart?.();
   const exchange = await phases.dataExchange(gate.handshake);
   const lastRun = succeededRun(now());
   await recordLastRun(record.id, lastRun);

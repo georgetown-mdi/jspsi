@@ -197,18 +197,34 @@ The derivation needs the last-advance anchor -- the creation deposit, run
 rotation, or re-invite the current `expires` was stamped from -- but that instant
 is deliberately not persisted (the record holds only the resulting `expires` and
 the policy). It is **reconstructed** as `current expires - previous
-tokenMaxAgeDays`, exact whenever a prior policy stamped the current bound. The
-new bound is then:
+tokenMaxAgeDays`, exact whenever a **reconstructable bound** exists: a prior
+policy AND a parseable current `expires` together. The arms discriminate on that
+bound-existence, not on policy-existence, so the import-reachable state
+{`tokenMaxAgeDays` present, `expires` absent} -- a record with a policy but no
+stamped bound -- falls to the edit-instant anchor exactly as an add-where-none
+does, because there is no bound to reconstruct an anchor from. The new bound is
+then:
 
-- **Edit with a prior policy in force.** `min(reconstructed anchor + new days,
-  current expires)` -- so a shorter policy recomputes an earlier bound from the
-  anchor, and a longer policy keeps the current bound (the `min` floors it there,
-  never moving `expires` later).
-- **Adding a policy where none existed.** No bound to reconstruct an anchor from,
-  so the anchor is the **edit instant**: the bound is `edit instant + new days`.
-  Introducing a bound where there was none only tightens (unbounded to bounded).
+- **Edit with a reconstructable bound in force** (a prior policy and a parseable
+  current `expires`). `min(reconstructed anchor + new days, current expires)` --
+  so a shorter policy recomputes an earlier bound from the anchor, and a longer
+  policy keeps the current bound (the `min` floors it there, never moving
+  `expires` later).
+- **Edit with no reconstructable bound** -- no prior policy, or a policy but no
+  parseable `expires` (the {policy present, bound absent} state, and the corrupt-
+  `expires` case). No bound to reconstruct an anchor from, so the anchor is the
+  **edit instant**: the bound is `edit instant + new days`, with no current bound
+  to floor against. Introducing a bound where none was in force only tightens
+  (unbounded to bounded).
 - **Clearing the policy.** Drops `expires` entirely, matching the rotation
   write-back's `null` clear -- a dropped policy must not leave a stale bound armed.
+
+A computed bound past the representable date range clears rather than storing a
+nonsense value: an edit that refuses to extend a credential must never harden a
+bounded secret into an unbounded one on a bad stamp, so clearing is the
+conservative outcome (re-invite recovers a mistaken clear). The schema's day-count
+cap makes this unreachable through the UI; the rule holds for a schema-bypassing
+caller.
 
 The decoupling has an honest consequence, always in the **safe** (never-later)
 direction. After a lengthen keeps the current bound, the reconstructed anchor no

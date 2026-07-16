@@ -50,6 +50,8 @@ import { DeleteExchangeButton } from "./SavedExchanges";
 import { ManagedExchangeDetail } from "./ManagedExchangeDetail";
 import styles from "./bench.module.css";
 
+import type { Ref } from "react";
+
 import type {
   ManagedExchangeLocalEdits,
   ManagedExchangeRecord,
@@ -109,10 +111,18 @@ export function ManagedRunSurface({ id }: { id: string }) {
   const [reinvite, setReinvite] = useState<ManagedReinvite>();
   const [reinviting, setReinviting] = useState(false);
   const [reinviteFailed, setReinviteFailed] = useState(false);
+  // Which entry point triggered the in-flight (or last) re-invite: the failure-path
+  // recovery near the top, or the detail configuration section far below. The failed
+  // alert renders only at the triggering site (so the two on-screen sites do not both
+  // show it), and a detail-triggered mint scrolls its result panel into view.
+  const [reinviteSource, setReinviteSource] = useState<"recovery" | "detail">();
 
   // A single AbortController per in-flight run, aborted on unmount so a torn-down
   // surface stops the rendezvous, the connection, and the exchange.
   const abortRef = useRef<AbortController | undefined>(undefined);
+  // The re-invite result panel, scrolled into view when the detail section (far below
+  // the panel) triggered the mint, so the operator lands on the artifacts they need.
+  const reinvitePanelRef = useRef<HTMLDivElement | null>(null);
 
   const navigate = useNavigate();
 
@@ -156,6 +166,23 @@ export function ManagedRunSurface({ id }: { id: string }) {
       }
     };
   }, [outputs]);
+
+  // The ReinvitePanel renders near the top of the surface; the detail section that
+  // can trigger it is far below, so a detail-triggered mint would land the result
+  // off-screen. Scroll it into view once it renders for the detail source. The
+  // failure-path recovery already renders where that user is looking, so it is left
+  // alone.
+  useEffect(() => {
+    if (
+      reinvite !== undefined &&
+      reinviteSource === "detail" &&
+      reinvitePanelRef.current !== null
+    )
+      reinvitePanelRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+  }, [reinvite, reinviteSource]);
 
   // Where the File System Access API exists and the record holds a handle, the run
   // reads through it (attended, so a gone permission may be re-prompted once);
@@ -338,8 +365,9 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // driver returns the rotated record; adopting it drops the stale in-memory secret so
   // a subsequent run derives the rendezvous from the fresh one, and clearing the
   // consumed failure surfaces "fresh invitation sent" rather than the recovered tier.
-  function reinviteNow() {
+  function reinviteNow(source: "recovery" | "detail") {
     if (record === undefined || reinviting) return;
+    setReinviteSource(source);
     setReinviting(true);
     setReinviteFailed(false);
     void reinviteManagedExchange(record)
@@ -368,7 +396,8 @@ export function ManagedRunSurface({ id }: { id: string }) {
       return;
     }
     setConfirmationGated(true);
-    if (record !== undefined && canReinviteFromRecord(record)) reinviteNow();
+    if (record !== undefined && canReinviteFromRecord(record))
+      reinviteNow("recovery");
   }
 
   // Persist an in-place edit to the local fields (label, max-token-age policy)
@@ -543,7 +572,11 @@ export function ManagedRunSurface({ id }: { id: string }) {
               // fresh secret and its consumed failure cleared, so the stale tier alert
               // and its recovery are gone -- the operator forwards the fresh invitation
               // and the next run derives from the new secret.
-              <ReinvitePanel record={record} reinvite={reinvite} />
+              <ReinvitePanel
+                record={record}
+                reinvite={reinvite}
+                panelRef={reinvitePanelRef}
+              />
             ) : (
               failure !== undefined && (
                 <>
@@ -558,8 +591,12 @@ export function ManagedRunSurface({ id }: { id: string }) {
                     confirmationGated={confirmationGated}
                     compromiseResponse={compromiseResponse}
                     reinviting={reinviting}
-                    reinviteFailed={reinviteFailed}
-                    onReinvite={reinviteNow}
+                    // The failed alert renders only at the site that triggered the
+                    // mint, so the recovery and the detail section do not both show it.
+                    reinviteFailed={
+                      reinviteFailed && reinviteSource === "recovery"
+                    }
+                    onReinvite={() => reinviteNow("recovery")}
                     onResolveConfirmation={resolveConfirmation}
                   />
                 </>
@@ -612,10 +649,12 @@ export function ManagedRunSurface({ id }: { id: string }) {
             <ManagedExchangeDetail
               record={record}
               onSaveLocalFields={saveLocalFields}
-              onReinviteToChangeTerms={reinviteNow}
+              onReinviteToChangeTerms={() => reinviteNow("detail")}
               canReinvite={canReinviteFromRecord(record)}
               reinviting={reinviting}
-              reinviteFailed={reinviteFailed}
+              // The failed alert renders here only when the detail section triggered
+              // the mint, so it and the failure-path recovery do not both show it.
+              reinviteFailed={reinviteFailed && reinviteSource === "detail"}
             />
             <div className={styles.workFoot}>
               <DeleteExchangeButton
@@ -847,12 +886,16 @@ function ConfirmationPanel({
 function ReinvitePanel({
   record,
   reinvite,
+  panelRef,
 }: {
   record: ManagedExchangeRecord;
   reinvite: ManagedReinvite;
+  /** Attached so a detail-triggered mint (which renders this panel far above the
+   * button that fired it) can scroll it into view. */
+  panelRef: Ref<HTMLDivElement>;
 }) {
   return (
-    <div className={styles.callout}>
+    <div className={styles.callout} ref={panelRef}>
       <p className={styles.calloutLead}>Send this fresh invitation.</p>
       <p className={styles.small}>
         Send this to your partner over your usual trusted channel (for example,

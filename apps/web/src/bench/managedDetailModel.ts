@@ -152,16 +152,19 @@ const OUTCOME_UNCERTAIN =
  * at or before the persist provably precedes any data leaving this party:
  *
  * - `"input"` -- the pre-connection input guard, before any connection.
- * - `"auth"` -- the authenticated handshake failed closed, before the persist and the
- *   data exchange.
+ * - `"auth"` -- a `security`-kind failure the classifier stamps ONLY before the data
+ *   exchange begins ({@link ../psi/managedRun.ts}, `rerunFailureLastRun` reads the
+ *   phase boundary), so an `"auth"` kind provably predates any payload -- a
+ *   security-kind error once payload flow could have started records `"transport"`
+ *   instead, not `"auth"`.
  * - `"storage"` -- the rotation persist failed after the handshake but before the data
  *   exchange (persist-before-success).
  *
  * The remaining kinds cannot prove it: `"transport"` is the catch-all bucket that a
- * data-exchange drop also lands in ({@link ../psi/managedRun.ts}, `rerunFailureLastRun`),
- * and `"cancelled"` covers a teardown that can land mid-data-exchange. A missing kind
- * (a defensive fall-through) is treated the same -- not proven precedent -- so the copy
- * never over-claims.
+ * data-exchange drop and a mid-exchange trust failure both land in
+ * ({@link ../psi/managedRun.ts}, `rerunFailureLastRun`), and `"cancelled"` covers a
+ * teardown that can land mid-data-exchange. A missing kind (a defensive fall-through)
+ * is treated the same -- not proven precedent -- so the copy never over-claims.
  */
 function disclosurePrecedesExchange(
   failureKind: ManagedExchangeLastRun["failureKind"],

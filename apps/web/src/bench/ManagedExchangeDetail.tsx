@@ -34,10 +34,11 @@ import type { ConfigRow } from "./managedDetailModel";
  * run surface stays the run affordance and these compose beside it; the derivations
  * and copy are the pure {@link ./managedDetailModel.ts}'s.
  *
- * The agreed terms are read-only here -- a change to them is a re-invite, not an
- * in-place edit ({@link ConfigurationView} says so and offers the re-invite
- * affordance) -- while the local fields edit in place without touching the
- * partnership ({@link LocalFieldsEditor}). The record view frames what it shows
+ * The agreed terms are read-only here -- fixed for this partnership; a change to
+ * them is a new exchange, not an in-place edit ({@link ConfigurationView} says so
+ * and offers the fast re-invite on the same terms) -- while the local fields edit
+ * in place without touching the partnership ({@link LocalFieldsEditor}). The record
+ * view frames what it shows
  * honestly as self-attested and links to the existing verify page; it never claims
  * a signed receipt.
  */
@@ -54,9 +55,10 @@ export function ManagedExchangeDetail({
    * Rejects on a store failure; the editor surfaces the failure and keeps the
    * form. */
   onSaveLocalFields: (edits: ManagedExchangeLocalEdits) => Promise<void>;
-  /** Enter the existing re-invite flow -- the only way to change the agreed terms.
-   * The inviter mints a fresh invitation; the acceptor's affordance names asking
-   * the partner instead (the caller routes by {@link canReinvite}). */
+  /** Enter the fast re-invite flow -- refresh the partnership with a new secret on
+   * the SAME terms (it does not change them; a terms change is a new exchange). The
+   * inviter mints a fresh invitation; the acceptor's affordance names asking the
+   * partner instead (the caller routes by {@link canReinvite}). */
   onReinviteToChangeTerms: () => void;
   /** Whether this party can mint a re-invite (inviter-only); drives the terms
    * re-invite affordance's copy. */
@@ -105,11 +107,11 @@ function ConfigRowItem({ row }: { row: ConfigRow }) {
 /**
  * The read-only configuration view: this party's side, the channel and partner
  * endpoint, and the agreed linkage terms. The agreed terms are the persisted
- * exchange-file document, which is read-only by design -- a change to them requires
- * a re-invite, not an in-place edit -- so this view carries a re-invite affordance
- * rather than an edit control (see docs/spec/MANAGED_EXCHANGE_RECORD.md, the
- * `exchangeFile` row). The inviter mints a fresh invitation; the acceptor is told to
- * ask the partner.
+ * exchange-file document, fixed for this partnership by design -- a change to them
+ * is a new exchange, not an in-place edit (see docs/spec/MANAGED_EXCHANGE_RECORD.md,
+ * the `exchangeFile` row). The re-invite affordance here refreshes the partnership
+ * with a new secret on the SAME terms, honestly labeled: the inviter mints a fresh
+ * invitation; the acceptor is told to ask the partner.
  */
 function ConfigurationView({
   record,
@@ -126,7 +128,7 @@ function ConfigurationView({
 }) {
   return (
     <div className={styles.callout}>
-      <p className={styles.eyebrow}>Configuration</p>
+      <h2 className={styles.eyebrow}>Configuration</h2>
       <div className={styles.dlRow}>
         <span className={styles.dlLabel}>Your side</span>
         <span>{SIDE_LABELS[record.side]}</span>
@@ -138,8 +140,11 @@ function ConfigurationView({
         <ConfigRowItem key={row.label} row={row} />
       ))}
       <p className={`${styles.small} ${styles.sub}`}>
-        These agreed terms are fixed. Changing them means re-inviting your
-        partner to agree new terms, not editing them here.
+        These agreed terms are fixed for this partnership. Re-inviting refreshes
+        the partnership with a new secret on these same terms; it does not
+        change them. To exchange on different terms, set up a{" "}
+        <Link to="/exchange">new exchange</Link> and delete this one if you no
+        longer want it.
       </p>
       {canReinvite ? (
         <>
@@ -154,7 +159,7 @@ function ConfigurationView({
             onClick={onReinviteToChangeTerms}
             loading={reinviting}
           >
-            Re-invite to change the terms
+            Re-invite with the same terms
           </Button>
         </>
       ) : (
@@ -231,7 +236,7 @@ function LocalFieldsEditor({
 
   return (
     <div className={styles.callout}>
-      <p className={styles.eyebrow}>Local settings</p>
+      <h2 className={styles.eyebrow}>Local settings</h2>
       <p className={styles.small}>
         These settings live only in this browser and edit in place, without
         re-inviting your partner or changing the agreed terms.
@@ -282,9 +287,16 @@ function LocalFieldsEditor({
         <p className={`${styles.small} ${styles.sub}`}>{cadenceNote}</p>
       )}
       <p className={`${styles.small} ${styles.sub}`}>
-        Shortening the maximum age or turning it off applies now; a longer
-        maximum age takes effect the next time this exchange runs, so an edit
-        never extends the stored secret&apos;s life on its own.
+        Shortening the maximum age applies now. Turning the bound off applies
+        now too and removes the age lapse entirely, so the stored secret no
+        longer lapses by age. A longer maximum age takes effect the next time
+        this exchange runs, so an edit never extends the stored secret&apos;s
+        life on its own.
+      </p>
+      <p className={`${styles.small} ${styles.sub}`}>
+        {record.expires !== undefined
+          ? `Stored secret lapses ${dateLabel(new Date(record.expires))}.`
+          : "No age bound is set; the stored secret does not lapse by age."}
       </p>
       {failed && (
         <Alert color="red" title="That could not be saved" mt="sm" mb="sm">
@@ -314,7 +326,7 @@ function RunHistory({ record }: { record: ManagedExchangeRecord }) {
   const entries = runHistoryEntries(record);
   return (
     <div className={styles.callout}>
-      <p className={styles.eyebrow}>Run history</p>
+      <h2 className={styles.eyebrow}>Run history</h2>
       {entries.length === 0 ? (
         <p className={styles.small}>
           This exchange has not run yet. Its runs will appear here.
@@ -351,7 +363,7 @@ function RecordView({ record }: { record: ManagedExchangeRecord }) {
   const { lastRun } = record;
   return (
     <div className={styles.callout}>
-      <p className={styles.eyebrow}>Record</p>
+      <h2 className={styles.eyebrow}>Record</h2>
       <p className={styles.small}>
         The record for a run is a self-attested account of what this exchange
         disclosed -- built from what both sides already hold, and deliberately
@@ -364,6 +376,13 @@ function RecordView({ record }: { record: ManagedExchangeRecord }) {
           <span className={styles.mono}>{dateLabel(new Date(lastRun.at))}</span>
           . Its full record file was offered to download when the run finished;
           this browser does not keep a copy per exchange.
+        </p>
+      ) : lastRun !== undefined ? (
+        <p className={styles.small}>
+          The most recent run did not complete (see the run history above), so
+          no completed run is recorded for this exchange yet. A run&apos;s full
+          record file is offered to download when the run finishes; this browser
+          does not keep a copy per exchange.
         </p>
       ) : (
         <p className={styles.small}>

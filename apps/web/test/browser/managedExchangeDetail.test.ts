@@ -112,11 +112,22 @@ describe("managed exchange detail configuration", () => {
     await expect
       .element(page.getByText("County Health Dept"))
       .toBeInTheDocument();
-    // The terms carry a re-invite affordance, not an edit control over them.
+    // The terms carry a fast re-invite affordance (same terms, new secret), not an
+    // edit control over them, and the button is labeled to what it does.
     await expect
       .element(
-        page.getByRole("button", { name: "Re-invite to change the terms" }),
+        page.getByRole("button", { name: "Re-invite with the same terms" }),
       )
+      .toBeInTheDocument();
+    // The stale "change the terms" label -- which the flow could not honor -- is gone.
+    expect(
+      page
+        .getByRole("button", { name: "Re-invite to change the terms" })
+        .query(),
+    ).toBeNull();
+    // To change the terms the operator sets up a new exchange, linked here.
+    await expect
+      .element(page.getByRole("link", { name: "new exchange" }))
       .toBeInTheDocument();
     expect(page.getByRole("button", { name: "Edit terms" }).query()).toBeNull();
     expect(
@@ -145,7 +156,7 @@ describe("managed exchange detail configuration", () => {
       .toBeInTheDocument();
     expect(
       page
-        .getByRole("button", { name: "Re-invite to change the terms" })
+        .getByRole("button", { name: "Re-invite with the same terms" })
         .query(),
     ).toBeNull();
   });
@@ -194,7 +205,7 @@ describe("managed exchange detail configuration", () => {
     render();
 
     const button = page.getByRole("button", {
-      name: "Re-invite to change the terms",
+      name: "Re-invite with the same terms",
     });
     await button.click();
 
@@ -251,6 +262,49 @@ describe("managed exchange detail local fields", () => {
     // A saved confirmation renders.
     await expect.element(page.getByText("Settings saved.")).toBeInTheDocument();
   });
+
+  test("reads back the current derived bound: a lapse date when expires is set", async () => {
+    mount(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter", {
+          tokenMaxAgeDays: 90,
+          expires: "2026-10-01T00:00:00.000Z",
+        }),
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    // Anchored so it targets the derived readback line, not the checkbox description
+    // or the cadence note, which also contain "stored secret lapses".
+    await expect
+      .element(page.getByText(/^Stored secret lapses /))
+      .toBeInTheDocument();
+  });
+
+  test("reads back no age bound when expires is absent", async () => {
+    mount(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter"),
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    await expect
+      .element(
+        page.getByText("the stored secret does not lapse by age", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+  });
 });
 
 describe("managed exchange detail record view", () => {
@@ -284,5 +338,34 @@ describe("managed exchange detail record view", () => {
     expect(
       page.getByText("signed receipt", { exact: true }).query(),
     ).toBeNull();
+  });
+
+  test("a non-succeeded last run points at run history rather than claiming no run", async () => {
+    // With a failed last run, the record view must not read "no completed run is
+    // recorded" bare while the run history above shows that failed run; it says the
+    // most recent run did not complete and points at the history.
+    const lastRun: ManagedExchangeLastRun = {
+      at: "2026-07-01T09:00:00.000Z",
+      outcome: "failed",
+      failureKind: "transport",
+    };
+    mount(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter", { lastRun }),
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    await expect
+      .element(
+        page.getByText("The most recent run did not complete", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
   });
 });
