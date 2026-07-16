@@ -39,6 +39,15 @@
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/require-agent-model.mjs\""
           }
         ]
+      },
+      {
+        "matcher": "Workflow",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/require-clean-tree-for-review.mjs\""
+          }
+        ]
       }
     ]
   }
