@@ -85,6 +85,24 @@ export function openManagedExchangeDatabase(): Promise<IDBDatabase> {
 }
 
 /**
+ * Whether the managed store can be opened at all in this browser. Opens the
+ * database and closes the connection at once: it exists only to tell an unopenable
+ * store (private mode with storage blocked, an engine without IndexedDB) from an
+ * openable one, so holding it open would leak a live connection and could block a
+ * later version-change transaction. Resolves `true` on a successful open, `false`
+ * when the open rejects, and never rejects itself -- a caller degrades on `false`
+ * rather than catching. The higher-level reads reopen as needed.
+ */
+export async function probeManagedStoreOpen(): Promise<boolean> {
+  try {
+    (await openManagedExchangeDatabase()).close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Request that the browser make the origin's storage persistent, so the managed
  * store is not evicted under storage pressure. Best-effort: the grant is never
  * assumed durable (a browser may deny or later revoke it) and is not surfaced as

@@ -250,7 +250,7 @@ function SavedExchangesEmpty() {
         <Anchor inherit component={Link} to="/accept">
           Accept it
         </Anchor>{" "}
-        and choose &quot;Manage this exchange&quot; to save it here.
+        and choose &quot;Save as a recurring exchange&quot; to save it here.
       </p>
       <RestoreFromBackup />
     </>
