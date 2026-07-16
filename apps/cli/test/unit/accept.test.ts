@@ -6,10 +6,13 @@ import { Readable } from "node:stream";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
 import logLibrary from "loglevel";
+import YAML from "yaml";
 import {
   encodeInvitation,
   getDefaultLinkageTerms,
   getLogger,
+  parseExchangeSpec,
+  reconcileReceivedPayload,
   UsageError,
 } from "@psilink/core";
 import type {
@@ -1446,6 +1449,173 @@ test("handler: online accept forwards the token's disclosed set to runOnlineBoot
     exit.mockRestore();
     // Module-level mock: reset so no later test inherits this call/impl.
     runOnlineBootstrapMock.mockReset();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- handler: offline accept-reuse refreshes the received-payload lock-in -----
+
+/**
+ * Run the offline accept handler over a pre-existing config, with
+ * --consent-to-terms so the confirmation prompt is skipped (its own tests cover
+ * the prompt gate). The token carries `disclosed`, the disclosed subset the
+ * operator consents to on this acceptance. Returns the config file's raw text and
+ * the exit spy so the caller can assert the on-disk refresh.
+ */
+async function runOfflineAcceptReuse(params: {
+  configFile: string;
+  input: string;
+  disclosed: string[] | undefined;
+}): Promise<string> {
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  try {
+    const encoded = await encodeInvitation({
+      ...sampleToken(FUTURE()),
+      disclosedPayloadColumns: params.disclosed,
+    });
+    await acceptHandler({
+      _: [],
+      $0: "psilink",
+      args: [encoded, params.input],
+      "consent-to-terms": true,
+      "config-file": params.configFile,
+      "key-file": path.join(path.dirname(params.configFile), ".psilink.key"),
+      "log-level": "silent",
+      record: false,
+    } as unknown as Arguments);
+    expect(exit).not.toHaveBeenCalled();
+    return fs.readFileSync(params.configFile, "utf8");
+  } finally {
+    exit.mockRestore();
+  }
+}
+
+test("handler: offline accept-reuse refreshes a stale lock-in, preserving operator content", async () => {
+  // A reused config carrying an OLD consented set is re-accepted over an invitation
+  // whose disclosed subset changed. The surgical refresh overwrites the stale
+  // value, preserving the operator's connection block, linkage terms, and a
+  // hand-authored comment.
+  const { dir, input, configFile } = offlineAcceptFixture();
+  try {
+    // A config whose linkage terms agree with the invitation's defaults (so it
+    // reconciles for reuse), then a hand-authored comment and a stale lock-in
+    // appended so the surgical write has operator content to preserve.
+    writeExistingConfig(configFile);
+    fs.appendFileSync(
+      configFile,
+      "# operator-authored note\nexpected_payload_columns:\n  - old_col\n",
+    );
+    const raw = await runOfflineAcceptReuse({
+      configFile,
+      input,
+      disclosed: ["diagnosis", "notes"],
+    });
+    // The operator's comment and connection block survive the surgical write.
+    expect(raw).toContain("# operator-authored note");
+    expect(raw).toContain("/mnt/share");
+    expect(raw).not.toContain("old_col");
+    const parsed = parseExchangeSpec(YAML.parse(raw));
+    expect(parsed.expectedPayloadColumns).toEqual(["diagnosis", "notes"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: offline accept-reuse fixes the false-abort a stale lock-in would have caused", async () => {
+  // The end-to-end failure this task closes. Before the refresh the config holds
+  // the partner's OLD disclosed set; the partner now discloses a new set, so a
+  // recurring exchange's reconcileReceivedPayload would abort the honest exchange.
+  // After the re-accept the config holds the NEW set, so the same reconcile passes;
+  // asserting the stale set would have thrown proves the config actually changed
+  // the outcome.
+  const { dir, input, configFile } = offlineAcceptFixture();
+  try {
+    writeExistingConfig(configFile);
+    // Seed the stale lock-in the operator originally consented to.
+    fs.appendFileSync(configFile, "expected_payload_columns:\n  - old_col\n");
+    const staleSpec = parseExchangeSpec(
+      YAML.parse(fs.readFileSync(configFile, "utf8")),
+    );
+    expect(staleSpec.expectedPayloadColumns).toEqual(["old_col"]);
+
+    const raw = await runOfflineAcceptReuse({
+      configFile,
+      input,
+      disclosed: ["diagnosis", "notes"],
+    });
+    const refreshedSpec = parseExchangeSpec(YAML.parse(raw));
+    // What the partner actually transmits now: its new disclosed set.
+    const partnerPayload = {
+      columns: ["diagnosis", "notes"],
+      rowIndices: [],
+      rows: [],
+    };
+    // The refreshed lock-in matches the partner's transmission -> no abort.
+    expect(() =>
+      reconcileReceivedPayload(
+        partnerPayload,
+        refreshedSpec.expectedPayloadColumns,
+      ),
+    ).not.toThrow();
+    // The stale lock-in would have aborted the same honest exchange.
+    expect(() =>
+      reconcileReceivedPayload(
+        partnerPayload,
+        staleSpec.expectedPayloadColumns,
+      ),
+    ).toThrow(/payload disclosure mismatch/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: offline accept-reuse removes the lock-in when the invitation carries no disclosed subset", async () => {
+  // A re-accept whose invitation carried no disclosed subset (an older or
+  // metadata-unknown mint) records no consented set: the prior lock-in is cleared
+  // so the recurring exchange reconciles lazily, not left stale.
+  const { dir, input, configFile } = offlineAcceptFixture();
+  try {
+    writeExistingConfig(configFile);
+    fs.appendFileSync(configFile, "expected_payload_columns:\n  - old_col\n");
+    const raw = await runOfflineAcceptReuse({
+      configFile,
+      input,
+      disclosed: undefined,
+    });
+    expect(raw).not.toContain("expected_payload_columns");
+    expect(raw).not.toContain("old_col");
+    const parsed = parseExchangeSpec(YAML.parse(raw));
+    expect(parsed.expectedPayloadColumns).toBeUndefined();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: offline accept-reuse writes an empty consented set verbatim (strict receive-nothing)", async () => {
+  // An empty disclosed subset is a real consent ("receive nothing"), distinct from
+  // absent: it must be written as an empty list so a later non-empty payload aborts.
+  const { dir, input, configFile } = offlineAcceptFixture();
+  try {
+    writeExistingConfig(configFile);
+    fs.appendFileSync(configFile, "expected_payload_columns:\n  - old_col\n");
+    const raw = await runOfflineAcceptReuse({
+      configFile,
+      input,
+      disclosed: [],
+    });
+    expect(raw).not.toContain("old_col");
+    const parsed = parseExchangeSpec(YAML.parse(raw));
+    expect(parsed.expectedPayloadColumns).toEqual([]);
+    // Strict "receive nothing": any transmitted column aborts.
+    expect(() =>
+      reconcileReceivedPayload(
+        { columns: ["diagnosis"], rowIndices: [], rows: [] },
+        parsed.expectedPayloadColumns,
+      ),
+    ).toThrow(/payload disclosure mismatch/);
+  } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
