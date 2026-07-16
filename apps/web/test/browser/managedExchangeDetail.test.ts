@@ -103,6 +103,8 @@ describe("managed exchange detail configuration", () => {
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
       }),
     );
 
@@ -129,6 +131,8 @@ describe("managed exchange detail configuration", () => {
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: false,
+        reinviting: false,
+        reinviteFailed: false,
       }),
     );
 
@@ -145,6 +149,76 @@ describe("managed exchange detail configuration", () => {
         .query(),
     ).toBeNull();
   });
+
+  test("a rejecting re-invite on the healthy detail surface shows the error and the button loads while pending", async () => {
+    // The re-invite button lives on the healthy detail surface, where no failure
+    // branch renders -- so its in-flight and failed state must be visible here, not
+    // only under the run surface's failure recovery. The surface owns the reinviting/
+    // reinviteFailed state; this drives them through the props exactly as it does.
+    let reject: (reason: Error) => void = () => undefined;
+    const promise = new Promise<void>((_resolve, rejectFn) => {
+      reject = rejectFn;
+    });
+    let reinviting = false;
+    let reinviteFailed = false;
+
+    function render() {
+      root?.render(
+        createElement(
+          MantineProvider,
+          null,
+          createElement(ManagedExchangeDetail, {
+            record: record("inviter"),
+            onSaveLocalFields: () => Promise.resolve(),
+            onReinviteToChangeTerms: () => {
+              reinviting = true;
+              reinviteFailed = false;
+              render();
+              void promise.catch(() => {
+                reinviting = false;
+                reinviteFailed = true;
+                render();
+              });
+            },
+            canReinvite: true,
+            reinviting,
+            reinviteFailed,
+          }),
+        ),
+      );
+    }
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    render();
+
+    const button = page.getByRole("button", {
+      name: "Re-invite to change the terms",
+    });
+    await button.click();
+
+    // While the re-invite is pending, the button is in its loading state (Mantine
+    // marks a loading Button with data-loading and disables it).
+    await vi.waitFor(() =>
+      expect(button.element().hasAttribute("data-loading")).toBe(true),
+    );
+
+    reject(new Error("re-invite rejected"));
+
+    // The failure surfaces beside the button, in the file's existing error voice.
+    await expect
+      .element(
+        page.getByText("The fresh invitation could not be created", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    // The button is no longer loading once the attempt settled.
+    await vi.waitFor(() =>
+      expect(button.element().hasAttribute("data-loading")).toBe(false),
+    );
+  });
 });
 
 describe("managed exchange detail local fields", () => {
@@ -159,6 +233,8 @@ describe("managed exchange detail local fields", () => {
         },
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
       }),
     );
 
@@ -189,6 +265,8 @@ describe("managed exchange detail record view", () => {
         onSaveLocalFields: () => Promise.resolve(),
         onReinviteToChangeTerms: () => undefined,
         canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
       }),
     );
 

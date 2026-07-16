@@ -104,8 +104,8 @@ are the standing definition of the managed exchange.
 | `side` | enum (`"inviter"` \| `"acceptor"`) | This party's side of the partnership; dispatches a re-run to the matching rendezvous flow (see [Role: a local `side` field](#role-a-local-side-field-not-the-document)). Local-only by design -- deliberately not the document's schema-only `connection.role`. |
 | `inputFileHandle` | `FileSystemFileHandle` or absent | A persisted **pointer** to the operator's input file, held where the File System Access API exists (Chromium), with persistent read permission where the platform grants it (an installed app), so an unattended run reads the standing file with nobody present and an attended re-run is one action. It is a reference, never a copy: no input content or row value persists, and the no-second-copy invariant holds unchanged. It is also live, not a snapshot: each run calls `getFile()` at run start and reads whatever file currently exists at the path -- a `File` object is a point-in-time reference, so `File` objects are never retained across runs -- which is what makes dropping the current period's extract over the same name the data-refresh workflow. A missing entry at run start fails the file read with a clean not-found, recorded as a benign `"input"` failure (see `lastRun`), never routed through desync/attack framing. What it does add to the store's disclosure is the input file's **name**, and the granted read permission extends an in-origin reader's reach to the file's current contents (see [Metadata at rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). Absent on browsers without the API (each attended run re-selects the file) and in any imported record: the handle is a device- and profile-local platform object stored by structured clone, with no file serialization, so the export artifact omits it and the first run after an import re-acquires one by selection. |
 | `sharedSecret` | string (base64url, 43 chars / 32 bytes) | The **current** rotated shared secret, matching `SHARED_SECRET_REGEX` (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md)) -- the `.psilink.key` analog the exchange-file document deliberately never carries. This is the one at-rest secret in the record. Rotated after every successful run and re-persisted before the run is treated as succeeded (see [Persist-before-success ordering](#persist-before-success-ordering)). |
-| `expires` | string (ISO 8601, UTC `Z`) or absent | The instant after which `sharedSecret` must not be used; the recovery when it lapses is re-invite. Absent means no bound is in force. The record inherits the CLI key file's **consumer** semantics for `expires` -- one field, one meaning to every consumer (see [Two sources, one `expires`](../SECURITY_DESIGN.md#two-sources-one-expires), a citation about meaning, not sourcing) -- while its **provenance** is single-source: only the max-age stamp below writes it, the invitation's setup lifetime having been consumed at provisioning. |
-| `tokenMaxAgeDays` | integer or absent | The operator's max-token-age policy for this exchange, the browser analog of the CLI `authentication.token_max_age_days`, and like it **off by default**: absent means no bound is in force, and a record is created with it absent unless the operator sets one. When set, each successful run stamps `expires` this many days out onto the rotated secret. The reason to opt in is a dormant partnership: rotation caps exposure only for an exchange that actually runs, so an idle stored secret has no automatic exposure bound without it (see [The primary controls](../SECURITY_DESIGN.md#the-primary-controls)). |
+| `expires` | string (ISO 8601, UTC `Z`) or absent | The instant after which `sharedSecret` must not be used; the recovery when it lapses is re-invite. Absent means no bound is in force. The record inherits the CLI key file's **consumer** semantics for `expires` -- one field, one meaning to every consumer (see [Two sources, one `expires`](../SECURITY_DESIGN.md#two-sources-one-expires), a citation about meaning, not sourcing) -- while its **provenance** is single-source: only the max-age stamp writes it, the invitation's setup lifetime having been consumed at provisioning. Two write paths stamp it, both under the same never-move-later rule: a successful run's rotation write-back stamps `advance-instant + tokenMaxAgeDays` from the real advance instant, and an operator's in-place edit of `tokenMaxAgeDays` re-derives it conservatively (see [Edit-time re-derivation of `expires`](#edit-time-re-derivation-of-expires)). |
+| `tokenMaxAgeDays` | integer or absent | The operator's max-token-age policy for this exchange, the browser analog of the CLI `authentication.token_max_age_days`, and like it **off by default**: absent means no bound is in force, and a record is created with it absent unless the operator sets one. When set, each successful run stamps `expires` this many days out onto the rotated secret. The reason to opt in is a dormant partnership: rotation caps exposure only for an exchange that actually runs, so an idle stored secret has no automatic exposure bound without it (see [The primary controls](../SECURITY_DESIGN.md#the-primary-controls)). This policy is a **local field** the operator may edit in place without a re-invite; editing it re-derives `expires` conservatively, so an edit never lengthens a stored credential's usable life without a rotation (see [Edit-time re-derivation of `expires`](#edit-time-re-derivation-of-expires)). |
 | `schedule` | object or absent | The partnership-agreed run schedule the unattended path executes: the agreed recurrence and run window -- the schedule is partnership-level agreement, coordinated out-of-band exactly as the terms are -- plus the retry bookkeeping for a missed window (the next planned attempt). Closed shape: timestamps, durations, and enums, no free text, under the same no-narrative constraint as `lastRun`. Absent for an exchange run attended-only. The field-by-field layout is in [The `schedule` object](#the-schedule-object). |
 | `lastRun` | object or absent | Run bookkeeping the backup state and the tiered desync UX read (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md)): `at` (ISO 8601 UTC), `outcome` (`"succeeded"` \| `"failed"` \| `"desynced"` \| `"missed"`), and, for a non-succeeded outcome, an optional `failureKind` (`"auth"` \| `"transport"` \| `"storage"` \| `"input"` \| `"cancelled"`). A `"missed"` outcome records an agreed window that passed without a completed handshake (a runner no-show on either side); it is benign, retried at the next window, and never routed through the desync/attack framing (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#a-missed-window-is-neither-desync-nor-attack)). An `"input"` failure records a benign pre-run input problem -- the handle's file missing at run start, or contents the column-shape guard rejects -- detected before any connection, likewise never routed through that framing. A **re-invite clears `lastRun`** in the same rotation transaction that advances the fresh secret: the re-invite is the recovery for the failure the entry recorded, so leaving it would re-derive a consumed tier at the next visit -- and once the import marker is cleared alongside, a stale `"auth"` failure would re-derive as the attack tier rather than the benign import one. A successful run instead advances `lastRun` to `"succeeded"`; only the re-invite recovery drops it. Every field is a timestamp or a closed enum -- there is deliberately **no free-text field**, so the run bookkeeping structurally cannot carry a match result, a count, or a row value; the constraint is the type, not a prose promise. |
 
@@ -182,6 +182,43 @@ That evolution path -- reject, re-invite, re-create -- is also how the shape
 grows: a future schema revision adds its fields under a new `schemaVersion`,
 rather than the v1 record carrying speculative, structurally always-absent
 seams.
+
+#### Edit-time re-derivation of `expires`
+
+The `tokenMaxAgeDays` policy is a local field an operator may edit in place
+(distinct from a run rotation or a re-invite). Editing it re-derives `expires`
+conservatively, under one normative constraint: **an edit never moves `expires`
+later**. The bound is a stored-credential exposure bound, so an in-place edit --
+which does not rotate the secret -- must not stretch that credential's usable
+life; a longer policy set by an edit takes effect only at the **next rotation's**
+write-back, which restamps from the real advance instant.
+
+The derivation needs the last-advance anchor -- the creation deposit, run
+rotation, or re-invite the current `expires` was stamped from -- but that instant
+is deliberately not persisted (the record holds only the resulting `expires` and
+the policy). It is **reconstructed** as `current expires - previous
+tokenMaxAgeDays`, exact whenever a prior policy stamped the current bound. The
+new bound is then:
+
+- **Edit with a prior policy in force.** `min(reconstructed anchor + new days,
+  current expires)` -- so a shorter policy recomputes an earlier bound from the
+  anchor, and a longer policy keeps the current bound (the `min` floors it there,
+  never moving `expires` later).
+- **Adding a policy where none existed.** No bound to reconstruct an anchor from,
+  so the anchor is the **edit instant**: the bound is `edit instant + new days`.
+  Introducing a bound where there was none only tightens (unbounded to bounded).
+- **Clearing the policy.** Drops `expires` entirely, matching the rotation
+  write-back's `null` clear -- a dropped policy must not leave a stale bound armed.
+
+The decoupling has an honest consequence, always in the **safe** (never-later)
+direction. After a lengthen keeps the current bound, the reconstructed anchor no
+longer matches the real advance instant: `current expires - new (longer) days`
+lands **earlier** than the true anchor. A subsequent shorten therefore computes
+from that earlier reconstructed anchor and can land a bound sooner than a run
+rotation would have -- strictly the conservative direction, and recoverable by
+re-invite if it lands an already-lapsed bound (the standing recovery for a lapsed
+`expires`). The implementation of this derivation is
+`apps/web/src/psi/managedTokenAgeEdit.ts`.
 
 ### The schedule object
 

@@ -119,13 +119,65 @@ describe("runHistoryEntries renders around the most recent run", () => {
     expect(entries[0].disclosure).not.toMatch(/\d+ (rows|matches|records)/);
   });
 
-  test("a non-succeeded run honestly discloses nothing", () => {
-    const lastRun: ManagedExchangeLastRun = {
-      at: "2026-07-01T09:00:00.000Z",
-      outcome: "missed",
-    };
-    const entries = runHistoryEntries(record("acceptor", { lastRun }));
-    expect(entries[0].outcome).toBe("Missed window");
-    expect(entries[0].disclosure).toContain("Nothing was disclosed");
-  });
+  // The disclosure line is mapped conservatively from where a failure fires in the
+  // run lifecycle (input guard -> handshake -> rotation persist -> data exchange). A
+  // run that provably stopped before any data left this party asserts nothing was
+  // disclosed; a run that failed after the handshake, where the record cannot prove
+  // whether payload reached the partner, must not assert either way.
+  test.each([
+    { outcome: "missed" as const, label: "Missed window" },
+    { outcome: "desynced" as const, label: "Out of sync" },
+    {
+      outcome: "failed" as const,
+      failureKind: "input" as const,
+      label: "Failed",
+    },
+    {
+      outcome: "failed" as const,
+      failureKind: "auth" as const,
+      label: "Failed",
+    },
+    {
+      outcome: "failed" as const,
+      failureKind: "storage" as const,
+      label: "Failed",
+    },
+  ])(
+    "a run that stopped before the data exchange ($outcome/$failureKind) asserts nothing was disclosed",
+    ({ outcome, failureKind, label }) => {
+      const lastRun: ManagedExchangeLastRun = {
+        at: "2026-07-01T09:00:00.000Z",
+        outcome,
+        ...(failureKind !== undefined ? { failureKind } : {}),
+      };
+      const entries = runHistoryEntries(record("acceptor", { lastRun }));
+      expect(entries[0].outcome).toBe(label);
+      expect(entries[0].disclosure).toContain(
+        "Nothing was disclosed -- the run stopped before any data was exchanged.",
+      );
+    },
+  );
+
+  // A failure that can postdate the handshake -- a data-exchange drop (transport), a
+  // teardown that can land mid-exchange (cancelled), or an unrecorded kind -- cannot
+  // prove nothing was disclosed, so the line asserts neither way and points at the
+  // record file as the authoritative account.
+  test.each([
+    { failureKind: "transport" as const },
+    { failureKind: "cancelled" as const },
+    { failureKind: undefined },
+  ])(
+    "a run that failed after the handshake ($failureKind) does not assert either way",
+    ({ failureKind }) => {
+      const lastRun: ManagedExchangeLastRun = {
+        at: "2026-07-01T09:00:00.000Z",
+        outcome: "failed",
+        ...(failureKind !== undefined ? { failureKind } : {}),
+      };
+      const entries = runHistoryEntries(record("acceptor", { lastRun }));
+      expect(entries[0].disclosure).not.toContain("Nothing was disclosed");
+      expect(entries[0].disclosure).toContain("did not complete");
+      expect(entries[0].disclosure).toContain("authoritative account");
+    },
+  );
 });

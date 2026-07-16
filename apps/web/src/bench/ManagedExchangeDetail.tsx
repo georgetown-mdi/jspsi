@@ -46,6 +46,8 @@ export function ManagedExchangeDetail({
   onSaveLocalFields,
   onReinviteToChangeTerms,
   canReinvite,
+  reinviting,
+  reinviteFailed,
 }: {
   record: ManagedExchangeRecord;
   /** Persist an in-place edit to the local fields (label, max-token-age policy).
@@ -59,6 +61,13 @@ export function ManagedExchangeDetail({
   /** Whether this party can mint a re-invite (inviter-only); drives the terms
    * re-invite affordance's copy. */
   canReinvite: boolean;
+  /** Whether a re-invite is in flight, so the terms button shows loading. Shared
+   * with the run surface's own re-invite state (see {@link ./ManagedRunSurface.tsx}),
+   * so an in-flight re-invite reads the same on a healthy exchange as on a failed one. */
+  reinviting: boolean;
+  /** Whether the last re-invite attempt failed, so the terms button surfaces the
+   * failure beside it. Shared with the run surface's re-invite state. */
+  reinviteFailed: boolean;
 }) {
   return (
     <>
@@ -66,6 +75,8 @@ export function ManagedExchangeDetail({
         record={record}
         onReinviteToChangeTerms={onReinviteToChangeTerms}
         canReinvite={canReinvite}
+        reinviting={reinviting}
+        reinviteFailed={reinviteFailed}
       />
       <LocalFieldsEditor record={record} onSave={onSaveLocalFields} />
       <RunHistory record={record} />
@@ -104,10 +115,14 @@ function ConfigurationView({
   record,
   onReinviteToChangeTerms,
   canReinvite,
+  reinviting,
+  reinviteFailed,
 }: {
   record: ManagedExchangeRecord;
   onReinviteToChangeTerms: () => void;
   canReinvite: boolean;
+  reinviting: boolean;
+  reinviteFailed: boolean;
 }) {
   return (
     <div className={styles.callout}>
@@ -127,9 +142,21 @@ function ConfigurationView({
         partner to agree new terms, not editing them here.
       </p>
       {canReinvite ? (
-        <Button variant="default" onClick={onReinviteToChangeTerms}>
-          Re-invite to change the terms
-        </Button>
+        <>
+          {reinviteFailed && (
+            <Alert color="red" title="That could not be completed" mb="sm">
+              The fresh invitation could not be created. Nothing changed here;
+              try again.
+            </Alert>
+          )}
+          <Button
+            variant="default"
+            onClick={onReinviteToChangeTerms}
+            loading={reinviting}
+          >
+            Re-invite to change the terms
+          </Button>
+        </>
       ) : (
         <p className={styles.small}>
           To change the terms, ask your partner to send you a fresh invitation

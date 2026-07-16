@@ -614,6 +614,8 @@ export function ManagedRunSurface({ id }: { id: string }) {
               onSaveLocalFields={saveLocalFields}
               onReinviteToChangeTerms={reinviteNow}
               canReinvite={canReinviteFromRecord(record)}
+              reinviting={reinviting}
+              reinviteFailed={reinviteFailed}
             />
             <div className={styles.workFoot}>
               <DeleteExchangeButton

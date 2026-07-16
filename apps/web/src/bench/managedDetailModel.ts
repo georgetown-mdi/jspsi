@@ -128,14 +128,80 @@ const OUTCOME_LABELS: Record<ManagedExchangeLastRun["outcome"], string> = {
   missed: "Missed window",
 };
 
+/** The disclosure line for a succeeded run. */
+const SUCCEEDED_DISCLOSURE =
+  "Disclosed the agreed terms (shown above). The full record file was offered to download when the run completed.";
+
+/** The disclosure line for a run that provably stopped before any data left this
+ * party (a no-show, or a failure that fired before the data exchange began). */
+const NOTHING_DISCLOSED =
+  "Nothing was disclosed -- the run stopped before any data was exchanged.";
+
+/** The disclosure line for a run that failed after the handshake, where the record
+ * cannot prove whether data reached the partner. It asserts neither way and points
+ * at the authoritative account -- the record file offered at run completion. */
+const OUTCOME_UNCERTAIN =
+  "The run did not complete. Whether any data reached your partner is not recorded here; the record file offered when a run completes is the authoritative account.";
+
+/**
+ * Whether a failed run's bookkeeping proves it stopped before the data exchange
+ * began -- so "nothing was disclosed" is honest. The run lifecycle is: input guard,
+ * then the authenticated handshake, then the durable rotation persist, then the data
+ * exchange (the first peer-visible payload; see
+ * {@link ../psi/managedExchangeRun.ts}). A failure whose recorded `failureKind` fires
+ * at or before the persist provably precedes any data leaving this party:
+ *
+ * - `"input"` -- the pre-connection input guard, before any connection.
+ * - `"auth"` -- the authenticated handshake failed closed, before the persist and the
+ *   data exchange.
+ * - `"storage"` -- the rotation persist failed after the handshake but before the data
+ *   exchange (persist-before-success).
+ *
+ * The remaining kinds cannot prove it: `"transport"` is the catch-all bucket that a
+ * data-exchange drop also lands in ({@link ../psi/managedRun.ts}, `rerunFailureLastRun`),
+ * and `"cancelled"` covers a teardown that can land mid-data-exchange. A missing kind
+ * (a defensive fall-through) is treated the same -- not proven precedent -- so the copy
+ * never over-claims.
+ */
+function disclosurePrecedesExchange(
+  failureKind: ManagedExchangeLastRun["failureKind"],
+): boolean {
+  return (
+    failureKind === "input" ||
+    failureKind === "auth" ||
+    failureKind === "storage"
+  );
+}
+
+/**
+ * The disclosure line for a non-succeeded run, mapped conservatively from the run's
+ * outcome and `failureKind`. A run that never completed a handshake (`"missed"`,
+ * `"desynced"`) or failed at or before the rotation persist (`"input"`, `"auth"`,
+ * `"storage"`) provably disclosed nothing -- no payload had left this party. A run
+ * that failed after the handshake (`"transport"`, `"cancelled"`, or an unrecorded
+ * kind) may have failed mid-data-exchange, so the line asserts neither way and points
+ * at the record file offered at run completion as the authoritative account.
+ */
+function nonSucceededDisclosure(lastRun: ManagedExchangeLastRun): string {
+  // A no-show and a rotation-desync both mean no handshake completed, so no data was
+  // exchanged; a `"failed"` outcome defers to the failureKind's lifecycle position.
+  if (lastRun.outcome === "missed" || lastRun.outcome === "desynced")
+    return NOTHING_DISCLOSED;
+  return disclosurePrecedesExchange(lastRun.failureKind)
+    ? NOTHING_DISCLOSED
+    : OUTCOME_UNCERTAIN;
+}
+
 /**
  * The run-history entries for the detail view, derived from the record's `lastRun`
  * bookkeeping. An empty list when no run has been recorded (a saved-but-never-run
  * exchange); otherwise a single entry for the most recent run. The disclosure line
  * is honest to what the bookkeeping holds: a succeeded run disclosed the agreed
- * terms (which the configuration view above names), while a non-succeeded run
- * disclosed nothing -- it did not complete. A per-run disclosure ledger is a
- * separate future item; this renders the one run the record knows about.
+ * terms (which the configuration view above names); a run that stopped before the
+ * data exchange disclosed nothing; and a run that failed after the handshake, where
+ * the record cannot prove whether data reached the partner, asserts neither way (see
+ * {@link nonSucceededDisclosure}). A per-run disclosure ledger is a separate future
+ * item; this renders the one run the record knows about.
  */
 export function runHistoryEntries(
   record: Pick<ManagedExchangeRecord, "lastRun">,
@@ -144,8 +210,8 @@ export function runHistoryEntries(
   if (lastRun === undefined) return [];
   const disclosure =
     lastRun.outcome === "succeeded"
-      ? "Disclosed the agreed terms (shown above). The full record file was offered to download when the run completed."
-      : "Nothing was disclosed -- the run did not complete.";
+      ? SUCCEEDED_DISCLOSURE
+      : nonSucceededDisclosure(lastRun);
   return [
     {
       at: lastRun.at,

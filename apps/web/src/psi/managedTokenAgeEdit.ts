@@ -1,44 +1,14 @@
 /**
  * The conservative edit-time re-derivation of a managed record's `expires` bound
  * when the operator edits its `tokenMaxAgeDays` policy in place (a local-fields
- * edit, distinct from a run rotation or a re-invite). It is a security control:
- * an edit must never extend a stored credential's usable life without a rotation.
+ * edit, distinct from a run rotation or a re-invite). The normative rule -- an edit
+ * never moves `expires` later, the anchor reconstruction, the four cases, and the
+ * decoupling consequence -- is in docs/spec/MANAGED_EXCHANGE_RECORD.md,
+ * "Edit-time re-derivation of `expires`". This module implements it; the checks
+ * below carry only the constraints the code shows.
  *
- * What the spec anchors expiry to. The record's `expires` is stamped
- * `advance-instant + tokenMaxAgeDays` -- the anchor is the last secret advance
- * (a creation-time deposit, a run rotation, or a re-invite), NOT the setup (see
- * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `expires` and `tokenMaxAgeDays` rows,
- * and the rotation write-back in {@link ./managedRunRotate.ts}). That anchor
- * instant is deliberately NOT persisted -- the record holds only the resulting
- * `expires` and the policy `tokenMaxAgeDays` -- so an editor cannot read it back
- * directly. When a policy was already in force it is reconstructable, since
- * `expires === anchor + oldDays` gives `anchor === expires - oldDays`.
- *
- * INTERPRETATION (flagged: the spec pins run/rotation/re-invite stamping but does
- * NOT address edit-time re-derivation). The rule here is the conservative reading:
- * a local edit may shorten or keep `expires`, and may add a bound where none
- * existed, but must NEVER push it later than the spec's derivation from the
- * existing anchor -- and, stricter still, never later than the current `expires`.
- * A longer policy set by an edit therefore does NOT lengthen a live credential; it
- * takes effect only at the next actual rotation, which restamps from the real
- * advance instant. The four cases:
- *
- * - Clear the policy (`null`): drop `expires` -- a dropped bound must not leave a
- *   stale instant armed, matching the rotation write-back's `null` clear.
- * - Add where none (no prior policy): stamp `now + newDays`. There is no anchor to
- *   reconstruct and no prior bound, so `now` is the only anchor; introducing a
- *   bound only tightens (unbounded -> bounded), never extends.
- * - Shorten (`newDays <= oldDays`): recompute strictly from the reconstructed
- *   anchor, `expires - oldDays + newDays`, which is at or before the current
- *   `expires`.
- * - Lengthen (`newDays > oldDays`): the anchor derivation would land later than
- *   the current `expires`, so keep the current `expires` -- the edit refuses to
- *   move it later. The longer policy applies at the next rotation.
- *
- * Uniformly: the new bound is `min(anchor + newDays, currentExpires)`, with `now`
- * as the anchor when no prior policy existed. `expires` never moves later on an
- * edit. `now` is injected so the derivation is pure and the moment of evaluation
- * is the caller's, matching the run+rotate module's clock discipline.
+ * `now` is injected so the derivation is pure and the moment of evaluation is the
+ * caller's, matching the run+rotate module's clock discipline.
  */
 
 import type { ManagedExchangeRecord } from "./managedExchangeRecord";
@@ -49,9 +19,10 @@ const MS_PER_DAY = 86_400_000;
 
 /**
  * Derive the `expires` bound a local edit of `tokenMaxAgeDays` should write,
- * conservatively (never later than the current bound; see the module header).
- * Returns the ISO 8601 UTC instant to set, or `null` to clear any standing bound
- * (a cleared policy, or an add-where-none whose stamp is somehow unrepresentable).
+ * conservatively (never later than the current bound; see the spec section the
+ * module header cites). Returns the ISO 8601 UTC instant to set, or `null` to clear
+ * any standing bound (a cleared policy, or an add-where-none whose stamp is somehow
+ * unrepresentable).
  *
  * @param record The record before the edit; its current `expires` and
  *   `tokenMaxAgeDays` are the anchor inputs.
