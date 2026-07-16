@@ -1,0 +1,42 @@
+{
+  "vectors": [
+    {
+      "name": "initiator-both-directions",
+      "description": "The initiator signs the receipt content bound to its own fingerprint and initiator role: the agreed-terms hash, the two directional session-keyed payload MACs (initiator->responder and responder->initiator, here fixed stand-in values), and the initiator-role binder. Any implementation seeded identically and given this session key and content must reproduce the fingerprint, the binder, and the Ed25519 signature.",
+      "seed": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "identity": "Party A, Agency A\napartyA@agency-a.gov",
+      "sessionKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+      "role": "initiator",
+      "content": {
+        "termsHash": "dGVybXNIYXNoVmVjdG9y",
+        "initiatorToResponderPayload": "aTJyUGF5bG9hZERpZ2VzdA",
+        "responderToInitiatorPayload": "cjJpUGF5bG9hZERpZ2VzdA",
+        "binder": "DqMqfqQWT3ezinyelof-x2r-aBMbuAnCpIFjI7cVvOY"
+      },
+      "expected": {
+        "binder": "DqMqfqQWT3ezinyelof-x2r-aBMbuAnCpIFjI7cVvOY",
+        "signature": "5RptKWyOT6DIH6z9u9Mud83jLmE4Ba6wls7a4YanlB6J92C1aOjlgVilzqdw35pYzWfSQ1sVQThdxq6ZX3nIAA",
+        "fingerprint": "Sca4aRt1lvldlctLS479DsbBpT0RbeEFkCv2knS5imU"
+      }
+    },
+    {
+      "name": "responder-distinct-identity",
+      "description": "The responder signs the same directional content bound to its own fingerprint and responder role (both parties key the two directions identically). Uses the same session key but a distinct identity; its role names the responder-role binder derivation to pin that label too. That responder-role binder is a derivation not produced in a live exchange, where both parties fold in the initiator-role binder -- the vector pins the label for cross-implementation coverage.",
+      "seed": "ZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQ",
+      "identity": "Party B, Agency B",
+      "sessionKey": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+      "role": "responder",
+      "content": {
+        "termsHash": "dGVybXNIYXNoVmVjdG9y",
+        "initiatorToResponderPayload": "aTJyUGF5bG9hZERpZ2VzdA",
+        "responderToInitiatorPayload": "cjJpUGF5bG9hZERpZ2VzdA",
+        "binder": "3DJfxbSxC4qxQyR19BpTZiCp1dhxwV6BBmxyzc6S3T0"
+      },
+      "expected": {
+        "binder": "3DJfxbSxC4qxQyR19BpTZiCp1dhxwV6BBmxyzc6S3T0",
+        "signature": "pvANvwV4hKI2CVAFo17L4-ywZPFjmoCXSUxHQpAfFamA8lbez1XDtQCI_utWwf8NRL3N7pVZ67mkcU9QGGB2CQ",
+        "fingerprint": "NSacZYsbzydLuAbdmEXvqVypCseszb1tA9YDIEssDWQ"
+      }
+    }
+  ]
+}

@@ -11,6 +11,7 @@ import {
   assertSharedSecretReadyForHandshake,
   deriveAbortToken,
   PeerAbortError,
+  ReceiptVerificationError,
   sanitizeForDisplay,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
@@ -19,6 +20,7 @@ import type {
   ConnectionConfig,
   PreparedExchange,
   ExchangeBootstrapResult,
+  SigningIdentity,
 } from "@psilink/core";
 
 import { LocalFSClient } from "./connection/localFSClient";
@@ -28,6 +30,7 @@ import { preflightKeyFilePath } from "./keyFilePreflight";
 import { loadCliPsiBackend } from "./psiBackend";
 import { createPsiEngine } from "./psiWorkerHost";
 import { writeExchangeRecord, type RecordOutput } from "./recordFile";
+import { writeDualSignedRecord, type ReceiptOutput } from "./receiptFile";
 import { writeOutput } from "./util/cli";
 import { logRuntimeEnv } from "./util/runtimeEnv";
 import {
@@ -79,6 +82,26 @@ export const PEER_SILENCE_GUIDANCE =
 export interface AuthPersist extends Authentication {
   sharedSecret: string;
   keyFilePath: string;
+}
+
+/**
+ * The signing inputs for the certificate-backed signed-receipt step, resolved by
+ * the exchange command from the `signing` config block. Passed to
+ * {@link runProtocol} on its own `signing` parameter; `null` (the default) skips
+ * the signing step so the unsigned-record path is unaffected. The signing step
+ * runs only on the authenticated path (the only one that holds a session key), so
+ * a non-null value is meaningful only with a non-null `auth`.
+ */
+export interface SigningPersist {
+  /** This party's long-lived signing identity (private key + certificate). */
+  identity: SigningIdentity;
+  /** The pinned partner certificate fingerprint (`signing.partner_fingerprint`);
+   * absent means no partner certificate can be trusted and verification fails
+   * closed. */
+  partnerFingerprint?: string;
+  /** Where the dual-signed record is written (an explicit path, or `undefined`
+   * for the default timestamped location). */
+  receiptOutput: ReceiptOutput;
 }
 
 /**
@@ -225,6 +248,14 @@ export interface RunProtocolResult {
  * {@link FileSyncConnection} constructor, bypassing config construction so they
  * can never be persisted to psilink.yaml. Defaults to `{}` (no sweep) and is
  * inert on any non-file-sync transport.
+ *
+ * `signing` carries the signed-receipt inputs (this party's signing identity, the
+ * pinned partner fingerprint, and where to write the dual-signed record). Pass
+ * `null` (the default) to skip the signing step, keeping the unsigned-record path
+ * unchanged. The step runs only on the authenticated path, which is the only one
+ * that holds the session key the receipt binder needs; a non-null `signing` on the
+ * unauthenticated (`auth: null`) path is rejected up front, since there is no
+ * session key to bind the receipt to.
  */
 export async function runProtocol(
   connection: ProtocolConnectionConfig,
@@ -237,6 +268,7 @@ export async function runProtocol(
   saveIntent?: boolean,
   onAuthenticated?: () => void | Promise<void>,
   fileSyncRuntime: FileSyncRuntimeOptions = {},
+  signing: SigningPersist | null = null,
 ): Promise<RunProtocolResult> {
   const log = getLogger(loggerName);
 
@@ -317,6 +349,18 @@ export async function runProtocol(
       throw new Error(
         "onAuthenticated is only valid on an authenticated exchange; an " +
           "unauthenticated (zero-setup) exchange has no acceptance step to hook",
+      );
+    // The signed-receipt step binds the receipt to the session key, which only the
+    // authenticated key exchange produces. Reject a signing config on the
+    // unauthenticated (`auth: null`) path up front rather than silently dropping
+    // it: there is no session key to derive the replay binder from, so the step
+    // could not run and a caller that wired it would get a receipt-less exchange
+    // with no signal why.
+    if (!auth && signing !== null)
+      throw new Error(
+        "a signing identity is only valid on an authenticated exchange; an " +
+          "unauthenticated (zero-setup) exchange has no session key to bind the " +
+          "signed receipt to",
       );
     if (auth) {
       // Fail fast on the locally-knowable secret preconditions -- a malformed or
@@ -406,6 +450,11 @@ export async function runProtocol(
   // mc.close(), so closing it closes the underlying FileSyncConnection and sweeps
   // its responsible files.
   let secure: EncryptedMessageConnection | undefined;
+  // The session key from the authenticated key exchange, captured in the outer
+  // scope so the runExchange call below can thread it into the signed-receipt step
+  // (the receipt binder is derived from it). Left undefined on the no-auth path,
+  // where the signing step is rejected up front, so runExchange runs unchanged.
+  let sessionKeyForReceipt: Uint8Array<ArrayBuffer> | undefined;
   // Set synchronously immediately before `await authenticateConnection`.
   // The partner can complete its own handshake and persist the rotated token
   // before our await resolves, so any failure that arrives after this flag is
@@ -696,6 +745,10 @@ export async function runProtocol(
       // gates the EncryptedMessageConnection wrap below.
       const { rotatedSecret, sessionKey, applyEncryption } =
         await authenticateConnection(mc, authParams, role, true);
+      // Capture the session key for the signed-receipt step (it derives the replay
+      // binder from it); only the authenticated path reaches here, so the no-auth
+      // path leaves it undefined and runExchange's signing step stays skipped.
+      sessionKeyForReceipt = sessionKey;
       // buildRotatedKeyFile stamps `expires` = now + tokenMaxAgeDays days when the
       // operator set a max-age policy, and omits it otherwise. The stamp is
       // computed here, at the moment of rotation, so it reflects the real rotation
@@ -892,96 +945,109 @@ export async function runProtocol(
     // from here on is a "run" fault (until output, marked below).
     emit((e) => e.stages(stageDefinitions));
     terminalPhase = "run";
-    const { associationTable, partnerPayload, audit, bootstrap } =
-      await runExchange(
-        // Encrypted path: `secure` is the AEAD decorator over mc (the handshake
-        // negotiated applyEncryption), so PSI frames are encrypted on the wire.
-        // Otherwise secure is undefined and the exchange runs over the unencrypted
-        // mc (transport security only): the no-auth zero-setup path that carries
-        // the --save bootstrap, and the authenticated path where the negotiated
-        // applyEncryption is false.
-        secure ?? mc,
-        role,
-        prepared,
-        {
-          psiLibrary,
-          // Run the PSI masking in a worker thread so a long round keeps the
-          // event-loop-owning thread responsive for the SFTP heartbeat and the
-          // liveness timers (board item 208035324). Falls back to in-process when
-          // the bundled worker is absent (dev / tests); see createPsiEngine.
-          psiEngineFactory: (role, id) => createPsiEngine(psiLibrary, role, id),
-          verbosity,
-          saveIntent,
-          // Advertise the observed SFTP host key for cross-party reconciliation
-          // only when the exchange runs over the authenticated, AEAD-wrapped
-          // channel (`secure` set): the value is unforgeable solely because it
-          // rides that channel, so advertising it on the unencrypted no-auth
-          // path -- where an active MITM could rewrite it to suppress the
-          // divergence -- would defeat the check. conn.observedHostKey is itself
-          // undefined for a file-drop or the no-pin path, so this is also a no-op
-          // there. (201058119)
-          observedHostKey:
-            secure !== undefined ? conn.observedHostKey : undefined,
-          onStage: (id: string) => {
-            const label = stageLabels[id] ?? id;
-            // The label derives from linkage-key names the partner may have
-            // authored, so it goes through the display-boundary escape before
-            // reaching the terminal, like this file's other stderr sites. The
-            // emitter applies the same escape before the pair reaches fd 3.
-            log.info(
-              sanitizeForDisplay(
-                label.charAt(0).toLowerCase() + label.slice(1),
-              ),
-            );
-            emit((e) => e.stage(id, label));
-          },
-          onWarning: (msg: string) => {
-            // Terms-exchange warnings can embed partner-authored column names,
-            // so the text goes through the display-boundary escape here and
-            // inside the emitter alike.
-            log.warn("terms exchange:", sanitizeForDisplay(msg));
-            emit((e) => e.warning(msg));
-          },
-          // A host-key divergence is a security signal, not a terms warning, so
-          // it gets its own un-prefixed warn line; the message is complete and
-          // display-safe (reconcileHostKeyFingerprints sanitizes both parties'
-          // server-controlled values). It also rides the machine-interface
-          // warning event: a supervisor that discards stderr on success (the
-          // appliance job runner) must still see the one control that catches a
-          // one-sided SFTP interception. Non-fatal: the exchange still
-          // completes and the operator disambiguates a rekey from an
-          // interception out-of-band.
-          onHostKeyDivergence: (msg: string) => {
-            log.warn(msg);
-            emit((e) => e.warning(msg));
-          },
-          // A present-but-malformed partner host-key advertisement is dropped by
-          // the fail-soft parse, so reconciliation is silently skipped for it.
-          // Log that drop at debug -- low enough that a benign version-skew does
-          // not warn on every exchange -- so an operator can tell a
-          // non-conforming partner from one that simply observed no host key
-          // (the benign no-host-key path logs nothing here). The dropped value
-          // is deliberately not included: it is unusable, and it is
-          // partner-controlled, so echoing it into a log would be an injection
-          // risk.
-          onPartnerHostKeyMalformed: () =>
-            log.debug(
-              "partner advertised a malformed SFTP host key in the terms " +
-                "exchange; it was dropped per the fail-soft contract and " +
-                "cross-party host-key reconciliation was skipped for it",
-            ),
-          onProtocolConfirmed: (partnerTerms, resolvedRole) => {
-            // identity is partner-controlled free text with no consistency check
-            // (a mutually-distrusting party sets it), so escape it before it
-            // reaches the operator's terminal/logs.
-            log.info(
-              "terms agreed, partner identity:",
-              sanitizeForDisplay(partnerTerms.identity),
-            );
-            log.info("role:", resolvedRole);
-          },
+    const {
+      associationTable,
+      partnerPayload,
+      audit,
+      bootstrap,
+      signedReceipt,
+    } = await runExchange(
+      // Encrypted path: `secure` is the AEAD decorator over mc (the handshake
+      // negotiated applyEncryption), so PSI frames are encrypted on the wire.
+      // Otherwise secure is undefined and the exchange runs over the unencrypted
+      // mc (transport security only): the no-auth zero-setup path that carries
+      // the --save bootstrap, and the authenticated path where the negotiated
+      // applyEncryption is false.
+      secure ?? mc,
+      role,
+      prepared,
+      {
+        psiLibrary,
+        // Run the PSI masking in a worker thread so a long round keeps the
+        // event-loop-owning thread responsive for the SFTP heartbeat and the
+        // liveness timers (board item 208035324). Falls back to in-process when
+        // the bundled worker is absent (dev / tests); see createPsiEngine.
+        psiEngineFactory: (role, id) => createPsiEngine(psiLibrary, role, id),
+        verbosity,
+        saveIntent,
+        // Signed-receipt inputs, threaded only when a signing config was passed
+        // (the exchange command resolves it from the `signing` block). The step
+        // is gated inside runExchange on BOTH the identity and the session key
+        // being present; sessionKeyForReceipt is set only on the authenticated
+        // path, and a signing config on the no-auth path was already rejected
+        // above, so these three travel together. Absent (signing null) leaves
+        // all three undefined and the signing step skipped -- the unsigned path.
+        signingIdentity: signing?.identity,
+        partnerFingerprint: signing?.partnerFingerprint,
+        sessionKey: signing !== null ? sessionKeyForReceipt : undefined,
+        // Advertise the observed SFTP host key for cross-party reconciliation
+        // only when the exchange runs over the authenticated, AEAD-wrapped
+        // channel (`secure` set): the value is unforgeable solely because it
+        // rides that channel, so advertising it on the unencrypted no-auth
+        // path -- where an active MITM could rewrite it to suppress the
+        // divergence -- would defeat the check. conn.observedHostKey is itself
+        // undefined for a file-drop or the no-pin path, so this is also a no-op
+        // there. (201058119)
+        observedHostKey:
+          secure !== undefined ? conn.observedHostKey : undefined,
+        onStage: (id: string) => {
+          const label = stageLabels[id] ?? id;
+          // The label derives from linkage-key names the partner may have
+          // authored, so it goes through the display-boundary escape before
+          // reaching the terminal, like this file's other stderr sites. The
+          // emitter applies the same escape before the pair reaches fd 3.
+          log.info(
+            sanitizeForDisplay(label.charAt(0).toLowerCase() + label.slice(1)),
+          );
+          emit((e) => e.stage(id, label));
         },
-      );
+        onWarning: (msg: string) => {
+          // Terms-exchange warnings can embed partner-authored column names,
+          // so the text goes through the display-boundary escape here and
+          // inside the emitter alike.
+          log.warn("terms exchange:", sanitizeForDisplay(msg));
+          emit((e) => e.warning(msg));
+        },
+        // A host-key divergence is a security signal, not a terms warning, so
+        // it gets its own un-prefixed warn line; the message is complete and
+        // display-safe (reconcileHostKeyFingerprints sanitizes both parties'
+        // server-controlled values). It also rides the machine-interface
+        // warning event: a supervisor that discards stderr on success (the
+        // appliance job runner) must still see the one control that catches a
+        // one-sided SFTP interception. Non-fatal: the exchange still
+        // completes and the operator disambiguates a rekey from an
+        // interception out-of-band.
+        onHostKeyDivergence: (msg: string) => {
+          log.warn(msg);
+          emit((e) => e.warning(msg));
+        },
+        // A present-but-malformed partner host-key advertisement is dropped by
+        // the fail-soft parse, so reconciliation is silently skipped for it.
+        // Log that drop at debug -- low enough that a benign version-skew does
+        // not warn on every exchange -- so an operator can tell a
+        // non-conforming partner from one that simply observed no host key
+        // (the benign no-host-key path logs nothing here). The dropped value
+        // is deliberately not included: it is unusable, and it is
+        // partner-controlled, so echoing it into a log would be an injection
+        // risk.
+        onPartnerHostKeyMalformed: () =>
+          log.debug(
+            "partner advertised a malformed SFTP host key in the terms " +
+              "exchange; it was dropped per the fail-soft contract and " +
+              "cross-party host-key reconciliation was skipped for it",
+          ),
+        onProtocolConfirmed: (partnerTerms, resolvedRole) => {
+          // identity is partner-controlled free text with no consistency check
+          // (a mutually-distrusting party sets it), so escape it before it
+          // reaches the operator's terminal/logs.
+          log.info(
+            "terms agreed, partner identity:",
+            sanitizeForDisplay(partnerTerms.identity),
+          );
+          log.info("role:", resolvedRole);
+        },
+      },
+    );
 
     // The two-party exchange is complete: runExchange has returned, so this side
     // has received everything and already sent the peer its terminal payload
@@ -1032,6 +1098,21 @@ export async function runProtocol(
     // record and its keys are a single optional field, so one check covers both.
     if (recordOutput !== undefined && audit !== undefined)
       writeExchangeRecord(recordOutput, audit.record, audit.keys, loggerName);
+
+    // Persist the dual-signed record after the self-attested record. Written only
+    // when the signing step ran and the signature exchange completed (runExchange
+    // returns signedReceipt undefined otherwise, and throws to the catch on a
+    // verification failure -- so no partial artifact is written for a terminated
+    // swap). Its timestamp is the record's createdAt, so the record and receipt
+    // files for one exchange share a stamp; the record is always built when a
+    // receipt exists (runExchange requires it). Non-fatal, like the record write.
+    if (signing !== null && signedReceipt !== undefined && audit !== undefined)
+      writeDualSignedRecord(
+        signing.receiptOutput,
+        signedReceipt,
+        audit.record.createdAt,
+        loggerName,
+      );
 
     // bootstrap is undefined on every authenticated path (saveIntent unset) and
     // populated on the zero-setup --save path; the caller branches on it.
@@ -1121,6 +1202,46 @@ export async function runProtocol(
       }
       return false;
     };
+
+    // Non-signing-partner observability: this side configured a signed receipt but
+    // the exchange failed before runExchange returned (exchangeComplete false), and
+    // not with a receipt verification error (a distinct security event already
+    // surfaced by that error's own kind/message). The signed-receipt swap is the
+    // last step of runExchange, so a partner that ran without a signing identity
+    // sends no receipt frame and this side parks on that receive until the peer
+    // timeout -- a drop otherwise indistinguishable from a generic peer-silence.
+    // Surface that context so the operator can check whether the partner was
+    // configured to sign at all, rather than chasing a transport fault.
+    // Walks the `cause` chain for a ReceiptVerificationError (mirroring
+    // isHintTagged/errIsPeerAbort above), so a future wrap of the security
+    // failure cannot downgrade it to this softer warn.
+    const isReceiptVerificationFailure = (e: unknown): boolean => {
+      const seen = new Set<unknown>();
+      let cursor: unknown = e;
+      while (
+        typeof cursor === "object" &&
+        cursor !== null &&
+        !seen.has(cursor)
+      ) {
+        seen.add(cursor);
+        if (cursor instanceof ReceiptVerificationError) return true;
+        cursor = (cursor as { cause?: unknown }).cause;
+      }
+      return false;
+    };
+    if (
+      signing !== null &&
+      !exchangeComplete &&
+      !isReceiptVerificationFailure(err)
+    )
+      log.warn(
+        "A signed receipt was configured for this exchange, but the exchange " +
+          "did not complete the receipt swap. If the partner did not configure " +
+          "a signing identity, it sends no receipt and this side waits for one " +
+          "until the peer timeout. Confirm the partner is configured to sign " +
+          "(its signing block, certificate mode) before treating this as a " +
+          "transport failure.",
+      );
 
     const hintAlreadyEmitted = isHintTagged(err);
     if (!hintAlreadyEmitted) {

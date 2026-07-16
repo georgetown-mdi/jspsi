@@ -774,7 +774,7 @@ Optional. Configures signing of exchange receipts and the trust in the partner's
 *Type:* string (`none` | `session-derived` | `certificate`)  
 *Required:* yes, when a `signing` block is present
 
-The receipt signing mode. `none` signs no receipt (only the unsigned self-attested record is produced). `session-derived` is a MAC under the shared key-exchange session key -- tamper-evident but not non-repudiation and not third-party verifiable. `certificate` signs with this party's long-lived signing identity and is the only mode that yields third-party-verifiable non-repudiation. (Receipt assembly and the receipt swap are not yet wired up; this field, the signing identity, and the trust checks below are in place today.)
+The receipt signing mode. `none` signs no receipt (only the unsigned self-attested record is produced). `session-derived` is a MAC under the shared key-exchange session key -- tamper-evident but not non-repudiation and not third-party verifiable; it is not yet implemented. `certificate` signs with this party's long-lived signing identity and is the only mode that yields third-party-verifiable non-repudiation. Under `certificate` mode an authenticated CLI exchange produces a dual-signed receipt: both parties sign the same terms and data-flow facts and swap signatures over the connection, each verifying the partner's pinned certificate before its signature (see [PROTOCOL.md](spec/PROTOCOL.md#the-signed-receipt-step)). Verifying a received dual-signed receipt from a stored file is deferred work.
 
 ### `signing.identity_file`
 
@@ -803,9 +803,9 @@ signing:
 *Type:* string (path)  
 *Required:* no
 
-Where signed receipts / evidence are written. Optional; the CLI falls back to a documented default when omitted.
+Where the dual-signed receipt is written under `certificate` mode. Optional; when omitted the CLI writes it to a timestamped `psilink-receipt-<stamp>.json` in the working directory (the stamp matching the exchange record's), so repeated exchanges accumulate an audit trail. The file is written owner-only. It holds no payload contents and no private keys -- only public certificates, signatures, and the terms and data-flow attestation -- so it does not reveal the matched data or leak whether either direction carried a payload. It does bind both parties' identities and the agreed terms (that is its purpose, a mutually non-repudiable attestation), so it is not anonymous; share it by copying the file when handing it to a partner or auditor. What a holder does and does not learn is enumerated in [EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md#receipt-privacy-properties).
 
-Under `certificate` mode a receipt is accepted only if its asserted [`linkage_terms.identity`](#linkage_termsidentity) is the one the presenting certificate authorizes -- an exact match of the full identity over the same canonical bytes the record commits to and the receipt signs. A party that uses a different identity string than the one bound into its certificate needs a new certificate (a deliberate regeneration); see [PROTOCOL.md](spec/PROTOCOL.md#signing-identity-and-certificate-pinning).
+Under `certificate` mode a receipt is accepted only if the identity the partner used in its agreed terms is the one the presenting certificate authorizes -- an exact match of the full identity over the same canonical bytes the record commits to and the receipt signs, checked against the agreed-terms identity rather than the certificate's own carried value. A party that uses a different identity string than the one bound into its certificate needs a new certificate (a deliberate regeneration); see [PROTOCOL.md](spec/PROTOCOL.md#signing-identity-and-certificate-pinning).
 
 ---
 
