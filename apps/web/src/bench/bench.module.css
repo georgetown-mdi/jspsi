@@ -567,6 +567,11 @@
   border: 1px solid var(--bench-danger);
 }
 
+.keyBadgeDead {
+  color: var(--bench-warn);
+  border: 1px solid var(--bench-warn);
+}
+
 .movers {
   display: inline-flex;
   gap: 6px;

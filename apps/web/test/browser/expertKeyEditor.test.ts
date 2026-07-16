@@ -15,6 +15,7 @@ import { seedAdvancedInvite } from "@psi/advancedInvite";
 
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 
+import type { KeyVerdict } from "@bench/inviterModel";
 import type { Root } from "react-dom/client";
 
 // A file carrying every default linkage column, so the seed keeps the full key set
@@ -58,7 +59,7 @@ function render() {
       createElement(ExpertKeyEditor, {
         draft,
         declaredFields,
-        keyIsSatisfiable: () => true,
+        keyVerdict: (): KeyVerdict => "satisfiable",
         fuzzyApplied: false,
         onChange: () => undefined,
         announce: () => undefined,

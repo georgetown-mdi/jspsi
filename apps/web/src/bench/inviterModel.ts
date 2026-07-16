@@ -3,6 +3,7 @@ import {
   authoredLinkageFields,
   disclosedColumnNames,
   getDefaultLinkageTerms,
+  pipelineAlwaysDrops,
 } from "@psilink/core";
 
 import {
@@ -472,20 +473,42 @@ export function declaredFieldsFor(
   return authoredLinkageFields(draft.metadata, draft.standardization);
 }
 
-/** Per-key satisfiability for the guided list's and expert editor's badges:
- * whether the columns can produce every field the key references. */
+/**
+ * A per-key verdict for the guided list's and expert editor's badges. Three
+ * outcomes, because a shape-satisfiable key can still be self-defeating:
+ * - `satisfiable`: every element field is producible and no element's transform
+ *   is value-killing.
+ * - `dead`: the columns can produce every element field (shape passes), but an
+ *   element's authored standardization can never yield a value -- a
+ *   self-defeating `parse_date` whose input format omits a component the data
+ *   carries. The key would run to a silent empty result, so it warns even though
+ *   the shape check passes.
+ * - `unsatisfiable`: an element references a field the columns cannot produce.
+ *
+ * `dead` is derived from the authored terms alone (value-independent, via
+ * {@link pipelineAlwaysDrops}), consistent with how the shape verdict is
+ * computed without data. It matches the acceptor surface, whose `deadKeyCount`
+ * counts the same self-defeating keys.
+ */
+export type KeyVerdict = "satisfiable" | "dead" | "unsatisfiable";
+
+/** The per-key verdict function behind the Keys tab badges ({@link KeyVerdict}). */
 export function keySatisfiabilityFor(
   editor: InviterEditor,
-): (index: number) => boolean {
+): (index: number) => KeyVerdict {
   const producible = producibleFieldNames(
     editor.draft.metadata,
     editor.draft.standardization,
     editor.seed.columns,
   );
-  return (index) =>
-    editor.draft.keys[index].key.elements.every((element) =>
-      producible.has(element.field),
-    );
+  return (index) => {
+    const key = editor.draft.keys[index].key;
+    if (!key.elements.every((element) => producible.has(element.field)))
+      return "unsatisfiable";
+    if (key.elements.some((element) => pipelineAlwaysDrops(element.transform)))
+      return "dead";
+    return "satisfiable";
+  };
 }
 
 /** Discard every edit and re-derive the recommended draft from the file,

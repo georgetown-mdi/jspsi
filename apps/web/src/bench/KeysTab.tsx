@@ -25,9 +25,34 @@ import { TermsImportExport } from "@components/TermsImportExport";
 import { declaredFieldsFor, keySatisfiabilityFor } from "./inviterModel";
 import styles from "./bench.module.css";
 
-import type { AcquiredCsv, InviterEditor } from "./inviterModel";
+import type { AcquiredCsv, InviterEditor, KeyVerdict } from "./inviterModel";
 import type { Algorithm, LinkageStrategy, LinkageTerms } from "@psilink/core";
 import type { AdvancedInviteDraft } from "@psi/advancedInvite";
+
+/** The guided-list badge copy and CSS class for each per-key verdict
+ * ({@link KeyVerdict}). A dead key warns ("won't match", amber) rather than
+ * blocking: its columns resolve but a self-defeating transform would run it to
+ * a silent empty result, so the author is nudged to fix the terms. */
+const KEY_VERDICT_BADGES: Record<
+  KeyVerdict,
+  {
+    label: string;
+    className: "keyBadgeSatisfiable" | "keyBadgeUnsatisfiable" | "keyBadgeDead";
+    ariaLabel?: string;
+  }
+> = {
+  satisfiable: { label: "satisfiable", className: "keyBadgeSatisfiable" },
+  unsatisfiable: {
+    label: "not satisfiable",
+    className: "keyBadgeUnsatisfiable",
+  },
+  dead: {
+    label: "won't match",
+    className: "keyBadgeDead",
+    ariaLabel:
+      "This key's cleaning can never produce a value; review the transform",
+  },
+};
 
 /**
  * The Matching keys tab: the guided ordered key list (enable + reorder, with
@@ -69,10 +94,7 @@ export function KeysTab({
   announce: (message: string) => void;
   onBack: () => void;
 }) {
-  const keyIsSatisfiable = useMemo(
-    () => keySatisfiabilityFor(editor),
-    [editor],
-  );
+  const keyVerdict = useMemo(() => keySatisfiabilityFor(editor), [editor]);
   const declaredFields = useMemo(
     () => declaredFieldsFor(editor.draft),
     [editor.draft],
@@ -96,7 +118,7 @@ export function KeysTab({
       <ol className={styles.guidedKeys} aria-describedby="bench-key-order-help">
         {editor.draft.keys.map((entry, index) => {
           const displayName = sanitizeForDisplay(entry.key.name);
-          const satisfiable = keyIsSatisfiable(index);
+          const badge = KEY_VERDICT_BADGES[keyVerdict(index)];
           return (
             <li key={entry.key.name}>
               <Checkbox
@@ -109,13 +131,12 @@ export function KeysTab({
                     Key {index + 1} -{" "}
                     <span className={styles.mono}>{displayName}</span>
                     <span
-                      className={
-                        satisfiable
-                          ? `${styles.keyBadge} ${styles.keyBadgeSatisfiable}`
-                          : `${styles.keyBadge} ${styles.keyBadgeUnsatisfiable}`
-                      }
+                      className={`${styles.keyBadge} ${styles[badge.className]}`}
+                      {...(badge.ariaLabel
+                        ? { role: "img", "aria-label": badge.ariaLabel }
+                        : {})}
                     >
-                      {satisfiable ? "satisfiable" : "not satisfiable"}
+                      {badge.label}
                     </span>
                   </>
                 }
@@ -161,7 +182,7 @@ export function KeysTab({
         <ExpertKeyEditor
           draft={editor.draft}
           declaredFields={declaredFields}
-          keyIsSatisfiable={keyIsSatisfiable}
+          keyVerdict={keyVerdict}
           fuzzyApplied={APPLIED_SETTINGS.fuzzyComparisons}
           onChange={onAuthoredDraft}
           announce={announce}

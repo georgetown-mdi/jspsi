@@ -730,9 +730,11 @@ describe("customize tabs", () => {
     expect(imported.keysAuthored).toBe(true);
     const disabled = imported.draft.keys.filter((entry) => !entry.enabled);
     expect(disabled.length).toBeGreaterThan(0);
-    const satisfiable = keySatisfiabilityFor(imported);
+    const verdict = keySatisfiabilityFor(imported);
     expect(
-      imported.draft.keys.some((_entry, index) => !satisfiable(index)),
+      imported.draft.keys.some(
+        (_entry, index) => verdict(index) === "unsatisfiable",
+      ),
     ).toBe(true);
     expect(reviewValidation(imported).canGenerate).toBe(true);
   });
@@ -911,5 +913,66 @@ describe("a column retype reconciles standardization even with authored keys", (
     // are demonstrably distinct.
     const guided = retypeFirstNameToLastName(seeded);
     expect(keyNames(guided)).not.toEqual(keyNames(seeded));
+  });
+});
+
+describe("per-key dead-key verdict on the authoring surface", () => {
+  // Author a self-defeating parse_date on a key element: input_format "MM/DD"
+  // has no year, so parseDate drops every record for that element and the whole
+  // key runs to a silent empty result. The columns still produce the field
+  // (shape passes), so the shape check alone would pass it -- the dead check is
+  // what catches it. The transform is authored onto the key ELEMENT (what the
+  // expert editor edits), not the field standardization.
+  function withDeadDobKey(
+    editor: ReturnType<typeof editorFromCsv>,
+    keyIndex: number,
+  ): ReturnType<typeof editorFromCsv> {
+    const keys = editor.draft.keys.map((entry, at) => {
+      if (at !== keyIndex) return entry;
+      const elements = entry.key.elements.map((element) =>
+        element.field === "date_of_birth"
+          ? {
+              ...element,
+              transform: [
+                { function: "parse_date", params: { inputFormat: "MM/DD" } },
+              ],
+            }
+          : element,
+      );
+      return { ...entry, key: { ...entry.key, elements } };
+    });
+    return editorWithAuthoredDraft(editor, { ...editor.draft, keys });
+  }
+
+  test("a value-killing parse_date flags the key dead, not unsatisfiable", () => {
+    const editor = editorFromCsv("Dana", csv);
+    // Key 0 (SSN4 + LN + DOB) carries a date_of_birth element the columns supply.
+    const dead = withDeadDobKey(editor, 0);
+    const verdict = keySatisfiabilityFor(dead);
+    expect(verdict(0)).toBe("dead");
+  });
+
+  test("a routine key is satisfiable, never flagged dead", () => {
+    const editor = editorFromCsv("Dana", csv);
+    const verdict = keySatisfiabilityFor(editor);
+    // Every recommended key passes cleanly on the default setup: no new warning.
+    for (const [index] of editor.draft.keys.entries())
+      expect(verdict(index)).toBe("satisfiable");
+  });
+
+  test("the dead verdict is scoped to the self-defeating key alone", () => {
+    const editor = editorFromCsv("Dana", csv);
+    const dead = withDeadDobKey(editor, 0);
+    const verdict = keySatisfiabilityFor(dead);
+    // Only the authored key is dead; its siblings keep their satisfiable badge.
+    for (const [index] of dead.draft.keys.entries())
+      expect(verdict(index)).toBe(index === 0 ? "dead" : "satisfiable");
+  });
+
+  test("a dead key does not block the mint gate (warn-only)", () => {
+    const editor = editorFromCsv("Dana", csv);
+    const dead = withDeadDobKey(editor, 0);
+    // The block gate is unchanged: a dead key warns but never hard-blocks Create.
+    expect(reviewValidation(dead).canGenerate).toBe(true);
   });
 });
