@@ -30,6 +30,15 @@
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-protected-push.mjs\""
           }
         ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/require-agent-model.mjs\""
+          }
+        ]
       }
     ]
   }
