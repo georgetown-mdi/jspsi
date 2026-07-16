@@ -330,7 +330,10 @@ function DeleteExchangeButton({
         variant="subtle"
         color="red"
         disabled={deleting}
-        onClick={() => setConfirming(true)}
+        onClick={() => {
+          setDeleteFailed(false);
+          setConfirming(true);
+        }}
       >
         Delete
       </Button>

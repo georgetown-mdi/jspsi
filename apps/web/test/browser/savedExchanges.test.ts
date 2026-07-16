@@ -398,4 +398,52 @@ describe("saved list route: delete is a first-class, always-available action", (
       .element(page.getByText("Riverbend quarterly", { exact: true }))
       .toBeInTheDocument();
   });
+
+  test("reopening the confirm after a failed delete starts clean, and a retry succeeds", async () => {
+    await createManagedExchange(newExchange({ label: "Riverbend quarterly" }));
+    deleteOverride = () => Promise.reject(new Error("delete failed"));
+
+    mount(createElement(SavedExchanges));
+
+    await page.getByRole("button", { name: "Delete" }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Delete" })
+      .click();
+    await expect
+      .element(
+        page.getByText("Removing it from this browser failed", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+
+    // Cancel the modal, then reopen it via the row's Delete button: the failure
+    // from the last attempt must not carry over into the fresh confirm.
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await page.getByRole("button", { name: "Delete" }).click();
+
+    expect(
+      page
+        .getByText("Removing it from this browser failed", { exact: false })
+        .query(),
+    ).toBeNull();
+    await expect
+      .element(
+        page.getByText('Delete "Riverbend quarterly"?', { exact: false }),
+      )
+      .toBeInTheDocument();
+
+    // Let a successful delete proceed to prove the retry path actually works.
+    deleteOverride = undefined;
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Delete" })
+      .click();
+
+    await expect
+      .element(page.getByText("You have none saved yet.", { exact: false }))
+      .toBeInTheDocument();
+    expect(page.getByText("Riverbend quarterly").query()).toBeNull();
+  });
 });
