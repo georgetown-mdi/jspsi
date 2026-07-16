@@ -5,8 +5,9 @@
  * on. No React: the ordering and the failure classification are unit-testable in
  * Node with the store reads injected.
  *
- * The two failure outcomes are deliberately distinct. A store that cannot be opened
- * at all -- private mode with storage blocked, or an engine without IndexedDB -- is
+ * The two failure outcomes are deliberately distinct. A store whose open does not
+ * succeed -- private mode with storage blocked, an engine without IndexedDB, or a
+ * version-change open transiently blocked by another tab's older connection -- is
  * `"unavailable"`: the operator can still run a one-off exchange, so the home route
  * renders the quick path and the list route shows an explicit degrade. A store that
  * opens but whose read fails (a corrupted or app-upgrade-invalidated record) is

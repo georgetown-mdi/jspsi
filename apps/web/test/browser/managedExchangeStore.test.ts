@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
 
 import {
+  IDB_VERSION,
   MANAGED_EXCHANGE_DB_NAME,
   MANAGED_EXCHANGE_LOCAL_STORE_NAME,
   MANAGED_EXCHANGE_STORE_NAME,
@@ -153,6 +154,31 @@ async function rawLocalPut(id: string, value: unknown): Promise<void> {
   } finally {
     db.close();
   }
+}
+
+/** Delete the whole managed-exchange database, so a test can re-create it at a chosen
+ * version. Resolves once the delete completes; a delete blocked by a live connection
+ * still fires `onsuccess` once that connection closes, so callers close held
+ * connections first. */
+async function deleteDatabase(): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(MANAGED_EXCHANGE_DB_NAME);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+/** Open a raw connection at `version`, deliberately WITHOUT the module's
+ * `onversionchange` self-close, so it models an old tab whose connection never yields
+ * to a later upgrade -- the condition that fires `blocked` on the next open. The caller
+ * closes it. */
+async function openRawHeldConnection(version: number): Promise<IDBDatabase> {
+  return await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(MANAGED_EXCHANGE_DB_NAME, version);
+    request.onupgradeneeded = () => undefined;
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
 }
 
 beforeEach(async () => {
@@ -698,5 +724,58 @@ describe("persistent storage request", () => {
     } finally {
       StorageManager.prototype.persist = realPersist;
     }
+  });
+});
+
+describe("a blocked open settles instead of hanging", () => {
+  test("a version-change open held off by an older connection rejects, not hangs", async () => {
+    // Recreate the database one version below this build, then hold that older
+    // connection open WITHOUT the module's onversionchange self-close, modelling an old
+    // tab that never yields. The module's open (at IDB_VERSION) is a version-change open
+    // the older connection blocks: it must reject rather than hang forever.
+    await deleteDatabase();
+    const held = await openRawHeldConnection(IDB_VERSION - 1);
+    try {
+      await expect(openManagedExchangeDatabase()).rejects.toThrow();
+    } finally {
+      held.close();
+    }
+  });
+
+  test("closing the blocking connection lets a reopened open succeed", async () => {
+    // The blocked state is transient: once the older connection closes, the same open
+    // succeeds. This pins the self-healing property the degrade relies on -- a reload
+    // (or the other tab closing) recovers a store the first open found blocked.
+    await deleteDatabase();
+    const held = await openRawHeldConnection(IDB_VERSION - 1);
+    await expect(openManagedExchangeDatabase()).rejects.toThrow();
+    held.close();
+    const db = await openManagedExchangeDatabase();
+    try {
+      expect(db.version).toBe(IDB_VERSION);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("an opened connection closes itself on a later version-change open", async () => {
+    // The root-cause half: a connection this module opens registers onversionchange to
+    // close itself, so it does not block the next build's upgrade the way an old tab's
+    // unyielding connection does. With the module-opened connection left open, a raw
+    // open one version higher completes rather than staying blocked.
+    await deleteDatabase();
+    const moduleConnection = await openManagedExchangeDatabase();
+    const higher = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(MANAGED_EXCHANGE_DB_NAME, IDB_VERSION + 1);
+      request.onupgradeneeded = () => undefined;
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+      request.onblocked = () =>
+        reject(new Error("module connection did not yield on versionchange"));
+    });
+    higher.close();
+    // The module connection closed itself, so a subsequent module open is clean.
+    moduleConnection.close();
+    await deleteDatabase();
   });
 });

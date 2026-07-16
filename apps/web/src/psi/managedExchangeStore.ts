@@ -61,8 +61,9 @@ export const MANAGED_EXCHANGE_LOCAL_STORE_NAME = "localState";
 /** The database schema version this build opens. Bump only for an IndexedDB
  * structural migration (a new object store or index), never for a change to the
  * record's own `schemaVersion`, which the record schema governs. Bumped to 2 to add
- * the local-sibling-state store. */
-const IDB_VERSION = 2;
+ * the local-sibling-state store.
+ * @internal */
+export const IDB_VERSION = 2;
 
 /**
  * Open (creating or upgrading) the managed-exchange database. The records store is
@@ -81,8 +82,26 @@ export function openManagedExchangeDatabase(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(MANAGED_EXCHANGE_LOCAL_STORE_NAME))
         db.createObjectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME);
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const db = request.result;
+      // Close on a later open's version-change so this connection stops holding an
+      // older version open. Without it a long-lived page's connection blocks the next
+      // build's upgrade open indefinitely, which is the condition that fires `blocked`
+      // below; closing here is the root-cause half that keeps that condition rare.
+      db.onversionchange = () => db.close();
+      resolve(db);
+    };
     request.onerror = () => reject(request.error);
+    // A version-change open is blocked when another live connection still holds an
+    // older version. It settles neither way on its own, so without this handler the
+    // promise would hang forever; reject it so a blocked open classifies as
+    // store-unavailable (the degrade-to-quick-path branch) rather than hanging a
+    // caller. The blocked state is transient and self-healing -- the `onversionchange`
+    // close above lets the other connection yield -- so a reload recovers it.
+    request.onblocked = () =>
+      reject(
+        new Error("managed-exchange database open blocked by another tab"),
+      );
   });
 }
 
