@@ -1212,9 +1212,28 @@ export async function runProtocol(
     // timeout -- a drop otherwise indistinguishable from a generic peer-silence.
     // Surface that context so the operator can check whether the partner was
     // configured to sign at all, rather than chasing a transport fault.
-    const isReceiptVerificationFailure =
-      err instanceof ReceiptVerificationError;
-    if (signing !== null && !exchangeComplete && !isReceiptVerificationFailure)
+    // Walks the `cause` chain for a ReceiptVerificationError (mirroring
+    // isHintTagged/errIsPeerAbort above), so a future wrap of the security
+    // failure cannot downgrade it to this softer warn.
+    const isReceiptVerificationFailure = (e: unknown): boolean => {
+      const seen = new Set<unknown>();
+      let cursor: unknown = e;
+      while (
+        typeof cursor === "object" &&
+        cursor !== null &&
+        !seen.has(cursor)
+      ) {
+        seen.add(cursor);
+        if (cursor instanceof ReceiptVerificationError) return true;
+        cursor = (cursor as { cause?: unknown }).cause;
+      }
+      return false;
+    };
+    if (
+      signing !== null &&
+      !exchangeComplete &&
+      !isReceiptVerificationFailure(err)
+    )
       log.warn(
         "A signed receipt was configured for this exchange, but the exchange " +
           "did not complete the receipt swap. If the partner did not configure " +
