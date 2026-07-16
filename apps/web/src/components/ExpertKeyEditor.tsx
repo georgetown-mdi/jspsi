@@ -47,6 +47,33 @@ import type {
 } from "@psilink/core";
 
 import type { AdvancedInviteDraft, FuzzyComparison } from "@psi/advancedInvite";
+import type { KeyVerdict } from "@bench/inviterModel";
+
+/** The expert-editor badge copy and Mantine color for each per-key verdict
+ * ({@link KeyVerdict}), reading consistently with the guided list. A dead key is
+ * warn-only (amber "review"): its columns resolve, but a self-defeating transform
+ * would run the key to a silent empty result. */
+const KEY_VERDICT_BADGES: Record<
+  KeyVerdict,
+  { label: string; color: string; ariaLabel: string }
+> = {
+  satisfiable: {
+    label: "satisfiable",
+    color: "green",
+    ariaLabel: "Your columns can satisfy this key",
+  },
+  unsatisfiable: {
+    label: "not satisfiable",
+    color: "red",
+    ariaLabel: "Your columns cannot satisfy this key",
+  },
+  dead: {
+    label: "review",
+    color: "yellow",
+    ariaLabel:
+      "This key's cleaning can never produce a value; review the transform",
+  },
+};
 
 /** The fuzzy-comparison expansions an element can declare, with plain-language
  * labels. The control is rendered only when the run applies fuzzy comparisons (see
@@ -83,7 +110,7 @@ function elementIdentifier(element: LinkageKeyElement): string {
 export function ExpertKeyEditor({
   draft,
   declaredFields,
-  keyIsSatisfiable,
+  keyVerdict,
   fuzzyApplied,
   onChange,
   announce,
@@ -91,8 +118,9 @@ export function ExpertKeyEditor({
   draft: AdvancedInviteDraft;
   /** The fields a key element may reference, in offer order (metadata-derived). */
   declaredFields: Array<LinkageField>;
-  /** Whether the inviter's columns can satisfy the key at this index. */
-  keyIsSatisfiable: (keyIndex: number) => boolean;
+  /** The per-key badge verdict at this index ({@link KeyVerdict}): satisfiable,
+   * unsatisfiable (a missing field), or dead (a self-defeating transform). */
+  keyVerdict: (keyIndex: number) => KeyVerdict;
   /** Whether the run applies fuzzy comparisons; when false the per-element fuzzy
    * control is hidden rather than shown disabled. */
   fuzzyApplied: boolean;
@@ -248,7 +276,7 @@ export function ExpertKeyEditor({
           // placeholder when it is blank so the toggle is never an empty target.
           const keyDisplayName =
             keyLabel.trim() === "" ? "Unnamed key" : keyLabel;
-          const satisfiable = keyIsSatisfiable(keyIndex);
+          const badge = KEY_VERDICT_BADGES[keyVerdict(keyIndex)];
           const keyId = idFor(keyIds.current, key);
           const keyOpen = expandedKeys.has(keyId);
           const keyBodyId = `key-body-${keyId}`;
@@ -301,15 +329,11 @@ export function ExpertKeyEditor({
                     <Badge
                       size="xs"
                       variant="light"
-                      color={satisfiable ? "green" : "red"}
+                      color={badge.color}
                       role="img"
-                      aria-label={
-                        satisfiable
-                          ? "Your columns can satisfy this key"
-                          : "Your columns cannot satisfy this key"
-                      }
+                      aria-label={badge.ariaLabel}
                     >
-                      {satisfiable ? "satisfiable" : "not satisfiable"}
+                      {badge.label}
                     </Badge>
                     <ActionIcon
                       variant="subtle"
