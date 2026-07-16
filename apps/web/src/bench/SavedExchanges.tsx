@@ -133,9 +133,7 @@ function SavedExchangesSurface({
         {load === undefined ? (
           <Loader />
         ) : load.kind === "failed" ? (
-          <p className={styles.sub}>
-            Your recurring exchanges could not be read from this browser.
-          </p>
+          <SavedExchangesFailed />
         ) : load.rows.length === 0 ? (
           <SavedExchangesEmpty />
         ) : (
@@ -234,6 +232,56 @@ function BackupLine({ row }: { row: SavedExchangeRow }) {
  * wholesale eviction cannot be told from a first visit, so the import is offered here
  * standing rather than behind a detected loss. */
 function SavedExchangesEmpty() {
+  return (
+    <>
+      <p className={styles.sub}>
+        A recurring exchange is a saved partnership with someone you exchange
+        with again and again: its terms and a rotating shared secret are stored
+        in this browser, so you can run it without a new invitation each time.
+        You have none saved yet.
+      </p>
+      <p>
+        <Button component={Link} to="/quick">
+          Set up a recurring exchange
+        </Button>
+      </p>
+      <p className={`${styles.sub} ${styles.small}`}>
+        Were you sent a recurring invitation?{" "}
+        <Anchor inherit component={Link} to="/accept">
+          Accept it
+        </Anchor>{" "}
+        and choose &quot;Manage this exchange&quot; to save it here.
+      </p>
+      <RestoreFromBackup />
+    </>
+  );
+}
+
+/** The read-failed surface: the list opened but its records could not be read, so it
+ * cannot show them. The read rejects wholesale on any single invalid record
+ * ({@link listManagedExchanges}), so a fresh import cannot mend the list here -- the bad
+ * record still fails the read. What the import can still do is store the exchange it
+ * carries and take the operator straight to its run surface, sidestepping the unreadable
+ * list. The copy is honest about that: the same restore affordance the empty state
+ * carries, under a lead that does not promise the list will then display. */
+function SavedExchangesFailed() {
+  return (
+    <>
+      <p className={styles.sub}>
+        Your recurring exchanges could not be read from this browser. If you
+        have a backup file, you can still restore an exchange and go straight to
+        running it.
+      </p>
+      <RestoreFromBackup />
+    </>
+  );
+}
+
+/** The standing restore-from-backup import affordance, shared by the empty state and the
+ * read-failed surface so both render one markup. A successful import takes the operator
+ * to the imported exchange's run surface, so it is a way forward even when the list read
+ * itself cannot be mended. */
+function RestoreFromBackup() {
   const navigate = useNavigate();
   const [importFailed, setImportFailed] = useState(false);
 
@@ -262,45 +310,25 @@ function SavedExchangesEmpty() {
   }
 
   return (
-    <>
-      <p className={styles.sub}>
-        A recurring exchange is a saved partnership with someone you exchange
-        with again and again: its terms and a rotating shared secret are stored
-        in this browser, so you can run it without a new invitation each time.
-        You have none saved yet.
+    <div className={styles.callout}>
+      <p className={styles.calloutLead}>Restore from a backup.</p>
+      <p className={styles.small}>
+        If this browser was cleared or you are moving to a new device, import
+        the backup file you exported to bring the exchange back here.
       </p>
-      <p>
-        <Button component={Link} to="/quick">
-          Set up a recurring exchange
-        </Button>
-      </p>
-      <p className={`${styles.sub} ${styles.small}`}>
-        Were you sent a recurring invitation?{" "}
-        <Anchor inherit component={Link} to="/accept">
-          Accept it
-        </Anchor>{" "}
-        and choose &quot;Manage this exchange&quot; to save it here.
-      </p>
-      <div className={styles.callout}>
-        <p className={styles.calloutLead}>Restore from a backup.</p>
-        <p className={styles.small}>
-          If this browser was cleared or you are moving to a new device, import
-          the backup file you exported to bring the exchange back here.
-        </p>
-        {importFailed && (
-          <Alert color="red" title="That file could not be imported" mb="sm">
-            The backup file could not be read. Check that you chose the backup
-            file you exported and that it was not modified.
-          </Alert>
+      {importFailed && (
+        <Alert color="red" title="That file could not be imported" mb="sm">
+          The backup file could not be read. Check that you chose the backup
+          file you exported and that it was not modified.
+        </Alert>
+      )}
+      <FileButton accept="application/json,.json" onChange={onFile}>
+        {(props) => (
+          <Button mt="sm" variant="default" {...props}>
+            Import a backup file
+          </Button>
         )}
-        <FileButton accept="application/json,.json" onChange={onFile}>
-          {(props) => (
-            <Button mt="sm" variant="default" {...props}>
-              Import a backup file
-            </Button>
-          )}
-        </FileButton>
-      </div>
-    </>
+      </FileButton>
+    </div>
   );
 }

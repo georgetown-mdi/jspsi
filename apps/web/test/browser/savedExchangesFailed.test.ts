@@ -100,4 +100,20 @@ describe("store opens but the read fails", () => {
       )
       .toBeInTheDocument();
   });
+
+  // The read-failed surface is not a dead end: it carries the same
+  // restore-from-backup import affordance the empty state has. The list read
+  // rejects wholesale on any one bad record, so the import cannot mend the list,
+  // but it stores the exchange and routes straight to its run surface -- a way
+  // forward the surface must still offer.
+  test("the read-failed surface offers the restore-from-backup import", async () => {
+    mount(createElement(SavedExchanges));
+
+    await expect
+      .element(page.getByText("Restore from a backup", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Import a backup file" }))
+      .toBeInTheDocument();
+  });
 });

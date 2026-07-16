@@ -128,7 +128,8 @@ export function BenchLobby() {
             Recurring exchanges
           </Anchor>{" "}
           lists the ones stored in this browser so you can run one without a new
-          invitation.
+          invitation, and is where you restore one from a backup file if this
+          browser was cleared.
         </p>
         <p className={`${styles.sub} ${styles.small}`}>
           Already have an exchange record?{" "}

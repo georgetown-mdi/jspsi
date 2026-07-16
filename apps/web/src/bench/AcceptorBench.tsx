@@ -213,8 +213,8 @@ export function AcceptorBench() {
       setDecode({
         status: "error",
         message:
-          "No invitation was found in this link. Paste the code on the " +
-          "bench's home page instead.",
+          "No invitation was found in this link. Paste the code into the " +
+          "accept form instead.",
       });
       return;
     }

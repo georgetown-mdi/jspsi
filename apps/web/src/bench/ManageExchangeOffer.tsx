@@ -1,7 +1,15 @@
 import { useState } from "react";
 
-import { Alert, Button, Checkbox, NumberInput, TextInput } from "@mantine/core";
+import {
+  Alert,
+  Anchor,
+  Button,
+  Checkbox,
+  NumberInput,
+  TextInput,
+} from "@mantine/core";
 import { IconCircleCheck } from "@tabler/icons-react";
+import { Link } from "@tanstack/react-router";
 
 import {
   LABEL_GUIDANCE,
@@ -68,7 +76,11 @@ export function ManageExchangeOffer({
         </p>
         <p className={styles.small}>
           Its terms and secret are stored in this browser so you can run it
-          again with the same partner. Find it in your recurring exchanges.
+          again with the same partner. Find it in your{" "}
+          <Anchor inherit component={Link} to="/saved">
+            recurring exchanges
+          </Anchor>
+          .
         </p>
       </div>
     );
