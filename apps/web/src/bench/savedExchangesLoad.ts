@@ -33,8 +33,9 @@ export type SavedExchangesLoad =
  * failure classes are testable without a real IndexedDB. */
 export interface SavedExchangesLoadDeps {
   /** Probe the store's openability. Rejects when the store cannot be opened at all;
-   * its result is otherwise unused (the reads reopen as needed). */
-  openStore: () => Promise<unknown>;
+   * on success the load closes the returned connection at once (the reads reopen as
+   * needed), so the probe never leaks it. */
+  openStore: () => Promise<{ close: () => void }>;
   /** Read every stored record. Rejects on a corrupted or invalidated store. */
   listExchanges: () => Promise<Array<ManagedExchangeRecord>>;
   /** Read the local sibling state, keyed by record id. */
@@ -54,7 +55,11 @@ export async function loadSavedExchanges(
   deps: SavedExchangesLoadDeps,
 ): Promise<SavedExchangesLoad> {
   try {
-    await deps.openStore();
+    // Close the probe connection at once: it exists only to separate an
+    // unopenable store from a post-open read failure, so holding it open would
+    // leak a live connection for the page lifetime and could block a later
+    // version-change transaction. The reads below reopen as needed.
+    (await deps.openStore()).close();
   } catch {
     return { kind: "unavailable" };
   }

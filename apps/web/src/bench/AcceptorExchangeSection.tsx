@@ -34,7 +34,7 @@ import type { RunOutputs } from "./runOutputs";
  * Problems block carries the other half). A failed run renders the failure
  * vocabulary's alert for its category, each with its one concrete way forward
  * -- an acceptor seat cannot mint, so every non-retryable recovery is a link
- * back to the lobby to paste a fresh invitation, and a config fault returns to
+ * to the quick path to paste a fresh invitation, and a config fault returns to
  * the confirm-columns step. No failure clears any operator input.
  */
 export function AcceptorExchangeSection({

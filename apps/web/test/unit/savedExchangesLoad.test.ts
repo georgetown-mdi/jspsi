@@ -56,7 +56,7 @@ function deps(
   overrides: Partial<SavedExchangesLoadDeps> = {},
 ): SavedExchangesLoadDeps {
   return {
-    openStore: () => Promise.resolve(),
+    openStore: () => Promise.resolve({ close: () => undefined }),
     listExchanges: () => Promise.resolve([]),
     listLocalState: () => Promise.resolve(new Map<string, ManagedLocalState>()),
     now: () => NOW,
@@ -80,6 +80,21 @@ describe("loadSavedExchanges", () => {
   test("loading -> empty: resolves ready with no rows when the store is empty", async () => {
     const result = await loadSavedExchanges(deps());
     expect(result).toEqual({ kind: "ready", rows: [] });
+  });
+
+  test("closes the probe connection on the success path so it is not leaked", async () => {
+    let closed = false;
+    await loadSavedExchanges(
+      deps({
+        openStore: () =>
+          Promise.resolve({
+            close: () => {
+              closed = true;
+            },
+          }),
+      }),
+    );
+    expect(closed).toBe(true);
   });
 
   test("does not resolve to a non-loading outcome before the reads settle", async () => {

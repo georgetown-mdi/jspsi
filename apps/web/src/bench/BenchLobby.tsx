@@ -11,10 +11,11 @@ import { downloadSampleCsvs } from "./sampleData";
 import styles from "./bench.module.css";
 
 /**
- * The app's landing screen: two primary actions side by side -- set up an
- * exchange, or accept an invitation you were sent -- above the standing
- * how-it-works explanation. Verifying a receipt is a secondary action, given
- * as an inline text link below the two cards rather than equal billing.
+ * The quick path's screen at `/quick`, reached from the recurring-exchange list
+ * home at `/`: two primary actions side by side -- set up a one-off exchange, or
+ * accept an invitation you were sent -- above the standing how-it-works
+ * explanation. Verifying a receipt is a secondary action, given as an inline text
+ * link below the two cards rather than equal billing.
  */
 export function BenchLobby() {
   const navigate = useNavigate();
