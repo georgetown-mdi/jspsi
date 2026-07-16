@@ -23,8 +23,12 @@ const terms = {
 } as unknown as LinkageTerms;
 
 // Two columns, one disclosed (`program_code`, isPayload) and one match-only
-// (`dob`): the disclosed set the exchange file's commitment must equal is
-// exactly the disclosed subset (see disclosedColumnNames / isDisclosedToPartner).
+// (`dob`): disclosedColumnNames(metadata) is exactly ["program_code"]. The
+// stub's own disclosedPayloadColumns is deliberately a DIFFERENT set
+// (["case_number"], not a payload column in this metadata at all) so a test
+// asserting against it can only pass on a verbatim pass-through of the
+// invitation's field -- a re-derivation via disclosedColumnNames(metadata)
+// would produce ["program_code"] instead and fail.
 const metadata = [
   { name: "program_code", role: "payload", isPayload: true },
   { name: "dob", role: "match", isPayload: false },
@@ -43,7 +47,7 @@ function invitationStub(
     columns: ["program_code", "dob"],
     metadata,
     standardization: undefined,
-    disclosedPayloadColumns: ["program_code"],
+    disclosedPayloadColumns: ["case_number"],
     ...overrides,
   };
 }
@@ -191,10 +195,22 @@ describe("endpoint and config derive from one locator", () => {
       path: "/exchanges/psilink",
     });
     // The config's terms, metadata, and disclosed set are read off the same
-    // minted invitation the code came from -- config and token agree.
+    // minted invitation the code came from -- config and token agree. The
+    // disclosed set equals the STUB's own field (["case_number"]), not
+    // disclosedColumnNames(metadata) (["program_code"]): this only holds
+    // under a verbatim pass-through of invitation.disclosedPayloadColumns.
     expect(input.linkageTerms).toBe(terms);
     expect(input.metadata).toBe(metadata);
-    expect(input.disclosedPayloadColumns).toEqual(["program_code"]);
+    expect(input.disclosedPayloadColumns).toEqual(["case_number"]);
+  });
+
+  test("an empty disclosed set is carried through, not omitted", () => {
+    const input = exchangeFileInputFor(
+      "sftp",
+      sftpFields,
+      invitationStub({ disclosedPayloadColumns: [] }),
+    );
+    expect(input.disclosedPayloadColumns).toEqual([]);
   });
 
   test("an empty remote directory is omitted, not sent as an empty path", () => {

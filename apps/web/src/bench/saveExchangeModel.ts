@@ -1,5 +1,3 @@
-import { disclosedColumnNames } from "@psilink/core";
-
 import type {
   ConnectionEndpointRequest,
   GeneratedInvitation,
@@ -250,13 +248,10 @@ export function exchangeFileInputFor(
     ...(invitation.standardization !== undefined
       ? { standardization: invitation.standardization }
       : {}),
-    // The token's disclosed set is disclosedColumnNames over the same metadata
-    // the invitation mint used (or the inferred metadata on the quick path);
-    // deriving it here from that metadata keeps the file's commitment identical
-    // to the token's.
-    ...(invitation.metadata !== undefined
-      ? { disclosedPayloadColumns: disclosedColumnNames(invitation.metadata) }
-      : {}),
+    // The token's own published set (including the strict empty set), so the
+    // persisted send-side commitment is the one the token carries -- never a
+    // re-derivation that could drift from it.
+    disclosedPayloadColumns: invitation.disclosedPayloadColumns,
   };
 }
 
