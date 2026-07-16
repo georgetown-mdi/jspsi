@@ -185,6 +185,65 @@ describe("reconstructCommittedData round-trips through the real build path", () 
     expect(report.commitments.localPayloadSent).toBe("verified");
   });
 
+  test("a short row omitting a prototype-member payload column reconstructs null, not the inherited function", async () => {
+    // A payload column named exactly an Object.prototype member ('toString'),
+    // omitted by a short input row: the send side (preparePayload) commits null,
+    // so reconstruction must read the same absent value. A bare inputRows[i]?.[col]
+    // would read the INHERITED function off the prototype chain, reconstructing a
+    // different byte than was committed -- a spurious localPayloadSent mismatch on a
+    // legitimate exchange. The own-property read reproduces the committed null.
+    const protoMeta: Metadata = [
+      { name: "pid", type: "ssn", role: "identifier", isPayload: false },
+      { name: "toString", type: "other", role: "payload", isPayload: true },
+    ];
+    const sparseRows: CSVRow[] = [{ pid: "P0" }, { pid: "P1" }]; // omit 'toString'
+    const partnerPayload: PartnerPayload = {
+      columns: ["note"],
+      rowIndices: [0],
+      rows: [["s-0"]],
+    };
+    const { report } = await roundTrip({
+      rawRows: sparseRows,
+      metadata: protoMeta,
+      associationTable: [[0], [0]],
+      partnerPayload,
+      ourIdColumn: "pid",
+    });
+    expect(report.outcome).toBe("verified");
+    expect(report.commitments.localPayloadSent).toBe("verified");
+  });
+
+  test("short rows omitting a prototype-member identifier column raise no spurious duplicate warning", async () => {
+    // Two input rows omit the 'toString' identifier column. A bare row[ourIdColumn]
+    // reads the SAME inherited prototype function for each, so the id-to-row map
+    // sees a repeated "value" and warns of a duplicate identifier that does not
+    // exist. The own-property read treats each omitting row as having no identifier
+    // (undefined), so no spurious duplicate warning is raised.
+    const protoIdMeta: Metadata = [
+      { name: "toString", type: "ssn", role: "identifier", isPayload: false },
+      { name: "dose", type: "first_name", role: "payload", isPayload: true },
+    ];
+    const rows: CSVRow[] = [
+      { toString: "P0", dose: "10mg" },
+      { dose: "20mg" }, // omits the 'toString' identifier column
+      { dose: "30mg" }, // also omits it -- same inherited value under a bare read
+    ];
+    const partnerPayload: PartnerPayload = {
+      columns: ["note"],
+      rowIndices: [0],
+      rows: [["s-0"]],
+    };
+    const { report, warnings } = await roundTrip({
+      rawRows: rows,
+      metadata: protoIdMeta,
+      associationTable: [[0], [0]],
+      partnerPayload,
+      ourIdColumn: "toString",
+    });
+    expect(warnings.some((w) => w.includes("duplicate"))).toBe(false);
+    expect(report.outcome).toBe("verified");
+  });
+
   test("warns, and fails to open, when a re-supplied input misses an identifier", async () => {
     // Reconstruct against an input whose identifier values do not cover the
     // result: the reconstruction warns and the affected commitments do not open.
