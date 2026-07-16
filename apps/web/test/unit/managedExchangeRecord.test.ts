@@ -240,6 +240,85 @@ describe("applyManagedExchangeLocalEdits", () => {
       }),
     ).toThrow();
   });
+
+  test("an edit that does not touch the policy leaves expires untouched", () => {
+    const record = buildManagedExchangeRecord(
+      newExchange({ tokenMaxAgeDays: 90, expires: "2026-04-06T14:00:00.000Z" }),
+    );
+    const edited = applyManagedExchangeLocalEdits(record, {
+      label: "Riverbend monthly",
+    });
+    expect(edited.expires).toBe("2026-04-06T14:00:00.000Z");
+    expect(edited.tokenMaxAgeDays).toBe(90);
+  });
+
+  // The security corner: editing the max-token-age policy re-derives `expires`
+  // conservatively -- an edit never pushes the bound later than the anchor
+  // derivation (docs/spec/MANAGED_EXCHANGE_RECORD.md, the `expires` row). The four
+  // cases are pinned here at the edit boundary; the pure derivation is unit-tested
+  // in managedTokenAgeEdit.test.ts.
+  const MS_PER_DAY = 86_400_000;
+  const anchor = Date.parse("2026-01-01T00:00:00.000Z");
+  const expires90 = new Date(anchor + 90 * MS_PER_DAY).toISOString();
+  const editNow = anchor + 200 * MS_PER_DAY;
+
+  test("shortening the policy recomputes expires earlier from the anchor", () => {
+    const record = buildManagedExchangeRecord(
+      newExchange({ tokenMaxAgeDays: 90, expires: expires90 }),
+    );
+    const edited = applyManagedExchangeLocalEdits(
+      record,
+      { tokenMaxAgeDays: 30 },
+      editNow,
+    );
+    expect(edited.tokenMaxAgeDays).toBe(30);
+    expect(edited.expires).toBe(
+      new Date(anchor + 30 * MS_PER_DAY).toISOString(),
+    );
+    expect(Date.parse(edited.expires as string)).toBeLessThan(
+      Date.parse(expires90),
+    );
+  });
+
+  test("lengthening the policy keeps the current bound (no extension without a rotation)", () => {
+    const record = buildManagedExchangeRecord(
+      newExchange({ tokenMaxAgeDays: 90, expires: expires90 }),
+    );
+    const edited = applyManagedExchangeLocalEdits(
+      record,
+      { tokenMaxAgeDays: 365 },
+      editNow,
+    );
+    expect(edited.tokenMaxAgeDays).toBe(365);
+    expect(edited.expires).toBe(expires90);
+  });
+
+  test("adding a policy where none existed stamps now + days", () => {
+    const record = buildManagedExchangeRecord(newExchange());
+    expect(record).not.toHaveProperty("expires");
+    const edited = applyManagedExchangeLocalEdits(
+      record,
+      { tokenMaxAgeDays: 30 },
+      editNow,
+    );
+    expect(edited.tokenMaxAgeDays).toBe(30);
+    expect(edited.expires).toBe(
+      new Date(editNow + 30 * MS_PER_DAY).toISOString(),
+    );
+  });
+
+  test("clearing the policy drops both the policy and the bound", () => {
+    const record = buildManagedExchangeRecord(
+      newExchange({ tokenMaxAgeDays: 90, expires: expires90 }),
+    );
+    const edited = applyManagedExchangeLocalEdits(
+      record,
+      { tokenMaxAgeDays: null },
+      editNow,
+    );
+    expect(edited).not.toHaveProperty("tokenMaxAgeDays");
+    expect(edited).not.toHaveProperty("expires");
+  });
 });
 
 describe("applyManagedExchangeRotation", () => {

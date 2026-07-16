@@ -127,10 +127,13 @@ describe("benignRerunOutcome", () => {
 describe("rerunFailureLastRun: the runner's failure bookkeeping", () => {
   const AT = Date.parse("2026-07-14T12:00:00.000Z");
 
-  test("a security-kind handshake failure records an auth-kind failed run", () => {
+  test("a security-kind failure before the data exchange records an auth-kind failed run", () => {
+    // The handshake failing closed provably precedes any payload, so the disclosure
+    // copy can honestly say nothing was disclosed.
     const lastRun = rerunFailureLastRun(
       new ConnectionError("key exchange authentication failed", "security"),
       AT,
+      false,
       false,
     );
     expect(lastRun).toEqual({
@@ -140,9 +143,27 @@ describe("rerunFailureLastRun: the runner's failure bookkeeping", () => {
     });
   });
 
+  test("a security-kind failure after the data exchange began records transport, not auth", () => {
+    // Core's EncryptedMessageConnection can raise a security-kind error on a tampered
+    // frame mid-data-exchange; past the phase boundary that is not the pre-disclosure
+    // handshake failure, so it records "transport" (the neither-way disclosure bucket)
+    // rather than the nothing-disclosed "auth".
+    const lastRun = rerunFailureLastRun(
+      new ConnectionError("frame tampered mid-exchange", "security"),
+      AT,
+      false,
+      true,
+    );
+    expect(lastRun).toEqual({
+      at: new Date(AT).toISOString(),
+      outcome: "failed",
+      failureKind: "transport",
+    });
+  });
+
   test("any other run failure records a transport-kind failed run", () => {
     expect(
-      rerunFailureLastRun(new Error("channel dropped"), AT, false),
+      rerunFailureLastRun(new Error("channel dropped"), AT, false, false),
     ).toEqual({
       at: new Date(AT).toISOString(),
       outcome: "failed",
@@ -157,6 +178,7 @@ describe("rerunFailureLastRun: the runner's failure bookkeeping", () => {
       new ConnectionError("closed mid-handshake", "security"),
       AT,
       true,
+      false,
     );
     expect(lastRun?.failureKind).toBe("cancelled");
   });
@@ -168,12 +190,14 @@ describe("rerunFailureLastRun: the runner's failure bookkeeping", () => {
         new ManagedInputError({ reason: "acquire", cause: new Error("x") }),
         AT,
         false,
+        false,
       ),
     ).toBeUndefined();
     expect(
       rerunFailureLastRun(
         new RotationPersistError(AT, new Error("db")),
         AT,
+        false,
         false,
       ),
     ).toBeUndefined();
@@ -183,12 +207,14 @@ describe("rerunFailureLastRun: the runner's failure bookkeeping", () => {
         new ManagedExchangeExpiredError("2026-07-01T00:00:00.000Z"),
         AT,
         false,
+        false,
       ),
     ).toBeUndefined();
     expect(
       rerunFailureLastRun(
         new ManagedExchangeLockUnavailableError("id"),
         AT,
+        false,
         false,
       ),
     ).toBeUndefined();

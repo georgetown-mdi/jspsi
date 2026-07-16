@@ -166,6 +166,12 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
     throw new ManagedExchangeExpiredError(record.expires as string);
   }
 
+  // Whether the data exchange began before the failure -- captured at the phase
+  // boundary runManagedExchange marks, consumed by the classification below so a
+  // security-kind error is "auth" only pre-data-exchange and "transport" once
+  // payload flow could have started.
+  let dataExchangeStarted = false;
+
   // The input guard, the single-writer lock, the persist-before-success rotation,
   // and the data exchange are runManagedExchange's, wired to this record's seams.
   try {
@@ -179,6 +185,9 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
       acquireInput: seams.acquireInput,
       handshake: seams.handshake,
       dataExchange: seams.dataExchange,
+      onDataExchangeStart: () => {
+        dataExchangeStarted = true;
+      },
       ...(options.lock !== undefined ? { lock: options.lock } : {}),
       now,
     });
@@ -199,6 +208,7 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
       error,
       now(),
       options.aborted?.() ?? false,
+      dataExchangeStarted,
     );
     if (lastRun !== undefined) {
       // Best-effort, mirroring the critical section's own bookkeeping writes: a
@@ -252,15 +262,21 @@ export function remapLapsedRunFailure(
  *
  * Everything else is this run's to stamp: a cancelled run (`aborted`, checked
  * first so a teardown-provoked error on a cancelled run is not misread) records
- * `"cancelled"`; a `security`-kind {@link ConnectionError} (the authenticated
- * handshake failing closed) records `"auth"`; any other failure records
- * `"transport"`. The outcome is always `"failed"` -- `"desynced"` is the later
- * desync-tiering item's call, not this classifier's.
+ * `"cancelled"`; a `security`-kind {@link ConnectionError} records `"auth"` only
+ * when it fired BEFORE the data exchange began (`!dataExchangeStarted`) -- the
+ * authenticated handshake failing closed, which provably precedes any payload. A
+ * security-kind error once payload flow could have started (core's
+ * `EncryptedMessageConnection` raising on a tampered frame mid-exchange) is not
+ * that pre-disclosure failure, so it records `"transport"` (the neither-way
+ * disclosure bucket), as does any other failure. The outcome is always
+ * `"failed"` -- `"desynced"` is the later desync-tiering item's call, not this
+ * classifier's.
  */
 export function rerunFailureLastRun(
   error: unknown,
   at: number,
   aborted: boolean,
+  dataExchangeStarted: boolean,
 ): ManagedExchangeLastRun | undefined {
   if (
     error instanceof ManagedExchangeExpiredError ||
@@ -270,7 +286,11 @@ export function rerunFailureLastRun(
   )
     return undefined;
   if (aborted) return failedRun(at, "failed", "cancelled");
-  if (error instanceof ConnectionError && error.kind === "security")
+  if (
+    error instanceof ConnectionError &&
+    error.kind === "security" &&
+    !dataExchangeStarted
+  )
     return failedRun(at, "failed", "auth");
   return failedRun(at, "failed", "transport");
 }

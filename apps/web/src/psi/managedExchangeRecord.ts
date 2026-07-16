@@ -13,9 +13,11 @@
  * party's whole minted exchange-file document verbatim (no `authentication`
  * block) plus the one at-rest secret and the small set of local-only fields the
  * document deliberately does not carry. It never holds input content or a row
- * value: at most a `FileSystemFileHandle` pointer to the operator's file. A
- * change to the agreed terms is a re-invite, not an in-place edit; only the local
- * fields (`label`, `schedule`, `tokenMaxAgeDays`) update in place.
+ * value: at most a `FileSystemFileHandle` pointer to the operator's file. The
+ * document is fixed for the partnership: a re-invite re-issues it verbatim with
+ * only a fresh secret, and a change to the agreed terms is a new exchange, not a
+ * re-invite or an in-place edit; only the local fields (`label`, `schedule`,
+ * `tokenMaxAgeDays`) update in place.
  */
 
 import {
@@ -27,6 +29,8 @@ import {
 } from "@psilink/core";
 
 import { z } from "zod";
+
+import { deriveEditedExpiry } from "./managedTokenAgeEdit";
 
 import type { ExchangeSpec, WebRTCExchangeLocator } from "@psilink/core";
 import type { ZodType } from "zod";
@@ -532,8 +536,9 @@ export function applyManagedExchangeInputHandle(
 }
 
 /** The local fields an operator may edit in place without a re-invite: the
- * display label, the run schedule, and the max-token-age policy. A change to the
- * agreed terms is a re-invite, not an in-place record edit, so the document and
+ * display label, the run schedule, and the max-token-age policy. The agreed
+ * terms are fixed for the partnership -- a re-invite only refreshes the secret,
+ * and a terms change is a new exchange, not a re-invite -- so the document and
  * the secret are deliberately not editable here. */
 export interface ManagedExchangeLocalEdits {
   /** A new display label (validated to {@link MAX_LABEL_LENGTH}). */
@@ -551,11 +556,22 @@ export interface ManagedExchangeLocalEdits {
  * an over-long label is rejected here exactly as at create. The input record is
  * not mutated.
  *
+ * An edit to `tokenMaxAgeDays` re-derives `expires` conservatively through
+ * {@link deriveEditedExpiry}: a shorter policy recomputes the bound from the
+ * reconstructed advance anchor, a longer one keeps the current bound (it takes
+ * effect only at the next rotation), an added policy stamps `now + days`, and a
+ * cleared policy drops the bound. The rule never moves `expires` later, so an edit
+ * cannot stretch a stored credential's life without a rotation (see
+ * {@link ./managedTokenAgeEdit.ts}). `now` is the anchor for an added policy;
+ * default `Date.now()` for callers that do not inject a clock. An edit that does
+ * not touch `tokenMaxAgeDays` leaves `expires` untouched.
+ *
  * @throws {ZodError} if the edited record is invalid.
  */
 export function applyManagedExchangeLocalEdits(
   record: ManagedExchangeRecord,
   edits: ManagedExchangeLocalEdits,
+  now: number = Date.now(),
 ): ManagedExchangeRecord {
   const next: ManagedExchangeRecord = { ...record };
   if (edits.label !== undefined) next.label = edits.label;
@@ -566,6 +582,9 @@ export function applyManagedExchangeLocalEdits(
   if (edits.tokenMaxAgeDays !== undefined) {
     if (edits.tokenMaxAgeDays === null) delete next.tokenMaxAgeDays;
     else next.tokenMaxAgeDays = edits.tokenMaxAgeDays;
+    const expires = deriveEditedExpiry(record, edits.tokenMaxAgeDays, now);
+    if (expires === null) delete next.expires;
+    else next.expires = expires;
   }
   return parseManagedExchangeRecord(next);
 }
