@@ -21,6 +21,7 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { pathToFileURL } from "node:url";
 
 const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
@@ -79,7 +80,7 @@ function latestTranscript(root) {
 }
 
 // Tier is the token immediately after "claude-" in a canonical model id.
-function tierOf(modelId) {
+export function tierOf(modelId) {
   if (typeof modelId !== "string") return null;
   const match = modelId.match(/^claude-([a-z]+)/);
   return match ? match[1] : null;
@@ -164,6 +165,55 @@ function readMetas(subagentsDir) {
   return metas;
 }
 
+// Classify one spawn's meta against the indexed transcript. Pure: takes the meta,
+// the two transcript indexes, and the frontmatter model map, and returns
+//   { category: "skip" | "audited", ... }
+// where an audited spawn also carries { kind: "ok" | "inherited" | "mismatch",
+// row } (a mismatch row additionally carries intendedTier). No filesystem access,
+// so it is unit-testable with synthetic inputs.
+export function classifySpawn(meta, spawnInput, resolvedModel, frontmatter) {
+  const toolUseId = meta.toolUseId;
+  if (!toolUseId) return { category: "skip" };
+  const input = spawnInput.get(toolUseId);
+  const resolved = resolvedModel.get(toolUseId);
+  // A spawn with no resolved model in this transcript cannot be tier-compared
+  // (an in-flight/async spawn, or a paired call from a parent session): skip it.
+  if (resolved === undefined) return { category: "skip" };
+
+  const agentType = meta.agentType;
+  let intended;
+  if (input && typeof input.model === "string" && input.model.length > 0) {
+    intended = input.model;
+  } else if (agentType && frontmatter.has(agentType)) {
+    intended = frontmatter.get(agentType);
+  } else {
+    intended = "session-inherited";
+  }
+
+  const resolvedTier = tierOf(resolved);
+  const row = {
+    agentType,
+    toolUseId,
+    description: meta.description,
+    intended,
+    resolved: resolved ?? "(unknown)",
+    resolvedTier: resolvedTier ?? "(unknown)",
+  };
+
+  if (intended === "session-inherited") {
+    return { category: "audited", kind: "inherited", row };
+  }
+  const intendedTier = TIER_ALIASES.has(intended) ? intended : tierOf(intended);
+  if (intendedTier !== resolvedTier) {
+    return {
+      category: "audited",
+      kind: "mismatch",
+      row: { ...row, intendedTier },
+    };
+  }
+  return { category: "audited", kind: "ok", row };
+}
+
 function main() {
   const arg = process.argv[2];
   const { transcript, dir } = resolveSession(arg);
@@ -179,43 +229,11 @@ function main() {
   let audited = 0;
 
   for (const meta of metas) {
-    const toolUseId = meta.toolUseId;
-    if (!toolUseId) continue;
-    const input = spawnInput.get(toolUseId);
-    const resolved = resolvedModel.get(toolUseId);
-    // No paired call in this transcript (e.g. a spawn from a parent session): skip.
-    if (input === undefined && resolved === undefined) continue;
+    const result = classifySpawn(meta, spawnInput, resolvedModel, frontmatter);
+    if (result.category === "skip") continue;
     audited++;
-
-    const agentType = meta.agentType;
-    let intended;
-    if (input && typeof input.model === "string" && input.model.length > 0) {
-      intended = input.model;
-    } else if (agentType && frontmatter.has(agentType)) {
-      intended = frontmatter.get(agentType);
-    } else {
-      intended = "session-inherited";
-    }
-
-    const resolvedTier = tierOf(resolved);
-    const row = {
-      agentType,
-      toolUseId,
-      description: meta.description,
-      intended,
-      resolved: resolved ?? "(unknown)",
-      resolvedTier: resolvedTier ?? "(unknown)",
-    };
-
-    if (intended === "session-inherited") {
-      inherited.push(row);
-      continue;
-    }
-    const intendedTier = TIER_ALIASES.has(intended)
-      ? intended
-      : tierOf(intended);
-    if (intendedTier !== resolvedTier)
-      mismatches.push({ ...row, intendedTier });
+    if (result.kind === "inherited") inherited.push(result.row);
+    else if (result.kind === "mismatch") mismatches.push(result.row);
   }
 
   report({ transcript, audited, mismatches, inherited });
@@ -257,4 +275,10 @@ function report({ transcript, audited, mismatches, inherited }) {
   }
 }
 
-main();
+// Run only when invoked directly; stay a pure module when imported by a test.
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  main();
+}

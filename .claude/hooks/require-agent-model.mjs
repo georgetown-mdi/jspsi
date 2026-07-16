@@ -23,22 +23,25 @@ function block(reason) {
 }
 
 // Collect the frontmatter `name` of every .claude/agents/*.md whose leading
-// `---`...`---` block has a non-empty `model:`. Throws on any read/parse failure;
-// the bare-spawn caller turns that throw into a fail-closed block.
+// `---`...`---` block pins a `model:` in the tier set. A value outside the set
+// (whitespace-only, a typo like "opuss") is not a valid pin, matching the
+// explicit-model path, so a bare spawn of that definition stays blocked until the
+// value is fixed. Throws on any read/parse failure; the bare-spawn caller turns
+// that throw into a fail-closed block.
 function pinnedDefinitions(agentsDir) {
   const pinned = new Set();
   for (const entry of readdirSync(agentsDir)) {
     if (!entry.endsWith(".md")) continue;
     const text = readFileSync(join(agentsDir, entry), "utf8");
-    const block = leadingFrontmatter(text);
-    if (!block) continue;
+    const fm = leadingFrontmatter(text);
+    if (!fm) continue;
     let name = null;
     let modelPinned = false;
-    for (const line of block.split("\n")) {
+    for (const line of fm.split("\n")) {
       const nameMatch = line.match(/^name:\s*(.+?)\s*$/);
       if (nameMatch) name = nameMatch[1];
       const modelMatch = line.match(/^model:\s*(.+?)\s*$/);
-      if (modelMatch && modelMatch[1].length > 0) modelPinned = true;
+      if (modelMatch && TIERS.has(modelMatch[1])) modelPinned = true;
     }
     if (name && modelPinned) pinned.add(name);
   }
@@ -84,6 +87,14 @@ function main() {
   try {
     pinned = pinnedDefinitions(agentsDir);
   } catch {
+    block(
+      "could not read agent definitions to verify a pin; pass an explicit model",
+    );
+  }
+  // Structural fail-closed: hold the door shut regardless of how block() is later
+  // implemented, so a refactor that stops block() from exiting cannot let an
+  // unverifiable bare spawn through.
+  if (!pinned) {
     block(
       "could not read agent definitions to verify a pin; pass an explicit model",
     );
