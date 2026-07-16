@@ -7,13 +7,13 @@ import {
   ReceiptVerificationError,
   buildReceiptContent,
   deriveReceiptBinder,
-  digestCommittedPayload,
   exchangeSignedReceipt,
   parseDualSignedRecord,
   serializeDualSignedRecord,
   signReceiptContent,
   verifyReceiptSignature,
 } from "../src/signedReceipt";
+import { hkdfDerive } from "../src/utils/crypto";
 import {
   computeCertificateFingerprint,
   generateSigningIdentity,
@@ -36,6 +36,11 @@ const seedA = new Uint8Array(32).map((_, i) => i);
 const seedB = new Uint8Array(32).map((_, i) => (i + 100) & 0xff);
 const identityA = generateSigningIdentity("Party A", { seed: seedA });
 const identityB = generateSigningIdentity("Party B", { seed: seedB });
+// The agreed-terms identity each party asserts for its partner. In these fixtures
+// the certificate identity and the agreed-terms identity coincide (a well-behaved
+// partner); the tautology-fix test below drives them apart deliberately.
+const partnerIdentityForA = identityB.certificate.identity;
+const partnerIdentityForB = identityA.certificate.identity;
 
 const fingerprintA = await computeCertificateFingerprint(identityA.certificate);
 const fingerprintB = await computeCertificateFingerprint(identityB.certificate);
@@ -90,74 +95,114 @@ describe("deriveReceiptBinder", () => {
 // --- Sign / verify -----------------------------------------------------------
 
 describe("signReceiptContent / verifyReceiptSignature", () => {
-  test("a signature verifies against the same content and certificate", async () => {
+  test("a signature verifies against the same content, certificate, and role", async () => {
     const c = content();
-    const sig = await signReceiptContent(identityA, c);
-    expect(verifyReceiptSignature(identityA.certificate, c, sig)).toBe(true);
+    const sig = await signReceiptContent(identityA, c, "initiator");
+    expect(
+      await verifyReceiptSignature(identityA.certificate, c, sig, "initiator"),
+    ).toBe(true);
   });
 
   test("Ed25519 signatures are deterministic (same content, same signature)", async () => {
     const c = content();
-    const sig1 = await signReceiptContent(identityA, c);
-    const sig2 = await signReceiptContent(identityA, c);
+    const sig1 = await signReceiptContent(identityA, c, "initiator");
+    const sig2 = await signReceiptContent(identityA, c, "initiator");
     expect(sig1).toBe(sig2);
   });
 
   test("a mutated content field fails verification (tamper detection)", async () => {
     const c = content();
-    const sig = await signReceiptContent(identityA, c);
+    const sig = await signReceiptContent(identityA, c, "initiator");
     const tampered = content({ termsHash: "dGFtcGVyZWQ" });
-    expect(verifyReceiptSignature(identityA.certificate, tampered, sig)).toBe(
-      false,
-    );
+    expect(
+      await verifyReceiptSignature(
+        identityA.certificate,
+        tampered,
+        sig,
+        "initiator",
+      ),
+    ).toBe(false);
   });
 
   test("a content with a different binder fails (wrong exchange)", async () => {
     const c = content({
       binder: await deriveReceiptBinder(sessionKey, "initiator"),
     });
-    const sig = await signReceiptContent(identityA, c);
+    const sig = await signReceiptContent(identityA, c, "initiator");
     const otherExchange = content({
       binder: await deriveReceiptBinder(otherSessionKey, "initiator"),
     });
     expect(
-      verifyReceiptSignature(identityA.certificate, otherExchange, sig),
+      await verifyReceiptSignature(
+        identityA.certificate,
+        otherExchange,
+        sig,
+        "initiator",
+      ),
     ).toBe(false);
   });
 
   test("the wrong certificate (another party's) fails verification", async () => {
     const c = content();
-    const sig = await signReceiptContent(identityA, c);
-    expect(verifyReceiptSignature(identityB.certificate, c, sig)).toBe(false);
-  });
-
-  test("a malformed signature is a false verdict, not a throw", () => {
+    const sig = await signReceiptContent(identityA, c, "initiator");
     expect(
-      verifyReceiptSignature(identityA.certificate, content(), "!!!"),
-    ).toBe(false);
-    expect(
-      verifyReceiptSignature(identityA.certificate, content(), "AAAA"),
+      await verifyReceiptSignature(identityB.certificate, c, sig, "initiator"),
     ).toBe(false);
   });
 
-  test("a mutated directional payload digest fails verification", async () => {
+  test("the wrong signer role fails verification (block-swap resistance)", async () => {
+    // A signature made bound to the initiator role does not verify when checked as
+    // the responder's: the signed bytes bind the signer's role, so the two blocks in
+    // a dual-signed record are not interchangeable.
     const c = content();
-    const sig = await signReceiptContent(identityA, c);
+    const sig = await signReceiptContent(identityA, c, "initiator");
+    expect(
+      await verifyReceiptSignature(identityA.certificate, c, sig, "responder"),
+    ).toBe(false);
+  });
+
+  test("a malformed signature is a false verdict, not a throw", async () => {
+    expect(
+      await verifyReceiptSignature(
+        identityA.certificate,
+        content(),
+        "!!!",
+        "initiator",
+      ),
+    ).toBe(false);
+    expect(
+      await verifyReceiptSignature(
+        identityA.certificate,
+        content(),
+        "AAAA",
+        "initiator",
+      ),
+    ).toBe(false);
+  });
+
+  test("a mutated directional payload MAC fails verification", async () => {
+    const c = content();
+    const sig = await signReceiptContent(identityA, c, "initiator");
     const swapped = content({
       initiatorToResponderPayload: c.responderToInitiatorPayload,
       responderToInitiatorPayload: c.initiatorToResponderPayload,
     });
     // Swapping the two directions changes the signed bytes, so the signature over
     // the original directions must not verify.
-    expect(verifyReceiptSignature(identityA.certificate, swapped, sig)).toBe(
-      false,
-    );
+    expect(
+      await verifyReceiptSignature(
+        identityA.certificate,
+        swapped,
+        sig,
+        "initiator",
+      ),
+    ).toBe(false);
   });
 });
 
-// --- Directional payload digest ----------------------------------------------
+// --- Directional payload MAC -------------------------------------------------
 
-describe("digestCommittedPayload / buildReceiptContent", () => {
+describe("buildReceiptContent (session-keyed directional payload MACs)", () => {
   const sentAtoB: CommittedPayload = {
     columns: ["dose"],
     rows: [["5mg"], ["10mg"]],
@@ -167,37 +212,20 @@ describe("digestCommittedPayload / buildReceiptContent", () => {
     rows: [["active"]],
   };
   const empty: CommittedPayload = { columns: [], rows: [] };
+  const binder = "YmluZGVy";
+  const termsHash = "dGVybXNIYXNo";
 
-  test("the digest is deterministic and salt-free (same data, same digest)", async () => {
-    expect(await digestCommittedPayload(sentAtoB)).toBe(
-      await digestCommittedPayload({
-        columns: ["dose"],
-        rows: [["5mg"], ["10mg"]],
-      }),
-    );
-  });
-
-  test("distinct data yields distinct digests", async () => {
-    expect(await digestCommittedPayload(sentAtoB)).not.toBe(
-      await digestCommittedPayload(sentBtoA),
-    );
-    expect(await digestCommittedPayload(empty)).not.toBe(
-      await digestCommittedPayload(sentAtoB),
-    );
-  });
-
-  test("both roles build byte-identical content from the same flow", async () => {
+  test("both roles build byte-identical content from the same flow and session key", async () => {
     // The initiator sends A->B and receives B->A; the responder sends B->A and
     // receives A->B. buildReceiptContent keys by role, so both produce the same
-    // two directional digests under the same keys -- the mutually-signed bytes.
-    const binder = "YmluZGVy";
-    const termsHash = "dGVybXNIYXNo";
+    // two directional MACs under the same keys -- the mutually-signed content.
     const initiatorContent = await buildReceiptContent(
       "initiator",
       termsHash,
       sentAtoB, // initiator's localPayloadSent (A->B)
       sentBtoA, // initiator's partnerPayloadReceived (B->A)
       binder,
+      sessionKey,
     );
     const responderContent = await buildReceiptContent(
       "responder",
@@ -205,14 +233,101 @@ describe("digestCommittedPayload / buildReceiptContent", () => {
       sentBtoA, // responder's localPayloadSent (B->A)
       sentAtoB, // responder's partnerPayloadReceived (A->B)
       binder,
+      sessionKey,
     );
     expect(initiatorContent).toEqual(responderContent);
-    expect(initiatorContent.initiatorToResponderPayload).toBe(
-      await digestCommittedPayload(sentAtoB),
+  });
+
+  test("distinct data yields distinct directional MACs", async () => {
+    const c = await buildReceiptContent(
+      "initiator",
+      termsHash,
+      sentAtoB,
+      sentBtoA,
+      binder,
+      sessionKey,
     );
-    expect(initiatorContent.responderToInitiatorPayload).toBe(
-      await digestCommittedPayload(sentBtoA),
+    expect(c.initiatorToResponderPayload).not.toBe(
+      c.responderToInitiatorPayload,
     );
+    const withEmpty = await buildReceiptContent(
+      "initiator",
+      termsHash,
+      empty,
+      sentBtoA,
+      binder,
+      sessionKey,
+    );
+    expect(withEmpty.initiatorToResponderPayload).not.toBe(
+      c.initiatorToResponderPayload,
+    );
+  });
+
+  test("a different session key yields different directional MACs (third-party non-recomputability)", async () => {
+    // The MAC key is derived from the session key, so a holder without the session
+    // key cannot recompute the MAC (nor brute-force the payload from it): the same
+    // payload under a different session key produces a different MAC.
+    const c = await buildReceiptContent(
+      "initiator",
+      termsHash,
+      sentAtoB,
+      sentBtoA,
+      binder,
+      sessionKey,
+    );
+    const other = await buildReceiptContent(
+      "initiator",
+      termsHash,
+      sentAtoB,
+      sentBtoA,
+      binder,
+      otherSessionKey,
+    );
+    expect(other.initiatorToResponderPayload).not.toBe(
+      c.initiatorToResponderPayload,
+    );
+    expect(other.responderToInitiatorPayload).not.toBe(
+      c.responderToInitiatorPayload,
+    );
+  });
+
+  test("the empty-payload direction is not a public constant (session-keyed)", async () => {
+    // The empty payload previously digested to a public SHA-256 constant, leaking
+    // flow direction to any third party. Under the session-keyed MAC, two different
+    // session keys give the empty direction two different MACs, so it is no longer a
+    // recognizable constant.
+    const macKeyA = await hkdfDerive(
+      sessionKey,
+      "psilink-signed-receipt-payload-v1:initiator-to-responder",
+      32,
+    );
+    const macKeyB = await hkdfDerive(
+      otherSessionKey,
+      "psilink-signed-receipt-payload-v1:initiator-to-responder",
+      32,
+    );
+    const emptyA = await buildReceiptContent(
+      "initiator",
+      termsHash,
+      empty,
+      sentBtoA,
+      binder,
+      sessionKey,
+    );
+    const emptyB = await buildReceiptContent(
+      "initiator",
+      termsHash,
+      empty,
+      sentBtoA,
+      binder,
+      otherSessionKey,
+    );
+    expect(emptyA.initiatorToResponderPayload).not.toBe(
+      emptyB.initiatorToResponderPayload,
+    );
+    // The two session keys' derived MAC keys differ, so a third party without the
+    // session key holds no fixed value to recognize the empty direction by.
+    expect(macKeyA).not.toEqual(macKeyB);
   });
 });
 
@@ -237,9 +352,15 @@ async function runReceiptExchange(
 function inputsFor(
   identity: SigningIdentity,
   pinnedFingerprint: string | undefined,
+  partnerIdentity: string,
   sharedContent: ReceiptContent,
 ): SignedReceiptExchangeInputs {
-  return { identity, pinnedFingerprint, content: sharedContent };
+  return {
+    identity,
+    pinnedFingerprint,
+    partnerIdentity,
+    content: sharedContent,
+  };
 }
 
 /**
@@ -282,8 +403,8 @@ describe("exchangeSignedReceipt (two-party over the pipe)", () => {
   test("a successful swap yields one dual-signed record on both sides", async () => {
     const shared = content();
     const [recInit, recResp] = await runReceiptExchange(
-      inputsFor(identityA, fingerprintB, shared),
-      inputsFor(identityB, fingerprintA, shared),
+      inputsFor(identityA, fingerprintB, partnerIdentityForA, shared),
+      inputsFor(identityB, fingerprintA, partnerIdentityForB, shared),
     );
     // Both parties write a byte-identical artifact (roles fixed by the handshake,
     // not by local/partner), carrying both certificates and signatures.
@@ -292,21 +413,33 @@ describe("exchangeSignedReceipt (two-party over the pipe)", () => {
     expect(recInit.content).toEqual(shared);
     expect(recInit.initiator.certificate).toEqual(identityA.certificate);
     expect(recInit.responder.certificate).toEqual(identityB.certificate);
-    // Each party's signature verifies against the shared content under its cert.
+    // Each party's signature verifies against the shared content bound to its role.
     expect(
-      verifyReceiptSignature(
+      await verifyReceiptSignature(
         recInit.initiator.certificate,
         recInit.content,
         recInit.initiator.signature,
+        "initiator",
       ),
     ).toBe(true);
     expect(
-      verifyReceiptSignature(
+      await verifyReceiptSignature(
         recInit.responder.certificate,
         recInit.content,
         recInit.responder.signature,
+        "responder",
       ),
     ).toBe(true);
+    // The two signature blocks are NOT interchangeable: the initiator's signature
+    // does not verify when checked as the responder's (its bound role differs).
+    expect(
+      await verifyReceiptSignature(
+        recInit.initiator.certificate,
+        recInit.content,
+        recInit.initiator.signature,
+        "responder",
+      ),
+    ).toBe(false);
   });
 
   test("a forged partner signature is rejected and terminates the exchange", async () => {
@@ -314,13 +447,18 @@ describe("exchangeSignedReceipt (two-party over the pipe)", () => {
     // against, so its frame's signature does not verify for the responder. The
     // responder rejects with a security error BEFORE sending its own signature.
     const shared = content();
-    const initiatorSignsWrong = inputsFor(identityA, fingerprintB, {
-      ...shared,
-      termsHash: "Zm9yZ2Vk",
-    });
+    const initiatorSignsWrong = inputsFor(
+      identityA,
+      fingerprintB,
+      partnerIdentityForA,
+      {
+        ...shared,
+        termsHash: "Zm9yZ2Vk",
+      },
+    );
     const reason = await expectResponderReject(
       initiatorSignsWrong,
-      inputsFor(identityB, fingerprintA, shared),
+      inputsFor(identityB, fingerprintA, partnerIdentityForB, shared),
     );
     expect(reason).toBeInstanceOf(ReceiptVerificationError);
     expect((reason as Error).message).toMatch(/signature does not verify/);
@@ -332,8 +470,8 @@ describe("exchangeSignedReceipt (two-party over the pipe)", () => {
     // check runs BEFORE the signature check, so this fails on the fingerprint.
     const shared = content();
     const reason = await expectResponderReject(
-      inputsFor(identityA, fingerprintB, shared),
-      inputsFor(identityB, fingerprintB, shared),
+      inputsFor(identityA, fingerprintB, partnerIdentityForA, shared),
+      inputsFor(identityB, fingerprintB, partnerIdentityForB, shared),
     );
     expect(reason).toBeInstanceOf(ReceiptVerificationError);
     expect((reason as Error).message).toMatch(/not trusted/);
@@ -344,8 +482,23 @@ describe("exchangeSignedReceipt (two-party over the pipe)", () => {
     // trusted at all: reject before ever verifying the signature.
     const shared = content();
     const reason = await expectResponderReject(
-      inputsFor(identityA, fingerprintB, shared),
-      inputsFor(identityB, undefined, shared),
+      inputsFor(identityA, fingerprintB, partnerIdentityForA, shared),
+      inputsFor(identityB, undefined, partnerIdentityForB, shared),
+    );
+    expect(reason).toBeInstanceOf(ReceiptVerificationError);
+    expect((reason as Error).message).toMatch(/not trusted/);
+  });
+
+  test("a validly-pinned cert whose identity differs from the agreed terms fails closed", async () => {
+    // The responder pins the initiator's REAL certificate (fingerprintA) but asserts
+    // a DIFFERENT agreed-terms identity for it than the certificate carries. The pin
+    // and self-signature pass, but the certificate does not authorize the asserted
+    // agreed-terms identity, so the receipt is rejected with a security error --
+    // closing the tautology where the certificate's own identity was asserted.
+    const shared = content();
+    const reason = await expectResponderReject(
+      inputsFor(identityA, fingerprintB, partnerIdentityForA, shared),
+      inputsFor(identityB, fingerprintA, "Not Party A", shared),
     );
     expect(reason).toBeInstanceOf(ReceiptVerificationError);
     expect((reason as Error).message).toMatch(/not trusted/);
@@ -360,8 +513,18 @@ describe("exchangeSignedReceipt (two-party over the pipe)", () => {
     const thisBinder = await deriveReceiptBinder(sessionKey, "initiator");
     const otherBinder = await deriveReceiptBinder(otherSessionKey, "initiator");
     const reason = await expectResponderReject(
-      inputsFor(identityA, fingerprintB, content({ binder: otherBinder })),
-      inputsFor(identityB, fingerprintA, content({ binder: thisBinder })),
+      inputsFor(
+        identityA,
+        fingerprintB,
+        partnerIdentityForA,
+        content({ binder: otherBinder }),
+      ),
+      inputsFor(
+        identityB,
+        fingerprintA,
+        partnerIdentityForB,
+        content({ binder: thisBinder }),
+      ),
     );
     expect(reason).toBeInstanceOf(ReceiptVerificationError);
     expect((reason as Error).message).toMatch(
@@ -376,8 +539,8 @@ describe("serialize / parse dual-signed record", () => {
   test("round-trips through serialize and parse", async () => {
     const shared = content();
     const [record] = await runReceiptExchange(
-      inputsFor(identityA, fingerprintB, shared),
-      inputsFor(identityB, fingerprintA, shared),
+      inputsFor(identityA, fingerprintB, partnerIdentityForA, shared),
+      inputsFor(identityB, fingerprintA, partnerIdentityForB, shared),
     );
     const parsed = parseDualSignedRecord(
       JSON.parse(serializeDualSignedRecord(record)),
@@ -391,6 +554,38 @@ describe("serialize / parse dual-signed record", () => {
         version: "psilink-signed-receipt/v2",
         content: content(),
         initiator: { certificate: identityA.certificate, signature: "AAAA" },
+        responder: { certificate: identityB.certificate, signature: "AAAA" },
+      }),
+    ).toThrow();
+  });
+
+  test("rejects an oversized certificate identity before any crypto work", () => {
+    // The certificate/receipt wire schema bounds partner-controlled fields, so a
+    // ~megabyte identity is refused at parse rather than passing shape validation
+    // ahead of the fingerprint/signature work.
+    const oversizedCert = {
+      ...identityA.certificate,
+      identity: "x".repeat(2000),
+    };
+    expect(() =>
+      parseDualSignedRecord({
+        version: SIGNED_RECEIPT_VERSION,
+        content: content(),
+        initiator: { certificate: oversizedCert, signature: "AAAA" },
+        responder: { certificate: identityB.certificate, signature: "AAAA" },
+      }),
+    ).toThrow();
+  });
+
+  test("rejects an oversized base64url signature field before any crypto work", () => {
+    expect(() =>
+      parseDualSignedRecord({
+        version: SIGNED_RECEIPT_VERSION,
+        content: content(),
+        initiator: {
+          certificate: identityA.certificate,
+          signature: "A".repeat(2000),
+        },
         responder: { certificate: identityB.certificate, signature: "AAAA" },
       }),
     ).toThrow();
@@ -442,12 +637,21 @@ describe("cross-implementation vectors", () => {
       );
       expect(binder).toBe(vector.expected.binder);
 
-      const signature = await signReceiptContent(identity, vector.content);
+      const signature = await signReceiptContent(
+        identity,
+        vector.content,
+        vector.role,
+      );
       expect(signature).toBe(vector.expected.signature);
       // And the produced signature verifies -- a cross-impl signer's output is
-      // accepted by this verifier.
+      // accepted by this verifier (checked against bytes bound to the same role).
       expect(
-        verifyReceiptSignature(identity.certificate, vector.content, signature),
+        await verifyReceiptSignature(
+          identity.certificate,
+          vector.content,
+          signature,
+          vector.role,
+        ),
       ).toBe(true);
     });
   }

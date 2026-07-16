@@ -68,12 +68,21 @@ describe("signed receipt in the browser", () => {
       );
       expect(binder).toBe(vector.expected.binder);
 
-      const signature = await signReceiptContent(identity, vector.content);
+      const signature = await signReceiptContent(
+        identity,
+        vector.content,
+        vector.role,
+      );
       expect(signature).toBe(vector.expected.signature);
       // The signature the browser produced verifies -- a cross-implementation
-      // signer's output is accepted by the verifier.
+      // signer's output is accepted by the verifier (bytes bound to the same role).
       expect(
-        verifyReceiptSignature(identity.certificate, vector.content, signature),
+        await verifyReceiptSignature(
+          identity.certificate,
+          vector.content,
+          signature,
+          vector.role,
+        ),
       ).toBe(true);
     },
   );

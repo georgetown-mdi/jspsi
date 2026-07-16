@@ -45,9 +45,16 @@ for (const vector of data.vectors) {
   // binder both parties fold in, so the signed content is exactly what the step
   // produces. (The role here is the vector's own role; a real exchange always
   // derives the initiator-role binder, but the vector pins the derivation for
-  // whichever role it names.)
+  // whichever role it names. The responder-role binder vector pins a derivation not
+  // produced in a live exchange, since both parties fold in the initiator-role
+  // binder.) The signature binds the signer's fingerprint and role, so it is made
+  // for the vector's own role.
   vector.content.binder = binder;
-  const signature = await signReceiptContent(identity, vector.content);
+  const signature = await signReceiptContent(
+    identity,
+    vector.content,
+    vector.role,
+  );
   vector.expected = { binder, signature, fingerprint };
 }
 

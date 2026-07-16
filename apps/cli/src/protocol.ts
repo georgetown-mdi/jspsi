@@ -11,6 +11,7 @@ import {
   assertSharedSecretReadyForHandshake,
   deriveAbortToken,
   PeerAbortError,
+  ReceiptVerificationError,
   sanitizeForDisplay,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
@@ -1201,6 +1202,27 @@ export async function runProtocol(
       }
       return false;
     };
+
+    // Non-signing-partner observability: this side configured a signed receipt but
+    // the exchange failed before runExchange returned (exchangeComplete false), and
+    // not with a receipt verification error (a distinct security event already
+    // surfaced by that error's own kind/message). The signed-receipt swap is the
+    // last step of runExchange, so a partner that ran without a signing identity
+    // sends no receipt frame and this side parks on that receive until the peer
+    // timeout -- a drop otherwise indistinguishable from a generic peer-silence.
+    // Surface that context so the operator can check whether the partner was
+    // configured to sign at all, rather than chasing a transport fault.
+    const isReceiptVerificationFailure =
+      err instanceof ReceiptVerificationError;
+    if (signing !== null && !exchangeComplete && !isReceiptVerificationFailure)
+      log.warn(
+        "A signed receipt was configured for this exchange, but the exchange " +
+          "did not complete the receipt swap. If the partner did not configure " +
+          "a signing identity, it sends no receipt and this side waits for one " +
+          "until the peer timeout. Confirm the partner is configured to sign " +
+          "(its signing block, certificate mode) before treating this as a " +
+          "transport failure.",
+      );
 
     const hintAlreadyEmitted = isHintTagged(err);
     if (!hintAlreadyEmitted) {

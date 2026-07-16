@@ -944,7 +944,7 @@ export async function runExchange(
     options.sessionKey !== undefined
   ) {
     // The receipt content is built from the mutually-verifiable facts directly --
-    // the agreed-terms hash and salt-free digests of the two directional payloads
+    // the agreed-terms hash and session-keyed MACs of the two directional payloads
     // -- NOT from the salted record commitments (per-party salts are not
     // byte-identical across parties). It is therefore independent of the non-fatal
     // audit build above; a party that could not build its local record can still
@@ -961,10 +961,15 @@ export async function runExchange(
       toCommittedPayload(localPayload),
       toCommittedPayload(partnerPayload),
       binder,
+      options.sessionKey,
     );
     signedReceipt = await exchangeSignedReceipt(conn, handshakeRole, {
       identity: options.signingIdentity,
       pinnedFingerprint: options.partnerFingerprint,
+      // The partner's agreed-terms identity (not the certificate's own), so the
+      // pinned certificate must authorize the identity the partner used in the
+      // agreed terms rather than a value it self-asserts in its certificate.
+      partnerIdentity: partnerTerms.identity,
       content,
     });
   }

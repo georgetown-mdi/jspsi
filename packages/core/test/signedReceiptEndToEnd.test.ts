@@ -118,7 +118,7 @@ test("both parties produce one dual-signed record with mutual verification", asy
   // The receipt content commits to the SAME agreed-terms hash the self-attested
   // record carries.
   expect(receipt.content.termsHash).toBe(resInit.audit!.record.termsHash);
-  // It carries the two directional payload digests (salt-free), not the salted
+  // It carries the two directional payload MACs (session-keyed), not the salted
   // record commitments.
   expect(receipt.content.initiatorToResponderPayload).toEqual(
     expect.any(String),
@@ -126,19 +126,21 @@ test("both parties produce one dual-signed record with mutual verification", asy
   expect(receipt.content.responderToInitiatorPayload).toEqual(
     expect.any(String),
   );
-  // Both signatures verify against the shared content under their certificates.
+  // Both signatures verify against the shared content bound to their roles.
   expect(
-    verifyReceiptSignature(
+    await verifyReceiptSignature(
       receipt.initiator.certificate,
       receipt.content,
       receipt.initiator.signature,
+      "initiator",
     ),
   ).toBe(true);
   expect(
-    verifyReceiptSignature(
+    await verifyReceiptSignature(
       receipt.responder.certificate,
       receipt.content,
       receipt.responder.signature,
+      "responder",
     ),
   ).toBe(true);
   expect(receipt.initiator.certificate).toEqual(identityA.certificate);
