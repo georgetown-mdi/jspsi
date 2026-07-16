@@ -370,10 +370,14 @@ function padLeftFactory(params: Params): StandardizingFn {
 }
 
 function nullIfFactory(params: Params): StandardizingFn {
+  // Nullish (not just undefined) reads as absent: the wire params are
+  // z.unknown(), so a partner can declare `values: null` or `value: null`, and
+  // normalizing that null below would throw. A declared null therefore behaves as
+  // an absent exclusion, like coalesce's nullish default.
   const values =
-    params.values !== undefined
+    params.values != null
       ? (params.values as string[])
-      : params.value !== undefined
+      : params.value != null
         ? [params.value as string]
         : [];
   // NFC-normalize the exclusion values so one authored in a different form
@@ -934,11 +938,15 @@ function compileStep(step: {
   if (step.function === "coalesce") {
     // NFC-normalize the literal default so coalesce cannot substitute a non-NFC
     // value into the key (it replaces the whole value, often as the last step).
-    const rawDefault = params.default as string | undefined;
+    // Nullish (not just undefined) falls back to no default: the wire params are
+    // z.unknown(), so a partner can declare `default: null`, and calling
+    // `.normalize` on it would throw while building the first row's key. A
+    // declared null therefore executes identically to an absent default, matching
+    // the sibling factories' `?? fallback` handling of a nullish param.
+    const rawDefault = params.default as string | null | undefined;
     return {
       kind: "coalesce",
-      default:
-        rawDefault === undefined ? undefined : rawDefault.normalize("NFC"),
+      default: rawDefault == null ? undefined : rawDefault.normalize("NFC"),
     };
   }
   const factory = STANDARDIZING_FUNCTIONS[step.function];

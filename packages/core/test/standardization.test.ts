@@ -448,6 +448,20 @@ describe("runPipeline — null-producing functions", () => {
     ).toBe("987654321");
   });
 
+  test("null_if with a null value/values param does not throw and excludes nothing", () => {
+    // Partner-crafted nullish params are schema-valid (transform params are
+    // z.unknown()); a null exclusion once threw normalizing null, so both a null
+    // `value` and a null `values` must read as an absent exclusion.
+    const nullValue = () =>
+      runPipeline("SMITH", [{ function: "null_if", params: { value: null } }]);
+    const nullValues = () =>
+      runPipeline("SMITH", [{ function: "null_if", params: { values: null } }]);
+    expect(nullValue).not.toThrow();
+    expect(nullValues).not.toThrow();
+    expect(nullValue()).toBe("SMITH");
+    expect(nullValues()).toBe("SMITH");
+  });
+
   test("filter_regex passes through matching value", () => {
     expect(
       runPipeline("SMITH", [
@@ -528,6 +542,34 @@ describe("runPipeline — coalesce", () => {
         { function: "coalesce", params: { default: "UNKNOWN" } },
       ]),
     ).toBe("UNKNOWN");
+  });
+
+  test("coalesce with a null default does not throw and behaves as absent", () => {
+    // A partner-crafted `default: null` is schema-valid (transform params are
+    // z.unknown(), count-bounded only), so it reaches compileStep and once threw a
+    // TypeError from `.normalize` on null. It must now leave a dropped value
+    // dropped, identically to an absent default.
+    const nullDefault = () =>
+      runPipeline("", [
+        { function: "null_if", params: { value: "" } },
+        { function: "coalesce", params: { default: null } },
+      ]);
+    expect(nullDefault).not.toThrow();
+    expect(nullDefault()).toBeNull();
+    expect(nullDefault()).toBe(
+      runPipeline("", [
+        { function: "null_if", params: { value: "" } },
+        { function: "coalesce" },
+      ]),
+    );
+  });
+
+  test("coalesce with a null default passes a present value through", () => {
+    expect(
+      runPipeline("SMITH", [
+        { function: "coalesce", params: { default: null } },
+      ]),
+    ).toBe("SMITH");
   });
 });
 
@@ -1502,6 +1544,41 @@ describe("buildKeyStrings", () => {
     };
     const dataset = makeDataset({ ssn: "000000000", last_name: "SMITH" });
     expect(buildKeyStrings(keyWithNullTransform, dataset, 0)).toBeNull();
+  });
+
+  test("element transform coalesce with a null default does not crash the key build", () => {
+    // The partner-reachable path: a crafted invitation carries a linkage-key
+    // element transform whose coalesce declares `default: null`. This once threw a
+    // TypeError from compileStep while building the first row's key. With a present
+    // value the coalesce is a no-op; the key must build identically to an absent
+    // default, never throw.
+    const keyWithNullCoalesce = {
+      name: "SSN+LN",
+      elements: [
+        {
+          field: "ssn",
+          transform: [{ function: "coalesce", params: { default: null } }],
+        },
+        { field: "last_name" },
+      ],
+    };
+    const keyWithAbsentCoalesce = {
+      name: "SSN+LN",
+      elements: [
+        { field: "ssn", transform: [{ function: "coalesce" }] },
+        { field: "last_name" },
+      ],
+    };
+    const dataset = makeDataset({ ssn: "000000000", last_name: "SMITH" });
+    expect(() =>
+      buildKeyStrings(keyWithNullCoalesce, dataset, 0),
+    ).not.toThrow();
+    expect(buildKeyStrings(keyWithNullCoalesce, dataset, 0)).toEqual(
+      buildKeyStrings(keyWithAbsentCoalesce, dataset, 0),
+    );
+    expect(buildKeyStrings(keyWithNullCoalesce, dataset, 0)).toEqual(
+      new Set(["000000000SMITH"]),
+    );
   });
 
   test("swap is applied when isReceiver is true", () => {
