@@ -5,6 +5,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 
 import {
   listManagedExchanges,
+  openManagedExchangeDatabase,
   requestPersistentStorage,
 } from "@psi/managedExchangeStore";
 import { MAX_ARTIFACT_IMPORT_BYTES } from "@psi/managedExchangeArtifact";
@@ -12,96 +13,134 @@ import { importManagedExchange } from "@psi/managedExchangeImport";
 import { listManagedLocalState } from "@psi/managedLocalState";
 
 import { BenchPage } from "./BenchPage";
-import { savedExchangeRows } from "./savedExchangesModel";
+import { loadSavedExchanges } from "./savedExchangesLoad";
 import styles from "./bench.module.css";
 
 import type { SavedExchangeRow } from "./savedExchangesModel";
+import type { SavedExchangesLoad } from "./savedExchangesLoad";
 
 /**
- * The saved-exchanges affordance: a minimal list of stored managed-exchange
- * records -- label, side, a one-line last-run status, and the derived backup
- * state -- each with a run action that opens the attended re-run surface. It is
- * the entry point into a re-run from a stored record, reached from the lobby.
+ * The managed-exchange home list: the app's default route. It lists the recurring
+ * exchanges stored in this browser -- label, side, a one-line last-run status, and
+ * the derived backup state -- each with a run action that opens the attended re-run
+ * surface, above a standing entry into the quick (invite/accept) path.
  *
- * The list joins each record to its local sibling state (the backup marker and any
- * spent state): a spent record (handed off by a migration export) shows no Run
- * action and names its handoff date. The empty state carries the import affordance
- * standing -- a wholesale eviction erases the evidence anything existed, so restore-
- * from-backup lives here rather than only behind a detected loss (see
- * docs/MANAGED_EXCHANGE.md, "Eviction recovery is the import flow").
+ * The list reads asynchronously before first paint resolves ({@link loadSavedExchanges}):
+ * it shows a loading state, then either the exchanges, the designed empty state, or --
+ * when the store cannot be opened at all (private mode with storage blocked, an engine
+ * without IndexedDB) -- a degrade to the quick path. It never flashes an empty list
+ * while the store is still loading.
  *
- * Deliberately NOT the management list: no add/remove, no per-exchange detail, no
- * edit. Those are separate items. The list reads the two stores once on mount and
- * derives its rows through the pure {@link savedExchangeRows}.
+ * The empty state is a designed first-run surface, not a blank list: it explains what a
+ * managed exchange is and offers creating one, accepting a recurring invitation, and a
+ * standing import affordance -- a wholesale eviction erases the evidence anything
+ * existed, so restore-from-backup lives here rather than only behind a detected loss
+ * (see docs/MANAGED_EXCHANGE.md, "Eviction recovery is the import flow").
+ *
+ * Deliberately NOT the management list: no add/remove, no per-exchange detail, no edit.
+ * Those are separate items. Each row joins its record to the local sibling state (the
+ * backup marker and any spent state): a spent record shows no Run action and names its
+ * handoff date.
  */
 export function SavedExchanges() {
   const navigate = useNavigate();
-  const [rows, setRows] = useState<Array<SavedExchangeRow>>();
-  const [loadFailed, setLoadFailed] = useState(false);
+  const [load, setLoad] = useState<SavedExchangesLoad>();
 
   useEffect(() => {
     let live = true;
-    Promise.all([listManagedExchanges(), listManagedLocalState()])
-      .then(([records, localState]) => {
-        if (live) setRows(savedExchangeRows(records, localState, Date.now()));
-      })
-      .catch(() => {
-        if (live) setLoadFailed(true);
-      });
+    void loadSavedExchanges({
+      openStore: openManagedExchangeDatabase,
+      listExchanges: listManagedExchanges,
+      listLocalState: listManagedLocalState,
+      now: Date.now,
+    }).then((result) => {
+      if (live) setLoad(result);
+    });
     return () => {
       live = false;
     };
   }, []);
 
+  if (load?.kind === "unavailable") return <StorageUnavailable />;
+
   return (
     <BenchPage>
       <main className={styles.lobby}>
         <div className={styles.wordmark}>psilink</div>
-        <h1>Saved exchanges</h1>
+        <h1>Recurring exchanges</h1>
         <p className={styles.sub}>
           Exchanges you saved to run again with the same partner, stored in this
           browser. Choose one to run it again without a new invitation.
         </p>
-        {loadFailed ? (
-          <p className={styles.sub}>
-            Your saved exchanges could not be read from this browser.
-          </p>
-        ) : rows === undefined ? (
+        {load === undefined ? (
           <Loader />
-        ) : rows.length === 0 ? (
+        ) : load.kind === "failed" ? (
+          <p className={styles.sub}>
+            Your recurring exchanges could not be read from this browser.
+          </p>
+        ) : load.rows.length === 0 ? (
           <SavedExchangesEmpty />
         ) : (
-          <ul className={styles.savedList}>
-            {rows.map((row) => (
-              <li key={row.id} className={styles.savedRow}>
-                <div className={styles.savedRowMain}>
-                  <span className={styles.savedRowLabel}>
-                    {row.label === "" ? "(unnamed exchange)" : row.label}
-                  </span>
-                  <span className={`${styles.small} ${styles.sub}`}>
-                    {row.sideLabel} - {row.status}
-                  </span>
-                  <BackupLine row={row} />
-                </div>
-                <Button
-                  variant={row.spentAsOf === undefined ? "default" : "subtle"}
-                  onClick={() =>
-                    void navigate({
-                      to: "/saved/$id",
-                      params: { id: row.id },
-                    })
-                  }
-                >
-                  {row.spentAsOf === undefined ? "Run" : "Open"}
-                </Button>
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className={styles.savedList}>
+              {load.rows.map((row) => (
+                <li key={row.id} className={styles.savedRow}>
+                  <div className={styles.savedRowMain}>
+                    <span className={styles.savedRowLabel}>
+                      {row.label === "" ? "(unnamed exchange)" : row.label}
+                    </span>
+                    <span className={`${styles.small} ${styles.sub}`}>
+                      {row.sideLabel} - {row.status}
+                    </span>
+                    <BackupLine row={row} />
+                  </div>
+                  <Button
+                    variant={row.spentAsOf === undefined ? "default" : "subtle"}
+                    onClick={() =>
+                      void navigate({
+                        to: "/saved/$id",
+                        params: { id: row.id },
+                      })
+                    }
+                  >
+                    {row.spentAsOf === undefined ? "Run" : "Open"}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+            <p className={`${styles.sub} ${styles.small}`}>
+              Need a one-off instead?{" "}
+              <Anchor inherit component={Link} to="/quick">
+                Set up or accept an exchange
+              </Anchor>{" "}
+              without saving it here.
+            </p>
+          </>
         )}
-        <p className={`${styles.sub} ${styles.small}`}>
-          <Anchor inherit component={Link} to="/">
-            Back to home
-          </Anchor>
+      </main>
+    </BenchPage>
+  );
+}
+
+/** The store-unavailable degrade: when the managed store cannot be opened at all
+ * (private mode with storage blocked, an engine without IndexedDB), the home route
+ * cannot list anything, so it hands the operator the quick path -- they can still run
+ * a one-off exchange -- rather than erroring. */
+function StorageUnavailable() {
+  return (
+    <BenchPage>
+      <main className={styles.lobby}>
+        <div className={styles.wordmark}>psilink</div>
+        <h1>Recurring exchanges</h1>
+        <p className={styles.sub}>
+          This browser cannot store recurring exchanges -- private browsing may
+          be blocking storage, or this browser does not support it. You can
+          still run a one-off exchange.
+        </p>
+        <p>
+          <Button component={Link} to="/quick">
+            Set up or accept a one-off exchange
+          </Button>
         </p>
       </main>
     </BenchPage>
@@ -131,9 +170,11 @@ function BackupLine({ row }: { row: SavedExchangeRow }) {
   );
 }
 
-/** The empty state: the standing import affordance for post-eviction recovery, plus
- * the plain first-visit guidance. A wholesale eviction cannot be told from a first
- * visit, so the import is offered here standing rather than behind a detected loss. */
+/** The first-run empty state: a designed surface, not a blank list. It explains what a
+ * managed exchange is, offers creating one and accepting a recurring invitation into the
+ * quick path, and carries the standing import affordance for post-eviction recovery. A
+ * wholesale eviction cannot be told from a first visit, so the import is offered here
+ * standing rather than behind a detected loss. */
 function SavedExchangesEmpty() {
   const navigate = useNavigate();
   const [importFailed, setImportFailed] = useState(false);
@@ -165,8 +206,22 @@ function SavedExchangesEmpty() {
   return (
     <>
       <p className={styles.sub}>
-        You have no saved exchanges in this browser. When you set up or accept
-        an exchange, choose &quot;Manage this exchange&quot; to save it here.
+        A recurring exchange is a saved partnership with someone you exchange
+        with again and again: its terms and a rotating shared secret are stored
+        in this browser, so you can run it without a new invitation each time.
+        You have none saved yet.
+      </p>
+      <p>
+        <Button component={Link} to="/quick">
+          Set up a recurring exchange
+        </Button>
+      </p>
+      <p className={`${styles.sub} ${styles.small}`}>
+        Were you sent a recurring invitation?{" "}
+        <Anchor inherit component={Link} to="/accept">
+          Accept it
+        </Anchor>{" "}
+        and choose &quot;Manage this exchange&quot; to save it here.
       </p>
       <div className={styles.callout}>
         <p className={styles.calloutLead}>Restore from a backup.</p>

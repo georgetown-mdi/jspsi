@@ -121,8 +121,8 @@ export function BenchLobby() {
         </p>
         <p className={`${styles.sub} ${styles.small}`}>
           Saved an exchange to run again?{" "}
-          <Anchor inherit component={Link} to="/saved">
-            Saved exchanges
+          <Anchor inherit component={Link} to="/">
+            Recurring exchanges
           </Anchor>{" "}
           lists the ones stored in this browser so you can run one without a new
           invitation.

@@ -300,7 +300,7 @@ export function RunWarningsAlert({
 export function AnotherExchangeFoot() {
   return (
     <div className={styles.workFoot}>
-      <Button component={Link} to="/">
+      <Button component={Link} to="/quick">
         Set up another exchange
       </Button>
     </div>

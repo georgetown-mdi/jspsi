@@ -114,7 +114,7 @@ export function AcceptorExchangeSection({
             </Button>
           )}
           {/* The acceptor cannot mint a fresh invitation, so the fresh-start
-              recovery is a link back to the lobby, where a new invitation is
+              recovery is a link to the quick path, where a new invitation is
               pasted. Offered for a security failure, an expired invitation, and
               a lapsed (non-retryable) exchange failure -- everything except a
               config fault (which the acceptor fixes in place) and an output
@@ -124,7 +124,7 @@ export function AcceptorExchangeSection({
               failure.category === "exchange") && (
               <Button
                 component={Link}
-                to="/"
+                to="/quick"
                 color="red"
                 variant="light"
                 mt="sm"

@@ -21,7 +21,7 @@ This changelog is a reader's summary of what PSI-Link does and how that changes 
 
 ### Changed
 
-- BREAKING: the redesigned web app now serves the primary routes -- `/` is a lobby offering start an exchange, accept an invitation, or verify a receipt; `/exchange`, `/accept`, and `/verify` are the flows behind them -- and the legacy web interface is removed. See `docs/DESIGN.md` and `docs/COMMUNICATION.md`.
+- BREAKING: the redesigned web app opens on the browser's list of recurring (managed) exchanges at `/`, run again without a new invitation, with a designed first-run empty state and a degrade to the quick path when the browser cannot store exchanges. Setting up or accepting a one-off exchange is the quick path (`/quick`, with `/exchange`, `/accept`, and `/verify` behind it), and the legacy web interface is removed. See `docs/DESIGN.md`, `docs/MANAGED_EXCHANGE.md`, and `docs/COMMUNICATION.md`.
 
 ### Security
 

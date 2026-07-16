@@ -309,8 +309,8 @@ function preparedWith(
   } as unknown as PreparedExchange;
 }
 
-describe("bench lobby", () => {
-  test("renders the landing structure with one main and one h1", async () => {
+describe("bench quick path", () => {
+  test("renders the quick-path structure with one main and one h1", async () => {
     mount(createElement(BenchLobby));
 
     await expect
@@ -1693,7 +1693,7 @@ describe("inviter bench", () => {
     const another = Array.from(document.querySelectorAll("a")).find(
       (anchor) => anchor.textContent === "Set up another exchange",
     );
-    expect(another?.getAttribute("href")).toBe("/");
+    expect(another?.getAttribute("href")).toBe("/quick");
   });
 
   test("post-create: a one-sided exchange states the withheld-result caveat", async () => {
@@ -1806,7 +1806,7 @@ describe("inviter bench", () => {
     const another = Array.from(document.querySelectorAll("a")).find(
       (anchor) => anchor.textContent === "Set up another exchange",
     );
-    expect(another?.getAttribute("href")).toBe("/");
+    expect(another?.getAttribute("href")).toBe("/quick");
   });
 
   test("post-create: a config failure surfaces its message and starts over", async () => {

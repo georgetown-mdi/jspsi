@@ -1,13 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { SavedExchanges } from "@bench/SavedExchanges";
+import { BenchLobby } from "@bench/BenchLobby";
 import { seo } from "@utils/seo";
 
-export const Route = createFileRoute("/")({
-  // The managed-exchange store is IndexedDB, origin-isolated and browser-only, so
-  // the home list must render client-side.
-  ssr: false,
-  component: SavedExchanges,
+export const Route = createFileRoute("/quick")({
+  component: BenchLobby,
   head: () => ({
     meta: seo({
       title: "psilink - private record linkage",
