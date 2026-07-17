@@ -190,6 +190,10 @@ linkage_terms:
 | `phone_number` | Phone number |
 | `email_address` | Email address |
 | `zip_code` | US ZIP code; canonical form is 5 digits, zero-padded |
+| `identifier` | Column that indexes a party's own records; never matchable |
+| `other` | A column whose PII type is none of the above |
+
+The first eight values are the complete type set for a `linkage_fields[].type`. The last two, `identifier` and `other`, are additionally valid for a `metadata.columns[].type` -- inference assigns them to an `_id`-suffixed column and to an otherwise unrecognized column, respectively -- but are not linkage-field types: a `linkage_fields[].type` set to either is rejected.
 
 Additional types will be added as their use case arises.
 
