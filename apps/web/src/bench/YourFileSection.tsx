@@ -187,8 +187,8 @@ export function YourFileSection({
           <p className={styles.calloutLead}>Using defaults</p>
           <p className={styles.small}>
             Customize data cleaning steps, matching keys, or attach an
-            associated agreement (bottom of right toolbar) before you create the
-            invitation.
+            associated agreement before you create the invitation (bottom of
+            right toolbar).
           </p>
         </div>
       )}
