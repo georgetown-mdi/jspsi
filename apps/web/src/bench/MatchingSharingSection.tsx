@@ -70,7 +70,7 @@ export function MatchingSharingSection({
   // its audible half, voiced even when a seed mounts already in conflict.
   const conflictAnnouncement = useDeferredAnnouncement(
     hasMultipleIdentifiers(metadata)
-      ? "Problem: choose a single row identifier."
+      ? "Problem: choose a single record identifier."
       : "",
   );
   return (
@@ -143,7 +143,8 @@ export function MatchingSharingSection({
         </table>
       </div>
       <p className={`${styles.small} ${styles.sub}`}>
-        Only one column can be the row identifier. Choose a single identifier.
+        Only one column can be the record identifier. Choose a single
+        identifier.
       </p>
       {/* Always mounted so assistive tech observes content changes; kept
           separate from the hint above so clearing a notice never re-announces

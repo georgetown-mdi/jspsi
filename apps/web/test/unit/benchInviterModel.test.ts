@@ -257,7 +257,7 @@ describe("review and create", () => {
     expect(
       problems.some(
         (problem) =>
-          problem.message === "Choose a single row identifier" &&
+          problem.message === "Choose a single record identifier" &&
           problem.target === "columns",
       ),
     ).toBe(true);
@@ -292,7 +292,7 @@ describe("review and create", () => {
     expect(byLabel.get("Cleaning")?.value).toMatch(
       /^\d+ fields?, filled in from your file$/,
     );
-    expect(byLabel.get("Matching keys")?.value).toMatch(
+    expect(byLabel.get("Matching on")?.value).toMatch(
       /^\d+ keys?, tried in order$/,
     );
     expect(byLabel.get("Invitation lifetime")?.value).toBe("1 day");

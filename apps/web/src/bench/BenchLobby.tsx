@@ -111,6 +111,19 @@ export function BenchLobby() {
           </div>
         </div>
         <p className={`${styles.sub} ${styles.small}`}>
+          First time here?{" "}
+          <Anchor
+            inherit
+            href="https://github.com/georgetown-mdi/jspsi#readme"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Instructions and documentation
+          </Anchor>{" "}
+          cover what psilink does, how to run an exchange, and the sample data
+          for practicing.
+        </p>
+        <p className={`${styles.sub} ${styles.small}`}>
           Running exchanges on a schedule? The same setup saves an SFTP exchange
           file for the command-line tool.
         </p>

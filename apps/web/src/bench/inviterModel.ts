@@ -994,7 +994,7 @@ export function spineProblems(
   const problems: Array<SpineProblem> = [];
   if (identifierProblem(editor.draft))
     problems.push({
-      message: "Choose a single row identifier",
+      message: "Choose a single record identifier",
       target: "columns",
     });
   const { errors } = reviewValidation(editor, now);
@@ -1047,7 +1047,7 @@ export function answersRows(
       changeTarget: "cleaning",
     },
     {
-      label: "Matching keys",
+      label: "Matching on",
       value: `${keysFact(editor.draft)}, tried in order`,
       changeTarget: "keys",
     },

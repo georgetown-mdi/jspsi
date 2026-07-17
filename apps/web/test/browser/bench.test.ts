@@ -520,7 +520,7 @@ describe("inviter bench", () => {
       )
       .toBeInTheDocument();
 
-    // Retyping the ignored column to the row identifier displaces the inferred
+    // Retyping the ignored column to the record identifier displaces the inferred
     // one; the displacement is announced.
     await page
       .getByLabelText("Type for program_code")
@@ -528,7 +528,7 @@ describe("inviter bench", () => {
     await expect
       .element(
         page.getByText(
-          "client_id changed to Ignored - only one column can be the row identifier.",
+          "client_id changed to Ignored - only one column can be the record identifier.",
         ),
       )
       .toBeInTheDocument();
@@ -558,7 +558,7 @@ describe("inviter bench", () => {
     // The inferred two-identifier conflict is a rail problem from the moment
     // the file is read, and its entry navigates into step 2 to fix it.
     await page
-      .getByRole("button", { name: "Choose a single row identifier" })
+      .getByRole("button", { name: "Choose a single record identifier" })
       .click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
@@ -567,7 +567,7 @@ describe("inviter bench", () => {
     // The conflict's audible half: announced even though the seed mounted
     // already in conflict.
     await expect
-      .element(page.getByText("Problem: choose a single row identifier."))
+      .element(page.getByText("Problem: choose a single record identifier."))
       .toBeInTheDocument();
 
     await page
