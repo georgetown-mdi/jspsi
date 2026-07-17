@@ -838,6 +838,55 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
       .toBeInTheDocument();
   });
 
+  test("a two-identifier file ties the conflict error to the offending Type controls", async () => {
+    // `id` and `identifier` both infer to role: identifier, so the file seeds a
+    // single-identifier conflict the grid surfaces (inferMetadata seeds it; the
+    // mutators never create it).
+    await reachColumns("id,identifier,first_name,last_name\n1,2,Alice,Smith\n");
+    const conflict = page.getByTestId("identifier-conflict");
+    await expect.element(conflict).toBeInTheDocument();
+    const errorId = conflict.element().getAttribute("id");
+    expect(errorId).toBeTruthy();
+
+    // Both offending Type controls carry the control-level error signal and
+    // point their description at the visible error element. (exact: true --
+    // "Type for column id" is a substring of "Type for column identifier".)
+    for (const columnName of ["id", "identifier"]) {
+      const control = page.getByRole("combobox", {
+        name: `Type for column ${columnName}`,
+        exact: true,
+      });
+      expect(control.element().getAttribute("aria-invalid")).toBe("true");
+      expect(control.element().getAttribute("aria-describedby")).toBe(errorId);
+    }
+
+    // A non-identifier Type control carries no stale error association.
+    const bystander = page.getByRole("combobox", {
+      name: "Type for column first_name",
+      exact: true,
+    });
+    expect(bystander.element().getAttribute("aria-invalid")).toBeNull();
+    expect(bystander.element().getAttribute("aria-describedby")).toBeNull();
+
+    // Retype one identifier to Other: the conflict clears and no control keeps a
+    // stale aria-invalid/association.
+    const idControl = page.getByRole("combobox", {
+      name: "Type for column identifier",
+      exact: true,
+    });
+    await userEvent.click(idControl);
+    await userEvent.click(
+      page.getByRole("option", { name: "Other (not used for matching)" }),
+    );
+    expect(page.getByTestId("identifier-conflict").query()).toBeNull();
+    const survivor = page.getByRole("combobox", {
+      name: "Type for column id",
+      exact: true,
+    });
+    expect(survivor.element().getAttribute("aria-invalid")).toBeNull();
+    expect(survivor.element().getAttribute("aria-describedby")).toBeNull();
+  });
+
   test("the ledger's You will send names the extra disclosed column, not the invitation's request", async () => {
     // The invitation requests no payload from the acceptor (acceptorTerms has no
     // payload.receive), so its terms name nothing to send. But the file carries an
