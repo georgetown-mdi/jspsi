@@ -204,7 +204,7 @@ export interface RunProtocolResult {
  * that a whitespace-only path does not silently create a file named " " in
  * the current directory. `sharedSecret` is validated by {@link authenticateConnection}
  * after the connection opens. `keyFilePath` is checked for non-emptiness only
- * — invalid paths are caught with a clear OS error at the key-file write step.
+ * -- invalid paths are caught with a clear OS error at the key-file write step.
  *
  * When `auth` is `null` the exchange runs without authentication; this is the
  * path taken by callers (e.g. zero-setup) that explicitly acknowledge relying
@@ -470,7 +470,7 @@ export async function runProtocol(
   // Set synchronously at the top of a signal handler before any await, so the
   // catch block below can detect that an in-flight failure was caused by the
   // signal-driven cleanup (rather than an organic protocol error) and yield
-  // the exit code to the signal handler — preventing the CLI handler's
+  // the exit code to the signal handler -- preventing the CLI handler's
   // process.exit(69) from racing the signal handler's process.exit(130/143).
   let signalReceived: NodeJS.Signals | undefined;
   async function doCleanup() {
@@ -536,14 +536,14 @@ export async function runProtocol(
     // Undo our own contribution to the max-listeners threshold rather than
     // decrementing from whatever it is now. If another module (or a parallel
     // runProtocol) mutated the threshold in between, decrementing from the
-    // current value would walk the baseline off by ±2 each cleanup cycle.
+    // current value would walk the baseline off by +/-2 each cleanup cycle.
     // We restore the captured value verbatim, which leaves any external
     // adjustment intact and undoes only our own +2.
     if (maxListenersIncremented) process.setMaxListeners(prevMaxListeners);
   }
   // The try/catch/finally in each handler ensures process.exit is always called
   // and that a rejection from doCleanup (possible if future modifications add an
-  // un-caught throw) never surfaces as an unhandled promise rejection — which
+  // un-caught throw) never surfaces as an unhandled promise rejection -- which
   // process.on("SIGINT") would otherwise silently discard.
   // Three states share one message helper so SIGINT, SIGTERM, and the catch
   // block stay consistent:
@@ -651,7 +651,7 @@ export async function runProtocol(
     opened = true;
 
     // If a signal fired while `conn.open()` was awaiting, the signal handler
-    // already ran doCleanup — including a conn.close() that no-op'd because
+    // already ran doCleanup -- including a conn.close() that no-op'd because
     // `connected` was still false at that moment. Now that open() has
     // resolved (`connected === true`), close the freshly-opened connection
     // explicitly and short-circuit so the catch's signalReceived branch
@@ -1152,7 +1152,7 @@ export async function runProtocol(
     //   - The saveKeyFile-failure path below, because its wrapped error
     //     already explains "definite local rotation, partner unknown".
     //   - authenticateConnection's own validation errors (token format,
-    //     pre- and post-handshake expiry — see auth.ts), because their
+    //     pre- and post-handshake expiry -- see auth.ts), because their
     //     messages already include specific recovery hints ("must
     //     re-invite" / "obtain a new invitation").
     // Skip the generic advisory in both cases so the user does not see two

@@ -27,7 +27,7 @@ const sharedKeys: LinkageTerms["linkageKeys"] = [
   { name: "SSN", elements: [{ field: "ssn" }] },
 ];
 
-/** Both parties expect output and will share — compatible pair. */
+/** Both parties expect output and will share -- compatible pair. */
 const termsA: LinkageTerms = {
   version: "1.0.0",
   identity: "Party A",
@@ -781,7 +781,7 @@ test("responder neutralizes partner bytes in a linkage-terms parse error", async
   // neutralized in the rejection the responder relays, never surfaced raw.
   // Reverting the call site to a raw ZodError.message regresses this (the JSON
   // dump leaks U+202E verbatim).
-  const evilKey = "\x1b[31m‮" + "x".repeat(MAX_NAME_LENGTH);
+  const evilKey = "\x1b[31m\u202e" + "x".repeat(MAX_NAME_LENGTH);
   const [connA, connB] = makeConnections();
   const responder = exchangeTerms(connB, "responder", termsB, 200);
   await connA.send({
@@ -808,7 +808,7 @@ test("responder neutralizes partner bytes in a linkage-terms parse error", async
     (e: unknown) => e as Error,
   );
   expect(reason.message).toContain("failed to parse");
-  expect(reason.message).not.toContain("‮");
+  expect(reason.message).not.toContain("\u202e");
   expect(reason.message).not.toContain("\x1b");
   expect(reason.message).toContain("\\u202e");
 });

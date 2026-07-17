@@ -126,7 +126,7 @@ test("routes a partner-controlled SFTP host through sanitizeForDisplay before lo
   mockState.connectImpl = async () => {
     throw new Error("connect refused");
   };
-  const hostileHost = "\x1b[31mevil.example‮com";
+  const hostileHost = "\x1b[31mevil.example\u202ecom";
 
   await expect(
     runProtocolCapturingConnLogs(
@@ -146,7 +146,7 @@ test("routes a partner-controlled SFTP host through sanitizeForDisplay before lo
   // Escaped form is present; the raw ESC and bidi-override bytes are gone.
   expect(hostLine).toContain("\\x1b[31mevil.example\\u202ecom");
   expect(hostLine).not.toContain("\x1b");
-  expect(hostLine).not.toContain("‮");
+  expect(hostLine).not.toContain("\u202e");
 });
 
 test("leaves an ordinary printable SFTP host unchanged", async () => {
@@ -179,7 +179,7 @@ test("routes a partner-seeded filedrop path through sanitizeForDisplay before lo
   // invitation endpoint too (charset-unconstrained). The log fires before
   // conn.open(), and a nonexistent path makes the real LocalFSClient reject so
   // the run still ends. (This branch uses LocalFSClient, not the mocked adapter.)
-  const hostilePath = "/srv/\x1b[31mevil‮drop-does-not-exist";
+  const hostilePath = "/srv/\x1b[31mevil\u202edrop-does-not-exist";
 
   await expect(
     runProtocol(
@@ -202,7 +202,7 @@ test("routes a partner-seeded filedrop path through sanitizeForDisplay before lo
   expect(pathLine).toBeDefined();
   expect(pathLine).toContain("/srv/\\x1b[31mevil\\u202edrop-does-not-exist");
   expect(pathLine).not.toContain("\x1b");
-  expect(pathLine).not.toContain("‮");
+  expect(pathLine).not.toContain("\u202e");
 });
 
 // --- Cleanup error sinks (render sanitizeErrorForDisplay, not the raw Error) --
@@ -221,7 +221,9 @@ test("renders a hostile close error through sanitizeErrorForDisplay in the clean
     .mockRejectedValue(new Error("synchronize aborted"));
   const closeSpy = vi
     .spyOn(FileSyncConnection.prototype, "close")
-    .mockRejectedValue(new Error("ENOENT: open '/srv/\x1b[31mEVIL\r\n‮FAKE'"));
+    .mockRejectedValue(
+      new Error("ENOENT: open '/srv/\x1b[31mEVIL\r\n\u202eFAKE'"),
+    );
 
   try {
     await expect(
@@ -248,7 +250,7 @@ test("renders a hostile close error through sanitizeErrorForDisplay in the clean
     expect(warnLine).not.toContain("\x1b");
     expect(warnLine).not.toContain("\r");
     expect(warnLine).not.toContain("\n");
-    expect(warnLine).not.toContain("‮");
+    expect(warnLine).not.toContain("\u202e");
   } finally {
     syncSpy.mockRestore();
     closeSpy.mockRestore();
@@ -294,7 +296,7 @@ test("renders a hostile close error through sanitizeErrorForDisplay in the opene
   };
   const closeSpy = vi
     .spyOn(FileSyncConnection.prototype, "close")
-    .mockRejectedValue(new Error("teardown failed: /srv/\x1b[31mX‮Y"));
+    .mockRejectedValue(new Error("teardown failed: /srv/\x1b[31mX\u202eY"));
 
   try {
     await expect(
@@ -315,7 +317,7 @@ test("renders a hostile close error through sanitizeErrorForDisplay in the opene
     expect(elseLine).toBeDefined();
     expect(elseLine).toContain(escaped);
     expect(elseLine).not.toContain("\x1b");
-    expect(elseLine).not.toContain("‮");
+    expect(elseLine).not.toContain("\u202e");
   } finally {
     closeSpy.mockRestore();
   }

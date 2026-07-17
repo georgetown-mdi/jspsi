@@ -56,7 +56,8 @@ const SSN4_STEPS: StandardizationStep[] = [
 // `allowedCharacters: "A-Z "` constraint on the default linkage fields.
 const NAME_STEPS: StandardizationStep[] = [
   { function: "trim_whitespace" },
-  // Normalize diacritics before stripping non-ASCII so é->e, ñ->n, etc.
+  // Normalize diacritics before stripping non-ASCII so an accented letter folds
+  // to its base letter (e-acute -> e, n-tilde -> n) rather than being dropped.
   { function: "remove_accents" },
   { function: "remove_non_ascii" },
   { function: "to_upper_case" },

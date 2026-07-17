@@ -57,15 +57,15 @@ describe("frameSizeExceededError", () => {
   });
 
   test("neutralizes deceptive Unicode (bidi-override) in the path", () => {
-    const err = frameSizeExceededError("/drop/file‮EVIL.json", 100);
-    expect(err.message).not.toContain("‮");
+    const err = frameSizeExceededError("/drop/file\u202eEVIL.json", 100);
+    expect(err.message).not.toContain("\u202e");
     expect(err.message).toContain("\\u202e");
   });
 
   test("neutralizes a homoglyph / confusable in the path", () => {
     // U+0430 (Cyrillic small a) renders identically to ASCII "a".
-    const err = frameSizeExceededError("/drop/cаfe.json", 100);
-    expect(err.message).not.toContain("а");
+    const err = frameSizeExceededError("/drop/c\u0430fe.json", 100);
+    expect(err.message).not.toContain("\u0430");
     expect(err.message).toContain("\\u0430");
   });
 });

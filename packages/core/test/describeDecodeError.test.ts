@@ -48,12 +48,12 @@ describe("describeDecodeError", () => {
     // operator escaped, never raw.
     const out = describeDecodeError({
       issues: [
-        { path: ["connectionEndpoint", "\x1b[31mKEY‮"], message: "bad" },
+        { path: ["connectionEndpoint", "\x1b[31mKEY\u202e"], message: "bad" },
       ],
     });
     expect(out).not.toContain("\x1b");
     expect(out).toContain("\\x1b");
-    expect(out).not.toContain("‮");
+    expect(out).not.toContain("\u202e");
     expect(out).toContain("\\u202e");
   });
 

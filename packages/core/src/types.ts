@@ -75,7 +75,7 @@ export type Connection = {
   // the peer has cause to send the next message. The established pattern
   // (see kex.ts / protocolSetup.ts / payloadExchange.ts) is that each
   // receive helper installs its `once("data", ...)` listener inside the
-  // Promise executor — synchronously after any prior receive resolves —
+  // Promise executor -- synchronously after any prior receive resolves --
   // so no transport macrotask can interleave between consumption of one
   // message and registration for the next.
   takeBufferedError: () => unknown;

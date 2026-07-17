@@ -882,7 +882,7 @@ describe("columnValues", () => {
   });
 });
 
-// --- getDefaultStandardization — dateInputFormat option ----------------------
+// --- getDefaultStandardization -- dateInputFormat option ---------------------
 
 describe("getDefaultStandardization — dateInputFormat option", () => {
   const dobTerms: LinkageTerms = {

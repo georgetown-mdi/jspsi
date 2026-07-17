@@ -38,7 +38,7 @@ const HttpAuthSchema: z.ZodType<HttpAuth> = z
 
 /**
  * An HTTP endpoint that provisions or wakes a supporting service before the
- * exchange begins. See EXCHANGE_REFERENCE.md §connection.server for lifecycle vs.
+ * exchange begins. See EXCHANGE_REFERENCE.md section connection.server for lifecycle vs.
  * address-returning provisioning semantics.
  */
 export interface ServerProvision {
@@ -293,7 +293,7 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
 /**
  * Regex that a shared secret must match: 43 base64url characters encoding exactly
  * 32 bytes. The final character encodes 4 data bits and 2 zero padding bits
- * (256 bits ÷ 6 = 42 full characters + 4 remaining data bits), constraining it
+ * (256 bits / 6 = 42 full characters + 4 remaining data bits), constraining it
  * to the 16-character set `[AEIMQUYcgkosw048]`.
  */
 export const SHARED_SECRET_REGEX = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
@@ -624,7 +624,7 @@ export interface FileSyncOptions extends SharedOptions {
    * Intended for sync-mediated transports (e.g. a cloud-sync service
    * reconciling two local directories) where `createExclusive` lacks
    * atomicity or deletion has high propagation latency. Delete still works
-   * on these transports — cleanup via `safeDelete` succeeds eventually —
+   * on these transports -- cleanup via `safeDelete` succeeds eventually --
    * but arrival order cannot be determined by an atomic exclusive-create.
    * This option is **not** intended for transports that genuinely cannot
    * delete; handshake files must be removable at `close()` time or they

@@ -1896,7 +1896,7 @@ test("loadConfigLinkageSource escapes control/ANSI bytes in a linkage_terms issu
   // An ESC-driven ANSI sequence and a right-to-left override (U+202E). The key
   // must exceed MAX_NAME_LENGTH so the record-key schema rejects it and Zod
   // surfaces the offending key in the issue path.
-  const badKey = "\x1b[31m‮evil" + "x".repeat(MAX_NAME_LENGTH + 10);
+  const badKey = "\x1b[31m\u202eevil" + "x".repeat(MAX_NAME_LENGTH + 10);
   terms.linkageKeys[0].elements[0].transform = [
     { function: "noop", params: { [badKey]: 1 } },
   ];
@@ -1915,7 +1915,7 @@ test("loadConfigLinkageSource escapes control/ANSI bytes in a linkage_terms issu
   expect(message).toContain("linkageKeys.0.elements.0.transform.0.params.");
   // The raw bytes are neutralized: their escaped forms appear, never the bytes.
   expect(message).not.toContain("\x1b");
-  expect(message).not.toContain("‮");
+  expect(message).not.toContain("\u202e");
   expect(message).toContain("\\x1b");
   expect(message).toContain("\\u202e");
 });

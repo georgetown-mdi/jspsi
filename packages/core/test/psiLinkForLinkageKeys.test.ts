@@ -130,7 +130,7 @@ test("rules match in order", async () => {
 
   // Client row 0 matches only by key 2 (SSN+LN1+FN1, wrong DOB).
   // Client row 1 matches by key 1 (SSN+LN+DOB, exact match).
-  // Client row 2 matches only by key 2 (SSN+LN1+FN1, wrong DOB) — same SSN as
+  // Client row 2 matches only by key 2 (SSN+LN1+FN1, wrong DOB) -- same SSN as
   // server row 0, but key 1 consumed that server record already.
   const clientRows = [
     {

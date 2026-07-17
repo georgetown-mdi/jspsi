@@ -1785,7 +1785,7 @@ test("poll does not emit error when get() throws ENOENT after list() surfaced th
   const errors: unknown[] = [];
 
   // Resolved on list()'s 3rd call, confirming the poller rescheduled at least
-  // twice after the ENOENT — without relying on a fixed wall-clock wait.
+  // twice after the ENOENT -- without relying on a fixed wall-clock wait.
   let notifyThirdList!: () => void;
   const thirdList = new Promise<void>((r) => {
     notifyThirdList = r;
@@ -1850,7 +1850,7 @@ test("poll delivers a subsequent valid message after swallowing an ENOENT", asyn
 
   let listCount = 0;
   const received: unknown[] = [];
-  // Resolved when the first message arrives — no fixed wall-clock wait.
+  // Resolved when the first message arrives -- no fixed wall-clock wait.
   let notifyReceived!: () => void;
   const firstMessage = new Promise<void>((r) => {
     notifyReceived = r;
@@ -2005,7 +2005,7 @@ test("poll emits error when ENOENT threshold is reached on consecutive poll cycl
 
 test("poll emits error immediately when list() throws ENOENT (not a TOCTOU race)", async () => {
   // reachedGet is false when list() throws, so ENOENT from the detection scan
-  // is a hard error that must be emitted immediately — not tolerated as a
+  // is a hard error that must be emitted immediately -- not tolerated as a
   // TOCTOU race.
   const { client } = makeMockClient();
   client.list = async (p) => {
@@ -2083,7 +2083,7 @@ test("synchronize() cleans up hello and lock files when createExclusive() throws
   files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
 
   // createExclusive() throws EEXIST; also plant the lock file so
-  // exists(lockPath) → true, simulating the peer having already claimed it.
+  // exists(lockPath) -> true, simulating the peer having already claimed it.
   client.createExclusive = async (path) => {
     files.set(lockPath, Buffer.alloc(0));
     throw Object.assign(new Error(`${path}: file already exists`), {
@@ -2099,7 +2099,7 @@ test("synchronize() cleans up hello and lock files when createExclusive() throws
   expect(files.has(`${conn.path}/${myHelloName}`)).toBe(false);
   // Roles are set correctly for the losing party.
   expect(conn.peerId).toBe(peerId);
-  // peerId arrived first → this connection is initiator (second to arrive).
+  // peerId arrived first -> this connection is initiator (second to arrive).
   expect(conn.handshakeRole).toBe("initiator");
 });
 
@@ -2802,7 +2802,7 @@ test("synchronize() rejects and cleans up hello and lock files when createExclus
   expect(files.has(lockPath)).toBe(false);
   // The outer catch cleans up only this party's hello (helloPath).
   expect(files.has(`${conn.path}/${myHelloName}`)).toBe(false);
-  // The peer's hello is left intact — it is the peer's responsibility and will
+  // The peer's hello is left intact -- it is the peer's responsibility and will
   // be swept on the next synchronize() call by whichever party reconnects first.
   expect(files.has(`${conn.path}/${peerHelloName}`)).toBe(true);
 });
@@ -2855,8 +2855,8 @@ test("synchronize() outer catch clears responsibleFiles so cleanup() makes no re
   await expect(conn.synchronize()).rejects.toThrow();
 
   // The outer catch deletes lockPath and helloPath (my hello): 2 safeDeletes.
-  // The peer's hello is left intact — it is the peer's responsibility, not this
-  // party's — so no safeDelete is issued for it.
+  // The peer's hello is left intact -- it is the peer's responsibility, not this
+  // party's -- so no safeDelete is issued for it.
   const countAfterSync = safeDeleteCount;
   expect(countAfterSync).toBe(2);
 
@@ -3069,7 +3069,7 @@ test("synchronize() lock-detection branch rejects a stale lock from a different 
 
 test("synchronize() createExclusive winner: leaves own hello and lock name in responsibleFiles so cleanup() can sweep them if peer never arrives", async () => {
   // Regression guard: previously, the outer try block in synchronize() cleared
-  // responsibleFiles on every successful waitForPeer() return — including the
+  // responsibleFiles on every successful waitForPeer() return -- including the
   // createExclusive-winner path, which is the one path that legitimately needs
   // to retain its files. The loser (whose createExclusive throws EEXIST) is
   // normally responsible for cleaning the lock and both hellos, but if the
@@ -3099,7 +3099,7 @@ test("synchronize() createExclusive winner: leaves own hello and lock name in re
   };
   // Peer hello body so the two-hellos read gate passes before createExclusive.
   files.set(`${conn.path}/${peerHelloName}`, LOCK_HELLO_BODY);
-  // Default mock createExclusive succeeds (no EEXIST) — this conn is the
+  // Default mock createExclusive succeeds (no EEXIST) -- this conn is the
   // lock-race winner.
 
   await conn.synchronize();
@@ -3838,8 +3838,8 @@ test("synchronize() preexisting-file guard rejects a leftover joining sentinel a
 
 test("ENOENT counter resets after a clean poll cycle, allowing a fresh set of retries", async () => {
   // Two ENOENTs (below threshold of 3), then exists() returns false (counter
-  // resets), then two more ENOENTs. Four total ENOENTs — but split across two
-  // groups — must never reach the threshold and must not emit an error.
+  // resets), then two more ENOENTs. Four total ENOENTs -- but split across two
+  // groups -- must never reach the threshold and must not emit an error.
   const peerId = "peer-test";
   let listCallCount = 0;
   let getCount = 0;
@@ -5213,7 +5213,7 @@ test("synchronize() lock starter: mid-sync joiner hello body retried, not malfor
   };
 
   // First list(): empty (initial preexisting check passes). Second+: only the
-  // peer hello is visible — no self hello — triggering the theseFiles===0 branch.
+  // peer hello is visible -- no self hello -- triggering the theseFiles===0 branch.
   let listCallCount = 0;
   client.list = async () => {
     listCallCount++;
@@ -7348,11 +7348,13 @@ test("poll() terminal: the unparseable-body error escapes control/ANSI bytes ech
 test("poll() terminal: the unparseable-body error neutralizes deceptive Unicode echoed by the JSON parser", async () => {
   // Leading bidi-override (RLO), zero-width, and Cyrillic homoglyph -- all
   // invalid JSON starts, all quoted raw in V8's parse error, all escaped here.
-  const err = await pollUnparseableBodyError(Buffer.from("‮​а not json"));
+  const err = await pollUnparseableBodyError(
+    Buffer.from("\u202e\u200b\u0430 not json"),
+  );
   expect(err.message).toContain("not valid JSON");
-  expect(err.message).not.toContain("‮");
-  expect(err.message).not.toContain("​");
-  expect(err.message).not.toContain("а");
+  expect(err.message).not.toContain("\u202e");
+  expect(err.message).not.toContain("\u200b");
+  expect(err.message).not.toContain("\u0430");
   expect(err.message).toContain("\\u202e");
 });
 
@@ -7934,10 +7936,10 @@ test("poll(): the unexpected-file error escapes a newline in a foreign filename"
 test("poll(): the unexpected-file error neutralizes deceptive Unicode in a foreign filename", async () => {
   // A bidi override (RLO), a zero-width char, and a Cyrillic homoglyph -- all
   // invisible or misleading rendered raw, all escaped here.
-  const err = await pollForeignFileError("a‮b​cаd.json");
-  expect(err.message).not.toContain("‮");
-  expect(err.message).not.toContain("​");
-  expect(err.message).not.toContain("а");
+  const err = await pollForeignFileError("a\u202eb\u200bc\u0430d.json");
+  expect(err.message).not.toContain("\u202e");
+  expect(err.message).not.toContain("\u200b");
+  expect(err.message).not.toContain("\u0430");
   expect(err.message).toContain("\\u202e");
   expect(err.message).toContain("\\u200b");
   expect(err.message).toContain("\\u0430");

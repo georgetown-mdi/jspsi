@@ -47,8 +47,8 @@ describe("directoryTooLargeError", () => {
   });
 
   test("neutralizes deceptive Unicode (bidi-override) in the directory path", () => {
-    const err = directoryTooLargeError("/drop/dir‮EVIL", 8192);
-    expect(err.message).not.toContain("‮");
+    const err = directoryTooLargeError("/drop/dir\u202eEVIL", 8192);
+    expect(err.message).not.toContain("\u202e");
     expect(err.message).toContain("\\u202e");
   });
 });

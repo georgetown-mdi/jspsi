@@ -274,7 +274,7 @@ test("safeParseMetadata rejects duplicate column names", () => {
 test("safeParseMetadata does not echo a duplicated name in the error", () => {
   // The name is operator-authored and may carry control/ANSI/bidi bytes; the
   // uniqueness refine reports a static message, never the offending name.
-  const evil = "\x1b[31mDUP\x1b[0m‮";
+  const evil = "\x1b[31mDUP\x1b[0m\u202e";
   const result = safeParseMetadata([
     { name: evil, type: "other", role: "payload", is_payload: true },
     { name: evil, type: "other", role: "payload", is_payload: true },
@@ -283,7 +283,7 @@ test("safeParseMetadata does not echo a duplicated name in the error", () => {
   if (!result.success) {
     expect(result.error.message).not.toContain("DUP");
     expect(result.error.message).not.toContain("\x1b");
-    expect(result.error.message).not.toContain("‮");
+    expect(result.error.message).not.toContain("\u202e");
   }
 });
 
@@ -332,7 +332,7 @@ test("safeParseMetadata accepts a normal column name (no regression)", () => {
 test("safeParseMetadata does not echo an over-long name in the error", () => {
   // The name is operator-authored and may carry control/ANSI/bidi bytes; the
   // length bound reports a static message, never the offending name.
-  const evil = "\x1b[31m" + "D".repeat(300) + "\x1b[0m‮";
+  const evil = "\x1b[31m" + "D".repeat(300) + "\x1b[0m\u202e";
   const result = safeParseMetadata([
     { name: evil, type: "other", role: "payload", is_payload: true },
   ]);
@@ -340,7 +340,7 @@ test("safeParseMetadata does not echo an over-long name in the error", () => {
   if (!result.success) {
     expect(result.error.message).not.toContain("D".repeat(300));
     expect(result.error.message).not.toContain("\x1b");
-    expect(result.error.message).not.toContain("‮");
+    expect(result.error.message).not.toContain("\u202e");
   }
 });
 
@@ -431,7 +431,7 @@ test("a rejected metadata type is not echoed in the parse error", () => {
   // Like the linkage-terms discriminator, the z.enum mismatch reports only the
   // expected options and the issue path, never the received value -- pin that so
   // an offending value carrying control/ANSI/bidi bytes cannot leak through.
-  const evil = "\x1b[31mfirstName\x1b[0m‮";
+  const evil = "\x1b[31mfirstName\x1b[0m\u202e";
   const result = safeParseMetadata([
     { name: "c", type: evil, role: "linkage", is_payload: false },
   ]);
@@ -439,6 +439,6 @@ test("a rejected metadata type is not echoed in the parse error", () => {
   if (!result.success) {
     expect(result.error.message).not.toContain("firstName");
     expect(result.error.message).not.toContain("\x1b");
-    expect(result.error.message).not.toContain("‮");
+    expect(result.error.message).not.toContain("\u202e");
   }
 });
