@@ -341,8 +341,8 @@ function parseDateFactory(params: Params): StandardizingFn {
   // satisfiability pre-flight is pinned to that verdict), realized here as an
   // empty format that tokenizes to an all-dropping pattern -- a raw non-string
   // would instead throw in parseDateFormat (`.startsWith` on an array). Guard the
-  // output format by type too: a non-string there reaches `.replace` on a matched
-  // row and throws, so it falls back to the absent default.
+  // output format by type too: a non-string there reaches `.replaceAll` on a
+  // matched row and throws, so it falls back to the absent default.
   const rawInputFormat = params.inputFormat;
   const inputFormat =
     rawInputFormat == null
@@ -390,16 +390,30 @@ function parseDateFactory(params: Params): StandardizingFn {
     if (!isCalendarDateValid(year, month, day)) return null;
 
     return outputFormat
-      .replace("YYYY", year)
-      .replace("MM", month)
-      .replace("DD", day);
+      .replaceAll("YYYY", year)
+      .replaceAll("MM", month)
+      .replaceAll("DD", day);
   };
 }
 
 function substringFactory(params: Params): StandardizingFn {
-  const start = params.start as number | undefined;
-  const len = params.length as number | undefined;
-  if (start === undefined || len === undefined || start === 0)
+  // Guard both bounds by type, not just presence: the wire params are
+  // z.unknown() and only count-bounded, so a partner can declare either as a
+  // non-integer (a string, float, or other JSON value). An unguarded non-number
+  // `length` turns `startIdx + len` into string concatenation, silently
+  // producing the wrong slice rather than the intended one. A start or length
+  // that is not an integer -- like the always-null `start === 0` no-op -- yields
+  // a fn that drops every value, the ignore path this factory already takes for a
+  // degenerate bound (never crashing the partner-reachable key build).
+  const start = params.start;
+  const len = params.length;
+  if (
+    typeof start !== "number" ||
+    !Number.isInteger(start) ||
+    typeof len !== "number" ||
+    !Number.isInteger(len) ||
+    start === 0
+  )
     return (_s) => null;
   if (start > 0) {
     // SQL SUBSTR convention: 1-indexed positive start — startIdx is fixed.
@@ -836,13 +850,13 @@ export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Record<
     label: "Substring",
     blurb: "Keep a fixed slice of the value by start position and length.",
     tier: "standard",
-    // The factory does no numeric validation -- it relies on String.slice, which
-    // tolerates fractional and negative bounds -- so the schema is deliberately
-    // stricter than the factory here, rejecting footgun shapes (a fractional
-    // position, a non-positive length, a 0 start) that slice would silently
-    // mangle. 0 is rejected because the factory treats it as a no-op returning an
-    // always-null fn; positions are 1-indexed, with a negative start counting
-    // from the end.
+    // The factory drops a non-integer or 0 bound to an always-null fn, but leaves
+    // a negative length (which slices to empty) alone -- so the schema is
+    // deliberately stricter here, rejecting footgun shapes (a fractional position,
+    // a non-positive length, a 0 start) at parse time with a message rather than
+    // silently dropping every row. 0 is rejected because the factory treats it as
+    // an always-null no-op; positions are 1-indexed, with a negative start
+    // counting from the end.
     params: z.object({
       start: z
         .number()

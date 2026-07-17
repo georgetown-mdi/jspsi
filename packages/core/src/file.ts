@@ -533,10 +533,10 @@ export function loadCSVColumnSample(
         }
         // `target` is non-undefined past this point, but it is an outer-scope
         // `let` read inside this callback, which TypeScript will not narrow on its
-        // own; this guard does the narrowing for the indexing below.
+        // own; this guard does the narrowing for the row read below.
         if (target === undefined) return;
         for (const row of results.data as Array<Record<string, unknown>>) {
-          const value = row[target];
+          const value = readRowColumn(row as CSVRow, target);
           if (typeof value === "string" && value.trim() !== "") {
             sample.push(value);
             // Enough to reproduce a full scan; stop reading the rest of the file.

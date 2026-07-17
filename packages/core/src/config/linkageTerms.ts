@@ -650,6 +650,26 @@ const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
       message: `transform regex pattern must not exceed ${MAX_TRANSFORM_PATTERN_LENGTH} characters`,
       path: ["params"],
     },
+  )
+  // `substring` slices by numeric `start` / `length`. A non-integer bound never
+  // slices as intended -- substringFactory drops it to an all-null fn, so the
+  // step silently excludes every row rather than erroring. Reject a present
+  // non-integer bound at parse instead, mirroring the descriptor schema's own
+  // `int` requirement. An absent bound is left alone: the factory ignores it the
+  // same way, so it is a no-op step, not a malformed one.
+  .refine(
+    (step) => {
+      if (step.function !== "substring") return true;
+      const { start, length } = step.params ?? {};
+      return (
+        (start === undefined || Number.isInteger(start)) &&
+        (length === undefined || Number.isInteger(length))
+      );
+    },
+    {
+      message: "substring start and length must be integers",
+      path: ["params"],
+    },
   );
 
 /**

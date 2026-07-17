@@ -979,7 +979,7 @@ Parameter names below are written in snake_case in YAML (e.g. `input_format`, `i
 | `to_lower_case` | Convert to lowercase | — |
 | `remove_accents` | Remove accents and other diacritics, ASCII-ifying the text; re-normalizes to NFC after the diacritic strip | — |
 | `remove_affixes` | Remove name titles (Mr., Dr., ...) (and suffixes (Jr., III, ...) | — |
-| `substring` | Extract a substring | `start` (1-indexed, required; negative counts from end), `length` (required) |
+| `substring` | Extract a substring | `start` (integer, 1-indexed, required; negative counts from end), `length` (positive integer, required) |
 | `parse_date` | Reformat a date string | `input_format` (default `MM/DD/YYYY`), `output_format` (default `YYYYMMDD`), each at most 256 characters; tokens: `YYYY`, `YY`, `MM`, `DD` |
 | `pad_left` | Left-pad the value with a fill character up to a target length; pass-through if already at or above the length | `length` (positive integer, required, at most 256), `char` (single character, default `"0"`) |
 | `phonetic` | Apply a phonetic encoding | `algorithm`: `soundex` (default); result is a 4-character string |

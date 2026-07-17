@@ -764,6 +764,59 @@ test("a non-string parse_date format still validates, so the runtime factory han
   ).toBe(true);
 });
 
+// --- substring integer bounds (partner-controlled non-integer footgun) --------
+// substring slices by numeric `start` / `length`; a non-integer bound never
+// slices as intended (the factory drops it to an all-null fn, silently excluding
+// every row). The refine rejects a present non-integer bound at validation.
+
+const substringTerms = (params: Record<string, unknown>) => ({
+  ...base,
+  linkageKeys: [
+    {
+      name: "SSN",
+      elements: [
+        { field: "ssn", transform: [{ function: "substring", params }] },
+      ],
+    },
+  ],
+});
+
+test("a non-integer substring start or length is rejected at validation", () => {
+  for (const params of [
+    { start: 1, length: "5" },
+    { start: "1", length: 5 },
+    { start: 1, length: 5.5 },
+    { start: 1.5, length: 5 },
+    { start: 1, length: true },
+  ]) {
+    const result = safeParseLinkageTerms(substringTerms(params));
+    expect(result.success, JSON.stringify(params)).toBe(false);
+    if (result.success) continue;
+    expect(
+      result.error.issues.some((i) =>
+        /substring start and length must be integers/.test(i.message),
+      ),
+    ).toBe(true);
+  }
+});
+
+test("integer substring bounds parse and are preserved", () => {
+  const result = safeParseLinkageTerms(substringTerms({ start: 3, length: 5 }));
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  expect(result.data.linkageKeys[0].elements[0].transform?.[0].params).toEqual({
+    start: 3,
+    length: 5,
+  });
+});
+
+test("absent substring bounds validate; the factory ignores the no-op step", () => {
+  expect(safeParseLinkageTerms(substringTerms({})).success).toBe(true);
+  expect(safeParseLinkageTerms(substringTerms({ start: 3 })).success).toBe(
+    true,
+  );
+});
+
 // --- transform regex pattern-length bound (source sanity pre-filter) --
 // The four tier:"regex" functions compile their raw pattern / delimiter under the
 // linear-time engine (compiled once per transform array, memoized).

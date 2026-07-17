@@ -195,6 +195,41 @@ describe("runPipeline — string functions", () => {
     expect(runPipeline("SMITH", [{ function: "substring" }])).toBeNull();
   });
 
+  test("substring with a valid integer slice still works", () => {
+    expect(
+      runPipeline("ABCDEFGHIJ", [
+        { function: "substring", params: { start: 3, length: 5 } },
+      ]),
+    ).toBe("CDEFG");
+  });
+
+  test("substring drops a non-integer length without string-concatenating", () => {
+    // The wire params are z.unknown(), so a partner can declare `length` as a
+    // non-number. An unguarded `startIdx + length` would then concatenate strings
+    // -- {start: 3, length: "5"} on "ABCDEFGHIJ" once sliced to "CDEFGHIJ" (from
+    // index 2 to "2" + "5" = "25") rather than the intended "CDEFG". The guard
+    // drops any non-integer bound to null instead.
+    for (const length of ["5", 5.5, true, ["5"]]) {
+      expect(
+        runPipeline("ABCDEFGHIJ", [
+          { function: "substring", params: { start: 3, length } },
+        ]),
+        JSON.stringify({ length }),
+      ).toBeNull();
+    }
+  });
+
+  test("substring drops a non-integer start without string-concatenating", () => {
+    for (const start of ["3", 3.5, true, ["3"]]) {
+      expect(
+        runPipeline("ABCDEFGHIJ", [
+          { function: "substring", params: { start, length: 5 } },
+        ]),
+        JSON.stringify({ start }),
+      ).toBeNull();
+    }
+  });
+
   test("pad_left pads a short string with zeros", () => {
     expect(
       runPipeline("123", [{ function: "pad_left", params: { length: 9 } }]),
@@ -524,6 +559,19 @@ describe("runPipeline — parse_date", () => {
       expect(parseWithOutput("06/15/1990", "YY")).toBe("YY");
       expect(parseWithOutput("01/02/2003", "YY")).toBe("YY");
     });
+  });
+
+  test("a repeated output token is substituted at every occurrence", () => {
+    const parseWithOutput = (value: string, outputFormat: string) =>
+      runPipeline(value, [
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat },
+        },
+      ]);
+    expect(parseWithOutput("06/15/1990", "MM/DD/MM")).toBe("06/15/06");
+    expect(parseWithOutput("06/15/1990", "YYYY-YYYY")).toBe("1990-1990");
+    expect(parseWithOutput("06/15/1990", "DD.DD.DD")).toBe("15.15.15");
   });
 });
 
