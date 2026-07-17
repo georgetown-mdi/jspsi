@@ -447,7 +447,7 @@ describe("acceptor bench: review terms", () => {
       .toBeInTheDocument();
     const ledger = document.querySelector('aside[aria-label="This exchange"]');
     expect(ledger?.textContent).toContain(
-      "These terms are your partner's proposal, read-only.",
+      "Data is encrypted locally before leaving your machine.",
     );
 
     // The top bar walks the acceptor spine with Review terms current; the
@@ -877,7 +877,7 @@ describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () =>
         "matches, never these settings.",
     );
     expect(ledger?.textContent).not.toContain(
-      "These terms are your partner's proposal, read-only.",
+      "Data is encrypted locally before leaving your machine.",
     );
   });
 

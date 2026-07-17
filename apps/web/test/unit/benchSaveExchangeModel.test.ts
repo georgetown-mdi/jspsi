@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   EMPTY_SAVE_FIELDS,
+  PRE_RUN_TRUST_FOOTER,
   credentialAlertCopy,
   endpointRequestFor,
   exchangeFileInputFor,
@@ -11,6 +12,7 @@ import {
   saveCapabilityCopy,
   saveExchangeError,
   saveLeadCopy,
+  saveTrustFooter,
 } from "@bench/saveExchangeModel";
 
 import type { LinkageTerms, Metadata } from "@psilink/core";
@@ -133,30 +135,27 @@ describe("copy is transport-specific", () => {
 });
 
 describe("live-run ledger footer by driver", () => {
-  test("a browser-local run keeps the local-encryption assurance verbatim", () => {
-    expect(liveRunLedgerFooter(false, false)).toBe(
+  test("every pre-run surface states the shared assurance verbatim", () => {
+    expect(PRE_RUN_TRUST_FOOTER).toBe(
       "Data is encrypted locally before leaving your machine. Your partner " +
         "receives only the fields listed under 'you will send' (step 2 " +
         "above) and only for clients who are in common.",
     );
+    // Browser run, server-driven run, and the SFTP/shared-directory save
+    // surface all state the same assurance -- it holds for every way an
+    // exchange runs, so the surfaces cannot drift.
+    expect(liveRunLedgerFooter(false, false)).toBe(PRE_RUN_TRUST_FOOTER);
+    expect(liveRunLedgerFooter(true, false)).toBe(PRE_RUN_TRUST_FOOTER);
+    expect(saveTrustFooter()).toBe(PRE_RUN_TRUST_FOOTER);
+  });
+
+  test("the settled copy differs only in the literal this-browser claim", () => {
     expect(liveRunLedgerFooter(false, true)).toBe(
       "Your file never left this browser. The results above are all your " +
         "partner received about your data.",
     );
-  });
-
-  test("a server-job run drops the local-machine claim (the file is sent to the appliance)", () => {
-    for (const hasResult of [false, true]) {
-      const footer = liveRunLedgerFooter(true, hasResult);
-      expect(footer).not.toContain("uploaded");
-      expect(footer).not.toContain("never left this browser");
-      expect(footer).not.toContain("encrypted locally");
-    }
-    expect(liveRunLedgerFooter(true, false)).toContain(
-      "Your partner receives only the fields listed under 'you will send'",
-    );
-    expect(liveRunLedgerFooter(true, true)).toContain(
-      "all your partner received about your data",
+    expect(liveRunLedgerFooter(true, true)).toBe(
+      "The results above are all your partner received about your data.",
     );
   });
 });

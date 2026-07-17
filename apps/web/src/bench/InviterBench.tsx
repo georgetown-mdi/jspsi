@@ -833,7 +833,7 @@ export function InviterBench() {
           }))}
           footer={
             section === "save" && isCliTransport(transport)
-              ? saveTrustFooter(transport)
+              ? saveTrustFooter()
               : liveRunLedgerFooter(
                   selection.kind === "server-job",
                   outputs !== undefined,

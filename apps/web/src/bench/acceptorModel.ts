@@ -163,10 +163,13 @@ function acceptorSendRow(
   };
 }
 
-/** The trust line under the acceptor's ledger, stated exactly as the mockup. */
+/** The trust line under the acceptor's ledger: the same pre-run assurance the
+ * inviter's surfaces state, with the step pointer at the acceptor's own
+ * confirm-columns step (step 3), where its send set is decided. */
 export const ACCEPTOR_LEDGER_FOOTER =
-  "These terms are your partner's proposal, read-only. Accepting never sends " +
-  "more than this ledger names.";
+  "Data is encrypted locally before leaving your machine. Your partner " +
+  "receives only the fields listed under 'you will send' (step 3 above) " +
+  "and only for clients who are in common.";
 
 /** The step-3 ledger footer, swapped in on the columns step: local-only column
  * typing and cleaning, stated exactly as the mockup. */
