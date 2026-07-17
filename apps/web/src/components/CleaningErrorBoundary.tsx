@@ -1,15 +1,17 @@
-import { Component } from "react";
+import { Component, createRef } from "react";
 
 import { Alert, Button, Stack, Text } from "@mantine/core";
 import { IconAlertTriangle } from "@tabler/icons-react";
 
 import { whenDiagnostic } from "@utils/diagnostics";
 
-import type { ErrorInfo, ReactNode } from "react";
+import type { ErrorInfo, ReactNode, RefObject } from "react";
+
+type FallbackRef = RefObject<HTMLDivElement | null>;
 
 type BoundaryProps = {
   children: ReactNode;
-  fallback: (reset: () => void) => ReactNode;
+  fallback: (reset: () => void, ref: FallbackRef) => ReactNode;
   onCatch: (error: unknown) => void;
   resetKey: string;
 };
@@ -21,9 +23,21 @@ type BoundaryProps = {
  * renders the fallback on a caught render error and re-renders the children once the
  * {@link resetKey} changes (an edit / remap / reset to the prepared data) or the
  * fallback's reset fires.
+ *
+ * A caught error unmounts the subtree that held keyboard focus, so the boundary
+ * steers focus across each swap: to the fallback region when it appears, and to the
+ * recovered children when it clears, so focus is never left on a removed node.
  */
 class Boundary extends Component<BoundaryProps, { errored: boolean }> {
   state = { errored: false };
+  private readonly fallbackRef: FallbackRef = createRef();
+  private readonly childrenRef = createRef<HTMLDivElement>();
+  // Whether the current fallback appearance has already claimed focus. A caught
+  // error derives `errored` within the failing render itself, so there is no
+  // separate errored=false -> true commit to detect; this instead marks a fresh
+  // fallback so its focus fires once, and clears on recovery for the next catch.
+  private fallbackFocused = false;
+  private focusTimer: ReturnType<typeof setTimeout> | undefined;
 
   static getDerivedStateFromError(): { errored: boolean } {
     return { errored: true };
@@ -33,10 +47,30 @@ class Boundary extends Component<BoundaryProps, { errored: boolean }> {
     this.props.onCatch(error);
   }
 
+  componentDidMount(): void {
+    this.steerFocus();
+  }
+
   componentDidUpdate(prev: BoundaryProps): void {
     // The prepared data changed (a remap / edit / reset), so retry the children.
     if (this.state.errored && prev.resetKey !== this.props.resetKey)
       this.reset();
+    this.steerFocus();
+  }
+
+  componentWillUnmount(): void {
+    clearTimeout(this.focusTimer);
+  }
+
+  // Focus is deferred a task past the commit rather than set here directly:
+  // unmounting the focused child blurs focus to <body> as the DOM mutates, and that
+  // blur lands after this lifecycle, so a synchronous focus is immediately undone.
+  private steerFocus(): void {
+    if (this.state.errored === this.fallbackFocused) return;
+    this.fallbackFocused = this.state.errored;
+    const target = this.state.errored ? this.fallbackRef : this.childrenRef;
+    clearTimeout(this.focusTimer);
+    this.focusTimer = setTimeout(() => target.current?.focus());
   }
 
   reset = (): void => {
@@ -44,9 +78,13 @@ class Boundary extends Component<BoundaryProps, { errored: boolean }> {
   };
 
   render(): ReactNode {
-    return this.state.errored
-      ? this.props.fallback(this.reset)
-      : this.props.children;
+    return this.state.errored ? (
+      this.props.fallback(this.reset, this.fallbackRef)
+    ) : (
+      <div ref={this.childrenRef} tabIndex={-1}>
+        {this.props.children}
+      </div>
+    );
   }
 }
 
@@ -90,8 +128,10 @@ export function CleaningErrorBoundary({
           console.error("Cleaning section boundary caught:", error),
         )
       }
-      fallback={(reset) => (
+      fallback={(reset, ref) => (
         <Alert
+          ref={ref}
+          tabIndex={-1}
           color="red"
           variant="light"
           icon={<IconAlertTriangle aria-hidden />}
