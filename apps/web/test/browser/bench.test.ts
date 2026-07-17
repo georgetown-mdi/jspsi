@@ -443,7 +443,7 @@ describe("inviter bench", () => {
       "Expires",
       "Results go to",
       "Agreement",
-      "Transport",
+      "How it runs",
     ]);
 
     // Every undecided ledger value is the muted em-dash mark.
@@ -1955,7 +1955,7 @@ describe("inviter bench", () => {
   test("choosing SFTP routes Create to the save surface without listening", async () => {
     await reachReviewCreate();
 
-    // Choosing the SFTP transport reflects in the ledger's Transport row and
+    // Choosing the SFTP transport reflects in the ledger's How it runs row and
     // the answers table before Create.
     await page
       .getByLabelText("Over SFTP, run by the psilink command-line tool")

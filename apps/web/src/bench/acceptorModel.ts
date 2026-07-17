@@ -234,7 +234,7 @@ export function acceptorLedgerRows(
     summary.legalAgreement !== undefined
       ? { label: "Agreement", value: summary.legalAgreement.reference }
       : { label: "Agreement", muted: "None" },
-    { label: "Transport", value: "Browser" },
+    { label: "How it runs", value: "Browser" },
   ];
 }
 
@@ -311,7 +311,7 @@ export function acceptorDoneLedgerRows(
     summary.legalAgreement !== undefined
       ? { label: "Agreement", value: summary.legalAgreement.reference }
       : { label: "Agreement", muted: "None" },
-    { label: "Transport", value: "Browser" },
+    { label: "How it runs", value: "Browser" },
   ];
 }
 

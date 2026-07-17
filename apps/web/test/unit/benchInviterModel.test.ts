@@ -95,7 +95,7 @@ describe("spine derivation from the read file", () => {
       "You and your partner",
     );
     expect(ledgerValue(editor, "Agreement").muted).toBe("None");
-    expect(ledgerValue(editor, "Transport").value).toBe("Browser");
+    expect(ledgerValue(editor, "How it runs").value).toBe("Browser");
   });
 
   test("an unmatchable file derives zero keys", () => {
@@ -298,7 +298,7 @@ describe("review and create", () => {
     expect(byLabel.get("Invitation lifetime")?.value).toBe("1 day");
     expect(byLabel.get("Invitation lifetime")?.setAbove).toBe(true);
     expect(byLabel.get("Results go to")?.value).toBe("You and your partner");
-    expect(byLabel.get("Transport")?.value).toBe("Live, in this browser");
+    expect(byLabel.get("How it runs")?.value).toBe("Live, in this browser");
   });
 
   test("a minted expiry replaces the relative lifetime in the ledger", () => {
@@ -500,8 +500,8 @@ describe("transport choice", () => {
   function transportRow<T extends { label: string }>(
     rows: ReadonlyArray<T>,
   ): T {
-    const row = rows.find((entry) => entry.label === "Transport");
-    if (row === undefined) throw new Error("no Transport row");
+    const row = rows.find((entry) => entry.label === "How it runs");
+    if (row === undefined) throw new Error("no How it runs row");
     return row;
   }
 

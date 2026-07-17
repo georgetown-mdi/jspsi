@@ -200,7 +200,7 @@ describe("acceptor ledger rows", () => {
     );
     expect(rowValue(rows, "Results go to")).toBe("You and your partner");
     expect(rowValue(rows, "Agreement")).toBe("MOU-2025-0042");
-    expect(rowValue(rows, "Transport")).toBe("Browser");
+    expect(rowValue(rows, "How it runs")).toBe("Browser");
   });
 
   test("from the columns step on, the send row names the disclosed metadata columns, sanitized", () => {
@@ -275,7 +275,7 @@ describe("acceptor completion ledger", () => {
       "Matched on",
       "Results went to",
       "Agreement",
-      "Transport",
+      "How it runs",
     ]);
     // The "You sent" row names the LAUNCHED metadata's disclosed set -- the frozen
     // pair that actually ran -- sanitized, not the invitation's request.
@@ -289,7 +289,7 @@ describe("acceptor completion ledger", () => {
     );
     expect(rowValue(rows, "Results went to")).toBe("You and your partner");
     expect(rowValue(rows, "Agreement")).toBe("MOU-2025-0042");
-    expect(rowValue(rows, "Transport")).toBe("Browser");
+    expect(rowValue(rows, "How it runs")).toBe("Browser");
     // The consumed invitation drops the forward-looking expiry row.
     expect(rows.some((row) => row.label === "Expires")).toBe(false);
   });
