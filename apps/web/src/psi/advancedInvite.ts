@@ -844,7 +844,7 @@ export function validateAdvancedInvite(
     draft.lifetimeSeconds > MAX_INVITATION_LIFETIME_SECONDS
   ) {
     errors.lifetime =
-      "Choose an invitation lifetime between 1 second and one year.";
+      "Choose an invitation duration between 1 second and one year.";
   }
 
   // A key is supplyable when the inviter's columns can declare every field it
@@ -1049,7 +1049,7 @@ function messageForField(field: AdvancedField): string {
     case "legalExpiration":
       return "Enter a valid date (YYYY-MM-DD).";
     case "lifetime":
-      return "Choose an invitation lifetime between 1 second and one year.";
+      return "Choose an invitation duration between 1 second and one year.";
     case "payload":
       // The common payload error (sending while only you receive) is set with its
       // own message in validateAdvancedInvite; this covers a schema failure on a

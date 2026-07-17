@@ -443,7 +443,7 @@ describe("inviter bench", () => {
       "Expires",
       "Results go to",
       "Agreement",
-      "Transport",
+      "How it runs",
     ]);
 
     // Every undecided ledger value is the muted em-dash mark.
@@ -477,7 +477,7 @@ describe("inviter bench", () => {
     // ledger fills in while still on step 1: derivation happens at read time.
     await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
     await expect
-      .element(page.getByText("Default terms are ready", { exact: false }))
+      .element(page.getByText("Using defaults", { exact: false }))
       .toBeInTheDocument();
 
     const ledger = () =>
@@ -520,7 +520,7 @@ describe("inviter bench", () => {
       )
       .toBeInTheDocument();
 
-    // Retyping the ignored column to the row identifier displaces the inferred
+    // Retyping the ignored column to the record identifier displaces the inferred
     // one; the displacement is announced.
     await page
       .getByLabelText("Type for program_code")
@@ -528,7 +528,7 @@ describe("inviter bench", () => {
     await expect
       .element(
         page.getByText(
-          "client_id changed to Ignored - only one column can be the row identifier.",
+          "client_id changed to Ignored - only one column can be the record identifier.",
         ),
       )
       .toBeInTheDocument();
@@ -558,7 +558,7 @@ describe("inviter bench", () => {
     // The inferred two-identifier conflict is a rail problem from the moment
     // the file is read, and its entry navigates into step 2 to fix it.
     await page
-      .getByRole("button", { name: "Choose a single row identifier" })
+      .getByRole("button", { name: "Choose a single record identifier" })
       .click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
@@ -567,7 +567,7 @@ describe("inviter bench", () => {
     // The conflict's audible half: announced even though the seed mounted
     // already in conflict.
     await expect
-      .element(page.getByText("Problem: choose a single row identifier."))
+      .element(page.getByText("Problem: choose a single record identifier."))
       .toBeInTheDocument();
 
     await page
@@ -1063,7 +1063,7 @@ describe("inviter bench", () => {
         .element(page.getByLabelText("Your name"))
         .toHaveValue("Sample County Health Dept");
       await expect
-        .element(page.getByText("Default terms are ready", { exact: false }))
+        .element(page.getByText("Using defaults", { exact: false }))
         .toBeInTheDocument();
       await expect
         .element(
@@ -1227,7 +1227,7 @@ describe("inviter bench", () => {
     // The ledger's Customize rows are plain buttons once the file is read;
     // the open tab's row carries aria-current="true" (spine steps use
     // "step"), and each row's accessible name carries its quiet fact.
-    await page.getByRole("button", { name: /Matching keys/ }).click();
+    await page.getByRole("button", { name: /Matching on/ }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Matching keys");
@@ -1235,7 +1235,7 @@ describe("inviter bench", () => {
       document.querySelector(
         `aside[aria-label="This exchange"] button[aria-current="true"]`,
       )?.textContent,
-    ).toContain("Matching keys");
+    ).toContain("Matching on");
 
     // Reordering the guided list reorders the ledger's matched-on keys.
     const orderBefore = ledgerRow("Matched on")?.querySelector("dd")
@@ -1955,7 +1955,7 @@ describe("inviter bench", () => {
   test("choosing SFTP routes Create to the save surface without listening", async () => {
     await reachReviewCreate();
 
-    // Choosing the SFTP transport reflects in the ledger's Transport row and
+    // Choosing the SFTP transport reflects in the ledger's How it runs row and
     // the answers table before Create.
     await page
       .getByLabelText("Over SFTP, run by the psilink command-line tool")
@@ -1991,7 +1991,7 @@ describe("inviter bench", () => {
       )
       .toBeInTheDocument();
     expect(ledger.textContent).toContain(
-      "The SFTP server carries only encrypted protocol messages",
+      "PII for linkage is encrypted locally before leaving your machine. Your partner receives only the fields listed under 'you will send' (step 2 above) and only for clients who are in common.",
     );
   });
 
@@ -2278,12 +2278,12 @@ describe("bench at a narrow viewport", () => {
     expect((cleaningRow.element() as HTMLElement).textContent).toMatch(
       /Cleaning.*field/,
     );
-    const keysRow = page.getByRole("button", { name: /Matching keys/ });
+    const keysRow = page.getByRole("button", { name: /Matching on/ });
     expect((keysRow.element() as HTMLElement).textContent).toMatch(
-      /Matching keys.*key/,
+      /Matching on.*key/,
     );
 
-    // Opening the disclosure reaches each tab: the Matching keys surface opens
+    // Opening the disclosure reaches each tab: the matching-keys editor opens
     // its work column.
     await keysRow.click();
     await expect

@@ -36,7 +36,7 @@ const ANNOUNCE_DEBOUNCE_MS = 600;
 /** The single-identifier conflict text, shared by the visible error and its
  * announcement so the two cannot drift. */
 const SINGLE_IDENTIFIER_MESSAGE =
-  "Only one column can be the row identifier. Choose a single identifier.";
+  "Only one column can be the record identifier. Choose a single identifier.";
 
 /**
  * The shared metadata grid: a real table mapping each input column to a semantic
@@ -109,8 +109,8 @@ export function MetadataGrid({
         ? ""
         : `${result.demotedIdentifiers.join(", ")} ${
             result.demotedIdentifiers.length === 1 ? "is" : "are"
-          } no longer the row identifier and will not be sent; only one ` +
-            "column can be the row identifier.",
+          } no longer the record identifier and will not be sent; only one ` +
+            "column can be the record identifier.",
     );
     onChange(result.metadata);
   };

@@ -280,7 +280,8 @@ export function AcceptorColumnsStep({
           caption="Your columns: type and use"
         />
         <p className={`${styles.small} ${styles.sub}`}>
-          Only one column can be the row identifier. Choose a single identifier.
+          Only one column can be the record identifier. Choose a single
+          identifier.
         </p>
 
         {!standardizationValid && (

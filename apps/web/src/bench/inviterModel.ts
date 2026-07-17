@@ -90,12 +90,12 @@ export interface RailProblem {
  * runs the live WebRTC exchange in this tab; `sftp` and `filedrop` are the two
  * command-line transports whose Create routes to the save-exchange-file surface
  * instead of listening for a partner. The value is editor state so it survives
- * a trip into a Customize tab and reflects into the ledger's Transport row and
- * the review answers.
+ * a trip into a Customize tab and reflects into the ledger's How-it-runs row
+ * and the review answers.
  */
 export type Transport = "browser" | "sftp" | "filedrop";
 
-/** The ledger's Transport row phrasing for each {@link Transport}. */
+/** The ledger's How-it-runs row phrasing for each {@link Transport}. */
 export const TRANSPORT_LEDGER_LABELS: Record<Transport, string> = {
   browser: "Browser",
   sftp: "SFTP (command-line tool)",
@@ -143,7 +143,7 @@ export function transportChooserCopy(
     ? {
         sftpLabel: "Over SFTP, run here",
         sftpDescription:
-          "Runs the exchange here through an SFTP server provisioned on this appliance. Your partner accepts with the same invitation code.",
+          "Runs the exchange here through an SFTP server provisioned on this machine. Your partner accepts with the same invitation code.",
       }
     : {
         sftpLabel: "Over SFTP, run by the psilink command-line tool",
@@ -264,7 +264,7 @@ export function editorWithOutputDirection(
 
 /** Set the transport the exchange runs over ({@link Transport}), chosen at
  * Review & create. Editor state so it survives a Customize-tab trip and drives
- * both Create's branch and the ledger/answers Transport rows. */
+ * both Create's branch and the ledger/answers How-it-runs rows. */
 export function editorWithTransport(
   editor: InviterEditor,
   transport: Transport,
@@ -725,7 +725,7 @@ export function inviterLedgerRows(
       { label: "Expires", reference: "Step 3", shareBar: true },
       { label: "Results go to", reference: "Step 3" },
       { label: "Agreement" },
-      { label: "Transport", reference: "Step 3" },
+      { label: "How it runs", reference: "Step 3" },
     ];
   }
   const sent = disclosedColumnNames(editor.draft.metadata);
@@ -788,7 +788,7 @@ export function inviterLedgerRows(
       ? { label: "Agreement", value: editor.draft.legalAgreement.reference }
       : { label: "Agreement", muted: "None" },
     {
-      label: "Transport",
+      label: "How it runs",
       reference: "Step 3",
       value: TRANSPORT_LEDGER_LABELS[editor.transport ?? "browser"],
     },
@@ -899,7 +899,7 @@ export function inviterRailFacts(
       target: "cleaning",
     },
     {
-      label: "Matching keys",
+      label: "Matching on",
       fact: editor === undefined ? undefined : keysFact(editor.draft),
       target: "keys",
     },
@@ -1017,7 +1017,7 @@ export function spineProblems(
   const problems: Array<SpineProblem> = [];
   if (identifierProblem(editor.draft))
     problems.push({
-      message: "Choose a single row identifier",
+      message: "Choose a single record identifier",
       target: "columns",
     });
   const { errors } = reviewValidation(editor, now);
@@ -1070,7 +1070,7 @@ export function answersRows(
       changeTarget: "cleaning",
     },
     {
-      label: "Matching keys",
+      label: "Matching on",
       value: `${keysFact(editor.draft)}, tried in order`,
       changeTarget: "keys",
     },
@@ -1081,7 +1081,7 @@ export function answersRows(
       changeTarget: "agreement",
     },
     {
-      label: "Invitation lifetime",
+      label: "Invitation duration",
       value: lifetimeNoun(editor.draft.lifetimeSeconds),
       setAbove: true,
     },
@@ -1091,7 +1091,7 @@ export function answersRows(
       setAbove: true,
     },
     {
-      label: "Transport",
+      label: "How it runs",
       value: TRANSPORT_ANSWER_LABELS[editor.transport ?? "browser"],
       setAbove: true,
     },

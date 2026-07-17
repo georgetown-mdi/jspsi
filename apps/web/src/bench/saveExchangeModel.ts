@@ -74,34 +74,38 @@ export function credentialAlertCopy(transport: CliTransport): string {
         "names only the directory both parties can reach.";
 }
 
-/** The ledger trust-footer copy for a live run. A browser-local run asserts the
- * file never leaves the browser; a server-job run (the console appliance)
- * sends the file to the appliance to run the exchange, so it omits that claim
- * and keeps only the partner-disclosure statement, which holds either way -- an
- * unverified "never uploaded" claim would be false there. The browser-local
- * copy is unchanged from before the console appliance existed. */
+/** The shared pre-run trust footer: the linkage PII -- the PSI match keys --
+ * is encrypted locally before leaving the machine on every transport, while
+ * payload columns are only transport-encrypted; that assurance and the
+ * disclosure statement hold for every way an exchange runs (browser, SFTP,
+ * shared directory, or a server-driven run -- the machine running the
+ * exchange is the operator's local machine, even reached over a VPN), so
+ * every pre-run surface states it identically. */
+export const PRE_RUN_TRUST_FOOTER =
+  "PII for linkage is encrypted locally before leaving your machine. Your partner " +
+  "receives only the fields listed under 'you will send' (step 2 above) " +
+  "and only for clients who are in common.";
+
+/** The ledger trust-footer copy for a live run: the shared pre-run assurance
+ * until a result lands. The settled copy differs only in the literal
+ * "this browser" claim, which a server-driven run cannot make. */
 export function liveRunLedgerFooter(
   serverJob: boolean,
   hasResult: boolean,
 ): string {
-  if (serverJob)
-    return hasResult
+  if (hasResult)
+    return serverJob
       ? "The results above are all your partner received about your data."
-      : "Your partner receives only what this ledger names.";
-  return hasResult
-    ? "Your file never left this browser. The results above are all your " +
-        "partner received about your data."
-    : "Your file stays in this browser. Nothing is uploaded; your partner " +
-        "receives only what this ledger names.";
+      : "Your file never left this browser. The results above are all your " +
+          "partner received about your data.";
+  return PRE_RUN_TRUST_FOOTER;
 }
 
-/** The trust-footer copy for the ledger on the save surface. */
-export function saveTrustFooter(transport: CliTransport): string {
-  return transport === "sftp"
-    ? "Your file stays on your machines. The SFTP server carries only " +
-        "encrypted protocol messages - never your rows."
-    : "Your file stays on your machines. The shared directory carries only " +
-        "encrypted protocol messages - never your rows.";
+/** The trust-footer copy for the ledger on the save surface: the same
+ * pre-run assurance as a browser run -- the statement holds for the SFTP and
+ * shared-directory transports too. */
+export function saveTrustFooter(): string {
+  return PRE_RUN_TRUST_FOOTER;
 }
 
 /** The top bar's transport note on the save surface. */

@@ -1,5 +1,9 @@
 import { useState } from "react";
 
+import { IconInfoCircle } from "@tabler/icons-react";
+
+import { Tooltip } from "@mantine/core";
+
 import { DisclosureSection } from "../components/DisclosureSection";
 import styles from "./bench.module.css";
 import { useNarrowBench } from "./narrowViewport";
@@ -34,6 +38,68 @@ export interface LedgerRow {
   muted?: string;
   reference?: string;
   shareBar?: boolean;
+}
+
+/** Plain-language explanations for the ledger's row headings, surfaced by the
+ * info icon beside each heading (hover, focus, or tap). Keyed by row label so
+ * every producer -- the inviter's, the acceptor's, and their settled past-tense
+ * variants -- gets one shared explanation; a label with no entry renders
+ * without an icon. Perspective-neutral wording, since the same label can face
+ * either party. */
+const HEADING_INFO: Record<string, string | undefined> = {
+  "You will send":
+    "The columns from your file your partner will receive, and only for " +
+    "records you both hold. Nothing is sent for your other records.",
+  "You sent":
+    "The columns from your file your partner received, and only for " +
+    "records you both hold. Nothing was sent for your other records.",
+  "You will receive":
+    "What you get when the exchange finishes: which of your records your " +
+    "partner also holds, plus any columns your partner marked as sent.",
+  "You received":
+    "What arrived when the exchange finished: the records you both hold, " +
+    "plus any columns your partner marked as sent.",
+  "Matched on":
+    "The fields used to decide whether your record and your partner's " +
+    "record are the same, tried in order. Only cryptographic fingerprints " +
+    "of these fields are compared; the values themselves are not revealed.",
+  Expires:
+    "When the invitation stops working. If it expires before the exchange " +
+    "runs, a new invitation is needed.",
+  "Results go to":
+    "Who receives the list of matched records when the exchange finishes.",
+  "Results went to":
+    "Who received the list of matched records when the exchange finished.",
+  Agreement:
+    "The data sharing agreement referenced for this exchange, if any. Both " +
+    "parties see the reference before the exchange runs.",
+  "How it runs":
+    "How the exchange runs: live between your two browsers, or through " +
+    "files on an SFTP server or shared directory using the command-line " +
+    "tool.",
+};
+
+/** The info icon beside a ledger heading: a focusable control whose tooltip
+ * explains the heading in plain language. Hover, keyboard focus, and touch all
+ * open it; the accessible name says which heading it explains, and the open
+ * tooltip is associated as the control's description. */
+function HeadingInfo({ label, info }: { label: string; info: string }) {
+  return (
+    <Tooltip
+      label={info}
+      multiline
+      w={250}
+      events={{ hover: true, focus: true, touch: true }}
+    >
+      <button
+        type="button"
+        className={styles.ledgerInfo}
+        aria-label={`What "${label}" means`}
+      >
+        <IconInfoCircle size={13} aria-hidden="true" />
+      </button>
+    </Tooltip>
+  );
 }
 
 const FACT_TONE_CLASS = {
@@ -148,21 +214,29 @@ function LedgerStanding({
 function LedgerRows({ rows }: { rows: ReadonlyArray<LedgerRow> }) {
   return (
     <dl>
-      {rows.map((row) => (
-        <div key={row.label} className={styles.ledgerRow}>
-          <dt>
-            {row.label}
-            {row.reference !== undefined && (
-              <span className={styles.ledgerRef}>{row.reference}</span>
-            )}
-          </dt>
-          <dd>
-            {row.value ?? (
-              <span className={styles.dash}>{row.muted ?? "\u2014"}</span>
-            )}
-          </dd>
-        </div>
-      ))}
+      {rows.map((row) => {
+        const info = HEADING_INFO[row.label];
+        return (
+          <div key={row.label} className={styles.ledgerRow}>
+            <dt>
+              <span className={styles.ledgerTerm}>
+                {row.label}
+                {info !== undefined && (
+                  <HeadingInfo label={row.label} info={info} />
+                )}
+              </span>
+              {row.reference !== undefined && (
+                <span className={styles.ledgerRef}>{row.reference}</span>
+              )}
+            </dt>
+            <dd>
+              {row.value ?? (
+                <span className={styles.dash}>{row.muted ?? "\u2014"}</span>
+              )}
+            </dd>
+          </div>
+        );
+      })}
     </dl>
   );
 }
