@@ -6,6 +6,7 @@ import type { Argv, Arguments } from "yargs";
 import {
   describeDecodeError,
   deriveAcceptedLinkageTerms,
+  disclosedColumnNames,
   getLogger,
   parseExchangeSpec,
   sanitizeForDisplay,
@@ -175,13 +176,53 @@ export { decodeAndValidateInvitation } from "../invitationDecode";
 
 // --- Display -----------------------------------------------------------------
 
-/** @internal exported for testing */
+/**
+ * The forward-reference wording the outbound-send line carries when the acceptor's
+ * own disclosed set is not yet determined at prompt time -- no input file (offline
+ * accept without one) or an input whose columns cannot satisfy the invitation's
+ * linkage keys, both of which leave the resolved spec without metadata. It points
+ * ahead to the operator's input file rather than asserting a count it cannot yet know,
+ * mirroring the web acceptor's pre-file forward-reference.
+ */
+const OUTBOUND_SEND_FORWARD_REFERENCE = "determined from your input file";
+
+/**
+ * @internal exported for testing
+ *
+ * `ownOutboundSend` is the columns THIS party will disclose to the partner for
+ * matched records -- its own outbound disclosure, the hardest-to-undo fact it
+ * consents to here. It is `disclosedColumnNames` over the acceptor's own resolved
+ * metadata (exactly the set `preparePayload` transmits), so the prompt cannot
+ * overstate what leaves this machine; `undefined` when that set is not yet
+ * determined at prompt time (see {@link OUTBOUND_SEND_FORWARD_REFERENCE}), an empty
+ * array when the acceptor discloses nothing. The names are operator-file strings,
+ * escaped and shown one per line so a name containing the list separator cannot be
+ * misread as two columns.
+ */
 export function displayInvitation(
   token: InvitationToken,
+  ownOutboundSend: ReadonlyArray<string> | undefined,
   log: ReturnType<typeof getLogger>,
 ): void {
   const terms = token.linkageTerms;
   log.info("Invitation details:");
+  // Lead with the acceptor's OWN outbound disclosure -- the columns it will send to
+  // the partner for matched records, its hardest-to-undo consent -- before the
+  // inviter's proposed terms, matching the web acceptor flow. undefined is the
+  // not-yet-known case (no metadata resolved): forward-reference rather than assert
+  // a count. Otherwise render every disclosed column, one sanitized name per line
+  // (the names are operator-file strings, and sanitizeForDisplay does not escape a
+  // comma, so a joined list could misread a name containing one as two entries);
+  // an empty set is a truthful "(none)", not a presupposed non-empty disclosure.
+  if (ownOutboundSend === undefined)
+    log.info(`    columns you will send: ${OUTBOUND_SEND_FORWARD_REFERENCE}`);
+  else if (ownOutboundSend.length === 0)
+    log.info("    columns you will send: (none) -- only matched records");
+  else {
+    log.info("    columns you will send:");
+    for (const column of ownOutboundSend)
+      log.info(`      - ${sanitizeForDisplay(column)}`);
+  }
   // identity and linkage-key names are partner-controlled free text (the inviter
   // crafts the token); escape them before they reach the acceptor's terminal,
   // since this summary is shown before the operator confirms acceptance.
@@ -635,7 +676,18 @@ export async function handler(argv: Arguments): Promise<void> {
         log,
       });
 
-      displayInvitation(ready.token, log);
+      // The acceptor's own outbound-send set: the columns this party will disclose
+      // to the partner for matched records, derived from its own resolved metadata
+      // via the same isDisclosedToPartner predicate preparePayload transmits on, so
+      // the prompt cannot overstate what leaves this machine. undefined when the
+      // resolved spec carries no metadata (offline accept with no input file, or an
+      // input whose columns cannot satisfy the invitation's keys) -- the not-yet-
+      // known case the display forward-references.
+      const ownOutboundSend =
+        ready.dataSpec.metadata !== undefined
+          ? disclosedColumnNames(ready.dataSpec.metadata)
+          : undefined;
+      displayInvitation(ready.token, ownOutboundSend, log);
       // With --consent-to-terms, skip the prompt and proceed on the recorded
       // advance consent. Log the bypass so an unattended run's own log shows the
       // human checkpoint was deliberately satisfied ahead of time, not silently
