@@ -71,8 +71,8 @@ export function builder(cmd: Argv): Argv {
     .positional("result-file", {
       type: "string",
       describe:
-        "the result file this party retained; needed to open the received-" +
-        "payload and pairing commitments",
+        "the result file this party retained (a path, not - for stdin); " +
+        "needed to open the received-payload and pairing commitments",
     })
     .option("keys", {
       type: "string",
@@ -207,7 +207,9 @@ const COMMITMENT_WORD: Record<CommitmentStatus, string> = {
   verified: "opened and matches",
   mismatch: "DOES NOT MATCH",
   "not-supplied": "not opened (no data re-supplied)",
-  unopenable: "not opened (no salt in the keys file)",
+  unopenable:
+    "cannot be opened (no salt in the keys file; likely a wrong or drifted " +
+    "keys file, not a problem with the record)",
 };
 const TERMS_WORD: Record<TermsHashStatus, string> = {
   verified: "re-derives and matches",

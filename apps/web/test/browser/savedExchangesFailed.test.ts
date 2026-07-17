@@ -84,7 +84,9 @@ describe("store opens but the read fails", () => {
 
     // The lobby's one-off cards must not stand in for the loss.
     expect(
-      page.getByRole("heading", { name: "Set up an exchange" }).query(),
+      page
+        .getByRole("heading", { name: "Set up a recurring exchange" })
+        .query(),
     ).toBeNull();
   });
 

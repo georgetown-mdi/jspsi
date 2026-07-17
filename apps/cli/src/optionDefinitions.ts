@@ -198,8 +198,9 @@ export function addCommonBootstrapOptions(
       type: "string",
       describe:
         "how often to poll the shared directory for the partner's files on " +
-        "the sftp/filedrop channels (default: 5s). A conservative default " +
-        "keeps within SFTP servers' anti-flood limits; a sub-second value is " +
+        "the sftp/filedrop channels (default: 5s); overrides " +
+        "connection.options.poll_interval_ms. A conservative default keeps " +
+        "within SFTP servers' anti-flood limits; a sub-second value is " +
         "accepted for a demo against a controlled server but warns. " +
         FINE_DURATION_VALUE_HELP,
     })

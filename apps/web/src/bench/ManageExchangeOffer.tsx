@@ -124,15 +124,15 @@ export function ManageExchangeOffer({
 
   // The store cannot be opened at all in this browser, so no deposit can land: offer
   // the honest state instead of a form that only fails at the write. No alarm
-  // styling -- the one-time exchange the operator just completed is unaffected.
+  // styling -- the one-off exchange the operator just completed is unaffected.
   if (!storeAvailable)
     return (
       <div className={styles.callout}>
         <p className={styles.calloutLead}>Save as a recurring exchange</p>
         <p className={styles.small}>
           This browser cannot store recurring exchanges -- private browsing may
-          be blocking storage, or this browser does not support it. Your
-          one-time exchange is unaffected.
+          be blocking storage, or this browser does not support it. Your one-off
+          exchange is unaffected.
         </p>
       </div>
     );
@@ -157,7 +157,7 @@ export function ManageExchangeOffer({
       <p className={styles.small}>
         Store this exchange&apos;s terms and secret in this browser so you can
         run it again with the same partner, without re-inviting. Skip this to
-        keep the exchange one-time: nothing is stored.
+        keep the exchange one-off: nothing is stored.
       </p>
       <TextInput
         label="Label"
@@ -206,8 +206,8 @@ export function ManageExchangeOffer({
           title="Could not save this recurring exchange"
           mt="sm"
         >
-          The exchange was not stored. Your one-time exchange is unaffected -
-          try again.
+          The exchange was not stored. Your one-off exchange is unaffected - try
+          again.
         </Alert>
       )}
       <Button
