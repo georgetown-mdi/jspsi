@@ -1,26 +1,26 @@
 PSI-Link
 ========
 
-PSI-Link is an open-source tool that lets two organizations find the records they have in common -- and optionally exchange data about those shared records -- without either organization revealing anything about the records they do not share. It performs privacy-preserving record linkage (PPRL) using a cryptographic protocol called private set intersection (PSI).
+PSI-Link is an open-source tool that lets two organizations find the records (individuals) they have in common with the option of exchanging data about those shared records, without either organization revealing anything about the records they do not share. It performs privacy-preserving record linkage (PPRL) using a cryptographic protocol called private set intersection (PSI).
 
 ## Key features
 
 - **Match without disclosure.** Each party keeps its full dataset private; the protocol reveals only which records the two parties have in common.
-- **Optional data exchange for matched records.** Beyond identifying matches, parties can share selected columns (for example, program enrollment dates or contact information) for shared records only.
+- **Optional data exchange for matched records.** Beyond identifying matches, parties can share selected columns (for example, program enrollment dates or contact information).
 - **Configurable matching.** Records are matched on linkage keys built from identifier fields such as name, date of birth, or SSN, with built-in data cleaning and standardization so both parties' data is compared consistently.
 - **No third party holds your data.** The web app exchanges data directly between the two parties' browsers; the command line app uses an SFTP server or file drop that you control.
 - **A record of every exchange.** Each completed exchange produces a local record of what was shared, which you can retain for disclosure documentation.
 
 ## Example use cases
 
-- A county HMIS administrator and a Medicaid agency identify clients enrolled in both systems and exchange fields such as renewal dates or case manager contact information -- for shared clients only.
+- A county HMIS administrator and a Medicaid agency identify clients enrolled in both systems and exchange fields such as renewal dates or case manager contact information (for shared clients only).
 - Two service providers with a data sharing agreement determine which clients they serve in common without disclosing their full caseloads to each other.
 - An agency IT team runs a recurring, scheduled exchange with a partner as part of a monthly data pipeline, using the command line app.
 
 ## Two ways to use this tool
 
-1. **Web app** -- runs in your browser with a guided, step-by-step interface. Your data files are read and processed locally in the browser; nothing is uploaded. Best for first-time and occasional exchanges, or for evaluating the tool. See the [Web App Quickstart](#web-app-quickstart).
-2. **Docker container (command line app)** -- a containerized command line application that connects through an SFTP server or file drop. Best for recurring or automated exchanges, or for IT teams integrating linkage into existing data processes. See the [CLI App Quickstart](#cli-app-quickstart).
+1. **Web app**: runs in your browser with a guided, step-by-step interface. Your data files are read and processed locally in the browser; PII used for matching is encrypted by the browser before leaving your machine. Best for first-time and occasional exchanges, or for evaluating the tool. See the [Web App Quickstart](#web-app-quickstart).
+2. **Docker container (command line app)**: a containerized command line application that connects through an SFTP server or file drop. Best for recurring or automated exchanges, or for IT teams integrating linkage into existing data processes. See the [CLI App Quickstart](#cli-app-quickstart).
 
 Both applications implement the same protocol and can be mixed: a first exchange set up in the web app can be exported and automated later with the command line app.
 
@@ -28,7 +28,7 @@ A third option combines the two: the same Docker image can serve the web interfa
 
 ## Test data
 
-This repository includes two synthetic datasets you can use to try the tool without touching real records: [`test_data/fake_data_1.csv`](test_data/fake_data_1.csv) and [`test_data/fake_data_2.csv`](test_data/fake_data_2.csv). Each contains fabricated names, SSNs, and dates of birth, with partial overlap between the two files, so you can run a complete practice exchange -- one party uses each file.
+This repository includes two synthetic datasets you can use to try the tool without touching real records: [`test_data/fake_data_1.csv`](test_data/fake_data_1.csv) and [`test_data/fake_data_2.csv`](test_data/fake_data_2.csv). Each contains fabricated names, SSNs, and dates of birth, with partial overlap between the two files, so you can run a complete practice exchange. One party uses each file and one initiates and then provides the generated link to the other party (e.g., via Slack or email).
 
 # Web App Quickstart
 
@@ -98,7 +98,7 @@ docker run -d -p 3000:3000 vdorie/psi-link:latest serve
 ```
 3. Visit [http://localhost:3000](http://localhost:3000) (or the serving machine's address from another machine on your network).
 
-This starts the web interface and its peer-coordination server; browser-to-browser exchanges work immediately. To let the console also run SFTP and shared-directory exchanges itself - rather than saving an exchange file for the command line app - enable its job API by supplying a directory for working files and an access token:
+This starts the web interface and its peer-coordination server; browser-to-browser exchanges work immediately. To let the console also run SFTP and shared-directory exchanges itself (rather than saving an exchange file for the command line app) enable its job API by supplying a directory for working files and an access token:
 
 ```sh
 docker run -d -p 3000:3000 \
@@ -170,7 +170,7 @@ To execute commands, launch a terminal from within Docker Desktop by clicking on
 
 ## Paths and invocation
 
-Paths can be given to Docker using standard Windows-style back-slashes. One exception is at the very end of the string - a trailing back-slash can cause Docker to fail to understand the end of the string. It is safe to remove it as it will still be treated as a directory.
+Paths can be given to Docker using standard Windows-style back-slashes. One exception is at the very end of the string: a trailing back-slash can cause Docker to fail to understand the end of the string. It is safe to remove it as it will still be treated as a directory.
 
 Additionally, the line-continuation markers given in the examples (the `\` at the end of each line) above do not parse correctly. Put commands all on one line instead. For example:
 
