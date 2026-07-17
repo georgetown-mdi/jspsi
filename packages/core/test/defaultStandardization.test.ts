@@ -1,4 +1,4 @@
-import { expect, test, describe } from "vitest";
+import { expect, test, describe, vi } from "vitest";
 
 import { getDefaultStandardization } from "../src/defaults/standardization";
 import {
@@ -917,6 +917,58 @@ describe("getDefaultStandardization — dateInputFormat option", () => {
       dateInputFormat: "YYYYMMDD",
     });
     expect(runPipeline("19900115", t.steps!)).toBe("19900115");
+  });
+
+  test("a two-digit-year (MM/DD/YY) DOB column standardizes to non-empty keys", () => {
+    // The default/recommended path binds parse_date with the inferred MM/DD/YY
+    // format; the YY token parses, so a two-digit-year DOB column produces key
+    // values rather than emptying. The year resolves against the fixed 1969-2068
+    // window: 90 -> 1990, and 00 -> 2000.
+    const [t] = getDefaultStandardization(dobMeta, dobTerms, {
+      dateInputFormat: "MM/DD/YY",
+    });
+    expect(runPipeline("01/15/90", t.steps!)).toBe("19900115");
+    expect(runPipeline("12/31/00", t.steps!)).toBe("20001231");
+    expect(runPipeline("not-a-date", t.steps!)).toBeNull();
+  });
+
+  test("the inferred format for a 2-digit-year column feeds the default pipeline end to end", () => {
+    // Inference selects MM/DD/YY for two-digit data (see inferDateFormat tests),
+    // and the format it selects is one core tokenizes, so the bound pipeline
+    // matches what core parses rather than dropping every record.
+    const values = ["01/15/90", "12/31/00", "06/28/75"];
+    const dateInputFormat = inferDateFormat(values);
+    expect(dateInputFormat).toBe("MM/DD/YY");
+    const [t] = getDefaultStandardization(dobMeta, dobTerms, {
+      dateInputFormat,
+    });
+    for (const value of values)
+      expect(runPipeline(value, t.steps!), `input ${value}`).not.toBeNull();
+  });
+
+  test("two parties with different clocks produce identical keys for a 2-digit-year DOB", () => {
+    // The pivot is a fixed protocol constant, not a clock read: standardize the
+    // same two-digit-year DOB under two wildly different local clocks and require
+    // byte-identical output. A per-party clock read would split a boundary year
+    // across centuries and miss the match; the constant makes them agree by
+    // construction. Definitional here, but it stands as a regression guard against
+    // any clock read sneaking back into the default path.
+    const keyUnderClock = (isoNow: string) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(isoNow));
+      try {
+        const [t] = getDefaultStandardization(dobMeta, dobTerms, {
+          dateInputFormat: "MM/DD/YY",
+        });
+        return runPipeline("06/15/40", t.steps!);
+      } finally {
+        vi.useRealTimers();
+      }
+    };
+    const keyA = keyUnderClock("2099-01-01T00:00:00Z");
+    const keyB = keyUnderClock("2000-01-01T00:00:00Z");
+    expect(keyA).toBe("20400615");
+    expect(keyB).toBe(keyA);
   });
 
   test("non-date types are unaffected by dateInputFormat", () => {

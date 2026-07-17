@@ -980,11 +980,13 @@ Parameter names below are written in snake_case in YAML (e.g. `input_format`, `i
 | `remove_accents` | Remove accents and other diacritics, ASCII-ifying the text; re-normalizes to NFC after the diacritic strip | — |
 | `remove_affixes` | Remove name titles (Mr., Dr., ...) (and suffixes (Jr., III, ...) | — |
 | `substring` | Extract a substring | `start` (1-indexed, required; negative counts from end), `length` (required) |
-| `parse_date` | Reformat a date string | `input_format` (default `MM/DD/YYYY`), `output_format` (default `YYYYMMDD`), each at most 256 characters; tokens: `YYYY`, `MM`, `DD` |
+| `parse_date` | Reformat a date string | `input_format` (default `MM/DD/YYYY`), `output_format` (default `YYYYMMDD`), each at most 256 characters; tokens: `YYYY`, `YY`, `MM`, `DD` |
 | `pad_left` | Left-pad the value with a fill character up to a target length; pass-through if already at or above the length | `length` (positive integer, required, at most 256), `char` (single character, default `"0"`) |
 | `phonetic` | Apply a phonetic encoding | `algorithm`: `soundex` (default); result is a 4-character string |
 | `replace_regex` | Replace all regex matches | `pattern` (required), `replacement` (default `""`) |
 | `extract_regex` | Keep the first capture group, or the whole match if the pattern has none; produce `null` if there is no match or the result is empty | `pattern` (required) |
+
+The year may be written with the four-digit `YYYY` token or the two-digit `YY` token; in an `input_format` either supplies the year component. A `YY` value is resolved to a four-digit year against a fixed cutoff shared by both parties, so they always resolve it to the same year and derive the same key without anything to agree on. The cutoff is a fixed constant rather than "the most recent past year", so a two-digit year can resolve to a year not yet reached; this does not affect linkage because both parties resolve it identically. In an `output_format` a `YY` is emitted literally (only `YYYY`/`MM`/`DD` are substituted), so it collapses the year to a constant. The exact cutoff and its window are specified in [PROTOCOL.md](spec/PROTOCOL.md#transform-regular-expression-dialect).
 
 A `parse_date` step whose `input_format` cannot supply a complete date -- for example `MM/DD`, which carries no year -- drops every record rather than reformatting it, so a linkage key whose element transform relies on it can never match. This holds for any data, so it is reported before the exchange runs (the CLI pre-flight warns; the web acceptor's confirm-columns step flags the key) rather than surfacing only as an empty result afterward.
 

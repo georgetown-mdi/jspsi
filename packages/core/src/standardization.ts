@@ -176,8 +176,40 @@ function removeAffixes(s: string): string {
  * decides whether a `parse_date` drops a component and so broadens matching)
  * against this exact set: adding a token here breaks that consumer's build rather
  * than letting it silently miss the new component.
+ *
+ * `YYYY` and `YY` are both INPUT year tokens: a layout supplies the year component
+ * for parsing if it carries either. Because `YY` is a prefix of `YYYY`, a consumer
+ * detecting tokens must tokenize greedily (longest year token first), never by
+ * substring membership, or a four-digit-year layout would false-report a two-digit
+ * year. `YY` is a year ONLY when parsing an input value; in an OUTPUT format it is
+ * not a substitution target (the factory's output replace fills only `YYYY`, `MM`,
+ * `DD`), so it emits literally and collapses the year -- {@link dateFormatComponents}
+ * separates those two contexts.
  */
-export type DateFormatToken = "YYYY" | "MM" | "DD";
+export type DateFormatToken = "YYYY" | "YY" | "MM" | "DD";
+
+/**
+ * The year tokens {@link parseDateFormat} recognizes when parsing an INPUT format,
+ * longest first so a greedy tokenizer consumes `YYYY` ahead of its `YY` prefix.
+ * Both satisfy the factory's year-component requirement; a `YY` value resolves to a
+ * four-digit year through the fixed century pivot ({@link resolveTwoDigitYear}).
+ * Exported so a component-detection consumer can recover the same year vocabulary
+ * rather than re-listing it.
+ */
+export const YEAR_FORMAT_TOKENS: readonly DateFormatToken[] = ["YYYY", "YY"];
+
+/**
+ * The fixed protocol pivot for resolving a two-digit `YY` year to four digits: a
+ * two-digit `yy <= 68` resolves into the 2000s, otherwise into the 1900s, so the
+ * window is 1969-2068 (the POSIX two-digit-year convention). This is a normative
+ * protocol CONSTANT, not a clock read or a per-party value: both parties resolve
+ * every `YY` against this same number by construction, so a boundary year cannot
+ * split across centuries and silently miss the match. The trade is a fixed cutoff
+ * rather than a moving "not in the future" one -- a value can resolve to a year not
+ * yet reached -- which does not affect linkage because both sides resolve it
+ * identically. The exact window is specified in PROTOCOL.md.
+ */
+const TWO_DIGIT_YEAR_PIVOT = 68;
 
 interface ParsedDateFormat {
   /** Anchored regex source compiled to match an input date string. */
@@ -204,6 +236,21 @@ function isCalendarDateValid(
   );
 }
 
+/**
+ * Resolve a two-digit year to a four-digit year against the fixed
+ * {@link TWO_DIGIT_YEAR_PIVOT}: a value at or below the pivot maps to the 2000s,
+ * otherwise to the 1900s. With the pivot at 68 the window is 1969-2068, so `68`
+ * -> `2068`, `69` -> `1969`, `00` -> `2000`, and `99` -> `1999`. The pivot is a
+ * protocol constant, identical on both parties by construction, so a `YY` value
+ * never silently changes century between runs or across parties -- there is no
+ * clock read and no per-party reference anywhere in this path.
+ */
+function resolveTwoDigitYear(twoDigit: string): string {
+  const value = Number(twoDigit);
+  const resolved = value <= TWO_DIGIT_YEAR_PIVOT ? 2000 + value : 1900 + value;
+  return String(resolved);
+}
+
 // Build the anchored regex source and capture order for a parse_date input
 // format. The format is partner-controlled and its MM/DD tokens EXPAND into
 // adjacent `(\d{1,2})` groups, which catastrophically backtrack on the JavaScript
@@ -221,6 +268,11 @@ function parseDateFormat(inputFormat: string): ParsedDateFormat {
       order.push("YYYY");
       regexStr += "(\\d{4})";
       i += 4;
+    } else if (inputFormat.startsWith("YY", i)) {
+      // Matched after YYYY so the four-digit year wins their shared prefix.
+      order.push("YY");
+      regexStr += "(\\d{2})";
+      i += 2;
     } else if (inputFormat.startsWith("MM", i)) {
       order.push("MM");
       regexStr += "(\\d{1,2})";
@@ -239,8 +291,48 @@ function parseDateFormat(inputFormat: string): ParsedDateFormat {
   return { source: `^${regexStr}$`, order };
 }
 
+/**
+ * The date COMPONENTS a `parse_date` format layout carries, context-aware because
+ * `YY` means different things on the two sides of the transform:
+ *
+ * - `context: "input"` -- the calendar fields the INPUT format PARSES. Both year
+ *   tokens ({@link YEAR_FORMAT_TOKENS}) collapse to the single canonical `"YYYY"`
+ *   year component, so an input carrying `YY` reports the year exactly as one
+ *   carrying `YYYY` does: the factory resolves either to a four-digit year.
+ * - `context: "output"` -- the calendar fields the OUTPUT format EMITS. The factory
+ *   substitutes only `YYYY`/`MM`/`DD` into the output; a `YY` in the output format
+ *   is not a substitution target, so it is emitted as the literal characters "YY"
+ *   and carries NO year -- the year has collapsed to a constant. So a `YY`-only
+ *   input token maps to `YYYY` here, but a `YY` in the OUTPUT contributes no year
+ *   component (it is treated as a literal separator).
+ *
+ * `MM` and `DD` map to themselves in both contexts. Recovered from core's OWN
+ * greedy tokenizer ({@link parseDateFormat}), never a substring scan -- `YY` is a
+ * prefix of `YYYY`, so a `String.includes` check would double-count a four-digit
+ * year. Exported so a component-detection consumer (the web consent screen's
+ * date-collapse marker) shares this tokenization rather than re-deriving it and
+ * drifting from the factory. The canonical components are a subset of
+ * {@link DateFormatToken}, so the return type stays that set.
+ */
+export function dateFormatComponents(
+  format: string,
+  context: "input" | "output",
+): Set<DateFormatToken> {
+  const components = new Set<DateFormatToken>();
+  for (const token of parseDateFormat(format).order) {
+    if (token === "YY") {
+      // A YY input token parses a year; a YY output token is an unsubstituted
+      // literal that carries no year and so contributes no component.
+      if (context === "input") components.add("YYYY");
+    } else {
+      components.add(token);
+    }
+  }
+  return components;
+}
+
 // Parse `input_format` -> YAML camelizes keys but not values, so format
-// string tokens YYYY / MM / DD stay as written; delimiter characters are
+// string tokens YYYY / YY / MM / DD stay as written; delimiter characters are
 // literal. Params arrive as camelCase after camelizeKeys (e.g. inputFormat).
 function parseDateFactory(params: Params): StandardizingFn {
   // The wire params are z.unknown() and only count-bounded, so a partner can
@@ -276,25 +368,31 @@ function parseDateFactory(params: Params): StandardizingFn {
     const groups = re.matchGroups(s.normalize("NFC"));
     if (groups === null) return null;
 
-    const parts: Partial<Record<DateFormatToken, string>> = {};
+    let year: string | undefined;
+    let month: string | undefined;
+    let day: string | undefined;
     order.forEach((token, idx) => {
       // The source anchors every token group, so a successful whole-string match
       // populates each; guard the null only to satisfy the type and to leave the
-      // part unset (caught by the YYYY/MM/DD presence check below) if it ever did
-      // not participate.
+      // component unset (caught by the presence check below) if it ever did not
+      // participate.
       const value = groups[idx + 1];
       if (value === null) return;
-      parts[token] = token === "YYYY" ? value : value.padStart(2, "0");
+      if (token === "YYYY") year = value;
+      else if (token === "YY") year = resolveTwoDigitYear(value);
+      else if (token === "MM") month = value.padStart(2, "0");
+      else if (token === "DD") day = value.padStart(2, "0");
     });
 
-    if (!parts.YYYY || !parts.MM || !parts.DD) return null;
+    // Either year token satisfies the year component.
+    if (!year || !month || !day) return null;
 
-    if (!isCalendarDateValid(parts.YYYY, parts.MM, parts.DD)) return null;
+    if (!isCalendarDateValid(year, month, day)) return null;
 
     return outputFormat
-      .replace("YYYY", parts.YYYY)
-      .replace("MM", parts.MM)
-      .replace("DD", parts.DD);
+      .replace("YYYY", year)
+      .replace("MM", month)
+      .replace("DD", day);
   };
 }
 
@@ -759,7 +857,7 @@ export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Record<
     name: "parse_date",
     label: "Parse date",
     blurb:
-      "Reformat a date between token layouts (YYYY, MM, DD) so different formats can match.",
+      "Reformat a date between token layouts (YYYY, YY, MM, DD) so different formats can match.",
     tier: "standard",
     // Format strings are bounded to non-empty and to MAX_DATE_FORMAT_LENGTH (the
     // same bound the linkage-terms gate applies to wire formats), but NOT to their
@@ -1645,24 +1743,15 @@ export function unsatisfiedLinkageFields(
 }
 
 /**
- * The date components {@link parseDateFactory} requires to emit any value. The
- * factory populates a component only for a token its INPUT format declares, then
- * returns null unless all three are present (its unconditional
- * `!parts.YYYY || !parts.MM || !parts.DD` guard), so an input format omitting any
- * of these produces null for every value.
- */
-const PARSE_DATE_REQUIRED_COMPONENTS: readonly DateFormatToken[] = [
-  "YYYY",
-  "MM",
-  "DD",
-];
-
-/**
  * Whether a `parse_date` step's INPUT format omits a date component the factory
  * requires, making {@link parseDateFactory} return null for EVERY value -- the
  * record is dropped regardless of its data. The motivating example is
- * `input_format: "MM/DD"` (no year): with no `YYYY` token, `parts.YYYY` is never
- * set and the factory's all-three-components guard drops every value.
+ * `input_format: "MM/DD"` (no year): with no year token, the factory's `year`
+ * component is never set and its all-three-components guard drops every value.
+ *
+ * The year component is supplied by EITHER year token ({@link YEAR_FORMAT_TOKENS}:
+ * `YYYY` or `YY`), matching the factory, which populates `year` from whichever it
+ * tokenizes; month needs `MM`, day needs `DD`.
  *
  * This mirrors {@link parseDateFactory}'s coercion exactly so the verdict cannot
  * drift from the runtime. A nullish input format falls back to the factory's
@@ -1683,7 +1772,8 @@ export function parseDateInputDropsEveryRecord(
   if (raw === null || raw === undefined) return false;
   if (typeof raw !== "string") return true;
   const present = new Set(parseDateFormat(raw).order);
-  return PARSE_DATE_REQUIRED_COMPONENTS.some((token) => !present.has(token));
+  const hasYear = YEAR_FORMAT_TOKENS.some((token) => present.has(token));
+  return !hasYear || !present.has("MM") || !present.has("DD");
 }
 
 /**
