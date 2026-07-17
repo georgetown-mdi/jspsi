@@ -77,7 +77,9 @@ describe("store unavailable", () => {
 
     // The one-off flow itself, not the list's degrade message.
     await expect
-      .element(page.getByRole("heading", { name: "Set up an exchange" }))
+      .element(
+        page.getByRole("heading", { name: "Set up a recurring exchange" }),
+      )
       .toBeInTheDocument();
     await expect
       .element(

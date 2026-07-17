@@ -69,7 +69,7 @@ export function BenchLobby() {
         </VisuallyHidden>
         <div className={styles.lobbyActions}>
           <div className={styles.actionCard}>
-            <h3>Set up an exchange</h3>
+            <h3>Set up a recurring exchange</h3>
             <p className={`${styles.small} ${styles.sub}`}>
               Choose a file, confirm what you disclose, and share an invitation.
               Default terms come from your file; most exchanges need nothing
@@ -77,7 +77,7 @@ export function BenchLobby() {
             </p>
             <p>
               <Button component={Link} to="/exchange">
-                Set up an exchange
+                Set up a recurring exchange
               </Button>
             </p>
           </div>

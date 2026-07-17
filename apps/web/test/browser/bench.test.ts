@@ -324,7 +324,7 @@ describe("bench quick path", () => {
       (heading) => heading.textContent,
     );
     expect(cardHeadings).toEqual([
-      "Set up an exchange",
+      "Set up a recurring exchange",
       "Accept an invitation you were sent",
     ]);
 
@@ -339,7 +339,7 @@ describe("bench quick path", () => {
       .toBeInTheDocument();
 
     const setUpLink = Array.from(document.querySelectorAll("a")).find(
-      (anchor) => anchor.textContent === "Set up an exchange",
+      (anchor) => anchor.textContent === "Set up a recurring exchange",
     );
     expect(setUpLink?.getAttribute("href")).toBe("/exchange");
 

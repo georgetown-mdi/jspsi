@@ -134,7 +134,9 @@ describe("home route: conditional on a stored exchange existing", () => {
     // The first-run landing is the quick (invite/accept) path: its two primary
     // actions, not the list's designed empty state.
     await expect
-      .element(page.getByRole("heading", { name: "Set up an exchange" }))
+      .element(
+        page.getByRole("heading", { name: "Set up a recurring exchange" }),
+      )
       .toBeInTheDocument();
     await expect
       .element(
