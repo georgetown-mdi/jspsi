@@ -136,7 +136,8 @@ describe("live-run ledger footer by driver", () => {
   test("a browser-local run keeps the never-uploaded assurance verbatim", () => {
     expect(liveRunLedgerFooter(false, false)).toBe(
       "Your file stays in this browser. Nothing is uploaded; your partner " +
-        "receives only what this ledger names.",
+        "receives only the fields listed in YOU WILL SEND (above) and only " +
+        "for clients who are in common.",
     );
     expect(liveRunLedgerFooter(false, true)).toBe(
       "Your file never left this browser. The results above are all your " +
@@ -152,7 +153,7 @@ describe("live-run ledger footer by driver", () => {
       expect(footer).not.toContain("stays in this browser");
     }
     expect(liveRunLedgerFooter(true, false)).toContain(
-      "Your partner receives only what this ledger names",
+      "Your partner receives only the fields listed in YOU WILL SEND",
     );
     expect(liveRunLedgerFooter(true, true)).toContain(
       "all your partner received about your data",

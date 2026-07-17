@@ -89,12 +89,14 @@ export function liveRunLedgerFooter(
   if (serverJob)
     return hasResult
       ? "The results above are all your partner received about your data."
-      : "Your partner receives only what this ledger names.";
+      : "Your partner receives only the fields listed in YOU WILL SEND " +
+          "(above) and only for clients who are in common.";
   return hasResult
     ? "Your file never left this browser. The results above are all your " +
         "partner received about your data."
     : "Your file stays in this browser. Nothing is uploaded; your partner " +
-        "receives only what this ledger names.";
+        "receives only the fields listed in YOU WILL SEND (above) and only " +
+        "for clients who are in common.";
 }
 
 /** The trust-footer copy for the ledger on the save surface. */
