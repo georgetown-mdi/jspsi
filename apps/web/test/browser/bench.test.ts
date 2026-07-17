@@ -1227,7 +1227,7 @@ describe("inviter bench", () => {
     // The ledger's Customize rows are plain buttons once the file is read;
     // the open tab's row carries aria-current="true" (spine steps use
     // "step"), and each row's accessible name carries its quiet fact.
-    await page.getByRole("button", { name: /Matching keys/ }).click();
+    await page.getByRole("button", { name: /Matching on/ }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Matching keys");
@@ -1235,7 +1235,7 @@ describe("inviter bench", () => {
       document.querySelector(
         `aside[aria-label="This exchange"] button[aria-current="true"]`,
       )?.textContent,
-    ).toContain("Matching keys");
+    ).toContain("Matching on");
 
     // Reordering the guided list reorders the ledger's matched-on keys.
     const orderBefore = ledgerRow("Matched on")?.querySelector("dd")
@@ -2278,12 +2278,12 @@ describe("bench at a narrow viewport", () => {
     expect((cleaningRow.element() as HTMLElement).textContent).toMatch(
       /Cleaning.*field/,
     );
-    const keysRow = page.getByRole("button", { name: /Matching keys/ });
+    const keysRow = page.getByRole("button", { name: /Matching on/ });
     expect((keysRow.element() as HTMLElement).textContent).toMatch(
-      /Matching keys.*key/,
+      /Matching on.*key/,
     );
 
-    // Opening the disclosure reaches each tab: the Matching keys surface opens
+    // Opening the disclosure reaches each tab: the matching-keys editor opens
     // its work column.
     await keysRow.click();
     await expect

@@ -876,7 +876,7 @@ export function inviterRailFacts(
       target: "cleaning",
     },
     {
-      label: "Matching keys",
+      label: "Matching on",
       fact: editor === undefined ? undefined : keysFact(editor.draft),
       target: "keys",
     },
