@@ -76,13 +76,15 @@ export function credentialAlertCopy(transport: CliTransport): string {
         "names only the directory both parties can reach.";
 }
 
-/** The shared pre-run trust footer: the local-encryption and disclosure
- * statement holds for every way an exchange runs (browser, SFTP, shared
- * directory, or a server-driven run -- the machine running the exchange is
- * the operator's local machine, even reached over a VPN), so every pre-run
- * surface states it identically. */
+/** The shared pre-run trust footer: the linkage PII -- the PSI match keys --
+ * is encrypted locally before leaving the machine on every transport, while
+ * payload columns are only transport-encrypted; that assurance and the
+ * disclosure statement hold for every way an exchange runs (browser, SFTP,
+ * shared directory, or a server-driven run -- the machine running the
+ * exchange is the operator's local machine, even reached over a VPN), so
+ * every pre-run surface states it identically. */
 export const PRE_RUN_TRUST_FOOTER =
-  "Data is encrypted locally before leaving your machine. Your partner " +
+  "PII for linkage is encrypted locally before leaving your machine. Your partner " +
   "receives only the fields listed under 'you will send' (step 2 above) " +
   "and only for clients who are in common.";
 

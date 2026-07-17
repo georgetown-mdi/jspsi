@@ -137,7 +137,7 @@ describe("copy is transport-specific", () => {
 describe("live-run ledger footer by driver", () => {
   test("every pre-run surface states the shared assurance verbatim", () => {
     expect(PRE_RUN_TRUST_FOOTER).toBe(
-      "Data is encrypted locally before leaving your machine. Your partner " +
+      "PII for linkage is encrypted locally before leaving your machine. Your partner " +
         "receives only the fields listed under 'you will send' (step 2 " +
         "above) and only for clients who are in common.",
     );

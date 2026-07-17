@@ -167,7 +167,7 @@ function acceptorSendRow(
  * inviter's surfaces state, with the step pointer at the acceptor's own
  * confirm-columns step (step 3), where its send set is decided. */
 export const ACCEPTOR_LEDGER_FOOTER =
-  "Data is encrypted locally before leaving your machine. Your partner " +
+  "PII for linkage is encrypted locally before leaving your machine. Your partner " +
   "receives only the fields listed under 'you will send' (step 3 above) " +
   "and only for clients who are in common.";
 
