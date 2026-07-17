@@ -1,6 +1,8 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getLogger } from "@psilink/core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -8,6 +10,7 @@ import {
   detectFileConflicts,
   expandTilde,
   FileExistsError,
+  warnIfFileOverPermissive,
   writeFileAtomic,
   writeFileOwnerOnly,
 } from "../../src/fileUtils";
@@ -380,6 +383,112 @@ describe("createOwnerOnlyWriteStream", () => {
     expect(openSpy).toHaveBeenCalledTimes(1);
     expect(openedFd).toBeDefined();
     expect(closeSpy).toHaveBeenCalledWith(openedFd);
+  });
+});
+
+// --- Windows owner-only ACL --------------------------------------------------
+
+// The current user's domain-qualified name (DOMAIN\user), the principal the
+// writers grant Modify and the only non-inherited ACE a narrowed file may carry.
+function currentWindowsUser(): string {
+  return execFileSync("whoami", [], { encoding: "utf8" }).trim();
+}
+
+// One parsed line of `icacls <file>` output: the principal and the raw flag/
+// rights token after the `:(` separator (e.g. "(I)(M)" or "(R)"). The first
+// line of icacls output echoes the path before the first ACE; the trailing
+// "Successfully processed" summary line has no `:(` and is skipped.
+type Ace = { principal: string; rights: string };
+
+function readAcl(filePath: string): Ace[] {
+  const output = execFileSync("icacls", [filePath], { encoding: "utf8" });
+  const echoed = filePath.replace(/\//g, "\\");
+  const aces: Ace[] = [];
+  for (const rawLine of output.split(/\r?\n/)) {
+    let line = rawLine;
+    if (line.startsWith(echoed)) line = line.slice(echoed.length).trimStart();
+    const trimmed = line.trim();
+    const sep = trimmed.indexOf(":(");
+    if (sep === -1) continue;
+    aces.push({
+      principal: trimmed.slice(0, sep).trim(),
+      rights: trimmed.slice(sep + 1),
+    });
+  }
+  return aces;
+}
+
+// True when the file's ACL grants only the current user, with no inherited (I)
+// ACE and no other explicit principal -- the owner-only state the writers must
+// produce. Deny ACEs are restrictive and ignored.
+function isOwnerOnly(filePath: string, owner: string): boolean {
+  const aces = readAcl(filePath);
+  if (aces.length === 0) return false;
+  return aces.every((ace) => {
+    if (ace.rights.includes("(DENY)")) return true;
+    if (ace.rights.includes("(I)")) return false;
+    return ace.principal.toLowerCase() === owner.toLowerCase();
+  });
+}
+
+describe("Windows owner-only ACL", () => {
+  test("each owner-only writer grants Modify to the current user only", async () => {
+    if (process.platform !== "win32") return;
+    const owner = currentWindowsUser();
+
+    const secret = path.join(dir, "secret");
+    writeFileOwnerOnly(secret, "x");
+    expect(isOwnerOnly(secret, owner)).toBe(true);
+    expect(readAcl(secret).some((a) => a.rights.includes("(M)"))).toBe(true);
+
+    const atomic = path.join(dir, "atomic");
+    writeFileAtomic(atomic, "x", 0o600);
+    expect(isOwnerOnly(atomic, owner)).toBe(true);
+
+    const streamed = path.join(dir, "streamed.csv");
+    await writeAndClose(createOwnerOnlyWriteStream(streamed), "a,b\n1,2\n");
+    expect(isOwnerOnly(streamed, owner)).toBe(true);
+    expect(readAcl(streamed).some((a) => a.rights.includes("(M)"))).toBe(true);
+  });
+
+  test("createOwnerOnlyWriteStream overwrite drops a foreign explicit ACE", async () => {
+    if (process.platform !== "win32") return;
+    const owner = currentWindowsUser();
+    const p = path.join(dir, "result.csv");
+
+    // Seed a pre-existing file carrying a foreign principal's explicit
+    // (non-inherited) grant, the ACE an in-place narrow would miss.
+    fs.writeFileSync(p, "stale\n");
+    execFileSync("icacls", [p, "/grant", "Guests:(R)"], { stdio: "ignore" });
+    expect(
+      readAcl(p).some((a) => a.principal.toLowerCase().includes("guests")),
+    ).toBe(true);
+
+    await writeAndClose(createOwnerOnlyWriteStream(p), "fresh\n");
+
+    // The fresh-inode recreation must have dropped the Guests ACE.
+    expect(
+      readAcl(p).some((a) => a.principal.toLowerCase().includes("guests")),
+    ).toBe(false);
+    expect(isOwnerOnly(p, owner)).toBe(true);
+  });
+
+  test("the load-time check warns on a loosened ACL and stays quiet on an owner-only file", () => {
+    if (process.platform !== "win32") return;
+    const p = path.join(dir, "secret");
+    writeFileOwnerOnly(p, "x");
+
+    const log = getLogger("file-utils");
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+
+    // A correctly-narrowed file must not warn.
+    warnIfFileOverPermissive(p, "shared secret");
+    expect(warn).not.toHaveBeenCalled();
+
+    // Grant a foreign principal read, defeating owner-only; the next load warns.
+    execFileSync("icacls", [p, "/grant", "Guests:(R)"], { stdio: "ignore" });
+    warnIfFileOverPermissive(p, "shared secret");
+    expect(warn).toHaveBeenCalled();
   });
 });
 

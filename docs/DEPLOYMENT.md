@@ -216,6 +216,62 @@ stat -f "%Lp %N" .psilink.key  # macOS
 
 The output must show `600`. If it does not, the CLI will emit a warning on load; correct the permissions before proceeding.
 
+## Verifying Windows owner-only file protections
+
+On Windows the CLI protects its owner-only files with ACLs rather than POSIX mode bits, and no automated test leg runs on Windows. The checks below are a manual procedure to run on a Windows host to confirm the owner-only writers still narrow ACLs correctly after a change to their Windows branch. Run them in PowerShell from a scratch directory on an NTFS volume that carries the usual inheritable ACEs (a subdirectory of the user profile is fine); each check produces an artifact you then inspect. `$me` below is the domain-qualified account the CLI narrows the file to; derive it from `whoami`, the same call the CLI uses to name the grant principal, so the comparison matches the granted identity exactly (domain casing and NetBIOS form included).
+
+```powershell
+$me = (whoami)
+```
+
+Owner-only artifacts on Windows come from three writers: `writeFileOwnerOnly` (the key file, the config writer, exchange records, and the signing identity), `createOwnerOnlyWriteStream` (the result CSV), and `writeFileAtomic` for a file written with the owner-only mode. Produce one artifact from each by running the operations that use them: an exchange writes the result CSV and rotates the key file, `accept` writes the signing identity, and so on (see [CLI.md](CLI.md)). Each check assumes a file at `$f`.
+
+**A narrowed file grants Modify to the current user only, with no inherited or foreign non-owner ACE.** After a writer creates `$f`, its DACL must grant `Modify` to the current user and to no one else, and must not be inheriting from the parent directory:
+
+```powershell
+icacls $f
+# Expect one line granting the current user (M); no BUILTIN\Users, no (I)
+# inherited entries, no other principal.
+(Get-Acl $f).AreAccessRulesProtected   # must be True (inheritance stripped)
+(Get-Acl $f).Access | ForEach-Object {
+  "{0}  {1}  Inherited={2}" -f $_.IdentityReference, $_.FileSystemRights, $_.IsInherited
+}
+# Every rule must be IdentityReference = $me, FileSystemRights = Modify,
+# Inherited = False. Any other principal, or any Inherited = True rule, fails.
+```
+
+This is what `writeFileOwnerOnly`, `writeFileAtomic` (owner-only mode), and `createOwnerOnlyWriteStream` all produce: they run `icacls <file> /inheritance:r /grant:r "$me:(M)"`, which strips inheritance and replaces the DACL with the single owner Modify grant.
+
+**`createOwnerOnlyWriteStream`'s overwrite path drops a pre-existing foreign explicit ACE.** The stream writer unlinks and recreates the destination as a fresh inode before narrowing, so a foreign principal's explicit (non-inherited) grant left on a prior file at that path does not survive the overwrite. Seed such a grant on a stand-in file, overwrite it by writing a result CSV to the same path, and confirm the foreign grant is gone:
+
+```powershell
+# Seed a pre-existing file with an explicit grant for another principal
+# (Guests is present on a default install; substitute any non-owner account).
+"stale" | Out-File -Encoding utf8 $f
+icacls $f /grant "Guests:(R)"
+icacls $f    # confirm the Guests ACE is present before the overwrite
+
+# Now run an exchange whose result CSV output path is $f, then re-inspect:
+icacls $f
+# Expect only the current user (M); the Guests ACE must be absent. If it
+# survived, the fresh-inode overwrite regressed to an in-place narrow.
+```
+
+**The load-time over-permissive check flags a loosened ACL.** On load, before reading an owner-only secret (the key file or the signing identity), the CLI runs `warnIfFileOverPermissive`, which on Windows checks the ACL: first via PowerShell `Get-Acl` with SID translation (both inherited and explicit ACEs; SYSTEM and Administrators are exempt), falling back to `icacls` (explicit non-owner ACEs only) where PowerShell is unavailable. Loosen a correctly-narrowed key file and confirm the next CLI load warns:
+
+```powershell
+# Grant another principal read on the key file, defeating owner-only.
+icacls .psilink.key /grant "Guests:(R)"
+```
+
+Run a command that loads the key file (for example `psilink exchange`) and confirm it logs a warning that the file grants access to other users and should be restricted to owner-only. To confirm the `icacls` fallback tier (used where `Get-Acl` cannot run, such as a Nano Server container or a constrained-language environment), repeat with PowerShell unavailable on `PATH`; the warning must still fire. Restore owner-only afterward:
+
+```powershell
+icacls .psilink.key /inheritance:r /grant:r "$me:(M)"
+```
+
+A clean load emits no such warning, so absence of the warning after restoring the ACL confirms the check clears a correctly-narrowed file.
+
 ## See also
 
 - [COMMUNICATION.md](COMMUNICATION.md) - the communication channels and services described here
