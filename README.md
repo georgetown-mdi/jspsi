@@ -24,6 +24,8 @@ PSI-Link is an open-source tool that lets two organizations find the records the
 
 Both applications implement the same protocol and can be mixed: a first exchange set up in the web app can be exported and automated later with the command line app.
 
+A third option combines the two: the same Docker image can serve the web interface from a machine you control (the web console), so operators get the guided browser experience while SFTP and shared-directory exchanges run on that machine. See the [Web Console Quickstart](#web-console-quickstart).
+
 ## Test data
 
 This repository includes two synthetic datasets you can use to try the tool without touching real records: [`test_data/fake_data_1.csv`](test_data/fake_data_1.csv) and [`test_data/fake_data_2.csv`](test_data/fake_data_2.csv). Each contains fabricated names, SSNs, and dates of birth, with partial overlap between the two files, so you can run a complete practice exchange -- one party uses each file.
@@ -84,6 +86,33 @@ The output file is a CSV giving the linkage between the two parties' records. Se
 To practice before using real data, the repository provides two synthetic input files in [`test_data/`](test_data/); each party uses one.
 
 For more information, see [apps/cli](apps/cli/).
+
+# Web Console Quickstart
+
+The same Docker image can serve the web interface from a machine you control, with no Node.js setup. The console serves one party and runs inside that party's own systems; it is never a shared meeting point for the two partners. An operator who connects to it over your network (or a VPN) gets the same guided experience as the web app.
+
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) (as above).
+2. Run:
+```sh
+docker run -d -p 3000:3000 vdorie/psi-link:latest serve
+```
+3. Visit [http://localhost:3000](http://localhost:3000) (or the serving machine's address from another machine on your network).
+
+This starts the web interface and its peer-coordination server; browser-to-browser exchanges work immediately. To let the console also run SFTP and shared-directory exchanges itself - rather than saving an exchange file for the command line app - enable its job API by supplying a directory for working files and an access token:
+
+```sh
+docker run -d -p 3000:3000 \
+  --env JOB_DATA_ROOT=/data/jobs \
+  --env JOB_API_TOKEN=ACCESS_TOKEN \
+  -v /host/jobs:/data/jobs \
+  vdorie/psi-link:latest serve
+```
+
+Replacing each of the following:
+   * `/host/jobs` - a directory on the serving machine where each exchange's working files are kept. Completed results stay here until you delete them.
+   * `ACCESS_TOKEN` - a secret the console requires on every job request. Required whenever the console is reachable from other machines.
+
+Running SFTP exchanges from the console additionally requires a file naming the SFTP servers it may connect to (`JOB_SFTP_REMOTES`). The file format, the security model, and further configuration are covered in [Server job API](docs/DEPLOYMENT.md#server-job-api) in the deployment guide.
 
 # Podman
 
