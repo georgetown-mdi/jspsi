@@ -45,6 +45,7 @@ Beyond the conventions in `CONTRIBUTING.md`:
 - Commit messages use no markdown and no top-level lists (other format rules in `CONTRIBUTING.md`, Commit Messages).
 - After a chain of edits, run `npm run typecheck && npm run lint && npm run format`; the LSP server often has a stale cache.
 - Typecheck, lint, and format are CI checks.
+- A change that adds a top-level directory under a guarded root (`apps/web`, `packages/core`) or edits CI/deploy config must also run `npm run test:scripts`; the workspace suites skip the CI/deploy drift guards (e.g. the deploy path-filter check), so a new unclassified dir passes locally and reddens only in CI.
 - Project state belongs in the GitHub project and docs/, not agent memory.
 - Encode a "does not happen at runtime" claim (a line that never fires, an unreachable branch) as a check, never a comment or doc note -- prose asserting a runtime fact rots silently; a check cannot lie. Full rule and the Global-listener cautionary example: `CONTRIBUTING.md`, Code Conventions.
 - Before committing, sweep your own diff: delete every comment that restates the code, narrates change history ("now", "previously", "moved here"), or cites a board item id. Thoroughness is demonstrated in tests and checks, not prose.

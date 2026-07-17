@@ -175,7 +175,14 @@ describe("ci path-filter drift guard (live workflows)", () => {
       const dirs = trackedTopLevelDirs(root);
       // Sanity: the root has tracked subdirs, so the assertion is actually live.
       expect(dirs.length).toBeGreaterThan(0);
-      expect(uncoveredDirs(dirs, deployEntries, DEPLOY_EXCLUDED)).toEqual([]);
+      const uncovered = uncoveredDirs(dirs, deployEntries, DEPLOY_EXCLUDED);
+      expect(
+        uncovered,
+        `new tracked dir(s) under ${root} are neither deploy-covered nor ` +
+          `allowlisted: ${uncovered.join(", ")}. Add each to DEPLOY_EXCLUDED if it ` +
+          `does not ship (dev/lint tooling, like apps/web/test), or a path to ` +
+          `${DEPLOY_WORKFLOW} if it does. Re-check with \`npm run test:scripts\`.`,
+      ).toEqual([]);
     }
   });
 
