@@ -344,9 +344,29 @@ export interface InvitationFieldSummary {
   /**
    * Plain-language descriptions of the declared constraints, if any. The
    * `exclude` denylist is summarized as a count rather than listing its values:
-   * it is advisory and can hold hundreds of entries.
+   * it is advisory and can hold hundreds of entries. The partner-authored
+   * `allowedCharacters` class is NOT among these -- it is a raw partner-controlled
+   * regular expression, so it is carried apart in {@link allowedCharacters} for
+   * the renderer to bind in its own bounded element rather than fold into a joined
+   * phrase (see the field doc there).
    */
   constraints: Array<string>;
+  /**
+   * The partner-authored `allowedCharacters` class the field declares, sanitized
+   * for display, present only when the field declares one. Carried apart from
+   * {@link constraints} -- not folded into a joined "allowed-character pattern: X"
+   * phrase -- so the renderer can bind this partner-controlled value in its OWN
+   * bounded element between the fixed, core-derived system label, the way the
+   * transform-coercion notes bind their partner value (see
+   * {@link InvitationTransformSummary.coercions}). A partner cannot then place
+   * separator text inside the class to impersonate the surrounding system label.
+   * The value arrives in an invitation accepted on a transcription checksum and is
+   * never vetted (the evaluating check is warn-not-enforce, core's
+   * `withinAllowedCharacters`); the renderer's fixed label marks it as
+   * partner-supplied and unverified. Sanitized once here, at the single display
+   * boundary, so no caller re-derives the escaping.
+   */
+  allowedCharacters?: string;
 }
 
 /**
@@ -428,25 +448,11 @@ export interface InvitationSummary {
  * order. The `exclude` denylist is reported as a count, not its values: it is
  * advisory and may hold hundreds of entries.
  *
- * `allowedCharacters` is deliberately NOT rendered as "characters limited to X".
- * The value is a partner-authored regular-expression character class: it arrives
- * in the invitation token, accepted on a transcription checksum -- not an
- * authenticity guarantee -- and is never vetted, so a crafted class reads very
- * differently to a human than the set it admits. A leading `^` negates it (`^A-Z`
- * admits every character EXCEPT A-Z), and a shorthand or bracket breakout (`\p{L}`,
- * `[:alpha:]`, `]|\w|[`) is opaque to a non-regex-literate operator -- so a
- * "limited to <class>" phrasing would present raw partner regex as a vetted,
- * plain-language promise it is not. It is instead labelled as the partner-supplied,
- * unverified regular expression it is, so its surface reading is no longer
- * presented as a guarantee -- a non-regex-literate operator can still misread a
- * crafted class, but the copy no longer asserts a promise the value cannot back,
- * and the "not verified by psilink" clause names the trust boundary (partner-
- * authored, warn-not-enforce) rather than only the regex syntax family. The raw
- * class is still shown (sanitized) so a regex-literate reviewer can inspect the
- * actual pattern. The check that evaluates the class is warn-not-enforce (core's
- * `withinAllowedCharacters`); this is that check's operator-facing display
- * complement. `allowedCharacters` is a short, length-bounded, partner-controlled
- * string, so it is sanitized before display.
+ * The partner-authored `allowedCharacters` class is deliberately NOT among these
+ * phrases -- it is surfaced apart in {@link allowedCharactersClass}, so the
+ * renderer binds the raw partner value in its own bounded element rather than
+ * folding it into a joined sentence a partner could impersonate. See that
+ * function for the trust-boundary rationale.
  */
 function describeConstraints(field: LinkageField): Array<string> {
   const constraints = field.constraints;
@@ -457,19 +463,46 @@ function describeConstraints(field: LinkageField): Array<string> {
     descriptions.push("values must be valid");
   if ("affixesAllowed" in constraints && constraints.affixesAllowed === false)
     descriptions.push("honorifics and suffixes removed");
-  if (
-    "allowedCharacters" in constraints &&
-    constraints.allowedCharacters !== undefined
-  )
-    descriptions.push(
-      `allowed-character pattern (partner-supplied regular expression, not verified by psilink): ${sanitizeForDisplay(constraints.allowedCharacters)}`,
-    );
   const exclude = constraints.exclude ?? [];
   if (exclude.length > 0)
     descriptions.push(
       `${exclude.length} excluded value${exclude.length === 1 ? "" : "s"}`,
     );
   return descriptions;
+}
+
+/**
+ * The field's partner-authored `allowedCharacters` class, sanitized for display,
+ * or undefined when the field declares none. Surfaced as the raw class alone
+ * (with no joined system label) so the renderer can bind it in its own bounded
+ * element between the fixed, core-derived label -- the way the transform-coercion
+ * notes bind their partner value -- rather than concatenating label and value into
+ * one string a partner could impersonate with separator text.
+ *
+ * The value is a partner-authored regular-expression character class: it arrives
+ * in the invitation token, accepted on a transcription checksum -- not an
+ * authenticity guarantee -- and is never vetted, so a crafted class reads very
+ * differently to a human than the set it admits. A leading `^` negates it (`^A-Z`
+ * admits every character EXCEPT A-Z), and a shorthand or bracket breakout (`\p{L}`,
+ * `[:alpha:]`, `]|\w|[`) is opaque to a non-regex-literate operator -- so a
+ * "limited to <class>" phrasing would present raw partner regex as a vetted,
+ * plain-language promise it is not. The renderer instead labels it as the
+ * partner-supplied, unverified regular expression it is, and shows the raw class
+ * (sanitized) so a regex-literate reviewer can inspect the actual pattern. The
+ * check that evaluates the class is warn-not-enforce (core's
+ * `withinAllowedCharacters`); the display is that check's operator-facing
+ * complement. `allowedCharacters` is a short, length-bounded, partner-controlled
+ * string, so it is sanitized before display, once here at the single boundary.
+ */
+function allowedCharactersClass(field: LinkageField): string | undefined {
+  const constraints = field.constraints;
+  if (
+    constraints === undefined ||
+    !("allowedCharacters" in constraints) ||
+    constraints.allowedCharacters === undefined
+  )
+    return undefined;
+  return sanitizeForDisplay(constraints.allowedCharacters);
 }
 
 /**
@@ -939,29 +972,34 @@ export function summarizeInvitation(
     terms.linkageFields.map((field) => [field.name, field.type]),
   );
 
-  // Collapse fields that are identical for display -- same semantic-type label
-  // and same constraint phrases -- so several fields of one type (the schema
-  // permits, e.g., a maiden and a current name both typed `first_name`) do not
-  // list the same line twice with nothing to tell them apart (the field `name`
-  // that would distinguish them is partner-controlled and deliberately not
-  // shown). Fields whose constraints differ stay distinct, since the constraint
-  // text then distinguishes them. The dedupe key is the JSON encoding of the
-  // (label, constraints) pair, which is injective over that displayed content:
-  // a plain join would not be, since a constraint phrase can itself contain the
-  // separator (the allowed-character pattern phrase embeds the partner-controlled
-  // regex class, which carries spaces). The key is built from the already-sanitized
-  // display strings, so two
-  // fields whose `allowedCharacters` differ only in characters sanitizeForDisplay
-  // folds together collapse -- correctly, since they render identically and
-  // nothing the acceptor could distinguish is lost.
+  // Collapse fields that are identical for display -- same semantic-type label,
+  // same constraint phrases, and same allowed-character class -- so several fields
+  // of one type (the schema permits, e.g., a maiden and a current name both typed
+  // `first_name`) do not list the same line twice with nothing to tell them apart
+  // (the field `name` that would distinguish them is partner-controlled and
+  // deliberately not shown). Fields whose constraints or allowed-character class
+  // differ stay distinct, since that content then distinguishes them. The dedupe
+  // key is the JSON encoding of the (label, constraints, allowedCharacters) triple,
+  // which is injective over that displayed content: a plain join would not be,
+  // since a constraint phrase or the regex class can itself contain the separator.
+  // The key is built from the already-sanitized display strings, so two fields
+  // whose `allowedCharacters` differ only in characters sanitizeForDisplay folds
+  // together collapse -- correctly, since they render identically and nothing the
+  // acceptor could distinguish is lost.
   const seenFields = new Set<string>();
   const linkageFields: Array<InvitationFieldSummary> = [];
   for (const field of terms.linkageFields) {
-    const summary = {
+    const allowed = allowedCharactersClass(field);
+    const summary: InvitationFieldSummary = {
       label: FIELD_TYPE_LABELS[field.type],
       constraints: describeConstraints(field),
+      ...(allowed !== undefined ? { allowedCharacters: allowed } : {}),
     };
-    const dedupeKey = JSON.stringify([summary.label, summary.constraints]);
+    const dedupeKey = JSON.stringify([
+      summary.label,
+      summary.constraints,
+      summary.allowedCharacters ?? null,
+    ]);
     if (seenFields.has(dedupeKey)) continue;
     seenFields.add(dedupeKey);
     linkageFields.push(summary);
