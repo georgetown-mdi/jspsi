@@ -1133,14 +1133,17 @@ test("decode error escapes a hostile unrecognized endpoint key name end to end",
 });
 
 // Renders displayInvitation into the joined info-log output, spying on the
-// given logger so each test can assert against its own logger instance.
+// given logger so each test can assert against its own logger instance. The
+// acceptor's own outbound-send set defaults to undefined (the not-yet-known case),
+// so a test exercising an unrelated line need not supply one.
 function renderDisplayInvitation(
   log: ReturnType<typeof getLogger>,
   token: InvitationToken,
+  ownOutboundSend?: ReadonlyArray<string>,
 ): string {
   const infoSpy = vi.spyOn(log, "info");
   try {
-    displayInvitation(token, log);
+    displayInvitation(token, ownOutboundSend, log);
     return infoSpy.mock.calls.map((c) => String(c[0])).join("\n");
   } finally {
     infoSpy.mockRestore();
@@ -1152,21 +1155,25 @@ test("displayInvitation escapes a hostile inviter identity and key names", () =>
     ...sampleToken(FUTURE()),
     linkageTerms: {
       ...getDefaultLinkageTerms("Inviter Org"),
-      identity: "\x1b[31mEVIL‮",
+      identity: "\x1b[31mEVIL\u202e",
       linkageKeys: [{ name: "k\x1b[0m", elements: [{ field: "ssn" }] }],
       // A hostile requested-from-you column name reaches the new "requests from
       // you" line; it must be escaped there too.
-      payload: { receive: [{ name: "req\x1b[0m‮" }] },
+      payload: { receive: [{ name: "req\x1b[0m\u202e" }] },
     },
   };
   const log = getLogger("accept-display-test");
   log.setLevel("silent");
   const infoSpy = vi.spyOn(log, "info");
   try {
-    displayInvitation(token, log);
+    // A hostile acceptor-file column name reaches the new "columns you will send"
+    // line; it must be escaped there too. The acceptor's own outbound-send names
+    // are operator-file strings rather than partner-controlled, but they still pass
+    // through the same escaping, so the assertion covers that line as well.
+    displayInvitation(token, ["send\x1b[0m\u202e"], log);
     const joined = infoSpy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(joined).not.toContain("\x1b");
-    expect(joined).not.toContain("‮");
+    expect(joined).not.toContain("\u202e");
     expect(joined).toContain("\\x1b");
     expect(joined).toContain("\\u202e");
   } finally {
@@ -1221,6 +1228,79 @@ test("displayInvitation: the inviter's request-from-acceptor receive shows names
   expect(lines(withReceive(undefined))).not.toContain(
     "the inviting party requests from you",
   );
+});
+
+test("displayInvitation: shows the acceptor's own outbound send, one column per line", () => {
+  // The columns THIS party will disclose to the partner for matched records -- its
+  // own outbound disclosure. A non-empty set is shown one column per line (so a name
+  // containing the list separator is not misread as two entries), leading the
+  // details before the inviter's proposed terms.
+  const log = getLogger("accept-display-outbound-test");
+  log.setLevel("silent");
+  const infoSpy = vi.spyOn(log, "info");
+  try {
+    displayInvitation(sampleToken(FUTURE()), ["diagnosis", "medication"], log);
+    const lines = infoSpy.mock.calls.map((c) => String(c[0]));
+    // The heading is present and the columns appear one per line, before the
+    // inviter's "columns you will receive"/"linkage keys" terms.
+    const headingIndex = lines.findIndex((l) =>
+      l.includes("columns you will send:"),
+    );
+    expect(headingIndex).toBeGreaterThanOrEqual(0);
+    expect(lines).toContain("      - diagnosis");
+    expect(lines).toContain("      - medication");
+    // No presupposing empty/unknown phrasing when the set is a real non-empty
+    // disclosure.
+    const joined = lines.join("\n");
+    expect(joined).not.toContain("(none)");
+    expect(joined).not.toContain("determined from your input file");
+  } finally {
+    infoSpy.mockRestore();
+  }
+});
+
+test("displayInvitation: a column name containing the list separator is not split into two entries", () => {
+  // sanitizeForDisplay does not escape a printable ASCII comma, so a joined list
+  // would misread a single column named "last, first" as two columns. Rendering one
+  // per line keeps it a single entry.
+  const log = getLogger("accept-display-outbound-comma-test");
+  log.setLevel("silent");
+  const infoSpy = vi.spyOn(log, "info");
+  try {
+    displayInvitation(sampleToken(FUTURE()), ["last, first", "notes"], log);
+    const lines = infoSpy.mock.calls.map((c) => String(c[0]));
+    // The comma-bearing name is one entry on its own line, not split at the comma.
+    expect(lines).toContain("      - last, first");
+    expect(lines).toContain("      - notes");
+    // Exactly two disclosed-column lines: the separator did not create a third.
+    expect(lines.filter((l) => l.startsWith("      - ")).length).toBe(2);
+  } finally {
+    infoSpy.mockRestore();
+  }
+});
+
+test("displayInvitation: the empty and not-yet-known outbound-send cases avoid a presupposing phrase", () => {
+  // Empty (the acceptor discloses nothing) and not-yet-known (no metadata resolved
+  // at prompt time) must both stay truthful: neither asserts a definite non-empty
+  // outbound send.
+  const log = getLogger("accept-display-outbound-empty-test");
+  log.setLevel("silent");
+  const base = sampleToken(FUTURE());
+  // Empty: a real "you disclose nothing", shown as a truthful (none) line, not a
+  // list and not a forward-reference.
+  const empty = renderDisplayInvitation(log, base, []);
+  expect(empty).toContain(
+    "columns you will send: (none) -- only matched records",
+  );
+  expect(empty).not.toContain("      - ");
+  // Not-yet-known: no metadata at prompt time, so the line forward-references the
+  // exchange rather than claiming any count.
+  const unknown = renderDisplayInvitation(log, base, undefined);
+  expect(unknown).toContain(
+    "columns you will send: determined from your input file",
+  );
+  expect(unknown).not.toContain("(none)");
+  expect(unknown).not.toContain("      - ");
 });
 
 test("displayInvitation: shows the linkage strategy and, for single-pass, the disclosure note", () => {
