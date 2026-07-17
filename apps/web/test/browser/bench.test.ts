@@ -12,8 +12,6 @@ import { createRoot } from "react-dom/client";
 // bound and blankets the top bar, intercepting unrelated clicks.
 import "@mantine/core/styles.css";
 
-import { MantineProvider } from "@mantine/core";
-
 import { decodeInvitation } from "@psilink/core";
 
 import { BENCH_STEP_STATE_KEY } from "@bench/stepHistory";
@@ -22,6 +20,8 @@ import { InvitationFileError } from "@psi/invitation";
 import { InviterBench } from "@bench/InviterBench";
 import { stagesFor } from "@bench/exchangeRun";
 import styles from "@bench/bench.module.css";
+
+import { renderApp } from "./renderApp";
 
 import type { PreparedExchange } from "@psilink/core";
 import type { ReactNode } from "react";
@@ -164,7 +164,7 @@ function mount(content: ReactNode) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  root.render(createElement(MantineProvider, null, content));
+  root.render(renderApp(content));
 }
 
 afterEach(async () => {

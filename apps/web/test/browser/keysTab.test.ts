@@ -7,11 +7,11 @@ import { page } from "vitest/browser";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
-import { MantineProvider } from "@mantine/core";
-
 import { editorFromCsv, editorWithAuthoredDraft } from "@bench/inviterModel";
 
 import { KeysTab } from "@bench/KeysTab";
+
+import { renderApp } from "./renderApp";
 
 import type { AcquiredCsv } from "@bench/inviterModel";
 import type { Root } from "react-dom/client";
@@ -61,9 +61,7 @@ let root: Root | undefined;
 function render() {
   const editor = withDeadDobKey(editorFromCsv("Dana Okafor", csv));
   root!.render(
-    createElement(
-      MantineProvider,
-      null,
+    renderApp(
       createElement(KeysTab, {
         editor,
         csv,

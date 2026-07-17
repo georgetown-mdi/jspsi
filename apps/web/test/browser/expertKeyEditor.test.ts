@@ -7,13 +7,13 @@ import { page } from "vitest/browser";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
-import { MantineProvider } from "@mantine/core";
-
 import { authoredLinkageFields } from "@psilink/core";
 
 import { seedAdvancedInvite } from "@psi/advancedInvite";
 
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
+
+import { renderApp } from "./renderApp";
 
 import type { KeyVerdict } from "@bench/inviterModel";
 import type { Root } from "react-dom/client";
@@ -53,9 +53,7 @@ function render() {
     draft.standardization,
   );
   root!.render(
-    createElement(
-      MantineProvider,
-      { theme: { respectReducedMotion: true } },
+    renderApp(
       createElement(ExpertKeyEditor, {
         draft,
         declaredFields,

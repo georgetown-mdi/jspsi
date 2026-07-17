@@ -162,8 +162,8 @@ export default defineConfig((_configEnv) => {
         {
           test: {
             include: [
-              "test/browser/**/*.{test,spec}.ts",
-              "test/**/*.browser.{test,spec}.ts",
+              "test/browser/**/*.{test,spec}.{ts,tsx}",
+              "test/**/*.browser.{test,spec}.{ts,tsx}",
             ],
             name: "browser",
             // Stand up the dev server (PeerJS coordination + /api) the same way

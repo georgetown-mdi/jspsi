@@ -7,9 +7,9 @@ import { page } from "vitest/browser";
 import { createElement, useState } from "react";
 import { createRoot } from "react-dom/client";
 
-import { MantineProvider } from "@mantine/core";
-
 import { CleaningErrorBoundary } from "@components/CleaningErrorBoundary";
+
+import { renderApp } from "./renderApp";
 
 import type { Root } from "react-dom/client";
 
@@ -27,7 +27,7 @@ function render(node: ReturnType<typeof createElement>) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  root.render(createElement(MantineProvider, null, node));
+  root.render(renderApp(node));
 }
 
 /** Throws on render while `broken`, like a tripped StandardizationCards invariant. */

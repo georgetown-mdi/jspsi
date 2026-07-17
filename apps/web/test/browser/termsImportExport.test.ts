@@ -7,12 +7,12 @@ import { page, userEvent } from "vitest/browser";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
-import { MantineProvider } from "@mantine/core";
-
 import { buildAdvancedTerms, seedAdvancedInvite } from "@psi/advancedInvite";
 import { exportLinkageTerms } from "@psi/linkageTermsIO";
 
 import { TermsImportExport } from "@components/TermsImportExport";
+
+import { renderApp } from "./renderApp";
 
 import type { Root } from "react-dom/client";
 
@@ -28,9 +28,7 @@ function mount() {
   document.body.appendChild(container);
   root = createRoot(container);
   root.render(
-    createElement(
-      MantineProvider,
-      null,
+    renderApp(
       createElement(TermsImportExport, {
         currentTerms,
         seed,

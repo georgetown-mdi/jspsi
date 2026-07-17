@@ -6,9 +6,9 @@ import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
 import "@mantine/core/styles.css";
-import { Checkbox, MantineProvider, Radio } from "@mantine/core";
+import { Checkbox, Radio } from "@mantine/core";
 
-import { cssVariablesResolver, mantineTheme } from "@theme";
+import { renderApp } from "./renderApp";
 
 import type { ComponentType, ReactNode } from "react";
 import type { Root } from "react-dom/client";
@@ -48,16 +48,7 @@ function mount(node: ReactNode) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  root.render(
-    createElement(
-      MantineProvider,
-      // The app root (routes/__root.tsx) configures the provider with both the theme
-      // and the cssVariablesResolver; render under the same config so a theme override
-      // that broke the description association would fail here, not only raw Mantine.
-      { theme: mantineTheme, cssVariablesResolver },
-      node,
-    ),
-  );
+  root.render(renderApp(node));
 }
 
 afterEach(() => {

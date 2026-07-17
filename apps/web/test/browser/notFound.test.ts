@@ -7,10 +7,9 @@ import { page, userEvent } from "vitest/browser";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
-import { MantineProvider } from "@mantine/core";
-
 import { NotFound } from "@components/NotFound";
-import { mantineTheme } from "@theme";
+
+import { renderApp } from "./renderApp";
 
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
@@ -44,12 +43,12 @@ vi.mock("@tanstack/react-router", () => ({
 let container: HTMLElement | undefined;
 let root: Root | undefined;
 
-// Mount under the real app theme, the way the running app composes it.
+// Mount under the real app provider config, the way the running app composes it.
 function mount(node: ReactNode) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  root.render(createElement(MantineProvider, { theme: mantineTheme }, node));
+  root.render(renderApp(node));
 }
 
 afterEach(() => {
