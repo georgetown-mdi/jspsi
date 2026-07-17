@@ -30,6 +30,14 @@ export const Route = createFileRoute("/api/jobs/$jobId/events")({
 
         const stream = new ReadableStream<Uint8Array>({
           start(controller) {
+            // Already aborted between the request and this callback: the later
+            // addEventListener would never fire post-abort, so the subscription
+            // would leak into the record. Close without subscribing.
+            if (request.signal.aborted) {
+              controller.close();
+              return;
+            }
+
             const encoder = new TextEncoder();
             const push = (id: number, event: unknown): void => {
               controller.enqueue(encoder.encode(renderSseFrame(id, event)));

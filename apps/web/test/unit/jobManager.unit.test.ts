@@ -243,6 +243,44 @@ describe("SSE replay", () => {
     await waitForTerminal(record);
     expect(seen.some((entry) => entry.event.type === "result")).toBe(true);
   });
+
+  test("a throwing listener is dropped and never breaks the relay", async () => {
+    // Drive the append path directly so a listener whose enqueue throws (a
+    // controller in an unexpected state) is isolated: it is unsubscribed, the
+    // append does not throw, and every other subscriber still receives events.
+    let handlers!: CliDriverHandlers;
+    const spy = vi
+      .spyOn(cliDriver, "spawnExchangeJob")
+      .mockImplementation((args) => {
+        handlers = args.handlers;
+        return { signal: () => true, isRunning: () => true };
+      });
+
+    const root = tempDataRoot("throwing-listener");
+    roots.push(root);
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+    });
+    managers.push(manager);
+
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    const healthy: Array<BufferedEvent> = [];
+    manager.subscribe(record, 0, () => {
+      throw new Error("enqueue on a closed controller");
+    });
+    manager.subscribe(record, 0, (entry) => healthy.push(entry));
+
+    expect(() =>
+      handlers.onEvent({ v: 1, type: "stage", id: "s1", label: "one" }),
+    ).not.toThrow();
+    expect(record.listeners.size).toBe(1);
+    handlers.onEvent({ v: 1, type: "stage", id: "s2", label: "two" });
+    expect(healthy.map((entry) => entry.id)).toEqual([1, 2]);
+
+    spy.mockRestore();
+  });
 });
 
 describe("event cap fails the job", () => {

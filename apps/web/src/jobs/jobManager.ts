@@ -484,9 +484,25 @@ export class JobManager {
     }
     const entry: BufferedEvent = { id: record.events.length + 1, event };
     record.events.push(entry);
-    for (const listener of record.listeners) listener(entry);
+    this.notifyListeners(record, entry);
     if (event.type === "result" || event.type === "error")
       this.markTerminalEmitted(record, event.type);
+  }
+
+  /**
+   * Notify every SSE listener of one buffered entry, isolating each: a listener
+   * whose enqueue throws (a controller in an unexpected state) is dropped rather
+   * than allowed to propagate out of the fd-3 relay and break every other
+   * subscriber's stream.
+   */
+  private notifyListeners(record: JobRecord, entry: BufferedEvent): void {
+    for (const listener of record.listeners) {
+      try {
+        listener(entry);
+      } catch {
+        record.listeners.delete(listener);
+      }
+    }
   }
 
   /** Fail a job whose event buffer overflowed, appending a synthesized error. */
@@ -503,7 +519,7 @@ export class JobManager {
       },
     };
     record.events.push(entry);
-    for (const listener of record.listeners) listener(entry);
+    this.notifyListeners(record, entry);
     this.markTerminalEmitted(record, "error");
     record.status = "failed";
     record.handle?.signal("SIGKILL");
@@ -591,7 +607,7 @@ export class JobManager {
       event,
     };
     record.events.push(entry);
-    for (const listener of record.listeners) listener(entry);
+    this.notifyListeners(record, entry);
     this.markTerminalEmitted(
       record,
       event.type === "result" ? "result" : "error",

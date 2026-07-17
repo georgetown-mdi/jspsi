@@ -224,6 +224,37 @@ describe("create validates and never CORS", () => {
   });
 });
 
+describe("GET /api/jobs/:id/events guards an already-aborted request", () => {
+  test("a pre-aborted signal closes the stream and leaks no listener", async () => {
+    const root = tempDataRoot("routes-abort");
+    roots.push(root);
+    vi.stubEnv("JOB_DATA_ROOT", root);
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      // A delayed stub keeps the job non-terminal, so the route reaches the
+      // live-subscribe path rather than closing on an already-terminal replay.
+      childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), STUB_DELAY_MS: "5000" },
+    });
+    (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
+      manager;
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+
+    const response = (await handlersOf(EventsRoute).GET({
+      request: new Request(`http://localhost/api/jobs/${id}/events`, {
+        signal: AbortSignal.abort(),
+      }),
+      params: { jobId: id },
+    })) as Response;
+    // Draining the body runs the stream's start callback, where the guard fires.
+    await response.text();
+    expect(record.listeners.size).toBe(0);
+
+    manager.cancelJob(record);
+  });
+});
+
 describe("routes validate the job id before filesystem use", () => {
   test("a malformed id is 404 on status, events, cancel, result, delete", async () => {
     enableJobApi();
