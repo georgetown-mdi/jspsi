@@ -1,4 +1,5 @@
 import {
+  dateFormatComponents,
   describeTransformCoercions,
   parseDateInputDropsEveryRecord,
   pipelineAlwaysDrops,
@@ -9,7 +10,6 @@ import { APPLIED_SETTINGS } from "@psi/appliedSettings";
 
 import type {
   Algorithm,
-  DateFormatToken,
   InvitationToken,
   LinkageField,
   LinkageKey,
@@ -604,36 +604,11 @@ function summarizeTransform(
   return summary;
 }
 
-/**
- * The date-component vocabulary `parse_date` layouts are built from, pinned to
- * core's {@link DateFormatToken} so adding a token there breaks this build rather
- * than silently missing a dropped component below. Detection is set-membership
- * only -- which components a format string carries -- and these tokens are
- * pairwise non-substrings, so `String.includes` recovers core's greedy
- * tokenization exactly for this vocabulary; a future overlapping token (a 2-digit
- * year, say) would surface as a compile error to revisit the membership test.
- */
-const DATE_FORMAT_COMPONENTS: Record<DateFormatToken, true> = {
-  YYYY: true,
-  MM: true,
-  DD: true,
-};
-
 // Core's parseDateFactory defaults (standardization.ts): an absent format is the
 // full MM/DD/YYYY -> YYYYMMDD layout, which carries every component, so an absent
 // outputFormat drops nothing.
 const DEFAULT_PARSE_DATE_INPUT = "MM/DD/YYYY";
 const DEFAULT_PARSE_DATE_OUTPUT = "YYYYMMDD";
-
-/** The date components a `parse_date` format layout carries. */
-function dateComponentsOf(format: string): Set<DateFormatToken> {
-  const present = new Set<DateFormatToken>();
-  for (const token of Object.keys(
-    DATE_FORMAT_COMPONENTS,
-  ) as Array<DateFormatToken>)
-    if (format.includes(token)) present.add(token);
-  return present;
-}
 
 /**
  * The breadth marker a `parse_date` step's output layout earns, or undefined when
@@ -687,9 +662,13 @@ function parseDateBreadth(
     typeof rawInput === "string" ? rawInput : DEFAULT_PARSE_DATE_INPUT;
   const output =
     typeof rawOutput === "string" ? rawOutput : DEFAULT_PARSE_DATE_OUTPUT;
-  const outputComponents = dateComponentsOf(output);
+  // The output is classified in its OWN context: a `YY` in the output format is an
+  // unsubstituted literal (the factory fills only YYYY/MM/DD), so it collapses the
+  // year and carries no year component -- an output of "YY" is a total constant
+  // ("any date"), and "MM/DD/YY" keeps month and day but drops the year.
+  const outputComponents = dateFormatComponents(output, "output");
   if (outputComponents.size === 0) return "any date";
-  const dropsComponent = [...dateComponentsOf(input)].some(
+  const dropsComponent = [...dateFormatComponents(input, "input")].some(
     (component) => !outputComponents.has(component),
   );
   return dropsComponent ? "partial" : undefined;

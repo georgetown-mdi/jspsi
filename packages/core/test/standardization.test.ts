@@ -8,6 +8,7 @@ import {
   validateStandardizationAgainstTerms,
   assertStandardizationMatchesTerms,
   describeTransformCoercions,
+  dateFormatComponents,
   unsatisfiedLinkageFields,
   assessLinkageSatisfiability,
   checkValueConstraints,
@@ -427,6 +428,149 @@ describe("runPipeline — parse_date", () => {
       expect(badInput, JSON.stringify(bad)).not.toThrow();
       expect(badInput(), JSON.stringify(bad)).toBeNull();
     }
+  });
+
+  // A two-digit YY year resolves through the fixed protocol pivot (the 1969-2068
+  // POSIX window), a module constant identical on both parties -- there is no
+  // reference param, no terms date, and no clock read on this path.
+  describe("two-digit year (YY) input fixed-constant pivot", () => {
+    const parseYY = (value: string) =>
+      runPipeline(value, [
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YY", outputFormat: "YYYYMMDD" },
+        },
+      ]);
+
+    test("MM/DD/YY parses at all", () => {
+      expect(parseYY("01/15/90")).toBe("19900115");
+    });
+
+    test("68 maps to 2068 (the top of the window)", () => {
+      expect(parseYY("06/15/68")).toBe("20680615");
+    });
+
+    test("69 maps to 1969 (the bottom of the window)", () => {
+      expect(parseYY("06/15/69")).toBe("19690615");
+    });
+
+    test("00 maps to 2000", () => {
+      expect(parseYY("06/15/00")).toBe("20000615");
+    });
+
+    test("99 maps to 1999", () => {
+      expect(parseYY("06/15/99")).toBe("19990615");
+    });
+
+    test("single-digit month and day still zero-pad under YY", () => {
+      expect(parseYY("1/5/90")).toBe("19900105");
+    });
+
+    test("a calendar-invalid day under YY returns null", () => {
+      expect(parseYY("02/30/90")).toBeNull();
+    });
+
+    test("YYYY still wins its shared YY prefix (four-digit year unchanged)", () => {
+      expect(
+        runPipeline("06/15/2027", [
+          {
+            function: "parse_date",
+            params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
+          },
+        ]),
+      ).toBe("20270615");
+    });
+
+    test("the pivot does not read the wall clock", () => {
+      // The result must not move with the system year: pin the same input twice
+      // under two different mocked clocks and require identical output. This is
+      // definitional with a constant pivot, so it also stands as a regression
+      // guard against any future clock read sneaking back into the path.
+      const under = (fakeYear: number) => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(`${fakeYear}-01-01T00:00:00Z`));
+        try {
+          return parseYY("06/15/40");
+        } finally {
+          vi.useRealTimers();
+        }
+      };
+      const partyA = under(2010);
+      const partyB = under(2099);
+      expect(partyA).toBe("20400615");
+      expect(partyB).toBe(partyA);
+    });
+  });
+
+  // In an OUTPUT format a `YY` token is NOT a resolved year: the factory
+  // substitutes only YYYY/MM/DD, so a `YY` in the output emits literally and
+  // collapses the year to a constant.
+  describe("two-digit year (YY) in the output format is a literal", () => {
+    const parseWithOutput = (value: string, outputFormat: string) =>
+      runPipeline(value, [
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat },
+        },
+      ]);
+
+    test("YY in the output is emitted literally, not the resolved year", () => {
+      // The output MM/DD/YY keeps month and day but writes the literal "YY" where
+      // the year would go -- the year has collapsed to a constant.
+      expect(parseWithOutput("06/15/1990", "MM/DD/YY")).toBe("06/15/YY");
+    });
+
+    test('a YY-only output collapses every date to the constant "YY"', () => {
+      expect(parseWithOutput("06/15/1990", "YY")).toBe("YY");
+      expect(parseWithOutput("01/02/2003", "YY")).toBe("YY");
+    });
+  });
+});
+
+// --- dateFormatComponents (context-aware) ------------------------------------
+
+describe("dateFormatComponents", () => {
+  test("an input YY collapses to the canonical year component", () => {
+    // The input factory resolves either year token to a four-digit year, so a
+    // YY-carrying input reports the year exactly as a YYYY-carrying one does.
+    expect([...dateFormatComponents("MM/DD/YY", "input")].sort()).toEqual([
+      "DD",
+      "MM",
+      "YYYY",
+    ]);
+    expect([...dateFormatComponents("MM/DD/YYYY", "input")].sort()).toEqual([
+      "DD",
+      "MM",
+      "YYYY",
+    ]);
+  });
+
+  test("an output YY carries no year (it is an unsubstituted literal)", () => {
+    // The factory substitutes only YYYY/MM/DD into the output; a YY in the output
+    // emits literally, so it carries no year component and the year has collapsed.
+    expect([...dateFormatComponents("MM/DD/YY", "output")].sort()).toEqual([
+      "DD",
+      "MM",
+    ]);
+    expect([...dateFormatComponents("YY", "output")]).toEqual([]);
+  });
+
+  test("YYYY greedily wins its YY prefix in both contexts", () => {
+    // A four-digit-year layout is never mis-detected as a two-digit year, so
+    // MM/DD/YYYY reports one year component, not a phantom extra.
+    expect([...dateFormatComponents("MM/DD/YYYY", "output")].sort()).toEqual([
+      "DD",
+      "MM",
+      "YYYY",
+    ]);
+  });
+
+  test("MM and DD map to themselves in both contexts", () => {
+    for (const context of ["input", "output"] as const)
+      expect([...dateFormatComponents("MM-DD", context)].sort()).toEqual([
+        "DD",
+        "MM",
+      ]);
   });
 });
 
@@ -2683,6 +2827,56 @@ describe("assessLinkageSatisfiability dead keys", () => {
       dobTerms([{ function: "parse_date" }]),
     );
     expect(deadKeys).toEqual([]);
+  });
+
+  test("a two-digit-year parse_date element transform is not a dead key", () => {
+    // The YY token supplies the year component, so the format tokenizes a full
+    // date and the key is not self-defeating.
+    const { deadKeys } = assessLinkageSatisfiability(
+      columns,
+      dobTerms([
+        { function: "parse_date", params: { inputFormat: "MM/DD/YY" } },
+      ]),
+    );
+    expect(deadKeys).toEqual([]);
+  });
+
+  test("a YY parse_date in a key ELEMENT transform resolves via the fixed constant (differential)", () => {
+    // The pivot lives in the parse_date factory, so it reaches an element-transform
+    // parse_date exactly as it reaches field standardization -- there is no
+    // chokepoint to bypass. Pin the resolved four-digit year (1990, via the fixed
+    // window) against an actual builder run over an element transform carrying YY,
+    // the path the prior "bind the reference at build time" design left unbound.
+    const terms = dobTerms([
+      {
+        function: "parse_date",
+        params: { inputFormat: "MM/DD/YY", outputFormat: "YYYYMMDD" },
+      },
+    ]);
+    const dataset = buildStandardizedDataset(
+      undefined,
+      [{ dob: "01/15/90" }],
+      inferMetadata(columns),
+      terms,
+    );
+    expect(buildKeyStrings(terms.linkageKeys[0], dataset, 0)).toEqual(
+      new Set(["19900115"]),
+    );
+  });
+
+  test("the builder produces a key string for a two-digit-year format (differential)", () => {
+    // Pin the "not dead" verdict for MM/DD/YY against an actual builder run: a
+    // two-digit-year DOB column yields a non-empty key on the default path.
+    const terms = dobTerms([
+      { function: "parse_date", params: { inputFormat: "MM/DD/YY" } },
+    ]);
+    const dataset = buildStandardizedDataset(
+      undefined,
+      [{ dob: "01/15/90" }],
+      inferMetadata(columns),
+      terms,
+    );
+    expect(buildKeyStrings(terms.linkageKeys[0], dataset, 0)).not.toBeNull();
   });
 
   test("a later coalesce default rescues a dead parse_date to a constant (not dead)", () => {

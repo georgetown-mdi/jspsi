@@ -1440,6 +1440,43 @@ describe("summarizeInvitation", () => {
       ]),
     ).toBe("last name");
 
+    // A two-digit-year input (MM/DD/YY) to a four-digit-year output is not a drop:
+    // in the INPUT context both YY and YYYY are the year component, so the input
+    // carries year/month/day and the output keeps all three -- routine
+    // canonicalization, unflagged. This pins that the year-token collapse recovers
+    // core's greedy tokenization rather than substring-counting a YY inside YYYY.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YY", outputFormat: "YYYYMMDD" },
+        },
+      ]),
+    ).toBe("last name");
+
+    // A YY in the OUTPUT format is NOT a resolved year -- the factory substitutes
+    // only YYYY/MM/DD, so "MM/DD/YY" writes the literal "YY" where the year would
+    // go, collapsing the year. It keeps month and day but drops the year, so it is
+    // a partial collapse, not routine canonicalization.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "MM/DD/YY" },
+        },
+      ]),
+    ).toBe("last name (partial)");
+    // A YY-only output collapses every date to the constant literal "YY" -- the
+    // maximal breadth, the same as a tokenless output.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YY" },
+        },
+      ]),
+    ).toBe("last name (any date)");
+
     // Routine standardization is not flagged.
     expect(headerFor([{ function: "pad_left", params: { length: 5 } }])).toBe(
       "last name",
@@ -1482,6 +1519,26 @@ describe("summarizeInvitation", () => {
         {
           function: "parse_date",
           params: { inputFormat: "MM/DD/YYYY", outputFormat: "registered" },
+        },
+      ]),
+    ).toBe("last name (any date)");
+    // A YY in the OUTPUT is an unsubstituted literal, not a resolved year: an
+    // "MM/DD/YY" output keeps month and day but collapses the year (a partial
+    // drop), while a "YY"-only output collapses every date to the constant "YY"
+    // (the maximal breadth). Neither may read as routine canonicalization.
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "MM/DD/YY" },
+        },
+      ]),
+    ).toBe("last name (partial)");
+    expect(
+      headerFor([
+        {
+          function: "parse_date",
+          params: { inputFormat: "MM/DD/YYYY", outputFormat: "YY" },
         },
       ]),
     ).toBe("last name (any date)");
