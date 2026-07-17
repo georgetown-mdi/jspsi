@@ -578,6 +578,16 @@ export function InvitationTerms({
   const discloseGroupLabelId = useId();
   const receiveGroupLabelId = useId();
   const matchingGroupLabelId = useId();
+  const constraintGroupLabelId = useId();
+  // The fields carrying a partner-authored allowedCharacters class, surfaced
+  // always-visible: a partner-defined character-class constraint applies to a
+  // linkage field, so the acceptor must be on notice before consenting rather than
+  // finding it dimmed inside the collapsed "Other details" disclosure. The class is
+  // already sanitized once in summarizeInvitation, so this filter carries no fresh
+  // derivation of partner text -- only a presence selection.
+  const constrainedFields = summary.linkageFields.filter(
+    (field) => field.allowedCharacters !== undefined,
+  );
   // The "Other details" toggle is self-describing: a one-line summary of the
   // disclosure's contents renders beneath it and is associated as the toggle's
   // aria-describedby (detailsSummaryId), so a reader -- sighted or not -- knows what
@@ -1042,6 +1052,71 @@ export function InvitationTerms({
           </Stack>
         </Stack>
 
+        {/* Partner-authored allowed-character constraints, promoted to the
+          always-visible core as their own labelled group so a partner-defined
+          character-class rule on a linkage field is on notice at the consent point,
+          not dimmed inside the collapsed "Other details" disclosure. Rendered only
+          when at least one field declares such a class. Each entry names the field,
+          then a FIXED system label marking the class as partner-supplied and
+          unverified, then the raw (already-sanitized) class in its OWN bounded Text.
+          The class is never joined into one sentence: it is partner-controlled and
+          may contain any separator, so concatenating it with the label would let a
+          crafted value impersonate system chrome (the same reason the coercion notes
+          bind their partner value apart). The class is advisory (core's
+          `withinAllowedCharacters` warns, does not enforce), so the copy states an
+          expectation, not a guarantee; the group's accessible name is fixed via
+          aria-labelledby, so no raw partner text enters the name. */}
+        {constrainedFields.length > 0 && (
+          <Stack role="group" aria-labelledby={constraintGroupLabelId} gap="xs">
+            <Title
+              order={tierHeadingOrder}
+              fz="sm"
+              fw={600}
+              id={constraintGroupLabelId}
+            >
+              Partner-defined character constraints
+            </Title>
+            <Text size="sm">
+              Your partner declares an allowed-character pattern for these
+              fields. Each is a partner-supplied regular expression that psilink
+              has not verified, and it is a data expectation rather than an
+              enforced filter.
+            </Text>
+            <Stack gap="xs">
+              {/* Keyed by index: the fields are already deduped and their order is
+                  fixed for a given terms document, and the sanitized label is not
+                  unique across fields of one type. */}
+              {constrainedFields.map((field, index) => (
+                <Stack key={index} gap={2}>
+                  <Text size="sm" fw={500}>
+                    {field.label}
+                  </Text>
+                  {/* The fixed system label as static JSX, then the raw class in
+                      its own bounded Text between core-derived chrome -- mirroring
+                      the coercion-note pattern -- so partner text cannot be read as
+                      the label. field.allowedCharacters is present here (the filter
+                      above selects on it), sanitized once in summarizeInvitation. */}
+                  <Text size="sm">
+                    Allowed characters (partner-supplied, unverified):
+                  </Text>
+                  <Text
+                    size="sm"
+                    ff="monospace"
+                    style={{
+                      border: "1px solid var(--mantine-color-default-border)",
+                      borderRadius: "var(--mantine-radius-sm)",
+                      padding: "2px 6px",
+                      wordBreak: "break-all",
+                    }}
+                  >
+                    {field.allowedCharacters}
+                  </Text>
+                </Stack>
+              ))}
+            </Stack>
+          </Stack>
+        )}
+
         {/* The legal agreement -- a cross-cutting GOVERNANCE frame, not a disclosure
           direction, so it carries its own labelled group. Placed last in the
           always-visible core, below the disclosure/result/mechanics tiers, as a
@@ -1132,11 +1207,12 @@ export function InvitationTerms({
                     field.constraints.length > 0 ? (
                       <Stack key={index} gap={2}>
                         <Text size="sm">{field.label}</Text>
-                        {/* Each constraint as its own item rather than a joined
-                        string: a partner-controlled allowedCharacters class may
-                        contain the separator, which joined text would render as
-                        spurious extra clauses. Keyed by index -- order is fixed
-                        for a field. */}
+                        {/* Each constraint as its own item. These are fixed
+                        plain-language phrases (validity, affix removal, a count
+                        of excluded values) carrying no partner free text; the
+                        partner-authored allowedCharacters class is surfaced apart,
+                        in the always-visible constraints group above. Keyed by
+                        index -- order is fixed for a field. */}
                         <List size="xs" withPadding listStyleType="circle">
                           {field.constraints.map((constraint, ci) => (
                             <List.Item key={ci}>

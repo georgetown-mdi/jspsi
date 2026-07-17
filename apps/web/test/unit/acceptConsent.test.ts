@@ -231,15 +231,17 @@ describe("summarizeInvitation", () => {
     );
     // A transform function name, its parameters, and a constraint's
     // allowedCharacters are all partner-controlled, so each is neutralized
-    // before it reaches the summary.
+    // before it reaches the summary. The allowedCharacters class is carried apart
+    // from the plain-language constraint phrases (surfaced as its own bounded
+    // element), so it is asserted on that field rather than in `constraints`.
     const transform = summary.linkageKeys[0].elements[0].transforms[0];
     expect(transform.function).not.toContain(BEL);
     expect(transform.function).toContain("\\x07");
     expect(transform.params[0]).not.toContain(BEL);
     expect(transform.params[0]).toContain("\\x07");
-    const constraint = summary.linkageFields[0].constraints[0];
-    expect(constraint).not.toContain(BEL);
-    expect(constraint).toContain("\\x07");
+    const allowed = summary.linkageFields[0].allowedCharacters;
+    expect(allowed).not.toContain(BEL);
+    expect(allowed).toContain("\\x07");
   });
 
   test("caps the number of transform parameters shown", () => {
@@ -409,14 +411,15 @@ describe("summarizeInvitation", () => {
     );
 
     // The two unconstrained "First name" entries collapse to one; the
-    // constraint-bearing one and the date field stay distinct.
+    // constraint-bearing one and the date field stay distinct. The allowedCharacters
+    // class is carried apart (its own field), not folded into a constraint phrase,
+    // and it participates in the dedupe key so the constrained field stays distinct.
     expect(summary.linkageFields).toEqual([
       { label: "First name", constraints: [] },
       {
         label: "First name",
-        constraints: [
-          "allowed-character pattern (partner-supplied regular expression, not verified by psilink): A-Z ",
-        ],
+        constraints: [],
+        allowedCharacters: "A-Z ",
       },
       { label: "Date of birth", constraints: [] },
     ]);
@@ -451,20 +454,23 @@ describe("summarizeInvitation", () => {
       "values must be valid",
       "2 excluded values",
     ]);
-    expect(firstName.constraints).toEqual([
-      "honorifics and suffixes removed",
-      "allowed-character pattern (partner-supplied regular expression, not verified by psilink): A-Z ",
-    ]);
+    // The plain-language constraint phrases; the partner-authored allowedCharacters
+    // class is carried apart (its own field), not folded into a phrase here.
+    expect(firstName.constraints).toEqual(["honorifics and suffixes removed"]);
+    expect(firstName.allowedCharacters).toBe("A-Z ");
     // A field with no constraints contributes nothing.
     expect(dob.constraints).toEqual([]);
+    expect(dob.allowedCharacters).toBeUndefined();
   });
 
-  test("frames a partner-authored allowedCharacters class as regex, not a plain-language guarantee", () => {
+  test("surfaces a partner-authored allowedCharacters class as its raw value apart from the constraint phrases", () => {
     // A leading `^` reads to a non-regex-literate operator as "allow caret and
-    // A-Z" but is class negation (admits everything EXCEPT A-Z). The display must
-    // not present this partner-authored, un-vetted regex as a "limited to"
-    // promise; it is labelled as the regular expression it is, with the raw class
-    // still shown so a regex-literate reviewer can inspect it.
+    // A-Z" but is class negation (admits everything EXCEPT A-Z). The summary
+    // surfaces the raw class ALONE -- not folded into a "limited to <class>"
+    // phrase, and not among the plain-language constraint phrases -- so the
+    // renderer can bind it in its own bounded element under a fixed, unverified
+    // system label. The raw class is preserved verbatim (sanitized) so a
+    // regex-literate reviewer can inspect the actual pattern.
     const summary = summarizeInvitation(
       makeToken({
         linkageFields: [
@@ -477,14 +483,12 @@ describe("summarizeInvitation", () => {
         linkageKeys: [{ name: "FN", elements: [{ field: "first_name" }] }],
       }),
     );
-    const [constraint] = summary.linkageFields[0].constraints;
-    expect(constraint).toBe(
-      "allowed-character pattern (partner-supplied regular expression, not verified by psilink): ^A-Z",
-    );
-    expect(constraint).not.toContain("limited to");
-    // The trust boundary is named, not just the regex syntax family, so the
-    // partner's un-vetted value is not read as one the app validated.
-    expect(constraint).toContain("not verified by psilink");
+    const field = summary.linkageFields[0];
+    expect(field.allowedCharacters).toBe("^A-Z");
+    // The raw class is not dressed up as a plain-language guarantee, nor folded
+    // into the plain-language constraint phrases.
+    expect(field.allowedCharacters).not.toContain("limited to");
+    expect(field.constraints).toEqual([]);
   });
 
   test("labels every fuzzy-comparison expansion in plain language", () => {

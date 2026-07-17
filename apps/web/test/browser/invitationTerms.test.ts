@@ -409,16 +409,18 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     expect(masterCollapse.getAttribute("aria-hidden")).toBe("true");
     expect(masterCollapse.hasAttribute("inert")).toBe(true);
 
-    // The non-key blocks (field constraints, payload, dedup) are in the master
+    // The non-key blocks (personal-data labels, payload, dedup) are in the master
     // disclosure ...
     const panel = await readyPanel("Other details");
-    expect(panel.textContent).toContain(
-      "allowed-character pattern (partner-supplied regular expression, not verified by psilink): A-Z",
-    );
+    expect(panel.textContent).toContain("Personal data used");
     expect(panel.textContent).toContain("risk_score");
     expect(panel.textContent).toContain("may match more than one");
-    // ... the legal agreement is NOT among them: it is promoted whole into the
-    // always-visible core, so its reference no longer sits in the disclosure ...
+    // ... the partner-authored allowed-character class is NOT among them: it is
+    // promoted whole into the always-visible core (its own constraints group), so
+    // the raw class no longer sits dimmed in the disclosure ...
+    expect(panel.textContent).not.toContain("A-Z");
+    // ... the legal agreement is NOT among them either: it is promoted whole into
+    // the always-visible core, so its reference no longer sits in the disclosure ...
     expect(panel.textContent).not.toContain("MOU-2025-0042");
     // ... and the per-key matching detail moved out, into the key's own
     // disclosure.
@@ -951,6 +953,133 @@ describe("InvitationTerms: always-visible egress and legal-agreement facts, tier
     expect(container!.textContent).not.toContain("attaches a legal agreement");
     expect(container!.textContent).not.toContain("MOU-2025-0042");
     expect(container!.textContent).not.toContain("Audit and evaluation");
+  });
+});
+
+describe("InvitationTerms: a partner-authored allowed-character constraint is on notice at consent", () => {
+  // A partner-defined allowedCharacters class is a rule on a linkage field the
+  // acceptor consents to. It must be legible at the consent point -- not dimmed
+  // inside the collapsed "Other details" disclosure -- so a partner-defined
+  // character-class constraint is on notice before consenting. Promoted into its
+  // own always-visible labelled group, with the raw partner-controlled class bound
+  // in its OWN bounded element (never joined into a sentence a partner could
+  // impersonate) under a fixed "unverified" system label.
+  const GROUP = "Partner-defined character constraints";
+  function render(
+    linkageTerms: LinkageTerms,
+    perspective?: "review" | "accepted" | "proposing",
+  ) {
+    renderTerms(linkageTerms, perspective ? { perspective } : undefined);
+  }
+
+  test("the constraint is surfaced always-visible, outside the 'Other details' disclosure", async () => {
+    // The module terms carry a first_name field with allowedCharacters "A-Z ".
+    render(terms);
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+
+    // Its own always-visible labelled group: an acceptor sees a partner-defined
+    // constraint applies without expanding any disclosure.
+    const constraints = group(GROUP);
+    await expect.element(constraints).toBeInTheDocument();
+    expect(constraints.element().textContent).toContain("First name");
+    expect(constraints.element().textContent).toContain("A-Z ");
+
+    // ... and OUTSIDE the "Other details" panel, which carries its collapsed content
+    // even while hidden: the class is not also dimmed there.
+    const panel = await readyPanel("Other details");
+    expect(panel.textContent).not.toContain("A-Z");
+  });
+
+  test("the constraint is not de-emphasized relative to the always-visible terms core", async () => {
+    // The regression the raise fixes: the class formerly rendered dimmed
+    // (size="xs" c="dimmed") inside the collapsed disclosure. It is now in the core
+    // at the same non-dimmed prominence as the terms around it. Assert the raw class
+    // node resolves to the SAME color as a core body-weight line elsewhere on the
+    // screen (the always-visible matching summary, a plain size="sm" Text), rather
+    // than the muted --mantine-color-dimmed the old disclosure used -- so it is not
+    // rendered less prominently than the always-visible terms core.
+    render(terms);
+    const constraints = group(GROUP);
+    await expect.element(constraints).toBeInTheDocument();
+    const classNode = Array.from(
+      constraints.element().querySelectorAll("*"),
+    ).find((el) => el.children.length === 0 && el.textContent.trim() === "A-Z");
+    expect(classNode).toBeTruthy();
+    // A known non-dimmed core line: the always-visible "Matching on ..." summary is
+    // a plain size="sm" Text in the core, so its resolved color is the body text
+    // color the class must share (not the muted dimmed token).
+    const coreLine = page.getByText(
+      "Matching on SSN, last name, date of birth, first name.",
+    );
+    await expect.element(coreLine).toBeInTheDocument();
+    expect(getComputedStyle(classNode!).color).toBe(
+      getComputedStyle(coreLine.element()).color,
+    );
+  });
+
+  test("the raw partner class occupies its OWN element, not folded into a joined sentence", async () => {
+    // The security-load-bearing property: the raw partner-controlled class is bound
+    // in its own bounded element between the fixed system label and the field
+    // label, NOT concatenated into one string a crafted value could impersonate as
+    // system chrome. Assert a leaf element holds the class verbatim and alone (its
+    // trimmed text is exactly the class), so the fixed label does not share the
+    // element with the partner value.
+    render({
+      ...terms,
+      linkageFields: [
+        {
+          name: "first_name",
+          type: "first_name",
+          constraints: { allowedCharacters: "^A-Z" },
+        },
+        { name: "last_name", type: "last_name" },
+      ],
+      linkageKeys: [{ name: "FN", elements: [{ field: "first_name" }] }],
+    });
+    const constraints = group(GROUP);
+    await expect.element(constraints).toBeInTheDocument();
+    // The raw class stands alone in its own leaf node -- the fixed "unverified"
+    // label is a separate sibling, never joined into the same string.
+    const classNode = Array.from(
+      constraints.element().querySelectorAll("*"),
+    ).find(
+      (el) => el.children.length === 0 && el.textContent.trim() === "^A-Z",
+    );
+    expect(classNode).toBeTruthy();
+    // The fixed system label marking the class partner-supplied and unverified is
+    // present as its own text, not folded into the class node.
+    expect(constraints.element().textContent).toContain(
+      "partner-supplied, unverified",
+    );
+    expect(classNode!.textContent).not.toContain("unverified");
+    // The corrected framing from the prior rework is preserved: the class is not
+    // dressed up as a plain-language "limited to" guarantee.
+    expect(constraints.element().textContent).not.toContain("limited to");
+  });
+
+  test("no constraints group when no field declares an allowed-character class", async () => {
+    // Strip the only constrained field's class: the whole group is gated on at
+    // least one field carrying one, so it does not render (and no stray heading is
+    // left behind).
+    render({
+      ...terms,
+      linkageFields: [
+        { name: "ssn", type: "ssn" },
+        { name: "first_name", type: "first_name" },
+        { name: "last_name", type: "last_name" },
+        { name: "dob", type: "date_of_birth" },
+      ],
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(group(GROUP).query()).toBeNull();
+    expect(container!.textContent).not.toContain(GROUP);
+  });
+
+  test("the group caption is a heading, so a screen-reader user can jump to it", async () => {
+    render(terms);
+    await expect
+      .element(page.getByRole("heading", { name: GROUP }))
+      .toBeInTheDocument();
   });
 });
 
