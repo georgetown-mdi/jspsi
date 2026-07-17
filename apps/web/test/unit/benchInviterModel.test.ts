@@ -586,7 +586,7 @@ describe("transport chooser copy by deployment", () => {
     const copy = transportChooserCopy(true, true);
     expect(copy.sftpLabel).toBe("Over SFTP, run here");
     expect(copy.sftpDescription).toContain(
-      "SFTP server provisioned on this appliance",
+      "SFTP server provisioned on this machine",
     );
     expect(copy.capabilityNote).toBe(
       "This deployment runs live, shared-directory, and SFTP exchanges here.",

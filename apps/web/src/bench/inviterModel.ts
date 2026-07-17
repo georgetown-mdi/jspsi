@@ -142,7 +142,7 @@ export function transportChooserCopy(
     ? {
         sftpLabel: "Over SFTP, run here",
         sftpDescription:
-          "Runs the exchange here through an SFTP server provisioned on this appliance. Your partner accepts with the same invitation code.",
+          "Runs the exchange here through an SFTP server provisioned on this machine. Your partner accepts with the same invitation code.",
       }
     : {
         sftpLabel: "Over SFTP, run by the psilink command-line tool",

@@ -164,7 +164,7 @@ export function ReviewCreateSection({
           {transport === "sftp" && sftpServerJob && (
             <NativeSelect
               label="SFTP server"
-              description="Provisioned on this appliance. Connection details and credentials stay on the appliance; the invitation carries only where to meet."
+              description="Provisioned on this machine. Connection details and credentials stay on this machine; the invitation carries only where to meet."
               value={sftpRemoteName ?? ""}
               data={sftpRemotes.map((remote) => ({
                 value: remote.name,
