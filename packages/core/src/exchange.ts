@@ -140,7 +140,7 @@ export interface PreparedExchange {
  * mint -- is refused, not left to each client to clamp. This is the run-side half
  * the record-integrity guarantee rests on; a pure record-side clamp would keep the
  * record honest but silently ignore an operator's stated intent to disclose only a
- * count, so the run refuses instead (item 208363104).
+ * count, so the run refuses instead.
  *
  * The guard ALLOWLISTS `psi` rather than denylisting `psi-c`: only the one
  * implemented, identifier-revealing algorithm proceeds, so any algorithm later
@@ -154,7 +154,7 @@ export interface PreparedExchange {
  * When a real count-only run path lands, REPLACE this refusal with it and ungate
  * the client-side gates in the same change -- flipping `APPLIED_SETTINGS.psiC`
  * alone is not sufficient while this refusal stands. The full ungate checklist is
- * tracked on the product board (item 208371871, "Implement count-only PSI").
+ * tracked on the product board under "Implement count-only PSI".
  *
  * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`: on the
  * accept side the algorithm is adopted verbatim from the partner's invitation
@@ -534,8 +534,7 @@ export interface RunExchangeOptions {
    * thread (the default, and what the browser uses). The CLI supplies a factory
    * that spawns a `worker_threads` worker so the masking runs off the
    * event-loop-owning thread, keeping it responsive for the SFTP heartbeat and
-   * timers; the returned engine is disposed when the PSI phase ends (board item
-   * 208035324).
+   * timers; the returned engine is disposed when the PSI phase ends.
    */
   psiEngineFactory?: (role: "starter" | "joiner", id: string) => PsiEngine;
   /**
@@ -567,7 +566,7 @@ export interface RunExchangeOptions {
   /**
    * This party's observed SFTP host key (fingerprint + key type), advertised in
    * the post-handshake terms exchange so the two parties can reconcile their
-   * independent views of the server's identity (201058119). Pass it ONLY on the
+   * independent views of the server's identity. Pass it ONLY on the
    * authenticated path -- the value is unforgeable only because it rides the
    * AEAD-wrapped terms exchange, so a caller threading it over an unauthenticated
    * channel would defeat the check. `undefined` (the default) advertises
@@ -856,7 +855,7 @@ export async function runExchange(
     // terminates its worker, so a ref'd worker handle can never hold the process open
     // at teardown. If the constructor threw before the participant took ownership,
     // dispose the bare injected engine so the worker psiEngineFactory already spawned
-    // is still terminated, never orphaned (board item 208035324).
+    // is still terminated, never orphaned.
     if (participant !== undefined) participant.dispose();
     else engine?.dispose();
   }

@@ -47,10 +47,10 @@ const PEERJS_SIGNALING_PATH = "/api/";
 /**
  * Route the deep-link targets: the acceptor's accept/reject consent screen. The
  * route itself -- decode, linkage-terms review, and the derived-id rendezvous --
- * is built by the web rendezvous task (item 196035727); this module only
+ * is built by the accept route; this module only
  * constructs a URL that points at it. The token rides in the URL fragment (see
  * {@link deepLinkFor}), so the contract this constant encodes is "path plus
- * fragment", which 196035727 must read in lockstep.
+ * fragment", which the accept route must read in lockstep.
  */
 export const ACCEPT_ROUTE_PATH = "/accept";
 

@@ -526,8 +526,8 @@ function normalizeText(value: string): string {
  * `checkValueConstraints` flags nothing for it; it never affects matching), but its
  * canonical form differs from an absent key, so the faithful import round-trip preserves
  * it verbatim for a field whose type has no default constraint rather than dropping it --
- * which would move the agreement hash and (before this) trip item 203437315's
- * refuse-on-import guard. See {@link reconcileImportedFields}. */
+ * which would move the agreement hash and trip the refuse-on-import guard.
+ * See {@link reconcileImportedFields}. */
 function isEmptyConstraints(constraints: unknown): boolean {
   return (
     typeof constraints === "object" &&

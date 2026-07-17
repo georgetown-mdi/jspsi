@@ -602,7 +602,7 @@ export function diffLinkageTerms(
   //
   // Only CanonicalEncodingError is softened to a warning. nfcDeep's own depth
   // guard can also throw NestingDepthExceededError, and that is deliberately left
-  // to propagate as the terminal exit-64 usage error item 202775336 established
+  // to propagate as the terminal exit-64 usage error established
   // for a pathological token -- a too-deep structure is rejected, not
   // reconciled-and-deferred the way an un-encodable value is. Both sides are now
   // depth-bounded upstream (the invitation's params at decode, the config at

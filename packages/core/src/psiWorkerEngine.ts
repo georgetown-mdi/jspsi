@@ -3,7 +3,7 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import { InProcessPsiEngine, type PsiEngine } from "./psiEngine";
 import type { Config } from "./types";
 
-// The runtime-agnostic PSI worker seam (board item 208035324). It moves the
+// The runtime-agnostic PSI worker seam. It moves the
 // blocking elliptic-curve masking off the thread that owns the network transport
 // and the event loop, so a long masking call no longer starves keepalives, timers,
 // or (in the browser) the UI. The host side ({@link WorkerPsiEngine}) is a

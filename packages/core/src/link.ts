@@ -76,7 +76,7 @@ function getUnidentifiedIndices(
 // recur, the recurring ones are deleted from the map; Map iteration is insertion
 // order and delete preserves the order of the survivors, so the first-appearance
 // order callers depend on is unchanged. This trims psilink's own per-key
-// reconstruction churn (board item 206377899); it is a minor slice of the
+// reconstruction churn; it is a minor slice of the
 // single-pass receiver's transient peak, which is dominated by the per-element
 // JS<->native boundary marshalling that the GC relief in linkViaSinglePassPSI
 // collects.
@@ -331,8 +331,8 @@ function singlePassOverCapMessage(
 // binding layer reached through createClientRequest/computeValueMatches/
 // createServerSetup -- not by the WebAssembly linear heap (a flat ~16 MB at
 // D = 14,000) or by retained JS (a ~20 MB live floor); collecting at the phase
-// boundaries recovers it (board item 206377899; the measured sizes, methodology,
-// and breakdown are in docs/spec/PROTOCOL.md). A no-op
+// boundaries recovers it (the measured sizes, methodology, and breakdown are in
+// docs/spec/PROTOCOL.md). A no-op
 // unless the runtime exposes a global gc: the CLI launches Node with --expose-gc
 // (the Dockerfile entrypoint and the apps/cli dev script), so it gets the relief;
 // a browser never exposes gc, so the web receiver does not, and its ceiling rests

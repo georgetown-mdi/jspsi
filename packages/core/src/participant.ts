@@ -189,7 +189,7 @@ export class PSIParticipant {
     // built from `library` -- today's behavior, with the masking running on the
     // calling thread. The CLI injects a worker-backed engine so the masking runs
     // off the event-loop-owning thread; that engine holds the key objects in its
-    // worker, so `library` is used only to build the default (board item 208035324).
+    // worker, so `library` is used only to build the default.
     engine?: PsiEngine,
   ) {
     this.id = id;

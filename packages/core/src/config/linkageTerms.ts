@@ -55,7 +55,7 @@ import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
 // leaves an over-count params value verbatim (parseLinkageTerms passes its bound
 // to camelizeKeys) instead of rewriting it, and the schema's refine rejects it
 // before the per-key record stage, so the over-count record is counted but never
-// rewritten or per-key-validated (item 202722105). Legitimate sizes vary -- a
+// rewritten or per-key-validated. Legitimate sizes vary -- a
 // denylist holds hundreds of values, hence the most generous bound
 // (MAX_EXCLUDE_ENTRIES) -- but each bound is far above any real config and far
 // below the RangeError thresholds. The `params` VALUE content is otherwise
@@ -299,9 +299,6 @@ const OutputSchema: z.ZodType<Output> = z.object({
 });
 
 // --- Linkage fields ----------------------------------------------------------
-// TODO:
-// - Semantic type enumeration is incomplete.
-// - Add a generic type.
 
 /** Constraints on name fields. */
 interface NameConstraints {
@@ -547,7 +544,7 @@ const TransformStepBaseSchema = z.object({
   // (parseLinkageTerms) is short-circuited for the same over-count record by the
   // same bound, so the record is rewritten by neither pass before this rejection.
   // The pipe keeps the post-cap `invalid_key` path -- and its parse-error
-  // sanitization (item 202554679) -- intact for an in-range over-long key.
+  // sanitization -- intact for an in-range over-long key.
   params: z
     .unknown()
     .refine(
@@ -1163,7 +1160,7 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
  * {@link camelizeKeys}). Only `transform.params` is partner-controlled and
  * key-count-bounded, so an over-count params record is handed to the schema --
  * whose own key-count refine rejects it -- without the multi-second snake->camel
- * rewrite a pathological-count payload would otherwise incur (item 202722105):
+ * rewrite a pathological-count payload would otherwise incur:
  * the pre-pass counts its keys but does not rewrite them. The bound matches
  * {@link MAX_PARAMS_ENTRIES}, so any record the pre-pass leaves verbatim here is
  * one the schema also rejects.
@@ -1536,7 +1533,7 @@ export function validateCompatibility(
   //   exactly these columns": the partner's `send` must match it byte-for-byte or
   //   the exchange aborts -- the strict mirror, unchanged. This is the recurring /
   //   loaded-config case, where both parties carry an agreed payload. An explicit
-  //   empty `receive: []` is strict BY INTENT (item 203599248): it asserts "the
+  //   empty `receive: []` is strict BY INTENT: it asserts "the
   //   partner sends nothing," distinct from an absent `receive`, so a partner that
   //   discloses any column fails this check. Empty-is-strict is chosen here to agree
   //   with the received-payload runtime lock-in -- an empty committed set

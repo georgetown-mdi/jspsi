@@ -12,8 +12,8 @@
  * object by the time it reaches this check.
  *
  * Its value is being the CHEAPEST of the O(n) passes over a pathological-count
- * partner record (a `transform.params` map of millions of keys, board item
- * 202722105): the boolean it returns lets the parse reject the record while
+ * partner record (a `transform.params` map of millions of keys): the boolean it
+ * returns lets the parse reject the record while
  * SKIPPING the two far more expensive O(n) passes the record would otherwise
  * incur -- the snake->camel camelize rebuild and the permissive Zod record
  * stage's per-key schema validation -- so the multi-second burn is cut to roughly
