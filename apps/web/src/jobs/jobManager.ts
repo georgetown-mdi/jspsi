@@ -537,15 +537,19 @@ export class JobManager {
     this.clearCancelTimers(record);
     this.releaseSftpRemoteForRecord(record);
 
-    if (state.outcome === "succeeded") record.status = "succeeded";
-    else if (state.outcome === "cancelled") record.status = "cancelled";
-    else record.status = "failed";
-
+    // An already-emitted terminal is authoritative: a job failed on buffer
+    // overflow signals SIGKILL, and if the child's own clean exit is observed
+    // before that kill lands, this exit outcome must not overwrite the failed
+    // status the overflow already committed.
     if (record.terminalEmitted) {
       record.terminalAt = record.terminalAt ?? Date.now();
       this.scheduleEviction(record);
       return;
     }
+
+    if (state.outcome === "succeeded") record.status = "succeeded";
+    else if (state.outcome === "cancelled") record.status = "cancelled";
+    else record.status = "failed";
 
     if (state.outcome === "cancelled") {
       this.synthesizeTerminal(record, {

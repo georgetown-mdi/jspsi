@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import * as cliDriver from "@jobs/cliDriver";
 import {
   JobManager,
   SftpRemoteBusyError,
@@ -24,6 +25,7 @@ import {
 } from "../utils/jobFixtures";
 
 import type { BufferedEvent, JobRecord } from "@jobs/jobManager";
+import type { CliDriverHandlers } from "@jobs/cliDriver";
 import type { JobSftpRemotesTable } from "@jobs/sftpRemotes";
 
 vi.mock("@jobs/workdir", { spy: true });
@@ -260,6 +262,48 @@ describe("event cap fails the job", () => {
     const terminal = record.events[record.events.length - 1].event;
     expect(terminal.type).toBe("error");
     expect(String(terminal.message)).toContain("buffer cap");
+  });
+
+  test("a clean child exit after overflow does not revert the failed status", async () => {
+    // The overflow fails the job and signals SIGKILL, but the exit reconciliation
+    // races that kill: if the child's own exit-0 close is observed first, the
+    // succeeded outcome must not overwrite the failed status the overflow set. The
+    // spawn is stubbed so both edges fire in the losing order with no timing luck.
+    let handlers!: CliDriverHandlers;
+    const spy = vi
+      .spyOn(cliDriver, "spawnExchangeJob")
+      .mockImplementation((args) => {
+        handlers = args.handlers;
+        return { signal: () => true, isRunning: () => true };
+      });
+
+    const root = tempDataRoot("overflow-exit-race");
+    roots.push(root);
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      eventBufferCap: 3,
+    });
+    managers.push(manager);
+
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    for (let i = 0; i < 5; i++)
+      handlers.onEvent({
+        v: 1,
+        type: "stage",
+        id: `s${i}`,
+        label: `stage ${i}`,
+      });
+    expect(record.status).toBe("failed");
+
+    handlers.onTerminal({ outcome: "succeeded", exitCode: 0, signal: null });
+    expect(record.status).toBe("failed");
+    const terminal = record.events[record.events.length - 1].event;
+    expect(terminal.type).toBe("error");
+    expect(String(terminal.message)).toContain("buffer cap");
+
+    spy.mockRestore();
   });
 });
 
