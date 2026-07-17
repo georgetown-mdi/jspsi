@@ -295,8 +295,8 @@ describe("review and create", () => {
     expect(byLabel.get("Matching on")?.value).toMatch(
       /^\d+ keys?, tried in order$/,
     );
-    expect(byLabel.get("Invitation lifetime")?.value).toBe("1 day");
-    expect(byLabel.get("Invitation lifetime")?.setAbove).toBe(true);
+    expect(byLabel.get("Invitation duration")?.value).toBe("1 day");
+    expect(byLabel.get("Invitation duration")?.setAbove).toBe(true);
     expect(byLabel.get("Results go to")?.value).toBe("You and your partner");
     expect(byLabel.get("How it runs")?.value).toBe("Live, in this browser");
   });

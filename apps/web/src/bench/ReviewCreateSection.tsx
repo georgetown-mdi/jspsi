@@ -101,7 +101,7 @@ export function ReviewCreateSection({
       <p className={styles.eyebrow}>Step 3 of 3</p>
       <h1 tabIndex={-1}>Review &amp; create</h1>
       <NativeSelect
-        label="Invitation lifetime"
+        label="Invitation duration"
         description="How long this invitation can be accepted before it expires."
         value={String(editor.draft.lifetimeSeconds)}
         data={LIFETIME_CHOICES.map((choice) => ({

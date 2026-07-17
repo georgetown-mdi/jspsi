@@ -1058,7 +1058,7 @@ export function answersRows(
       changeTarget: "agreement",
     },
     {
-      label: "Invitation lifetime",
+      label: "Invitation duration",
       value: lifetimeNoun(editor.draft.lifetimeSeconds),
       setAbove: true,
     },
