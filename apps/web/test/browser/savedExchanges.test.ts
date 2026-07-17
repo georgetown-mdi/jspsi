@@ -135,7 +135,7 @@ describe("home route: conditional on a stored exchange existing", () => {
     // actions, not the list's designed empty state.
     await expect
       .element(
-        page.getByRole("heading", { name: "Set up a recurring exchange" }),
+        page.getByRole("heading", { name: "Invite someone to exchange data" }),
       )
       .toBeInTheDocument();
     await expect

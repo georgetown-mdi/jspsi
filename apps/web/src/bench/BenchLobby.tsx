@@ -11,8 +11,8 @@ import { downloadSampleCsvs } from "./sampleData";
 import styles from "./bench.module.css";
 
 /**
- * The quick path's screen: two primary actions side by side -- set up a one-off
- * exchange, or accept an invitation you were sent -- above the standing how-it-works
+ * The quick path's screen: two primary actions side by side -- invite someone to a
+ * one-off exchange, or accept an invitation you were sent -- above the standing how-it-works
  * explanation. Verifying a receipt is a secondary action, given as an inline text
  * link below the two cards rather than equal billing. It has its own route at
  * `/quick` and is also the home route's first-run landing (an empty or
@@ -69,7 +69,7 @@ export function BenchLobby() {
         </VisuallyHidden>
         <div className={styles.lobbyActions}>
           <div className={styles.actionCard}>
-            <h3>Set up a recurring exchange</h3>
+            <h3>Invite someone to exchange data</h3>
             <p className={`${styles.small} ${styles.sub}`}>
               Choose a file, confirm what you disclose, and share an invitation.
               Default terms come from your file; most exchanges need nothing
@@ -77,7 +77,7 @@ export function BenchLobby() {
             </p>
             <p>
               <Button component={Link} to="/exchange">
-                Set up a recurring exchange
+                Create an invitation
               </Button>
             </p>
           </div>
