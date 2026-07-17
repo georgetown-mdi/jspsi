@@ -371,7 +371,12 @@ export function DeleteExchangeButton({
           <Button variant="default" onClick={() => setConfirming(false)}>
             Cancel
           </Button>
-          <Button color="red" loading={deleting} onClick={confirmDelete}>
+          <Button
+            color="red"
+            variant="light"
+            loading={deleting}
+            onClick={confirmDelete}
+          >
             Delete
           </Button>
         </div>
