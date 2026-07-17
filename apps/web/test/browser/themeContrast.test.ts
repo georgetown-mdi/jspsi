@@ -339,7 +339,7 @@ describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
         createElement(
           LinkRenderedButton,
           { component: "a", href: "/exchange" },
-          "Set up a recurring exchange",
+          "Create an invitation",
         ),
       ),
     );
