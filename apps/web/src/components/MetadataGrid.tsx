@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { Select, Stack, Table, Text, VisuallyHidden } from "@mantine/core";
 
@@ -16,6 +16,8 @@ import {
 } from "@psi/metadataEditing";
 
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
+
+import type { SelectProps } from "@mantine/core";
 
 import type { Metadata, SemanticType } from "@psilink/core";
 
@@ -37,6 +39,31 @@ const ANNOUNCE_DEBOUNCE_MS = 600;
  * announcement so the two cannot drift. */
 const SINGLE_IDENTIFIER_MESSAGE =
   "Only one column can be the record identifier. Choose a single identifier.";
+
+/**
+ * The error-association props for a Type control that is one of the offenders in a
+ * single-identifier conflict: `aria-invalid` as the control-level error signal and
+ * `aria-describedby` anchored to the visible error (`errorId`), so a reader landing
+ * on the control hears the error as its own context.
+ *
+ * `withAria: false` because Mantine's Select otherwise runs its own accessibility
+ * pass over the input, which drives `aria-invalid` off the `error` prop and
+ * `aria-describedby` off the Input.Wrapper context -- overriding the two attributes
+ * set here. Its own docs sanction disabling it for custom accessibility handling.
+ * The `error` prop is not the alternative: it would also paint a red border, an
+ * appearance change this control must not make. `withAria` is a real Input prop
+ * that Select forwards at runtime but omits from its narrower public prop type,
+ * hence the assertion.
+ */
+function conflictTypeControlAria(
+  errorId: string,
+): SelectProps<SemanticType> & { withAria: boolean } {
+  return {
+    "aria-invalid": true,
+    "aria-describedby": errorId,
+    withAria: false,
+  };
+}
 
 /**
  * The shared metadata grid: a real table mapping each input column to a semantic
@@ -120,6 +147,9 @@ export function MetadataGrid({
     applyEdit(setColumnDisclosure(metadata, columnName, choice));
 
   const multipleIdentifiers = hasMultipleIdentifiers(metadata);
+  // The visible error's id, so each conflicting Type control can point its
+  // aria-describedby at it -- useId keeps it unique if two grids mount.
+  const conflictErrorId = useId();
 
   // The conflict announcement is deferred one commit (see useDeferredAnnouncement),
   // so a seed that mounts ALREADY in the two-identifier state is announced as an
@@ -145,6 +175,11 @@ export function MetadataGrid({
         <Table.Tbody>
           {metadata.map((column) => {
             const choices = disclosureChoicesForType(column.type);
+            // Only the identifier-roled columns are the offenders in a
+            // single-identifier conflict, so the control-level error signal
+            // rides exactly those Type controls and clears on every other.
+            const inConflict =
+              multipleIdentifiers && column.role === "identifier";
             return (
               <Table.Tr key={column.name}>
                 <Table.Th scope="row" style={{ fontWeight: 500 }}>
@@ -156,6 +191,9 @@ export function MetadataGrid({
                     value={column.type}
                     allowDeselect={false}
                     aria-label={`Type for column ${column.name}`}
+                    {...(inConflict
+                      ? conflictTypeControlAria(conflictErrorId)
+                      : {})}
                     onChange={(value) =>
                       value !== null && onType(column.name, value)
                     }
@@ -190,9 +228,16 @@ export function MetadataGrid({
           what reaches assistive tech: see the conflictAnnouncement note above for
           why it is deferred. Both read the same message constant so they cannot
           drift; tests query the visible error by its data-testid (the announcement
-          carries the same text, so a getByText would be ambiguous). */}
+          carries the same text, so a getByText would be ambiguous). Its id also
+          anchors the offending Type controls' aria-describedby (see
+          conflictTypeControlAria). */}
       {multipleIdentifiers && (
-        <Text size="sm" c="red" data-testid="identifier-conflict">
+        <Text
+          size="sm"
+          c="red"
+          id={conflictErrorId}
+          data-testid="identifier-conflict"
+        >
           {SINGLE_IDENTIFIER_MESSAGE}
         </Text>
       )}
