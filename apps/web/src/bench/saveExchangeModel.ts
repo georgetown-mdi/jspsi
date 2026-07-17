@@ -76,12 +76,11 @@ export function credentialAlertCopy(transport: CliTransport): string {
         "names only the directory both parties can reach.";
 }
 
-/** The ledger trust-footer copy for a live run. A browser-local run asserts the
- * file never leaves the browser; a server-job run (the console appliance)
- * sends the file to the appliance to run the exchange, so it omits that claim
- * and keeps only the partner-disclosure statement, which holds either way -- an
- * unverified "never uploaded" claim would be false there. The browser-local
- * copy is unchanged from before the console appliance existed. */
+/** The ledger trust-footer copy for a live run. A browser-local run states the
+ * data is encrypted locally before it leaves the machine; a server-job run
+ * (the console appliance) sends the file to the appliance to run the exchange,
+ * so it omits that claim and keeps only the partner-disclosure statement,
+ * which holds either way. */
 export function liveRunLedgerFooter(
   serverJob: boolean,
   hasResult: boolean,
@@ -89,14 +88,14 @@ export function liveRunLedgerFooter(
   if (serverJob)
     return hasResult
       ? "The results above are all your partner received about your data."
-      : "Your partner receives only the fields listed in YOU WILL SEND " +
-          "(above) and only for clients who are in common.";
+      : "Your partner receives only the fields listed under 'you will " +
+          "send' (step 2 above) and only for clients who are in common.";
   return hasResult
     ? "Your file never left this browser. The results above are all your " +
         "partner received about your data."
-    : "Your file stays in this browser. Nothing is uploaded; your partner " +
-        "receives only the fields listed in YOU WILL SEND (above) and only " +
-        "for clients who are in common.";
+    : "Data is encrypted locally before leaving your machine. Your partner " +
+        "receives only the fields listed under 'you will send' (step 2 " +
+        "above) and only for clients who are in common.";
 }
 
 /** The trust-footer copy for the ledger on the save surface. */

@@ -133,11 +133,11 @@ describe("copy is transport-specific", () => {
 });
 
 describe("live-run ledger footer by driver", () => {
-  test("a browser-local run keeps the never-uploaded assurance verbatim", () => {
+  test("a browser-local run keeps the local-encryption assurance verbatim", () => {
     expect(liveRunLedgerFooter(false, false)).toBe(
-      "Your file stays in this browser. Nothing is uploaded; your partner " +
-        "receives only the fields listed in YOU WILL SEND (above) and only " +
-        "for clients who are in common.",
+      "Data is encrypted locally before leaving your machine. Your partner " +
+        "receives only the fields listed under 'you will send' (step 2 " +
+        "above) and only for clients who are in common.",
     );
     expect(liveRunLedgerFooter(false, true)).toBe(
       "Your file never left this browser. The results above are all your " +
@@ -145,15 +145,15 @@ describe("live-run ledger footer by driver", () => {
     );
   });
 
-  test("a server-job run drops the never-uploaded claim (the file is sent to the appliance)", () => {
+  test("a server-job run drops the local-machine claim (the file is sent to the appliance)", () => {
     for (const hasResult of [false, true]) {
       const footer = liveRunLedgerFooter(true, hasResult);
       expect(footer).not.toContain("uploaded");
       expect(footer).not.toContain("never left this browser");
-      expect(footer).not.toContain("stays in this browser");
+      expect(footer).not.toContain("encrypted locally");
     }
     expect(liveRunLedgerFooter(true, false)).toContain(
-      "Your partner receives only the fields listed in YOU WILL SEND",
+      "Your partner receives only the fields listed under 'you will send'",
     );
     expect(liveRunLedgerFooter(true, true)).toContain(
       "all your partner received about your data",
