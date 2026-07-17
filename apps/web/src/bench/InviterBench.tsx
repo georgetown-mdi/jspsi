@@ -1026,7 +1026,7 @@ export function InviterBench() {
             />
             {/* The manage offer is webrtc-only (its record composes a webrtc
                 locator) and is skippable: leaving it untouched keeps the exchange
-                one-time. It stands from the share screen through completion, so
+                one-off. It stands from the share screen through completion, so
                 either party can manage the partnership. The sample demo is
                 excluded: a standing record of synthetic terms armed with a real
                 secret is not a partnership to manage. */}

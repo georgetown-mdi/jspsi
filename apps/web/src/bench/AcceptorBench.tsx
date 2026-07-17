@@ -788,7 +788,7 @@ export function AcceptorBench() {
               withAsterisk
               required
               label="Your name"
-              description="Recorded in your exchange record so your partner can identify you"
+              description="Shown to your partner so they can identify you in this exchange"
               value={acceptorName}
               maxLength={200}
               error={fieldErrors.name}
@@ -982,7 +982,7 @@ export function AcceptorBench() {
             />
             {/* The manage offer is webrtc-only (its record composes a webrtc
                 locator from the invitation's endpoint) and is skippable: leaving
-                it untouched keeps the exchange one-time. It stands from launch
+                it untouched keeps the exchange one-off. It stands from launch
                 through completion, so this party can manage the partnership. */}
             {decode.invitation.endpoint.channel === "webrtc" &&
               launched !== undefined &&
