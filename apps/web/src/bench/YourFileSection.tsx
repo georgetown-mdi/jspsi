@@ -184,13 +184,11 @@ export function YourFileSection({
       )}
       {acquired !== undefined && linkable && (
         <div className={styles.callout}>
-          <p className={styles.calloutLead}>
-            Default terms are ready. Most exchanges need nothing more.
-          </p>
+          <p className={styles.calloutLead}>Using defaults</p>
           <p className={styles.small}>
-            Cleaning, matching keys, and the option of a legal agreement were
-            set from your file&apos;s columns. Customize any of them any time
-            before you create the invitation.
+            Customize data cleaning steps, matching keys, or attach an
+            associated agreement (bottom of right toolbar) before you create the
+            invitation.
           </p>
         </div>
       )}

@@ -477,7 +477,7 @@ describe("inviter bench", () => {
     // ledger fills in while still on step 1: derivation happens at read time.
     await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
     await expect
-      .element(page.getByText("Default terms are ready", { exact: false }))
+      .element(page.getByText("Using defaults", { exact: false }))
       .toBeInTheDocument();
 
     const ledger = () =>
@@ -1063,7 +1063,7 @@ describe("inviter bench", () => {
         .element(page.getByLabelText("Your name"))
         .toHaveValue("Sample County Health Dept");
       await expect
-        .element(page.getByText("Default terms are ready", { exact: false }))
+        .element(page.getByText("Using defaults", { exact: false }))
         .toBeInTheDocument();
       await expect
         .element(
