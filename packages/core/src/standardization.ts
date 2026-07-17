@@ -462,7 +462,6 @@ function phoneticFactory(params: Params): StandardizingFn {
       return result !== "0000" ? result : null;
     };
   }
-  // TODO: metaphone
   throw new Error(`unsupported phonetic algorithm: "${algorithm}"`);
 }
 
@@ -1948,7 +1947,7 @@ export function assessLinkageSatisfiability(
 // companion to validateStandardizationAgainstTerms (which checks only NAMES: that
 // standardization outputs map to declared fields, and that step function names are
 // known). Promoted out of the web workbench so the web's constraint badges and the
-// CLI's prepare-path warnings run ONE implementation (board item 202994324).
+// CLI's prepare-path warnings run ONE implementation.
 // Warn-not-enforce throughout, matching the LinkageField constraint contract ("the
 // application warns if violated but does not enforce them", config/linkageTerms.ts):
 // nothing here throws or rejects a value; each surface decides how to present the

@@ -12,9 +12,8 @@ import { sanitizeErrorForDisplay } from "@psilink/core";
  * command has arrived within the window. A PSI round spends long stretches with no
  * file traffic on the side that is computing rather than polling -- and on weak
  * hardware (old agency laptops) a single round's elliptic-curve masking can run
- * for minutes. With the masking moved off the event-loop-owning thread (the other
- * half of board item 208035324), the timer can finally fire during that stretch;
- * this heartbeat is what fills it.
+ * for minutes. With the masking moved off the event-loop-owning thread, the timer
+ * can finally fire during that stretch; this heartbeat is what fills it.
  *
  * Why a real SFTP command and not an SSH/TCP keepalive: a server keys idleness on
  * the last SFTP protocol REQUEST, not on transport-level traffic, so an SSH
@@ -190,8 +189,7 @@ export class SftpHeartbeat {
     // The heartbeat is a background keepalive, never real work: every terminal
     // path clears it, so unref'ing it only matters when the process is winding
     // down with the timer still armed, where it must not hold the process open
-    // (the deliberately unref'd SFTP-liveness-timer teardown contract, item
-    // 208026498).
+    // (the deliberately unref'd SFTP-liveness-timer teardown contract).
     this.timer.unref();
   }
 

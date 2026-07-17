@@ -17,8 +17,8 @@
 // at the 100 ms default -- is small and stays far under peerTimeoutMs (default 1
 // hour): the peer polls concurrently, so the advertisement only has to land
 // before the peer would otherwise time out, not on the first try. Internal-only
-// constant (not a user-facing config option): this hardens 193901017's
-// documented best-effort floor and changes no detection behavior. See the use
+// constant (not a user-facing config option): this hardens the documented
+// best-effort floor and changes no detection behavior. See the use
 // site in synchronize()'s joiner fast-path.
 /** @internal */
 export const ADVERTISE_HELLO_RETRY_ATTEMPTS = 5;

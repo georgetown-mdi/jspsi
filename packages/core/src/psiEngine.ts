@@ -21,8 +21,8 @@ type DeserializedServerSetup = ReturnType<
  *
  * The whole surface is deliberately bytes-in / bytes-out (or value-list-in): nothing
  * that crosses it is a live library handle, so a worker-hosted implementation can
- * stand behind the same interface without the caller changing (board item
- * 208035324). The one piece of cross-call state -- the joiner's deserialized setup
+ * stand behind the same interface without the caller changing. The one piece of
+ * cross-call state -- the joiner's deserialized setup
  * between {@link receiveServerSetup} and {@link computeAssociationTable} -- lives
  * INSIDE the engine for the same reason: the deserialized setup cannot cross a
  * worker boundary, so the engine holds it rather than handing it back.

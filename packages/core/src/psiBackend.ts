@@ -7,9 +7,9 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 // WebAssembly build; the browser always uses WASM. The native addon wraps the
 // SAME private-join-and-compute P-256 curve and wire format as WASM, so the two
 // interoperate byte-for-byte (the psi-engine-wire-vectors.json fixture pins that
-// contract). Building and shipping the addon is board item 199653275; this
-// selector is the seam it plugs into. Correctness must never depend on the addon
-// being present -- WASM is the default-correct fallback.
+// contract). This selector is the seam the native addon plugs into. Correctness
+// must never depend on the addon being present -- WASM is the default-correct
+// fallback.
 
 /**
  * Which PSI crypto engine {@link loadPsiBackend} resolved: the native N-API

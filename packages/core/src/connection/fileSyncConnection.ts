@@ -465,8 +465,8 @@ const writeMessageHeader = (out: Buffer, type: number, seq: number): void => {
  * (`version || type || seq`), returning a fresh Buffer holding only those bytes.
  * The send path streams this header and the payload as two chunks (see
  * {@link FileSyncConnection.send}) rather than concatenating them into one
- * buffer: prepending the 10-byte header no longer copies the whole payload, so a
- * binary frame holds ~1x its size live rather than ~2x. The on-disk bytes are
+ * buffer, so it never copies the whole payload to prepend the 10-byte header: a
+ * binary frame holds ~1x its size live, not ~2x. The on-disk bytes are
  * identical to {@link serializeFileSyncMessage}'s (`header || payload`); the byte
  * count the filename declares is `MESSAGE_HEADER_BYTES + payload.length`.
  *
@@ -581,9 +581,9 @@ const getDefaultOptions = (): Options => {
 
 export interface FileInfo {
   name: string;
-  // Retained for downstream transport consumers; no longer used by the
-  // rendezvous tiebreaker (see waitForPeer), which orders on UUID alone
-  // because sync tools stamp transfer time rather than creation time.
+  // Kept for downstream transport consumers. The rendezvous tiebreaker (see
+  // waitForPeer) does not read it -- it orders on UUID alone, because sync tools
+  // stamp transfer time rather than creation time.
   modifyTime: number;
   // On-disk byte count, populated by every FileTransportClient.list(). poll()
   // compares it against the declared count encoded in a message filename so a
@@ -781,11 +781,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // The authenticated cross-party abort-marker subsystem (armed post-handshake,
   // cleared with the handshake identity). It owns the abort state (the two
   // role-derived tokens, the captured write inputs, and the write-vs-seal
-  // decision one-shot) that this class used to hold inline; the delegating
-  // members below (armAbort / writeAbortMarker / sealAbort / abortArmed and the
-  // internal close()/poll() seams) forward to it, keeping the connection's
-  // public and test surface unchanged. See ./abortMarker and
-  // docs/spec/CHANNEL_SECURITY.md ("Authenticated abort marker").
+  // decision one-shot); the delegating members below (armAbort / writeAbortMarker
+  // / sealAbort / abortArmed and the internal close()/poll() seams) forward to
+  // it, keeping the connection's public and test surface unchanged. See
+  // ./abortMarker and docs/spec/CHANNEL_SECURITY.md ("Authenticated abort marker").
   private readonly abortMarker: AbortMarkerSubsystem;
 
   // True once armAbort() has run (derived, not stored): only an armed connection

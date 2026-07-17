@@ -965,7 +965,7 @@ export async function runProtocol(
         psiLibrary,
         // Run the PSI masking in a worker thread so a long round keeps the
         // event-loop-owning thread responsive for the SFTP heartbeat and the
-        // liveness timers (board item 208035324). Falls back to in-process when
+        // liveness timers. Falls back to in-process when
         // the bundled worker is absent (dev / tests); see createPsiEngine.
         psiEngineFactory: (role, id) => createPsiEngine(psiLibrary, role, id),
         verbosity,
@@ -987,7 +987,7 @@ export async function runProtocol(
         // path -- where an active MITM could rewrite it to suppress the
         // divergence -- would defeat the check. conn.observedHostKey is itself
         // undefined for a file-drop or the no-pin path, so this is also a no-op
-        // there. (201058119)
+        // there.
         observedHostKey:
           secure !== undefined ? conn.observedHostKey : undefined,
         onStage: (id: string) => {

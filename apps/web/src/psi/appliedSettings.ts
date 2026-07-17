@@ -33,7 +33,7 @@
  * operator who reached such an exchange would have the run aborted regardless of
  * this flag. Each refusal must be replaced by the real run path in the same
  * change. The full psi-c ungate checklist across web, CLI, and core is tracked on
- * the product board (item 208371871, "Implement count-only PSI").
+ * the product board under "Implement count-only PSI".
  */
 export const APPLIED_SETTINGS: {
   readonly psiC: boolean;

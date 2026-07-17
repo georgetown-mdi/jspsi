@@ -389,7 +389,7 @@ export async function loadInputRows(
  * {@link loadInputRows} reads. `init` infers column metadata and linkage fields
  * from the header alone and the date-input format from the DOB column, and never
  * consumes any other row data, so this caps `init`'s peak memory at one parse
- * chunk rather than letting it scale with the input file (board item 206482800).
+ * chunk rather than letting it scale with the input file.
  *
  * The result is shaped exactly as {@link loadInputRows}'s -- `{ rawRows, columns
  * }` -- so it drops straight into {@link buildDataSpec} unchanged, keeping `init`

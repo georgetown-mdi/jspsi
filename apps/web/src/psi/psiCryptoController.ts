@@ -14,8 +14,8 @@ import type {
  * Off-main-thread PSI crypto for the web app: the CPU-bound elliptic-curve masking
  * a PSI round performs runs in a Web Worker the app owns, so the browser tab stays
  * interactive -- UI paints, timers fire, and the WebRTC peer keepalives keep firing
- * -- while a round masks, instead of freezing for the round's duration (board item
- * 209368277, the browser analogue of the CLI's `worker_threads` offload, 208035324).
+ * -- while a round masks, instead of freezing for the round's duration (the browser
+ * analogue of the CLI's `worker_threads` offload).
  *
  * This is the BROWSER SPAWN ADAPTER for the runtime-agnostic PSI worker seam in
  * `@psilink/core`: core's {@link WorkerPsiEngine} turns each crypto call into a

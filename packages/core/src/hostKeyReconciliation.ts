@@ -12,7 +12,7 @@ import type { PresentedHostKey } from "./connection/fileSyncConnection.js";
  * while the other trusts the real key, is invisible to both until their observed
  * fingerprints are reconciled. This reconciliation rides the authenticated
  * post-handshake terms exchange (see {@link exchangeTerms}), so the advertised
- * value cannot be forged by an unauthenticated party (201058119).
+ * value cannot be forged by an unauthenticated party.
  *
  * Returns `undefined` (no divergence to report) when:
  * - Either side observed no host key. A file-drop mount, the browser/proxy SFTP

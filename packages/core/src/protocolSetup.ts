@@ -34,7 +34,7 @@ const MAX_ABORT_REASONS = 256;
 // The optional `hostKey` advertisement rides the terms exchange so each party
 // advertises the SFTP host key it observed (fingerprint + key type) to the
 // other, for cross-party reconciliation against a one-sided interception
-// (201058119; see reconcileHostKeyFingerprints). Like `save`, it rides the
+// (see reconcileHostKeyFingerprints). Like `save`, it rides the
 // terms exchange rather than a dedicated round-trip because that is the one
 // bidirectional exchange both parties always perform, and -- being inside the
 // authenticated, AEAD-wrapped post-handshake channel -- the advertised value
@@ -135,8 +135,8 @@ export const recordCountField = z
 // exchange and reconciled fail-closed: a partner that advertises anything other
 // than this build's exact version is on an incompatible build, so the exchange
 // aborts with an actionable "run the same version" diagnosis before the linkage
-// rounds begin, rather than failing later with a cryptic frame-parse error
-// (208014743). It rides the terms exchange -- the one bidirectional round-trip
+// rounds begin, rather than failing later with a cryptic frame-parse error.
+// It rides the terms exchange -- the one bidirectional round-trip
 // both parties always perform, carrying `linkageTerms`, `recordCount`, `save`,
 // and `hostKey` beside it -- so the check adds no new round-trip; on the
 // authenticated path it rides the AEAD channel and cannot be forged.
@@ -146,7 +146,7 @@ export const recordCountField = z
 // linkage-terms `version` (compared for equality between the parties' authored
 // values, see docs/spec/PROTOCOL.md) and from the file-sync MESSAGE_ENVELOPE_VERSION
 // byte (the transport frame format, see fileSyncConnection.ts). The reconcile is
-// fail-closed (matching the mode-flag fast-fail precedent, 193901017), NOT
+// fail-closed (matching the mode-flag fast-fail precedent), NOT
 // fail-soft like the host-key advisory: any PRESENT value that is not our exact
 // version aborts -- a different integer, or a garbled/wrong-typed value from a
 // non-conforming or corrupted peer, which is why the field is read as `unknown`
@@ -358,8 +358,8 @@ async function sendAbort(
 // version that reshapes a sibling field (a required `recordCount`, an optional
 // `save`, ...) can no longer throw `termsMessage.parse` before the version is read
 // and thereby bury the actionable "run the same version" message behind a generic
-// "failed to parse". It is the structural form of what was previously only a prose
-// rule -- that every envelope field stay backward-parseable across a bump. Like
+// "failed to parse". It structurally enforces the rule that every envelope field
+// stay backward-parseable across a bump. Like
 // `termsMessage`, `protocolVersion` is read as `unknown`, so a garbled value still
 // reconciles to the named skew rather than a parse error; a non-object frame, or one
 // carrying no version, probes to `undefined` (treated as a legacy peer). `.catch`
@@ -431,7 +431,7 @@ async function reconcileProtocolVersion(
  * the partner's before weighing the terms. Any advertised version other than
  * this build's -- a different integer, or a present-but-garbled value -- fail-
  * closes with {@link PROTOCOL_VERSION_MISMATCH_MESSAGE} (both sides learn the
- * real cause instead of a later cryptic frame-parse error; 208014743); an ABSENT
+ * real cause instead of a later cryptic frame-parse error); an ABSENT
  * one is a legacy build wire-compatible with this one and proceeds. See
  * {@link reconcileProtocolVersion}.
  *
@@ -469,7 +469,7 @@ async function reconcileProtocolVersion(
  * When `localHostKey` is set, this party's observed SFTP host key (fingerprint +
  * key type) is advertised on its terms message and the partner's is read back,
  * returned as {@link TermsExchangeResult.partnerHostKey} for cross-party
- * reconciliation (201058119). Left `undefined` (a party that observed no host
+ * reconciliation. Left `undefined` (a party that observed no host
  * key) it omits the field, so the partner reconciles against nothing and a
  * one-sided absence is not a divergence. Like `save`, it never affects whether
  * the terms are agreed.
@@ -530,7 +530,7 @@ export async function exchangeTerms(
     // any terms are weighed. A version skew is the root cause, so its actionable
     // diagnosis (and the abort it best-effort sends the responder) wins over a
     // record-count, terms, or sibling-field parse difference the mismatch might also
-    // produce (208014743). A legacy or abort frame carries no version, so this is a
+    // produce. A legacy or abort frame carries no version, so this is a
     // no-op there and the abort still surfaces at the decision check below.
     await reconcileProtocolVersion(conn, probeProtocolVersion(rawMsg));
 
@@ -646,7 +646,7 @@ export async function exchangeTerms(
 
     // Fail-closed protocol-version check first: a version skew is the root cause,
     // so its actionable diagnosis wins over a terms parse/compat error the same
-    // mismatch would otherwise surface (208014743). The abort carries localTerms
+    // mismatch would otherwise surface. The abort carries localTerms
     // (the responder's message-2 slot always does).
     await reconcileProtocolVersion(conn, partnerProtocolVersion, localTerms);
 

@@ -82,15 +82,11 @@ const payloadWireSchema = z.discriminatedUnion("hasData", [
       // governance.payloadReceived), and it was bounded that way before it began
       // deriving from the partner's wire message rather than from local terms.
       // Both the `.min(1)` floor and the MAX_NAME_LENGTH ceiling those names
-      // carry are enforced here. The floor was previously omitted -- an empty
-      // partner name was left to RecordPayloadColumnSchema, which rejects it at
-      // record build via the non-fatal guard (skipping the record, not failing the
-      // exchange) -- because an honest sender could emit a `""` column from a
-      // trailing-comma CSV header, and flooring the wire would escalate that
-      // common case into a full exchange failure on the peer. inferMetadata now
-      // rejects an empty name at intake, so an honest sender never emits one: the
-      // floor here can no longer regress an honest exchange, and instead refuses a
-      // partner who hand-crafts `[""]` to suppress this party's record (the
+      // carry are enforced here. The floor is safe against an honest sender
+      // because inferMetadata rejects an empty name at intake, so an honest
+      // sender never emits a `""` column (e.g. from a trailing-comma CSV header):
+      // the floor cannot fail an honest exchange, and instead refuses a partner
+      // who hand-crafts `[""]` to suppress this party's record (the
       // exchange-record `.min(1)` remains the on-disk backstop). This is a
       // per-ELEMENT length check folded into the same single `every` pass, not a
       // count `.max()`, so it caps accumulation at one issue regardless of element

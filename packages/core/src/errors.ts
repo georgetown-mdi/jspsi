@@ -307,8 +307,7 @@ export class TransportOperationStalledError extends UsageError {
  * not depend on catching it by type.
  *
  * It deliberately carries no `psilinkRecoveryHintEmitted` tag and no operator
- * next step: the operator-facing-error audit (board item 199419757) judged it to
- * have none. It is a local teardown signal that almost never reaches the process
+ * next step. It is a local teardown signal that almost never reaches the process
  * exit code (the signal handler owns 130/143 and this rejection is logged and
  * swallowed), so there is no actionable step to surface and nothing for the
  * generic CLI advisory to contradict.

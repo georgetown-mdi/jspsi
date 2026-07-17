@@ -13,7 +13,7 @@ import * as z from "zod";
  * `RangeError: Maximum call stack size exceeded`), or, for a flat array with no
  * such frame, throws `RangeError: Invalid string length` building the error
  * string from the issues (~3.5M elements). Both verified on Zod 4.4.3; the same
- * ordering subtlety the `transform.params` bound handles (board item 202609308).
+ * ordering subtlety the `transform.params` bound handles.
  *
  * The permissive `z.array(z.unknown())` first stage accepts the array without
  * validating elements, the count refine rejects an over-count array with one

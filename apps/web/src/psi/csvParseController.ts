@@ -13,7 +13,7 @@ import { errorFromWorkerEvent } from "./workerEventError";
  * small, interruptible steps rather than one uninterruptible clone proportional to the
  * full result size. That spreads the receive cost -- it does not lower its total -- so
  * the tab stays responsive even receiving a near-cap intake, closing the receive-time
- * stall the single-post hand-off left (the open question #202522668 raised). Everything
+ * stall the single-post hand-off left. Everything
  * else -- a small File, or the Node readable stream the unit tests feed
  * generateInvitation -- parses inline, where a worker's spawn and the streamed hand-off
  * buy nothing.

@@ -45,8 +45,8 @@ const NON_TRUST_KINDS: ReadonlySet<ConnectionErrorKind> = new Set([
  * ordinary case (see docs/SECURITY_DESIGN.md, "Channel security"; only a
  * DTLS-terminating WebSocket relay -- not yet a supported transport -- would
  * flip this to `true`). The 32-byte session key is still derived: it is the
- * fruit of authenticating the peer, and the deferred web-encryption work (board
- * item 195802633) consumes it to key {@link EncryptedMessageConnection} once a
+ * fruit of authenticating the peer, and the deferred web-encryption work
+ * consumes it to key {@link EncryptedMessageConnection} once a
  * relay can force the wrap on. The returned {@link AuthResult} carries the rotated
  * secret unchanged; what a caller does with it is the caller's, not this
  * function's: the one-shot flow discards it (single-use, no key-file persistence
@@ -134,7 +134,7 @@ export async function authenticateExchange(
   // We requested no encryption and expect the peer to do the same, so the
   // transcript-bound decision must be false. If a peer ever requests the
   // application AEAD (a future CLI WebRTC peer, or the deferred web-encryption
-  // work, board item 195802633), running runExchange in cleartext while the peer
+  // work), running runExchange in cleartext while the peer
   // wraps would silently diverge; fail loudly here until that wrap is wired. Only
   // a peer that completed the handshake (so it holds the secret) can set this, so
   // this never fires for an unauthenticated peer. `usage` kind -> the caller's

@@ -469,8 +469,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // ssh2 mints a fresh socket per attempt, so the setting is re-applied to every
     // socket, not just the first. Guarded and non-fatal: TCP_NODELAY is a latency
     // optimization, not a correctness requirement, so a future upstream that drops
-    // the method must degrade to slower-but-correct, not fail to connect. See
-    // board item 199674097.
+    // the method must degrade to slower-but-correct, not fail to connect.
     if (typeof internals.client?.setNoDelay === "function") {
       internals.client.setNoDelay(true);
     } else {
@@ -492,8 +491,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // reruns on each reconnect against a fresh socket, so this re-applies every
     // time. Guarded and non-fatal, exactly like setNoDelay: keepalive is transport
     // hygiene, not a correctness requirement, so an upstream that relocates the
-    // socket must degrade to no-keepalive, not fail to connect. See board item
-    // 208035324.
+    // socket must degrade to no-keepalive, not fail to connect.
     const rawSocket = internals.client?._sock;
     if (typeof rawSocket?.setKeepAlive === "function") {
       rawSocket.setKeepAlive(true, SFTP_TCP_KEEPALIVE_DELAY_MS);

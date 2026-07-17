@@ -2,7 +2,7 @@ import * as z from "zod";
 
 /**
  * Hello payload envelope: the two bilateral mode flags each party advertises at
- * rendezvous (193901017). The peer compares them against its own configuration
+ * rendezvous. The peer compares them against its own configuration
  * at every site where it reads a peer hello and fails fast on a mismatch, so a
  * divergent pairing does not stall silently until the peer timeout.
  *
