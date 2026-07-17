@@ -10,13 +10,13 @@ import { createRoot } from "react-dom/client";
 
 import "@mantine/core/styles.css";
 
-import { MantineProvider } from "@mantine/core";
-
 import {
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
 } from "@psi/managedExchangeRecord";
 import { ManagedExchangeDetail } from "@bench/ManagedExchangeDetail";
+
+import { renderApp } from "./renderApp";
 
 import type {
   ManagedExchangeLastRun,
@@ -85,7 +85,7 @@ function mount(content: ReactNode) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  root.render(createElement(MantineProvider, null, content));
+  root.render(renderApp(content));
 }
 
 afterEach(() => {
@@ -175,9 +175,7 @@ describe("managed exchange detail configuration", () => {
 
     function render() {
       root?.render(
-        createElement(
-          MantineProvider,
-          null,
+        renderApp(
           createElement(ManagedExchangeDetail, {
             record: record("inviter"),
             onSaveLocalFields: () => Promise.resolve(),

@@ -7,9 +7,9 @@ import { page, userEvent } from "vitest/browser";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
-import { MantineProvider } from "@mantine/core";
-
 import { InvitationTerms } from "@components/InvitationTerms";
+
+import { renderApp } from "./renderApp";
 
 import type { Root } from "react-dom/client";
 
@@ -84,9 +84,9 @@ afterEach(() => {
 });
 
 // The single render entry point for every describe block: render InvitationTerms
-// under a MantineProvider with the given terms and any optional props. Each block
-// wraps this thinly for the one or two params it varies. Only props explicitly set
-// are forwarded, so the component sees each optional prop absent (not undefined)
+// under the app provider config with the given terms and any optional props. Each
+// block wraps this thinly for the one or two params it varies. Only props explicitly
+// set are forwarded, so the component sees each optional prop absent (not undefined)
 // exactly as before -- the difference the perspective/outbound gates turn on.
 function renderTerms(
   linkageTerms: LinkageTerms = terms,
@@ -98,9 +98,7 @@ function renderTerms(
   },
 ) {
   root!.render(
-    createElement(
-      MantineProvider,
-      null,
+    renderApp(
       createElement(InvitationTerms, {
         linkageTerms,
         ...(options?.perspective ? { perspective: options.perspective } : {}),
@@ -546,11 +544,7 @@ describe("InvitationTerms: a key disclosure stays mounted but hidden under a red
 
   test("every disclosure's aria-controls resolves to a present, hidden panel while collapsed under reduced motion", async () => {
     root!.render(
-      createElement(
-        MantineProvider,
-        { theme: { respectReducedMotion: true } },
-        createElement(InvitationTerms, { linkageTerms: terms }),
-      ),
+      renderApp(createElement(InvitationTerms, { linkageTerms: terms })),
     );
 
     // The always-mounted-wrapper design for every disclosure. The top-level ones
@@ -601,9 +595,7 @@ describe("InvitationTerms: a key disclosure stays mounted but hidden under a red
     // the Collapse panel (instead of the outer wrapper) would dangle -- assert the
     // wrapper stays present here, the invariant the other disclosures are held to.
     root!.render(
-      createElement(
-        MantineProvider,
-        { theme: { respectReducedMotion: true } },
+      renderApp(
         createElement(InvitationTerms, {
           linkageTerms: terms,
           perspective: "proposing",

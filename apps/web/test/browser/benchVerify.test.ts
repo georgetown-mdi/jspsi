@@ -7,8 +7,6 @@ import { page, userEvent } from "vitest/browser";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
-import { MantineProvider } from "@mantine/core";
-
 import {
   buildExchangeRecord,
   serializeExchangeRecord,
@@ -17,6 +15,8 @@ import {
 
 import { BenchLobby } from "@bench/BenchLobby";
 import { VerifyReceiptBench } from "@bench/VerifyReceiptBench";
+
+import { renderApp } from "./renderApp";
 
 import type {
   AssociationTable,
@@ -106,7 +106,7 @@ function mount(content: ReactNode) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  root.render(createElement(MantineProvider, null, content));
+  root.render(renderApp(content));
 }
 
 // The Mantine Dropzone renders a hidden file input; the page's dropzones appear

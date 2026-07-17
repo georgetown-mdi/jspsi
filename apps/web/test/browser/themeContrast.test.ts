@@ -12,13 +12,10 @@ import {
   Alert,
   Button,
   Checkbox,
-  MantineProvider,
   Text,
   TextInput,
 } from "@mantine/core";
 import { IconCheck, IconCopy } from "@tabler/icons-react";
-
-import { cssVariablesResolver, mantineTheme } from "@theme";
 
 // tokens.css defines the --bench-* custom properties bench.module.css reads
 // (--bench-accent among them); BenchPage.tsx imports it as a side effect in
@@ -26,6 +23,8 @@ import { cssVariablesResolver, mantineTheme } from "@theme";
 // --bench-accent resolves to nothing and masks the rule this test targets.
 import "@bench/tokens.css";
 import benchStyles from "@bench/bench.module.css";
+
+import { renderApp } from "./renderApp";
 
 import type { ComponentType, ReactNode } from "react";
 import type { Root } from "react-dom/client";
@@ -125,17 +124,7 @@ function mount(scheme: "light" | "dark", node: ReactNode) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  root.render(
-    createElement(
-      MantineProvider,
-      // The app root (routes/__root.tsx) configures the provider with BOTH the theme
-      // and the cssVariablesResolver; render under the same config so a resolver
-      // override on a covered surface is exercised here, not only in the idealized
-      // arithmetic of the unit test.
-      { theme: mantineTheme, cssVariablesResolver, forceColorScheme: scheme },
-      node,
-    ),
-  );
+  root.render(renderApp(node, { forceColorScheme: scheme }));
 }
 
 afterEach(() => {

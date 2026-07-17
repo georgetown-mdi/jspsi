@@ -7,9 +7,9 @@ import { page } from "vitest/browser";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
-import { MantineProvider } from "@mantine/core";
-
 import { DisclosureSection } from "@components/DisclosureSection";
+
+import { renderApp } from "./renderApp";
 
 import type { Root } from "react-dom/client";
 
@@ -58,9 +58,7 @@ function setReducedMotion(prefersReduced: boolean) {
 
 function render(open: boolean) {
   root!.render(
-    createElement(
-      MantineProvider,
-      { theme: { respectReducedMotion: true } },
+    renderApp(
       createElement(DisclosureSection, {
         label: LABEL,
         open,

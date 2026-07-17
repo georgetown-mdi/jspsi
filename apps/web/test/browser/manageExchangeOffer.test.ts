@@ -9,9 +9,9 @@ import { createRoot } from "react-dom/client";
 
 import "@mantine/core/styles.css";
 
-import { MantineProvider } from "@mantine/core";
-
 import { ManageExchangeOffer } from "@bench/ManageExchangeOffer";
+
+import { renderApp } from "./renderApp";
 
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
@@ -54,7 +54,7 @@ function mount(content: ReactNode) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  root.render(createElement(MantineProvider, null, content));
+  root.render(renderApp(content));
 }
 
 afterEach(() => {

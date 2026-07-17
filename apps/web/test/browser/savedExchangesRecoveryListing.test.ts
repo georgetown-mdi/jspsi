@@ -10,8 +10,6 @@ import { createRoot } from "react-dom/client";
 
 import "@mantine/core/styles.css";
 
-import { MantineProvider } from "@mantine/core";
-
 import {
   MANAGED_EXCHANGE_LOCAL_STORE_NAME,
   MANAGED_EXCHANGE_STORE_NAME,
@@ -26,6 +24,8 @@ import {
 } from "@psi/managedLocalState";
 import { SavedExchanges } from "@bench/SavedExchanges";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
+
+import { renderApp } from "./renderApp";
 
 import type { NewManagedExchange } from "@psi/managedExchangeRecord";
 import type { ReactNode } from "react";
@@ -121,7 +121,7 @@ function mount(content: ReactNode) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  root.render(createElement(MantineProvider, null, content));
+  root.render(renderApp(content));
 }
 
 beforeEach(async () => {

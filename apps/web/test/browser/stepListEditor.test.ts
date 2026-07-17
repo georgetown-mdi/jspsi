@@ -7,9 +7,9 @@ import { page } from "vitest/browser";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
-import { MantineProvider } from "@mantine/core";
-
 import { StepListEditor } from "@components/StepListEditor";
+
+import { renderApp } from "./renderApp";
 
 import type { EditableStep } from "@components/StepListEditor";
 import type { Root } from "react-dom/client";
@@ -28,7 +28,7 @@ function render(node: ReturnType<typeof createElement>) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  root.render(createElement(MantineProvider, null, node));
+  root.render(renderApp(node));
 }
 
 // The cross-party trust boundary: the token-embedded key-element transform editor

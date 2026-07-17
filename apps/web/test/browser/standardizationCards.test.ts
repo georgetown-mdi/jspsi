@@ -7,13 +7,12 @@ import { page, userEvent } from "vitest/browser";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
-import { MantineProvider } from "@mantine/core";
-
 import { authoredLinkageFields } from "@psilink/core";
 
 import { StandardizationCards } from "@components/StandardizationCards";
 
 import { expandFieldCards } from "./fieldCards";
+import { renderApp } from "./renderApp";
 
 import type { Root } from "react-dom/client";
 
@@ -54,9 +53,7 @@ function render(
   document.body.appendChild(container);
   root = createRoot(container);
   root.render(
-    createElement(
-      MantineProvider,
-      null,
+    renderApp(
       createElement(StandardizationCards, {
         standardization,
         declaredFields: authoredLinkageFields(metadata, standardization),
