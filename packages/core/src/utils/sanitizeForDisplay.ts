@@ -38,8 +38,8 @@ export interface SanitizeForDisplayOptions {
  * doubled so the escaping is unambiguous. This single rule neutralizes the whole
  * threat surface at once -- C0/C1 controls and the ESC that drives ANSI sequences,
  * line breaks usable for log-line spoofing, bidi overrides (RLO/LRO), zero-width
- * characters, and homoglyph/confusable characters (a Cyrillic "a" renders as
- * `а`, not as a Latin "a"). The output is then truncated so its length never
+ * characters, and homoglyph/confusable characters (a Cyrillic `U+0430` renders
+ * identically to a Latin "a"). The output is then truncated so its length never
  * exceeds `maxLength` (plus the marker); see {@link SanitizeForDisplayOptions}.
  *
  * The trade-off is fidelity for safety: legitimate non-ASCII text (accented names,

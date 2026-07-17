@@ -245,7 +245,7 @@ export function assertSharedSecretReadyForHandshake(
  * with the same `sharedSecret`;
  * if they do not, the key-confirmation step will fail and this function throws.
  *
- * IMPORTANT — runtime contract: {@link Authentication}'s `sharedSecret` is typed
+ * IMPORTANT -- runtime contract: {@link Authentication}'s `sharedSecret` is typed
  * as optional only to accommodate parse-time intermediate states (e.g. a
  * configuration file loaded before the key file is injected). By the time
  * this function is invoked, `authentication.sharedSecret` MUST be populated

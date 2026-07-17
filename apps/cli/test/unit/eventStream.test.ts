@@ -78,7 +78,7 @@ function validateEvent(event: unknown): event is StreamEvent {
 // The repo's hostile-value strings: an ANSI/control ESC sequence and a
 // right-to-left override (RLO), mirroring packages/core's sanitize tests.
 const ESC_INJECTION = "\x1b[31mEVIL\x1b[0m";
-const RLO_INJECTION = "user‮EVIL";
+const RLO_INJECTION = "user\u202eEVIL";
 
 // --- Schema conformance: every event type validates, version present ---------
 
@@ -171,7 +171,7 @@ test("the security category is identifiable from the terminal event alone", () =
 test("sanitizes a hostile stage label (partner-authored linkage-key name)", () => {
   const event = buildStagesEvent([{ id: "stage 1 / 1", label: RLO_INJECTION }]);
   const label = event.stages[0].label;
-  expect(label).not.toContain("‮");
+  expect(label).not.toContain("\u202e");
   expect(label).toContain("\\u202e");
 });
 
@@ -184,7 +184,7 @@ test("sanitizes a hostile stage-transition label and id", () => {
 
 test("sanitizes a hostile warning message", () => {
   const event = buildWarningEvent(RLO_INJECTION);
-  expect(event.message).not.toContain("‮");
+  expect(event.message).not.toContain("\u202e");
   expect(event.message).toContain("\\u202e");
 });
 

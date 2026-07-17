@@ -1523,7 +1523,7 @@ test.skipIf(process.platform === "win32")(
     // already says "authentication succeeded and the shared token was rotated,
     // but the updated token could not be saved...". The generic authStarted
     // advisory ("the partner may have already derived...while this side did
-    // not") contradicts this — it understates a definite local rotation.
+    // not") contradicts this -- it understates a definite local rotation.
     // The wrapped error sets `psilinkRecoveryHintEmitted: true` to suppress the
     // generic advisory; this test verifies neither generic hint is logged.
     //
@@ -1938,7 +1938,7 @@ test("SIGINT mid-synchronize exits with 130 and cleans up the hello file (starte
       timeout: 5_000,
     });
 
-    // After cleanup runs the hello file must be gone — otherwise a retry
+    // After cleanup runs the hello file must be gone -- otherwise a retry
     // would trip the "preexisting hello or lock files" guard.
     expect(
       fs.readdirSync(dropDir).filter((f) => f.endsWith("-hello.json")),
@@ -2121,7 +2121,7 @@ test.skipIf(process.platform === "win32")(
     // Start B first so it becomes the responder. As the responder, B's only
     // outgoing key-exchange message (msg2) is consumed by A before B returns from
     // authenticateConnection; by the time B fails at saveKeyFile and doCleanup
-    // runs, all of B's responsible files are already gone — no cleanup race.
+    // runs, all of B's responsible files are already gone -- no cleanup race.
     const bPromise = runProtocol(
       {
         ...dropConfig,
@@ -3065,7 +3065,7 @@ test("a hostile stage label and terms warning reach the human log neutralized", 
   // and column names. Drive both callbacks with the repo's hostile patterns (a
   // bidi override and an ANSI ESC sequence) through a real two-party run and
   // assert the captured stderr lines carry only the visible escapes.
-  const hostileStageId = "user‮EVIL stage";
+  const hostileStageId = "user\u202eEVIL stage";
   const hostileWarning = "column \x1b[31mEVIL\x1b[0m mismatch";
 
   vi.mocked(runExchange).mockImplementationOnce((async (...args: unknown[]) => {
@@ -3101,7 +3101,7 @@ test("a hostile stage label and terms warning reach the human log neutralized", 
 
   const stageLine = mockState.infos.find((m) => m.includes("EVIL stage"));
   expect(stageLine).toBeDefined();
-  expect(stageLine).not.toContain("‮");
+  expect(stageLine).not.toContain("\u202e");
   expect(stageLine).toContain("\\u202e");
 
   const warnLine = mockState.warnings.find((m) =>

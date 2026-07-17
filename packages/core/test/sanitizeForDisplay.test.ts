@@ -41,22 +41,22 @@ describe("sanitizeForDisplay", () => {
   });
 
   test("neutralizes a bidi-override character (RLO)", () => {
-    const out = sanitizeForDisplay("user‮EVIL");
-    expect(out).not.toContain("‮");
+    const out = sanitizeForDisplay("user\u202eEVIL");
+    expect(out).not.toContain("\u202e");
     expect(out).toContain("\\u202e");
   });
 
   test("neutralizes zero-width characters", () => {
-    const out = sanitizeForDisplay("a​b﻿c");
-    expect(out).not.toContain("​");
-    expect(out).not.toContain("﻿");
+    const out = sanitizeForDisplay("a\u200bb\ufeffc");
+    expect(out).not.toContain("\u200b");
+    expect(out).not.toContain("\ufeff");
     expect(out).toBe("a\\u200bb\\ufeffc");
   });
 
   test("neutralizes a homoglyph / confusable (Cyrillic small a)", () => {
     // U+0430 renders identically to ASCII "a" but is a different character.
-    const out = sanitizeForDisplay("cаfe");
-    expect(out).not.toContain("а");
+    const out = sanitizeForDisplay("c\u0430fe");
+    expect(out).not.toContain("\u0430");
     expect(out).toBe("c\\u0430fe");
   });
 

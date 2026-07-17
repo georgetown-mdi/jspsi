@@ -291,10 +291,10 @@ describe("transportOperationStalledError", () => {
   test("neutralizes deceptive Unicode (bidi-override) in the path", () => {
     const err = transportOperationStalledError(
       "file read",
-      "/drop/file‮EVIL.json",
+      "/drop/file\u202eEVIL.json",
       "received no data",
     );
-    expect(err.message).not.toContain("‮");
+    expect(err.message).not.toContain("\u202e");
     expect(err.message).toContain("\\u202e");
   });
 
@@ -302,10 +302,10 @@ describe("transportOperationStalledError", () => {
     // U+0430 (Cyrillic small a) renders identically to ASCII "a".
     const err = transportOperationStalledError(
       "file read",
-      "/drop/cаfe.json",
+      "/drop/c\u0430fe.json",
       "received no data",
     );
-    expect(err.message).not.toContain("а");
+    expect(err.message).not.toContain("\u0430");
     expect(err.message).toContain("\\u0430");
   });
 });

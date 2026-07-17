@@ -73,7 +73,7 @@ export function fromBase64Url(str: string): Uint8Array<ArrayBuffer> {
  * timing, but this is unavoidable for variable-length inputs and is not a
  * concern when comparing fixed-length values (e.g. MACs or session keys).
  * The accumulator is seeded with a length-mismatch flag so that unequal-length
- * inputs always return `false` — without the seed, an input that is a
+ * inputs always return `false` -- without the seed, an input that is a
  * zero-padded prefix of the other would XOR `(undefined??0)` against `0` for
  * the extra iterations, contributing nothing to the accumulator and returning
  * `true` incorrectly.
@@ -97,7 +97,7 @@ export function bytesEqual(
  * and the given `info` string.
  *
  * A zero salt is used deliberately: `info` carries all domain separation, so
- * the salt adds no security.  RFC 5869 §3.1 explicitly permits this when the
+ * the salt adds no security.  RFC 5869 section 3.1 explicitly permits this when the
  * IKM is high-entropy key material, which is always true here (callers pass
  * either a session key or a decoded 32-byte base64url token).
  */

@@ -222,7 +222,7 @@ test("authentication throws for a token containing non-base64url characters", as
 test("authentication throws for a token with valid base64url characters but wrong final character", async () => {
   const mc = fromEventConnection(makeConn());
   // 42 'A's + 'B': all valid base64url characters, but 'B' is not in
-  // [AEIMQUYcgkosw048] — the 16-character set that encodes 4 data bits +
+  // [AEIMQUYcgkosw048] -- the 16-character set that encodes 4 data bits +
   // 2 zero padding bits for a 32-byte value.
   const badToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB";
   await expect(

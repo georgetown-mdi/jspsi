@@ -38,8 +38,8 @@ describe("sanitizeErrorForDisplay", () => {
   });
 
   test("neutralizes deceptive Unicode (bidi override) in the message", () => {
-    const out = sanitizeErrorForDisplay(new Error("user‮EVIL"));
-    expect(out).not.toContain("‮");
+    const out = sanitizeErrorForDisplay(new Error("user\u202eEVIL"));
+    expect(out).not.toContain("\u202e");
     expect(out).toContain("\\u202e");
   });
 

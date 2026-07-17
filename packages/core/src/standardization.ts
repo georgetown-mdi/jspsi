@@ -37,10 +37,10 @@ const logger = getLogger("cleaning");
 /**
  * The result type for a single standardization pipeline or step.
  *
- * - `string` — a single canonical value.
- * - `null` — no valid value; the record is excluded from any linkage key that
+ * - `string` -- a single canonical value.
+ * - `null` -- no valid value; the record is excluded from any linkage key that
  *   references this field.
- * - `Set<string>` — multiple candidate values produced by a fan-out step such
+ * - `Set<string>` -- multiple candidate values produced by a fan-out step such
  *   as `split_on`. Each value generates a separate PSI entry; all entries carry
  *   the original row identifier so that matches resolve back to the source row.
  *   `Set` enforces uniqueness: duplicate values from splitting or subsequent
@@ -416,14 +416,14 @@ function substringFactory(params: Params): StandardizingFn {
   )
     return (_s) => null;
   if (start > 0) {
-    // SQL SUBSTR convention: 1-indexed positive start — startIdx is fixed.
+    // SQL SUBSTR convention: 1-indexed positive start -- startIdx is fixed.
     const startIdx = start - 1;
     return (s) => {
       const result = s.slice(startIdx, startIdx + len);
       return result.length > 0 ? result : null;
     };
   }
-  // Negative start counts from the end — depends on string length at call time.
+  // Negative start counts from the end -- depends on string length at call time.
   return (s) => {
     const startIdx = Math.max(0, s.length + start);
     const result = s.slice(startIdx, startIdx + len);
@@ -592,7 +592,7 @@ function splitOnFactory(params: Params): StandardizingFn {
 // Each entry here must also be given a descriptor in
 // STANDARDIZATION_FUNCTION_DESCRIPTORS below -- its drift test fails CI on a
 // function added here without a descriptor, and vice versa -- and be documented
-// in docs/EXCHANGE_REFERENCE.md § "Available functions", which is a prose
+// in docs/EXCHANGE_REFERENCE.md section "Available functions", which is a prose
 // obligation no test enforces.
 //
 // NFC-comparison contract: any step that matches an authored value, pattern, or

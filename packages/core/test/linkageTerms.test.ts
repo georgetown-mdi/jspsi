@@ -128,7 +128,7 @@ test("accepts a zip_code linkage field referenced by a key", () => {
   }
 });
 
-// --- Cross-field constraint: deduplicate → expectsOutput ---------------------
+// --- Cross-field constraint: deduplicate -> expectsOutput --------------------
 
 test("a missing or non-boolean deduplicate is rejected", () => {
   for (const malformed of [undefined, null, "true", 1, {}, []]) {
@@ -170,7 +170,7 @@ test("deduplicate: false with expectsOutput: false is valid", () => {
   expect(result.success).toBe(true);
 });
 
-// --- Cross-field constraint: expectsOutput: false → no payload.receive -------
+// --- Cross-field constraint: expectsOutput: false -> no payload.receive ------
 
 test("expectsOutput: false with a non-empty payload.receive is invalid", () => {
   // A party that receives no output cannot receive payload columns for matched
@@ -284,7 +284,7 @@ test("a parse error does not echo a partner-supplied received value", () => {
   // 1. For most codes (type mismatch, enum, semver/date format, too_small) the
   //    Zod message reports the expected type/options, never the received value,
   //    so even the RAW `error.message` carries no partner bytes.
-  const evil = "\x1b[31mEVIL\x1b[0m‮";
+  const evil = "\x1b[31mEVIL\x1b[0m\u202e";
   const enumSemver = safeParseLinkageTerms({
     ...base,
     algorithm: evil, // invalid enum
@@ -293,7 +293,7 @@ test("a parse error does not echo a partner-supplied received value", () => {
   expect(enumSemver.success).toBe(false);
   if (!enumSemver.success) {
     expect(enumSemver.error.message).not.toContain("\x1b");
-    expect(enumSemver.error.message).not.toContain("‮");
+    expect(enumSemver.error.message).not.toContain("\u202e");
   }
 
   // 2. The `invalid_key` code on the bounded `transform.params` record key
@@ -303,7 +303,7 @@ test("a parse error does not echo a partner-supplied received value", () => {
   //    schema. The dangerous bytes lead the key (with padding past the bound
   //    after them) so escaping, not the display-length cap, is what neutralizes
   //    them. Assert on the rendered message the exchange actually relays.
-  const evilKey = "\x1b[31m‮" + "x".repeat(MAX_NAME_LENGTH);
+  const evilKey = "\x1b[31m\u202e" + "x".repeat(MAX_NAME_LENGTH);
   const invalidKey = safeParseLinkageTerms({
     ...base,
     linkageKeys: [
@@ -323,10 +323,10 @@ test("a parse error does not echo a partner-supplied received value", () => {
     // The raw dump leaks the bidi override -- this is exactly the gap the
     // source escaping closes. (The ESC byte is JSON-escaped by the dump, but a
     // bidi/zero-width/homoglyph byte is not.)
-    expect(invalidKey.error.message).toContain("‮");
+    expect(invalidKey.error.message).toContain("\u202e");
     const relayed = describeDecodeError(invalidKey.error);
     expect(relayed).not.toContain("\x1b");
-    expect(relayed).not.toContain("‮");
+    expect(relayed).not.toContain("\u202e");
     expect(relayed).toContain("\\x1b");
     expect(relayed).toContain("\\u202e");
   }
@@ -1833,14 +1833,14 @@ test("a partner reference with an ANSI/control sequence is neutralized", () => {
 test("a partner value with bidi-override / zero-width characters is neutralized", () => {
   const { errors } = validateCompatibility(
     withAgreement(termsA, "MOU-001", "Care coordination"),
-    withAgreement(termsB, "MOU-001", "Care​ coordination‮EVIL"),
+    withAgreement(termsB, "MOU-001", "Care\u200b coordination\u202eEVIL"),
   );
   const msg = errors.find((e) =>
     e.includes("legal agreement purpose mismatch"),
   );
   expect(msg).toBeDefined();
-  expect(msg).not.toContain("​");
-  expect(msg).not.toContain("‮");
+  expect(msg).not.toContain("\u200b");
+  expect(msg).not.toContain("\u202e");
   expect(msg).toContain("\\u200b");
   expect(msg).toContain("\\u202e");
 });

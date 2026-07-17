@@ -23,14 +23,14 @@ Provide:
 
 ## Common fields and values
 
-**Status** — the valid options differ by board (the board's field is the source of truth):
+**Status** -- the valid options differ by board (the board's field is the source of truth):
 
 - **Product board (9)**: `"Backlog"`, `"In Progress"`, `"Review"`, `"Done"`
 - **Release & Operations board (10)**: `"Todo"`, `"In Progress"`, `"Done"`
 
-**Title** — any string (will be trimmed)
+**Title** -- any string (will be trimmed)
 
-**Body** — the draft item's body text; supports Markdown
+**Body** -- the draft item's body text; supports Markdown
 
 ## How the skill works
 

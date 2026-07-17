@@ -670,7 +670,7 @@ export interface FileTransportClient {
 /**
  * File-based rendezvous and message-passing connection. Implements the
  * `-hello.json`/`-lock.json` handshake (or the lockless ack-handshake barrier) and
- * `.json` polling protocol over any {@link FileTransportClient} — an SFTP
+ * `.json` polling protocol over any {@link FileTransportClient} -- an SFTP
  * server via {@link SSH2SFTPClientAdapter} or a locally-mounted folder via
  * `LocalFSClient`.
  */
@@ -4443,7 +4443,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         if (++this.consecutiveEnoentCount >= MAX_CONSECUTIVE_ENOENT) {
           // Stop the poller synchronously before emitting so that the
           // finally block does not reschedule another poll. The external
-          // error handler (doCleanup → conn.stop()) is still called and
+          // error handler (doCleanup -> conn.stop()) is still called and
           // is safe when pollerActive is already false.
           this.pollerActive = false;
           this.emit(

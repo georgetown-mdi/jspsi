@@ -86,7 +86,7 @@ test("preparePayload: rows are indexed by associationTable[0]", () => {
 test("preparePayload: identifier column is sent as a plain payload column", () => {
   const result = preparePayload(rawRows, metaWithId, [[0], [0]]);
   if (!result.hasData) throw new Error("expected hasData:true");
-  // patient_id has isPayload:true — it is transmitted, but not specially labeled
+  // patient_id has isPayload:true -- it is transmitted, but not specially labeled
   expect(result.columns).toContain("patient_id");
   expect(result.rowIndices).toEqual([0]);
   expect(result).not.toHaveProperty("identifierColumn");
@@ -1305,9 +1305,9 @@ test("buildOutputTable: maps partner rows correctly when their indices are not i
   // Column 2 is the partner row index (their side of the pairing); the payload
   // value follows.
   expect(rows).toEqual([
-    ["P0", "3", "Q3"], // our row 0 → their row 3 → payload index 2
-    ["P2", "1", "Q1"], // our row 2 → their row 1 → payload index 0
-    ["P4", "2", "Q2"], // our row 4 → their row 2 → payload index 1
+    ["P0", "3", "Q3"], // our row 0 -> their row 3 -> payload index 2
+    ["P2", "1", "Q1"], // our row 2 -> their row 1 -> payload index 0
+    ["P4", "2", "Q2"], // our row 4 -> their row 2 -> payload index 1
   ]);
 });
 

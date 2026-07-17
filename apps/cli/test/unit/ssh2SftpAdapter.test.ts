@@ -724,7 +724,7 @@ describe("createExclusive", () => {
     const err = await adapter
       .createExclusive("/remote/existing.txt")
       .catch((e: unknown) => e);
-    // Same object reference — not re-wrapped.
+    // Same object reference -- not re-wrapped.
     expect(err).toBe(alreadyNormalized);
     expect((err as NodeJS.ErrnoException).code).toBe("EEXIST");
   });
@@ -2361,7 +2361,7 @@ describe("out-of-band client event callbacks", () => {
     // newline. ssh2 reads it straight off the wire onto err.message, so logging
     // it raw would let a hostile server spoof a log line or smuggle a terminal
     // escape into an operator's console or --log-file.
-    eventCallbacks(adapter).error(new Error("\x1b[31mbad‮\nFORGED"));
+    eventCallbacks(adapter).error(new Error("\x1b[31mbad\u202e\nFORGED"));
 
     expect(error).toHaveBeenCalledTimes(1);
     const line = error.mock.calls[0][0] as string;
@@ -2369,7 +2369,7 @@ describe("out-of-band client event callbacks", () => {
     // gone. Teeth: dropping sanitizeForDisplay surfaces the raw bytes here.
     expect(line).toContain("\\x1b[31mbad\\u202e\\x0aFORGED");
     expect(line).not.toContain("\x1b");
-    expect(line).not.toContain("‮");
+    expect(line).not.toContain("\u202e");
     expect(line).not.toContain("\n");
     expect(trace).not.toHaveBeenCalled();
   });
