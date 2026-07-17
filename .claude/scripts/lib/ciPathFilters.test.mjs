@@ -37,13 +37,18 @@ const DEPLOY_WORKFLOW = ".github/workflows/eb_deploy.yaml";
 // explicitly excluded below.
 const GUARDED_ROOTS = ["apps/web", "packages/core"];
 
-// Subtrees the deploy filter omits ON PURPOSE: a change to test sources runs the
-// PR suite but must not trigger a rebuild+redeploy. Allowlisting a directory
-// SUPPRESSES its deploy-coverage check, so an entry here must be a real "this
-// directory does not ship" decision, not a way to mute a failure. The live tests
-// below assert each entry still exists, so a removed/renamed tree cannot rot the
-// list.
-const DEPLOY_EXCLUDED = new Set(["apps/web/test", "packages/core/test"]);
+// Subtrees the deploy filter omits ON PURPOSE: a change to test or dev-tooling
+// sources runs the PR suite but must not trigger a rebuild+redeploy. Allowlisting
+// a directory SUPPRESSES its deploy-coverage check, so an entry here must be a real
+// "this directory does not ship" decision, not a way to mute a failure. The live
+// tests below assert each entry still exists, so a removed/renamed tree cannot rot
+// the list. apps/web/eslint-rules holds lint-time custom rules that never ship in
+// the artifact.
+const DEPLOY_EXCLUDED = new Set([
+  "apps/web/test",
+  "packages/core/test",
+  "apps/web/eslint-rules",
+]);
 
 // Inputs that feed the shipped artifact but live OUTSIDE the guarded roots, so
 // the top-level-dir scan cannot see them. Assert the deploy filter still lists

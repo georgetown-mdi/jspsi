@@ -1,6 +1,7 @@
 // eslint.config.js
 import pluginRouter from "@tanstack/eslint-plugin-router";
 import { tanstackConfig } from "@tanstack/eslint-config";
+import filledPrimaryContrastScope from "./eslint-rules/filled-primary-contrast-scope.mjs";
 
 export default [
   {
@@ -40,7 +41,9 @@ export default [
     // Fail CI on a stray or rule-silencing disable so the tripwire cannot be
     // quietly turned off on a sensitive parse (a bare `eslint .` only warns).
     linterOptions: { reportUnusedDisableDirectives: "error" },
+    plugins: { "filled-primary-contrast": filledPrimaryContrastScope },
     rules: {
+      "filled-primary-contrast/filled-primary-contrast-scope": "error",
       "no-restricted-syntax": [
         "error",
         {
