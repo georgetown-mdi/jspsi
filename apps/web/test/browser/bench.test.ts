@@ -1991,7 +1991,7 @@ describe("inviter bench", () => {
       )
       .toBeInTheDocument();
     expect(ledger.textContent).toContain(
-      "The SFTP server carries only encrypted protocol messages",
+      "Data is encrypted locally before leaving your machine. Your partner receives only the fields listed under 'you will send' (step 2 above) and only for clients who are in common.",
     );
   });
 
