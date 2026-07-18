@@ -2,8 +2,8 @@ import { describe, expect, test } from "vitest";
 
 import {
   ACCEPTOR_SEND_FORWARD_REFERENCE,
-  ACCEPT_UNSUPPORTED_MESSAGE,
   ACCEPT_UNSUPPORTED_TITLE,
+  acceptUnsupportedMessage,
   acceptorConsentName,
   acceptorConsentReady,
   acceptorDoneLedgerRows,
@@ -437,18 +437,20 @@ describe("acceptor legal-agreement display", () => {
 });
 
 describe("applianceRunsAccept", () => {
-  test("the appliance runs a filedrop accept (a server job over the mounted file)", () => {
-    expect(applianceRunsAccept("filedrop")).toBe(true);
-  });
-
   test("the appliance cannot run a webrtc accept (no in-tab exchange yet)", () => {
     expect(applianceRunsAccept("webrtc")).toBe(false);
   });
 
-  test("the unsupported copy names what the appliance CAN run so it is not a dead end", () => {
+  test("the appliance cannot run a filedrop accept (its server job polls a private per-job directory the partner cannot reach)", () => {
+    expect(applianceRunsAccept("filedrop")).toBe(false);
+  });
+
+  test("the unsupported copy points each channel at where it CAN run so it is not a dead end", () => {
     expect(ACCEPT_UNSUPPORTED_TITLE.length).toBeGreaterThan(0);
-    // The body must point the operator at the shared-directory path the appliance
-    // does run, not merely refuse.
-    expect(ACCEPT_UNSUPPORTED_MESSAGE).toContain("shared-directory");
+    // A WebRTC accept needs a browser; the copy points at a web deployment.
+    expect(acceptUnsupportedMessage("webrtc")).toContain("web app");
+    // A file-drop accept runs in the command-line tool, which reaches the partner's
+    // shared directory the appliance cannot.
+    expect(acceptUnsupportedMessage("filedrop")).toContain("command-line tool");
   });
 });

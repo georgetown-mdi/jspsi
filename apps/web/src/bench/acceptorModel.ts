@@ -395,18 +395,21 @@ type AcceptEndpointChannel = AcceptableInvitation["endpoint"]["channel"];
 
 /**
  * Whether the console appliance can carry out an accepted invitation's endpoint
- * itself. The appliance runs a file-drop accept as a server job over its mounted
- * work directory, but has no in-tab WebRTC exchange yet (that awaits the Node WebRTC
- * and proxy interconnectivity work) and holds no file rows in the browser to run one
- * with, so a WebRTC accept cannot run on a console build. Keyed exhaustively off the
- * admitted channel so a widened accept-endpoint union fails to compile until its
- * appliance-runnability is decided -- the allowlist discipline CONTRIBUTING requires
- * for transport branching. Off the console every admitted endpoint runs in the
- * browser, so the caller consults this only on a console build.
+ * itself. Neither admitted channel is runnable on a console build today: a WebRTC
+ * accept has no in-tab exchange (that awaits the Node WebRTC and proxy
+ * interconnectivity work) and holds no file rows in the browser to run one with, and
+ * a file-drop accept's server job polls a private per-job directory the partner
+ * cannot reach -- the invitation's own shared-directory locator is never routed into
+ * the run (that awaits the shared-rendezvous interconnectivity work), so it would
+ * hang rather than rendezvous. Keyed exhaustively off the admitted channel so a
+ * widened accept-endpoint union fails to compile until its appliance-runnability is
+ * decided -- the allowlist discipline CONTRIBUTING requires for transport branching.
+ * Off the console every admitted endpoint runs in the browser, so the caller consults
+ * this only on a console build.
  */
 const APPLIANCE_RUNS_ACCEPT: Record<AcceptEndpointChannel, boolean> = {
   webrtc: false,
-  filedrop: true,
+  filedrop: false,
 };
 
 /** Whether the console appliance can run an accepted invitation's endpoint channel
@@ -416,16 +419,35 @@ export function applianceRunsAccept(channel: AcceptEndpointChannel): boolean {
 }
 
 /** The honest title for a console accept whose endpoint the appliance cannot run
- * today ({@link applianceRunsAccept}), in the inviter chooser's
- * "planned capability for this appliance" register. */
+ * today ({@link applianceRunsAccept}), in the "planned capability for this
+ * appliance" register. */
 export const ACCEPT_UNSUPPORTED_TITLE =
   "This appliance cannot run this exchange type yet";
 
-/** The unsupported-accept body: names what the appliance CAN run (shared-directory
- * exchanges from the mounted work directory) so the operator is not left at a dead
- * end with a doomed run. */
-export const ACCEPT_UNSUPPORTED_MESSAGE =
-  "This invitation runs an in-browser (WebRTC) exchange. This appliance runs " +
-  "shared-directory exchanges from its mounted work directory, and its in-browser " +
-  "exchange support is a planned capability. Ask your partner for a shared-directory " +
-  "invitation to run it on this appliance.";
+/**
+ * The honest unsupported-accept body per admitted channel: each names why the
+ * appliance cannot run the exchange and where the operator CAN run it, so the
+ * operator is not left at a dead end with a doomed run. A WebRTC accept needs a
+ * browser, so it points at a standard web deployment; a file-drop accept runs in
+ * the command-line tool, which reaches the partner's shared directory the appliance
+ * cannot.
+ */
+const ACCEPT_UNSUPPORTED_MESSAGE: Record<AcceptEndpointChannel, string> = {
+  webrtc:
+    "This invitation runs an in-browser (WebRTC) exchange. Running an in-tab " +
+    "exchange on this appliance is a planned capability; until it ships, accept " +
+    "this invitation from a standard psilink web app in your browser.",
+  filedrop:
+    "This invitation runs over a shared directory both parties reach. This " +
+    "appliance runs each exchange in a private working directory your partner " +
+    "cannot reach, so it cannot complete a shared-directory accept yet. Accept it " +
+    "with the psilink command-line tool instead.",
+};
+
+/** The honest unsupported-accept body for an accepted endpoint's channel
+ * ({@link ACCEPT_UNSUPPORTED_MESSAGE}). */
+export function acceptUnsupportedMessage(
+  channel: AcceptEndpointChannel,
+): string {
+  return ACCEPT_UNSUPPORTED_MESSAGE[channel];
+}

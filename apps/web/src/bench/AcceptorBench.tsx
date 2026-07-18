@@ -34,8 +34,8 @@ import {
   ACCEPTOR_COLUMNS_LEDGER_FOOTER,
   ACCEPTOR_DONE_LEDGER_FOOTER,
   ACCEPTOR_LEDGER_FOOTER,
-  ACCEPT_UNSUPPORTED_MESSAGE,
   ACCEPT_UNSUPPORTED_TITLE,
+  acceptUnsupportedMessage,
   acceptorConsentName,
   acceptorConsentReady,
   acceptorDoneLedgerRows,
@@ -180,8 +180,8 @@ function fileSizeLabel(sizeBytes: number): string {
  * then commits it behind the consent gate (parsing it in the browser on the hosted
  * build, or referencing the appliance-profiled mounted file on the console) and
  * hands off to the confirm-columns step. On the console an invitation whose endpoint
- * the appliance cannot run (a WebRTC accept) is stopped at the review step with an
- * honest state before consent or intake.
+ * the appliance cannot run -- no accept channel is appliance-runnable today -- is
+ * stopped at the review step with an honest state before consent or intake.
  *
  * The consent semantics are re-surfaced from the hardened legacy flow, never
  * re-derived: {@link InvitationTerms} renders the full, never-condensed terms at
@@ -270,12 +270,13 @@ export function AcceptorBench() {
     return () => controller.abort();
   }, []);
 
-  // A console accept whose endpoint the appliance cannot run today (a WebRTC
-  // invitation: the appliance has no in-tab exchange yet and holds no file rows in
-  // the browser to run one with). Surfaced at the review step BEFORE consent or
-  // intake, so the operator meets an honest "this appliance cannot run this exchange
-  // type yet" state naming what it CAN run rather than a doomed run. Off the console
-  // every admitted endpoint runs in the browser, so this is always false there.
+  // A console accept whose endpoint the appliance cannot run today. No admitted
+  // channel is runnable on the appliance yet: a WebRTC accept has no in-tab exchange,
+  // and a file-drop accept's server job polls a private per-job directory the partner
+  // cannot reach ({@link applianceRunsAccept}). Surfaced at the review step BEFORE
+  // consent or intake, so the operator meets an honest "this appliance cannot run this
+  // exchange type yet" state naming where it CAN run rather than a doomed run. Off the
+  // console every admitted endpoint runs in the browser, so this is always false there.
   const unsupported =
     consoleBuild &&
     decode.status === "ready" &&
@@ -944,9 +945,10 @@ export function AcceptorBench() {
               headingOrder={1}
               headingRef={termsHeadingRef}
             />
-            {/* The appliance cannot run this endpoint (a WebRTC accept on the
-                console): stop here, before consent or intake, with an honest state
-                naming what the appliance CAN run rather than a doomed run. */}
+            {/* The appliance cannot run this endpoint (no console accept channel
+                runs today): stop here, before consent or intake, with an honest
+                per-channel state naming where the operator CAN run it rather than a
+                doomed run. */}
             {unsupported ? (
               <Alert
                 color="orange"
@@ -956,7 +958,7 @@ export function AcceptorBench() {
                 tabIndex={-1}
                 mt="md"
               >
-                {ACCEPT_UNSUPPORTED_MESSAGE}
+                {acceptUnsupportedMessage(decode.invitation.endpoint.channel)}
               </Alert>
             ) : (
               <div className={styles.workFoot}>
