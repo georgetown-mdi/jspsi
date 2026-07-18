@@ -43,9 +43,11 @@ export function fileAssuranceLine(
 /**
  * The single resolved file-assurance line (or its absence) for this build. The
  * server receives files exactly on the console appliance ({@link isConsoleBuild}),
- * where the browser-only claim no longer holds. All three bench surfaces that
- * show the assurance copy (AcceptorBench, BenchLobby, YourFileSection) render
- * this constant rather than each reading the profile or hardcoding the claim,
- * so the deployment-awareness lives in one place.
+ * where the browser-only claim no longer holds. BenchLobby (which makes no per-file
+ * claim of its own) renders this constant directly; the two mounted-input surfaces
+ * (AcceptorBench, YourFileSection) render it on the hosted build but opt into
+ * {@link APPLIANCE_FILE_ASSURANCE} on the console, where their intake reads the file
+ * from the appliance rather than the browser. The deployment-awareness lives here
+ * rather than in each surface reading the profile or hardcoding the claim.
  */
 export const FILE_ASSURANCE_LINE = fileAssuranceLine(isConsoleBuild());
