@@ -85,6 +85,7 @@ interface StubOptions {
   profile?: unknown;
   profileStatus?: number;
   remotes?: unknown;
+  rendezvous?: unknown;
   coverageStatus?: number;
 }
 
@@ -103,8 +104,6 @@ function stubJobApi(options: StubOptions = {}): {
   const realFetch = window.fetch.bind(window);
   let listing: unknown = options.listing ?? {
     configured: true,
-    totalEntries: 1,
-    truncated: false,
     files: [CLIENTS_FILE],
   };
   let profile: unknown = options.profile ?? CLIENTS_PROFILE;
@@ -141,6 +140,10 @@ function stubJobApi(options: StubOptions = {}): {
         );
       if (url === "/api/jobs/remotes")
         return Promise.resolve(jsonResponse(options.remotes ?? []));
+      if (url === "/api/jobs/rendezvous")
+        return Promise.resolve(
+          jsonResponse(options.rendezvous ?? { configured: false }),
+        );
       if (url === "/api/jobs")
         return Promise.resolve(jsonResponse({ id: "job-7" }, 201));
       if (url === "/api/jobs/job-7/events")
@@ -223,66 +226,22 @@ async function reachReviewCreate() {
 }
 
 describe("console inviter file picker states", () => {
-  test("an unconfigured directory names JOB_INPUT_DIR and the mount", async () => {
-    stubJobApi({
-      listing: {
-        configured: false,
-        totalEntries: 0,
-        truncated: false,
-        files: [],
-      },
-    });
+  test("an empty listing shows the no-usable-files state", async () => {
+    stubJobApi({ listing: { configured: true, files: [] } });
     mount(createElement(InviterBench));
     await expect
-      .element(page.getByText("No work directory is configured"))
-      .toBeInTheDocument();
-    await expect.element(page.getByText("JOB_INPUT_DIR")).toBeInTheDocument();
-  });
-
-  test("an empty directory is distinct from one with only inadmissible entries", async () => {
-    stubJobApi({
-      listing: {
-        configured: true,
-        totalEntries: 0,
-        truncated: false,
-        files: [],
-      },
-    });
-    mount(createElement(InviterBench));
-    await expect
-      .element(page.getByText("The work directory is empty"))
+      .element(
+        page.getByText("No usable files in the work directory", {
+          exact: true,
+        }),
+      )
       .toBeInTheDocument();
   });
 
-  test("entries present but none usable is its own state", async () => {
-    stubJobApi({
-      listing: {
-        configured: true,
-        totalEntries: 3,
-        truncated: false,
-        files: [],
-      },
-    });
-    mount(createElement(InviterBench));
-    await expect
-      .element(page.getByText("No usable files in the work directory"))
-      .toBeInTheDocument();
-  });
-
-  test("a populated, truncated listing shows the rows and the truncation note", async () => {
-    stubJobApi({
-      listing: {
-        configured: true,
-        totalEntries: 600,
-        truncated: true,
-        files: [CLIENTS_FILE],
-      },
-    });
+  test("a populated listing shows the file rows", async () => {
+    stubJobApi({ listing: { configured: true, files: [CLIENTS_FILE] } });
     mount(createElement(InviterBench));
     await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
-    await expect
-      .element(page.getByText("more are present", { exact: false }))
-      .toBeInTheDocument();
   });
 });
 
@@ -313,31 +272,6 @@ describe("console inviter two-stage pick", () => {
       )
       .toBeEnabled();
   });
-
-  test("a listing refresh that finds a changed size/mtime shows the drift notice", async () => {
-    const api = stubJobApi();
-    mount(createElement(InviterBench));
-    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
-    await page.getByRole("button", { name: "Select clients.csv" }).click();
-    await page.getByRole("button", { name: "Use this file" }).click();
-    await expect.element(page.getByText("Selected")).toBeInTheDocument();
-
-    // The file changes on disk (size and mtime), then the operator refreshes.
-    api.setListing({
-      configured: true,
-      totalEntries: 1,
-      truncated: false,
-      files: [
-        { ...CLIENTS_FILE, sizeBytes: 9000, modifiedAt: 1_700_000_999_000 },
-      ],
-    });
-    await page.getByRole("button", { name: "Refresh" }).click();
-    await expect
-      .element(
-        page.getByText("This file changed on disk since you profiled it"),
-      )
-      .toBeInTheDocument();
-  });
 });
 
 describe("console inviter transports and sample data", () => {
@@ -355,10 +289,10 @@ describe("console inviter transports and sample data", () => {
     await reachReviewCreate();
     const browser = page.getByLabelText("Live, in this browser");
     await expect.element(browser).toBeDisabled();
-    // The disabled card names its in-tab exchange as a planned appliance capability
+    // The disabled card names its in-tab exchange as out of scope on the appliance
     // (this phrasing is unique to the Browser card's description).
     await expect
-      .element(page.getByText("planned capability for this appliance"))
+      .element(page.getByText("the public psilink web app's domain"))
       .toBeInTheDocument();
   });
 
@@ -375,8 +309,20 @@ describe("console inviter transports and sample data", () => {
       .toBeInTheDocument();
   });
 
-  test("with no provisioned remotes the default transport is the filedrop save-a-file card", async () => {
-    stubJobApi({ remotes: [] });
+  test("with a rendezvous mount and no remotes the filedrop card runs here by default", async () => {
+    stubJobApi({
+      remotes: [],
+      rendezvous: { configured: true, path: "/mnt/rendezvous" },
+    });
+    mount(createElement(InviterBench));
+    await reachReviewCreate();
+    await expect
+      .element(page.getByLabelText("Over a shared directory, run here"))
+      .toBeChecked();
+  });
+
+  test("with no rendezvous mount the filedrop card is disabled", async () => {
+    stubJobApi({ remotes: [], rendezvous: { configured: false } });
     mount(createElement(InviterBench));
     await reachReviewCreate();
     await expect
@@ -385,7 +331,7 @@ describe("console inviter transports and sample data", () => {
           "Over a shared directory, run by the command-line tool",
         ),
       )
-      .toBeChecked();
+      .toBeDisabled();
   });
 });
 
@@ -443,7 +389,7 @@ describe("console inviter mint and run", () => {
     expect(intent.channel).toBe("sftp");
     expect(intent.remote).toBe("dr_west");
     expect(intent.inputCsv).toBeUndefined();
-    expect(intent.inputFile).toEqual(CLIENTS_FILE);
+    expect(intent.inputFile).toEqual({ name: "clients.csv" });
 
     await vi.waitFor(() =>
       expect(
@@ -471,7 +417,7 @@ describe("console inviter mint and run", () => {
       .toHaveTextContent("Exchange complete");
   });
 
-  test("the coverage sweep posts the mounted-file freshness reference", async () => {
+  test("the coverage sweep posts the mounted-file name only", async () => {
     const api = stubJobApi();
     mount(createElement(InviterBench));
     await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
@@ -480,7 +426,7 @@ describe("console inviter mint and run", () => {
     await expect.element(page.getByText("Selected")).toBeInTheDocument();
 
     // The bench's coverage provider posts to the appliance sweep with the file's
-    // profiled freshness pair (no inline content).
+    // name (the CLI reads it in place; no freshness pair, no inline content).
     await vi.waitFor(() => {
       expect(
         api.captured.some(
@@ -495,8 +441,8 @@ describe("console inviter mint and run", () => {
     );
     const body = JSON.parse(post?.body ?? "{}") as Record<string, unknown>;
     expect(body.name).toBe("clients.csv");
-    expect(body.sizeBytes).toBe(CLIENTS_FILE.sizeBytes);
-    expect(body.modifiedAt).toBe(CLIENTS_FILE.modifiedAt);
+    expect(body.sizeBytes).toBeUndefined();
+    expect(body.modifiedAt).toBeUndefined();
   });
 });
 
@@ -570,31 +516,7 @@ describe("console inviter picker accessibility", () => {
   });
 });
 
-describe("console inviter picker drift and re-profile", () => {
-  test("a removed file is distinct from a changed one and destroys no draft", async () => {
-    const api = stubJobApi();
-    mount(createElement(InviterBench));
-    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
-    await page.getByRole("button", { name: "Select clients.csv" }).click();
-    await page.getByRole("button", { name: "Use this file" }).click();
-    await expect.element(page.getByText("Selected")).toBeInTheDocument();
-
-    // The file vanishes from a COMPLETE listing: removal, not a false "changed".
-    api.setListing({
-      configured: true,
-      totalEntries: 0,
-      truncated: false,
-      files: [],
-    });
-    await page.getByRole("button", { name: "Refresh" }).click();
-    await expect
-      .element(page.getByText("This file is no longer in the work directory"))
-      .toBeInTheDocument();
-    expect(
-      page.getByText("This file changed on disk since you profiled it").query(),
-    ).toBeNull();
-  });
-
+describe("console inviter picker re-profile", () => {
   test("re-profiling with unchanged columns keeps the draft; changed columns reset it", async () => {
     const api = stubJobApi();
     mount(createElement(InviterBench));
