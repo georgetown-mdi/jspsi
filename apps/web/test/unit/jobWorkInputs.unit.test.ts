@@ -249,6 +249,34 @@ describe("profileJobInput", () => {
       UnknownJobInputError,
     );
   });
+
+  test("a symlink swapped in between admission and open is UnknownJobInputError, no fd leak", async () => {
+    const dir = tempDir("open-race");
+    const name = writeFixture(dir);
+    const secret = tempDir("open-race-secret");
+    fs.writeFileSync(path.join(secret, "creds"), "ssn\n999\n");
+
+    const realOpen = fs.openSync;
+    const closeSpy = vi.spyOn(fs, "closeSync");
+    // The genuine race O_NOFOLLOW exists to close: after the admission lstat has
+    // accepted the regular file, swap it for a symlink, then let the REAL open run
+    // -- O_NOFOLLOW makes it throw a genuine ELOOP, which must map to
+    // UnknownJobInputError (the 404 posture) rather than escape as a generic error.
+    vi.spyOn(fs, "openSync").mockImplementationOnce(((
+      filePath: fs.PathLike,
+      flags: number,
+    ) => {
+      fs.rmSync(path.join(dir, name));
+      fs.symlinkSync(path.join(secret, "creds"), path.join(dir, name));
+      return realOpen(filePath, flags);
+    }) as typeof fs.openSync);
+
+    await expect(profileJobInput(dir, name)).rejects.toBeInstanceOf(
+      UnknownJobInputError,
+    );
+    // The open threw before any descriptor existed, so nothing is closed: no leak.
+    expect(closeSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe("coverageJobInput", () => {

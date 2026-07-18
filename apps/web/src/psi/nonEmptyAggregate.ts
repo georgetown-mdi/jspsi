@@ -103,15 +103,17 @@ export interface FieldValueCoverage {
   /** {@link produced} / {@link total} in [0, 1]; 0 when {@link total} is 0. */
   rate: number;
   /**
-   * True when the field's steps are not all valid, so its coverage is not computed.
-   * Two cases reach it: a step left mid-edit (e.g. a `pad_left` with no length yet),
-   * and an in-dialect but over-length regex source (rejected by the length cap).
-   * Both are caught by {@link isStepValid} BEFORE the pipeline is compiled, so a
-   * malformed step never throws at compile and a pathological-length pattern never
-   * reaches the compiler on the (inline, below-threshold) main-thread sweep. Coverage
-   * is then not computable, so it MUST NOT be read as a 0% collapse: the host already
-   * gates launch on a malformed pipeline, and a false alarm would be noise on top of
-   * that step's own inline error.
+   * True when the field's coverage is not computed. Three cases reach it: a step left
+   * mid-edit (e.g. a `pad_left` with no length yet), an in-dialect but over-length
+   * regex source (rejected by the length cap) -- both caught by {@link isStepValid}
+   * BEFORE the pipeline is compiled, so a malformed step never throws at compile and a
+   * pathological-length pattern never reaches the compiler on the (inline,
+   * below-threshold) main-thread sweep -- and a pipeline that compiles yet throws on a
+   * specific row's value, which degrades the field here rather than aborting the
+   * whole sweep (see {@link FieldCoverageAccumulator.add}). Coverage is then not
+   * computable, so it MUST NOT be read as a 0% collapse: the host already gates launch
+   * on a malformed pipeline, and a false alarm would be noise on top of that step's
+   * own inline error.
    */
   unavailable: boolean;
 }
@@ -138,7 +140,9 @@ export interface FieldCoverageAccumulator {
    * Fold one row into every field's tally: for each available field, count the row
    * as produced iff its pipeline yields exactly one matchable key (an empty STRING
    * counts; a dropped null/empty-Set, and a multi-value fan-out Set core's key
-   * iterator excludes, do not). Increments the shared row total.
+   * iterator excludes, do not). Increments the shared row total. A field whose
+   * pipeline THROWS on a row degrades to `unavailable` and is no longer evaluated,
+   * so one bad row never aborts the sweep (nor, server-side, 400s the whole request).
    */
   add: (row: CSVRow) => void;
   /** The per-field coverage after every fed row, in the standardization's order. */
@@ -162,29 +166,41 @@ export function createFieldCoverageAccumulator(
   const fields = standardization.map((transformation) => {
     const steps = transformation.steps ?? [];
     const base = { output: transformation.output, input: transformation.input };
-    if (!steps.every(isStepValid)) return { ...base, field: null, produced: 0 };
-    try {
-      const field = new StandardizedField(
-        transformation.output,
-        transformation.input,
-        steps,
-        [],
-      );
-      return { ...base, field, produced: 0 };
-    } catch {
-      return { ...base, field: null as StandardizedField | null, produced: 0 };
+    let field: StandardizedField | null = null;
+    if (steps.every(isStepValid)) {
+      try {
+        field = new StandardizedField(
+          transformation.output,
+          transformation.input,
+          steps,
+          [],
+        );
+      } catch {
+        field = null;
+      }
     }
+    return { ...base, field, produced: 0 };
   });
 
   let total = 0;
   return {
     add(row: CSVRow): void {
       total++;
-      for (const entry of fields)
-        // One matchable key iff the value set is exactly one value -- see
-        // FieldValueCoverage.produced.
-        if (entry.field !== null && entry.field.evaluateRow(row).length === 1)
-          entry.produced++;
+      for (const entry of fields) {
+        if (entry.field === null) continue;
+        // A step that passes the validity gate and compiles can still throw on a
+        // specific row's value. Degrade that field to unavailable (and stop
+        // evaluating it) rather than aborting the whole sweep, matching the old
+        // whole-file computeFieldCoverage: server-side one bad row would otherwise
+        // 400 the entire coverage request. One matchable key iff the value set is
+        // exactly one value -- see FieldValueCoverage.produced.
+        try {
+          if (entry.field.evaluateRow(row).length === 1) entry.produced++;
+        } catch {
+          entry.field = null;
+          entry.produced = 0;
+        }
+      }
     },
     result(): Array<FieldValueCoverage> {
       return fields.map((entry) => ({

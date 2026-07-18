@@ -216,6 +216,13 @@ interface OpenedInput {
   modifiedAt: number;
 }
 
+/** Open-time errno codes that are indistinguishable from an unknown name to the
+ * client: a symlink swapped in after the admission lstat (`ELOOP`, the exact race
+ * `O_NOFOLLOW` exists to close), a file that vanished (`ENOENT`), or one made
+ * unreadable (`EACCES`). Each maps to {@link UnknownJobInputError} (empty-bodied
+ * 404, name never echoed), never a generic error. */
+const UNKNOWN_INPUT_OPEN_CODES = new Set(["ELOOP", "ENOENT", "EACCES"]);
+
 /**
  * Open an admitted input for reading, closing the symlink-swap and file-swap TOCTOU
  * windows. Re-runs the admission listing and requires `name` to match an admitted
@@ -223,7 +230,11 @@ interface OpenedInput {
  * enumerated), then `open(join(root, name), O_RDONLY | O_NOFOLLOW)` and `fstat`,
  * requiring `(dev, ino)` to equal the admission lstat. A name that is not admitted,
  * or an inode that no longer matches, is an {@link UnknownJobInputError}; the fd is
- * closed on any post-open failure so no descriptor leaks.
+ * closed on any post-open failure so no descriptor leaks. An open that fails on a
+ * post-admission race ({@link UNKNOWN_INPUT_OPEN_CODES}: the swapped-in symlink's
+ * `ELOOP`, a vanished file's `ENOENT`, an unreadable file's `EACCES`) is mapped to
+ * the same {@link UnknownJobInputError} rather than escaping as a generic error that
+ * the routes would surface as a 400.
  *
  * `O_NOFOLLOW` protects only the FINAL path component, and the root's realpath was
  * resolved once at boot; a post-boot remount or replacement of an intermediate
@@ -234,10 +245,18 @@ function openAdmittedInput(resolvedDir: string, name: string): OpenedInput {
   const entry = admitted.find((candidate) => candidate.name === name);
   if (entry === undefined) throw new UnknownJobInputError();
   const filePath = path.join(resolvedDir, name);
-  const fd = fs.openSync(
-    filePath,
-    fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW,
-  );
+  let fd: number;
+  try {
+    fd = fs.openSync(filePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  } catch (error) {
+    const code =
+      error instanceof Error && "code" in error
+        ? (error as NodeJS.ErrnoException).code
+        : undefined;
+    if (code !== undefined && UNKNOWN_INPUT_OPEN_CODES.has(code))
+      throw new UnknownJobInputError();
+    throw error;
+  }
   try {
     const stat = fs.fstatSync(fd);
     if (stat.dev !== entry.dev || stat.ino !== entry.ino)
@@ -512,34 +531,45 @@ export function logJobInputDirBoot(
 }
 
 /**
- * Whether every standardization step's pattern/delimiter source stays within
+ * The standardization functions whose named param is compiled to a linear-time
+ * regex at pipeline construction (`compileLinearRegex` in core's
+ * standardization.ts), paired with that param's camelCase name. These are the only
+ * sources whose LENGTH drives the super-linear RE2 compile this route bounds. A
+ * plain-string param -- coalesce's `default`, null_if's `value`/`values` -- is never
+ * compiled and is unbounded on every other path (core's schema, the browser
+ * preview, the job-create intent), so capping it here would 400 a pipeline that runs
+ * fine everywhere else. `parse_date`'s format param also compiles, but the shared
+ * coverage accumulator already gates every field through `isStepValid`, which bounds
+ * that format at its own cap before any compile; only the regex-tier
+ * pattern/delimiter sources need this route's pre-parse rejection.
+ */
+const REGEX_SOURCE_PARAM_BY_FUNCTION: Record<string, string> = {
+  replace_regex: "pattern",
+  extract_regex: "pattern",
+  filter_regex: "pattern",
+  split_on: "delimiter",
+};
+
+/**
+ * Whether every standardization step's compiled regex source stays within
  * {@link MAX_TRANSFORM_PATTERN_LENGTH}. The intent-level schema bounds counts, not
- * pattern length, and while RE2JS execution is linear-time its COMPILE cost lands
- * on this process's event loop before any row streams, so this route caps the
- * source length of every string param (a regex pattern, a split delimiter). It is a
- * route-level cap only: the shared intent schema (and the job-create path) is
- * unchanged.
+ * pattern length, and while RE2JS execution is linear-time its COMPILE cost lands on
+ * this process's event loop before any row streams, so this route caps the source
+ * length of exactly the params that reach regex compilation
+ * ({@link REGEX_SOURCE_PARAM_BY_FUNCTION}). It is a route-level cap only: the shared
+ * intent schema (and the job-create path) is unchanged.
  */
 function stepPatternsWithinCap(
   transformation: Standardization[number],
 ): boolean {
   for (const step of transformation.steps ?? []) {
-    const params = step.params;
-    if (params === undefined) continue;
-    for (const value of Object.values(params)) {
-      if (
-        typeof value === "string" &&
-        value.length > MAX_TRANSFORM_PATTERN_LENGTH
-      )
-        return false;
-      if (Array.isArray(value))
-        for (const element of value)
-          if (
-            typeof element === "string" &&
-            element.length > MAX_TRANSFORM_PATTERN_LENGTH
-          )
-            return false;
-    }
+    if (!Object.hasOwn(REGEX_SOURCE_PARAM_BY_FUNCTION, step.function)) continue;
+    const value = step.params?.[REGEX_SOURCE_PARAM_BY_FUNCTION[step.function]];
+    if (
+      typeof value === "string" &&
+      value.length > MAX_TRANSFORM_PATTERN_LENGTH
+    )
+      return false;
   }
   return true;
 }

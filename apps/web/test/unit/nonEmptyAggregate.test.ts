@@ -1,4 +1,6 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
+
+import { StandardizedField } from "@psilink/core";
 
 import {
   NON_EMPTY_WORKER_CHAR_THRESHOLD,
@@ -18,6 +20,10 @@ import type {
 } from "../../src/psi/nonEmptyAggregateController.js";
 
 import type { CSVRow, Standardization } from "@psilink/core";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("computeFieldCoverage: the silent-empty defense", () => {
   test("a transform that collapses every row to null surfaces a 0% coverage alarm", () => {
@@ -365,5 +371,40 @@ describe("createFieldCoverageAccumulator: streaming equals batch", () => {
     expect(accumulator.result()).toEqual(
       computeFieldCoverage([], standardization),
     );
+  });
+
+  test("a field whose pipeline throws on a row degrades to unavailable, not a sweep abort", () => {
+    const rows: Array<CSVRow> = [
+      { last_name: "Public" },
+      { last_name: "boom" },
+      { last_name: "Adams" },
+    ];
+    const realEvaluateRow = StandardizedField.prototype.evaluateRow;
+    // A compiled pipeline can still throw on a specific row's value (a step that
+    // slips past the validity gate). That row must degrade the field to unavailable
+    // and stop its evaluation, never abort the whole sweep -- server-side one bad row
+    // would otherwise 400 the entire coverage request.
+    vi.spyOn(StandardizedField.prototype, "evaluateRow").mockImplementation(
+      function (this: StandardizedField, row: CSVRow): Array<string> {
+        if (row.last_name === "boom")
+          throw new Error("row-time pipeline throw");
+        return realEvaluateRow.call(this, row);
+      },
+    );
+    const accumulator = createFieldCoverageAccumulator([
+      {
+        output: "last_name",
+        input: "last_name",
+        steps: [{ function: "to_upper_case" }],
+      },
+    ]);
+    expect(() => {
+      for (const row of rows) accumulator.add(row);
+    }).not.toThrow();
+    const [coverage] = accumulator.result();
+    expect(coverage.total).toBe(3);
+    expect(coverage.produced).toBe(0);
+    expect(coverage.unavailable).toBe(true);
+    expect(isSilentEmpty(coverage)).toBe(false);
   });
 });

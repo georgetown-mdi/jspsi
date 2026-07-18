@@ -1,8 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { listJobInputs, useJobInputDir } from "@jobs/workInputs";
+import {
+  JobInputParseBusyError,
+  listJobInputs,
+  useJobInputDir,
+  useJobInputParseGate,
+} from "@jobs/workInputs";
+import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
 import { gateJobRoute } from "@jobs/routeSupport";
-import { jobJsonResponse } from "@jobs/gate";
 
 /**
  * `GET /api/jobs/inputs` -- list the operator-mounted input CSVs the server may
@@ -16,14 +21,27 @@ import { jobJsonResponse } from "@jobs/gate";
  * mysteriously empty list. `totalEntries` (the raw readdir count before admission)
  * lets the UI distinguish an empty directory from one whose entries are all
  * inadmissible (dotfiles, directories, symlinks).
+ *
+ * The synchronous `readdir`+`lstat` scan runs through the shared parse/sweep gate,
+ * exactly as profile and coverage do, so a burst of listing requests cannot pile
+ * scans onto the event loop; the third concurrent request is refused `429`.
  */
 export const Route = createFileRoute("/api/jobs/inputs/")({
   server: {
     handlers: {
-      GET: ({ request }) => {
+      GET: async ({ request }) => {
         const gate = gateJobRoute(request);
         if (gate.kind === "response") return gate.response;
-        return jobJsonResponse(listJobInputs(useJobInputDir()));
+        try {
+          const listing = await useJobInputParseGate().run(() =>
+            Promise.resolve(listJobInputs(useJobInputDir())),
+          );
+          return jobJsonResponse(listing);
+        } catch (error) {
+          if (error instanceof JobInputParseBusyError)
+            return jobEmptyResponse(429);
+          throw error;
+        }
       },
     },
   },

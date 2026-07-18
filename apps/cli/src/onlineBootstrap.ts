@@ -469,10 +469,10 @@ export function singlePassDisclosureNotice(): string {
  * selection is byte-identical to before the flag existed.
  *
  * `dateInputFormat`, when given, is the DOB date-input format the caller already
- * inferred (via `inferDateInputFormatFromSource`, from a bounded sample) and short
- * -circuits this function's own inference from `rawRows`. `init` uses it because
- * its bounded read carries no full row set to scan; the invite/accept paths omit
- * it and this function infers the format from their full `rawRows` exactly as
+ * inferred (via `inferDateInputFormatFromSource`, from a bounded sample) and
+ * short-circuits this function's own inference from `rawRows`. `init` uses it
+ * because its bounded read carries no full row set to scan; the invite/accept paths
+ * omit it and this function infers the format from their full `rawRows` exactly as
  * before -- so the parameter is additive and behavior-preserving for them.
  */
 export function buildDataSpec(args: {

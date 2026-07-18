@@ -239,8 +239,11 @@ enumerated, so a crafted name never reaches `path.join`. To read, it then:
 `O_NOFOLLOW` closes the symlink-swap window on the final component; the `(dev, ino)`
 recheck closes the file-swap window between the admission `lstat` and the open. The
 open-time `fstat` size/mtime are what the profile reports and what coverage compares
-for drift. Failures never echo the requested name: an unset directory or unknown
-name is an empty-bodied `404`, an unusable file (parse error, ceiling trip) a `400`.
+for drift. Failures never echo the requested name: an unset directory, an unknown
+name, or an open-time race indistinguishable from one -- the `O_NOFOLLOW` `ELOOP` on
+a symlink swapped in after the admission `lstat`, an `ENOENT` on a vanished file, or
+an `EACCES` on one made unreadable -- is an empty-bodied `404`; an unusable file
+(parse error, ceiling trip) a `400`.
 
 ### Profile
 

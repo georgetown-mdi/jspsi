@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import {
-  JobInputDriftError,
   JobInputParseBusyError,
   MAX_COVERAGE_BODY_BYTES,
   UnknownJobInputError,
@@ -63,7 +62,6 @@ export const Route = createFileRoute("/api/jobs/inputs/coverage")({
             return jobEmptyResponse(429);
           if (error instanceof UnknownJobInputError)
             return jobEmptyResponse(404);
-          if (error instanceof JobInputDriftError) return jobEmptyResponse(400);
           return jobEmptyResponse(400);
         }
       },

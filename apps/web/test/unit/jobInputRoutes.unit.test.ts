@@ -49,6 +49,7 @@ const STANDARDIZATION: Standardization = [
 ];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   const manager = (globalThis as { jobManagerInstance?: JobManager })
     .jobManagerInstance;
@@ -199,6 +200,21 @@ describe("GET /api/jobs/inputs listing", () => {
     expect(body.configured).toBe(true);
     expect(body.files.map((f) => f.name)).toEqual([name]);
   });
+
+  test("is 429 when the parse gate is already full", async () => {
+    const { dir } = inputDirWithFixture();
+    enable({ inputDir: dir });
+    const gate = useJobInputParseGate();
+    // Occupy the running slot and the depth-one queue: the listing scan shares the
+    // same gate as profile/coverage, so the third concurrent request is refused.
+    void gate.run(() => new Promise<void>(() => {}));
+    void gate.run(() => new Promise<void>(() => {}));
+    const response = (await handlersOf(InputsRoute).GET({
+      request: new Request("http://localhost/api/jobs/inputs"),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(429);
+  });
 });
 
 describe("GET /api/jobs/inputs/profile", () => {
@@ -225,6 +241,33 @@ describe("GET /api/jobs/inputs/profile", () => {
     enable({ inputDir: dir });
     const response = (await handlersOf(ProfileRoute).GET({
       request: profileRequest("../secret"),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("");
+  });
+
+  test("a symlink swapped in between admission and open is an empty-bodied 404", async () => {
+    const { dir, name } = inputDirWithFixture();
+    const secret = tempDir("route-open-race-secret");
+    fs.writeFileSync(path.join(secret, "creds"), "ssn\n9\n");
+    enable({ inputDir: dir });
+
+    const realOpen = fs.openSync;
+    // The genuine O_NOFOLLOW race: swap the admitted regular file for a symlink after
+    // admission but before open, so the real open throws ELOOP -- mapped to a 404 that
+    // never echoes the name, matching the profile route's documented posture.
+    vi.spyOn(fs, "openSync").mockImplementationOnce(((
+      filePath: fs.PathLike,
+      flags: number,
+    ) => {
+      fs.rmSync(path.join(dir, name));
+      fs.symlinkSync(path.join(secret, "creds"), path.join(dir, name));
+      return realOpen(filePath, flags);
+    }) as typeof fs.openSync);
+
+    const response = (await handlersOf(ProfileRoute).GET({
+      request: profileRequest(name),
       params: {},
     })) as Response;
     expect(response.status).toBe(404);
@@ -320,6 +363,31 @@ describe("POST /api/jobs/inputs/coverage", () => {
       params: {},
     })) as Response;
     expect(response.status).toBe(400);
+  });
+
+  test("an over-cap coalesce default is not capped (it is not a regex source)", async () => {
+    const { dir, name } = inputDirWithFixture();
+    enable({ inputDir: dir });
+    // coalesce's default is a plain, uncompiled string, unbounded on every other
+    // path (core schema, browser preview, job-create intent); the route pattern cap
+    // must scope to compiled regex sources, so an over-length default still passes.
+    const longDefault: Standardization = [
+      {
+        output: "last_name",
+        input: "last_name",
+        steps: [
+          {
+            function: "coalesce",
+            params: { default: "x".repeat(MAX_TRANSFORM_PATTERN_LENGTH + 1) },
+          },
+        ],
+      },
+    ];
+    const response = (await handlersOf(CoverageRoute).POST({
+      request: coverageRequest(coverageBody(dir, name, longDefault)),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(200);
   });
 
   test("a drifted (size, mtime) pair is an empty-bodied 400", async () => {
