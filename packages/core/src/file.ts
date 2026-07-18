@@ -262,103 +262,109 @@ function normalizeCSVRow(row: unknown): CSVRow {
 }
 
 /**
- * Parse a CSV file to its COMPLETE row set. Resolves a {@link Papa.ParseResult}
- * whose `data` and `errors` are accumulated across every PapaParse chunk, so a
- * file larger than one `Papa.LocalChunkSize` chunk is returned whole rather than
- * truncated to its final chunk (see the accumulation note in the body). Rejects
- * on a read/stream error.
+ * The PapaParse configuration every CSV read in this module shares -- the ONE
+ * config object behind both the whole-file loader ({@link loadCSVFile}) and the
+ * streaming row-consumer ({@link streamCSVRows}). Config identity is what makes
+ * the two drivers parse-equivalent: the web browser worker wraps loadCSVFile and
+ * the server streams over the same header/skip-empty/inline semantics, so a row
+ * one driver produces is byte-identical to the other's, and neither can silently
+ * drift from the browser's parse.
+ *
+ * Parse INLINE, never in a Web Worker. PapaParse's `worker: true` spawns its
+ * worker from its own bundled source by reading the running script's URL -- a
+ * self-location trick that survives a dev server (the module is a real,
+ * URL-addressable file) but breaks once Vite bundles and minifies PapaParse into a
+ * chunk: the spawned worker runs a broken bootstrap that mis-applies `header:
+ * true`, so the header row AND the first data row both land in `meta.fields` while
+ * `data` comes back empty. The malformed header then crashes the first consumer
+ * that treats a field as a string (inferMetadata's `name.toLowerCase()`), so the
+ * production web inviter could not generate an invitation of any kind. Dev and the
+ * real-Chromium browser tests pass because the worker resolves there -- the failure
+ * is specific to the bundled build, so no unit/browser test catches it; the header
+ * guard in {@link runSharedCSVParse} is the executable backstop. Inline parsing
+ * blocks the main thread for the parse, acceptable for the once-per-exchange
+ * invite/accept file; an off-main-thread parse, if ever wanted for very large
+ * files, must go through a Vite-native worker in the web app, not PapaParse's
+ * self-hosted one. Under Node (the CLI and the web server) PapaParse never honored
+ * the worker anyway (`WORKERS_SUPPORTED` is `!!global.Worker`, false there), so
+ * this changes only the web build.
+ */
+const SHARED_CSV_PARSE_CONFIG = {
+  worker: false,
+  header: true,
+  skipEmptyLines: true,
+} as const;
+
+/**
+ * Drive a PapaParse read of `file` under {@link SHARED_CSV_PARSE_CONFIG} and the
+ * single-line byte ceiling, handing each chunk's normalized rows to
+ * `consumeChunk`. The whole-file loader ({@link loadCSVFile}) and the streaming
+ * row-consumer ({@link streamCSVRows}) are the two drivers over this one runner,
+ * so neither can drift to different parse semantics. Resolves with the final
+ * {@link Papa.ParseMeta} once the parse settles; rejects on a read/parse error or
+ * a ceiling trip.
  *
  * `byteCeiling` bounds a single logical line -- the partial line PapaParse must
  * buffer whole before it yields a chunk -- so a no-newline file, an oversized
  * header, or one enormous field fails fast with a clear, operator-readable error
- * rather than driving memory and CPU with that span; see
- * {@link CSV_LINE_BYTE_CEILING}. Unlike loadCSVColumnSample (whose row cap also
- * removes real waste), this read genuinely consumes every row of the operator's
- * own file (invite/accept/exchange), so the ceiling is a robustness backstop on a
- * single pathological line, not a memory saving for well-formed input -- a normal
- * file reads exactly as it did before.
- *
- * Two complementary mechanisms enforce it across the inputs this read serves, both
- * on public API only. For the Node stream every CLI caller passes,
- * {@link guardStreamLineByteCeiling} scans the source's own `data` events and
- * destroys it past the ceiling, which PapaParse surfaces through its `error`
- * callback -- bounding every line (header or any data row). For the browser `File`
- * the web caller passes -- which PapaParse reads whole through FileReader, with no
- * `data` events to scan -- a bounded pre-read
+ * rather than driving memory and CPU with that span; see {@link CSV_LINE_BYTE_CEILING}.
+ * Two complementary mechanisms enforce it, both on public API only. For the Node
+ * stream a CLI or server caller passes, {@link guardStreamLineByteCeiling} scans
+ * the source's own `data` events and destroys it past the ceiling, which PapaParse
+ * surfaces through its `error` callback -- bounding every line (header or any data
+ * row). For the browser `File` the web caller passes -- read whole through
+ * FileReader, with no `data` events to scan -- the bounded pre-read
  * ({@link assertLeadingLineWithinByteCeiling}) instead rejects an oversized LEADING
- * line (the header, or a no-newline file) before parsing; a giant field in a LATER
- * row on that path stays bounded by the web app's intake cap (apps/web's
- * `MAX_CSV_FILE_BYTES`) rather than scanned for here. See that helper for why the
- * web path is bounded only at its leading line, not every row.
+ * line before parsing; a giant field in a LATER row on that path stays bounded by
+ * the web app's intake cap (`MAX_CSV_FILE_BYTES`).
  *
- * Caveat on `meta`: only `meta.fields` (the header) is whole-file-stable. The
- * rest of `meta` (`cursor`, `truncated`, `aborted`, ...) is the FINAL chunk's --
- * it is captured per chunk and only `fields` persists across chunks -- so a
- * consumer must not read whole-file position or truncation state off it. Every
- * current consumer reads only `data` and `meta.fields`.
+ * PapaParse's per-chunk `chunk` callback is the only place every row is seen: in
+ * BOTH inline and worker mode `complete`'s argument is the FINAL chunk (worker) or
+ * `undefined` (inline once a `chunk` callback is present), never the whole file, so
+ * a driver that read `complete` alone would silently truncate a >1-chunk file.
+ * Rows are normalized to {@link CSVRow} at this single boundary -- dropping the
+ * non-string `__parsed_extra` PapaParse attaches to an over-long row -- so both
+ * drivers see the honest row type without a per-site cast.
+ *
+ * Caveat on `meta`: only `meta.fields` (the header) is whole-file-stable; the rest
+ * (`cursor`, `truncated`, `aborted`, ...) is the FINAL chunk's, so a consumer must
+ * not read whole-file position or truncation state off it.
  */
-export async function loadCSVFile(
+async function runSharedCSVParse(
   file: LocalFile,
-  byteCeiling: number = CSV_LINE_BYTE_CEILING,
-): Promise<Papa.ParseResult<CSVRow>> {
+  byteCeiling: number,
+  consumeChunk: (
+    rows: Array<CSVRow>,
+    errors: Array<Papa.ParseError>,
+    meta: Papa.ParseMeta,
+  ) => void,
+): Promise<Papa.ParseMeta> {
   // Bound the non-stream (browser File) path's leading line before parsing: a File
   // exposes no `data` events for the stream guard below to scan, since PapaParse
   // reads it whole through FileReader. A Node stream or string is a no-op here.
   await assertLeadingLineWithinByteCeiling(file, byteCeiling);
   return new Promise((resolve, reject) => {
-    // Accumulate every chunk's rows on THIS thread. PapaParse splits a file into
-    // `Papa.LocalChunkSize` chunks, and neither mode's `complete` argument is the
-    // whole file: worker mode posts each chunk back separately and hands
-    // `complete` only the FINAL chunk (it accumulates across chunks solely inside
-    // the worker, where `complete` is a boolean and never fires), and the inline
-    // path hands `complete` `undefined` once a `chunk` callback is present. The
-    // per-chunk `chunk` callback -- which fires on this thread in BOTH modes -- is
-    // the only place every row is seen, so collect there and resolve the union. A
-    // missing `chunk` callback is exactly the silent multi-chunk truncation this
-    // accumulation removes (the older single-chunk-only contract); a >1-chunk file
-    // therefore parses whole rather than to a truncated subset with no error.
-    const data: Array<CSVRow> = [];
-    const errors: Array<Papa.ParseError> = [];
     let meta: Papa.ParseMeta | undefined;
 
-    // Bound a single logical line on the Node stream path (the CLI's file/stdin
-    // input): the guard scans the source's own `data` events and destroys it past
-    // the ceiling, which PapaParse -- reading the same source -- reports through the
-    // `error` callback below. Inert for a non-stream LocalFile (a browser File has
-    // no `data` events); that path is bounded by the pre-read above instead.
+    // Bound a single logical line on the Node stream path (CLI file/stdin, or the
+    // server's opened input file): the guard scans the source's own `data` events
+    // and destroys it past the ceiling, which PapaParse -- reading the same source
+    // -- reports through the `error` callback below. Inert for a non-stream
+    // LocalFile (a browser File has no `data` events); that path is bounded by the
+    // pre-read above instead.
     const source = file as StreamSource;
     const detachGuard = guardStreamLineByteCeiling(source, byteCeiling);
 
     Papa.parse(file, {
-      // Parse INLINE, never in a Web Worker. PapaParse's `worker: true` spawns its
-      // worker from its own bundled source by reading the running script's URL -- a
-      // self-location trick that survives a dev server (the module is a real,
-      // URL-addressable file) but breaks once Vite bundles and minifies PapaParse
-      // into a chunk: the spawned worker runs a broken bootstrap that mis-applies
-      // `header: true`, so the header row AND the first data row both land in
-      // `meta.fields` while `data` comes back empty. The malformed header then
-      // crashes the first consumer that treats a field as a string (inferMetadata's
-      // `name.toLowerCase()`), so the production web inviter could not generate an
-      // invitation of any kind. Dev and the real-Chromium browser tests pass because
-      // the worker resolves there -- the failure is specific to the bundled build, so
-      // no unit/browser test catches it; the header guard in `complete` below is the
-      // executable backstop. Inline parsing blocks the main thread for the parse,
-      // acceptable for the once-per-exchange invite/accept file; an off-main-thread
-      // parse, if ever wanted for very large files, must go through a Vite-native
-      // worker in the web app, not PapaParse's self-hosted one. Under Node (the CLI)
-      // PapaParse never honored the worker anyway (`WORKERS_SUPPORTED` is
-      // `!!global.Worker`, false there), so this changes only the web build.
-      worker: false,
-      header: true,
-      skipEmptyLines: true,
+      ...SHARED_CSV_PARSE_CONFIG,
       chunk: (results) => {
         // Spread-push would pass one argument per row and can overflow the call
-        // stack for a chunk holding hundreds of thousands of short rows, so append
-        // in a loop (O(n) total, stack-safe). Normalize each row to a CSVRow at this
-        // single boundary -- dropping PapaParse's non-string __parsed_extra -- so the
-        // honest row type holds for every consumer without a per-site cast.
-        for (const row of results.data) data.push(normalizeCSVRow(row));
-        for (const error of results.errors) errors.push(error);
+        // stack for a chunk holding hundreds of thousands of short rows, so build
+        // the chunk's row array in a loop (O(n) total, stack-safe), normalizing
+        // each row here at the single boundary.
+        const rows: Array<CSVRow> = [];
+        for (const row of results.data) rows.push(normalizeCSVRow(row));
+        consumeChunk(rows, results.errors, results.meta);
         // Every chunk's meta carries the header field list (the parser's fields
         // persist across chunks), so keep the latest for `complete`, whose own
         // argument is only the final chunk (worker) or undefined (inline).
@@ -377,10 +383,11 @@ export async function loadCSVFile(
         }
         // The header must be a flat list of string column names. A correct
         // `header: true` parse always produces that; a non-string field means the
-        // parse itself malfunctioned (the bundled-worker corruption the `worker:
-        // false` note above describes leaks a data row -- an array -- into
-        // `meta.fields`). Reject loudly here rather than letting the malformed header
-        // flow into inferMetadata and surface as a deep, opaque `toLowerCase` crash.
+        // parse itself malfunctioned (the bundled-worker corruption the shared
+        // config note above describes leaks a data row -- an array -- into
+        // `meta.fields`). Reject loudly here rather than letting the malformed
+        // header flow into inferMetadata and surface as a deep, opaque
+        // `toLowerCase` crash.
         if (meta.fields?.some((field) => typeof field !== "string")) {
           reject(
             new Error(
@@ -390,7 +397,7 @@ export async function loadCSVFile(
           );
           return;
         }
-        resolve({ data, errors, meta });
+        resolve(meta);
       },
       error: (error) => {
         // The guard's ceiling trip surfaces here -- it destroys the source with
@@ -401,6 +408,70 @@ export async function loadCSVFile(
       },
     });
   });
+}
+
+/**
+ * Parse a CSV file to its COMPLETE row set. Resolves a {@link Papa.ParseResult}
+ * whose `data` and `errors` are accumulated across every PapaParse chunk, so a
+ * file larger than one `Papa.LocalChunkSize` chunk is returned whole rather than
+ * truncated to its final chunk. Rejects on a read/stream error.
+ *
+ * The single-line `byteCeiling` and the parse semantics are the shared runner's
+ * ({@link runSharedCSVParse}); this driver's whole contribution is to accumulate
+ * every chunk's rows on this thread. Unlike loadCSVColumnSample (whose row cap
+ * also removes real waste), this read genuinely consumes every row of the
+ * operator's own file, so the ceiling is a robustness backstop on a single
+ * pathological line, not a memory saving for well-formed input. The whole-file
+ * streaming counterpart that retains NOTHING is {@link streamCSVRows}.
+ *
+ * Caveat on `meta`: only `meta.fields` is whole-file-stable (see the runner);
+ * every current consumer reads only `data` and `meta.fields`.
+ */
+export async function loadCSVFile(
+  file: LocalFile,
+  byteCeiling: number = CSV_LINE_BYTE_CEILING,
+): Promise<Papa.ParseResult<CSVRow>> {
+  const data: Array<CSVRow> = [];
+  const errors: Array<Papa.ParseError> = [];
+  const meta = await runSharedCSVParse(
+    file,
+    byteCeiling,
+    (rows, chunkErrors) => {
+      for (const row of rows) data.push(row);
+      for (const error of chunkErrors) errors.push(error);
+    },
+  );
+  return { data, errors, meta };
+}
+
+/**
+ * Stream a CSV file to `consumeChunk`, retaining NOTHING: each PapaParse chunk's
+ * normalized rows are handed to the consumer and then dropped, so peak memory is
+ * one chunk regardless of file size. The server-side profile and coverage passes
+ * over CLI-scale mounted inputs (millions of rows, gigabytes) use this -- they
+ * accumulate only constant-size summaries (a row counter, bounded per-column
+ * samples, a running coverage count), never the rows. `consumeChunk` also receives
+ * the header column list (`meta.fields`, stable across chunks) so a consumer can
+ * key per-column state without a separate read.
+ *
+ * The SAME shared runner ({@link runSharedCSVParse}), config, single-line byte
+ * ceiling, and row normalization as {@link loadCSVFile} -- one config, two drivers
+ * -- so a streaming server pass and a browser worker wrapping loadCSVFile parse
+ * identically. Resolves with the header column list once the parse settles;
+ * rejects on a read/parse error or a ceiling trip, the same contract as
+ * loadCSVFile.
+ */
+export async function streamCSVRows(
+  file: LocalFile,
+  consumeChunk: (rows: Array<CSVRow>, columns: Array<string>) => void,
+  byteCeiling: number = CSV_LINE_BYTE_CEILING,
+): Promise<Array<string>> {
+  const meta = await runSharedCSVParse(
+    file,
+    byteCeiling,
+    (rows, _errors, chunkMeta) => consumeChunk(rows, chunkMeta.fields ?? []),
+  );
+  return meta.fields ?? [];
 }
 
 /**

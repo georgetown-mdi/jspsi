@@ -75,10 +75,16 @@ export {
   loadCSVFile,
   loadCSVColumns,
   loadCSVColumnSample,
+  streamCSVRows,
   readRowColumn,
   CSV_LINE_BYTE_CEILING,
 } from "./file";
 export type { CSVRow } from "./file";
+export {
+  inferDateInputFormatFromSource,
+  inferDateOfBirthColumn,
+} from "./inferDateInputFormat";
+export type { InferredDateInputFormat } from "./inferDateInputFormat";
 
 export {
   inferDateFormat,
