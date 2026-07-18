@@ -18,7 +18,7 @@ import {
 
 import { isStepValid } from "@psi/standardizationAuthoring";
 
-import type { ColumnSamples } from "./columnSamples";
+import type { ColumnSamples } from "@components/columnSamples";
 
 import type {
   FieldValue,
