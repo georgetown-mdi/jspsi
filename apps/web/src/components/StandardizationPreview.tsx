@@ -16,10 +16,9 @@ import {
   sanitizeForDisplay,
 } from "@psilink/core";
 
-import { PREVIEW_SAMPLE_SIZE, sampleInputValues } from "@psi/previewSamples";
 import { isStepValid } from "@psi/standardizationAuthoring";
 
-import type { ColumnSamples } from "@components/columnSamples";
+import type { ColumnSamples } from "@psi/columnSamples";
 
 import type {
   FieldValue,

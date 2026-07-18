@@ -20,7 +20,7 @@ import {
   profileJobInput,
   useJobInputDir,
 } from "@jobs/workInputs";
-import { PREVIEW_SAMPLE_SIZE, sampleInputValues } from "@psi/previewSamples";
+import { PREVIEW_SAMPLE_SIZE, sampleInputValues } from "@psi/columnSamples";
 import { JobApiConfigError } from "@jobs/gate";
 import { computeFieldCoverage } from "@psi/nonEmptyAggregate";
 

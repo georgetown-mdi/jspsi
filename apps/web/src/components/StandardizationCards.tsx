@@ -9,7 +9,7 @@ import { DisclosureSection } from "@components/DisclosureSection";
 import { StandardizationPreview } from "@components/StandardizationPreview";
 import { StandardizationStepEditor } from "@components/StandardizationStepEditor";
 
-import type { ColumnSamples } from "@components/columnSamples";
+import type { ColumnSamples } from "@psi/columnSamples";
 
 import type {
   LinkageField,

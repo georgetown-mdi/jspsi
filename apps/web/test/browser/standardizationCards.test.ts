@@ -10,7 +10,7 @@ import { createRoot } from "react-dom/client";
 import { authoredLinkageFields } from "@psilink/core";
 
 import { StandardizationCards } from "@components/StandardizationCards";
-import { columnSamplesFromRows } from "@components/columnSamples";
+import { columnSamplesFromRows } from "@psi/columnSamples";
 
 import { expandFieldCards } from "./fieldCards";
 import { renderApp } from "./renderApp";

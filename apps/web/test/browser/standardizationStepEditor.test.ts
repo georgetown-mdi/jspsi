@@ -9,7 +9,7 @@ import { createRoot } from "react-dom/client";
 
 import { StandardizationPreview } from "@components/StandardizationPreview";
 import { StandardizationStepEditor } from "@components/StandardizationStepEditor";
-import { columnSamplesFromRows } from "@components/columnSamples";
+import { columnSamplesFromRows } from "@psi/columnSamples";
 
 import { renderApp } from "./renderApp";
 

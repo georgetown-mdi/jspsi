@@ -8,7 +8,7 @@ import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 import { CleaningErrorBoundary } from "@components/CleaningErrorBoundary";
 import { FieldCoverage } from "@components/FieldCoverage";
 import { StandardizationCards } from "@components/StandardizationCards";
-import { columnSamplesFromRows } from "@components/columnSamples";
+import { columnSamplesFromRows } from "@psi/columnSamples";
 
 import { declaredFieldsFor } from "./inviterModel";
 import styles from "./bench.module.css";

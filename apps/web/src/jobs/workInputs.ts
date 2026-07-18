@@ -16,7 +16,7 @@ import {
   streamCSVRows,
 } from "@psilink/core";
 
-import { PREVIEW_SAMPLE_SIZE } from "@psi/previewSamples";
+import { PREVIEW_SAMPLE_SIZE } from "@psi/columnSamples";
 import { createFieldCoverageAccumulator } from "@psi/nonEmptyAggregate";
 
 import { JOB_DATA_ROOT_ENV, JobApiConfigError } from "./gate";
