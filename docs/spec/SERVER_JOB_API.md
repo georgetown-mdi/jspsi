@@ -170,7 +170,11 @@ like the remotes table:
 - Mutual containment with the resolved data root refuses startup: the input
   directory must not equal, contain, or be contained by `JOB_DATA_ROOT`. Otherwise
   the listing could expose job workdirs, or a job could be fed its own artifacts or
-  another job's key material.
+  another job's key material. When the data root does not yet exist at boot, its
+  side of the comparison is lexical (`path.resolve`, no symlink resolution), so a
+  `JOB_DATA_ROOT` routed through a symlinked intermediate component is on the
+  operator -- the same disjoint-mounts model as the boot-time realpath caveat
+  below.
 
 After the checks pass, the server logs one boot-diagnostic line -- the resolved
 realpath, the total `readdir` entry count, and the admissible file count -- so an
