@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 
 import { NonEmptyRateController } from "@psi/nonEmptyAggregateController";
 import { defaultSpawnAggregateWorker } from "@psi/nonEmptyAggregateWorkerClient";
+import { postJobInputCoverage } from "@psi/workInputClient";
 
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
+import type { WorkInputReference } from "@psi/workInputClient";
 
 import type { CSVRow, Standardization } from "@psilink/core";
 
@@ -52,6 +54,49 @@ export const rowsCoverageProvider: CoverageProviderFactory<
   ReadonlyArray<CSVRow>
 > = (rawRows) =>
   new NonEmptyRateController(rawRows, defaultSpawnAggregateWorker);
+
+/**
+ * The console coverage provider: each `compute` POSTs the standardization plus the
+ * file's profiled freshness pair to the appliance's streaming coverage sweep
+ * ({@link postJobInputCoverage}). A non-2xx (429 busy, a drifted/schema 400, or a
+ * transient error) is treated like a superseded response -- the returned promise
+ * never settles, so the hook holds its honest "Checking..." pending state until the
+ * next debounced edit supersedes it, rather than dropping to a false "coverage
+ * unknown". `dispose` aborts any in-flight sweep.
+ */
+export const consoleCoverageProvider: CoverageProviderFactory<
+  WorkInputReference
+> = (reference) => {
+  const controller = new AbortController();
+  return {
+    compute: (standardization) =>
+      new Promise<Array<FieldValueCoverage>>((resolve) => {
+        void postJobInputCoverage(reference, standardization, controller.signal)
+          .then((rates) => {
+            if (rates !== null) resolve(rates);
+          })
+          .catch(() => undefined);
+      }),
+    dispose: () => controller.abort(),
+  };
+};
+
+/** The bench's coverage input, unifying the hosted browser rows and the console's
+ * mounted-file reference so one {@link useNonEmptyRates} call serves both builds. */
+export type BenchCoverageInput =
+  | { kind: "rows"; rows: ReadonlyArray<CSVRow> }
+  | { kind: "workFile"; reference: WorkInputReference };
+
+/** The unified bench coverage provider: dispatches a `rows` input to the hosted
+ * worker-backed provider and a `workFile` input to the console fetch-backed sweep.
+ * A stable module-level factory so the hook rebuilds the provider only when the
+ * coverage input identity changes. */
+export const benchCoverageProvider: CoverageProviderFactory<
+  BenchCoverageInput
+> = (input) =>
+  input.kind === "rows"
+    ? rowsCoverageProvider(input.rows)
+    : consoleCoverageProvider(input.reference);
 
 /**
  * Run the full-CSV per-field value coverage for the current standardization behind

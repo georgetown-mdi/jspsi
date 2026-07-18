@@ -8,14 +8,14 @@ import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 import { CleaningErrorBoundary } from "@components/CleaningErrorBoundary";
 import { FieldCoverage } from "@components/FieldCoverage";
 import { StandardizationCards } from "@components/StandardizationCards";
-import { columnSamplesFromRows } from "@psi/columnSamples";
 
 import { declaredFieldsFor } from "./inviterModel";
 import styles from "./bench.module.css";
 
-import type { AcquiredCsv, InviterEditor } from "./inviterModel";
 import type { LinkageField, StandardizationStep } from "@psilink/core";
+import type { ColumnSamples } from "@psi/columnSamples";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
+import type { InviterEditor } from "./inviterModel";
 
 /**
  * The Cleaning tab: per-field pipelines with previews and whole-file coverage,
@@ -25,7 +25,7 @@ import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
  */
 export function CleaningTab({
   editor,
-  csv,
+  columnSamples,
   expertMode,
   rates,
   pending,
@@ -38,7 +38,11 @@ export function CleaningTab({
   onBack,
 }: {
   editor: InviterEditor;
-  csv: AcquiredCsv;
+  /** The per-column preview samples the before/after preview reads: computed from
+   * the rows on the hosted build, read from the server-side profile on the console
+   * (which never holds the rows). Supplied by the host so this tab never touches
+   * `csv.rawRows`, which the console acquired shape does not carry. */
+  columnSamples: ColumnSamples;
   expertMode: boolean;
   /** The full-CSV per-field coverage, swept once at the bench and shared with the
    * Customize fact and the coverage Problems entry (`null` before the first sweep
@@ -61,12 +65,6 @@ export function CleaningTab({
   const declaredFields = useMemo(
     () => declaredFieldsFor(editor.draft),
     [editor.draft],
-  );
-  // The per-column preview samples, drawn from the rows once for the whole tab so a
-  // field rebound to another column finds its sample by lookup.
-  const columnSamples = useMemo(
-    () => columnSamplesFromRows(csv.rawRows, csv.columns),
-    [csv.rawRows, csv.columns],
   );
   const resetKey = editor.draft.standardization
     .map((transformation) => `${transformation.output}=${transformation.input}`)

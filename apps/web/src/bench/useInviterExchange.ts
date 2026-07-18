@@ -19,10 +19,8 @@ import { inviterExchangeDataSpec } from "@psi/advancedInvite";
 import { listenAsInviter } from "@psi/rendezvous";
 import { waitForIncomingConnection } from "@psi/waitForConnection";
 
-import { deploymentProfile } from "@utils/clientConfig";
+import { isConsoleBuild } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
-
-import { selectExchangeDriver } from "./exchangeDriverSelection";
 
 import {
   WAITING_STAGE_ID,
@@ -33,8 +31,12 @@ import {
   runWithStages,
   stagesFor,
 } from "./exchangeRun";
+import {
+  availableTransports,
+  invitationUsable,
+  transportRunMode,
+} from "./inviterModel";
 import { buildRunOutputs } from "./runOutputs";
-import { invitationUsable } from "./inviterModel";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
@@ -43,11 +45,14 @@ import type {
   ExchangeErrorCategory,
   GenerateOutput,
 } from "@psi/exchangeLifecycle";
+import type {
+  JobInputSource,
+  ServerJobExchangeTransport,
+} from "@psi/serverJobExchangeDriver";
 import type { ExchangeDriver } from "@psi/exchangeDriver";
 import type { ExchangeRun } from "./exchangeRun";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { RunOutputs } from "./runOutputs";
-import type { ServerJobExchangeTransport } from "@psi/serverJobExchangeDriver";
 import type { Transport } from "./inviterModel";
 
 /** A failed run, ready to render: the lifecycle's category (which decides the
@@ -156,7 +161,7 @@ export function useInviterExchange({
   invitation,
   inviterName,
   channel,
-  sourceFile,
+  inputSource,
   sftpRemotesConfigured,
   sftpRemote,
 }: {
@@ -166,10 +171,11 @@ export function useInviterExchange({
    * this run builds. A live run only ever starts for a channel the selector maps
    * to a live kind; the owner withholds the invitation for a save-file channel. */
   channel: Transport;
-  /** The original CSV file, the server-job driver's `inputCsv` source. The
-   * server-job path submits the file's raw text; the browser path re-parses the
-   * retained rows off the minted invitation and never reads this. */
-  sourceFile: File | undefined;
+  /** Where the appliance reads this party's input from on a server-job run
+   * ({@link JobInputSource}): the console picker's mounted-file reference. Undefined
+   * on the browser path, which re-parses the retained rows off the minted invitation
+   * and never reads this. */
+  inputSource: JobInputSource | undefined;
   /** Whether the appliance has provisioned SFTP remotes -- the selector's third
    * input, threaded from the owner's fetch so this hook and the owner route
    * identically. */
@@ -306,21 +312,20 @@ export function useInviterExchange({
     // The console appliance carries out the exchange: the driver POSTs the
     // sealed terms, this party's authored metadata/standardization (when
     // present, so the CLI honors the operator's data-prep edits rather than
-    // inferring), the shared secret, and the file's raw text to the job API and
-    // maps the server's event stream onto the same lifecycle events. It owns no
-    // peer connection or PSI library, so `acquire`/`generateOutput` go unused on
-    // this path. Reading the file's text is the only async step before the run,
-    // so it precedes the driver build.
-    const serverJobDriver = async (): Promise<ExchangeDriver<RunOutputs>> => {
-      if (sourceFile === undefined)
-        throw new Error("no source file for the server-job exchange");
+    // inferring), the shared secret, and the input source to the job API and maps
+    // the server's event stream onto the same lifecycle events. On the console the
+    // input source is a REFERENCE to the operator-mounted file (no content transits
+    // the browser). It owns no peer connection or PSI library, so
+    // `acquire`/`generateOutput` go unused on this path.
+    const serverJobDriver = (): ExchangeDriver<RunOutputs> => {
+      if (inputSource === undefined)
+        throw new Error("no input source for the server-job exchange");
       const transport = serverJobTransport();
-      const inputCsv = await sourceFile.text();
       return createServerJobExchangeDriver({
         transport,
         linkageTerms: minted.linkageTerms,
         sharedSecret: minted.sharedSecret,
-        inputCsv,
+        inputSource,
         ...(minted.metadata !== undefined ? { metadata: minted.metadata } : {}),
         ...(minted.standardization !== undefined
           ? { standardization: minted.standardization }
@@ -328,19 +333,15 @@ export function useInviterExchange({
       });
     };
 
-    const selection = selectExchangeDriver(
+    const runMode = transportRunMode(
+      availableTransports(isConsoleBuild(), sftpRemotesConfigured),
       channel,
-      deploymentProfile(),
-      sftpRemotesConfigured,
     );
 
     void (async () => {
       let driver: ExchangeDriver<RunOutputs>;
       try {
-        driver =
-          selection.kind === "server-job"
-            ? await serverJobDriver()
-            : browserDriver();
+        driver = runMode === "server-job" ? serverJobDriver() : browserDriver();
       } catch (error) {
         if (controller.signal.aborted) return;
         whenDiagnostic(() => console.error(error));

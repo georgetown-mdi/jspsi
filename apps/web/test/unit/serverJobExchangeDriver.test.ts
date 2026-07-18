@@ -26,6 +26,10 @@ import type {
 import type { ObjectUrls, RunOutputs } from "@bench/runOutputs";
 import type { RelayEvent } from "@jobs/cliDriver";
 
+/** The inline CSV content the reused config carries; the driver maps an `inline`
+ * input source to the intent's `inputCsv` arm. */
+const CONFIG_INPUT_CSV = "ssn\n111223333\n";
+
 /** The construction-time config every test reuses (a filedrop transport unless
  * a test overrides it); the driver only carries it into the intent, so its
  * values are never validated here. */
@@ -34,7 +38,7 @@ function driverConfig(): ServerJobExchangeDriverConfig {
     transport: { channel: "filedrop" },
     linkageTerms: validLinkageTerms(),
     sharedSecret: VALID_SHARED_SECRET,
-    inputCsv: "ssn\n111223333\n",
+    inputSource: { kind: "inline", csv: CONFIG_INPUT_CSV },
   };
 }
 
@@ -448,7 +452,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
       channel: "filedrop",
       eventStream: true,
       sharedSecret: config.sharedSecret,
-      inputCsv: config.inputCsv,
+      inputCsv: CONFIG_INPUT_CSV,
     });
   });
 
@@ -467,10 +471,34 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
         channel: "filedrop",
         linkageTerms: config.linkageTerms,
         sharedSecret: config.sharedSecret,
-        inputCsv: config.inputCsv,
+        inputCsv: CONFIG_INPUT_CSV,
         eventStream: true,
       }),
     );
+  });
+
+  test("a workFile input source maps to the intent's inputFile arm, not inputCsv", async () => {
+    const { client, createdIntents } = scriptedClient([result(true)]);
+    const config: ServerJobExchangeDriverConfig = {
+      ...driverConfig(),
+      inputSource: {
+        kind: "workFile",
+        name: "clients.csv",
+        sizeBytes: 4096,
+        modifiedAt: 1_700_000_000_000,
+      },
+    };
+    await createServerJobExchangeDriver(config, client).run(
+      driverEvents(new AbortController().signal),
+    );
+
+    const intent = createdIntents[0] as Record<string, unknown>;
+    expect(intent.inputCsv).toBeUndefined();
+    expect(intent.inputFile).toEqual({
+      name: "clients.csv",
+      sizeBytes: 4096,
+      modifiedAt: 1_700_000_000_000,
+    });
   });
 
   test("an sftp transport POSTs the sftp arm carrying ONLY the remote name", async () => {

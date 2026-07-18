@@ -115,7 +115,7 @@ describe("acceptorServerJobConfig", () => {
   test("carries the acceptor's raw CSV text and the token's shared secret verbatim", () => {
     const config = configFor();
 
-    expect(config.inputCsv).toBe(inputCsv);
+    expect(config.inputSource).toEqual({ kind: "inline", csv: inputCsv });
     expect(config.sharedSecret).toBe(token.sharedSecret);
   });
 

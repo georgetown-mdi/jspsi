@@ -110,7 +110,7 @@ export function acceptorServerJobConfig({
     transport: { channel: "filedrop" },
     linkageTerms: deriveAcceptedLinkageTerms(token.linkageTerms, acceptorName),
     sharedSecret: token.sharedSecret,
-    inputCsv,
+    inputSource: { kind: "inline", csv: inputCsv },
     metadata: edits.metadata,
     standardization: edits.standardization,
     // The received-payload lock-in, mirrored from the invitation's disclosed set

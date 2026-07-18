@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import { Alert, VisuallyHidden } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
@@ -16,16 +16,17 @@ import {
 } from "@psi/invitation";
 import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
 import { capturedInputHandle } from "@psi/managedInputHandle";
+import { columnSamplesFromRows } from "@psi/columnSamples";
 import { createManagedExchange } from "@psi/managedExchangeStore";
 import { fetchSftpRemotes } from "@psi/serverJobExchangeDriver";
 import { invitationLocation } from "@psi/invitationLocation";
 import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 
-import { deploymentProfile, isConsoleBuild } from "@utils/clientConfig";
+import { isConsoleBuild } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import {
-  rowsCoverageProvider,
+  benchCoverageProvider,
   useNonEmptyRates,
 } from "@components/useNonEmptyRates";
 import { triggerBlobDownload } from "@components/blobDownload";
@@ -42,11 +43,7 @@ import {
   saveTrustFooter,
 } from "./saveExchangeModel";
 import {
-  buildManagedDeposit,
-  composeManagedDocument,
-  webrtcLocatorFromEndpoint,
-} from "./manageOfferModel";
-import {
+  availableTransports,
   cleaningCoverageProblems,
   editorFromCsv,
   editorWithAlgorithm,
@@ -76,8 +73,14 @@ import {
   reviewValidation,
   sealEditor,
   spineProblems,
+  transportRunMode,
   unsealEditor,
 } from "./inviterModel";
+import {
+  buildManagedDeposit,
+  composeManagedDocument,
+  webrtcLocatorFromEndpoint,
+} from "./manageOfferModel";
 import { downloadSampleCsvs, sampleInviterFile } from "./sampleData";
 import { AgreementTab } from "./AgreementTab";
 import { BenchShell } from "./BenchShell";
@@ -92,8 +95,8 @@ import { ReviewCreateSection } from "./ReviewCreateSection";
 import { SaveExchangeSection } from "./SaveExchangeSection";
 import { TopBar } from "./TopBar";
 import { YourFileSection } from "./YourFileSection";
+import { consoleAcquiredCsv } from "./consoleAcquiredCsv";
 import { restorableSection } from "./stepRestore";
-import { selectExchangeDriver } from "./exchangeDriverSelection";
 import { sftpEndpointForRemote } from "./sftpRemoteChoice";
 import { timelineSteps } from "./exchangeRun";
 import { useInviterExchange } from "./useInviterExchange";
@@ -106,8 +109,12 @@ import type {
   ConnectionEndpointRequest,
   GeneratedInvitation,
 } from "@psi/invitation";
+import type { BenchCoverageInput } from "@components/useNonEmptyRates";
+import type { ColumnSamples } from "@psi/columnSamples";
 import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { IntakeAlert } from "./YourFileSection";
+import type { JobInputProfile } from "@jobs/workInputs";
+import type { JobInputSource } from "@psi/serverJobExchangeDriver";
 import type { ManageOfferChoices } from "./manageOfferModel";
 import type { ManageOfferStatus } from "./ManageExchangeOffer";
 import type { SavedExchange } from "./SaveExchangeSection";
@@ -123,6 +130,16 @@ type SpineStep = "file" | "columns" | "review";
  * (the AcceptorBench lift). */
 const EMPTY_ROWS: ReadonlyArray<CSVRow> = [];
 const EMPTY_STANDARDIZATION: Standardization = [];
+
+/** Stable "no file yet" coverage input and preview samples, so the coverage hook's
+ * provider is not rebuilt every render on a fresh identity before a file is
+ * acquired. The empty-rows coverage input drives the hosted worker provider over no
+ * rows (an empty coverage), never a console fetch. */
+const EMPTY_COVERAGE_INPUT: BenchCoverageInput = {
+  kind: "rows",
+  rows: EMPTY_ROWS,
+};
+const EMPTY_COLUMN_SAMPLES: ColumnSamples = new Map();
 
 const SPINE_LABELS: Record<SpineStep, string> = {
   file: "Your file",
@@ -176,6 +193,12 @@ export function InviterBench() {
   const [section, setSection] = useState<Section>("file");
   const [lastSpineStep, setLastSpineStep] = useState<SpineStep>("file");
   const [acquired, setAcquired] = useState<AcquiredCsv>();
+  // The console profile behind the acquired shape: the appliance reads the file, so
+  // the browser holds only the profile (name, size, mtime, columns, samples, date
+  // format). It backs the mint (columns), the run (the mounted-file reference), the
+  // coverage sweep, the preview samples, and the authoring-time drift signal.
+  // Undefined on the hosted build, which reads the file in the browser instead.
+  const [consoleSource, setConsoleSource] = useState<JobInputProfile>();
   const [sourceFile, setSourceFile] = useState<File>();
   // The File System Access handle a drop attached to the selected file, where the
   // platform yielded one; captured so a managed deposit can persist a reusable
@@ -201,18 +224,15 @@ export function InviterBench() {
   const [demoActive, setDemoActive] = useState(false);
   const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
 
-  const transport = editor?.transport ?? "browser";
-
-  // Fetch the appliance's provisioned SFTP remotes the first time the operator
-  // picks the sftp channel on a console build; the table is boot-static on the
-  // server, so one fetch per bench serves the session. The helper resolves to
-  // an empty array on any failure, so Create then falls back to the save-file
-  // surface rather than arming a server-job run with no remote to name. The
-  // picker defaults to the first remote so a chosen name always exists while
-  // the picker is shown.
+  // Fetch the appliance's provisioned SFTP remotes once on a console build; the
+  // table is boot-static on the server, so one fetch per bench serves the session,
+  // and the default transport reads its presence (SFTP when provisioned, else the
+  // filedrop save-a-file card). The helper resolves to an empty array on any
+  // failure, so Create then falls back to the save-file surface rather than arming a
+  // server-job run with no remote to name. The picker defaults to the first remote
+  // so a chosen name always exists while the picker is shown.
   useEffect(() => {
-    if (!isConsoleBuild() || transport !== "sftp" || sftpRemotes !== undefined)
-      return;
+    if (!isConsoleBuild() || sftpRemotes !== undefined) return;
     let cancelled = false;
     void fetchSftpRemotes().then((remotes) => {
       if (cancelled) return;
@@ -226,35 +246,83 @@ export function InviterBench() {
     return () => {
       cancelled = true;
     };
-  }, [transport, sftpRemotes]);
+  }, [sftpRemotes]);
 
   const sftpRemotesConfigured =
     sftpRemotes !== undefined && sftpRemotes.length > 0;
   const chosenSftpRemote = sftpRemotes?.find(
     (remote) => remote.name === sftpRemoteName,
   );
-  const selection = selectExchangeDriver(
-    transport,
-    deploymentProfile(),
+  const available = availableTransports(
+    isConsoleBuild(),
     sftpRemotesConfigured,
   );
+  const transport = editor?.transport ?? available.defaultTransport;
+  // How the chosen transport runs, from the chooser's own policy (which offers a
+  // console filedrop as a save-a-file card, unlike the raw driver mapping): the
+  // create branch and the live run both read it.
+  const chosenRunMode = transportRunMode(available, transport);
+
+  // The console reads the mounted file on the appliance, so a server-job run carries
+  // only a REFERENCE (name + profiled freshness pair), never the content.
+  const inputSource: JobInputSource | undefined =
+    consoleSource !== undefined
+      ? {
+          kind: "workFile",
+          name: consoleSource.name,
+          sizeBytes: consoleSource.sizeBytes,
+          modifiedAt: consoleSource.modifiedAt,
+        }
+      : undefined;
 
   // The live run starts the moment a live invitation exists (the hook drives
   // the partner exchange right away) and is torn down when the invitation is
-  // discarded or the bench unmounts. A `save-file` selection never runs live:
+  // discarded or the bench unmounts. A `save-file` run mode never runs live:
   // its invitation is minted for the save surface, so it is withheld from the
   // hook and `invitation` alone (not the withheld value) proves nothing dials
-  // for a saved exchange. A `server-job` selection runs live too -- the console
+  // for a saved exchange. A `server-job` run mode runs live too -- the console
   // appliance carries it out -- so it drives the hook exactly as `browser` does.
-  const runsLive = selection.kind !== "save-file";
+  const runsLive = chosenRunMode !== "save-file";
   const { run, outputs, failure, warnings, tryAgain } = useInviterExchange({
     invitation: runsLive ? invitation : undefined,
     inviterName: editor?.draft.identity ?? "",
     channel: transport,
-    sourceFile,
+    inputSource,
     sftpRemotesConfigured,
     sftpRemote: chosenSftpRemote?.name,
   });
+
+  // The coverage input, unified across builds: the browser's parsed rows on the
+  // hosted build, the mounted-file reference on the console (whose sweep is a fetch
+  // to the appliance). Memoized so a standardization edit reuses the provider and
+  // only a new file rebuilds it. The console reads no rows -- `acquired.rawRows` is a
+  // throwing getter there -- so this never touches it on that path.
+  const coverageInput = useMemo<BenchCoverageInput>(() => {
+    if (consoleSource !== undefined)
+      return {
+        kind: "workFile",
+        reference: {
+          name: consoleSource.name,
+          sizeBytes: consoleSource.sizeBytes,
+          modifiedAt: consoleSource.modifiedAt,
+        },
+      };
+    if (!isConsoleBuild() && acquired !== undefined)
+      return { kind: "rows", rows: acquired.rawRows };
+    return EMPTY_COVERAGE_INPUT;
+  }, [acquired, consoleSource]);
+
+  // The per-column preview samples the Cleaning tab's before/after preview reads:
+  // computed from the browser rows on the hosted build, read from the server-side
+  // profile on the console. Kept off `acquired.rawRows` on the console for the same
+  // reason as the coverage input.
+  const columnSamples = useMemo<ColumnSamples>(() => {
+    if (consoleSource !== undefined)
+      return new Map(Object.entries(consoleSource.columnSamples));
+    if (!isConsoleBuild() && acquired !== undefined)
+      return columnSamplesFromRows(acquired.rawRows, acquired.columns);
+    return EMPTY_COLUMN_SAMPLES;
+  }, [acquired, consoleSource]);
 
   // Full-CSV coverage for the Cleaning tab, the Customize menu's Cleaning-attention
   // value, and the coverage Problems entry -- one sweep shared by all three, lifted
@@ -262,9 +330,9 @@ export function InviterBench() {
   // section (the AcceptorBench lift). The hook must run every render, so it takes
   // stable empty inputs until a file is acquired.
   const { rates, pending: ratesPending } = useNonEmptyRates(
-    acquired?.rawRows ?? EMPTY_ROWS,
+    coverageInput,
     editor?.draft.standardization ?? EMPTY_STANDARDIZATION,
-    rowsCoverageProvider,
+    benchCoverageProvider,
   );
   const cleaningAttention = inviterCleaningAttention(editor, rates);
   const coverageProblems = cleaningCoverageProblems(editor, rates);
@@ -368,7 +436,7 @@ export function InviterBench() {
   // exchange file saved. In either finalized state, leaving costs nothing the
   // operator has not already secured.
   useUnloadGuard({
-    hasFile: sourceFile !== undefined,
+    hasFile: acquired !== undefined,
     finalized: invitation !== undefined || savedExchange !== undefined,
     demoActive,
   });
@@ -413,6 +481,10 @@ export function InviterBench() {
   useEffect(() => {
     if (seededDemo.current) return;
     seededDemo.current = true;
+    // The sample seed reads an in-memory File in the browser; the console never
+    // reads a file in the browser (its intake is the mounted-directory picker), so
+    // the in-place seed is hidden there per the sample-data decision.
+    if (isConsoleBuild()) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get("demo") !== "1") return;
     params.delete("demo");
@@ -442,6 +514,7 @@ export function InviterBench() {
   // as the one the operator just dropped.
   function discardRead(alert: IntakeAlert) {
     setAcquired(undefined);
+    setConsoleSource(undefined);
     setSourceFile(undefined);
     setSourceHandle(undefined);
     setEditor(undefined);
@@ -507,6 +580,37 @@ export function InviterBench() {
     }
   }
 
+  // Commit a profiled mounted file (the console picker's "Use this file") as the
+  // acquired file: build the rows-less acquired shape from the profile, seed the
+  // editor threading the profiled date-input format, and keep the profile for the
+  // mint (columns), the run (the mounted-file reference), the coverage sweep, the
+  // preview samples, and the drift signal. Mirrors readFile's post-parse seeding.
+  function commitConsoleFile(profile: JobInputProfile) {
+    const csv = consoleAcquiredCsv({
+      fileName: profile.name,
+      sizeBytes: profile.sizeBytes,
+      columns: profile.columns,
+      rowCount: profile.rowCount,
+      dateInputFormat: profile.dateInputFormat,
+    });
+    const seeded = editorFromCsv(name, csv);
+    setConsoleSource(profile);
+    setAcquired(csv);
+    setEditor(seeded);
+    // A fresh file re-seeds the terms and resets the transport to the default; any
+    // exchange file saved for the prior file no longer describes them.
+    setSavedExchange(undefined);
+    setIntakeAlert(
+      seeded.draft.keys.length === 0
+        ? {
+            title: "This file cannot be matched",
+            message:
+              "None of the matching keys can be built from this file's columns. Matching needs columns like name, date of birth, Social Security number, ZIP code, phone, or email.",
+          }
+        : undefined,
+    );
+  }
+
   // Load the synthetic inviter sample into the live spine: build the in-memory
   // File and pass it through the same readFile intake a dropped file uses, with
   // a sample inviter name so step 1 lands complete. The mint path stays
@@ -527,6 +631,7 @@ export function InviterBench() {
     parseAbort.current?.abort();
     setName("");
     setAcquired(undefined);
+    setConsoleSource(undefined);
     setSourceFile(undefined);
     setSourceHandle(undefined);
     setEditor(undefined);
@@ -554,25 +659,38 @@ export function InviterBench() {
     setAnnouncement(demotionNotice(result.demotedIdentifiers));
   }
 
-  // Minting re-parses the retained source file through generateInvitation --
-  // the same fail-closed parse boundary the current app mints at -- so the
-  // embedded terms, the returned rows, and the satisfiability re-check all
-  // bind to one read of the file.
+  // The mint's input source, build-aware: the retained browser File on the hosted
+  // build (re-parsed at the fail-closed parse boundary), or the console's profiled
+  // columns bound directly (the console never reads the file in the browser, so the
+  // mint binds the profiled columns without a re-parse; the satisfiability re-check
+  // stays columns-based).
+  function mintSource():
+    { file: File } | { profiledColumns: Array<string> } | undefined {
+    if (consoleSource !== undefined)
+      return { profiledColumns: consoleSource.columns };
+    return sourceFile !== undefined ? { file: sourceFile } : undefined;
+  }
+
+  // Minting binds the invitation to the file's columns through generateInvitation --
+  // re-parsing the retained File on the hosted build (the fail-closed parse
+  // boundary), or the profiled columns on the console -- so the embedded terms and
+  // the satisfiability re-check bind to one view of the file.
   async function createInvitation() {
-    if (editor === undefined || sourceFile === undefined) return;
+    const source = mintSource();
+    if (editor === undefined || source === undefined) return;
     // The Create button is disabled on any open problem; this repeats the gate
     // because spineProblems covers the identifier conflict and coverageProblems
     // the silent-empty coverage, neither of which canGenerate alone captures.
     if (spineProblems(editor).length > 0 || coverageProblems.length > 0) return;
     const validation = reviewValidation(editor);
     if (!validation.canGenerate || validation.terms === undefined) return;
-    // A save-file selection seals the terms exactly as the live path does but
+    // A save-file run mode seals the terms exactly as the live path does but
     // mints NOTHING here: the code and the config YAML are minted together on
     // the save surface, from the authored locator. Seal, discard any prior
-    // saved artifacts, and route to save. A server-job selection (filedrop on
-    // the console appliance) instead mints here and routes to the live run,
-    // exactly as the browser path does.
-    if (selection.kind === "save-file") {
+    // saved artifacts, and route to save. A server-job run mode (sftp on the
+    // console appliance) instead mints here and routes to the live run, exactly
+    // as the browser path does.
+    if (chosenRunMode === "save-file") {
       setEditor(sealEditor(editor));
       setSavedExchange(undefined);
       setSaveAlert(undefined);
@@ -595,7 +713,7 @@ export function InviterBench() {
     try {
       const minted = await generateInvitation({
         inviterName: editor.draft.identity,
-        file: sourceFile,
+        ...source,
         location: invitationLocation(),
         lifetimeSeconds: editor.draft.lifetimeSeconds,
         linkageTerms: validation.terms,
@@ -653,7 +771,8 @@ export function InviterBench() {
   // re-mints both: the atomic savedExchange update replaces the old code and
   // file in one step, so a stale code can never sit beside a new file.
   async function saveExchangeFile() {
-    if (editor === undefined || sourceFile === undefined) return;
+    const source = mintSource();
+    if (editor === undefined || source === undefined) return;
     if (!isCliTransport(transport)) return;
     const cliTransport: CliTransport = transport;
     if (saveExchangeError(cliTransport, saveFields) !== undefined) return;
@@ -664,7 +783,7 @@ export function InviterBench() {
     try {
       const minted = await generateInvitation({
         inviterName: editor.draft.identity,
-        file: sourceFile,
+        ...source,
         location: invitationLocation(),
         lifetimeSeconds: editor.draft.lifetimeSeconds,
         linkageTerms: validation.terms,
@@ -840,7 +959,7 @@ export function InviterBench() {
             section === "save" && isCliTransport(transport)
               ? saveTrustFooter()
               : liveRunLedgerFooter(
-                  selection.kind === "server-job",
+                  chosenRunMode === "server-job",
                   outputs !== undefined,
                 )
           }
@@ -858,6 +977,16 @@ export function InviterBench() {
             acquired={acquired}
             linkable={linkable}
             alert={intakeAlert}
+            committed={
+              consoleSource !== undefined
+                ? {
+                    name: consoleSource.name,
+                    sizeBytes: consoleSource.sizeBytes,
+                    modifiedAt: consoleSource.modifiedAt,
+                  }
+                : undefined
+            }
+            onCommit={commitConsoleFile}
             onContinue={() => {
               if (fileReady) goTo("columns");
             }}
@@ -939,7 +1068,7 @@ export function InviterBench() {
           acquired !== undefined && (
             <CleaningTab
               editor={editor}
-              csv={acquired}
+              columnSamples={columnSamples}
               expertMode={expertMode}
               rates={rates}
               pending={ratesPending}
