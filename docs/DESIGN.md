@@ -18,7 +18,7 @@ The parameters necessary to execute an exchange are written down into a JSON or 
 
 # Architecture
 
-The linkage protocol, exchange agreements, and communication layer described in this document are built into a single library whose functionality is exposed to users through two applications, one delivered in the web browser and one used through the command line.
+The linkage protocol, exchange agreements, and communication layer described in this document are built into a single library whose functionality is exposed to users through three applications: a public web application delivered in the browser, a command line application, and a local console that puts a browser-based management interface in front of the command line application.
 
 When adopting the software, program officers are likely to first conduct exchanges with the web application in order to establish the business case for using the software, either by operating on previously established data sharing agreements or running a PSI-C algorithm to measure the size of shared membership. This bootstrapping process allows for setting and exporting exchange parameters, which can be handed off to IT professionals who can automate the procedure. They are likely to use the command line application as it can be more easily integrated with other data processes, such as exporting the data to be shared and ingesting the data received.
 
@@ -39,6 +39,12 @@ Starting an exchange walks the inviter through a short, guided flow: choose your
 Accepting an invitation opens the partner's deep link and walks the acceptor through reviewing the invitation's terms, consenting to them (an explicit acknowledgement and a typed name, with the inviter's legal agreement shown for agreement when one is attached), confirming which of the acceptor's own columns take part, and running the exchange. The invitation's secret travels in the link's URL fragment and is never sent to a server; the two parties rendezvous over the peer-coordination (PeerJS) signaling server the web application itself hosts, deriving their peer identifiers from that shared secret.
 
 Verifying a receipt checks a completed exchange's self-attested record against its verification keys, entirely in the browser, so a party can confirm its own disclosure record without uploading anything.
+
+## Web console
+
+The web console is a browser-based management interface for the command line application, run on the operator's own machine. It reuses the web application's machinery -- served locally as a web server bound to the host, used by the same person who conducts the exchange and not shared beyond that host -- to remove the friction of driving the CLI by hand: authoring a configuration and supplying the right arguments. From it an operator runs a single SFTP or synced-folder exchange, which the console conducts either by invoking the CLI or by running it directly in the server process.
+
+The console works on one mounted working directory at a time, holding that one exchange's configuration, secret, input, and results. It is not a directory of saved connections, a scheduler or recurring-exchange manager -- recurring exchanges live in the web application, and the command line application is scheduled from the command line -- a manager of many exchanges at once, or a network service that fronts the operator behind an access-control perimeter. The operator is the host's own user, and the one untrusted input, the partner's invitation, is already covered by the exchange protocol's own protections. The published Docker image runs the console when started with `serve`; how it is enabled and deployed is in [DEPLOYMENT.md](DEPLOYMENT.md#server-job-api), its single-party trust boundary in [SECURITY_DESIGN.md](SECURITY_DESIGN.md#single-party-appliance-trust-boundary), and the server-side job API's wire contract in [SERVER_JOB_API.md](spec/SERVER_JOB_API.md).
 
 # User journey
 
