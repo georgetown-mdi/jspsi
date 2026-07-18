@@ -1,6 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import {
+  JobInputDriftError,
+  JobInputInsufficientSpaceError,
+  UnknownJobInputError,
+} from "@jobs/workInputs";
+import {
   MAX_JOB_BODY_BYTES,
   gateJobRoute,
   readJobRequestBody,
@@ -17,9 +22,11 @@ import { jobExchangeIntentSchema } from "@jobs/intent";
  * `POST /api/jobs` -- create and start an exchange job from a typed intent.
  *
  * Auth-gated. The request body is a JSON {@link JobExchangeIntent}: a filedrop
- * or sftp exchange with validated linkage terms, a shared secret, and inline CSV
- * content. The server generates the job id, composes the CLI config from the
- * intent (every path a server-chosen name in the workdir; sftp connection
+ * or sftp exchange with validated linkage terms, a shared secret, and exactly one
+ * input source -- inline CSV content or a reference to an operator-mounted file
+ * (re-admitted against the server's own directory enumeration and snapshot-copied
+ * into the workdir). The server generates the job id, composes the CLI config from
+ * the intent (every path a server-chosen name in the workdir; sftp connection
  * material drawn only from the operator-provisioned remotes table), writes the
  * inputs, and spawns the CLI. No client string reaches argv or a file path.
  *
@@ -60,6 +67,15 @@ export const Route = createFileRoute("/api/jobs/")({
             return jobEmptyResponse(400);
           if (error instanceof SftpRemoteBusyError)
             return jobEmptyResponse(409);
+          // An unknown/vanished mounted input, a freshness drift, or insufficient
+          // space is an empty-bodied 400 that never echoes the name -- the
+          // unknown-remote posture (the manager left no workdir behind).
+          if (
+            error instanceof UnknownJobInputError ||
+            error instanceof JobInputDriftError ||
+            error instanceof JobInputInsufficientSpaceError
+          )
+            return jobEmptyResponse(400);
           // Workdir creation or an input write failed (the manager has already
           // cleaned up); no internal detail crosses the boundary.
           return jobEmptyResponse(500);

@@ -5,27 +5,35 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import * as cliDriver from "@jobs/cliDriver";
 import {
-  JobManager,
-  SftpRemoteBusyError,
-  UnknownSftpRemoteError,
-} from "@jobs/jobManager";
-import {
+  JOB_FILE_MODE,
   createWorkdir,
   generateJobId,
   removeWorkdir,
   writeJobFile,
 } from "@jobs/workdir";
+import {
+  JobInputDriftError,
+  JobInputInsufficientSpaceError,
+  UnknownJobInputError,
+} from "@jobs/workInputs";
+import {
+  JobManager,
+  SftpRemoteBusyError,
+  UnknownSftpRemoteError,
+} from "@jobs/jobManager";
 
 import {
   STUB_CLI_PATH,
   tempDataRoot,
   testSftpRemotesTable,
+  validInputFileIntent,
   validIntent,
   validSftpIntent,
 } from "../utils/jobFixtures";
 
 import type { BufferedEvent, JobRecord } from "@jobs/jobManager";
 import type { CliDriverHandlers } from "@jobs/cliDriver";
+import type { JobInputFileReference } from "@jobs/intent";
 import type { JobSftpRemotesTable } from "@jobs/sftpRemotes";
 
 vi.mock("@jobs/workdir", { spy: true });
@@ -55,6 +63,7 @@ function makeManager(options: {
   ignoreSigterm?: boolean;
   eventBufferCap?: number;
   sftpRemotes?: JobSftpRemotesTable;
+  jobInputDir?: string;
   recordJson?: string;
 }): JobManager {
   // The stub reads its scenario from the child environment; the driver's
@@ -83,6 +92,7 @@ function makeManager(options: {
     cancelSigkillGraceMs: 40,
     eventBufferCap: options.eventBufferCap,
     sftpRemotes: options.sftpRemotes,
+    jobInputDir: options.jobInputDir,
     childEnv,
   });
   managers.push(manager);
@@ -432,6 +442,146 @@ describe("createJob failure cleanup", () => {
     const record = manager.getJob(id)!;
     await waitForTerminal(record);
     expect(record.status).toBe("succeeded");
+  });
+});
+
+/** Write a fresh work-input directory holding one CSV and return the directory plus
+ * the reference a client would submit -- its name and the (size, mtime-ms) profiled
+ * snapshot, mtime truncated to integer epoch ms exactly as the listing emits it. */
+function writeInputDir(
+  label: string,
+  content = "ssn,last_name,date_of_birth\n111223333,smith,1990-01-01\n",
+  name = "input.csv",
+): { dir: string; ref: JobInputFileReference } {
+  const dir = tempDataRoot(label);
+  roots.push(dir);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, name);
+  fs.writeFileSync(file, content);
+  const stat = fs.statSync(file);
+  return {
+    dir,
+    ref: { name, sizeBytes: stat.size, modifiedAt: Math.trunc(stat.mtimeMs) },
+  };
+}
+
+describe("work-input snapshot copy at create", () => {
+  test("copies the mounted file into a 0600 input.csv whose bytes equal the source", async () => {
+    const content = "ssn,last_name,date_of_birth\n555667777,jones,1975-06-02\n";
+    const { dir, ref } = writeInputDir("copy", content);
+    const manager = makeManager({
+      events: [RESULT_EVENT],
+      exitCode: 0,
+      jobInputDir: dir,
+    });
+    const id = await manager.createJob(validInputFileIntent(ref));
+    const record = manager.getJob(id)!;
+    const inputPath = path.join(record.workdir, "input.csv");
+    expect(fs.readFileSync(inputPath, "utf8")).toBe(content);
+    // Owner-only, chmod-enforced regardless of umask.
+    expect(fs.statSync(inputPath).mode & 0o777).toBe(JOB_FILE_MODE);
+  });
+
+  test("the mounted-file job spawns the same argv as an inline job; source path never in argv", async () => {
+    const captured: Array<{ inputPath: string; workdir: string }> = [];
+    const spy = vi
+      .spyOn(cliDriver, "spawnExchangeJob")
+      .mockImplementation((args) => {
+        captured.push({ inputPath: args.inputPath, workdir: args.workdir });
+        return { signal: () => true, isRunning: () => true };
+      });
+
+    const { dir, ref } = writeInputDir(
+      "argv",
+      "ssn,last_name,date_of_birth\n111223333,smith,1990-01-01\n",
+      "mounted-source-name.csv",
+    );
+    const manager = makeManager({ jobInputDir: dir });
+    const inlineId = await manager.createJob(validIntent());
+    const fileId = await manager.createJob(validInputFileIntent(ref));
+
+    const inline = captured.find((c) => c.workdir.endsWith(inlineId))!;
+    const mounted = captured.find((c) => c.workdir.endsWith(fileId))!;
+    // Each job points the CLI at the fixed input.csv in its OWN workdir; the two
+    // argv paths differ only by the server-generated workdir, never by the input
+    // source, so the CLI never learns the mounted file's name or path.
+    expect(inline.inputPath).toBe(path.join(inline.workdir, "input.csv"));
+    expect(mounted.inputPath).toBe(path.join(mounted.workdir, "input.csv"));
+    expect(mounted.inputPath.replace(fileId, inlineId)).toBe(inline.inputPath);
+    expect(mounted.inputPath).not.toContain("mounted-source-name");
+    expect(mounted.inputPath).not.toContain(dir);
+
+    spy.mockRestore();
+  });
+
+  test("an unknown/vanished name is UnknownJobInputError and leaves no workdir", async () => {
+    const { dir } = writeInputDir("vanished");
+    const manager = makeManager({ jobInputDir: dir });
+    const root = roots[roots.length - 1]; // makeManager pushes the data root last
+    await expect(
+      manager.createJob(
+        validInputFileIntent({
+          name: "absent.csv",
+          sizeBytes: 10,
+          modifiedAt: 1_720_000_000_000,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(UnknownJobInputError);
+    expect(fs.existsSync(root)).toBe(false);
+  });
+
+  test("an inputFile intent with no directory configured is UnknownJobInputError", async () => {
+    const manager = makeManager({});
+    const root = roots[roots.length - 1];
+    await expect(
+      manager.createJob(validInputFileIntent()),
+    ).rejects.toBeInstanceOf(UnknownJobInputError);
+    expect(fs.existsSync(root)).toBe(false);
+  });
+
+  test("a drifted (size or mtime) pair is JobInputDriftError and leaves no workdir", async () => {
+    const { dir, ref } = writeInputDir("drift");
+    const manager = makeManager({ jobInputDir: dir });
+    const root = roots[roots.length - 1];
+    await expect(
+      manager.createJob(
+        validInputFileIntent({ ...ref, sizeBytes: ref.sizeBytes + 1 }),
+      ),
+    ).rejects.toBeInstanceOf(JobInputDriftError);
+    await expect(
+      manager.createJob(
+        validInputFileIntent({ ...ref, modifiedAt: ref.modifiedAt + 1000 }),
+      ),
+    ).rejects.toBeInstanceOf(JobInputDriftError);
+    expect(fs.existsSync(root)).toBe(false);
+  });
+
+  test("an exact (size, mtime-ms) match passes the freshness check and runs", async () => {
+    const { dir, ref } = writeInputDir("fresh");
+    const manager = makeManager({
+      events: [RESULT_EVENT],
+      exitCode: 0,
+      jobInputDir: dir,
+    });
+    const id = await manager.createJob(validInputFileIntent(ref));
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    expect(record.status).toBe("succeeded");
+  });
+
+  test("insufficient free space is JobInputInsufficientSpaceError and leaves no workdir", async () => {
+    const { dir, ref } = writeInputDir("space");
+    const manager = makeManager({ jobInputDir: dir });
+    const root = roots[roots.length - 1];
+    // A statfs reporting zero available bytes refuses the create before the copy.
+    vi.spyOn(fs, "statfsSync").mockReturnValue({
+      bavail: 0,
+      bsize: 4096,
+    } as fs.StatsFs);
+    await expect(
+      manager.createJob(validInputFileIntent(ref)),
+    ).rejects.toBeInstanceOf(JobInputInsufficientSpaceError);
+    expect(fs.existsSync(root)).toBe(false);
   });
 });
 

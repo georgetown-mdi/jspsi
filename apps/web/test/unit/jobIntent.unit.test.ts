@@ -24,9 +24,11 @@ import {
 } from "@jobs/intent";
 
 import {
+  SAMPLE_INPUT_FILE_REF,
   TEST_HOST_KEY_FINGERPRINT,
   TEST_SFTP_REMOTE_NAME,
   testSftpRemoteEntry,
+  validInputFileIntent,
   validIntent,
   validLinkageTerms,
   validSftpIntent,
@@ -131,6 +133,77 @@ const intentArms: Array<{
     build: (overrides) => ({ ...validSftpIntent(), ...overrides }),
   },
 ];
+
+describe("jobExchangeIntentSchema enforces exactly-one-of inputCsv/inputFile", () => {
+  test("accepts an inputFile reference and no inputCsv, both arms", () => {
+    expect(
+      jobExchangeIntentSchema.safeParse(validInputFileIntent()).success,
+    ).toBe(true);
+    expect(
+      jobExchangeIntentSchema.safeParse({
+        ...validInputFileIntent(),
+        channel: "sftp",
+        remote: TEST_SFTP_REMOTE_NAME,
+      }).success,
+    ).toBe(true);
+  });
+
+  test("rejects an intent carrying BOTH inputCsv and inputFile", () => {
+    const both = { ...validIntent(), inputFile: SAMPLE_INPUT_FILE_REF };
+    expect(jobExchangeIntentSchema.safeParse(both).success).toBe(false);
+  });
+
+  test("rejects an intent carrying NEITHER inputCsv nor inputFile", () => {
+    const neither: Record<string, unknown> = { ...validInputFileIntent() };
+    delete neither.inputFile;
+    expect(jobExchangeIntentSchema.safeParse(neither).success).toBe(false);
+  });
+
+  test("rejects a smuggled extra field inside inputFile (sub-object is strict)", () => {
+    // A client attempts to smuggle an absolute path alongside the opaque name.
+    const intent = {
+      ...validInputFileIntent(),
+      inputFile: { ...SAMPLE_INPUT_FILE_REF, path: "/etc/passwd" },
+    };
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
+  test("rejects a non-segment inputFile name (same shape rule as the listing)", () => {
+    for (const name of ["../secret", "a/b", ".psilink.key", ""]) {
+      const intent = validInputFileIntent({ ...SAMPLE_INPUT_FILE_REF, name });
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+    }
+  });
+
+  test("rejects a non-positive size or non-integer modifiedAt", () => {
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validInputFileIntent({ ...SAMPLE_INPUT_FILE_REF, sizeBytes: 0 }),
+      ).success,
+    ).toBe(false);
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validInputFileIntent({ ...SAMPLE_INPUT_FILE_REF, modifiedAt: 1.5 }),
+      ).success,
+    ).toBe(false);
+  });
+
+  test("preserves the serialized epoch-ms modifiedAt through a JSON round-trip", () => {
+    // The freshness check compares modifiedAt by exact equality of the round-tripped
+    // value, so the schema must accept and preserve the integer epoch-ms the
+    // listing/profile emit -- a JSON round-trip must not alter it.
+    const modifiedAt = 1_720_123_456_789;
+    const intent = validInputFileIntent({
+      ...SAMPLE_INPUT_FILE_REF,
+      modifiedAt,
+    });
+    const roundTripped: unknown = JSON.parse(JSON.stringify(intent));
+    const parsed = jobExchangeIntentSchema.safeParse(roundTripped);
+    expect(parsed.success).toBe(true);
+    if (parsed.success && parsed.data.inputFile !== undefined)
+      expect(parsed.data.inputFile.modifiedAt).toBe(modifiedAt);
+  });
+});
 
 describe("jobExchangeIntentSchema bounds the intent's sizes", () => {
   for (const arm of intentArms) {

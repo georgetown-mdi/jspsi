@@ -6,6 +6,11 @@ import {
   composeKeyFileDocument,
   composeSftpConfigDocument,
 } from "./intent";
+import {
+  UnknownJobInputError,
+  assertJobInputFreeSpace,
+  openJobInputForSnapshot,
+} from "./workInputs";
 import { classifyRestoredJob, listRestorableJobIds } from "./jobArtifacts";
 import {
   createWorkdir,
@@ -23,8 +28,9 @@ import type {
   JobTerminalState,
   RelayEvent,
 } from "./cliDriver";
+import type { JobExchangeIntent, JobInputFileReference } from "./intent";
 import type { JobSftpRemoteEntry, JobSftpRemotesTable } from "./sftpRemotes";
-import type { JobExchangeIntent } from "./intent";
+import type { OpenedJobInput } from "./workInputs";
 
 /**
  * Thrown by {@link JobManager.createJob} when an sftp intent names a remote
@@ -173,6 +179,13 @@ export interface JobManagerOptions {
    */
   sftpRemotes?: JobSftpRemotesTable;
   /**
+   * The resolved, boot-validated work-input directory (from
+   * {@link useJobInputDir}). Absent when `JOB_INPUT_DIR` is unset, in which case
+   * an intent naming an `inputFile` fails with {@link UnknownJobInputError}. Never
+   * derived from a request.
+   */
+  jobInputDir?: string;
+  /**
    * Extra environment variables merged into every spawned child. Empty in
    * production; the manager tests use it to configure the stub CLI. Set only by
    * the server-side constructor, never derived from a request.
@@ -209,6 +222,7 @@ export class JobManager {
   private readonly terminalTtlMs: number;
   private readonly childEnv: NodeJS.ProcessEnv | undefined;
   private readonly sftpRemotes: JobSftpRemotesTable | undefined;
+  private readonly jobInputDir: string | undefined;
   /** The per-remote busy latch: remote name -> holding job id. */
   private readonly sftpRemoteHolders = new Map<string, string>();
   /**
@@ -231,6 +245,7 @@ export class JobManager {
       options.cancelSigkillGraceMs ?? CANCEL_SIGKILL_GRACE_MS;
     this.terminalTtlMs = options.terminalTtlMs ?? JOB_TERMINAL_TTL_MS;
     this.sftpRemotes = options.sftpRemotes;
+    this.jobInputDir = options.jobInputDir;
     this.childEnv = options.childEnv;
   }
 
@@ -240,13 +255,22 @@ export class JobManager {
    * fixed names, and spawns the CLI. Returns the new job's id.
    *
    * An sftp intent resolves (and latches) its remote BEFORE any filesystem
-   * work, so an unknown or busy remote is rejected with nothing on disk.
+   * work, so an unknown or busy remote is rejected with nothing on disk. An
+   * `inputFile` intent likewise resolves, freshness-checks, and OPENS the mounted
+   * input before the workdir exists (mirroring the unknown-remote flow): an
+   * unknown/vanished name, a (size, mtime) drift, or insufficient free space is
+   * rejected with nothing on disk. The opened fd is held across workdir creation
+   * (pinning the inode) and streamed into `input.csv`.
    */
   async createJob(intent: JobExchangeIntent): Promise<string> {
     const id = generateJobId();
     const remoteEntry =
       intent.channel === "sftp"
         ? this.acquireSftpRemote(intent.remote, id)
+        : undefined;
+    const openedInput =
+      intent.inputFile !== undefined
+        ? this.openWorkInput(intent.inputFile)
         : undefined;
 
     this.creatingJobIds.add(id);
@@ -264,19 +288,47 @@ export class JobManager {
         created.workdir,
         created.exchangeDirectory,
         remoteEntry,
+        openedInput,
       );
     } catch (error) {
       // A failure after the workdir exists must not strand it: the record may
       // not be in the table yet, so no DELETE or eviction could ever reach the
       // directory (which may already hold the written key file). The remote
-      // latch is released the same way -- no terminal path could ever run.
+      // latch is released the same way -- no terminal path could ever run. The
+      // opened input fd is closed here too (idempotent once copyTo consumed it).
       this.jobs.delete(id);
       if (intent.channel === "sftp") this.releaseSftpRemote(intent.remote, id);
+      openedInput?.close();
       if (workdir !== null) await removeWorkdir(workdir);
       throw error;
     } finally {
       this.creatingJobIds.delete(id);
     }
+  }
+
+  /**
+   * Resolve, freshness-check, and open an `inputFile` reference against the
+   * work-input directory before any filesystem work: an unset directory or an
+   * unknown/vanished name is {@link UnknownJobInputError}, a (size, mtime) drift is
+   * {@link JobInputDriftError}, and a data root without room for the snapshot copy
+   * is {@link JobInputInsufficientSpaceError} -- all mapped by the route to an
+   * empty-bodied 400 that never echoes the name. The returned handle owns the fd.
+   */
+  private openWorkInput(inputFile: JobInputFileReference): OpenedJobInput {
+    if (this.jobInputDir === undefined) throw new UnknownJobInputError();
+    const opened = openJobInputForSnapshot(
+      this.jobInputDir,
+      inputFile.name,
+      inputFile.sizeBytes,
+      inputFile.modifiedAt,
+    );
+    try {
+      assertJobInputFreeSpace(this.dataRoot, opened.sizeBytes);
+    } catch (error) {
+      opened.close();
+      throw error;
+    }
+    return opened;
   }
 
   /**
@@ -334,6 +386,7 @@ export class JobManager {
     workdir: string,
     exchangeDirectory: string,
     remoteEntry: JobSftpRemoteEntry | undefined,
+    openedInput: OpenedJobInput | undefined,
   ): Promise<string> {
     const configDocument = composeDocumentByChannel(
       intent,
@@ -352,11 +405,7 @@ export class JobManager {
       JOB_FILE_NAMES.key,
       keyDocument,
     );
-    const inputPath = await writeJobFile(
-      workdir,
-      JOB_FILE_NAMES.input,
-      intent.inputCsv,
-    );
+    const inputPath = await this.writeJobInput(intent, workdir, openedInput);
     const outputPath = path.join(workdir, JOB_FILE_NAMES.output);
     const recordPath = path.join(workdir, JOB_FILE_NAMES.record);
     const keysPath = path.join(workdir, JOB_FILE_NAMES.recordKeys);
@@ -404,6 +453,30 @@ export class JobManager {
     });
 
     return id;
+  }
+
+  /**
+   * Write the job's `input.csv` into the workdir under the fixed server-chosen
+   * name and return its path. An `openedInput` snapshots the mounted file by
+   * streaming its held fd (flat memory at CLI scale); otherwise the inline
+   * `inputCsv` content is written. Either way the CLI is pointed at the same fixed
+   * path, so its argv is byte-identical across the two input sources.
+   */
+  private async writeJobInput(
+    intent: JobExchangeIntent,
+    workdir: string,
+    openedInput: OpenedJobInput | undefined,
+  ): Promise<string> {
+    if (openedInput !== undefined) {
+      const inputPath = path.join(workdir, JOB_FILE_NAMES.input);
+      await openedInput.copyTo(inputPath);
+      return inputPath;
+    }
+    if (intent.inputCsv !== undefined)
+      return writeJobFile(workdir, JOB_FILE_NAMES.input, intent.inputCsv);
+    // The exactly-one-of intent schema guarantees one input source; refuse a
+    // caller that bypassed it rather than spawning the CLI on an empty input.
+    throw new Error("job intent carries neither inputCsv nor inputFile");
   }
 
   /** Look up a job by id, or undefined if unknown/evicted. */

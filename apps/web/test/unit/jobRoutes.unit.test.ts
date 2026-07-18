@@ -23,10 +23,12 @@ import {
   STUB_CLI_PATH,
   tempDataRoot,
   testSftpRemotesTable,
+  validInputFileIntent,
   validIntent,
   validSftpIntent,
 } from "../utils/jobFixtures";
 
+import type { JobInputFileReference } from "@jobs/intent";
 import type { JobManager as JobManagerType } from "@jobs/jobManager";
 
 const roots: Array<string> = [];
@@ -508,6 +510,89 @@ function enableJobApiWithRemotes(stubEnv: NodeJS.ProcessEnv = {}): JobManager {
     manager;
   return manager;
 }
+
+/**
+ * Enable the API and seed the global manager with a resolved work-input directory
+ * (the production wiring passes it from {@link useJobInputDir}), pointed at the stub
+ * CLI. Returns the input directory and a reference to the one CSV in it.
+ */
+function enableJobApiWithInputDir(stubEnv: NodeJS.ProcessEnv = {}): {
+  dataRoot: string;
+  ref: JobInputFileReference;
+  content: string;
+} {
+  const dataRoot = tempDataRoot("routes-inputs-data");
+  roots.push(dataRoot);
+  const inputDir = tempDataRoot("routes-inputs-mount");
+  roots.push(inputDir);
+  fs.mkdirSync(inputDir, { recursive: true });
+  const content = "ssn,last_name,date_of_birth\n111223333,smith,1990-01-01\n";
+  const name = "mounted.csv";
+  fs.writeFileSync(`${inputDir}/${name}`, content);
+  const stat = fs.statSync(`${inputDir}/${name}`);
+
+  vi.stubEnv("JOB_DATA_ROOT", dataRoot);
+  const manager = new JobManager({
+    dataRoot,
+    binaryPath: STUB_CLI_PATH,
+    jobInputDir: inputDir,
+    childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), ...stubEnv },
+  });
+  (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
+    manager;
+  return {
+    dataRoot,
+    ref: {
+      name,
+      sizeBytes: stat.size,
+      modifiedAt: Math.trunc(stat.mtimeMs),
+    },
+    content,
+  };
+}
+
+describe("POST /api/jobs drives a job from a mounted work input", () => {
+  test("a valid inputFile reference creates a job whose input.csv equals the source", async () => {
+    const { dataRoot, ref, content } = enableJobApiWithInputDir();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validInputFileIntent(ref)),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(201);
+    const { id } = (await response.json()) as { id: string };
+    expect(fs.readFileSync(`${dataRoot}/${id}/input.csv`, "utf8")).toBe(
+      content,
+    );
+  });
+
+  test("an unknown mounted name is an empty-bodied 400 that never echoes it", async () => {
+    enableJobApiWithInputDir();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(
+        validInputFileIntent({
+          name: "absent.csv",
+          sizeBytes: 10,
+          modifiedAt: 1_720_000_000_000,
+        }),
+      ),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(400);
+    expect(await response.text()).toBe("");
+  });
+
+  test("a drifted (size, mtime) pair is an empty-bodied 400", async () => {
+    const { ref } = enableJobApiWithInputDir();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(
+        validInputFileIntent({ ...ref, sizeBytes: ref.sizeBytes + 1 }),
+      ),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(400);
+    expect(await response.text()).toBe("");
+  });
+});
 
 describe("POST /api/jobs maps the sftp remote rejections to empty bodies", () => {
   test("an unknown remote is an empty-bodied 400", async () => {

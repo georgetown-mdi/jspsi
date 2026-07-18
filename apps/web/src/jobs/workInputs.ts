@@ -1,5 +1,7 @@
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 
 import { z } from "zod";
 
@@ -18,10 +20,12 @@ import { PREVIEW_SAMPLE_SIZE } from "@psi/previewSamples";
 import { createFieldCoverageAccumulator } from "@psi/nonEmptyAggregate";
 
 import { JOB_DATA_ROOT_ENV, JobApiConfigError } from "./gate";
+import { MAX_INPUT_NAME_LENGTH, isAdmissibleInputName } from "./workInputName";
 import {
   MAX_STANDARDIZATION_STEPS,
   MAX_STANDARDIZATION_TRANSFORMATIONS,
 } from "./intent";
+import { JOB_FILE_MODE } from "./workdir";
 
 import type { Standardization, getLogger } from "@psilink/core";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
@@ -45,8 +49,7 @@ export const JOB_INPUT_DIR_ENV = "JOB_INPUT_DIR";
  */
 export const MAX_INPUT_LISTING_ENTRIES = 512;
 
-/** The maximum length of an admissible input file name (a single path segment). */
-export const MAX_INPUT_NAME_LENGTH = 255;
+export { MAX_INPUT_NAME_LENGTH, isAdmissibleInputName } from "./workInputName";
 
 /**
  * The byte cap on a coverage request body: a generous bound on the streamed read
@@ -95,27 +98,6 @@ declare global {
  * drift comparison), so a round-tripped value compares by exact equality. */
 function mtimeMsInt(mtimeMs: number): number {
   return Math.trunc(mtimeMs);
-}
-
-// C0 controls (which include NUL) and DEL: an operator-controlled name is still
-// rendered through the UI, and a control character has no place in a file name.
-// eslint-disable-next-line no-control-regex
-const CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f]/;
-
-/**
- * Whether `name` is an admissible input file name: a single path segment (no `/`,
- * `\`, or NUL), not `.`/`..`, no leading dot (so a `.psilink.key`-shaped file is
- * excluded by construction), no control characters, length 1..255. Symlink and
- * directory exclusion is a separate lstat check ({@link listAdmitted}); this bounds
- * only the name shape.
- */
-export function isAdmissibleInputName(name: string): boolean {
-  if (name.length === 0 || name.length > MAX_INPUT_NAME_LENGTH) return false;
-  if (name === "." || name === "..") return false;
-  if (name.startsWith(".")) return false;
-  if (name.includes("/") || name.includes("\\")) return false;
-  if (CONTROL_CHAR_PATTERN.test(name)) return false;
-  return true;
 }
 
 /** One admitted entry, carrying the lstat identity ({@link mtimeMsInt}, `dev`,
@@ -375,6 +357,121 @@ export async function coverageJobInput(
     for (const row of rows) accumulator.add(row);
   });
   return accumulator.result();
+}
+
+/** The job workdir's filesystem cannot fit a snapshot copy of the admitted input.
+ * A best-effort free-space refusal, mapped to an empty-bodied 400 before the job
+ * spawns; the copy's own ENOSPC remains the runtime backstop. */
+export class JobInputInsufficientSpaceError extends Error {
+  constructor() {
+    super("insufficient free space to snapshot the job input");
+    this.name = "JobInputInsufficientSpaceError";
+  }
+}
+
+/**
+ * An admitted input opened for a snapshot copy into a job workdir: the identity-
+ * verified fd (held open across workdir creation, pinning the inode against a
+ * post-admission swap) plus its open-time size. {@link copyTo} streams the content
+ * and takes ownership of the fd (closing it); {@link close} handles the failure
+ * path and is idempotent, so the create-failure cleanup may call it whether or not
+ * the copy ran.
+ */
+export class OpenedJobInput {
+  readonly sizeBytes: number;
+  private readonly filePath: string;
+  private fd: number | null;
+
+  /** @internal Constructed only by {@link openJobInputForSnapshot}. */
+  constructor(fd: number, filePath: string, sizeBytes: number) {
+    this.fd = fd;
+    this.filePath = filePath;
+    this.sizeBytes = sizeBytes;
+  }
+
+  /**
+   * Stream the opened content into `destPath` at mode 0600 (chmod-enforced against
+   * the umask, matching the workdir file-write discipline) and close the fd. The copy is
+   * streamed, never buffered, so a CLI-scale gigabyte input snapshots at flat
+   * memory. The source is always the server's own enumerated entry and the bytes
+   * land at the server-chosen `destPath`, so nothing here reaches argv or a
+   * composed path.
+   */
+  async copyTo(destPath: string): Promise<void> {
+    if (this.fd === null)
+      throw new Error("job input already consumed or closed");
+    const fd = this.fd;
+    // Ownership transfers to the read stream (autoClose closes the fd on end or
+    // error), so a later close() must not double-close it.
+    this.fd = null;
+    const source = fs.createReadStream(this.filePath, { fd, autoClose: true });
+    const destination = fs.createWriteStream(destPath, { mode: JOB_FILE_MODE });
+    await pipeline(source, destination);
+    await fsp.chmod(destPath, JOB_FILE_MODE);
+  }
+
+  /** Close the still-open fd. A no-op once {@link copyTo} has consumed it. */
+  close(): void {
+    if (this.fd !== null) {
+      fs.closeSync(this.fd);
+      this.fd = null;
+    }
+  }
+}
+
+/**
+ * Open an admitted input for a snapshot copy, applying the WP1 open recipe
+ * (O_NOFOLLOW open + (dev, ino) recheck) plus the create-time freshness check: the
+ * open-time (size, mtime-ms) must equal the client's profiled pair (its snapshot
+ * from profiling), else a {@link JobInputDriftError}. An unknown or vanished name
+ * is an {@link UnknownJobInputError}. Returns an {@link OpenedJobInput} whose fd the
+ * caller streams into the workdir; the fd is closed on the drift failure so none
+ * leaks.
+ */
+export function openJobInputForSnapshot(
+  resolvedDir: string,
+  name: string,
+  expectedSizeBytes: number,
+  expectedModifiedAt: number,
+): OpenedJobInput {
+  const opened = openAdmittedInput(resolvedDir, name);
+  if (
+    opened.sizeBytes !== expectedSizeBytes ||
+    opened.modifiedAt !== expectedModifiedAt
+  ) {
+    fs.closeSync(opened.fd);
+    throw new JobInputDriftError();
+  }
+  return new OpenedJobInput(opened.fd, opened.filePath, opened.sizeBytes);
+}
+
+/**
+ * Best-effort refuse when `targetDir`'s filesystem has less than `requiredBytes`
+ * free, so a CLI-scale snapshot copy cannot wedge the data root mid-write.
+ * `fs.statfsSync` is taken on the nearest existing ancestor of `targetDir` (the
+ * data root may not yet exist at the first job); a statfs that cannot be taken is
+ * treated as "cannot prove insufficiency" and does NOT refuse -- this is a guard,
+ * not a guarantee.
+ */
+export function assertJobInputFreeSpace(
+  targetDir: string,
+  requiredBytes: number,
+): void {
+  let probe = path.resolve(targetDir);
+  let stat: fs.StatsFs;
+  for (;;) {
+    try {
+      stat = fs.statfsSync(probe);
+      break;
+    } catch {
+      const parent = path.dirname(probe);
+      if (parent === probe) return;
+      probe = parent;
+    }
+  }
+  const availableBytes = stat.bavail * stat.bsize;
+  if (availableBytes < requiredBytes)
+    throw new JobInputInsufficientSpaceError();
 }
 
 /**

@@ -5,6 +5,7 @@ import { getDefaultLinkageTerms } from "@psilink/core";
 
 import type {
   JobFiledropExchangeIntent,
+  JobInputFileReference,
   JobSftpExchangeIntent,
 } from "@jobs/intent";
 import type {
@@ -38,6 +39,29 @@ export function validIntent(
     linkageTerms: validLinkageTerms(),
     sharedSecret: VALID_SHARED_SECRET,
     inputCsv: "ssn,last_name,date_of_birth\n111223333,smith,1990-01-01\n",
+    ...overrides,
+  };
+}
+
+/** A static, schema-valid `inputFile` reference for the pure intent-schema tests
+ * (no file on disk; the manager tests build a real one). */
+export const SAMPLE_INPUT_FILE_REF: JobInputFileReference = {
+  name: "input.csv",
+  sizeBytes: 42,
+  modifiedAt: 1_720_000_000_000,
+};
+
+/** A valid filedrop job intent driven by a mounted `inputFile` reference (no inline
+ * `inputCsv`); overrides merge over the base. */
+export function validInputFileIntent(
+  inputFile: JobInputFileReference = SAMPLE_INPUT_FILE_REF,
+  overrides: Partial<JobFiledropExchangeIntent> = {},
+): JobFiledropExchangeIntent {
+  return {
+    channel: "filedrop",
+    linkageTerms: validLinkageTerms(),
+    sharedSecret: VALID_SHARED_SECRET,
+    inputFile,
     ...overrides,
   };
 }
