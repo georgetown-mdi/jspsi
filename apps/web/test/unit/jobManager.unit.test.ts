@@ -673,6 +673,61 @@ describe("sftp remote resolution and the per-remote busy latch", () => {
   });
 });
 
+describe("sftp job driven by a mounted work input", () => {
+  test("an inputFile whose open drifts fails without latching the remote", async () => {
+    const { dir, ref } = writeInputDir("sftp-input-drift");
+    const manager = makeManager({
+      events: [RESULT_EVENT],
+      exitCode: 0,
+      sftpRemotes: testSftpRemotesTable(),
+      jobInputDir: dir,
+    });
+    const root = roots[roots.length - 1];
+    // The remote latches BEFORE the input opens; a wrong sizeBytes guarantees the
+    // drift throw, so the failure path is the only thing that can release the latch.
+    await expect(
+      manager.createJob(
+        validSftpIntent({
+          inputCsv: undefined,
+          inputFile: { ...ref, sizeBytes: ref.sizeBytes + 1 },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(JobInputDriftError);
+    // The open failed before createWorkdir: nothing on disk, not even the data root.
+    expect(fs.existsSync(root)).toBe(false);
+    // The latch did not leak: a subsequent valid job over the same remote is
+    // accepted (no SftpRemoteBusyError) and runs.
+    const id = await manager.createJob(validSftpIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    expect(record.status).toBe("succeeded");
+  });
+
+  test("a valid inputFile snapshots the mount and composes the sftp config", async () => {
+    const content = "ssn,last_name,date_of_birth\n555667777,jones,1975-06-02\n";
+    const { dir, ref } = writeInputDir("sftp-input-valid", content);
+    const manager = makeManager({
+      events: [RESULT_EVENT],
+      exitCode: 0,
+      sftpRemotes: testSftpRemotesTable(),
+      jobInputDir: dir,
+    });
+    const id = await manager.createJob(
+      validSftpIntent({ inputCsv: undefined, inputFile: ref }),
+    );
+    const record = manager.getJob(id)!;
+    const inputPath = path.join(record.workdir, "input.csv");
+    expect(fs.readFileSync(inputPath, "utf8")).toBe(content);
+    await waitForTerminal(record);
+    expect(record.status).toBe("succeeded");
+    const configYaml = fs.readFileSync(
+      `${record.workdir}/psilink.yaml`,
+      "utf8",
+    );
+    expect(configYaml).toContain("channel: sftp");
+  });
+});
+
 const CREATED_AT = "2026-07-08T14:32:00.000Z";
 
 /** Run a job to a succeeded terminal (with result and record/keys on disk) and

@@ -420,8 +420,8 @@ export class OpenedJobInput {
 }
 
 /**
- * Open an admitted input for a snapshot copy, applying the WP1 open recipe
- * (O_NOFOLLOW open + (dev, ino) recheck) plus the create-time freshness check: the
+ * Open an admitted input for a snapshot copy, applying the admitted-input open
+ * recipe (O_NOFOLLOW open + (dev, ino) recheck) plus the create-time freshness check: the
  * open-time (size, mtime-ms) must equal the client's profiled pair (its snapshot
  * from profiling), else a {@link JobInputDriftError}. An unknown or vanished name
  * is an {@link UnknownJobInputError}. Returns an {@link OpenedJobInput} whose fd the

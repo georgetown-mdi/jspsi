@@ -268,14 +268,15 @@ export class JobManager {
       intent.channel === "sftp"
         ? this.acquireSftpRemote(intent.remote, id)
         : undefined;
-    const openedInput =
-      intent.inputFile !== undefined
-        ? this.openWorkInput(intent.inputFile)
-        : undefined;
 
     this.creatingJobIds.add(id);
     let workdir: string | null = null;
+    let openedInput: OpenedJobInput | undefined;
     try {
+      openedInput =
+        intent.inputFile !== undefined
+          ? this.openWorkInput(intent.inputFile)
+          : undefined;
       const created = await createWorkdir(
         this.dataRoot,
         id,

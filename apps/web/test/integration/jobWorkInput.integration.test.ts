@@ -23,11 +23,11 @@ import {
 
 import type { ChildProcess } from "node:child_process";
 
-// The WP2 claim, demonstrated once against the REAL built server: after the intent
-// gains an inputFile reference and the manager snapshot-copies it, a job can be
-// driven from an operator-mounted directory with no UI -- a single authenticated
-// POST names a mounted file and the server writes the fixed workdir input.csv from
-// it. The job API is loopback-gated with no token, so the loopback fetch is
+// The mounted-input drive path, demonstrated once against the REAL built server: with
+// an inputFile reference the manager snapshot-copies, a job can be driven from an
+// operator-mounted directory with no UI -- a single authenticated POST names a mounted
+// file and the server writes the fixed workdir input.csv from it. The job API is
+// loopback-gated with no token, so the loopback fetch is
 // permitted; the CLI is stubbed so no real exchange (or built CLI) is needed -- the
 // input.csv is written before the child spawns, so its bytes are the assertion.
 //
