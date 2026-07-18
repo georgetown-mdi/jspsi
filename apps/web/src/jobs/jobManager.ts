@@ -298,11 +298,7 @@ export class JobManager {
         intent.inputFile !== undefined
           ? this.resolveWorkInputPath(intent.inputFile)
           : undefined;
-      const created = await createWorkdir(
-        this.dataRoot,
-        id,
-        JOB_FILE_NAMES.exchangeDirectory,
-      );
+      const created = await createWorkdir(this.dataRoot, id);
       workdir = created.workdir;
       return await this.startJobInWorkdir(
         intent,

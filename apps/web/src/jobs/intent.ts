@@ -383,8 +383,6 @@ export const JOB_FILE_NAMES = {
   key: ".psilink.key",
   /** The client's input CSV content. */
   input: "input.csv",
-  /** The rendezvous directory the filedrop exchange reads and writes. */
-  exchangeDirectory: "exchange",
   /** The CLI's matched-result output. */
   output: "output.csv",
   /** The self-attested exchange record, pinned so the server knows its path

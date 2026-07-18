@@ -893,16 +893,12 @@ describe("restore after a simulated restart", () => {
     const paused = new Promise<void>((resolve) => (release = resolve));
     // Pause createWorkdir after the workdir exists but before the record is set,
     // so a concurrent read lands squarely in the creation window.
-    vi.mocked(createWorkdir).mockImplementationOnce(
-      async (dataRoot, jobId, subdir) => {
-        const workdir = path.join(dataRoot, jobId);
-        await fs.promises.mkdir(workdir, { recursive: true });
-        const exchangeDirectory = path.join(workdir, subdir);
-        await fs.promises.mkdir(exchangeDirectory, { recursive: true });
-        await paused;
-        return { workdir, exchangeDirectory };
-      },
-    );
+    vi.mocked(createWorkdir).mockImplementationOnce(async (dataRoot, jobId) => {
+      const workdir = path.join(dataRoot, jobId);
+      await fs.promises.mkdir(workdir, { recursive: true });
+      await paused;
+      return { workdir };
+    });
     const manager = makeManager({
       events: [RESULT_EVENT],
       exitCode: 0,

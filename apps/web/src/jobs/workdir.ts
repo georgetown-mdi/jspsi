@@ -49,15 +49,14 @@ export function resolveWorkdir(dataRoot: string, jobId: string): string | null {
 }
 
 /**
- * Create a job's workdir (mode 0o700) and its rendezvous subdirectory under the
- * data root. The data root itself is created if missing. Fails if the workdir
- * already exists, so a reused id cannot clobber an existing job's files.
+ * Create a job's workdir (mode 0o700) under the data root. The data root itself is
+ * created if missing. Fails if the workdir already exists, so a reused id cannot
+ * clobber an existing job's files.
  */
 export async function createWorkdir(
   dataRoot: string,
   jobId: string,
-  exchangeSubdir: string,
-): Promise<{ workdir: string; exchangeDirectory: string }> {
+): Promise<{ workdir: string }> {
   const workdir = resolveWorkdir(dataRoot, jobId);
   if (workdir === null)
     throw new Error("job id did not resolve to a path under the data root");
@@ -70,10 +69,7 @@ export async function createWorkdir(
   });
   await fsp.mkdir(workdir, { mode: WORKDIR_MODE });
   await fsp.chmod(workdir, WORKDIR_MODE);
-  const exchangeDirectory = path.join(workdir, exchangeSubdir);
-  await fsp.mkdir(exchangeDirectory, { mode: WORKDIR_MODE });
-  await fsp.chmod(exchangeDirectory, WORKDIR_MODE);
-  return { workdir, exchangeDirectory };
+  return { workdir };
 }
 
 /**
