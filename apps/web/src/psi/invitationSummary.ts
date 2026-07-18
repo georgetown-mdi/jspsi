@@ -441,6 +441,14 @@ export interface InvitationSummary {
   payload?: InvitationPayloadSummary;
   /** The invitation's expiry instant (ISO 8601), if the token carries one. */
   expires?: string;
+  /**
+   * The partner's advisory shared-directory locator, sanitized for display: the
+   * `path` a single-directory file-drop endpoint carries (its folder name, minted
+   * by the console inviter). Present only for such an endpoint. Advisory only -- the
+   * accepting operator confirms it names the same synced folder mounted on their own
+   * appliance; it never flows to any config.
+   */
+  connectionPath?: string;
 }
 
 /**
@@ -963,10 +971,22 @@ function summarizeKey(
 export function summarizeInvitation(
   source: Pick<
     InvitationToken,
-    "linkageTerms" | "expires" | "disclosedPayloadColumns"
+    | "linkageTerms"
+    | "expires"
+    | "disclosedPayloadColumns"
+    | "connectionEndpoint"
   >,
 ): InvitationSummary {
   const terms = source.linkageTerms;
+
+  // A single-directory file-drop endpoint's advisory path is partner-controlled free
+  // text, so it is sanitized here like every other displayed partner string; the
+  // split inbound/outbound pair and non-filedrop endpoints carry no single locator.
+  const endpoint = source.connectionEndpoint;
+  const connectionPath =
+    endpoint?.channel === "filedrop" && endpoint.path !== undefined
+      ? sanitizeForDisplay(endpoint.path)
+      : undefined;
 
   const fieldByName = new Map(
     terms.linkageFields.map((field) => [field.name, field.type]),
@@ -1094,6 +1114,8 @@ export function summarizeInvitation(
 
   if (source.expires !== undefined)
     summary.expires = sanitizeForDisplay(source.expires);
+
+  if (connectionPath !== undefined) summary.connectionPath = connectionPath;
 
   return summary;
 }

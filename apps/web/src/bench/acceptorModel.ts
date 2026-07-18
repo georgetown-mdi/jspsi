@@ -249,11 +249,41 @@ export function invitingPartyName(token: InvitationToken): string {
   return sanitizeForDisplay(token.linkageTerms.identity);
 }
 
-/** The completion trust line under the settled ledger, stated exactly as the
- * mockup: the file never left, and the ledger names all the partner received. */
+/**
+ * The partner's advisory shared-directory locator for display, or undefined when the
+ * accepted invitation carries no single-directory file-drop path. Routed through
+ * {@link summarizeInvitation}, the one partner-string sanitizing boundary the ledger
+ * already uses -- the value is partner-supplied and never rendered raw. Advisory
+ * only: the accepting operator confirms it names the same synced folder mounted on
+ * this appliance, which is server-configured; it never flows to config.
+ */
+export function acceptorAdvisoryLocator(
+  token: InvitationToken,
+): string | undefined {
+  return summarizeInvitation(token).connectionPath;
+}
+
+/** The completion trust line under the settled ledger for a browser-run accept: the
+ * file never left this browser, and the ledger names all the partner received. */
 export const ACCEPTOR_DONE_LEDGER_FOOTER =
   "Your file never left this browser. The results above are all your partner " +
   "received about your data.";
+
+/** The completion trust line for a console file-drop accept, which runs on the
+ * appliance (the CLI reads the mounted CSV, never the browser): the
+ * "never left this browser" claim would be false, so it is dropped and only the
+ * honest statement about what the partner received is kept. */
+export const ACCEPTOR_DONE_SERVER_JOB_LEDGER_FOOTER =
+  "The results above are all your partner received about your data.";
+
+/** The completion trust line under the settled ledger, chosen by how the accept ran:
+ * a server-job (console file-drop) accept drops the "never left this browser" claim
+ * the appliance cannot make, mirroring the inviter's server-job footer. */
+export function acceptorDoneLedgerFooter(serverJob: boolean): string {
+  return serverJob
+    ? ACCEPTOR_DONE_SERVER_JOB_LEDGER_FOOTER
+    : ACCEPTOR_DONE_LEDGER_FOOTER;
+}
 
 /** What a completed exchange settled for the acceptor's ledger: the matched-row
  * count that actually arrived, or that the agreed terms withheld the result table
@@ -457,6 +487,19 @@ export function acceptUnsupported(
   return undefined;
 }
 
+/** Whether a console accept runs as a server job on the appliance: a console build
+ * accepting a file-drop endpoint runs the exchange against the mounted shared
+ * directory (the command-line tool), not in the browser. Every other admitted accept
+ * runs the live exchange in this browser. This one signal drives both the "How it
+ * runs" ledger row and the settled footer's "never left this browser" claim, so the
+ * two cannot disagree. */
+export function acceptorRunsAsServerJob(
+  endpoint: AcceptEndpoint,
+  consoleBuild: boolean,
+): boolean {
+  return consoleBuild && endpoint.channel === "filedrop";
+}
+
 /** The ledger's "How it runs" phrasing for an accepted endpoint. A console
  * single-directory file-drop accept runs the exchange on the appliance against the
  * shared directory (the command-line tool), not in the browser; every other admitted
@@ -465,7 +508,7 @@ export function acceptorHowItRunsLabel(
   endpoint: AcceptEndpoint,
   consoleBuild: boolean,
 ): string {
-  return consoleBuild && endpoint.channel === "filedrop"
+  return acceptorRunsAsServerJob(endpoint, consoleBuild)
     ? TRANSPORT_LEDGER_LABELS.filedrop
     : TRANSPORT_LEDGER_LABELS.browser;
 }

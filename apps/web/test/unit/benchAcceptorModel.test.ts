@@ -3,8 +3,10 @@ import { describe, expect, test } from "vitest";
 import {
   ACCEPTOR_SEND_FORWARD_REFERENCE,
   acceptUnsupported,
+  acceptorAdvisoryLocator,
   acceptorConsentName,
   acceptorConsentReady,
+  acceptorDoneLedgerFooter,
   acceptorDoneLedgerRows,
   acceptorDoneLedgerTag,
   acceptorHowItRunsLabel,
@@ -515,5 +517,65 @@ describe("acceptorHowItRunsLabel", () => {
   test("a WebRTC accept, or any hosted accept, runs in the browser", () => {
     expect(acceptorHowItRunsLabel(WEBRTC_ENDPOINT, true)).toBe("Browser");
     expect(acceptorHowItRunsLabel(SINGLE_DIR_FILEDROP, false)).toBe("Browser");
+  });
+});
+
+describe("acceptorDoneLedgerFooter", () => {
+  test("a server-job (console file-drop) accept drops the this-browser claim", () => {
+    // The CLI reads the mounted CSV on the appliance, never the browser, so the
+    // "never left this browser" claim would be false and must be omitted.
+    const footer = acceptorDoneLedgerFooter(true);
+    expect(footer).not.toContain("this browser");
+    expect(footer).toContain(
+      "The results above are all your partner received about your data.",
+    );
+  });
+
+  test("a browser-run accept keeps the this-browser claim", () => {
+    const footer = acceptorDoneLedgerFooter(false);
+    expect(footer).toContain("never left this browser");
+    expect(footer).toContain(
+      "The results above are all your partner received about your data.",
+    );
+  });
+});
+
+describe("acceptorAdvisoryLocator", () => {
+  test("returns the sanitized shared-folder path for a single-directory filedrop", () => {
+    const locator = acceptorAdvisoryLocator(
+      makeToken({}, { connectionEndpoint: SINGLE_DIR_FILEDROP }),
+    );
+    expect(locator).toBe("/mnt/rendezvous");
+  });
+
+  test("sanitizes an injection-bearing partner path (never raw)", () => {
+    const evilPath = `drops${ESC}[31m${RLO}psilink`;
+    const locator = acceptorAdvisoryLocator(
+      makeToken(
+        {},
+        { connectionEndpoint: { channel: "filedrop", path: evilPath } },
+      ),
+    );
+    expect(locator).toBeDefined();
+    expect(locator).not.toContain(ESC);
+    expect(locator).not.toContain(RLO);
+  });
+
+  test("is undefined for a webrtc, split-directory, or path-less endpoint", () => {
+    expect(
+      acceptorAdvisoryLocator(
+        makeToken({}, { connectionEndpoint: WEBRTC_ENDPOINT }),
+      ),
+    ).toBeUndefined();
+    expect(
+      acceptorAdvisoryLocator(
+        makeToken({}, { connectionEndpoint: SPLIT_FILEDROP }),
+      ),
+    ).toBeUndefined();
+    expect(
+      acceptorAdvisoryLocator(
+        makeToken({}, { connectionEndpoint: { channel: "filedrop" } }),
+      ),
+    ).toBeUndefined();
   });
 });

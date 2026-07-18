@@ -133,6 +133,7 @@ afterEach(async () => {
   root = undefined;
   container = undefined;
   window.location.hash = "";
+  vi.unstubAllGlobals();
 });
 
 describe("console acceptor unsupported-shape gate", () => {
@@ -180,5 +181,55 @@ describe("console acceptor unsupported-shape gate", () => {
         .getByRole("button", { name: "Continue: consent & your file" })
         .query(),
     ).toBeNull();
+  });
+});
+
+// The appliance HERE reports a configured rendezvous mount, so a single-directory
+// filedrop accept is runnable and reaches the consent step.
+function stubRendezvousMounted(): void {
+  const realFetch = window.fetch.bind(window);
+  const jsonResponse = (body: unknown) =>
+    new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  vi.stubGlobal(
+    "fetch",
+    (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = String(input);
+      if (url === "/api/jobs/rendezvous")
+        return Promise.resolve(
+          jsonResponse({ configured: true, path: "/mnt/rendezvous" }),
+        );
+      if (url === "/api/jobs/inputs")
+        return Promise.resolve(jsonResponse({ configured: true, files: [] }));
+      if (url.startsWith("/api/jobs"))
+        return Promise.resolve(new Response(null, { status: 404 }));
+      return realFetch(input, init);
+    },
+  );
+}
+
+describe("console acceptor advisory shared-folder locator", () => {
+  test("shows the partner's locator read-only and sanitized at the consent step", async () => {
+    stubRendezvousMounted();
+    window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
+    mount(createElement(AcceptorBench));
+
+    // With a rendezvous mount configured the accept is runnable: the Continue action
+    // replaces the unsupported block. Advancing reaches the consent step.
+    await page
+      .getByRole("button", { name: "Continue: consent & your file" })
+      .click();
+
+    // The consent step surfaces the partner's advisory shared-folder locator for the
+    // operator to confirm against their own mounted directory -- display-only, and the
+    // partner-supplied path is rendered through the sanitizing summary.
+    await expect
+      .element(page.getByText("Confirm the shared folder"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText(FILEDROP_ENDPOINT.path!, { exact: false }))
+      .toBeInTheDocument();
   });
 });

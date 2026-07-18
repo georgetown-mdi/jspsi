@@ -33,11 +33,12 @@ import { setColumnTypeForMatching } from "@psi/metadataEditing";
 
 import {
   ACCEPTOR_COLUMNS_LEDGER_FOOTER,
-  ACCEPTOR_DONE_LEDGER_FOOTER,
   ACCEPTOR_LEDGER_FOOTER,
   acceptUnsupported,
+  acceptorAdvisoryLocator,
   acceptorConsentName,
   acceptorConsentReady,
+  acceptorDoneLedgerFooter,
   acceptorDoneLedgerRows,
   acceptorDoneLedgerTag,
   acceptorHowItRunsLabel,
@@ -45,6 +46,7 @@ import {
   acceptorLedgerTag,
   acceptorLegalAgreementDisplay,
   acceptorRailFacts,
+  acceptorRunsAsServerJob,
   acceptorSpine,
   invitingPartyName,
 } from "./acceptorModel";
@@ -560,12 +562,26 @@ export function AcceptorBench() {
 
   const ready = decode.status === "ready";
   const token = ready ? decode.invitation.token : undefined;
+  // Whether this accept runs on the appliance as a server job (a console file-drop)
+  // rather than in the browser: the one signal behind the "How it runs" ledger row
+  // and the settled footer's "never left this browser" claim.
+  const acceptServerJob =
+    ready && acceptorRunsAsServerJob(decode.invitation.endpoint, consoleBuild);
   // The ledger's "How it runs" phrasing, from the accepted endpoint's run mode: a
   // console single-directory file-drop accept runs on the appliance (the shared
   // directory), every other admitted accept in this browser.
   const howItRuns = ready
     ? acceptorHowItRunsLabel(decode.invitation.endpoint, consoleBuild)
     : "";
+  // The partner's advisory shared-directory locator, shown read-only at the consent
+  // step for a runnable console file-drop accept so the operator confirms it names the
+  // same synced folder mounted on this appliance. Partner-supplied and sanitized
+  // through summarizeInvitation; never flows to config. Present only once the accept
+  // is runnable (past the unsupported gate), so a doomed accept does not surface it.
+  const advisoryLocator =
+    ready && acceptServerJob && unsupported === undefined
+      ? acceptorAdvisoryLocator(decode.invitation.token)
+      : undefined;
   const linkageTerms = token?.linkageTerms;
   // The sanitized legal-agreement values the consent step displays beside the
   // attestation; undefined when the invitation attaches none (no fieldset then).
@@ -765,7 +781,7 @@ export function AcceptorBench() {
         }))}
         footer={
           settled
-            ? ACCEPTOR_DONE_LEDGER_FOOTER
+            ? acceptorDoneLedgerFooter(acceptServerJob)
             : step === "columns"
               ? ACCEPTOR_COLUMNS_LEDGER_FOOTER
               : ACCEPTOR_LEDGER_FOOTER
@@ -1075,6 +1091,18 @@ export function AcceptorBench() {
                   </div>
                 )}
               </>
+            )}
+            {advisoryLocator !== undefined && (
+              <Alert
+                color="blue"
+                icon={<IconAlertCircle aria-hidden />}
+                title="Confirm the shared folder"
+                mt="md"
+              >
+                Your partner named this shared folder:{" "}
+                <span className={styles.mono}>{advisoryLocator}</span>. Confirm
+                it is the synced folder mounted on this appliance.
+              </Alert>
             )}
             {acceptAssuranceLine !== undefined && (
               <p className={`${styles.small} ${styles.sub}`}>
