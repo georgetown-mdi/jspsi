@@ -124,6 +124,21 @@ export function isCliTransport(
   return transport !== "browser";
 }
 
+/**
+ * The advisory locator a console filedrop invitation carries: the last non-empty
+ * segment of the operator's rendezvous directory path, NOT the resolved absolute
+ * path. The partner-bound token discloses only the shared folder's name, so a
+ * bare-host run does not leak the appliance's directory layout, and the accepting
+ * operator confirms this name against their own mounted directory. Splits on both
+ * POSIX and Windows separators and ignores trailing separators; falls back to the
+ * trimmed input when it has no separator. */
+export function rendezvousLocatorName(dirPath: string): string {
+  const segments = dirPath
+    .split(/[/\\]+/)
+    .filter((segment) => segment.length > 0);
+  return segments.length > 0 ? segments[segments.length - 1] : dirPath.trim();
+}
+
 /** How a chosen transport would run on this build: the
  * {@link ExchangeDriverSelection} kind as the inviter chooser's UI policy. A console
  * filedrop runs as a server job against the mounted rendezvous directory when

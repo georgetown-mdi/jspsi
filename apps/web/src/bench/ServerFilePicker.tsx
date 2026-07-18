@@ -31,7 +31,8 @@ import type { JobInputProfile } from "@jobs/workInputs";
 function listingLiveMessage(listing: JobInputsResult | "loading"): string {
   if (listing === "loading") return "";
   if (listing.kind === "error") return "The file listing could not be loaded.";
-  const { files } = listing.listing;
+  const { files, configured } = listing.listing;
+  if (!configured) return "No work directory is configured on this appliance.";
   if (files.length === 0) return "No usable files in the work directory.";
   return `Loaded ${files.length} ${files.length === 1 ? "file" : "files"} from the work directory.`;
 }
@@ -229,7 +230,25 @@ function ListingView({
       </Stack>
     );
 
-  const { files } = listing.listing;
+  const { files, configured } = listing.listing;
+
+  // An unconfigured JOB_INPUT_DIR and an empty-but-mounted directory both list zero
+  // files; the unconfigured case is a deployment-config gap, so it names the env var
+  // rather than telling the operator to place a file in a directory that does not exist.
+  if (!configured)
+    return (
+      <Stack gap="sm">
+        <Alert
+          color="blue"
+          icon={<IconAlertCircle />}
+          title="No work directory configured"
+        >
+          No work directory is configured on this appliance. Set JOB_INPUT_DIR
+          to the mounted input directory.
+        </Alert>
+        {refreshButton}
+      </Stack>
+    );
 
   if (files.length === 0)
     return (

@@ -238,6 +238,25 @@ describe("console inviter file picker states", () => {
       .toBeInTheDocument();
   });
 
+  test("an unconfigured work directory names the env var to set", async () => {
+    stubJobApi({ listing: { configured: false, files: [] } });
+    mount(createElement(InviterBench));
+    // An unset JOB_INPUT_DIR is a deployment-config gap, distinct from an
+    // empty-but-mounted directory: name the env var, do not tell the operator to
+    // place a file in a directory that is not configured.
+    await expect
+      .element(page.getByText("No work directory configured", { exact: true }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Set JOB_INPUT_DIR", { exact: false }))
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByText("No usable files in the work directory", { exact: true })
+        .query(),
+    ).toBeNull();
+  });
+
   test("a populated listing shows the file rows", async () => {
     stubJobApi({ listing: { configured: true, files: [CLIENTS_FILE] } });
     mount(createElement(InviterBench));
@@ -415,6 +434,36 @@ describe("console inviter mint and run", () => {
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Exchange complete");
+  });
+
+  test("a filedrop invitation carries only the rendezvous folder name, not its absolute path", async () => {
+    stubJobApi({
+      remotes: [],
+      rendezvous: { configured: true, path: "/srv/exchanges/psilink" },
+    });
+    mount(createElement(InviterBench));
+    await reachReviewCreate();
+    // Filedrop is the default (a rendezvous mount, no remotes) and runs here.
+    await expect
+      .element(page.getByLabelText("Over a shared directory, run here"))
+      .toBeChecked();
+
+    await page.getByRole("button", { name: "Create the invitation" }).click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Your invitation is ready");
+
+    await page.getByRole("button", { name: "Show full code" }).click();
+    const encoded = (
+      document.querySelector(`.${styles.revealArea}`) as HTMLTextAreaElement
+    ).value;
+    const token = await decodeInvitation(encoded);
+    // The partner-bound token discloses only the shared folder's name (the basename),
+    // never the appliance's resolved absolute path.
+    expect(token.connectionEndpoint).toEqual({
+      channel: "filedrop",
+      path: "psilink",
+    });
   });
 
   test("the coverage sweep posts the mounted-file name only", async () => {

@@ -72,6 +72,7 @@ import {
   inviterLedgerRows,
   inviterRailFacts,
   isCliTransport,
+  rendezvousLocatorName,
   resetToRecommended,
   reviewValidation,
   sealEditor,
@@ -757,12 +758,16 @@ export function InviterBench() {
       if (chosenSftpRemote === undefined) return;
       connectionEndpoint = sftpEndpointForRemote(chosenSftpRemote);
     } else if (transport === "filedrop") {
-      // A console filedrop server-job carries the configured rendezvous mount as the
-      // invitation's advisory locator, so the partner can confirm the shared folder.
-      // The mount is server-side; a missing path means the rendezvous state changed
+      // A console filedrop server-job carries the rendezvous directory's NAME (its
+      // basename) as the invitation's advisory locator, so the partner can confirm the
+      // shared folder without the token disclosing the appliance's absolute path. The
+      // mount is server-side; a missing path means the rendezvous state changed
       // mid-create, so refuse rather than mint a code with no locator.
       if (rendezvous?.path === undefined) return;
-      connectionEndpoint = { channel: "filedrop", path: rendezvous.path };
+      connectionEndpoint = {
+        channel: "filedrop",
+        path: rendezvousLocatorName(rendezvous.path),
+      };
     }
     setMinting(true);
     setCreateAlert(undefined);
