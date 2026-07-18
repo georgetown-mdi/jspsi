@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  APPLIANCE_FILE_ASSURANCE,
   BROWSER_ONLY_FILE_ASSURANCE,
   fileAssuranceLine,
 } from "@bench/fileAssurance";
@@ -10,6 +11,14 @@ describe("BROWSER_ONLY_FILE_ASSURANCE", () => {
   test("is the exact copy the hosted, browser-only deployment states", () => {
     expect(BROWSER_ONLY_FILE_ASSURANCE).toBe(
       "Your file is processed entirely in your browser and it is never uploaded to our server.",
+    );
+  });
+});
+
+describe("APPLIANCE_FILE_ASSURANCE", () => {
+  test("is the truthful console copy for a mounted-directory intake", () => {
+    expect(APPLIANCE_FILE_ASSURANCE).toBe(
+      "Files are read from this appliance's mounted work directory; your browser does not upload them.",
     );
   });
 });

@@ -10,6 +10,19 @@ export const BROWSER_ONLY_FILE_ASSURANCE =
   "uploaded to our server.";
 
 /**
+ * The console appliance's truthful file-assurance line, for a surface whose intake
+ * reads the input from the appliance's mounted work directory rather than the
+ * browser (the console inviter's server-file picker). It is deliberately NOT the
+ * value {@link fileAssuranceLine} resolves for the console build: a surface that
+ * has not yet switched to the mounted-directory intake (the acceptor, pending its
+ * own work package) would state a claim that is false for it, so each mounted-input
+ * surface opts into this copy explicitly rather than inheriting it.
+ */
+export const APPLIANCE_FILE_ASSURANCE =
+  "Files are read from this appliance's mounted work directory; your browser " +
+  "does not upload them.";
+
+/**
  * Decide the file-assurance line from whether this deployment's server
  * receives files. `false` (the hosted, browser-only deployment) renders
  * {@link BROWSER_ONLY_FILE_ASSURANCE} unchanged. `true` omits the claim

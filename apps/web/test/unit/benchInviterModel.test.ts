@@ -6,6 +6,7 @@ import { buildAdvancedTerms } from "@psi/advancedInvite";
 
 import {
   answersRows,
+  availableTransports,
   cleaningCoverageProblems,
   editorFromCsv,
   editorWithAlgorithm,
@@ -546,6 +547,70 @@ describe("transport choice", () => {
   });
 });
 
+describe("availableTransports matrix", () => {
+  function optionByTransport(consoleBuild: boolean, remotes: boolean) {
+    return new Map(
+      availableTransports(consoleBuild, remotes).options.map((option) => [
+        option.transport,
+        option,
+      ]),
+    );
+  }
+
+  test("hosted offers all three live/CLI, none disabled, defaulting to browser", () => {
+    for (const remotes of [false, true]) {
+      const available = availableTransports(false, remotes);
+      expect(available.defaultTransport).toBe("browser");
+      const byTransport = optionByTransport(false, remotes);
+      expect(byTransport.get("browser")).toMatchObject({
+        offered: true,
+        disabled: false,
+        runMode: "browser",
+      });
+      expect(byTransport.get("sftp")).toMatchObject({
+        disabled: false,
+        runMode: "save-file",
+      });
+      expect(byTransport.get("filedrop")).toMatchObject({
+        disabled: false,
+        runMode: "save-file",
+      });
+    }
+  });
+
+  test("console disables the Browser card and defaults to SFTP when remotes exist", () => {
+    const available = availableTransports(true, true);
+    expect(available.defaultTransport).toBe("sftp");
+    const byTransport = optionByTransport(true, true);
+    // Browser is offered (never removed) but disabled: its in-tab exchange is a
+    // planned appliance capability.
+    expect(byTransport.get("browser")).toMatchObject({
+      offered: true,
+      disabled: true,
+    });
+    expect(byTransport.get("sftp")).toMatchObject({
+      disabled: false,
+      runMode: "server-job",
+    });
+    // The console filedrop card reverts to save-a-file even though the driver
+    // plumbing can run it as a server job.
+    expect(byTransport.get("filedrop")).toMatchObject({
+      disabled: false,
+      runMode: "save-file",
+    });
+  });
+
+  test("console with no remotes defaults to the filedrop save-a-file card", () => {
+    const available = availableTransports(true, false);
+    expect(available.defaultTransport).toBe("filedrop");
+    const byTransport = optionByTransport(true, false);
+    expect(byTransport.get("browser")).toMatchObject({ disabled: true });
+    // With no provisioned remote to name, SFTP falls back to save-a-file too.
+    expect(byTransport.get("sftp")).toMatchObject({ runMode: "save-file" });
+    expect(byTransport.get("filedrop")).toMatchObject({ runMode: "save-file" });
+  });
+});
+
 describe("transport chooser copy by deployment", () => {
   test("a hosted build offers to save the shared-directory exchange", () => {
     const copy = transportChooserCopy(false, false);
@@ -553,17 +618,22 @@ describe("transport chooser copy by deployment", () => {
       "Over a shared directory, run by the command-line tool",
     );
     expect(copy.filedropDescription).toContain("Saves an exchange file");
+    expect(copy.browserDescription).toContain("Your browsers connect directly");
     expect(copy.capabilityNote).toBe(
       "This browser runs live exchanges only; SFTP and shared-directory exchanges run in the psilink command-line tool.",
     );
   });
 
-  test("a console build offers to run the shared-directory exchange here", () => {
+  test("a console build saves the shared-directory exchange for the CLI", () => {
     const copy = transportChooserCopy(true, false);
-    expect(copy.filedropLabel).toBe("Over a shared directory, run here");
-    expect(copy.filedropDescription).toContain("Runs the exchange here");
-    expect(copy.capabilityNote).toContain(
-      "runs live and shared-directory exchanges here",
+    expect(copy.filedropLabel).toBe(
+      "Over a shared directory, run by the command-line tool",
+    );
+    expect(copy.filedropDescription).toContain("Saves an exchange file");
+    // The Browser card names its in-tab exchange as a planned capability.
+    expect(copy.browserDescription).toContain("planned capability");
+    expect(copy.capabilityNote).toBe(
+      "This appliance saves a file for the command-line tool to run SFTP and shared-directory exchanges; in-tab browser exchanges are a planned capability.",
     );
   });
 
@@ -589,11 +659,15 @@ describe("transport chooser copy by deployment", () => {
     expect(copy.sftpDescription).toContain(
       "SFTP server provisioned on this machine",
     );
+    // The console SFTP card states the file is read on the appliance.
+    expect(copy.sftpDescription).toContain("read on this appliance");
     expect(copy.capabilityNote).toBe(
-      "This deployment runs live, shared-directory, and SFTP exchanges here.",
+      "This appliance runs SFTP exchanges here; shared-directory exchanges save a file for the command-line tool; in-tab browser exchanges are a planned capability.",
     );
-    // The filedrop card is unchanged by the remotes flag.
-    expect(copy.filedropLabel).toBe("Over a shared directory, run here");
+    // The filedrop card saves a file regardless of the remotes flag.
+    expect(copy.filedropLabel).toBe(
+      "Over a shared directory, run by the command-line tool",
+    );
   });
 });
 

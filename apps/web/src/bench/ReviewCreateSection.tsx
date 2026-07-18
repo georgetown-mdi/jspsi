@@ -7,6 +7,7 @@ import {
   LIFETIME_CHOICES,
   RESULTS_DIRECTION_LABELS,
   answersRows,
+  availableTransports,
   expiryLabel,
   transportChooserCopy,
 } from "./inviterModel";
@@ -79,9 +80,15 @@ export function ReviewCreateSection({
   onCreate: () => void;
   onNavigate: (target: SpineTarget) => void;
 }) {
-  const transport = editor.transport ?? "browser";
   const sftpServerJob = sftpRemotes !== undefined && sftpRemotes.length > 0;
+  const available = availableTransports(isConsoleBuild(), sftpServerJob);
+  const transport = editor.transport ?? available.defaultTransport;
+  const browserDisabled =
+    available.options.find((option) => option.transport === "browser")
+      ?.disabled === true;
   const {
+    browserLabel,
+    browserDescription,
     filedropLabel,
     filedropDescription,
     sftpLabel,
@@ -142,9 +149,10 @@ export function ReviewCreateSection({
           <Radio
             name="transport"
             checked={transport === "browser"}
+            disabled={browserDisabled}
             onChange={() => onTransport("browser")}
-            label="Live, in this browser"
-            description="Your browsers connect directly. You get an invitation link and code to share; keep this tab open while your partner accepts."
+            label={browserLabel}
+            description={browserDescription}
           />
         </div>
         <div
