@@ -200,8 +200,8 @@ export function InviterBench() {
   // The console profile behind the acquired shape: the appliance reads the file, so
   // the browser holds only the profile (name, size, mtime, columns, samples, date
   // format). It backs the mint (columns), the run (the mounted-file reference), the
-  // coverage sweep, the preview samples, and the authoring-time drift signal.
-  // Undefined on the hosted build, which reads the file in the browser instead.
+  // coverage sweep, and the preview samples. Undefined on the hosted build, which
+  // reads the file in the browser instead.
   const [consoleSource, setConsoleSource] = useState<JobInputProfile>();
   const [sourceFile, setSourceFile] = useState<File>();
   // The File System Access handle a drop attached to the selected file, where the

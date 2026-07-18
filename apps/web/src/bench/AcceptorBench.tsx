@@ -226,9 +226,9 @@ export function AcceptorBench() {
   // The console profile behind the acquired shape: the appliance reads the file, so
   // the browser holds only the profile (name, size, mtime, columns, samples, date
   // format), committed via the picker's "Use this file" before consent. It backs the
-  // columns seed, the run's mounted-file reference, the coverage sweep, the preview
-  // samples, and the authoring-time drift signal. Undefined on the hosted build, which
-  // reads the file in the browser behind the consent gate instead.
+  // columns seed, the run's mounted-file reference, the coverage sweep, and the preview
+  // samples. Undefined on the hosted build, which reads the file in the browser behind
+  // the consent gate instead.
   const [consoleSource, setConsoleSource] = useState<JobInputProfile>();
   const [columnsState, setColumnsState] = useState<AcceptorColumnsState>();
   // Whether the appliance has a rendezvous mount, fetched once on a console build.

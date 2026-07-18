@@ -61,7 +61,7 @@ export function YourFileSection({
   linkable: boolean;
   alert: IntakeAlert | undefined;
   /** The file committed to the bench on the console (its profiled reference), so the
-   * picker marks its row and flags an authoring-time drift; unused off the console. */
+   * picker marks its row; unused off the console. */
   committed?: WorkInputReference;
   /** Commit a profiled console file to the bench (the picker's "Use this file");
    * unused off the console. */

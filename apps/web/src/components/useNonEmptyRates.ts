@@ -28,8 +28,8 @@ export interface NonEmptyRatesState {
  * A source of full-file per-field coverage: seeded once for a coverage input,
  * recomputed for each standardization edit, and torn down on dispose. The hosted
  * default ({@link rowsCoverageProvider}) wraps {@link NonEmptyRateController} over the
- * browser's parsed rows; the console provider (a fetch to the server-side coverage
- * sweep) is a later work package that plugs in through this same seam.
+ * browser's parsed rows; the console provider ({@link consoleCoverageProvider}) fetches
+ * the server-side coverage sweep through this same seam.
  */
 export interface CoverageProvider {
   /** Resolve the per-field rates for `standardization`. A compute the hook
@@ -56,13 +56,13 @@ export const rowsCoverageProvider: CoverageProviderFactory<
   new NonEmptyRateController(rawRows, defaultSpawnAggregateWorker);
 
 /**
- * The console coverage provider: each `compute` POSTs the standardization plus the
- * file's profiled freshness pair to the appliance's streaming coverage sweep
- * ({@link postJobInputCoverage}). A non-2xx (429 busy, a drifted/schema 400, or a
- * transient error) is treated like a superseded response -- the returned promise
- * never settles, so the hook holds its honest "Checking..." pending state until the
- * next debounced edit supersedes it, rather than dropping to a false "coverage
- * unknown". `dispose` aborts any in-flight sweep.
+ * The console coverage provider: each `compute` POSTs the file's name and the
+ * standardization to the appliance's streaming coverage sweep
+ * ({@link postJobInputCoverage}). A non-2xx (a schema 400 or a transient error) is
+ * treated like a superseded response -- the returned promise never settles, so the
+ * hook holds its honest "Checking..." pending state until the next debounced edit
+ * supersedes it, rather than dropping to a false "coverage unknown". `dispose` aborts
+ * any in-flight sweep.
  */
 export const consoleCoverageProvider: CoverageProviderFactory<
   WorkInputReference

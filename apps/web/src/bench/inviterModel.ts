@@ -125,11 +125,9 @@ export function isCliTransport(
 }
 
 /** How a chosen transport would run on this build: the
- * {@link ExchangeDriverSelection} kind as the inviter chooser's UI policy rather
- * than the raw driver mapping. The two diverge on one cell -- a console filedrop:
- * the driver plumbing can run it as a server job, but a console filedrop cannot
- * rendezvous cross-party yet, so the chooser offers it as a save-a-file (CLI)
- * card. */
+ * {@link ExchangeDriverSelection} kind as the inviter chooser's UI policy. A console
+ * filedrop runs as a server job against the mounted rendezvous directory when
+ * `JOB_RENDEZVOUS_DIR` is set, and is disabled otherwise. */
 export type TransportRunMode = ExchangeDriverSelection["kind"];
 
 /** One transport card's placement in the chooser: whether it is offered (rendered
@@ -255,11 +253,12 @@ function capabilityNoteFor(
 /** The Review & create transport-chooser copy that changes with the deployment.
  * The hosted build keeps the browser-only phrasing and saves the two command-line
  * exchanges for the CLI. On the console appliance (`consoleBuild`) the Browser card
- * names its in-tab exchange as a planned capability, the filedrop card saves a file
- * for the CLI (its server-job cannot rendezvous cross-party yet), and -- when the
- * appliance has provisioned SFTP remotes (`sftpServerJob`) -- the SFTP card offers
- * to run here and reads the file on the appliance. The capability note is
- * regenerated from {@link availableTransports} so it cannot drift from behavior. */
+ * is disabled as out of scope, the filedrop card runs here against the mounted
+ * rendezvous directory when one is configured (`rendezvousConfigured`, else it is
+ * disabled), and -- when the appliance has provisioned SFTP remotes (`sftpServerJob`)
+ * -- the SFTP card offers to run here and reads the file on the appliance. The
+ * capability note is regenerated from {@link availableTransports} so it cannot drift
+ * from behavior. */
 export interface TransportChooserCopy {
   browserLabel: string;
   browserDescription: string;
