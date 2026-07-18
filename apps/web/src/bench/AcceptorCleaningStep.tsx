@@ -9,17 +9,16 @@ import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 import { CleaningErrorBoundary } from "@components/CleaningErrorBoundary";
 import { FieldCoverage } from "@components/FieldCoverage";
 import { StandardizationCards } from "@components/StandardizationCards";
-import { columnSamplesFromRows } from "@psi/columnSamples";
 
 import styles from "./bench.module.css";
 
 import type {
-  CSVRow,
   LinkageField,
   Metadata,
   Standardization,
   StandardizationStep,
 } from "@psilink/core";
+import type { ColumnSamples } from "@psi/columnSamples";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
 /**
@@ -31,18 +30,21 @@ import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
  * amber not red, routing the fix to the partner.
  *
  * Presentational over the shared column-step state the bench owns; the full-CSV
- * coverage (`rates`) is computed by the bench's `useNonEmptyRates` and passed in, so
- * one sweep drives both this tab and the Customize menu's Cleaning-attention value.
+ * coverage (`rates`) and the per-column preview samples are computed by the bench
+ * (from the browser rows on the hosted build, read from the server-side profile on
+ * the console) and passed in, so one sweep drives both this tab and the Customize
+ * menu's Cleaning-attention value and the console never reads rows it does not hold.
  */
 export function AcceptorCleaningStep({
   declaredFields,
   metadata,
   standardization,
-  rawRows,
+  columnSamples,
   rates,
   ratesPending,
   deadKeyCount,
   cleaningResetKey,
+  coveragePendingLabel,
   onFieldSteps,
   onFieldInput,
   onReset,
@@ -53,7 +55,9 @@ export function AcceptorCleaningStep({
   declaredFields: Array<LinkageField>;
   metadata: Metadata;
   standardization: Standardization;
-  rawRows: Array<CSVRow>;
+  /** The per-column preview samples, keyed by input-column name: the browser rows'
+   * samples on the hosted build, the profiled samples on the console. */
+  columnSamples: ColumnSamples;
   /** Full-CSV per-field coverage, or null before the first sweep settles. */
   rates: ReadonlyMap<string, FieldValueCoverage> | null;
   ratesPending: boolean;
@@ -62,6 +66,10 @@ export function AcceptorCleaningStep({
   /** A signature of each field's input binding, so a remap or reset auto-recovers
    * the cleaning error boundary. */
   cleaningResetKey: string;
+  /** The coverage pending-placeholder copy: the console passes the whole-file
+   * appliance-sweep phrasing, so the readout does not read as an instant local
+   * check. Undefined keeps the default local copy. */
+  coveragePendingLabel?: string;
   onFieldSteps: (output: string, steps: Array<StandardizationStep>) => void;
   onFieldInput: (output: string, column: string) => void;
   onReset: () => void;
@@ -75,16 +83,6 @@ export function AcceptorCleaningStep({
   const fieldByName = useMemo(
     () => new Map(declaredFields.map((field) => [field.name, field])),
     [declaredFields],
-  );
-  // The per-column preview samples, drawn from the rows once for the whole tab so a
-  // field rebound to another column finds its sample by lookup.
-  const columnSamples = useMemo(
-    () =>
-      columnSamplesFromRows(
-        rawRows,
-        metadata.map((column) => column.name),
-      ),
-    [rawRows, metadata],
   );
 
   // The safe labels of the fields whose transform drops every row, for the one
@@ -159,6 +157,9 @@ export function AcceptorCleaningStep({
             <FieldCoverage
               rate={rates?.get(output)}
               pending={rates !== null && ratesPending}
+              {...(coveragePendingLabel !== undefined
+                ? { pendingLabel: coveragePendingLabel }
+                : {})}
             />
           )}
           isFieldSilentEmpty={(output) => {

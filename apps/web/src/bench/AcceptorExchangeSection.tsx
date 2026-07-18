@@ -45,6 +45,7 @@ export function AcceptorExchangeSection({
   warning,
   onTryAgain,
   onFixColumns,
+  onRefreshFile,
 }: {
   invitation: AcceptableInvitation;
   run: ExchangeRun;
@@ -54,9 +55,13 @@ export function AcceptorExchangeSection({
    * the run and cleared on a failure. */
   warning: AlertContent | undefined;
   onTryAgain: () => void;
-  /** Return to the confirm-columns step with every setting intact -- the config
-   * failure's recovery, since the acceptor fixes its own settings there. */
+  /** Return to the confirm-columns step with every setting intact -- a prepare-time
+   * config failure's recovery, since the acceptor fixes its own settings there. */
   onFixColumns: () => void;
+  /** Return to the consent-and-file step to re-profile the mounted file -- the
+   * console mounted-file create rejection's recovery ({@link RunFailure.recovery}
+   * `refresh-file`), where the fault is the file, not the terms. */
+  onRefreshFile: () => void;
 }) {
   const phase = outputs !== undefined ? "done" : "running";
 
@@ -132,14 +137,34 @@ export function AcceptorExchangeSection({
                 Start over with a fresh invitation
               </Button>
             )}
+          {/* A console mounted-file create rejection (drifted, removed, or out of
+              space): the fault is the file, so recovery returns to the consent-and-
+              file step to re-profile it, not to the columns the operator authored. */}
+          {failure.category === "config" &&
+            failure.recovery === "refresh-file" && (
+              <Button
+                color="red"
+                variant="light"
+                mt="sm"
+                onClick={onRefreshFile}
+              >
+                Return to your file
+              </Button>
+            )}
           {/* A prepare-time fault in this party's own settings: the acceptor
               fixes it on the confirm-columns step with every input intact, so
               the recovery returns there rather than re-running as-is. */}
-          {failure.category === "config" && (
-            <Button color="red" variant="light" mt="sm" onClick={onFixColumns}>
-              Back to your columns
-            </Button>
-          )}
+          {failure.category === "config" &&
+            failure.recovery !== "refresh-file" && (
+              <Button
+                color="red"
+                variant="light"
+                mt="sm"
+                onClick={onFixColumns}
+              >
+                Back to your columns
+              </Button>
+            )}
         </FailureAlert>
       )}
       {/* The confirm-columns partial-coverage advisory, kept visible through the
