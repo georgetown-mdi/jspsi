@@ -17,7 +17,6 @@ import {
 import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
 import { capturedInputHandle } from "@psi/managedInputHandle";
 import { createManagedExchange } from "@psi/managedExchangeStore";
-import { dateInputFormatForColumns } from "@psi/advancedInvite";
 import { fetchSftpRemotes } from "@psi/serverJobExchangeDriver";
 import { invitationLocation } from "@psi/invitationLocation";
 import { loadCSVFileOffMainThread } from "@psi/csvParseController";
@@ -482,7 +481,6 @@ export function InviterBench() {
         rawRows: result.data,
         columns,
         rowCount: result.data.length,
-        dateInputFormat: dateInputFormatForColumns(columns, result.data),
       };
       const seeded = editorFromCsv(identity, csv);
       setAcquired(csv);

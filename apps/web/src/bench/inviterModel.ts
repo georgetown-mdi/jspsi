@@ -185,9 +185,9 @@ export function transportChooserCopy(
  * parsed rows and columns every derivation binds to. `rowCount` is the file's
  * row total, held explicitly so the display surfaces do not read `rawRows.length`
  * (the console acquires only a server-side profile, not the rows). `dateInputFormat`
- * is the pre-inferred date-of-birth layout ({@link dateInputFormatForColumns}),
- * threaded through the draft model so a reconciliation never re-derives it from the
- * rows. */
+ * is a pre-inferred date-of-birth layout ({@link dateInputFormatForColumns}), set
+ * only by sources that profile it without rows (the console); when absent, each
+ * derivation infers it from the rows as before. */
 export interface AcquiredCsv {
   fileName: string;
   sizeBytes: number;

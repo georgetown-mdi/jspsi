@@ -64,9 +64,10 @@ export interface AcceptorAcquiredCsv {
   /** The file's row total, held explicitly so display surfaces never read
    * `rawRows.length` (the console profiles the count server-side). */
   rowCount: number;
-  /** The pre-inferred date-of-birth input layout
-   * ({@link dateInputFormatForColumns}), threaded into the derived standardization
-   * so a remap never re-derives it from the rows. */
+  /** A pre-inferred date-of-birth input layout
+   * ({@link dateInputFormatForColumns}), set only by sources that profile it
+   * without rows (the console); when absent, derivations infer it from the
+   * rows as before. */
   dateInputFormat?: string;
 }
 

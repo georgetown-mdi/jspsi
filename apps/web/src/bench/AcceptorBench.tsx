@@ -14,7 +14,6 @@ import {
 import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
 import { capturedInputHandle } from "@psi/managedInputHandle";
 import { createManagedExchange } from "@psi/managedExchangeStore";
-import { dateInputFormatForColumns } from "@psi/advancedInvite";
 import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
@@ -410,7 +409,6 @@ export function AcceptorBench() {
         columns,
         rawRows: result.data,
         rowCount: result.data.length,
-        dateInputFormat: dateInputFormatForColumns(columns, result.data),
       });
       setColumnsState(acceptorInitialColumnsState(columns));
       goToStep("columns");
