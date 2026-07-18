@@ -106,11 +106,12 @@ The web application can run as a **console appliance** for a single party: a con
 
 **One image, the console profile baked in.** The published `vdorie/psi-link` image is the appliance: it is built with `VITE_DEPLOYMENT_PROFILE=console` so its web assets and its server-side job driver are the console halves, and it runs them with `docker run -d -p 3000:3000 vdorie/psi-link serve` (see [Docker deployment](#docker-deployment)). You do not build web assets yourself, set the profile, or publish a second image; the profile the image carries drives which transports run server-side. Under `console` the transport chooser offers to run a shared-directory (`filedrop`) exchange on the appliance -- sending the operator's file to the job API -- and, when SFTP remotes are provisioned (below), to run an SFTP exchange against one of them; it drops the browser-only file-handling assurance from the UI accordingly. The separate `hosted` web deployment (the continuously deployed `apps/web`, not this image) never offers to run an exchange server-side: a shared-directory or SFTP exchange there only saves an exchange file for the command-line tool, so the operator's file stays in the browser even if the API were reachable.
 
-The job API is **off by default.** It does nothing -- serves no endpoint, spawns no CLI -- until you configure a data root. Two environment variables control it:
+The job API is **off by default.** It does nothing -- serves no endpoint, spawns no CLI -- until you configure a data root. These environment variables control it:
 
 - `JOB_DATA_ROOT` -- the feature gate and the directory under which each job's working files are created. Set it to turn the API on; leave it unset to keep it off. A hosted deployment that does not set it never exposes the API.
 - `JOB_API_TOKEN` -- a bearer token the API requires on every request. Set it whenever the API is reachable beyond loopback.
 - `JOB_SFTP_REMOTES` -- the path to a mounted file naming the SFTP servers the appliance may connect out to. Set it to let the appliance run SFTP exchanges through the job API; leave it unset and SFTP stays save-a-file.
+- `JOB_INPUT_DIR` -- the one directory the appliance lists and reads input CSVs from. Set it (and mount that directory) to give the console its input files; leave it unset and the console reports an explicit "input directory not configured" state rather than a silently empty listing. Like `JOB_SFTP_REMOTES` it requires `JOB_DATA_ROOT`, and nothing about it is baked into the image. See [The work-input directory](#the-work-input-directory).
 
 **Loopback or token, enforced at startup.** The API assumes a single operator, not multiple tenants, so it must not sit unauthenticated on a shared interface. If you enable it (set `JOB_DATA_ROOT`) on a non-loopback bind without a token, the server refuses to start. Run it either bound to loopback (the appliance case, no token needed) or with `JOB_API_TOKEN` set.
 
@@ -121,6 +122,45 @@ That startup check reads the application's own bind host, which is not the whole
 **Restarting cancels in-flight exchanges; completed jobs survive.** Job state lives in server memory only, so restarting the server cancels any exchange still running -- rerun those, since the exchange protocol cannot resume mid-run. A completed job's files remain on disk, and the console re-discovers them after a restart: you can still list prior jobs and download each one's result, record, and verification keys read-only (an interrupted run shows as terminated, and nothing is ever re-run). Per-job directories accumulate under `JOB_DATA_ROOT` until you remove a job through the API or delete its directory by hand; nothing is auto-deleted.
 
 The endpoint contract, the request schema, the working-directory layout and file permissions, and the exact gate and startup rules are specified in [SERVER_JOB_API.md](spec/SERVER_JOB_API.md).
+
+### The work-input directory
+
+`JOB_INPUT_DIR` names the one directory the appliance lists and reads input CSVs from. The console reads its exchange input from that directory: the operator drops CSVs into the mounted host directory and selects one from the console. Set the variable to the directory's in-container path and mount the host directory there in the same `docker run` line -- nothing is baked into the image, so the appliance reads only the directory you point it at. Leave the variable unset and the console shows an explicit "input directory not configured" state, an actionable prompt to set `JOB_INPUT_DIR` and mount a directory, not a mysteriously empty listing. Like the SFTP remotes table, it requires `JOB_DATA_ROOT`: setting it without a data root refuses startup.
+
+Mount the directory read-only. Nothing in the container writes to it -- each job snapshots its chosen input into the data root when the job is created, and the CLI reads only that snapshot -- so `:ro` costs nothing and keeps the appliance from touching the operator's source data:
+
+```sh
+docker run -d -p 3000:3000 \
+  --env JOB_DATA_ROOT=/data/jobs \
+  --env JOB_API_TOKEN=... \
+  --env JOB_INPUT_DIR=/work \
+  -v /host/jobs:/data/jobs \
+  -v /host/data:/work:ro \
+  vdorie/psi-link serve
+```
+
+**Disk usage.** Each job copies its chosen input into its working directory under `JOB_DATA_ROOT`, so a job's on-disk footprint includes a full snapshot of its input -- gigabytes per job at the file sizes the CLI is built for. Job creation refuses, and creates no job, when the data root's filesystem has less free space than the input's size. As with the rest of a job's working files, these snapshots accumulate until you delete the job (see above); nothing is auto-deleted, so size the data-root volume for several times your largest input and prune finished jobs.
+
+**The container runs as root.** The published image ships no `USER` directive, so the appliance process runs as root inside the container. The application-layer admission checks -- the appliance reads only the one configured directory, through an enumerated listing that never follows a symlink out of it or opens a name it did not itself list -- are the barrier between the web surface and the rest of the container's contents. Running the container as a non-root user is not a supported deployment target, so there is no UID or file-ownership tuning to apply beyond mounting the input directory read-only.
+
+**Results leave the other way.** Input files come in through the mount; results do not go back out through it. A finished job's result CSV, exchange record, and verification keys download through the authenticated job API and are never written to the mounted directory.
+
+**Keep the mount to input CSVs only.** The appliance treats every listable file in the directory as a candidate CSV and surfaces bounded sample values from it, so mount a directory that holds input data only and keep credential files and other secrets out of it. In particular, a provisioned SFTP remote's credential `@path` references should not resolve under `JOB_INPUT_DIR`. This is a deployment recommendation, not a startup check the appliance enforces.
+
+**Upgrading an existing console deployment.** A console deployment upgraded without setting `JOB_INPUT_DIR` and adding the mount shows the "input directory not configured" state until you do both. The mounted directory is the console's supported way to supply an exchange input; set the variable and mount a directory holding your input CSVs.
+
+The admission rules, the streaming profile and coverage passes, and the exact startup and containment checks are specified in [SERVER_JOB_API.md](spec/SERVER_JOB_API.md#work-input-files).
+
+### Sample-data walkthrough on the console
+
+The bench's sample-data control downloads two synthetic CSVs -- `psilink-sample-inviter.csv` and `psilink-sample-partner.csv` -- that drive a full exchange with no real records. The in-browser version runs both parties in two browser tabs; the console appliance reads its input from the mounted directory instead, so run the sample against the appliance like this:
+
+1. Download the sample CSVs from the bench's sample-data control.
+2. Place `psilink-sample-inviter.csv` in the host directory you mounted at `JOB_INPUT_DIR`.
+3. In the console, select that file as the appliance party's input and run the exchange over a channel both parties can reach (a provisioned SFTP remote, above).
+4. On the partner side, run the `psilink` CLI against `psilink-sample-partner.csv` over that same channel (see [CLI.md](CLI.md) and [COMMUNICATION.md](COMMUNICATION.md)).
+
+The two sample files are engineered to match on several records under default cleaning, so the exchange produces a non-empty result you can download and inspect.
 
 ## SFTP server
 
@@ -160,7 +200,7 @@ docker run -d -p 3000:3000 \
   vdorie/psi-link serve
 ```
 
-`JOB_CLI_BINARY` is pre-set in the image and needs no operator value. The loopback-or-token rule, why the token is required on a non-loopback bind, and the reverse-proxy caveat are in [Server job API](#server-job-api); a deployment reachable beyond loopback (a published port, or any reverse proxy) must set `JOB_API_TOKEN` or deny `/api/jobs` at the proxy.
+`JOB_CLI_BINARY` is pre-set in the image and needs no operator value. The loopback-or-token rule, why the token is required on a non-loopback bind, and the reverse-proxy caveat are in [Server job API](#server-job-api); a deployment reachable beyond loopback (a published port, or any reverse proxy) must set `JOB_API_TOKEN` or deny `/api/jobs` at the proxy. To source the console's exchange input from a mounted directory rather than a browser upload, add `JOB_INPUT_DIR` and its mount as well (see [The work-input directory](#the-work-input-directory)).
 
 ### Key file permissions in containers
 
