@@ -12,8 +12,11 @@ import {
   sanitizeForDisplay,
 } from "@psilink/core";
 
+import {
+  JobApiRequestError,
+  createServerJobExchangeDriver,
+} from "@psi/serverJobExchangeDriver";
 import { createBrowserExchangeDriver } from "@psi/exchangeDriver";
-import { createServerJobExchangeDriver } from "@psi/serverJobExchangeDriver";
 import { hasRecoveryHint } from "@psi/authenticateExchange";
 import { inviterExchangeDataSpec } from "@psi/advancedInvite";
 import { listenAsInviter } from "@psi/rendezvous";
@@ -63,13 +66,40 @@ export interface RunFailure {
   category: ExchangeErrorCategory;
   title: string;
   message: string;
+  /** The recovery the alert offers when the default category recovery is wrong.
+   * `refresh-file` steers a console mounted-file create rejection back to Your file
+   * to re-profile, rather than start-over-to-review: the fault is the file, not the
+   * terms. Absent for every other failure, which keeps its category's recovery. */
+  recovery?: "refresh-file";
 }
 
 /** @internal */
 export function failureFor(
   category: ExchangeErrorCategory,
   error: unknown,
+  inputSource?: JobInputSource,
 ): RunFailure {
+  // A console job create rejected the mounted file (drifted, removed, or the data
+  // root ran out of space since selection): a 400 the driver categorized `config`.
+  // The operator's terms are fine -- the file is the fault -- so the alert names the
+  // file cause and routes recovery to Your file, not start-over-to-review. Scoped to
+  // the workFile create rejection so a CLI prepare-time config fault keeps its copy.
+  if (
+    category === "config" &&
+    inputSource?.kind === "workFile" &&
+    error instanceof JobApiRequestError &&
+    error.status === 400
+  ) {
+    return {
+      category,
+      title: "The appliance could not use this file",
+      message:
+        "The appliance could not use this file. It may have changed, been " +
+        "removed, or run out of space since you selected it. Return to Your " +
+        "file to refresh and re-profile it.",
+      recovery: "refresh-file",
+    };
+  }
   if (category === "output") {
     // The exchange succeeded; only results-file generation failed. The user
     // must not be told to re-run a privacy-sensitive exchange, so unlike the
@@ -371,7 +401,7 @@ export function useInviterExchange({
           // on) keeps the full object. The user-facing alert is separately
           // sanitized in failureFor.
           whenDiagnostic(() => console.error(error));
-          setFailure(failureFor(category, error));
+          setFailure(failureFor(category, error, inputSource));
           setRun((current) => runWithFailure(current));
         },
       });

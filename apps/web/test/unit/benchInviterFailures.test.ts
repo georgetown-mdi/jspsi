@@ -1,6 +1,16 @@
 import { describe, expect, test } from "vitest";
 
+import { JobApiRequestError } from "@psi/serverJobExchangeDriver";
 import { failureFor } from "@bench/useInviterExchange";
+
+import type { JobInputSource } from "@psi/serverJobExchangeDriver";
+
+const WORK_FILE: JobInputSource = {
+  kind: "workFile",
+  name: "clients.csv",
+  sizeBytes: 4096,
+  modifiedAt: 1_700_000_000_000,
+};
 
 describe("failureFor", () => {
   test("each category carries its alert title", () => {
@@ -48,5 +58,35 @@ describe("failureFor", () => {
       "The exchange could not be completed - usually a temporary " +
         "connection problem rather than an issue with your data.",
     );
+  });
+
+  test("a mounted-file create rejection names the file and routes to Your file", () => {
+    const failure = failureFor(
+      "config",
+      new JobApiRequestError(400, "POST /api/jobs failed with status 400"),
+      WORK_FILE,
+    );
+    expect(failure.recovery).toBe("refresh-file");
+    expect(failure.title).toBe("The appliance could not use this file");
+    expect(failure.message).not.toContain("status 400");
+    expect(failure.message).toContain("Your file");
+  });
+
+  test("a config fault that is not a mounted-file 400 keeps the default recovery", () => {
+    // An inline-source create rejection, and a CLI prepare-time config fault, both
+    // keep the start-over-to-review recovery -- only the workFile 400 reroutes.
+    expect(
+      failureFor("config", new JobApiRequestError(400, "x"), {
+        kind: "inline",
+        csv: "a,b",
+      }).recovery,
+    ).toBeUndefined();
+    expect(
+      failureFor("config", new JobApiRequestError(500, "x"), WORK_FILE)
+        .recovery,
+    ).toBeUndefined();
+    expect(
+      failureFor("config", new Error("bad terms")).recovery,
+    ).toBeUndefined();
   });
 });

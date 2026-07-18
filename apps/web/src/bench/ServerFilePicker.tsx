@@ -9,6 +9,7 @@ import {
   Stack,
   Table,
   Text,
+  VisuallyHidden,
 } from "@mantine/core";
 import { IconAlertCircle, IconRefresh } from "@tabler/icons-react";
 
@@ -35,21 +36,76 @@ function formatBytes(bytes: number): string {
   return `${bytes} B`;
 }
 
-/** Whether the committed file's on-disk size/mtime still match the profiled pair the
- * bench holds; a mismatch (or a vanished entry) is the authoring-time drift. */
-function hasDrifted(
+/** The authoring-time state of a committed file's profiled snapshot against a fresh
+ * listing. Kept distinct so the notice never claims a file "changed" when it was
+ * removed or merely pushed past the truncated listing window. */
+export type WorkInputDrift = "none" | "changed" | "removed" | "not-listed";
+
+/**
+ * Compare a committed file's profiled `(sizeBytes, modifiedAt)` against a fresh
+ * listing. Present with a matching pair, or a listing that could not be read, is
+ * `none`; present with a different pair is `changed`; absent from a COMPLETE listing
+ * is `removed`; absent from a TRUNCATED listing is `not-listed` -- the file may sit
+ * beyond the 512-name window, so its absence there is not evidence it is gone, and
+ * flagging it as "changed" would drive the operator to destroy an intact draft.
+ */
+export function workInputDrift(
   committed: WorkInputReference,
   listing: JobInputsResult,
-): boolean {
-  if (listing.kind !== "listing") return false;
+): WorkInputDrift {
+  if (listing.kind !== "listing") return "none";
   const entry = listing.listing.files.find(
     (file) => file.name === committed.name,
   );
-  return (
-    entry === undefined ||
-    entry.sizeBytes !== committed.sizeBytes ||
-    entry.modifiedAt !== committed.modifiedAt
-  );
+  if (entry !== undefined)
+    return entry.sizeBytes !== committed.sizeBytes ||
+      entry.modifiedAt !== committed.modifiedAt
+      ? "changed"
+      : "none";
+  return listing.listing.truncated ? "not-listed" : "removed";
+}
+
+// The aria-live status copy below is deliberately worded distinctly from the visible
+// notices it accompanies (the CleaningTab live-region idiom): a screen reader hears
+// the region on change, while the visible alert carries the operator-facing detail.
+
+/** The drift live-region copy -- short, name-free (the visible notice carries the
+ * name), one line per state. */
+function driftLiveMessage(drift: WorkInputDrift): string {
+  if (drift === "changed")
+    return "The mounted file changed since you profiled it; re-profile it.";
+  if (drift === "removed")
+    return "The mounted file is gone from the work directory.";
+  if (drift === "not-listed")
+    return "The mounted file is outside the current listing.";
+  return "";
+}
+
+/** The listing settle copy for the aria-live status region. */
+function listingLiveMessage(listing: JobInputsResult | "loading"): string {
+  if (listing === "loading") return "";
+  if (listing.kind === "busy") return "The appliance is busy.";
+  if (listing.kind === "error") return "The file listing could not be loaded.";
+  const { configured, totalEntries, truncated, files } = listing.listing;
+  if (!configured) return "This appliance has no work directory configured.";
+  if (files.length === 0)
+    return totalEntries === 0
+      ? "No files are in the work directory yet."
+      : "The work directory holds no usable files.";
+  return truncated
+    ? `Loaded the first ${files.length} files; additional files are present.`
+    : `Loaded ${files.length} ${files.length === 1 ? "file" : "files"} from the work directory.`;
+}
+
+/** The profile settle copy for the aria-live status region. */
+function profileLiveMessage(
+  profile: JobInputProfileResult | "loading" | undefined,
+): string {
+  if (profile === undefined) return "";
+  if (profile === "loading") return "Profiling the file on the appliance.";
+  if (profile.kind === "busy") return "The appliance is busy.";
+  if (profile.kind !== "profile") return "The file could not be profiled.";
+  return "File profile ready. Confirm the file before using it.";
 }
 
 /**
@@ -62,9 +118,14 @@ function hasDrifted(
  * ({@link fetchJobInputProfile}) and shows a confirm panel -- columns, row count,
  * size, modified time, and a per-column sample peek -- with an explicit loading
  * state, since a pass over a CLI-scale file takes seconds. "Use this file" commits
- * the profile to the bench. A listing refresh compares the committed file's
- * size/mtime against the profiled snapshot and surfaces a drift notice prompting a
- * re-profile.
+ * the profile to the bench.
+ *
+ * A listing refresh compares the committed file's `(size, mtime)` against the
+ * profiled snapshot and surfaces one of three distinct notices ({@link
+ * workInputDrift}): changed on disk, removed, or not visible in a truncated listing.
+ * Focus moves to the active stage on a listing<->confirm swap and on a refresh settle
+ * (so the loading branch is never a focus dead-end), and a polite status region
+ * announces every listing/profile/drift update.
  */
 export function ServerFilePicker({
   committed,
@@ -126,60 +187,145 @@ export function ServerFilePicker({
     cancelSelection();
   }
 
-  const drifted =
-    committed !== undefined &&
-    listing !== "loading" &&
-    hasDrifted(committed, listing);
+  // The active stage receives focus on a listing<->confirm swap and on a refresh
+  // settle, so a screen-reader user is never stranded on a control that unmounted
+  // and the loading branch (which has no focusable content of its own) is not a
+  // dead-end. tabIndex -1 makes the wrapper focusable without adding it to the tab
+  // order; a programmatic focus does not trip :focus-visible, so no outline shows.
+  const stageRef = useRef<HTMLDivElement>(null);
+  const stageMounted = useRef(false);
+  useEffect(() => {
+    if (stageMounted.current) stageRef.current?.focus();
+    stageMounted.current = true;
+  }, [selectedName]);
 
-  const driftNotice = drifted ? (
-    <Alert
-      color="orange"
-      icon={<IconAlertCircle />}
-      title="This file changed on disk since you profiled it"
-    >
-      <Stack gap="xs">
-        <Text size="sm">
-          The exchange will not run against content that changed after you
-          profiled it. Re-profile{" "}
-          <span className={styles.mono}>
-            {sanitizeForDisplay(committed.name)}
-          </span>{" "}
-          to use its current version.
-        </Text>
-        <Group>
-          <Button
-            size="xs"
-            variant="light"
-            onClick={() => void selectFile(committed.name)}
-          >
-            Re-profile this file
-          </Button>
-        </Group>
-      </Stack>
-    </Alert>
-  ) : null;
+  const focusAfterListing = useRef(false);
+  const refresh = useCallback(() => {
+    focusAfterListing.current = true;
+    void loadListing();
+  }, [loadListing]);
+  useEffect(() => {
+    if (listing === "loading") return;
+    if (focusAfterListing.current) {
+      focusAfterListing.current = false;
+      stageRef.current?.focus();
+    }
+  }, [listing]);
+
+  const drift: WorkInputDrift =
+    committed !== undefined && listing !== "loading"
+      ? workInputDrift(committed, listing)
+      : "none";
+
+  // One polite status region announces the last settled update: the profile result
+  // while confirming a file, otherwise the drift (which outranks the plain listing
+  // summary) or the listing summary. Computed in render so the region re-announces
+  // exactly when the message text changes (the TermsImportExport live-region idiom).
+  const liveMessage =
+    selectedName !== undefined
+      ? profileLiveMessage(profile)
+      : drift !== "none"
+        ? driftLiveMessage(drift)
+        : listingLiveMessage(listing);
 
   return (
     <Stack gap="md" mt="md">
-      {driftNotice}
-      {selectedName !== undefined ? (
-        <ConfirmPanel
-          name={selectedName}
-          profile={profile}
-          onUse={useProfiled}
-          onCancel={cancelSelection}
-          onRetry={() => void selectFile(selectedName)}
-        />
-      ) : (
-        <ListingView
-          listing={listing}
-          committed={committed}
-          onRefresh={() => void loadListing()}
-          onSelect={(name) => void selectFile(name)}
+      <VisuallyHidden role="status" aria-live="polite">
+        {liveMessage}
+      </VisuallyHidden>
+      {committed !== undefined && (
+        <DriftNotice
+          drift={drift}
+          name={committed.name}
+          onReprofile={() => void selectFile(committed.name)}
         />
       )}
+      <div ref={stageRef} tabIndex={-1} style={{ outline: "none" }}>
+        {selectedName !== undefined ? (
+          <ConfirmPanel
+            name={selectedName}
+            profile={profile}
+            onUse={useProfiled}
+            onCancel={cancelSelection}
+            onRetry={() => void selectFile(selectedName)}
+          />
+        ) : (
+          <ListingView
+            listing={listing}
+            committed={committed}
+            onRefresh={refresh}
+            onSelect={(name) => void selectFile(name)}
+          />
+        )}
+      </div>
     </Stack>
   );
+}
+
+/** The authoring-time drift notice for the committed file, one of three distinct
+ * copies ({@link workInputDrift}). Only `changed` offers a re-profile (a removed or
+ * out-of-window file cannot be re-profiled from here). */
+function DriftNotice({
+  drift,
+  name,
+  onReprofile,
+}: {
+  drift: WorkInputDrift;
+  name: string;
+  onReprofile: () => void;
+}) {
+  const displayName = (
+    <span className={styles.mono}>{sanitizeForDisplay(name)}</span>
+  );
+  if (drift === "changed")
+    return (
+      <Alert
+        color="orange"
+        icon={<IconAlertCircle />}
+        title="This file changed on disk since you profiled it"
+      >
+        <Stack gap="xs">
+          <Text size="sm">
+            The exchange will not run against content that changed after you
+            profiled it. Re-profile {displayName} to use its current version.
+          </Text>
+          <Group>
+            <Button size="xs" variant="light" onClick={onReprofile}>
+              Re-profile this file
+            </Button>
+          </Group>
+        </Stack>
+      </Alert>
+    );
+  if (drift === "removed")
+    return (
+      <Alert
+        color="red"
+        icon={<IconAlertCircle />}
+        title="This file is no longer in the work directory"
+      >
+        <Text size="sm">
+          The exchange cannot run against a file that is no longer there. Choose
+          another file below, or restore {displayName} to the work directory and
+          refresh.
+        </Text>
+      </Alert>
+    );
+  if (drift === "not-listed")
+    return (
+      <Alert
+        color="blue"
+        icon={<IconAlertCircle />}
+        title="This file is not visible in the current listing"
+      >
+        <Text size="sm">
+          {displayName} is beyond the truncated file listing, so its current
+          state cannot be checked here. Narrow the work directory to see it,
+          then re-profile if it changed.
+        </Text>
+      </Alert>
+    );
+  return null;
 }
 
 /** The first-stage listing: the distinct configured/empty/inadmissible/list states
@@ -286,7 +432,7 @@ function ListingView({
   return (
     <Stack gap="sm">
       <Group justify="space-between" align="center">
-        <Text fw={600}>Choose a file from the work directory</Text>
+        <h2 style={{ margin: 0 }}>Choose a file from the work directory</h2>
         {refreshButton}
       </Group>
       <Table
@@ -305,10 +451,12 @@ function ListingView({
         <Table.Tbody>
           {files.map((file) => {
             const isCommitted = committed?.name === file.name;
+            const displayName = sanitizeForDisplay(file.name);
+            const action = isCommitted ? "Re-profile" : "Select";
             return (
               <Table.Tr key={file.name}>
                 <Table.Td className={styles.mono}>
-                  {sanitizeForDisplay(file.name)}{" "}
+                  {displayName}{" "}
                   {isCommitted && (
                     <Badge size="xs" color="green" variant="light">
                       Selected
@@ -323,9 +471,10 @@ function ListingView({
                   <Button
                     size="xs"
                     variant="light"
+                    aria-label={`${action} ${displayName}`}
                     onClick={() => onSelect(file.name)}
                   >
-                    {isCommitted ? "Re-profile" : "Select"}
+                    {action}
                   </Button>
                 </Table.Td>
               </Table.Tr>
@@ -429,7 +578,7 @@ function ConfirmPanel({
   const profiled = profile.profile;
   return (
     <Stack gap="sm">
-      <Text fw={600}>Confirm this file</Text>
+      <h2 style={{ margin: 0 }}>Confirm this file</h2>
       <Table withRowBorders={false} aria-label="File profile">
         <Table.Tbody>
           <Table.Tr>

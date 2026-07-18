@@ -135,7 +135,16 @@ export function YourFileSection({
                 download the CSVs
               </Anchor>
               , then place one in this appliance&apos;s mounted work directory
-              -- the deployment guide walks through it.
+              -- see the{" "}
+              <Anchor
+                inherit
+                href="https://github.com/georgetown-mdi/jspsi/blob/main/docs/DEPLOYMENT.md"
+                target="_blank"
+                rel="noreferrer"
+              >
+                deployment guide
+              </Anchor>
+              .
             </p>
           )}
         </>

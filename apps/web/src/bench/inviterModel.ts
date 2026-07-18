@@ -325,8 +325,10 @@ export interface AcquiredCsv {
  * shape ({@link AcquiredCsv.rowsWithheld}) contributes an empty set -- its
  * `dateInputFormat` was already profiled, so the inference has no rows to draw on
  * and needs none -- while a hosted shape contributes its parsed rows. Keeping the
- * access here means the throwing `rawRows` getter is never touched on the console. */
-function seedRows(csv: AcquiredCsv): Array<CSVRow> {
+ * access here means the throwing `rawRows` getter is never touched on the console.
+ * Exported so the one remaining `rawRows` consumer that lives outside this module
+ * (the expert-mode terms import/export) reads rows through the same guard. */
+export function seedRows(csv: AcquiredCsv): Array<CSVRow> {
   return csv.rowsWithheld === true ? [] : csv.rawRows;
 }
 
@@ -666,6 +668,29 @@ export function resetToRecommended(
 ): InviterEditor {
   if (editor.sealed === true) return editor;
   return editorFromCsv(editor.draft.identity, csv);
+}
+
+/** Reconcile an existing session onto a re-profiled file whose column set is
+ * unchanged: the authored draft (keys, cleaning, disclosure, transport) is kept and
+ * the profile-derived date-of-birth format is threaded back through the keep-keys
+ * reconciliation ({@link setDraftMetadataKeepingKeys}), so a re-profile refreshes the
+ * file's facts without discarding the operator's customizations. A sealed session is
+ * returned unchanged -- its terms are locked. The caller reseeds instead when the
+ * columns changed. */
+export function editorReprofiled(
+  editor: InviterEditor,
+  csv: AcquiredCsv,
+): InviterEditor {
+  if (editor.sealed === true) return editor;
+  return {
+    ...editor,
+    draft: setDraftMetadataKeepingKeys(
+      editor.draft,
+      editor.draft.metadata,
+      seedRows(csv),
+      csv.dateInputFormat,
+    ),
+  };
 }
 
 /** The result of a step-2 column edit: the reconciled session plus any

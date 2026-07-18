@@ -35,6 +35,7 @@ export function CleaningTab({
   onFieldRemoved,
   onResetCleaning,
   cleaningError,
+  coveragePendingLabel,
   onBack,
 }: {
   editor: InviterEditor;
@@ -60,6 +61,9 @@ export function CleaningTab({
   /** The validation message for the cleaning, rendered inline (the work
    * column's Problems block carries it too). */
   cleaningError: string | undefined;
+  /** Provider-aware coverage pending copy (the console sweep is a whole-file pass on
+   * the appliance); the hosted build leaves it undefined to keep the default. */
+  coveragePendingLabel?: string;
   onBack: () => void;
 }) {
   const declaredFields = useMemo(
@@ -135,6 +139,7 @@ export function CleaningTab({
             <FieldCoverage
               rate={rates?.get(output)}
               pending={rates !== null && pending}
+              pendingLabel={coveragePendingLabel}
             />
           )}
           isFieldSilentEmpty={(output) => {

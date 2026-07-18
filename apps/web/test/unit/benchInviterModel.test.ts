@@ -9,6 +9,7 @@ import {
   availableTransports,
   cleaningCoverageProblems,
   editorFromCsv,
+  editorReprofiled,
   editorWithAlgorithm,
   editorWithAuthoredDraft,
   editorWithColumnDisclosure,
@@ -109,6 +110,27 @@ describe("spine derivation from the read file", () => {
     const editor = editorFromCsv("Dana", unmatchable);
     expect(enabledKeys(editor.draft)).toEqual([]);
     expect(ledgerValue(editor, "Matched on").muted).toBe("No keys");
+  });
+
+  test("editorReprofiled keeps the authored draft on a same-columns re-profile", () => {
+    const authored = editorWithKeyEnabled(editorFromCsv("Dana", csv), 0, false);
+    // A re-profile of the same file with unchanged columns: only the file facts
+    // (size, rows) differ.
+    const reprofiled = editorReprofiled(authored, {
+      ...csv,
+      sizeBytes: csv.sizeBytes + 4096,
+      rowCount: 2,
+    });
+    expect(reprofiled.draft.keys).toEqual(authored.draft.keys);
+    expect(reprofiled.draft.standardization).toEqual(
+      authored.draft.standardization,
+    );
+    expect(reprofiled.draft.metadata).toEqual(authored.draft.metadata);
+  });
+
+  test("editorReprofiled leaves a sealed session untouched", () => {
+    const sealed = sealEditor(editorFromCsv("Dana", csv));
+    expect(editorReprofiled(sealed, { ...csv, sizeBytes: 1 })).toBe(sealed);
   });
 
   test("before a file is read, every ledger row is the placeholder", () => {

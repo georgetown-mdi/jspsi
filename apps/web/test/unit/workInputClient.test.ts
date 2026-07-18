@@ -104,7 +104,14 @@ describe("fetchJobInputProfile", () => {
 describe("postJobInputCoverage", () => {
   test("posts the freshness pair and standardization, returning the rates on a 200", async () => {
     const rates = [
-      { output: "name", input: "first_name", produced: 2, total: 2 },
+      {
+        output: "name",
+        input: "first_name",
+        produced: 2,
+        total: 2,
+        rate: 1,
+        unavailable: false,
+      },
     ];
     const fetchImpl = vi.fn(() => Promise.resolve(jsonResponse({ rates })));
     const controller = new AbortController();
@@ -138,6 +145,72 @@ describe("postJobInputCoverage", () => {
       expect(result).toBeNull();
     }
   });
+
+  test("rejects a body whose entry has a malformed numeric field", async () => {
+    // A NaN/undefined numeric that reached the silent-empty gate would fail it OPEN
+    // for that field, so a malformed entry degrades the whole body to the error
+    // state (null) rather than reporting a false coverage.
+    for (const bad of [
+      { output: "name", input: "first_name", produced: 2, total: 2 },
+      { output: "name", input: "first_name", produced: "2", total: 2, rate: 1 },
+      {
+        output: "name",
+        input: "first_name",
+        produced: 2,
+        total: 2,
+        rate: null,
+      },
+      {
+        output: "name",
+        input: "first_name",
+        produced: 2,
+        total: 2,
+        rate: 1,
+        unavailable: "no",
+      },
+      { output: "", input: "first_name", produced: 2, total: 2, rate: 1 },
+    ]) {
+      const result = await postJobInputCoverage(
+        REFERENCE,
+        STANDARDIZATION,
+        new AbortController().signal,
+        () => Promise.resolve(jsonResponse({ rates: [bad] })),
+      );
+      expect(result).toBeNull();
+    }
+  });
+
+  test("accepts an entry that omits the unavailable flag, defaulting it false", async () => {
+    const result = await postJobInputCoverage(
+      REFERENCE,
+      STANDARDIZATION,
+      new AbortController().signal,
+      () =>
+        Promise.resolve(
+          jsonResponse({
+            rates: [
+              {
+                output: "name",
+                input: "first_name",
+                produced: 2,
+                total: 2,
+                rate: 1,
+              },
+            ],
+          }),
+        ),
+    );
+    expect(result).toEqual([
+      {
+        output: "name",
+        input: "first_name",
+        produced: 2,
+        total: 2,
+        rate: 1,
+        unavailable: false,
+      },
+    ]);
+  });
 });
 
 describe("consoleCoverageProvider", () => {
@@ -157,7 +230,14 @@ describe("consoleCoverageProvider", () => {
 
   test("resolves the rates on a clean sweep", async () => {
     const rates = [
-      { output: "name", input: "first_name", produced: 2, total: 2 },
+      {
+        output: "name",
+        input: "first_name",
+        produced: 2,
+        total: 2,
+        rate: 1,
+        unavailable: false,
+      },
     ];
     vi.stubGlobal("fetch", () => Promise.resolve(jsonResponse({ rates })));
     const provider = consoleCoverageProvider(REFERENCE);

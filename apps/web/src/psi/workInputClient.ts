@@ -143,15 +143,39 @@ export async function fetchJobInputProfile(
 }
 
 /** Validate a coverage response body's `rates` into the coverage array, or null on
- * any malformed shape. */
+ * any malformed shape. Every {@link FieldValueCoverage} field is checked, matching
+ * the thoroughness of the listing/profile parsers above: a malformed numeric field
+ * that slipped through as `NaN`/`undefined` would flow into the silent-empty
+ * create-gate and fail it OPEN for that field, so a bad body degrades to the honest
+ * error state (the caller holds its pending "Checking..." until the next edit
+ * supersedes it) rather than reporting a false coverage. `unavailable` is accepted
+ * when absent -- an absent flag reads as "available", the same direction the alarm
+ * fails toward. */
 function coverageRatesOf(body: unknown): Array<FieldValueCoverage> | null {
   if (!isRecord(body)) return null;
   const rates = body.rates;
   if (!Array.isArray(rates)) return null;
+  const parsed: Array<FieldValueCoverage> = [];
   for (const entry of rates) {
-    if (!isRecord(entry) || typeof entry.output !== "string") return null;
+    if (!isRecord(entry)) return null;
+    const { output, input, total, produced, rate, unavailable } = entry;
+    if (typeof output !== "string" || output.length === 0) return null;
+    if (typeof input !== "string") return null;
+    if (typeof total !== "number" || !Number.isFinite(total)) return null;
+    if (typeof produced !== "number" || !Number.isFinite(produced)) return null;
+    if (typeof rate !== "number" || !Number.isFinite(rate)) return null;
+    if (unavailable !== undefined && typeof unavailable !== "boolean")
+      return null;
+    parsed.push({
+      output,
+      input,
+      total,
+      produced,
+      rate,
+      unavailable: unavailable ?? false,
+    });
   }
-  return rates as Array<FieldValueCoverage>;
+  return parsed;
 }
 
 /**

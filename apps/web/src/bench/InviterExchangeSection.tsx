@@ -41,6 +41,7 @@ export function InviterExchangeSection({
   partnerAcceptsByCli,
   onTryAgain,
   onStartOver,
+  onRefreshFile,
 }: {
   invitation: GeneratedInvitation;
   run: ExchangeRun;
@@ -58,6 +59,9 @@ export function InviterExchangeSection({
   partnerAcceptsByCli: boolean;
   onTryAgain: () => void;
   onStartOver: () => void;
+  /** Recovery for a console mounted-file create rejection ({@link RunFailure.recovery}
+   * `refresh-file`): return to Your file to re-profile. */
+  onRefreshFile: () => void;
 }) {
   const phase =
     outputs !== undefined ? "done" : awaitingPartner(run) ? "share" : "running";
@@ -113,14 +117,24 @@ export function InviterExchangeSection({
               Try again
             </Button>
           )}
-          {/* Every non-retryable failure except "output" (whose exchange
-              already succeeded, so nothing here may invite a re-run) offers
-              exactly one recovery: a fresh invitation. */}
-          {!retryable && failure.category !== "output" && (
-            <Button color="red" variant="light" mt="sm" onClick={onStartOver}>
-              Start over with a fresh invitation
+          {/* A rejected mounted file steers to Your file to re-profile -- the fault
+              is the file, not the terms, so start-over-to-review would strand the
+              operator away from the fix. */}
+          {!retryable && failure.recovery === "refresh-file" && (
+            <Button color="red" variant="light" mt="sm" onClick={onRefreshFile}>
+              Return to Your file
             </Button>
           )}
+          {/* Every other non-retryable failure except "output" (whose exchange
+              already succeeded, so nothing here may invite a re-run) offers
+              exactly one recovery: a fresh invitation. */}
+          {!retryable &&
+            failure.recovery === undefined &&
+            failure.category !== "output" && (
+              <Button color="red" variant="light" mt="sm" onClick={onStartOver}>
+                Start over with a fresh invitation
+              </Button>
+            )}
         </FailureAlert>
       )}
       {/* The copy artifacts drop out once the partner connects (nothing left

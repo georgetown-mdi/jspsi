@@ -29,6 +29,7 @@ import {
   benchCoverageProvider,
   useNonEmptyRates,
 } from "@components/useNonEmptyRates";
+import { CONSOLE_COVERAGE_PENDING_LABEL } from "@components/FieldCoverage";
 import { triggerBlobDownload } from "@components/blobDownload";
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 
@@ -46,6 +47,7 @@ import {
   availableTransports,
   cleaningCoverageProblems,
   editorFromCsv,
+  editorReprofiled,
   editorWithAlgorithm,
   editorWithAuthoredDraft,
   editorWithColumnDisclosure,
@@ -351,6 +353,20 @@ export function InviterBench() {
     goTo("review");
   }
 
+  // The console mounted-file recovery: a create rejected the file (drifted,
+  // removed, or out of space), so the recovery lives back at Your file, where a
+  // re-profile refreshes it. Unseals with every input intact and discards the
+  // failed invitation, exactly as startOver does, but lands on the file step.
+  function refreshFile() {
+    setEditor((current) =>
+      current === undefined ? current : unsealEditor(current),
+    );
+    setInvitation(undefined);
+    setSavedExchange(undefined);
+    setManageStatus("idle");
+    goTo("file");
+  }
+
   // Deposit a managed-exchange record for this exchange as the inviter: the
   // standing terms plus the secret embedded in the just-minted invitation, so the
   // same partnership can run again later. The connection block is composed from
@@ -581,11 +597,17 @@ export function InviterBench() {
   }
 
   // Commit a profiled mounted file (the console picker's "Use this file") as the
-  // acquired file: build the rows-less acquired shape from the profile, seed the
-  // editor threading the profiled date-input format, and keep the profile for the
-  // mint (columns), the run (the mounted-file reference), the coverage sweep, the
-  // preview samples, and the drift signal. Mirrors readFile's post-parse seeding.
+  // acquired file. A blank header cell is refused early with the shared unnameable
+  // alert (as readFile does), or core's inferMetadata would throw at seed time and
+  // unmount the bench. Re-profiling the same committed file keeps the authored draft
+  // when its columns are unchanged and only refreshes the profile-derived facts;
+  // otherwise it reseeds from the profile.
   function commitConsoleFile(profile: JobInputProfile) {
+    const emptyPositions = emptyColumnPositions(profile.columns);
+    if (emptyPositions.length > 0) {
+      discardRead(unnameableColumnsAlert(emptyPositions));
+      return;
+    }
     const csv = consoleAcquiredCsv({
       fileName: profile.name,
       sizeBytes: profile.sizeBytes,
@@ -593,22 +615,52 @@ export function InviterBench() {
       rowCount: profile.rowCount,
       dateInputFormat: profile.dateInputFormat,
     });
-    const seeded = editorFromCsv(name, csv);
-    setConsoleSource(profile);
-    setAcquired(csv);
-    setEditor(seeded);
-    // A fresh file re-seeds the terms and resets the transport to the default; any
-    // exchange file saved for the prior file no longer describes them.
-    setSavedExchange(undefined);
-    setIntakeAlert(
-      seeded.draft.keys.length === 0
-        ? {
-            title: "This file cannot be matched",
-            message:
-              "None of the matching keys can be built from this file's columns. Matching needs columns like name, date of birth, Social Security number, ZIP code, phone, or email.",
-          }
-        : undefined,
-    );
+    const reseed = () => {
+      const seeded = editorFromCsv(name, csv);
+      setConsoleSource(profile);
+      setAcquired(csv);
+      setEditor(seeded);
+      // A fresh file re-seeds the terms and resets the transport to the default; any
+      // exchange file saved for the prior file no longer describes them.
+      setSavedExchange(undefined);
+      setIntakeAlert(
+        seeded.draft.keys.length === 0
+          ? {
+              title: "This file cannot be matched",
+              message:
+                "None of the matching keys can be built from this file's columns. Matching needs columns like name, date of birth, Social Security number, ZIP code, phone, or email.",
+            }
+          : undefined,
+      );
+    };
+    if (
+      editor !== undefined &&
+      editor.sealed !== true &&
+      consoleSource !== undefined &&
+      consoleSource.name === profile.name
+    ) {
+      const columnsUnchanged =
+        consoleSource.columns.length === profile.columns.length &&
+        consoleSource.columns.every(
+          (column, index) => column === profile.columns[index],
+        );
+      if (columnsUnchanged) {
+        setConsoleSource(profile);
+        setAcquired(csv);
+        setEditor(editorReprofiled(editor, csv));
+        setSavedExchange(undefined);
+        setEditorAnnouncement(
+          "Re-profiled with the file's current contents; your customizations are unchanged.",
+        );
+        return;
+      }
+      reseed();
+      setEditorAnnouncement(
+        "The file's columns changed, so your customizations were reset to the defaults.",
+      );
+      return;
+    }
+    reseed();
   }
 
   // Load the synthetic inviter sample into the live spine: build the in-memory
@@ -1089,6 +1141,11 @@ export function InviterBench() {
                 setEditorAnnouncement("Cleaning reset to the default steps.");
               }}
               cleaningError={reviewValidation(editor).errors.standardization}
+              coveragePendingLabel={
+                consoleSource !== undefined
+                  ? CONSOLE_COVERAGE_PENDING_LABEL
+                  : undefined
+              }
               onBack={() => goTo("review")}
             />
           )}
@@ -1157,6 +1214,7 @@ export function InviterBench() {
               partnerAcceptsByCli={isCliTransport(transport)}
               onTryAgain={tryAgain}
               onStartOver={startOver}
+              onRefreshFile={refreshFile}
             />
             {/* The manage offer is webrtc-only (its record composes a webrtc
                 locator) and is skippable: leaving it untouched keeps the exchange

@@ -22,7 +22,11 @@ import { buildAdvancedTerms } from "@psi/advancedInvite";
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 import { TermsImportExport } from "@components/TermsImportExport";
 
-import { declaredFieldsFor, keySatisfiabilityFor } from "./inviterModel";
+import {
+  declaredFieldsFor,
+  keySatisfiabilityFor,
+  seedRows,
+} from "./inviterModel";
 import styles from "./bench.module.css";
 
 import type { AcquiredCsv, InviterEditor, KeyVerdict } from "./inviterModel";
@@ -270,7 +274,7 @@ export function KeysTab({
           <TermsImportExport
             currentTerms={currentTerms}
             seed={editor.seed}
-            rawRows={csv.rawRows}
+            rawRows={seedRows(csv)}
             dateInputFormat={csv.dateInputFormat}
             onImport={onImport}
           />

@@ -93,6 +93,7 @@ interface StubOptions {
 function stubJobApi(options: StubOptions = {}): {
   captured: Array<CapturedRequest>;
   setListing: (listing: unknown) => void;
+  setProfile: (profile: unknown) => void;
   emitEvent: (event: object) => void;
   closeEvents: () => void;
 } {
@@ -106,7 +107,7 @@ function stubJobApi(options: StubOptions = {}): {
     truncated: false,
     files: [CLIENTS_FILE],
   };
-  const profile = options.profile ?? CLIENTS_PROFILE;
+  let profile: unknown = options.profile ?? CLIENTS_PROFILE;
 
   const jsonResponse = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), {
@@ -166,6 +167,9 @@ function stubJobApi(options: StubOptions = {}): {
     setListing: (next) => {
       listing = next;
     },
+    setProfile: (next) => {
+      profile = next;
+    },
     emitEvent: (event) =>
       sse?.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`)),
     closeEvents: () => sse?.close(),
@@ -200,7 +204,7 @@ afterEach(async () => {
 async function reachReviewCreate() {
   await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
   await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
-  await page.getByRole("button", { name: "Select" }).click();
+  await page.getByRole("button", { name: "Select clients.csv" }).click();
   await page.getByRole("button", { name: "Use this file" }).click();
   await expect
     .element(
@@ -287,7 +291,7 @@ describe("console inviter two-stage pick", () => {
     stubJobApi();
     mount(createElement(InviterBench));
     await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
-    await page.getByRole("button", { name: "Select" }).click();
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
 
     // The confirm panel appears BEFORE the file becomes the bench's acquired file.
     await expect
@@ -314,7 +318,7 @@ describe("console inviter two-stage pick", () => {
     const api = stubJobApi();
     mount(createElement(InviterBench));
     await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
-    await page.getByRole("button", { name: "Select" }).click();
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
     await page.getByRole("button", { name: "Use this file" }).click();
     await expect.element(page.getByText("Selected")).toBeInTheDocument();
 
@@ -471,7 +475,7 @@ describe("console inviter mint and run", () => {
     const api = stubJobApi();
     mount(createElement(InviterBench));
     await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
-    await page.getByRole("button", { name: "Select" }).click();
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
     await page.getByRole("button", { name: "Use this file" }).click();
     await expect.element(page.getByText("Selected")).toBeInTheDocument();
 
@@ -493,5 +497,173 @@ describe("console inviter mint and run", () => {
     expect(body.name).toBe("clients.csv");
     expect(body.sizeBytes).toBe(CLIENTS_FILE.sizeBytes);
     expect(body.modifiedAt).toBe(CLIENTS_FILE.modifiedAt);
+  });
+});
+
+describe("console inviter picker accessibility", () => {
+  test("the picker stages are real h2 headings", async () => {
+    stubJobApi();
+    mount(createElement(InviterBench));
+    await expect
+      .element(
+        page.getByRole("heading", {
+          level: 2,
+          name: "Choose a file from the work directory",
+        }),
+      )
+      .toBeInTheDocument();
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await expect
+      .element(
+        page.getByRole("heading", { level: 2, name: "Confirm this file" }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("a polite status region announces the loaded listing", async () => {
+    stubJobApi();
+    mount(createElement(InviterBench));
+    await vi.waitFor(() => {
+      const status = document.querySelector(
+        '[role="status"][aria-live="polite"]',
+      );
+      expect(status?.textContent).toContain("Loaded 1 file");
+    });
+  });
+
+  test("selecting a file moves focus to the confirm stage", async () => {
+    stubJobApi();
+    mount(createElement(InviterBench));
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    // The stage swap sends focus to the confirm panel so a screen-reader user is not
+    // stranded on the row button that just unmounted.
+    await vi.waitFor(() => {
+      expect(document.activeElement?.textContent).toContain(
+        "Confirm this file",
+      );
+    });
+  });
+
+  test("each row's Select button names its file so the names do not collide", async () => {
+    stubJobApi({
+      listing: {
+        configured: true,
+        totalEntries: 2,
+        truncated: false,
+        files: [
+          CLIENTS_FILE,
+          {
+            name: "roster.csv",
+            sizeBytes: 8192,
+            modifiedAt: 1_700_000_500_000,
+          },
+        ],
+      },
+    });
+    mount(createElement(InviterBench));
+    await expect
+      .element(page.getByRole("button", { name: "Select clients.csv" }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Select roster.csv" }))
+      .toBeInTheDocument();
+  });
+});
+
+describe("console inviter picker drift and re-profile", () => {
+  test("a removed file is distinct from a changed one and destroys no draft", async () => {
+    const api = stubJobApi();
+    mount(createElement(InviterBench));
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect.element(page.getByText("Selected")).toBeInTheDocument();
+
+    // The file vanishes from a COMPLETE listing: removal, not a false "changed".
+    api.setListing({
+      configured: true,
+      totalEntries: 0,
+      truncated: false,
+      files: [],
+    });
+    await page.getByRole("button", { name: "Refresh" }).click();
+    await expect
+      .element(page.getByText("This file is no longer in the work directory"))
+      .toBeInTheDocument();
+    expect(
+      page.getByText("This file changed on disk since you profiled it").query(),
+    ).toBeNull();
+  });
+
+  test("re-profiling with unchanged columns keeps the draft; changed columns reset it", async () => {
+    const api = stubJobApi();
+    mount(createElement(InviterBench));
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect.element(page.getByText("Selected")).toBeInTheDocument();
+
+    // Re-profile the same file with the same columns: the draft is preserved.
+    await page.getByRole("button", { name: "Re-profile clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(
+        page.getByText("your customizations are unchanged", { exact: false }),
+      )
+      .toBeInTheDocument();
+
+    // The file's columns change under the same name: reseeded, with an explicit
+    // notice that the customizations were reset.
+    api.setProfile({
+      ...CLIENTS_PROFILE,
+      columns: ["client_id", "email"],
+      columnSamples: { client_id: ["1", "2"], email: ["a@x.gov", "b@x.gov"] },
+    });
+    await page.getByRole("button", { name: "Re-profile clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(
+        page.getByText("your customizations were reset", { exact: false }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("a profile with a blank header cell is refused without unmounting the bench", async () => {
+    stubJobApi({
+      profile: {
+        ...CLIENTS_PROFILE,
+        columns: ["client_id", "", "dob"],
+        columnSamples: {
+          client_id: ["1", "2"],
+          "": ["x", "y"],
+          dob: ["01/02/1990", "03/04/1985"],
+        },
+      },
+    });
+    mount(createElement(InviterBench));
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    // The shared unnameable-column alert, not a bench crash from core's throwing
+    // inferMetadata: the name field is still on screen.
+    await expect
+      .element(page.getByText("This file has an unnamed column"))
+      .toBeInTheDocument();
+    await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+  });
+});
+
+describe("console inviter sample-data copy", () => {
+  test("links the deployment guide instead of promising a walkthrough", async () => {
+    stubJobApi();
+    mount(createElement(InviterBench));
+    const link = page.getByRole("link", { name: "deployment guide" });
+    await expect.element(link).toBeInTheDocument();
+    await expect
+      .element(link)
+      .toHaveAttribute(
+        "href",
+        "https://github.com/georgetown-mdi/jspsi/blob/main/docs/DEPLOYMENT.md",
+      );
   });
 });
