@@ -69,8 +69,11 @@ export interface RunFailure {
   /** The recovery the alert offers when the default category recovery is wrong.
    * `refresh-file` steers a console mounted-file create rejection back to Your file
    * to re-profile, rather than start-over-to-review: the fault is the file, not the
-   * terms. Absent for every other failure, which keeps its category's recovery. */
-  recovery?: "refresh-file";
+   * terms. `refresh-file-or-restart` additionally keeps the start-over route for an
+   * sftp run, whose identical empty-bodied 400 is as likely a vanished picked
+   * destination (fixed at Review & create) as a bad file. Absent for every other
+   * failure, which keeps its category's recovery. */
+  recovery?: "refresh-file" | "refresh-file-or-restart";
 }
 
 /** @internal */
@@ -78,18 +81,33 @@ export function failureFor(
   category: ExchangeErrorCategory,
   error: unknown,
   inputSource?: JobInputSource,
+  channel?: Transport,
 ): RunFailure {
   // A console job create rejected the mounted file (drifted, removed, or the data
   // root ran out of space since selection): a 400 the driver categorized `config`.
   // The operator's terms are fine -- the file is the fault -- so the alert names the
   // file cause and routes recovery to Your file, not start-over-to-review. Scoped to
   // the workFile create rejection so a CLI prepare-time config fault keeps its copy.
+  // On the sftp channel the appliance returns that same empty-bodied 400 for a
+  // vanished picked remote, indistinguishable from a bad file here, so the copy names
+  // both causes and the alert offers both routes (the file at Your file, the
+  // destination at Review & create); filedrop stays unambiguous.
   if (
     category === "config" &&
     inputSource?.kind === "workFile" &&
     error instanceof JobApiRequestError &&
     error.status === 400
   ) {
+    if (channel === "sftp")
+      return {
+        category,
+        title: "The appliance could not start this exchange",
+        message:
+          "The appliance could not use this file, or the selected SFTP " +
+          "destination is no longer available. Check the file on Your file, " +
+          "and the destination on Review & create.",
+        recovery: "refresh-file-or-restart",
+      };
     return {
       category,
       title: "The appliance could not use this file",
@@ -401,7 +419,7 @@ export function useInviterExchange({
           // on) keeps the full object. The user-facing alert is separately
           // sanitized in failureFor.
           whenDiagnostic(() => console.error(error));
-          setFailure(failureFor(category, error, inputSource));
+          setFailure(failureFor(category, error, inputSource, channel));
           setRun((current) => runWithFailure(current));
         },
       });

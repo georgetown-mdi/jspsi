@@ -73,6 +73,22 @@ export function InviterExchangeSection({
     failure?.category === "exchange" &&
     invitationUsable(invitation.expires, new Date());
 
+  // A rejected mounted file routes to Your file to re-profile; an sftp run adds the
+  // start-over route (to Review & create) as well, since its empty-bodied 400 is as
+  // likely a vanished picked destination as a bad file. Every other non-retryable
+  // failure except output (whose exchange already succeeded, so nothing here may
+  // invite a re-run) offers exactly one recovery: a fresh invitation.
+  const offersRefreshFile =
+    !retryable &&
+    (failure?.recovery === "refresh-file" ||
+      failure?.recovery === "refresh-file-or-restart");
+  const offersStartOver =
+    !retryable &&
+    failure !== undefined &&
+    failure.category !== "output" &&
+    (failure.recovery === undefined ||
+      failure.recovery === "refresh-file-or-restart");
+
   // The phase-level focus throughline. The bench host moves focus to the h1
   // when the section mounts; within the section, focus moves again when the
   // partner connects or a retry clears the alert -- the share block or the
@@ -117,24 +133,16 @@ export function InviterExchangeSection({
               Try again
             </Button>
           )}
-          {/* A rejected mounted file steers to Your file to re-profile -- the fault
-              is the file, not the terms, so start-over-to-review would strand the
-              operator away from the fix. */}
-          {!retryable && failure.recovery === "refresh-file" && (
+          {offersRefreshFile && (
             <Button color="red" variant="light" mt="sm" onClick={onRefreshFile}>
               Return to Your file
             </Button>
           )}
-          {/* Every other non-retryable failure except "output" (whose exchange
-              already succeeded, so nothing here may invite a re-run) offers
-              exactly one recovery: a fresh invitation. */}
-          {!retryable &&
-            failure.recovery === undefined &&
-            failure.category !== "output" && (
-              <Button color="red" variant="light" mt="sm" onClick={onStartOver}>
-                Start over with a fresh invitation
-              </Button>
-            )}
+          {offersStartOver && (
+            <Button color="red" variant="light" mt="sm" onClick={onStartOver}>
+              Start over with a fresh invitation
+            </Button>
+          )}
         </FailureAlert>
       )}
       {/* The copy artifacts drop out once the partner connects (nothing left

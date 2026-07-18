@@ -17,7 +17,7 @@ import { sanitizeForDisplay } from "@psilink/core";
 
 import { fetchJobInputProfile, fetchJobInputs } from "@psi/workInputClient";
 
-import { dateTimeLabel } from "./inviterModel";
+import { byteSizeLabel, dateTimeLabel } from "./inviterModel";
 import styles from "./bench.module.css";
 
 import type {
@@ -26,15 +26,6 @@ import type {
   WorkInputReference,
 } from "@psi/workInputClient";
 import type { JobInputProfile } from "@jobs/workInputs";
-
-/** Format a byte count for the file rows -- CLI-scale inputs reach gigabytes, so the
- * ladder runs to GB. */
-function formatBytes(bytes: number): string {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-  if (bytes >= 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  return `${bytes} B`;
-}
 
 /** The authoring-time state of a committed file's profiled snapshot against a fresh
  * listing. Kept distinct so the notice never claims a file "changed" when it was
@@ -464,7 +455,7 @@ function ListingView({
                   )}
                 </Table.Td>
                 <Table.Td className={styles.mono}>
-                  {formatBytes(file.sizeBytes)}
+                  {byteSizeLabel(file.sizeBytes)}
                 </Table.Td>
                 <Table.Td>{dateTimeLabel(new Date(file.modifiedAt))}</Table.Td>
                 <Table.Td>
@@ -596,7 +587,7 @@ function ConfirmPanel({
           <Table.Tr>
             <Table.Th scope="row">Size</Table.Th>
             <Table.Td className={styles.mono}>
-              {formatBytes(profiled.sizeBytes)}
+              {byteSizeLabel(profiled.sizeBytes)}
             </Table.Td>
           </Table.Tr>
           <Table.Tr>

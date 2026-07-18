@@ -182,8 +182,9 @@ function coverageRatesOf(body: unknown): Array<FieldValueCoverage> | null {
  * Sweep per-field coverage for a mounted file under `standardization`, carrying the
  * client's profiled freshness pair so the appliance refuses a drifted file. Resolves
  * the coverage array on a clean sweep; resolves null on ANY non-2xx (429 busy, a
- * drift/schema 400, or a transient server error) so the caller can treat it like a
- * superseded response rather than surfacing a generic error.
+ * drift/schema 400, or a transient server error) or a rejected fetch (offline, abort),
+ * so the caller can treat it like a superseded response rather than surfacing a
+ * generic error.
  */
 export async function postJobInputCoverage(
   reference: WorkInputReference,
@@ -191,18 +192,22 @@ export async function postJobInputCoverage(
   signal: AbortSignal,
   fetchImpl: typeof fetch = fetch,
 ): Promise<Array<FieldValueCoverage> | null> {
-  const response = await fetchImpl("/api/jobs/inputs/coverage", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      name: reference.name,
-      sizeBytes: reference.sizeBytes,
-      modifiedAt: reference.modifiedAt,
-      standardization,
-    }),
-    signal,
-  });
-  if (!response.ok) return null;
-  const body: unknown = await response.json();
-  return coverageRatesOf(body);
+  try {
+    const response = await fetchImpl("/api/jobs/inputs/coverage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: reference.name,
+        sizeBytes: reference.sizeBytes,
+        modifiedAt: reference.modifiedAt,
+        standardization,
+      }),
+      signal,
+    });
+    if (!response.ok) return null;
+    const body: unknown = await response.json();
+    return coverageRatesOf(body);
+  } catch {
+    return null;
+  }
 }

@@ -72,6 +72,36 @@ describe("failureFor", () => {
     expect(failure.message).toContain("Your file");
   });
 
+  test("a filedrop mounted-file 400 keeps the unambiguous file-cause copy", () => {
+    const failure = failureFor(
+      "config",
+      new JobApiRequestError(400, "POST /api/jobs failed with status 400"),
+      WORK_FILE,
+      "filedrop",
+    );
+    expect(failure.recovery).toBe("refresh-file");
+    expect(failure.title).toBe("The appliance could not use this file");
+    expect(failure.message).not.toContain("SFTP");
+  });
+
+  test("an sftp mounted-file 400 names both the file and the destination", () => {
+    // The server returns the identical empty-bodied 400 for a vanished SFTP remote,
+    // so on the sftp channel the copy names both causes and the alert keeps both the
+    // Return-to-Your-file and the start-over route.
+    const failure = failureFor(
+      "config",
+      new JobApiRequestError(400, "POST /api/jobs failed with status 400"),
+      WORK_FILE,
+      "sftp",
+    );
+    expect(failure.recovery).toBe("refresh-file-or-restart");
+    expect(failure.title).toBe("The appliance could not start this exchange");
+    expect(failure.message).not.toContain("status 400");
+    expect(failure.message).toContain("SFTP destination");
+    expect(failure.message).toContain("Your file");
+    expect(failure.message).toContain("Review & create");
+  });
+
   test("a config fault that is not a mounted-file 400 keeps the default recovery", () => {
     // An inline-source create rejection, and a CLI prepare-time config fault, both
     // keep the start-over-to-review recovery -- only the workFile 400 reroutes.

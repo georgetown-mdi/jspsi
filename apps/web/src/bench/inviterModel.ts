@@ -778,14 +778,20 @@ export function identifierProblem(draft: AdvancedInviteDraft): boolean {
   return hasMultipleIdentifiers(draft.metadata);
 }
 
+/** A byte count as a compact size label, e.g. `8.4 MB`, `512 KB`, `2.1 GB`. The
+ * ladder floors at 1 KB and runs to GB, since CLI-scale console inputs reach
+ * gigabytes; shared by the file card and the server-file picker so their size ladders
+ * cannot drift. */
+export function byteSizeLabel(sizeBytes: number): string {
+  if (sizeBytes >= 1024 ** 3) return `${(sizeBytes / 1024 ** 3).toFixed(1)} GB`;
+  if (sizeBytes >= 1024 ** 2) return `${(sizeBytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
+}
+
 /** The file card's metadata line, e.g. `12,408 rows - 8.4 MB`. */
 export function fileCardMeta(rowCount: number, sizeBytes: number): string {
   const rows = new Intl.NumberFormat("en-US").format(rowCount);
-  const size =
-    sizeBytes >= 1024 ** 2
-      ? `${(sizeBytes / 1024 ** 2).toFixed(1)} MB`
-      : `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
-  return `${rows} rows - ${size}`;
+  return `${rows} rows - ${byteSizeLabel(sizeBytes)}`;
 }
 
 /** A lifetime as a plain duration phrase, e.g. `1 hour`, `7 days`. Whole

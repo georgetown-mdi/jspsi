@@ -146,6 +146,16 @@ describe("postJobInputCoverage", () => {
     }
   });
 
+  test("resolves null when the fetch rejects (offline / abort)", async () => {
+    const result = await postJobInputCoverage(
+      REFERENCE,
+      STANDARDIZATION,
+      new AbortController().signal,
+      () => Promise.reject(new Error("network down")),
+    );
+    expect(result).toBeNull();
+  });
+
   test("rejects a body whose entry has a malformed numeric field", async () => {
     // A NaN/undefined numeric that reached the silent-empty gate would fail it OPEN
     // for that field, so a malformed entry degrades the whole body to the error

@@ -34,8 +34,6 @@ const rawRowsConsumers = [
   "src/bench/inviterModel.ts",
   "src/bench/AcceptorBench.tsx",
   "src/bench/InviterBench.tsx",
-  "src/bench/KeysTab.tsx",
-  "src/bench/CleaningTab.tsx",
   "src/bench/runOutputs.ts",
   "src/bench/useInviterExchange.ts",
   "src/psi/nonEmptyAggregate.worker.ts",
