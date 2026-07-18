@@ -19,8 +19,9 @@ import {
 import { PREVIEW_SAMPLE_SIZE, sampleInputValues } from "@psi/previewSamples";
 import { isStepValid } from "@psi/standardizationAuthoring";
 
+import type { ColumnSamples } from "@components/columnSamples";
+
 import type {
-  CSVRow,
   FieldValue,
   LinkageField,
   StandardizationStep,
@@ -127,24 +128,25 @@ function Outcome({
 
 /**
  * The before->after value preview for one field's standardization pipeline, docked
- * beside its step list. Runs the operator's CURRENT steps over a small sample of
- * the field's input column ({@link sampleInputValues}) and renders each row's
- * outcome distinctly by its three pipeline shapes -- a cleaned value, a "dropped"
- * (null) chip, or a fan-out into several candidates (a Set) -- so the operator sees
- * exactly what each step does to real rows, in pipeline order. A value that does
- * not meet the field's declared constraints is flagged with a warn-not-enforce
- * badge ({@link checkValueConstraints}); the badge surfaces the violation without
- * blocking.
+ * beside its step list. Runs the operator's CURRENT steps over the field's input
+ * column's preview sample (looked up from {@link ColumnSamples}) and renders each
+ * row's outcome distinctly by its three pipeline shapes -- a cleaned value, a
+ * "dropped" (null) chip, or a fan-out into several candidates (a Set) -- so the
+ * operator sees exactly what each step does to real rows, in pipeline order. A value
+ * that does not meet the field's declared constraints is flagged with a
+ * warn-not-enforce badge ({@link checkValueConstraints}); the badge surfaces the
+ * violation without blocking.
  *
- * Pure over its inputs: it derives the sample and runs core's `runPipeline`, so
- * reordering or editing a step re-runs the pipeline and the preview tracks it.
+ * The sample is passed in, not derived from rows, so the console (which never holds
+ * the rows) can feed the same map from its server-side profile. Pure over its inputs:
+ * it runs core's `runPipeline`, so reordering or editing a step re-runs the pipeline
+ * and the preview tracks it.
  */
 export function StandardizationPreview({
   field,
   inputColumn,
   steps,
-  rawRows,
-  sampleSize = PREVIEW_SAMPLE_SIZE,
+  columnSamples,
 }: {
   /** The linkage field this pipeline produces, for the constraint check. */
   field: LinkageField;
@@ -152,14 +154,12 @@ export function StandardizationPreview({
   inputColumn: string;
   /** The current pipeline steps, in order. */
   steps: Array<StandardizationStep>;
-  /** The parsed CSV rows the sample is drawn from. */
-  rawRows: ReadonlyArray<CSVRow>;
-  /** Override the provisional sample size (testing/aesthetics). */
-  sampleSize?: number;
+  /** The per-column preview samples; the field's `inputColumn` entry is sampled. */
+  columnSamples: ColumnSamples;
 }) {
   const sample = useMemo(
-    () => sampleInputValues(rawRows, inputColumn, sampleSize),
-    [rawRows, inputColumn, sampleSize],
+    () => columnSamples.get(inputColumn) ?? [],
+    [columnSamples, inputColumn],
   );
   // Recompute the outcomes whenever the steps or sample change; `steps` is a new
   // array on every edit/reorder, so the pipeline re-runs and the preview tracks

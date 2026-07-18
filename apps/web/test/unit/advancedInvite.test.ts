@@ -19,6 +19,7 @@ import {
 import {
   addKey,
   buildAdvancedTerms,
+  dateInputFormatForColumns,
   defaultStandardizationForRows,
   draftFromTerms,
   draftWithFieldAdded,
@@ -1189,6 +1190,33 @@ describe("inviter standardization: per-field column binding and multi-field", ()
     });
   });
 
+  test("a seed from (columns + pre-inferred format) deep-equals one from full rows", () => {
+    // The console has no rows: it seeds from the columns plus the date format its
+    // server-side profile inferred. That must reproduce the hosted seed byte for byte,
+    // since the rows feed the model only through that one inferred value.
+    const isoRows = [
+      {
+        ssn: "123456789",
+        ssn4: "6789",
+        first_name: "A",
+        last_name: "B",
+        dob: "1990-01-31",
+      },
+      {
+        ssn: "987654321",
+        ssn4: "4321",
+        first_name: "C",
+        last_name: "D",
+        dob: "1985-12-25",
+      },
+    ];
+    const format = dateInputFormatForColumns(ALL_COLUMNS, isoRows);
+    expect(format).toBe("YYYY-MM-DD");
+    expect(seedAdvancedInvite("Org", ALL_COLUMNS, [], format)).toEqual(
+      seedAdvancedInvite("Org", ALL_COLUMNS, isoRows),
+    );
+  });
+
   test("the seeded default standardization yields the same terms as no standardization (guided path unchanged)", () => {
     // authoredLinkageFields over getDefaultStandardization reproduces the default
     // per-type field set, so seeding the draft with the recommended cleaning does
@@ -1686,6 +1714,32 @@ describe("importedConstraintDivergenceMessage refuses a non-representable-constr
         buildAdvancedTerms(draftFromTerms(exported, mfSeed, 3600, mfRows)),
       ),
     ).toEqual(canonicalString(exported));
+  });
+
+  test("the verdict is insensitive to the rows and the threaded date format", () => {
+    // The console runs this check with no rows -- it threads the profiled date format
+    // over an empty row set. The verdict must match the hosted (full-rows) result: the
+    // comparison is over the field DECLARATIONS, which the date format (a cleaning
+    // step) never touches. Pinned here rather than trusting the doc comment.
+    const seed = seedFor();
+    const format = dateInputFormatForColumns(columns, rawRows);
+    const refused = withFieldConstraints(defaultExport(), "ssn", {
+      exclude: ["999999999"],
+      validOnly: false,
+    });
+    for (const terms of [refused, defaultExport()]) {
+      const fromRows = importedConstraintDivergenceMessage(
+        terms,
+        seed,
+        rawRows,
+      );
+      expect(
+        importedConstraintDivergenceMessage(terms, seed, [], format),
+      ).toEqual(fromRows);
+      expect(importedConstraintDivergenceMessage(terms, seed, [])).toEqual(
+        fromRows,
+      );
+    }
   });
 });
 

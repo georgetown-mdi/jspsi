@@ -57,15 +57,48 @@ export function defaultStandardizationForRows(
   metadata: Metadata,
   terms: LinkageTerms,
   rawRows: ReadonlyArray<CSVRow>,
+  dateInputFormat?: string,
 ): Standardization {
+  return getDefaultStandardization(metadata, terms, {
+    dateInputFormat: dateInputFormat ?? inferDateInputFormat(metadata, rawRows),
+  });
+}
+
+/**
+ * The date-of-birth input format the recommended cleaning parses with: inferred
+ * from the first present `role: linkage` date_of_birth column's values, or
+ * `undefined` (the `MM/DD/YYYY` default) when there is no such column or the layout
+ * cannot be inferred. The single derivation {@link defaultStandardizationForRows}
+ * falls back to when no pre-inferred format is threaded, and the value the console
+ * profiles server-side so the browser can author without the rows.
+ */
+export function inferDateInputFormat(
+  metadata: Metadata,
+  rawRows: ReadonlyArray<CSVRow>,
+): string | undefined {
   const dobColumn = metadata.find(
     (column) => column.type === "date_of_birth" && column.role === "linkage",
   );
-  const dateInputFormat =
-    dobColumn !== undefined
-      ? inferDateFormat(columnValues(rawRows, dobColumn.name))
-      : undefined;
-  return getDefaultStandardization(metadata, terms, { dateInputFormat });
+  return dobColumn !== undefined
+    ? inferDateFormat(columnValues(rawRows, dobColumn.name))
+    : undefined;
+}
+
+/**
+ * The date-of-birth input format {@link seedAdvancedInvite} derives for a set of
+ * columns and their rows -- {@link inferDateInputFormat} over the same seed metadata
+ * ({@link normalizeForEditor} of {@link inferMetadata}) the seed builds. The hosted
+ * intake derives it once here so the value can thread every reconciliation in place
+ * of the full rows, and a seed from (columns, format) reproduces one from full rows.
+ */
+export function dateInputFormatForColumns(
+  columns: Array<string>,
+  rawRows: ReadonlyArray<CSVRow>,
+): string | undefined {
+  return inferDateInputFormat(
+    normalizeForEditor(inferMetadata(columns)),
+    rawRows,
+  );
 }
 
 /**
@@ -75,12 +108,15 @@ export function defaultStandardizationForRows(
  * the editor never opens on a blank form; the seeded standardization infers the
  * date-of-birth format from `rawRows` (see {@link defaultStandardizationForRows}).
  * Calling this again is exactly the "Reset to defaults" action. `rawRows`
- * defaults to empty, which yields the `MM/DD/YYYY` date default.
+ * defaults to empty, which yields the `MM/DD/YYYY` date default; a pre-inferred
+ * `dateInputFormat` ({@link dateInputFormatForColumns}) overrides that derivation,
+ * so a seed from (columns, format) matches one from full rows without them.
  */
 export function seedAdvancedInvite(
   identity: string,
   columns: Array<string>,
   rawRows: ReadonlyArray<CSVRow> = [],
+  dateInputFormat?: string,
 ): { draft: AdvancedInviteDraft; seed: AdvancedInviteSeed } {
   // Normalized so the collapsed disclosure control opens on a faithful diagonal
   // (an inferred identifier column is not silently disclosed). Normalization only
@@ -111,7 +147,12 @@ export function seedAdvancedInvite(
       // equal getDefaultLinkageTerms' -- the editor opens on a known-good valid
       // state, byte-identical to the quick path's (the inferred format lives only in
       // the local steps, which the terms do not carry).
-      standardization: defaultStandardizationForRows(metadata, terms, rawRows),
+      standardization: defaultStandardizationForRows(
+        metadata,
+        terms,
+        rawRows,
+        dateInputFormat,
+      ),
       keys: terms.linkageKeys.map((key) => ({ key, enabled: true })),
     },
     seed: { terms, metadata, columns },
@@ -133,6 +174,7 @@ export function setDraftMetadataKeepingKeys(
   draft: AdvancedInviteDraft,
   metadata: Metadata,
   rawRows: ReadonlyArray<CSVRow> = [],
+  dateInputFormat?: string,
 ): AdvancedInviteDraft {
   return {
     ...draft,
@@ -143,6 +185,7 @@ export function setDraftMetadataKeepingKeys(
       metadata,
       draft.identity,
       rawRows,
+      dateInputFormat,
     ),
   };
 }
@@ -164,13 +207,14 @@ export function setDraftMetadata(
   draft: AdvancedInviteDraft,
   metadata: Metadata,
   rawRows: ReadonlyArray<CSVRow> = [],
+  dateInputFormat?: string,
 ): AdvancedInviteDraft {
   const offerable = getDefaultLinkageTerms(
     draft.identity,
     metadata,
   ).linkageKeys;
   return {
-    ...setDraftMetadataKeepingKeys(draft, metadata, rawRows),
+    ...setDraftMetadataKeepingKeys(draft, metadata, rawRows, dateInputFormat),
     keys: reconcileKeys(draft.keys, offerable),
   };
 }
@@ -203,6 +247,7 @@ function reconcileStandardization(
   metadata: Metadata,
   identity: string,
   rawRows: ReadonlyArray<CSVRow>,
+  dateInputFormat?: string,
 ): Standardization {
   const columnByName = new Map(metadata.map((column) => [column.name, column]));
   const prevTypeByName = new Map(
@@ -228,6 +273,7 @@ function reconcileStandardization(
     metadata,
     getDefaultLinkageTerms(identity, metadata),
     rawRows,
+    dateInputFormat,
   );
   const additions = fullDefault.filter((transformation) => {
     const column = columnByName.get(transformation.input);
@@ -545,8 +591,14 @@ function standardizationForImportedTerms(
   defaultTerms: LinkageTerms,
   terms: LinkageTerms,
   rawRows: ReadonlyArray<CSVRow>,
+  dateInputFormat?: string,
 ): Standardization {
-  const base = defaultStandardizationForRows(metadata, defaultTerms, rawRows);
+  const base = defaultStandardizationForRows(
+    metadata,
+    defaultTerms,
+    rawRows,
+    dateInputFormat,
+  );
   // The recommended steps each imported field's type cleans with, keyed by field
   // name. Derived from the default standardization over the IMPORTED terms (not the
   // seed's), so it covers every imported field's type -- including one the inviter
@@ -555,9 +607,12 @@ function standardizationForImportedTerms(
   // columns it picks collide on the first per type; only the steps are read here,
   // and the distinct columns are assigned below.
   const stepsByField = new Map(
-    defaultStandardizationForRows(metadata, terms, rawRows).map(
-      (transformation) => [transformation.output, transformation.steps],
-    ),
+    defaultStandardizationForRows(
+      metadata,
+      terms,
+      rawRows,
+      dateInputFormat,
+    ).map((transformation) => [transformation.output, transformation.steps]),
   );
   // The default-named field each type already binds; only the EXTRA same-typed
   // fields (first_name_2, ...) need a reconstructed binding.
@@ -633,12 +688,14 @@ export function draftFromTerms(
   seed: AdvancedInviteSeed,
   lifetimeSeconds: number = INVITATION_LIFETIME_SECONDS,
   rawRows: ReadonlyArray<CSVRow> = [],
+  dateInputFormat?: string,
 ): AdvancedInviteDraft {
   const standardization = standardizationForImportedTerms(
     seed.metadata,
     seed.terms,
     terms,
     rawRows,
+    dateInputFormat,
   );
   // Disable -- but keep -- any imported key the reconstructed binding cannot
   // supply: one referencing a field no column declares (more same-typed fields than

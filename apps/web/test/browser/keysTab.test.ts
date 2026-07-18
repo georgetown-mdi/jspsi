@@ -31,6 +31,7 @@ const csv: AcquiredCsv = {
     },
   ],
   columns: ["client_id", "first_name", "last_name", "dob", "ssn4"],
+  rowCount: 1,
 };
 
 // Author a self-defeating parse_date onto the date_of_birth element of the

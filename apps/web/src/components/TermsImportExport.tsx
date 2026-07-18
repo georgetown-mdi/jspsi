@@ -40,6 +40,7 @@ export function TermsImportExport({
   currentTerms,
   seed,
   rawRows,
+  dateInputFormat,
   onImport,
 }: {
   /** The terms the current draft represents, for export. */
@@ -47,10 +48,13 @@ export function TermsImportExport({
   /** The editor seed (inviter columns/metadata), needed to reconstruct what an
    * imported document would generate for the constraint-divergence refusal. */
   seed: AdvancedInviteSeed;
-  /** The inviter's parsed rows, threaded into the same reconstruction (the date
-   * format it infers does not affect the constraint comparison, but the rebuild
-   * takes them). */
+  /** The inviter's parsed rows, the reconstruction's fallback source for the
+   * date-format inference when no pre-inferred format is threaded (the format does
+   * not affect the constraint comparison, but the rebuild takes it). */
   rawRows: ReadonlyArray<CSVRow>;
+  /** The pre-inferred date-of-birth input format, threaded so the reconstruction
+   * never re-derives it from the rows (the console has none). */
+  dateInputFormat?: string;
   /** Called with validated, non-gated terms to load into the editor. */
   onImport: (terms: LinkageTerms) => void;
 }) {
@@ -77,6 +81,7 @@ export function TermsImportExport({
       result.terms,
       seed,
       rawRows,
+      dateInputFormat,
     );
     if (constraintDivergence !== undefined) {
       setError(constraintDivergence);

@@ -182,12 +182,19 @@ export function transportChooserCopy(
  */
 
 /** The read file the spine works over: identity for the file card plus the
- * parsed rows and columns every derivation binds to. */
+ * parsed rows and columns every derivation binds to. `rowCount` is the file's
+ * row total, held explicitly so the display surfaces do not read `rawRows.length`
+ * (the console acquires only a server-side profile, not the rows). `dateInputFormat`
+ * is a pre-inferred date-of-birth layout ({@link dateInputFormatForColumns}), set
+ * only by sources that profile it without rows (the console); when absent, each
+ * derivation infers it from the rows as before. */
 export interface AcquiredCsv {
   fileName: string;
   sizeBytes: number;
   rawRows: Array<CSVRow>;
   columns: Array<string>;
+  rowCount: number;
+  dateInputFormat?: string;
 }
 
 /** An editing session over the read file: the live draft and the fixed seed it
@@ -230,7 +237,12 @@ export function editorFromCsv(
   inviterName: string,
   csv: AcquiredCsv,
 ): InviterEditor {
-  return seedAdvancedInvite(inviterName, csv.columns, csv.rawRows);
+  return seedAdvancedInvite(
+    inviterName,
+    csv.columns,
+    csv.rawRows,
+    csv.dateInputFormat,
+  );
 }
 
 /** Carry a later name edit into the draft without disturbing the derived
@@ -353,6 +365,7 @@ export function editorWithImportedTerms(
       editor.seed,
       editor.draft.lifetimeSeconds,
       csv.rawRows,
+      csv.dateInputFormat,
     ),
     keysAuthored: true,
   };
@@ -460,6 +473,7 @@ export function editorWithRecommendedCleaning(
         editor.draft.metadata,
         getDefaultLinkageTerms(editor.draft.identity, editor.draft.metadata),
         csv.rawRows,
+        csv.dateInputFormat,
       ),
     },
   };
@@ -545,8 +559,18 @@ function withMetadata(
       // reconciliation (setDraftMetadata), never the standardization.
       draft:
         editor.keysAuthored === true
-          ? setDraftMetadataKeepingKeys(editor.draft, metadata, csv.rawRows)
-          : setDraftMetadata(editor.draft, metadata, csv.rawRows),
+          ? setDraftMetadataKeepingKeys(
+              editor.draft,
+              metadata,
+              csv.rawRows,
+              csv.dateInputFormat,
+            )
+          : setDraftMetadata(
+              editor.draft,
+              metadata,
+              csv.rawRows,
+              csv.dateInputFormat,
+            ),
     },
     demotedIdentifiers,
   };
@@ -1054,7 +1078,7 @@ export function answersRows(
     },
     {
       label: "Your file",
-      value: `${csv.fileName} - ${new Intl.NumberFormat("en-US").format(csv.rawRows.length)} rows`,
+      value: `${csv.fileName} - ${new Intl.NumberFormat("en-US").format(csv.rowCount)} rows`,
       mono: true,
       changeTarget: "file",
     },

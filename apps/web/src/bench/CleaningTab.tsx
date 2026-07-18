@@ -8,6 +8,7 @@ import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 import { CleaningErrorBoundary } from "@components/CleaningErrorBoundary";
 import { FieldCoverage } from "@components/FieldCoverage";
 import { StandardizationCards } from "@components/StandardizationCards";
+import { columnSamplesFromRows } from "@components/columnSamples";
 
 import { declaredFieldsFor } from "./inviterModel";
 import styles from "./bench.module.css";
@@ -60,6 +61,12 @@ export function CleaningTab({
   const declaredFields = useMemo(
     () => declaredFieldsFor(editor.draft),
     [editor.draft],
+  );
+  // The per-column preview samples, drawn from the rows once for the whole tab so a
+  // field rebound to another column finds its sample by lookup.
+  const columnSamples = useMemo(
+    () => columnSamplesFromRows(csv.rawRows, csv.columns),
+    [csv.rawRows, csv.columns],
   );
   const resetKey = editor.draft.standardization
     .map((transformation) => `${transformation.output}=${transformation.input}`)
@@ -121,7 +128,7 @@ export function CleaningTab({
           standardization={editor.draft.standardization}
           declaredFields={declaredFields}
           metadata={editor.draft.metadata}
-          rawRows={csv.rawRows}
+          columnSamples={columnSamples}
           onStepsChange={(output, _input, steps) => onFieldSteps(output, steps)}
           onInputColumnChange={onFieldInput}
           onAddField={expertMode ? onFieldAdded : undefined}

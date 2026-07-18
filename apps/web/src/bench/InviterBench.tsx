@@ -24,9 +24,12 @@ import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 import { deploymentProfile, isConsoleBuild } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
+import {
+  rowsCoverageProvider,
+  useNonEmptyRates,
+} from "@components/useNonEmptyRates";
 import { triggerBlobDownload } from "@components/blobDownload";
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
-import { useNonEmptyRates } from "@components/useNonEmptyRates";
 
 import {
   EMPTY_SAVE_FIELDS,
@@ -261,6 +264,7 @@ export function InviterBench() {
   const { rates, pending: ratesPending } = useNonEmptyRates(
     acquired?.rawRows ?? EMPTY_ROWS,
     editor?.draft.standardization ?? EMPTY_STANDARDIZATION,
+    rowsCoverageProvider,
   );
   const cleaningAttention = inviterCleaningAttention(editor, rates);
   const coverageProblems = cleaningCoverageProblems(editor, rates);
@@ -476,6 +480,7 @@ export function InviterBench() {
         sizeBytes: file.size,
         rawRows: result.data,
         columns,
+        rowCount: result.data.length,
       };
       const seeded = editorFromCsv(identity, csv);
       setAcquired(csv);

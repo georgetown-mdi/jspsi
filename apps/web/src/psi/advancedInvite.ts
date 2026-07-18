@@ -29,9 +29,11 @@ export { outputForDirection } from "./advancedInviteTypes";
 export {
   addElement,
   addKey,
+  dateInputFormatForColumns,
   defaultStandardizationForRows,
   draftFromTerms,
   draftWithFieldAdded,
+  inferDateInputFormat,
   moveElement,
   removeElement,
   removeKey,
