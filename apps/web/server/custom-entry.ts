@@ -20,6 +20,7 @@ import logLibrary from "loglevel";
 import { getLogger } from "@psilink/core";
 
 import { assertJobApiStartupSafe, readJobApiConfig } from "../src/jobs/gate";
+import { logJobInputDirBoot, useJobInputDir } from "../src/jobs/workInputs";
 import { shutdownJobManager, useSftpRemotesTable } from "../src/jobs/index";
 import { ConfigManager } from "../src/utils/serverConfig";
 import { registerServer } from "../src/httpServer";
@@ -70,6 +71,14 @@ assertJobApiStartupSafe(
 // file that does not load (or one configured without a data root) refuses to
 // start rather than deferring the error to the first sftp job request.
 useSftpRemotesTable();
+
+// And for the work-input directory: a configured JOB_INPUT_DIR that does not
+// resolve to a directory, is set without a data root, or overlaps the data root
+// refuses startup. When configured and valid, log the one boot-diagnostic line
+// (resolved realpath plus readdir/admissible counts) so a mis-mount is visible at
+// boot without touching the API.
+const jobInputDir = useJobInputDir();
+if (jobInputDir !== undefined) logJobInputDirBoot(jobInputDir, log);
 
 // @ts-ignore part of preset
 const listener = server.listen(path ? { path } : { port, host }, (err) => {

@@ -25,8 +25,11 @@ import { Route as ApiPeerjsIndexRouteImport } from './routes/api/peerjs/index'
 import { Route as ApiJobsIndexRouteImport } from './routes/api/jobs/index'
 import { Route as ApiPeerjsIdRouteImport } from './routes/api/peerjs/id'
 import { Route as ApiJobsRemotesRouteImport } from './routes/api/jobs/remotes'
+import { Route as ApiJobsInputsIndexRouteImport } from './routes/api/jobs/inputs/index'
 import { Route as ApiJobsJobIdIndexRouteImport } from './routes/api/jobs/$jobId/index'
 import { Route as ApiPeerjsKeyPeersRouteImport } from './routes/api/peerjs/$key/peers'
+import { Route as ApiJobsInputsProfileRouteImport } from './routes/api/jobs/inputs/profile'
+import { Route as ApiJobsInputsCoverageRouteImport } from './routes/api/jobs/inputs/coverage'
 import { Route as ApiJobsJobIdResultRouteImport } from './routes/api/jobs/$jobId/result'
 import { Route as ApiJobsJobIdRecordRouteImport } from './routes/api/jobs/$jobId/record'
 import { Route as ApiJobsJobIdKeysRouteImport } from './routes/api/jobs/$jobId/keys'
@@ -113,6 +116,11 @@ const ApiJobsRemotesRoute = ApiJobsRemotesRouteImport.update({
   path: '/api/jobs/remotes',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiJobsInputsIndexRoute = ApiJobsInputsIndexRouteImport.update({
+  id: '/api/jobs/inputs/',
+  path: '/api/jobs/inputs/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiJobsJobIdIndexRoute = ApiJobsJobIdIndexRouteImport.update({
   id: '/api/jobs/$jobId/',
   path: '/api/jobs/$jobId/',
@@ -121,6 +129,16 @@ const ApiJobsJobIdIndexRoute = ApiJobsJobIdIndexRouteImport.update({
 const ApiPeerjsKeyPeersRoute = ApiPeerjsKeyPeersRouteImport.update({
   id: '/api/peerjs/$key/peers',
   path: '/api/peerjs/$key/peers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiJobsInputsProfileRoute = ApiJobsInputsProfileRouteImport.update({
+  id: '/api/jobs/inputs/profile',
+  path: '/api/jobs/inputs/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiJobsInputsCoverageRoute = ApiJobsInputsCoverageRouteImport.update({
+  id: '/api/jobs/inputs/coverage',
+  path: '/api/jobs/inputs/coverage',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiJobsJobIdResultRoute = ApiJobsJobIdResultRouteImport.update({
@@ -171,8 +189,11 @@ export interface FileRoutesByFullPath {
   '/api/jobs/$jobId/keys': typeof ApiJobsJobIdKeysRoute
   '/api/jobs/$jobId/record': typeof ApiJobsJobIdRecordRoute
   '/api/jobs/$jobId/result': typeof ApiJobsJobIdResultRoute
+  '/api/jobs/inputs/coverage': typeof ApiJobsInputsCoverageRoute
+  '/api/jobs/inputs/profile': typeof ApiJobsInputsProfileRoute
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
   '/api/jobs/$jobId/': typeof ApiJobsJobIdIndexRoute
+  '/api/jobs/inputs/': typeof ApiJobsInputsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -195,8 +216,11 @@ export interface FileRoutesByTo {
   '/api/jobs/$jobId/keys': typeof ApiJobsJobIdKeysRoute
   '/api/jobs/$jobId/record': typeof ApiJobsJobIdRecordRoute
   '/api/jobs/$jobId/result': typeof ApiJobsJobIdResultRoute
+  '/api/jobs/inputs/coverage': typeof ApiJobsInputsCoverageRoute
+  '/api/jobs/inputs/profile': typeof ApiJobsInputsProfileRoute
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
   '/api/jobs/$jobId': typeof ApiJobsJobIdIndexRoute
+  '/api/jobs/inputs': typeof ApiJobsInputsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -221,8 +245,11 @@ export interface FileRoutesById {
   '/api/jobs/$jobId/keys': typeof ApiJobsJobIdKeysRoute
   '/api/jobs/$jobId/record': typeof ApiJobsJobIdRecordRoute
   '/api/jobs/$jobId/result': typeof ApiJobsJobIdResultRoute
+  '/api/jobs/inputs/coverage': typeof ApiJobsInputsCoverageRoute
+  '/api/jobs/inputs/profile': typeof ApiJobsInputsProfileRoute
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
   '/api/jobs/$jobId/': typeof ApiJobsJobIdIndexRoute
+  '/api/jobs/inputs/': typeof ApiJobsInputsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -248,8 +275,11 @@ export interface FileRouteTypes {
     | '/api/jobs/$jobId/keys'
     | '/api/jobs/$jobId/record'
     | '/api/jobs/$jobId/result'
+    | '/api/jobs/inputs/coverage'
+    | '/api/jobs/inputs/profile'
     | '/api/peerjs/$key/peers'
     | '/api/jobs/$jobId/'
+    | '/api/jobs/inputs/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -272,8 +302,11 @@ export interface FileRouteTypes {
     | '/api/jobs/$jobId/keys'
     | '/api/jobs/$jobId/record'
     | '/api/jobs/$jobId/result'
+    | '/api/jobs/inputs/coverage'
+    | '/api/jobs/inputs/profile'
     | '/api/peerjs/$key/peers'
     | '/api/jobs/$jobId'
+    | '/api/jobs/inputs'
   id:
     | '__root__'
     | '/'
@@ -297,8 +330,11 @@ export interface FileRouteTypes {
     | '/api/jobs/$jobId/keys'
     | '/api/jobs/$jobId/record'
     | '/api/jobs/$jobId/result'
+    | '/api/jobs/inputs/coverage'
+    | '/api/jobs/inputs/profile'
     | '/api/peerjs/$key/peers'
     | '/api/jobs/$jobId/'
+    | '/api/jobs/inputs/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -319,8 +355,11 @@ export interface RootRouteChildren {
   ApiJobsJobIdKeysRoute: typeof ApiJobsJobIdKeysRoute
   ApiJobsJobIdRecordRoute: typeof ApiJobsJobIdRecordRoute
   ApiJobsJobIdResultRoute: typeof ApiJobsJobIdResultRoute
+  ApiJobsInputsCoverageRoute: typeof ApiJobsInputsCoverageRoute
+  ApiJobsInputsProfileRoute: typeof ApiJobsInputsProfileRoute
   ApiPeerjsKeyPeersRoute: typeof ApiPeerjsKeyPeersRoute
   ApiJobsJobIdIndexRoute: typeof ApiJobsJobIdIndexRoute
+  ApiJobsInputsIndexRoute: typeof ApiJobsInputsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -437,6 +476,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiJobsRemotesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/jobs/inputs/': {
+      id: '/api/jobs/inputs/'
+      path: '/api/jobs/inputs'
+      fullPath: '/api/jobs/inputs/'
+      preLoaderRoute: typeof ApiJobsInputsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/jobs/$jobId/': {
       id: '/api/jobs/$jobId/'
       path: '/api/jobs/$jobId'
@@ -449,6 +495,20 @@ declare module '@tanstack/react-router' {
       path: '/api/peerjs/$key/peers'
       fullPath: '/api/peerjs/$key/peers'
       preLoaderRoute: typeof ApiPeerjsKeyPeersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/jobs/inputs/profile': {
+      id: '/api/jobs/inputs/profile'
+      path: '/api/jobs/inputs/profile'
+      fullPath: '/api/jobs/inputs/profile'
+      preLoaderRoute: typeof ApiJobsInputsProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/jobs/inputs/coverage': {
+      id: '/api/jobs/inputs/coverage'
+      path: '/api/jobs/inputs/coverage'
+      fullPath: '/api/jobs/inputs/coverage'
+      preLoaderRoute: typeof ApiJobsInputsCoverageRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/jobs/$jobId/result': {
@@ -525,8 +585,11 @@ const rootRouteChildren: RootRouteChildren = {
   ApiJobsJobIdKeysRoute: ApiJobsJobIdKeysRoute,
   ApiJobsJobIdRecordRoute: ApiJobsJobIdRecordRoute,
   ApiJobsJobIdResultRoute: ApiJobsJobIdResultRoute,
+  ApiJobsInputsCoverageRoute: ApiJobsInputsCoverageRoute,
+  ApiJobsInputsProfileRoute: ApiJobsInputsProfileRoute,
   ApiPeerjsKeyPeersRoute: ApiPeerjsKeyPeersRoute,
   ApiJobsJobIdIndexRoute: ApiJobsJobIdIndexRoute,
+  ApiJobsInputsIndexRoute: ApiJobsInputsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

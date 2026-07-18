@@ -4,6 +4,7 @@ import {
   NON_EMPTY_WORKER_CHAR_THRESHOLD,
   NON_EMPTY_WORKER_ROW_THRESHOLD,
   computeFieldCoverage,
+  createFieldCoverageAccumulator,
   isSilentEmpty,
   shouldComputeOffThread,
 } from "../../src/psi/nonEmptyAggregate.js";
@@ -320,5 +321,49 @@ describe("NonEmptyRateController: off-main-thread dispatch above the threshold",
     await Promise.resolve();
     expect(settled).not.toHaveBeenCalled();
     expect(fake.received.filter((m) => m.kind === "compute")).toHaveLength(0);
+  });
+});
+
+describe("createFieldCoverageAccumulator: streaming equals batch", () => {
+  const standardization: Standardization = [
+    {
+      output: "last_name",
+      input: "last_name",
+      steps: [{ function: "to_upper_case" }],
+    },
+    {
+      output: "birth_date",
+      input: "dob",
+      steps: [
+        { function: "parse_date", params: { inputFormat: "YYYY-MM-DD" } },
+      ],
+    },
+    // A field left mid-edit stays `unavailable` on both drivers.
+    {
+      output: "pad",
+      input: "last_name",
+      steps: [{ function: "pad_left", params: {} }],
+    },
+  ];
+
+  test("feeding rows one at a time equals computeFieldCoverage over the whole set", () => {
+    const rows: Array<CSVRow> = [
+      { last_name: "Public", dob: "1990-01-02" },
+      { last_name: "", dob: "not-a-date" },
+      { last_name: "Adams", dob: "2000-05-14" },
+      { dob: "1972-03-08" },
+    ];
+    const accumulator = createFieldCoverageAccumulator(standardization);
+    for (const row of rows) accumulator.add(row);
+    expect(accumulator.result()).toEqual(
+      computeFieldCoverage(rows, standardization),
+    );
+  });
+
+  test("an empty stream reports zero totals, not a divide-by-zero", () => {
+    const accumulator = createFieldCoverageAccumulator(standardization);
+    expect(accumulator.result()).toEqual(
+      computeFieldCoverage([], standardization),
+    );
   });
 });

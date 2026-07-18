@@ -1214,6 +1214,25 @@ export class StandardizedField {
   }
 
   /**
+   * Standardize a SINGLE row's value for this field, using the pipeline compiled
+   * once in the constructor and consulting no cache. An empty array signals the
+   * record has no valid value for this field.
+   *
+   * This is the compile-once, feed-a-row entry point a STREAMING consumer uses:
+   * it can construct the field once (paying the pipeline compile a single time)
+   * over an empty backing row set and then hand rows in as they arrive, retaining
+   * none -- the server-side coverage sweep over a CLI-scale mounted file does
+   * exactly this. {@link get} is the cached, by-index counterpart for a consumer
+   * that holds the whole row set in memory; both run the same compiled pipeline,
+   * so the two drivers cannot diverge.
+   */
+  evaluateRow(row: CSVRow): string[] {
+    const raw = readRowColumn(row, this.inputColumn);
+    if (raw === undefined) return [];
+    return toValueSet(runCompiledPipeline(raw, this.compiledSteps));
+  }
+
+  /**
    * Return the standardized values for the row at `index`.
    *
    * The result is computed on first access and cached for subsequent calls.
@@ -1224,12 +1243,7 @@ export class StandardizedField {
     if (cached !== undefined) return cached;
 
     const row = this.rawRows[index];
-    const raw = row ? readRowColumn(row, this.inputColumn) : undefined;
-    if (raw === undefined) {
-      this.cache.set(index, []);
-      return [];
-    }
-    const values = toValueSet(runCompiledPipeline(raw, this.compiledSteps));
+    const values = row ? this.evaluateRow(row) : [];
     this.cache.set(index, values);
     return values;
   }

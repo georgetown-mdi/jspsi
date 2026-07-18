@@ -4,7 +4,7 @@ title: "Web Server Job API"
 
 # Web server job API
 
-This document specifies the web application's server-side job API: the HTTP endpoints through which a supervisor creates, observes, cancels, and deletes an exchange job that the Nitro server drives as a `psilink` CLI subprocess, the typed intent the client submits and the validation that makes it injection-closed, the operator-provisioned SFTP remotes table and its validation, the on-disk workdir layout and modes, the SSE event relay and its full-history replay, the exit-code reconciliation and cancellation escalation, the environment variables that gate and configure the feature, and the memory-only job lifetime. It is the spec-tier complement to the operator-facing overview in [DEPLOYMENT.md](../DEPLOYMENT.md#server-job-api), which says what the feature is for and how to turn it on; this document says how each request, file, and event is constructed. It consumes -- and re-validates at the trust boundary -- the CLI's fd-3 event stream specified in [CLI_EVENTS.md](CLI_EVENTS.md); it does not respecify that stream's construction (see there). It does not cover the exchange protocol that produces the events (see [PROTOCOL.md](PROTOCOL.md)) or the display-sanitization escape format the fields reuse (see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#display-sanitization-escape-format)). Intended readers are implementors writing a supervisor against this API and security auditors.
+This document specifies the web application's server-side job API: the HTTP endpoints through which a supervisor creates, observes, cancels, and deletes an exchange job that the Nitro server drives as a `psilink` CLI subprocess, the typed intent the client submits and the validation that makes it injection-closed, the operator-provisioned SFTP remotes table and its validation, the operator-mounted work-input directory and its listing/profile/coverage surface, the on-disk workdir layout and modes, the SSE event relay and its full-history replay, the exit-code reconciliation and cancellation escalation, the environment variables that gate and configure the feature, and the memory-only job lifetime. It is the spec-tier complement to the operator-facing overview in [DEPLOYMENT.md](../DEPLOYMENT.md#server-job-api), which says what the feature is for and how to turn it on; this document says how each request, file, and event is constructed. It consumes -- and re-validates at the trust boundary -- the CLI's fd-3 event stream specified in [CLI_EVENTS.md](CLI_EVENTS.md); it does not respecify that stream's construction (see there). It does not cover the exchange protocol that produces the events (see [PROTOCOL.md](PROTOCOL.md)) or the display-sanitization escape format the fields reuse (see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#display-sanitization-escape-format)). Intended readers are implementors writing a supervisor against this API and security auditors.
 
 The job API exists for the console-appliance deployment: a container serving one party, inside that party's trust boundary, that drives the party's own `psilink exchange` runs without the operator invoking the CLI by hand. It is not a shared rendezvous between parties; the trust invariant it rests on and what would violate it are in [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#single-party-appliance-trust-boundary). The API is off unless a data root is configured, and its whole design -- server-composed CLI inputs, memory-only state, loopback-or-token auth -- is calibrated to that single-operator posture.
 
@@ -31,6 +31,9 @@ Every job response carries `Cache-Control: no-store` and no CORS headers -- the 
 | `GET` | `/api/jobs/:jobId/record` | `200` `application/json` | The self-attested exchange record, only after the job succeeded. `404` otherwise. |
 | `GET` | `/api/jobs/:jobId/keys` | `200` `application/json` | The private verification keys paired with the record, only after the job succeeded. `404` otherwise. |
 | `GET` | `/api/jobs/remotes` | `200` JSON array | The operator-provisioned SFTP remotes as a credential-free projection; `[]` when none are configured. See [SFTP remotes](#sftp-remotes). |
+| `GET` | `/api/jobs/inputs` | `200` listing JSON | The operator-mounted input CSVs the server may read. `configured: false` with an empty list when `JOB_INPUT_DIR` is unset. See [Work-input files](#work-input-files). |
+| `GET` | `/api/jobs/inputs/profile` | `200` profile JSON | A single-pass profile of one named input (columns, row count, inferred date format, bounded samples). `404` when the directory is unconfigured or the name is unknown, `400` on an unusable file, `429` when the parse gate is full. |
+| `POST` | `/api/jobs/inputs/coverage` | `200` `{ "rates": [...] }` | Per-field non-empty coverage over one named input under a submitted standardization. `413` (body over 1 MiB), `400` (bad body, schema failure, or size/mtime drift), `404` (unconfigured or unknown name), `429` (parse gate full). |
 
 Auth applies to every endpoint uniformly: a disabled API is `404` and a bad bearer is `401` on all of them, resolved before the id is even parsed.
 
@@ -144,6 +147,165 @@ The table is startup-frozen: changing hosts, names, or pins requires a restart. 
 
 Returns the provisioned remotes as an explicitly mapped, credential-free projection -- `[{ "name": "...", "host": "...", "port"?: <int>, "path"?: "..." }]` and nothing else: no username, no credential references (which would reveal the secret-mount filesystem layout), no fingerprints. An enabled API with no remotes configured serves `200 []` (a `404` would be indistinguishable from the disabled-API gate). The console web build uses this to offer the remote picker and to author an invitation's sftp endpoint from the picked remote's locator. The static `remotes` segment cannot be captured as a job id: ids are validated as canonical v4 UUIDs before any use, which `remotes` is not.
 
+## Work-input files
+
+The console appliance reads its input CSVs from one operator-mounted directory
+rather than accepting them uploaded through the browser. `JOB_INPUT_DIR` names that
+directory; the server lists it, profiles a chosen file, and computes coverage over
+it, all as streaming passes that retain no rows. This surface is off unless
+`JOB_INPUT_DIR` is set, and -- like every job route -- dark unless `JOB_DATA_ROOT`
+enables the API at all.
+
+### Startup resolution and containment
+
+`JOB_INPUT_DIR` is resolved once at startup with `fs.realpathSync`, fail-closed
+like the remotes table:
+
+- A configured directory that does not exist, or is not a directory, refuses
+  startup.
+- `JOB_INPUT_DIR` set without `JOB_DATA_ROOT` refuses startup -- the directory
+  serves only the job API, which the data root enables, exactly the
+  `JOB_SFTP_REMOTES` rule. Because neither variable is ever baked into the image,
+  the two provisioning vars behave identically.
+- Mutual containment with the resolved data root refuses startup: the input
+  directory must not equal, contain, or be contained by `JOB_DATA_ROOT`. Otherwise
+  the listing could expose job workdirs, or a job could be fed its own artifacts or
+  another job's key material.
+
+After the checks pass, the server logs one boot-diagnostic line -- the resolved
+realpath, the total `readdir` entry count, and the admissible file count -- so an
+operator who mounted the wrong host path, or whose entries are all filtered out,
+sees it at boot without touching the API.
+
+`O_NOFOLLOW` (below) protects only the final path component, and the root's
+realpath is resolved once at boot. A post-boot remount, or replacement of an
+intermediate path component, is out of model for the single-party appliance.
+
+### Listing and admission
+
+The listing is the ONLY source of truth for admissible names. `GET
+/api/jobs/inputs` returns:
+
+```json
+{
+  "configured": <bool>,
+  "totalEntries": <int>,
+  "truncated": <bool>,
+  "files": [{ "name": "<segment>", "sizeBytes": <int>, "modifiedAt": <int> }]
+}
+```
+
+`configured` is `false` (with an empty list) when `JOB_INPUT_DIR` is unset -- a
+state reachable only when the job API itself is enabled -- so the console UI can
+render an actionable "set `JOB_INPUT_DIR` and mount a directory" state rather than a
+mysteriously empty list. `totalEntries` is the raw `readdir` count BEFORE admission,
+so the UI can tell an empty directory from one whose entries are all inadmissible.
+`modifiedAt` is integer epoch milliseconds everywhere.
+
+Admission, applied to a non-recursive `readdir` of the resolved root:
+
+- **Name shape.** A single path segment: no `/`, `\`, or NUL; not `.` or `..`; no
+  leading dot (so a `.psilink.key`-shaped file is excluded by construction); no
+  control characters; length 1..255.
+- **Regular files only.** `lstat` must report a regular file. A symlink's `lstat`
+  is a symlink, so `isFile()` is false and it is never admitted -- a symlink in the
+  input directory pointing at `/run/secrets/...` or the data root is neither
+  listable nor readable.
+- **Deterministic cap.** Admitted entries are sorted by name BEFORE the 512-entry
+  cap, so truncation (`truncated: true`) is deterministic across `readdir`
+  orderings.
+
+There is no `.csv` extension filter (the profile parse is the real gate; operators
+name files unpredictably) and NO total-size cap: mounted inputs are the CLI-scale
+files the CLI is specced for (millions of rows, gigabytes). Memory stays flat
+because every reader streams; time scales linearly and is governed by the
+one-parse-at-a-time gate. `MAX_CSV_FILE_BYTES` is the hosted browser-upload bound
+and does not apply here.
+
+### By-name admission and the open recipe
+
+Every by-name operation (profile, coverage) re-runs the listing and requires the
+requested name to match an admitted entry by exact string equality -- the
+remotes-table `Map.get` discipline. The server only ever opens names it itself
+enumerated, so a crafted name never reaches `path.join`. To read, it then:
+
+1. `open(join(root, name), O_RDONLY | O_NOFOLLOW)`.
+2. `fstat` the descriptor and require `(dev, ino)` to equal the admission `lstat`.
+
+`O_NOFOLLOW` closes the symlink-swap window on the final component; the `(dev, ino)`
+recheck closes the file-swap window between the admission `lstat` and the open. The
+open-time `fstat` size/mtime are what the profile reports and what coverage compares
+for drift. Failures never echo the requested name: an unset directory or unknown
+name is an empty-bodied `404`, an unusable file (parse error, ceiling trip) a `400`.
+
+### Profile
+
+`GET /api/jobs/inputs/profile?name=...` returns, in ONE streaming constant-memory
+pass:
+
+```json
+{
+  "name": "<segment>",
+  "sizeBytes": <int>,
+  "modifiedAt": <int>,
+  "rowCount": <int>,
+  "columns": ["..."],
+  "dateInputFormat": "<format>",
+  "columnSamples": { "<column>": ["..."] }
+}
+```
+
+- `columns` from the header; `rowCount` by counting.
+- `dateInputFormat` (omitted when there is no date-of-birth column or the sample
+  yields no signal) via the shared core composition: the DOB column is picked by
+  `inferMetadata`, its first `INFER_DATE_SCAN_CAP` (1000) non-empty values are
+  sampled, and `inferDateFormat` runs over the sample. The bound is exact -- that
+  cap is where `inferDateFormat` stops its own scan -- so the profiled format
+  equals a full-column read, the same cap-exactness the CLI's `init` relies on.
+- `columnSamples` is the first `PREVIEW_SAMPLE_SIZE` (5) non-empty values per column
+  in row order, the same `sampleInputValues` semantics the browser preview uses.
+
+`sizeBytes`/`modifiedAt` are the open-time `fstat` values the client keeps for the
+authoring-time drift signal.
+
+### Coverage
+
+`POST /api/jobs/inputs/coverage` with body `{ name, sizeBytes, modifiedAt,
+standardization }` returns `{ "rates": FieldValueCoverage[] }` from one streaming
+sweep of the named file under the submitted standardization. The `standardization`
+is validated through the SAME bounded schema the job intent uses (the transformation
+and step counts, and the output/input name lengths) PLUS a route-level per-step
+pattern/delimiter source length cap reusing `MAX_TRANSFORM_PATTERN_LENGTH`. The
+intent-level schema bounds counts, not pattern length, and while RE2JS execution is
+linear-time, its compile cost lands on this process's event loop before any row
+streams -- so this in-process endpoint caps the source length; the shared intent
+schema (and the job-create path) is unchanged.
+
+The body is read through `readJobRequestBody` under a 1 MiB cap. The submitted
+`sizeBytes`/`modifiedAt` are the client's profiled snapshot: the server's open-time
+`fstat` size/mtime must equal that pair, else the coverage is refused as drifted
+(empty-bodied `400`) -- coverage is never silently computed over content that
+changed since profiling.
+
+### Resource posture and the in-process tradeoff
+
+- **No cache.** The profile is one streaming pass per request; coverage is a
+  streaming recompute per request. The memory ceiling is flat regardless of file
+  size, and no parsed PII rests in server memory between requests.
+- **One at a time.** A single-flight gate serializes all parse/sweep work across
+  the profile and coverage routes (the single-operator appliance bound doing double
+  duty as the memory bound). A second request waits in a depth-one queue; a third
+  is refused `429`, which the client treats like a superseded response. The stream
+  yields between chunks, so a worst-case event-loop stall is one chunk's pipeline
+  work, not the whole file.
+- **In-process pipeline execution.** The coverage sweep runs client-supplied
+  standardization pipelines in the web-server process, whereas the existing homes of
+  that computation are the operator's own browser and the CLI child process. The
+  pipelines are count-bounded, pattern-length-capped at this endpoint, and
+  linear-regex-compiled (RE2JS -- no backtracking): this is a resource bound, not a
+  ReDoS hole, and no metadata or standardization value becomes an argv fragment, a
+  path, a host, or a credential.
+
 ## Workdir layout
 
 Each job gets a workdir at `<dataRoot>/<jobId>/`, created mode `0o700` (owner-only, `rwx------`), with an explicit `chmod` after `mkdir` because a restrictive umask is not guaranteed. Creation fails if the directory already exists, so a reused id cannot clobber an existing job. The data root itself is created (recursively) if missing. Inside the workdir, files are written at fixed, server-chosen names, each mode `0o600` (owner-only, `rw-------`, again `chmod`-enforced after write):
@@ -241,12 +403,13 @@ The escalation timers are cleared when the child exits, so a child that stops on
 | `JOB_API_TOKEN` | The bearer token. Non-empty -> every endpoint requires a matching `Authorization: Bearer` header (constant-time compared). Empty -> unauthenticated, permitted only on a loopback bind (see the startup rule). |
 | `JOB_CLI_BINARY` | Overrides the CLI entry path the driver spawns. Unset -> the workspace-relative built entry (`apps/cli/dist/index.js`, resolved four levels up from the jobs module). Used by production overrides and by tests pointing the driver at a stub. It is set only server-side, never derived from a request. |
 | `JOB_SFTP_REMOTES` | The SFTP remotes table (see [SFTP remotes](#sftp-remotes)). Empty or unset -> every sftp intent is rejected; the API is otherwise unchanged. Non-empty -> the named YAML file is loaded and validated at startup, fail-closed. Requires `JOB_DATA_ROOT`; set only server-side, never derived from a request. |
+| `JOB_INPUT_DIR` | The one directory the server may list and read input CSVs from (see [Work-input files](#work-input-files)). Empty or unset -> the input-file feature is off (the listing is `configured: false`, profile/coverage `404`); the API is otherwise unchanged. Non-empty -> the directory is `realpath`-resolved and containment-checked at startup, fail-closed. Requires `JOB_DATA_ROOT`; set only server-side, never derived from a request, never baked into the image. |
 
 ### Fail-closed startup rule
 
 Before the server binds, if the API is enabled (`JOB_DATA_ROOT` set) and no token is configured (`JOB_API_TOKEN` empty) and the bind host is not loopback, startup is refused with a configuration error rather than exposing an unauthenticated CLI driver on a public interface. A bind host is loopback when it is `localhost`, `::1`/`[::1]`, or a `127.` address; an unset host (the default all-interfaces bind) is treated as non-loopback and fails closed rather than assuming loopback. A unix-socket bind is appliance-local and treated as loopback for this check. The safe configurations -- disabled, loopback, or token-protected -- start normally.
 
-The same posture covers the remotes table: a configured `JOB_SFTP_REMOTES` that is unreadable or invalid, or one configured without `JOB_DATA_ROOT`, refuses startup.
+The same posture covers the remotes table: a configured `JOB_SFTP_REMOTES` that is unreadable or invalid, or one configured without `JOB_DATA_ROOT`, refuses startup. It covers the work-input directory too: a configured `JOB_INPUT_DIR` that does not resolve to a directory, is set without `JOB_DATA_ROOT`, or overlaps the resolved data root (mutual containment) refuses startup (see [Work-input files](#work-input-files)). The loopback requirement is a startup bind invariant, not a per-request check.
 
 ## Job lifetime and orphan handling
 

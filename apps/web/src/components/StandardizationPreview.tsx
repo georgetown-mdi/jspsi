@@ -12,11 +12,11 @@ import {
 
 import {
   checkValueConstraints,
-  readRowColumn,
   runPipeline,
   sanitizeForDisplay,
 } from "@psilink/core";
 
+import { PREVIEW_SAMPLE_SIZE, sampleInputValues } from "@psi/previewSamples";
 import { isStepValid } from "@psi/standardizationAuthoring";
 
 import type {
@@ -25,39 +25,6 @@ import type {
   LinkageField,
   StandardizationStep,
 } from "@psilink/core";
-
-/**
- * Row-sample size for the before->after preview: the first few rows with a non-empty
- * value for the field's input column. The preview is for inspecting the transform on
- * representative values, so a small fixed window keeps it cheap and legible; the
- * whole-file coverage question (does the transform collapse the field?) is answered
- * separately and exhaustively by the off-main-thread non-empty-rate aggregate
- * ({@link ../psi/nonEmptyAggregate}), not by widening this sample. Settled at 5,
- * coordinated with that aggregate and its row threshold.
- */
-export const PREVIEW_SAMPLE_SIZE = 5;
-
-/** Pick up to `limit` non-empty raw values for `inputColumn`, in row order. A row
- * whose value is missing or blank after trimming carries no signal for the
- * preview, so it is skipped rather than shown as an empty before->after pair. */
-function sampleInputValues(
-  rawRows: ReadonlyArray<CSVRow>,
-  inputColumn: string,
-  limit: number,
-): Array<string> {
-  const values: Array<string> = [];
-  for (const row of rawRows) {
-    // Read by own-property so a short row lacking the column reads as absent even
-    // when the column is named an Object.prototype member (readRowColumn); a bare
-    // row[inputColumn] would surface the inherited function past the check below.
-    const raw = readRowColumn(row, inputColumn);
-    if (raw !== undefined && raw.trim() !== "") {
-      values.push(raw);
-      if (values.length >= limit) break;
-    }
-  }
-  return values;
-}
 
 /** Render one cleaned value as a chip with any warn-not-enforce constraint badges
  * beside it. The value is the operator's own data (local CSV), shown sanitized for

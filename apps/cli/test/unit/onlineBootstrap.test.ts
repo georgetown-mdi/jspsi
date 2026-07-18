@@ -9,6 +9,7 @@ import {
   CSV_LINE_BYTE_CEILING,
   getDefaultLinkageTerms,
   getLogger,
+  inferDateInputFormatFromSource,
   INFER_DATE_SCAN_CAP,
   MAX_PAYLOAD_ENTRIES,
   MAX_RECONNECT_ATTEMPTS,
@@ -47,7 +48,6 @@ import {
   endpointFromConnection,
   generateSharedSecret,
   loadInputRows,
-  loadInputRowsForInference,
   logOnlineBootstrapOutcome,
   looksLikeUrl,
   observedReceivedColumnsForSave,
@@ -56,7 +56,11 @@ import {
   singlePassDisclosureNotice,
 } from "../../src/onlineBootstrap";
 import { redactUrlCredentials } from "../../src/util/connectionUrl";
-import { MAX_TIMEOUT_SECONDS, runOrExit } from "../../src/util/cli";
+import {
+  MAX_TIMEOUT_SECONDS,
+  openInputSource,
+  runOrExit,
+} from "../../src/util/cli";
 import { runProtocol } from "../../src/protocol";
 import { streamOf, ttyStream, withStdin } from "../stdinStream";
 
@@ -2693,7 +2697,7 @@ test("loadInputRows: `-` at an interactive terminal is rejected (invite path inh
   });
 });
 
-// --- loadInputRowsForInference (init's bounded read) -------------------------
+// --- init's bounded inference read (inferDateInputFormatFromSource) -----------
 
 // A column set where date_of_birth joins a satisfiable default linkage key (a
 // name + DOB combination), so the inferred terms include a date_of_birth field
@@ -2721,7 +2725,27 @@ function dobInputFormat(
   return (step?.params as { inputFormat?: unknown } | undefined)?.inputFormat;
 }
 
-test("loadInputRowsForInference: infers the same metadata, fields, standardization, and dob format as a full read", async () => {
+/** Reproduce init's inference: read only the header + a bounded DOB sample via
+ * the shared core helper, then author the data spec from the header with the
+ * pre-inferred format -- exactly what `buildTemplateData` does. */
+async function inferInitDataSpec(
+  input: string,
+  opts: { allowStdin?: boolean } = {},
+) {
+  const inferred = await inferDateInputFormatFromSource(
+    openInputSource(input, opts),
+  );
+  const { dataSpec } = buildDataSpec({
+    identity: "Org",
+    rows: { rawRows: [], columns: inferred.columns },
+    ...(inferred.dateInputFormat !== undefined
+      ? { dateInputFormat: inferred.dateInputFormat }
+      : {}),
+  });
+  return { inferred, dataSpec };
+}
+
+test("inferDateInputFormatFromSource: the init path infers the same metadata, fields, standardization, and dob format as a full read", async () => {
   // The divergence guard the issue makes load-bearing: init's lighter read must
   // author terms byte-identical to what invite/accept derive from a full read of
   // the same file. Pin all four inferred outputs by comparing the two dataSpecs.
@@ -2733,26 +2757,22 @@ test("loadInputRowsForInference: infers the same metadata, fields, standardizati
       identity: "Org",
       rows: await loadInputRows(file),
     });
-    const light = buildDataSpec({
-      identity: "Org",
-      rows: await loadInputRowsForInference(file),
-    });
-    expect(light.dataSpec.metadata).toEqual(full.dataSpec.metadata);
-    expect(light.dataSpec.linkageTerms).toEqual(full.dataSpec.linkageTerms);
-    expect(light.dataSpec.standardization).toEqual(
-      full.dataSpec.standardization,
-    );
-    expect(dobInputFormat(light.dataSpec)).toBe("YYYY-MM-DD");
-    expect(dobInputFormat(light.dataSpec)).toBe(dobInputFormat(full.dataSpec));
+    const { dataSpec: light } = await inferInitDataSpec(file);
+    expect(light.metadata).toEqual(full.dataSpec.metadata);
+    expect(light.linkageTerms).toEqual(full.dataSpec.linkageTerms);
+    expect(light.standardization).toEqual(full.dataSpec.standardization);
+    expect(dobInputFormat(light)).toBe("YYYY-MM-DD");
+    expect(dobInputFormat(light)).toBe(dobInputFormat(full.dataSpec));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("loadInputRowsForInference: does not read the full row set -- the dob sample is bounded to the scan cap", async () => {
+test("inferDateInputFormatFromSource: reads a bounded DOB sample, so a file far larger than the scan cap still yields the header and format", async () => {
   // A file with more dob rows than the inference cap: the full read returns every
-  // row, the inference read returns the header plus a sample capped at
-  // INFER_DATE_SCAN_CAP, so init's memory does not scale with the file.
+  // row, while the helper reads only the header plus a sample bounded at
+  // INFER_DATE_SCAN_CAP, so init's memory does not scale with the file yet the
+  // inferred format is unchanged.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bounded-"));
   try {
     const file = path.join(dir, "in.csv");
@@ -2761,45 +2781,39 @@ test("loadInputRowsForInference: does not read the full row set -- the dob sampl
     const full = await loadInputRows(file);
     expect(full.rawRows).toHaveLength(rowCount);
 
-    const light = await loadInputRowsForInference(file);
-    // The header is read whole...
-    expect(light.columns).toEqual(INFER_COLUMNS);
-    // ...but the rows handed to inference are capped at the scan limit, and hold
-    // only the projected dob column rather than the full record.
-    expect(light.rawRows).toHaveLength(INFER_DATE_SCAN_CAP);
-    expect(Object.keys(light.rawRows[0])).toEqual(["dob"]);
+    const { inferred } = await inferInitDataSpec(file);
+    expect(inferred.columns).toEqual(INFER_COLUMNS);
+    expect(inferred.dobColumn).toBe("dob");
+    expect(inferred.dateInputFormat).toBe("YYYY-MM-DD");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("loadInputRowsForInference: a file with no dob column reads only the header", async () => {
+test("inferDateInputFormatFromSource: a file with no dob column yields no format and infers the same terms as a full read", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-nodob-"));
   try {
     const file = path.join(dir, "in.csv");
     fs.writeFileSync(file, "first_name,last_name,member_id\nAlice,Smith,1\n");
-    const { columns, rawRows } = await loadInputRowsForInference(file);
-    expect(columns).toEqual(["first_name", "last_name", "member_id"]);
-    // No DOB column to sample, so no row data is retained at all.
-    expect(rawRows).toEqual([]);
+    const { inferred, dataSpec: light } = await inferInitDataSpec(file);
+    expect(inferred.columns).toEqual(["first_name", "last_name", "member_id"]);
+    // No DOB column to sample, so no format is inferred.
+    expect(inferred.dobColumn).toBeUndefined();
+    expect(inferred.dateInputFormat).toBeUndefined();
     // Inference over it still matches a full read (no date format to infer).
     const full = buildDataSpec({
       identity: "Org",
       rows: await loadInputRows(file),
     });
-    const light = buildDataSpec({
-      identity: "Org",
-      rows: { columns, rawRows },
-    });
-    expect(light.dataSpec).toEqual(full.dataSpec);
+    expect(light).toEqual(full.dataSpec);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("loadInputRowsForInference: a header larger than the read buffer is read whole, matching the full read", async () => {
+test("inferDateInputFormatFromSource: a header larger than the read buffer is read whole, matching the full read", async () => {
   // A header longer than fs.createReadStream's 64 KiB read buffer spans multiple
-  // stream reads, so the bounded loader must not commit to the first (empty-field)
+  // stream reads, so the bounded read must not commit to the first (empty-field)
   // chunk -- otherwise init reads an empty header and silently infers nothing
   // while the full read infers correctly. Compare the header both paths recover.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bighdr-"));
@@ -2813,28 +2827,31 @@ test("loadInputRowsForInference: a header larger than the read buffer is read wh
     fs.writeFileSync(file, `${cols.join(",")}\n${row}\n`);
 
     const full = await loadInputRows(file);
-    const light = await loadInputRowsForInference(file);
-    expect(light.columns).toEqual(full.columns);
-    expect(light.columns).toHaveLength(8000);
+    const { inferred } = await inferInitDataSpec(file);
+    expect(inferred.columns).toEqual(full.columns);
+    expect(inferred.columns).toHaveLength(8000);
     // The DOB sample was still taken from the (now correctly read) header.
-    expect(light.rawRows).toEqual([{ dob: "1990-01-02" }]);
+    expect(inferred.dobColumn).toBe("dob");
+    expect(inferred.dateInputFormat).toBe("YYYY-MM-DD");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("loadInputRowsForInference: a `-` CSV from stdin infers the same terms as the file", async () => {
+test("inferDateInputFormatFromSource: a `-` CSV from stdin infers the same as the file", async () => {
   // init reads its input with allowStdin enabled; the bounded read must work over
   // a non-rewindable stdin stream in a single pass, matching the file path.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-infer-stdin-"));
   try {
     const file = path.join(dir, "in.csv");
     fs.writeFileSync(file, csvWithRows(10));
-    const fromFile = await loadInputRowsForInference(file, {
-      allowStdin: true,
-    });
+    const fromFile = await inferDateInputFormatFromSource(
+      openInputSource(file, { allowStdin: true }),
+    );
     const fromStdin = await withStdin(streamOf(csvWithRows(10)), () =>
-      loadInputRowsForInference("-", { allowStdin: true }),
+      inferDateInputFormatFromSource(
+        openInputSource("-", { allowStdin: true }),
+      ),
     );
     expect(fromStdin).toEqual(fromFile);
   } finally {
@@ -2842,7 +2859,7 @@ test("loadInputRowsForInference: a `-` CSV from stdin infers the same terms as t
   }
 });
 
-test("loadInputRowsForInference: a no-newline input fails fast rather than buffering the span", async () => {
+test("inferDateInputFormatFromSource: a no-newline input fails fast rather than buffering the span", async () => {
   // init's bounded read carries the byte ceiling end to end: a pathological local
   // CSV with no row terminator (one giant line) aborts with an operator-readable
   // error instead of consuming memory proportional to the span. Exercised over
@@ -2851,7 +2868,9 @@ test("loadInputRowsForInference: a no-newline input fails fast rather than buffe
   const giant = "x".repeat(CSV_LINE_BYTE_CEILING + 1024);
   await withStdin(streamOf(giant), async () => {
     await expect(
-      loadInputRowsForInference("-", { allowStdin: true }),
+      inferDateInputFormatFromSource(
+        openInputSource("-", { allowStdin: true }),
+      ),
     ).rejects.toThrow(/single-line limit/);
   });
 });

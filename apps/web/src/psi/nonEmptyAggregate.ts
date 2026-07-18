@@ -117,6 +117,89 @@ export interface FieldValueCoverage {
 }
 
 /**
+ * A per-field coverage tally fed one row at a time, so the sweep can run over a
+ * STREAM that retains no rows: the whole-file batch entry point
+ * ({@link computeFieldCoverage}) and the server-side streaming pass over a mounted
+ * CLI-scale file share this one accumulator, so the two drivers count identically
+ * (equivalence pinned by test).
+ *
+ * Each field's {@link StandardizedField} pipeline is compiled ONCE in
+ * {@link createFieldCoverageAccumulator} (over an empty backing row set, since rows
+ * arrive through {@link FieldCoverageAccumulator.add}, not by index), so a
+ * regex/`parse_date` pipeline is not recompiled per row. A field whose steps are
+ * not all valid ({@link isStepValid}), or whose compile throws, is marked
+ * `unavailable` WITHOUT compiling on the sweep path -- so one mid-edit step does
+ * not blank the whole aggregate, and an in-dialect but over-length regex source
+ * never reaches the compiler (the super-linear-in-length compile the length cap
+ * exists to bound stays off the main thread / off the server event loop).
+ */
+export interface FieldCoverageAccumulator {
+  /**
+   * Fold one row into every field's tally: for each available field, count the row
+   * as produced iff its pipeline yields exactly one matchable key (an empty STRING
+   * counts; a dropped null/empty-Set, and a multi-value fan-out Set core's key
+   * iterator excludes, do not). Increments the shared row total.
+   */
+  add: (row: CSVRow) => void;
+  /** The per-field coverage after every fed row, in the standardization's order. */
+  result: () => Array<FieldValueCoverage>;
+}
+
+/**
+ * Build a {@link FieldCoverageAccumulator} for `standardization`, compiling each
+ * transformation's pipeline once. See {@link FieldCoverageAccumulator} for the
+ * one-computation rationale and {@link computeFieldCoverage} for the sweep
+ * semantics (empties observed, empty-string counted, fan-out excluded).
+ */
+export function createFieldCoverageAccumulator(
+  standardization: Standardization,
+): FieldCoverageAccumulator {
+  // Each field compiles once here (over an empty backing array -- rows come through
+  // add(), never by index) and its produced counter is folded per row. A field that
+  // is not all-valid, or whose compile throws, carries no StandardizedField and is
+  // reported unavailable; the compile is wrapped so a step that slips past the
+  // validity gate yet throws is caught rather than blanking the aggregate.
+  const fields = standardization.map((transformation) => {
+    const steps = transformation.steps ?? [];
+    const base = { output: transformation.output, input: transformation.input };
+    if (!steps.every(isStepValid)) return { ...base, field: null, produced: 0 };
+    try {
+      const field = new StandardizedField(
+        transformation.output,
+        transformation.input,
+        steps,
+        [],
+      );
+      return { ...base, field, produced: 0 };
+    } catch {
+      return { ...base, field: null as StandardizedField | null, produced: 0 };
+    }
+  });
+
+  let total = 0;
+  return {
+    add(row: CSVRow): void {
+      total++;
+      for (const entry of fields)
+        // One matchable key iff the value set is exactly one value -- see
+        // FieldValueCoverage.produced.
+        if (entry.field !== null && entry.field.evaluateRow(row).length === 1)
+          entry.produced++;
+    },
+    result(): Array<FieldValueCoverage> {
+      return fields.map((entry) => ({
+        output: entry.output,
+        input: entry.input,
+        total,
+        produced: entry.produced,
+        rate: total > 0 ? entry.produced / total : 0,
+        unavailable: entry.field === null,
+      }));
+    },
+  };
+}
+
+/**
  * Compute per-field value coverage over the WHOLE row set. For each transformation,
  * runs its pipeline over every row's input column and counts the rows that yield
  * exactly one matchable key (an empty STRING counts; a dropped null/empty-Set, and a
@@ -131,56 +214,17 @@ export interface FieldValueCoverage {
  * preview cannot show. A field whose transform drops every row reports `produced: 0`
  * ({@link isSilentEmpty}).
  *
- * Each field gets its own {@link StandardizedField}, which compiles the steps once
- * (so a regex/`parse_date` pipeline is not recompiled per row); the field and its
- * per-row cache fall out of scope after its loop. A field whose steps are not all
- * valid ({@link isStepValid}) is returned `unavailable` WITHOUT compiling, so one
- * mid-edit step does not blank the whole aggregate AND an in-dialect but over-length
- * regex source never reaches the compiler on this sweep -- which runs inline on the
- * main thread below the off-thread threshold, where the super-linear-in-length
- * compile the length cap exists to bound would otherwise block the tab. The compile
- * is also still wrapped, so a step that slips past the validity gate yet throws is
- * caught rather than blanking the aggregate.
+ * The whole-file batch driver over {@link createFieldCoverageAccumulator}: it feeds
+ * every row and reads the result, so it and the server's streaming pass are one
+ * computation. See that accumulator for the compile-once and `unavailable` handling.
  */
 export function computeFieldCoverage(
   rawRows: ReadonlyArray<CSVRow>,
   standardization: Standardization,
 ): Array<FieldValueCoverage> {
-  const total = rawRows.length;
-  return standardization.map((transformation) => {
-    const base = {
-      output: transformation.output,
-      input: transformation.input,
-      total,
-    };
-    const steps = transformation.steps ?? [];
-    // An invalid step is never compiled here -- see the `unavailable` doc: this keeps
-    // a malformed step from throwing and a pathological-length pattern off the
-    // main-thread compile path, mirroring the preview's gate.
-    if (!steps.every(isStepValid))
-      return { ...base, produced: 0, rate: 0, unavailable: true };
-    try {
-      const field = new StandardizedField(
-        transformation.output,
-        transformation.input,
-        steps,
-        rawRows,
-      );
-      let produced = 0;
-      for (let index = 0; index < total; index++)
-        // One matchable key iff the value set is exactly one value -- see
-        // FieldValueCoverage.produced.
-        if (field.get(index).length === 1) produced++;
-      return {
-        ...base,
-        produced,
-        rate: total > 0 ? produced / total : 0,
-        unavailable: false,
-      };
-    } catch {
-      return { ...base, produced: 0, rate: 0, unavailable: true };
-    }
-  });
+  const accumulator = createFieldCoverageAccumulator(standardization);
+  for (const row of rawRows) accumulator.add(row);
+  return accumulator.result();
 }
 
 /**
