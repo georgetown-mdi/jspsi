@@ -396,9 +396,16 @@ export function importedConstraintDivergenceMessage(
   terms: LinkageTerms,
   seed: AdvancedInviteSeed,
   rawRows: ReadonlyArray<CSVRow> = [],
+  dateInputFormat?: string,
 ): string | undefined {
   const rebuilt = buildAdvancedTerms(
-    draftFromTerms(terms, seed, INVITATION_LIFETIME_SECONDS, rawRows),
+    draftFromTerms(
+      terms,
+      seed,
+      INVITATION_LIFETIME_SECONDS,
+      rawRows,
+      dateInputFormat,
+    ),
   );
   const importedByName = new Map(
     terms.linkageFields.map((field) => [field.name, field]),

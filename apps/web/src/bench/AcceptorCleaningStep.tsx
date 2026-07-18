@@ -9,6 +9,7 @@ import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 import { CleaningErrorBoundary } from "@components/CleaningErrorBoundary";
 import { FieldCoverage } from "@components/FieldCoverage";
 import { StandardizationCards } from "@components/StandardizationCards";
+import { columnSamplesFromRows } from "@components/columnSamples";
 
 import styles from "./bench.module.css";
 
@@ -74,6 +75,16 @@ export function AcceptorCleaningStep({
   const fieldByName = useMemo(
     () => new Map(declaredFields.map((field) => [field.name, field])),
     [declaredFields],
+  );
+  // The per-column preview samples, drawn from the rows once for the whole tab so a
+  // field rebound to another column finds its sample by lookup.
+  const columnSamples = useMemo(
+    () =>
+      columnSamplesFromRows(
+        rawRows,
+        metadata.map((column) => column.name),
+      ),
+    [rawRows, metadata],
   );
 
   // The safe labels of the fields whose transform drops every row, for the one
@@ -141,7 +152,7 @@ export function AcceptorCleaningStep({
           standardization={standardization}
           declaredFields={declaredFields}
           metadata={metadata}
-          rawRows={rawRows}
+          columnSamples={columnSamples}
           onStepsChange={(output, _input, steps) => onFieldSteps(output, steps)}
           onInputColumnChange={onFieldInput}
           renderCoverage={(output) => (

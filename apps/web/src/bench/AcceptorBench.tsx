@@ -14,16 +14,20 @@ import {
 import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
 import { capturedInputHandle } from "@psi/managedInputHandle";
 import { createManagedExchange } from "@psi/managedExchangeStore";
+import { dateInputFormatForColumns } from "@psi/advancedInvite";
 import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
 import { deploymentProfile } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
+import {
+  rowsCoverageProvider,
+  useNonEmptyRates,
+} from "@components/useNonEmptyRates";
 import { InvitationTerms } from "@components/InvitationTerms";
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 import { setColumnTypeForMatching } from "@psi/metadataEditing";
-import { useNonEmptyRates } from "@components/useNonEmptyRates";
 
 import {
   ACCEPTOR_COLUMNS_LEDGER_FOOTER,
@@ -405,6 +409,8 @@ export function AcceptorBench() {
         sizeBytes: file.size,
         columns,
         rawRows: result.data,
+        rowCount: result.data.length,
+        dateInputFormat: dateInputFormatForColumns(columns, result.data),
       });
       setColumnsState(acceptorInitialColumnsState(columns));
       goToStep("columns");
@@ -437,7 +443,12 @@ export function AcceptorBench() {
     columnsState !== undefined &&
     acquired !== undefined &&
     linkageTerms !== undefined
-      ? acceptorColumnsEditorState(columnsState, linkageTerms, acquired.rawRows)
+      ? acceptorColumnsEditorState(
+          columnsState,
+          linkageTerms,
+          acquired.rawRows,
+          acquired.dateInputFormat,
+        )
       : undefined;
   const verdict =
     editorState !== undefined &&
@@ -481,6 +492,7 @@ export function AcceptorBench() {
   const { rates, pending: ratesPending } = useNonEmptyRates(
     acquired?.rawRows ?? EMPTY_ROWS,
     editorState?.standardization ?? EMPTY_STANDARDIZATION,
+    rowsCoverageProvider,
   );
   const cleaningAttention =
     editorState !== undefined && verdict !== undefined

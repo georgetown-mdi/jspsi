@@ -160,7 +160,7 @@ export function YourFileSection({
               {acquired.fileName}
             </div>
             <div className={`${styles.fileMeta} ${styles.mono}`}>
-              {fileCardMeta(acquired.rawRows.length, acquired.sizeBytes)}
+              {fileCardMeta(acquired.rowCount, acquired.sizeBytes)}
             </div>
           </div>
         </div>

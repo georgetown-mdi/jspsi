@@ -12,52 +12,19 @@ import {
 
 import {
   checkValueConstraints,
-  readRowColumn,
   runPipeline,
   sanitizeForDisplay,
 } from "@psilink/core";
 
 import { isStepValid } from "@psi/standardizationAuthoring";
 
+import type { ColumnSamples } from "./columnSamples";
+
 import type {
-  CSVRow,
   FieldValue,
   LinkageField,
   StandardizationStep,
 } from "@psilink/core";
-
-/**
- * Row-sample size for the before->after preview: the first few rows with a non-empty
- * value for the field's input column. The preview is for inspecting the transform on
- * representative values, so a small fixed window keeps it cheap and legible; the
- * whole-file coverage question (does the transform collapse the field?) is answered
- * separately and exhaustively by the off-main-thread non-empty-rate aggregate
- * ({@link ../psi/nonEmptyAggregate}), not by widening this sample. Settled at 5,
- * coordinated with that aggregate and its row threshold.
- */
-export const PREVIEW_SAMPLE_SIZE = 5;
-
-/** Pick up to `limit` non-empty raw values for `inputColumn`, in row order. A row
- * whose value is missing or blank after trimming carries no signal for the
- * preview, so it is skipped rather than shown as an empty before->after pair. */
-function sampleInputValues(
-  rawRows: ReadonlyArray<CSVRow>,
-  inputColumn: string,
-  limit: number,
-): Array<string> {
-  const values: Array<string> = [];
-  for (const row of rawRows) {
-    // Read by own-property so a short row lacking the column reads as absent even
-    // when the column is named an Object.prototype member (readRowColumn); a bare
-    // row[inputColumn] would surface the inherited function past the check below.
-    const raw = readRowColumn(row, inputColumn);
-    if (raw !== undefined && raw.trim() !== "") {
-      values.push(raw);
-      if (values.length >= limit) break;
-    }
-  }
-  return values;
-}
 
 /** Render one cleaned value as a chip with any warn-not-enforce constraint badges
  * beside it. The value is the operator's own data (local CSV), shown sanitized for
@@ -160,24 +127,25 @@ function Outcome({
 
 /**
  * The before->after value preview for one field's standardization pipeline, docked
- * beside its step list. Runs the operator's CURRENT steps over a small sample of
- * the field's input column ({@link sampleInputValues}) and renders each row's
- * outcome distinctly by its three pipeline shapes -- a cleaned value, a "dropped"
- * (null) chip, or a fan-out into several candidates (a Set) -- so the operator sees
- * exactly what each step does to real rows, in pipeline order. A value that does
- * not meet the field's declared constraints is flagged with a warn-not-enforce
- * badge ({@link checkValueConstraints}); the badge surfaces the violation without
- * blocking.
+ * beside its step list. Runs the operator's CURRENT steps over the field's input
+ * column's preview sample (looked up from {@link ColumnSamples}) and renders each
+ * row's outcome distinctly by its three pipeline shapes -- a cleaned value, a
+ * "dropped" (null) chip, or a fan-out into several candidates (a Set) -- so the
+ * operator sees exactly what each step does to real rows, in pipeline order. A value
+ * that does not meet the field's declared constraints is flagged with a
+ * warn-not-enforce badge ({@link checkValueConstraints}); the badge surfaces the
+ * violation without blocking.
  *
- * Pure over its inputs: it derives the sample and runs core's `runPipeline`, so
- * reordering or editing a step re-runs the pipeline and the preview tracks it.
+ * The sample is passed in, not derived from rows, so the console (which never holds
+ * the rows) can feed the same map from its server-side profile. Pure over its inputs:
+ * it runs core's `runPipeline`, so reordering or editing a step re-runs the pipeline
+ * and the preview tracks it.
  */
 export function StandardizationPreview({
   field,
   inputColumn,
   steps,
-  rawRows,
-  sampleSize = PREVIEW_SAMPLE_SIZE,
+  columnSamples,
 }: {
   /** The linkage field this pipeline produces, for the constraint check. */
   field: LinkageField;
@@ -185,14 +153,12 @@ export function StandardizationPreview({
   inputColumn: string;
   /** The current pipeline steps, in order. */
   steps: Array<StandardizationStep>;
-  /** The parsed CSV rows the sample is drawn from. */
-  rawRows: ReadonlyArray<CSVRow>;
-  /** Override the provisional sample size (testing/aesthetics). */
-  sampleSize?: number;
+  /** The per-column preview samples; the field's `inputColumn` entry is sampled. */
+  columnSamples: ColumnSamples;
 }) {
   const sample = useMemo(
-    () => sampleInputValues(rawRows, inputColumn, sampleSize),
-    [rawRows, inputColumn, sampleSize],
+    () => columnSamples.get(inputColumn) ?? [],
+    [columnSamples, inputColumn],
   );
   // Recompute the outcomes whenever the steps or sample change; `steps` is a new
   // array on every edit/reorder, so the pipeline re-runs and the preview tracks

@@ -61,6 +61,13 @@ export interface AcceptorAcquiredCsv {
   sizeBytes: number;
   columns: Array<string>;
   rawRows: Array<CSVRow>;
+  /** The file's row total, held explicitly so display surfaces never read
+   * `rawRows.length` (the console profiles the count server-side). */
+  rowCount: number;
+  /** The pre-inferred date-of-birth input layout
+   * ({@link dateInputFormatForColumns}), threaded into the derived standardization
+   * so a remap never re-derives it from the rows. */
+  dateInputFormat?: string;
 }
 
 /**
@@ -122,6 +129,7 @@ export function acceptorColumnsEditorState(
   state: AcceptorColumnsState,
   linkageTerms: LinkageTerms,
   rawRows: ReadonlyArray<CSVRow>,
+  dateInputFormat?: string,
 ): { metadata: Metadata; standardization: Standardization } {
   const { metadata } = state;
   const fieldByName = new Map(
@@ -143,6 +151,7 @@ export function acceptorColumnsEditorState(
     metadata,
     linkageTerms,
     rawRows,
+    dateInputFormat,
   );
   const standardization = applyStepOverrides(
     applyInputOverrides(baseStandardization, effectiveInputOverrides),

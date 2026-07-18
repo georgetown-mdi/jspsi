@@ -69,6 +69,7 @@ const csv: AcquiredCsv = {
     "ssn4",
     "program_code",
   ],
+  rowCount: 1,
 };
 
 function ledgerValue(editor: ReturnType<typeof editorFromCsv>, label: string) {
@@ -826,6 +827,7 @@ describe("a column retype reconciles standardization even with authored keys", (
       },
     ],
     columns: ["first_name", "last_name", "dob", "extra"],
+    rowCount: 1,
   };
 
   function retypeFirstNameToLastName(editor: ReturnType<typeof editorFromCsv>) {
