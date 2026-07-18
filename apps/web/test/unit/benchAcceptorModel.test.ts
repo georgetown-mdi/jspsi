@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest";
 
 import {
   ACCEPTOR_SEND_FORWARD_REFERENCE,
+  ACCEPT_UNSUPPORTED_MESSAGE,
+  ACCEPT_UNSUPPORTED_TITLE,
   acceptorConsentName,
   acceptorConsentReady,
   acceptorDoneLedgerRows,
@@ -11,6 +13,7 @@ import {
   acceptorLegalAgreementDisplay,
   acceptorRailFacts,
   acceptorSpine,
+  applianceRunsAccept,
   invitingPartyName,
 } from "@bench/acceptorModel";
 
@@ -430,5 +433,22 @@ describe("acceptor legal-agreement display", () => {
     expect(
       acceptorLegalAgreementDisplay(makeToken({ legalAgreement: undefined })),
     ).toBeUndefined();
+  });
+});
+
+describe("applianceRunsAccept", () => {
+  test("the appliance runs a filedrop accept (a server job over the mounted file)", () => {
+    expect(applianceRunsAccept("filedrop")).toBe(true);
+  });
+
+  test("the appliance cannot run a webrtc accept (no in-tab exchange yet)", () => {
+    expect(applianceRunsAccept("webrtc")).toBe(false);
+  });
+
+  test("the unsupported copy names what the appliance CAN run so it is not a dead end", () => {
+    expect(ACCEPT_UNSUPPORTED_TITLE.length).toBeGreaterThan(0);
+    // The body must point the operator at the shared-directory path the appliance
+    // does run, not merely refuse.
+    expect(ACCEPT_UNSUPPORTED_MESSAGE).toContain("shared-directory");
   });
 });

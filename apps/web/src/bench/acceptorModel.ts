@@ -7,6 +7,7 @@ import { dateTimeLabel } from "./inviterModel";
 
 import type { InvitationToken, LinkageTerms, Metadata } from "@psilink/core";
 import type { RailFact, RailStepState } from "./inviterModel";
+import type { AcceptableInvitation } from "@psi/acceptInvitation";
 
 /**
  * The pure model behind the acceptor bench's three-step spine: the step
@@ -386,3 +387,45 @@ export function acceptorLegalAgreementDisplay(
       sanitized.expirationDate !== raw.expirationDate,
   };
 }
+
+/** The connection-endpoint channels an accepted invitation can carry, narrowed
+ * from the token by {@link prepareAcceptedInvitation}: WebRTC always, file-drop on
+ * a console build. */
+type AcceptEndpointChannel = AcceptableInvitation["endpoint"]["channel"];
+
+/**
+ * Whether the console appliance can carry out an accepted invitation's endpoint
+ * itself. The appliance runs a file-drop accept as a server job over its mounted
+ * work directory, but has no in-tab WebRTC exchange yet (that awaits the Node WebRTC
+ * and proxy interconnectivity work) and holds no file rows in the browser to run one
+ * with, so a WebRTC accept cannot run on a console build. Keyed exhaustively off the
+ * admitted channel so a widened accept-endpoint union fails to compile until its
+ * appliance-runnability is decided -- the allowlist discipline CONTRIBUTING requires
+ * for transport branching. Off the console every admitted endpoint runs in the
+ * browser, so the caller consults this only on a console build.
+ */
+const APPLIANCE_RUNS_ACCEPT: Record<AcceptEndpointChannel, boolean> = {
+  webrtc: false,
+  filedrop: true,
+};
+
+/** Whether the console appliance can run an accepted invitation's endpoint channel
+ * ({@link APPLIANCE_RUNS_ACCEPT}). */
+export function applianceRunsAccept(channel: AcceptEndpointChannel): boolean {
+  return APPLIANCE_RUNS_ACCEPT[channel];
+}
+
+/** The honest title for a console accept whose endpoint the appliance cannot run
+ * today ({@link applianceRunsAccept}), in the inviter chooser's
+ * "planned capability for this appliance" register. */
+export const ACCEPT_UNSUPPORTED_TITLE =
+  "This appliance cannot run this exchange type yet";
+
+/** The unsupported-accept body: names what the appliance CAN run (shared-directory
+ * exchanges from the mounted work directory) so the operator is not left at a dead
+ * end with a doomed run. */
+export const ACCEPT_UNSUPPORTED_MESSAGE =
+  "This invitation runs an in-browser (WebRTC) exchange. This appliance runs " +
+  "shared-directory exchanges from its mounted work directory, and its in-browser " +
+  "exchange support is a planned capability. Ask your partner for a shared-directory " +
+  "invitation to run it on this appliance.";
