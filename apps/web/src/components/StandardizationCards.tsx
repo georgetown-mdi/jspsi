@@ -9,8 +9,9 @@ import { DisclosureSection } from "@components/DisclosureSection";
 import { StandardizationPreview } from "@components/StandardizationPreview";
 import { StandardizationStepEditor } from "@components/StandardizationStepEditor";
 
+import type { ColumnSamples } from "@psi/columnSamples";
+
 import type {
-  CSVRow,
   LinkageField,
   Metadata,
   Standardization,
@@ -48,7 +49,7 @@ export function StandardizationCards({
   standardization,
   declaredFields,
   metadata,
-  rawRows,
+  columnSamples,
   onStepsChange,
   onInputColumnChange,
   onAddField,
@@ -66,8 +67,9 @@ export function StandardizationCards({
   declaredFields: Array<LinkageField>;
   /** The operator's column metadata, for the per-type input-column options. */
   metadata: Metadata;
-  /** The parsed rows the preview samples. */
-  rawRows: Array<CSVRow>;
+  /** The per-column preview samples the before/after preview reads (computed from
+   * the rows on hosted, read from the profile on the console). */
+  columnSamples: ColumnSamples;
   /** Emit a step edit: `output` names the field, `input` is the transformation's
    * input column AS RENDERED (echoed for the acceptor's stale-override check), and
    * `steps` is the next pipeline. */
@@ -179,7 +181,7 @@ export function StandardizationCards({
             field={field}
             inputColumn={transformation.input}
             steps={steps}
-            rawRows={rawRows}
+            columnSamples={columnSamples}
             inputColumnOptions={columnsForType(field.type)}
             onInputColumnChange={(column) =>
               onInputColumnChange(transformation.output, column)
@@ -231,7 +233,7 @@ function StandardizationCard({
   field,
   inputColumn,
   steps,
-  rawRows,
+  columnSamples,
   inputColumnOptions,
   onInputColumnChange,
   onStepsChange,
@@ -242,7 +244,7 @@ function StandardizationCard({
   field: LinkageField;
   inputColumn: string;
   steps: Array<StandardizationStep>;
-  rawRows: Array<CSVRow>;
+  columnSamples: ColumnSamples;
   inputColumnOptions: Array<string>;
   onInputColumnChange: (column: string) => void;
   onStepsChange: (steps: Array<StandardizationStep>) => void;
@@ -309,7 +311,7 @@ function StandardizationCard({
               field={field}
               inputColumn={inputColumn}
               steps={steps}
-              rawRows={rawRows}
+              columnSamples={columnSamples}
             />
           </DisclosureSection>
           {onRemove !== undefined && (

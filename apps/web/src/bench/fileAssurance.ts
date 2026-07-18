@@ -10,6 +10,21 @@ export const BROWSER_ONLY_FILE_ASSURANCE =
   "uploaded to our server.";
 
 /**
+ * The console appliance's truthful file-assurance line, for a surface whose intake
+ * reads the input from the appliance's mounted work directory rather than the
+ * browser (the console inviter's and acceptor's server-file pickers). It is
+ * deliberately NOT the value {@link fileAssuranceLine} resolves for the console
+ * build: surfaces that never switch to the mounted-directory intake -- the lobby,
+ * which makes no per-file claim, and the receipt verifier, which parses locally in
+ * the browser on every build -- would state a claim false for them if this were the
+ * blanket console line, so each mounted-input surface opts into this copy explicitly
+ * rather than inheriting it.
+ */
+export const APPLIANCE_FILE_ASSURANCE =
+  "Files are read from this appliance's mounted work directory; your browser " +
+  "does not upload them.";
+
+/**
  * Decide the file-assurance line from whether this deployment's server
  * receives files. `false` (the hosted, browser-only deployment) renders
  * {@link BROWSER_ONLY_FILE_ASSURANCE} unchanged. `true` omits the claim
@@ -28,9 +43,11 @@ export function fileAssuranceLine(
 /**
  * The single resolved file-assurance line (or its absence) for this build. The
  * server receives files exactly on the console appliance ({@link isConsoleBuild}),
- * where the browser-only claim no longer holds. All three bench surfaces that
- * show the assurance copy (AcceptorBench, BenchLobby, YourFileSection) render
- * this constant rather than each reading the profile or hardcoding the claim,
- * so the deployment-awareness lives in one place.
+ * where the browser-only claim no longer holds. BenchLobby (which makes no per-file
+ * claim of its own) renders this constant directly; the two mounted-input surfaces
+ * (AcceptorBench, YourFileSection) render it on the hosted build but opt into
+ * {@link APPLIANCE_FILE_ASSURANCE} on the console, where their intake reads the file
+ * from the appliance rather than the browser. The deployment-awareness lives here
+ * rather than in each surface reading the profile or hardcoding the claim.
  */
 export const FILE_ASSURANCE_LINE = fileAssuranceLine(isConsoleBuild());

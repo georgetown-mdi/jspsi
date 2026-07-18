@@ -6,6 +6,8 @@ import {
   composeKeyFileDocument,
   composeSftpConfigDocument,
 } from "./intent";
+import { JobInputNotFoundError, jobInputFilePath } from "./workInputs";
+import { rendezvousStartupWarnings } from "./jobRendezvous";
 import { classifyRestoredJob, listRestorableJobIds } from "./jobArtifacts";
 import {
   createWorkdir,
@@ -23,8 +25,8 @@ import type {
   JobTerminalState,
   RelayEvent,
 } from "./cliDriver";
+import type { JobExchangeIntent, JobInputFileReference } from "./intent";
 import type { JobSftpRemoteEntry, JobSftpRemotesTable } from "./sftpRemotes";
-import type { JobExchangeIntent } from "./intent";
 
 /**
  * Thrown by {@link JobManager.createJob} when an sftp intent names a remote
@@ -51,6 +53,19 @@ export class SftpRemoteBusyError extends Error {
   constructor() {
     super("the named sftp remote is held by a running job");
     this.name = "SftpRemoteBusyError";
+  }
+}
+
+/**
+ * Thrown by {@link JobManager.createJob} when a filedrop intent arrives but no
+ * rendezvous directory is configured (`JOB_RENDEZVOUS_DIR` unset). The console UI
+ * disables the filedrop transport in that state, so this is the server-side backstop
+ * for an intent that reached the API anyway; the route maps it to a 400.
+ */
+export class JobRendezvousUnavailableError extends Error {
+  constructor() {
+    super("no rendezvous directory is configured for a filedrop exchange");
+    this.name = "JobRendezvousUnavailableError";
   }
 }
 
@@ -173,6 +188,19 @@ export interface JobManagerOptions {
    */
   sftpRemotes?: JobSftpRemotesTable;
   /**
+   * The resolved work-input directory (from {@link useJobInputDir}). Absent when
+   * `JOB_INPUT_DIR` is unset, in which case an intent naming an `inputFile` fails
+   * with {@link JobInputNotFoundError}. Never derived from a request.
+   */
+  jobInputDir?: string;
+  /**
+   * The resolved rendezvous directory (from {@link useJobRendezvousDir}) a filedrop
+   * exchange reads and writes. Absent when `JOB_RENDEZVOUS_DIR` is unset, in which
+   * case a filedrop intent fails with {@link JobRendezvousUnavailableError}. Never
+   * derived from a request.
+   */
+  jobRendezvousDir?: string;
+  /**
    * Extra environment variables merged into every spawned child. Empty in
    * production; the manager tests use it to configure the stub CLI. Set only by
    * the server-side constructor, never derived from a request.
@@ -209,6 +237,8 @@ export class JobManager {
   private readonly terminalTtlMs: number;
   private readonly childEnv: NodeJS.ProcessEnv | undefined;
   private readonly sftpRemotes: JobSftpRemotesTable | undefined;
+  private readonly jobInputDir: string | undefined;
+  private readonly jobRendezvousDir: string | undefined;
   /** The per-remote busy latch: remote name -> holding job id. */
   private readonly sftpRemoteHolders = new Map<string, string>();
   /**
@@ -231,6 +261,8 @@ export class JobManager {
       options.cancelSigkillGraceMs ?? CANCEL_SIGKILL_GRACE_MS;
     this.terminalTtlMs = options.terminalTtlMs ?? JOB_TERMINAL_TTL_MS;
     this.sftpRemotes = options.sftpRemotes;
+    this.jobInputDir = options.jobInputDir;
+    this.jobRendezvousDir = options.jobRendezvousDir;
     this.childEnv = options.childEnv;
   }
 
@@ -240,13 +272,24 @@ export class JobManager {
    * fixed names, and spawns the CLI. Returns the new job's id.
    *
    * An sftp intent resolves (and latches) its remote BEFORE any filesystem
-   * work, so an unknown or busy remote is rejected with nothing on disk.
+   * work, so an unknown or busy remote is rejected with nothing on disk. An
+   * `inputFile` intent likewise resolves its mounted path before the workdir
+   * exists (mirroring the unknown-remote flow): a name that resolves to no regular
+   * file is rejected with nothing on disk. A filedrop intent requires a configured
+   * rendezvous directory. The CLI reads the mounted file in place, so nothing is
+   * copied into the workdir.
    */
   async createJob(intent: JobExchangeIntent): Promise<string> {
     const id = generateJobId();
     const remoteEntry =
       intent.channel === "sftp"
         ? this.acquireSftpRemote(intent.remote, id)
+        : undefined;
+    if (intent.channel === "filedrop" && this.jobRendezvousDir === undefined)
+      throw new JobRendezvousUnavailableError();
+    const mountedInputPath =
+      intent.inputFile !== undefined
+        ? this.resolveWorkInputPath(intent.inputFile)
         : undefined;
 
     this.creatingJobIds.add(id);
@@ -262,8 +305,8 @@ export class JobManager {
         intent,
         id,
         created.workdir,
-        created.exchangeDirectory,
         remoteEntry,
+        mountedInputPath,
       );
     } catch (error) {
       // A failure after the workdir exists must not strand it: the record may
@@ -277,6 +320,17 @@ export class JobManager {
     } finally {
       this.creatingJobIds.delete(id);
     }
+  }
+
+  /**
+   * Resolve an `inputFile` reference to the mounted path the CLI reads in place,
+   * before any filesystem work: an unset directory, or a name that resolves to no
+   * regular file, is {@link JobInputNotFoundError} -- mapped by the route to a 400.
+   * The mounted directory is the operator's own read-only data.
+   */
+  private resolveWorkInputPath(inputFile: JobInputFileReference): string {
+    if (this.jobInputDir === undefined) throw new JobInputNotFoundError();
+    return jobInputFilePath(this.jobInputDir, inputFile.name);
   }
 
   /**
@@ -332,12 +386,12 @@ export class JobManager {
     intent: JobExchangeIntent,
     id: string,
     workdir: string,
-    exchangeDirectory: string,
     remoteEntry: JobSftpRemoteEntry | undefined,
+    mountedInputPath: string | undefined,
   ): Promise<string> {
     const configDocument = composeDocumentByChannel(
       intent,
-      exchangeDirectory,
+      this.jobRendezvousDir,
       remoteEntry,
     );
     const keyDocument = composeKeyFileDocument(intent);
@@ -352,11 +406,7 @@ export class JobManager {
       JOB_FILE_NAMES.key,
       keyDocument,
     );
-    const inputPath = await writeJobFile(
-      workdir,
-      JOB_FILE_NAMES.input,
-      intent.inputCsv,
-    );
+    const inputPath = await this.writeJobInput(intent, workdir, mountedInputPath);
     const outputPath = path.join(workdir, JOB_FILE_NAMES.output);
     const recordPath = path.join(workdir, JOB_FILE_NAMES.record);
     const keysPath = path.join(workdir, JOB_FILE_NAMES.recordKeys);
@@ -378,6 +428,14 @@ export class JobManager {
       cancelTimers: [],
     };
     this.jobs.set(id, record);
+
+    if (intent.channel === "filedrop" && this.jobRendezvousDir !== undefined)
+      for (const message of rendezvousStartupWarnings(
+        this.jobRendezvousDir,
+        this.jobInputDir,
+        this.dataRoot,
+      ))
+        this.appendEvent(record, { v: 1, type: "warning", message });
 
     const eventStream = intent.eventStream ?? true;
     record.handle = spawnExchangeJob({
@@ -404,6 +462,24 @@ export class JobManager {
     });
 
     return id;
+  }
+
+  /**
+   * Resolve the path the CLI reads its input from. A `mountedInputPath` points the
+   * CLI at the operator-mounted file in place (nothing is copied into the workdir);
+   * otherwise the inline `inputCsv` content is written to the fixed workdir name.
+   */
+  private async writeJobInput(
+    intent: JobExchangeIntent,
+    workdir: string,
+    mountedInputPath: string | undefined,
+  ): Promise<string> {
+    if (mountedInputPath !== undefined) return mountedInputPath;
+    if (intent.inputCsv !== undefined)
+      return writeJobFile(workdir, JOB_FILE_NAMES.input, intent.inputCsv);
+    // The exactly-one-of intent schema guarantees one input source; refuse a
+    // caller that bypassed it rather than spawning the CLI on an empty input.
+    throw new Error("job intent carries neither inputCsv nor inputFile");
   }
 
   /** Look up a job by id, or undefined if unknown/evicted. */
@@ -778,16 +854,15 @@ function liveJobSummary(record: JobRecord): JobSummary {
 }
 
 /**
- * Compose the CLI config document for the intent's channel: filedrop rendezvous
- * in the server-chosen exchange directory inside the workdir; sftp rendezvous
- * at the operator-provisioned remote (the per-job exchange directory is simply
- * unused). The sftp arm requires the entry `acquireSftpRemote` resolved; a
- * missing one here is a caller bug surfaced as a hard error, not a silent
- * fallback.
+ * Compose the CLI config document for the intent's channel: filedrop rendezvous in
+ * the operator-configured rendezvous mount; sftp rendezvous at the
+ * operator-provisioned remote. Each arm requires the resource `createJob` already
+ * resolved -- the sftp remote entry, the filedrop rendezvous directory -- so a
+ * missing one here is a caller bug surfaced as a hard error, not a silent fallback.
  */
 function composeDocumentByChannel(
   intent: JobExchangeIntent,
-  exchangeDirectory: string,
+  rendezvousDir: string | undefined,
   remoteEntry: JobSftpRemoteEntry | undefined,
 ): string {
   if (intent.channel === "sftp") {
@@ -795,5 +870,7 @@ function composeDocumentByChannel(
       throw new Error("sftp job reached compose without a resolved remote");
     return composeSftpConfigDocument(intent, remoteEntry);
   }
-  return composeConfigDocument(intent, exchangeDirectory);
+  if (rendezvousDir === undefined)
+    throw new Error("filedrop job reached compose without a rendezvous directory");
+  return composeConfigDocument(intent, rendezvousDir);
 }

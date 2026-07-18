@@ -54,8 +54,8 @@ export function AcceptorExchangeSection({
    * the run and cleared on a failure. */
   warning: AlertContent | undefined;
   onTryAgain: () => void;
-  /** Return to the confirm-columns step with every setting intact -- the config
-   * failure's recovery, since the acceptor fixes its own settings there. */
+  /** Return to the confirm-columns step with every setting intact -- a prepare-time
+   * config failure's recovery, since the acceptor fixes its own settings there. */
   onFixColumns: () => void;
 }) {
   const phase = outputs !== undefined ? "done" : "running";

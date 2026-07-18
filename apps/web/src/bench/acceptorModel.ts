@@ -3,10 +3,11 @@ import { disclosedColumnNames, sanitizeForDisplay } from "@psilink/core";
 import { commitAcceptance } from "@psi/acceptConsent";
 import { summarizeInvitation } from "@psi/invitationSummary";
 
-import { dateTimeLabel } from "./inviterModel";
+import { TRANSPORT_LEDGER_LABELS, dateTimeLabel } from "./inviterModel";
 
 import type { InvitationToken, LinkageTerms, Metadata } from "@psilink/core";
 import type { RailFact, RailStepState } from "./inviterModel";
+import type { AcceptableInvitation } from "@psi/acceptInvitation";
 
 /**
  * The pure model behind the acceptor bench's three-step spine: the step
@@ -196,6 +197,7 @@ export function acceptorLedgerTag(invitingParty: string): string {
  */
 export function acceptorLedgerRows(
   token: InvitationToken,
+  howItRuns: string,
   metadata?: Metadata,
 ): Array<AcceptorLedgerRow> {
   const summary = summarizeInvitation(token);
@@ -237,7 +239,7 @@ export function acceptorLedgerRows(
     summary.legalAgreement !== undefined
       ? { label: "Agreement", value: summary.legalAgreement.reference }
       : { label: "Agreement", muted: "None" },
-    { label: "How it runs", value: "Browser" },
+    { label: "How it runs", value: howItRuns },
   ];
 }
 
@@ -283,6 +285,7 @@ export function acceptorDoneLedgerRows(
   token: InvitationToken,
   outcome: AcceptorLedgerOutcome,
   metadata: Metadata,
+  howItRuns: string,
 ): Array<AcceptorLedgerRow> {
   const summary = summarizeInvitation(token);
   const received = summary.payload?.send ?? [];
@@ -314,7 +317,7 @@ export function acceptorDoneLedgerRows(
     summary.legalAgreement !== undefined
       ? { label: "Agreement", value: summary.legalAgreement.reference }
       : { label: "Agreement", muted: "None" },
-    { label: "How it runs", value: "Browser" },
+    { label: "How it runs", value: howItRuns },
   ];
 }
 
@@ -385,4 +388,84 @@ export function acceptorLegalAgreementDisplay(
       sanitized.purpose !== raw.purpose ||
       sanitized.expirationDate !== raw.expirationDate,
   };
+}
+
+/** The connection endpoint an accepted invitation carries, narrowed from the token
+ * by {@link prepareAcceptedInvitation}: a WebRTC signaling endpoint, or a file-drop
+ * endpoint on a console build. */
+type AcceptEndpoint = AcceptableInvitation["endpoint"];
+
+/** The honest title for a console accept whose endpoint the appliance cannot run,
+ * pointing the operator at where it CAN run. */
+export const ACCEPT_UNSUPPORTED_TITLE =
+  "This appliance cannot run this exchange";
+
+/** The honest unsupported-accept copy for a console build, deciding runnability by
+ * the endpoint's SHAPE rather than a channel kill-switch: a WebRTC accept has no
+ * in-tab exchange on the appliance (WebRTC is the public web app's domain); a
+ * split-directory file-drop uses inbound/outbound mailboxes the console does not
+ * offer (collapsing the mirror-swapped pair would break the read-where-the-peer-
+ * writes invariant); and a single-directory file-drop needs `JOB_RENDEZVOUS_DIR`
+ * mounted. */
+export interface AcceptUnsupported {
+  title: string;
+  message: string;
+}
+
+/** Whether a file-drop endpoint carries the single shared-directory form the console
+ * runs, rather than the inbound/outbound split it does not offer. */
+function isSingleDirectoryFiledrop(endpoint: AcceptEndpoint): boolean {
+  return endpoint.channel === "filedrop" && endpoint.path !== undefined;
+}
+
+/**
+ * The unsupported-accept state for a console build, or undefined when the appliance
+ * can run the accepted endpoint. Determined by the endpoint SHAPE and whether the
+ * rendezvous mount is configured, not a static kill-switch: a runnable console accept
+ * is a single-directory file-drop with `JOB_RENDEZVOUS_DIR` set. The caller consults
+ * this only on a console build; off the console every admitted endpoint runs in the
+ * browser.
+ */
+export function acceptUnsupported(
+  endpoint: AcceptEndpoint,
+  rendezvousConfigured: boolean,
+): AcceptUnsupported | undefined {
+  if (endpoint.channel === "webrtc")
+    return {
+      title: ACCEPT_UNSUPPORTED_TITLE,
+      message:
+        "This invitation runs an in-browser (WebRTC) exchange, which is out of " +
+        "scope on this appliance. Accept it from a standard psilink web app in " +
+        "your browser instead.",
+    };
+  if (!isSingleDirectoryFiledrop(endpoint))
+    return {
+      title: ACCEPT_UNSUPPORTED_TITLE,
+      message:
+        "This invitation uses separate inbound and outbound directories, which " +
+        "this appliance does not run. Accept it with the psilink command-line " +
+        "tool instead.",
+    };
+  if (!rendezvousConfigured)
+    return {
+      title: ACCEPT_UNSUPPORTED_TITLE,
+      message:
+        "This invitation runs over a shared directory, but this appliance has no " +
+        "rendezvous directory configured. Set JOB_RENDEZVOUS_DIR to a directory " +
+        "both parties can reach and reload.",
+    };
+  return undefined;
+}
+
+/** The ledger's "How it runs" phrasing for an accepted endpoint. A console
+ * single-directory file-drop accept runs the exchange on the appliance against the
+ * shared directory (the command-line tool), not in the browser; every other admitted
+ * accept runs the live exchange in this browser. */
+export function acceptorHowItRunsLabel(
+  endpoint: AcceptEndpoint,
+  consoleBuild: boolean,
+): string {
+  return consoleBuild && endpoint.channel === "filedrop"
+    ? TRANSPORT_LEDGER_LABELS.filedrop
+    : TRANSPORT_LEDGER_LABELS.browser;
 }

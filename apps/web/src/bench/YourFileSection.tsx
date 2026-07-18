@@ -7,12 +7,17 @@ import log from "loglevel";
 
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 
-import { FILE_ASSURANCE_LINE } from "./fileAssurance";
+import { isConsoleBuild } from "@utils/clientConfig";
+
+import { APPLIANCE_FILE_ASSURANCE, FILE_ASSURANCE_LINE } from "./fileAssurance";
+import { ServerFilePicker } from "./ServerFilePicker";
 import { fileCardMeta } from "./inviterModel";
 import styles from "./bench.module.css";
 
 import type { AcquiredCsv } from "./inviterModel";
 import type { FileRejection } from "@mantine/dropzone";
+import type { JobInputProfile } from "@jobs/workInputs";
+import type { WorkInputReference } from "@psi/workInputClient";
 
 /** A titled alert for a failed or unusable read, focused when it appears so
  * the failure is announced without clearing the operator's input. */
@@ -24,9 +29,13 @@ export interface IntakeAlert {
 /**
  * Step 1 of the inviter spine: the inviter's name and file. Presentational --
  * the host owns the parse and the draft; this section renders the intake
- * surface (dropzone always available, file card once read, recommended-terms
- * callout when the file can back an exchange) and gates Continue on a name
- * and a linkable file.
+ * surface and gates Continue on a name and a linkable file.
+ *
+ * The intake surface is deployment-specific. The hosted build reads the file in
+ * the browser through a dropzone (file card once read, recommended-terms callout
+ * when the file can back an exchange). The console appliance never reads the file
+ * in the browser: it renders {@link ServerFilePicker} over the operator-mounted
+ * work-input directory, and the file-assurance line and sample-data copy say so.
  */
 export function YourFileSection({
   name,
@@ -36,25 +45,38 @@ export function YourFileSection({
   acquired,
   linkable,
   alert,
+  committed,
+  onCommit,
   onContinue,
   onLoadSample,
   onDownloadSamples,
 }: {
   name: string;
   onNameChange: (name: string) => void;
-  /** The dropped or selected file; the host parses it. */
+  /** The dropped or selected file; the host parses it. Hosted build only. */
   onFile: (file: File) => void;
   reading: boolean;
   acquired: AcquiredCsv | undefined;
   /** Whether the read file can back at least one matching key. */
   linkable: boolean;
   alert: IntakeAlert | undefined;
+  /** The file committed to the bench on the console (its profiled reference), so the
+   * picker marks its row and flags an authoring-time drift; unused off the console. */
+  committed?: WorkInputReference;
+  /** Commit a profiled console file to the bench (the picker's "Use this file");
+   * unused off the console. */
+  onCommit?: (profile: JobInputProfile) => void;
   onContinue: () => void;
-  /** Seed the synthetic sample into this exchange in place. */
+  /** Seed the synthetic sample into this exchange in place. Hosted build only -- the
+   * console cannot read an in-browser file, so its sample affordance is download-only. */
   onLoadSample: () => void;
   /** Download the two sample CSVs client-side, uploading nothing. */
   onDownloadSamples: () => void;
 }) {
+  const consoleBuild = isConsoleBuild();
+  const assuranceLine = consoleBuild
+    ? APPLIANCE_FILE_ASSURANCE
+    : FILE_ASSURANCE_LINE;
   const alertRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (alert !== undefined) alertRef.current?.focus();
@@ -95,78 +117,113 @@ export function YourFileSection({
         maxLength={200}
         onChange={(event) => onNameChange(event.currentTarget.value)}
       />
-      <Dropzone
-        className={styles.dropzone}
-        onDrop={(files) => {
-          setRejectionMessage(undefined);
-          const file = files.at(0);
-          if (file !== undefined) onFile(file);
-        }}
-        onReject={handleReject}
-        accept={["text/plain", "text/csv", "application/vnd.ms-excel"]}
-        maxSize={MAX_CSV_FILE_BYTES}
-        multiple={false}
-        loading={reading}
-        aria-label="Your data file"
-        mt="md"
-      >
-        <p>
-          <strong>Drag your CSV here or click to select</strong>
-        </p>
-        <p className={styles.dropzoneMax}>(Max file size: {maxMb} MB)</p>
-      </Dropzone>
-      {rejectionMessage !== undefined && (
-        <Text role="alert" c="red" size="sm" mt="xs">
-          {rejectionMessage}
-        </Text>
-      )}
-      {acquired === undefined && (
-        <p className={`${styles.small} ${styles.sub}`}>
-          Use sample data:{" "}
-          <Anchor
-            inherit
-            component="button"
-            type="button"
-            onClick={onLoadSample}
+      {consoleBuild ? (
+        <>
+          <ServerFilePicker
+            committed={committed}
+            onUse={(profile) => onCommit?.(profile)}
+          />
+          {acquired === undefined && (
+            <p className={`${styles.small} ${styles.sub}`}>
+              Use sample data:{" "}
+              <Anchor
+                inherit
+                component="button"
+                type="button"
+                onClick={onDownloadSamples}
+              >
+                download the CSVs
+              </Anchor>
+              , then place one in this appliance&apos;s mounted work directory
+              -- see the{" "}
+              <Anchor
+                inherit
+                href="https://github.com/georgetown-mdi/jspsi/blob/main/docs/DEPLOYMENT.md"
+                target="_blank"
+                rel="noreferrer"
+              >
+                deployment guide
+              </Anchor>
+              .
+            </p>
+          )}
+        </>
+      ) : (
+        <>
+          <Dropzone
+            className={styles.dropzone}
+            onDrop={(files) => {
+              setRejectionMessage(undefined);
+              const file = files.at(0);
+              if (file !== undefined) onFile(file);
+            }}
+            onReject={handleReject}
+            accept={["text/plain", "text/csv", "application/vnd.ms-excel"]}
+            maxSize={MAX_CSV_FILE_BYTES}
+            multiple={false}
+            loading={reading}
+            aria-label="Your data file"
+            mt="md"
           >
-            load it into this exchange
-          </Anchor>
-          , or{" "}
-          <Anchor
-            inherit
-            component="button"
-            type="button"
-            onClick={onDownloadSamples}
-          >
-            download the CSVs
-          </Anchor>
-          .
-        </p>
-      )}
-      {acquired !== undefined && (
-        <div className={styles.fileCard}>
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            aria-hidden="true"
-          >
-            <path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z" />
-            <path d="M13 3v6h6" />
-          </svg>
-          <div>
-            <div className={`${styles.fileName} ${styles.mono}`}>
-              {acquired.fileName}
+            <p>
+              <strong>Drag your CSV here or click to select</strong>
+            </p>
+            <p className={styles.dropzoneMax}>(Max file size: {maxMb} MB)</p>
+          </Dropzone>
+          {rejectionMessage !== undefined && (
+            <Text role="alert" c="red" size="sm" mt="xs">
+              {rejectionMessage}
+            </Text>
+          )}
+          {acquired === undefined && (
+            <p className={`${styles.small} ${styles.sub}`}>
+              Use sample data:{" "}
+              <Anchor
+                inherit
+                component="button"
+                type="button"
+                onClick={onLoadSample}
+              >
+                load it into this exchange
+              </Anchor>
+              , or{" "}
+              <Anchor
+                inherit
+                component="button"
+                type="button"
+                onClick={onDownloadSamples}
+              >
+                download the CSVs
+              </Anchor>
+              .
+            </p>
+          )}
+          {acquired !== undefined && (
+            <div className={styles.fileCard}>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                aria-hidden="true"
+              >
+                <path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z" />
+                <path d="M13 3v6h6" />
+              </svg>
+              <div>
+                <div className={`${styles.fileName} ${styles.mono}`}>
+                  {acquired.fileName}
+                </div>
+                <div className={`${styles.fileMeta} ${styles.mono}`}>
+                  {fileCardMeta(acquired.rowCount, acquired.sizeBytes)}
+                </div>
+              </div>
             </div>
-            <div className={`${styles.fileMeta} ${styles.mono}`}>
-              {fileCardMeta(acquired.rawRows.length, acquired.sizeBytes)}
-            </div>
-          </div>
-        </div>
+          )}
+        </>
       )}
-      {FILE_ASSURANCE_LINE !== undefined && (
-        <p className={`${styles.small} ${styles.sub}`}>{FILE_ASSURANCE_LINE}</p>
+      {assuranceLine !== undefined && (
+        <p className={`${styles.small} ${styles.sub}`}>{assuranceLine}</p>
       )}
       {alert !== undefined && (
         <Alert

@@ -69,6 +69,12 @@ export function InviterExchangeSection({
     failure?.category === "exchange" &&
     invitationUsable(invitation.expires, new Date());
 
+  // Every non-retryable failure except output (whose exchange already succeeded, so
+  // nothing here may invite a re-run) offers exactly one recovery: a fresh invitation
+  // via start-over, back to Review & create with every input intact.
+  const offersStartOver =
+    !retryable && failure !== undefined && failure.category !== "output";
+
   // The phase-level focus throughline. The bench host moves focus to the h1
   // when the section mounts; within the section, focus moves again when the
   // partner connects or a retry clears the alert -- the share block or the
@@ -113,10 +119,7 @@ export function InviterExchangeSection({
               Try again
             </Button>
           )}
-          {/* Every non-retryable failure except "output" (whose exchange
-              already succeeded, so nothing here may invite a re-run) offers
-              exactly one recovery: a fresh invitation. */}
-          {!retryable && failure.category !== "output" && (
+          {offersStartOver && (
             <Button color="red" variant="light" mt="sm" onClick={onStartOver}>
               Start over with a fresh invitation
             </Button>

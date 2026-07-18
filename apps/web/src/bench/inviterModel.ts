@@ -4,6 +4,7 @@ import {
   disclosedColumnNames,
   getDefaultLinkageTerms,
   pipelineAlwaysDrops,
+  sanitizeForDisplay,
 } from "@psilink/core";
 
 import {
@@ -26,6 +27,8 @@ import {
 
 import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
+import { selectExchangeDriver } from "./exchangeDriverSelection";
+
 import type {
   AdvancedField,
   AdvancedInviteDraft,
@@ -42,7 +45,9 @@ import type {
   LinkageTerms,
   SemanticType,
 } from "@psilink/core";
+import type { DeploymentProfile } from "@utils/clientConfig";
 import type { DisclosureChoice } from "@psi/metadataEditing";
+import type { ExchangeDriverSelection } from "./exchangeDriverSelection";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
 /**
@@ -119,14 +124,145 @@ export function isCliTransport(
   return transport !== "browser";
 }
 
+/** How a chosen transport would run on this build: the
+ * {@link ExchangeDriverSelection} kind as the inviter chooser's UI policy rather
+ * than the raw driver mapping. The two diverge on one cell -- a console filedrop:
+ * the driver plumbing can run it as a server job, but a console filedrop cannot
+ * rendezvous cross-party yet, so the chooser offers it as a save-a-file (CLI)
+ * card. */
+export type TransportRunMode = ExchangeDriverSelection["kind"];
+
+/** One transport card's placement in the chooser: whether it is offered (rendered
+ * at all), whether it renders disabled, and how a pick would run. */
+export interface TransportOption {
+  transport: Transport;
+  offered: boolean;
+  disabled: boolean;
+  runMode: TransportRunMode;
+}
+
+/** The chooser's single source of truth for which transport cards are offered,
+ * which render disabled, and which is the default. The capability note and the
+ * card copy are regenerated from these facts so copy cannot drift from behavior. */
+export interface AvailableTransports {
+  options: ReadonlyArray<TransportOption>;
+  defaultTransport: Transport;
+}
+
+const TRANSPORT_ORDER: ReadonlyArray<Transport> = [
+  "browser",
+  "sftp",
+  "filedrop",
+];
+
+/**
+ * The transport matrix for a build: which cards are offered, which render
+ * disabled, how each would run, and the default. Hosted offers all three live in
+ * the browser or saved for the CLI, defaulting to the live browser exchange. The
+ * console appliance offers the same three cards but disables the Browser card (its
+ * in-tab WebRTC exchange is out of scope on the appliance) and runs its filedrop
+ * card here as a server job against the mounted rendezvous directory -- disabled
+ * when `JOB_RENDEZVOUS_DIR` is unset. The console default is SFTP when the appliance
+ * has provisioned remotes, else the filedrop card when a rendezvous directory is
+ * mounted, else SFTP.
+ */
+export function availableTransports(
+  consoleBuild: boolean,
+  sftpRemotesConfigured: boolean,
+  rendezvousConfigured: boolean,
+): AvailableTransports {
+  const profile: DeploymentProfile = consoleBuild ? "console" : "hosted";
+  const options = TRANSPORT_ORDER.map((transport): TransportOption => {
+    const disabled =
+      consoleBuild &&
+      (transport === "browser" ||
+        (transport === "filedrop" && !rendezvousConfigured));
+    const runMode: TransportRunMode = selectExchangeDriver(
+      transport,
+      profile,
+      sftpRemotesConfigured,
+    ).kind;
+    return { transport, offered: true, disabled, runMode };
+  });
+  const defaultTransport: Transport = consoleBuild
+    ? sftpRemotesConfigured
+      ? "sftp"
+      : rendezvousConfigured
+        ? "filedrop"
+        : "sftp"
+    : "browser";
+  return { options, defaultTransport };
+}
+
+/** The run mode of a chosen transport in an {@link AvailableTransports} matrix;
+ * `browser` when the matrix does not model the transport (unreachable for the
+ * closed {@link Transport} set, but keeps callers total). */
+export function transportRunMode(
+  available: AvailableTransports,
+  transport: Transport,
+): TransportRunMode {
+  return (
+    available.options.find((option) => option.transport === transport)
+      ?.runMode ?? "browser"
+  );
+}
+
+const TRANSPORT_RUN_NOUN: Record<Transport, string> = {
+  browser: "live",
+  sftp: "SFTP",
+  filedrop: "shared-directory",
+};
+
+function joinNouns(nouns: ReadonlyArray<string>): string {
+  if (nouns.length <= 1) return nouns.join("");
+  if (nouns.length === 2) return `${nouns[0]} and ${nouns[1]}`;
+  return `${nouns.slice(0, -1).join(", ")}, and ${nouns[nouns.length - 1]}`;
+}
+
+function transportNounsByRunMode(
+  available: AvailableTransports,
+  runMode: TransportRunMode,
+): Array<string> {
+  return available.options
+    .filter((option) => option.runMode === runMode && !option.disabled)
+    .map((option) => TRANSPORT_RUN_NOUN[option.transport]);
+}
+
+/** The capability note, regenerated from {@link availableTransports} facts so the
+ * copy cannot drift from which transports run here, save a file for the CLI, or are
+ * a disabled roadmap capability. */
+function capabilityNoteFor(
+  consoleBuild: boolean,
+  available: AvailableTransports,
+): string {
+  if (!consoleBuild)
+    return "This browser runs live exchanges only; SFTP and shared-directory exchanges run in the psilink command-line tool.";
+  const here = transportNounsByRunMode(available, "server-job");
+  const cli = transportNounsByRunMode(available, "save-file");
+  const parts: Array<string> = [];
+  if (here.length > 0)
+    parts.push(`This appliance runs ${joinNouns(here)} exchanges here`);
+  if (cli.length > 0)
+    parts.push(
+      here.length > 0
+        ? `${joinNouns(cli)} exchanges save a file for the command-line tool`
+        : `This appliance saves a file for the command-line tool to run ${joinNouns(cli)} exchanges`,
+    );
+  parts.push("in-tab browser exchanges are out of scope on this appliance");
+  return `${parts.join("; ")}.`;
+}
+
 /** The Review & create transport-chooser copy that changes with the deployment.
- * On the console appliance (`consoleBuild`) the appliance itself runs the
- * shared-directory exchange, so the filedrop card offers to run it here; when
- * the appliance also has provisioned SFTP remotes (`sftpServerJob`) the SFTP
- * card offers to run here too, through a provisioned server, and the
- * capability note names both. The hosted build keeps the browser-only
- * phrasing, and the browser card is unchanged everywhere. */
+ * The hosted build keeps the browser-only phrasing and saves the two command-line
+ * exchanges for the CLI. On the console appliance (`consoleBuild`) the Browser card
+ * names its in-tab exchange as a planned capability, the filedrop card saves a file
+ * for the CLI (its server-job cannot rendezvous cross-party yet), and -- when the
+ * appliance has provisioned SFTP remotes (`sftpServerJob`) -- the SFTP card offers
+ * to run here and reads the file on the appliance. The capability note is
+ * regenerated from {@link availableTransports} so it cannot drift from behavior. */
 export interface TransportChooserCopy {
+  browserLabel: string;
+  browserDescription: string;
   filedropLabel: string;
   filedropDescription: string;
   sftpLabel: string;
@@ -137,37 +273,36 @@ export interface TransportChooserCopy {
 export function transportChooserCopy(
   consoleBuild: boolean,
   sftpServerJob: boolean,
+  rendezvousConfigured: boolean,
 ): TransportChooserCopy {
+  const available = availableTransports(
+    consoleBuild,
+    sftpServerJob,
+    rendezvousConfigured,
+  );
   const sftpRunsHere = consoleBuild && sftpServerJob;
-  const sftpCopy = sftpRunsHere
-    ? {
-        sftpLabel: "Over SFTP, run here",
-        sftpDescription:
-          "Runs the exchange here through an SFTP server provisioned on this machine. Your partner accepts with the same invitation code.",
-      }
-    : {
-        sftpLabel: "Over SFTP, run by the psilink command-line tool",
-        sftpDescription:
-          "Saves an exchange file that runs the command-line tool over your SFTP server. Your partner accepts with the same invitation code.",
-      };
-  return consoleBuild
-    ? {
-        filedropLabel: "Over a shared directory, run here",
-        filedropDescription:
-          "Runs the exchange here against a directory both parties can reach. Your partner accepts with the same invitation code.",
-        ...sftpCopy,
-        capabilityNote: sftpRunsHere
-          ? "This deployment runs live, shared-directory, and SFTP exchanges here."
-          : "This deployment runs live and shared-directory exchanges here; SFTP exchanges run in the psilink command-line tool.",
-      }
-    : {
-        filedropLabel: "Over a shared directory, run by the command-line tool",
-        filedropDescription:
-          "Saves an exchange file the command-line tool runs against a directory both parties can reach.",
-        ...sftpCopy,
-        capabilityNote:
-          "This browser runs live exchanges only; SFTP and shared-directory exchanges run in the psilink command-line tool.",
-      };
+  const filedropRunsHere = consoleBuild && rendezvousConfigured;
+  return {
+    browserLabel: "Live, in this browser",
+    browserDescription: consoleBuild
+      ? "In-tab browser exchanges are out of scope on this appliance -- they are the public psilink web app's domain. Run the exchange over SFTP or a shared directory instead."
+      : "Your browsers connect directly. You get an invitation link and code to share; keep this tab open while your partner accepts.",
+    filedropLabel: filedropRunsHere
+      ? "Over a shared directory, run here"
+      : "Over a shared directory, run by the command-line tool",
+    filedropDescription: filedropRunsHere
+      ? "Runs the exchange here against the shared directory mounted on this appliance. Your file is read on this appliance, not uploaded from your browser. Your partner accepts with the same invitation code and runs their half against the same synced folder."
+      : consoleBuild
+        ? "Unavailable: mount a rendezvous directory and set JOB_RENDEZVOUS_DIR to run a shared-directory exchange here."
+        : "Saves an exchange file the command-line tool runs against a directory both parties can reach.",
+    sftpLabel: sftpRunsHere
+      ? "Over SFTP, run here"
+      : "Over SFTP, run by the psilink command-line tool",
+    sftpDescription: sftpRunsHere
+      ? "Runs the exchange here through an SFTP server provisioned on this machine. Your file is read on this appliance, not uploaded from your browser. Your partner accepts with the same invitation code."
+      : "Saves an exchange file that runs the command-line tool over your SFTP server. Your partner accepts with the same invitation code.",
+    capabilityNote: capabilityNoteFor(consoleBuild, available),
+  };
 }
 
 /**
@@ -182,12 +317,38 @@ export function transportChooserCopy(
  */
 
 /** The read file the spine works over: identity for the file card plus the
- * parsed rows and columns every derivation binds to. */
+ * parsed rows and columns every derivation binds to. `rowCount` is the file's
+ * row total, held explicitly so the display surfaces do not read `rawRows.length`
+ * (the console acquires only a server-side profile, not the rows). `dateInputFormat`
+ * is a pre-inferred date-of-birth layout ({@link dateInputFormatForColumns}), set
+ * only by sources that profile it without rows (the console); when absent, each
+ * derivation infers it from the rows as before. */
 export interface AcquiredCsv {
   fileName: string;
   sizeBytes: number;
   rawRows: Array<CSVRow>;
   columns: Array<string>;
+  rowCount: number;
+  dateInputFormat?: string;
+  /** True when this shape carries no rows -- the console acquires a server-side
+   * profile, not the file, so `rawRows` is a throwing getter there. The draft
+   * reconciliations read rows only to infer the date-of-birth format, which the
+   * console supplies as `dateInputFormat`, so a rows-withheld shape contributes an
+   * empty row set to those helpers ({@link seedRows}) rather than reading the
+   * getter. */
+  rowsWithheld?: boolean;
+}
+
+/** The rows the draft reconciliations feed to the seed/standardization helpers,
+ * whose only use of rows is date-of-birth format inference. A rows-withheld console
+ * shape ({@link AcquiredCsv.rowsWithheld}) contributes an empty set -- its
+ * `dateInputFormat` was already profiled, so the inference has no rows to draw on
+ * and needs none -- while a hosted shape contributes its parsed rows. Keeping the
+ * access here means the throwing `rawRows` getter is never touched on the console.
+ * Exported so the one remaining `rawRows` consumer that lives outside this module
+ * (the expert-mode terms import/export) reads rows through the same guard. */
+export function seedRows(csv: AcquiredCsv): Array<CSVRow> {
+  return csv.rowsWithheld === true ? [] : csv.rawRows;
 }
 
 /** An editing session over the read file: the live draft and the fixed seed it
@@ -230,7 +391,12 @@ export function editorFromCsv(
   inviterName: string,
   csv: AcquiredCsv,
 ): InviterEditor {
-  return seedAdvancedInvite(inviterName, csv.columns, csv.rawRows);
+  return seedAdvancedInvite(
+    inviterName,
+    csv.columns,
+    seedRows(csv),
+    csv.dateInputFormat,
+  );
 }
 
 /** Carry a later name edit into the draft without disturbing the derived
@@ -352,7 +518,8 @@ export function editorWithImportedTerms(
       terms,
       editor.seed,
       editor.draft.lifetimeSeconds,
-      csv.rawRows,
+      seedRows(csv),
+      csv.dateInputFormat,
     ),
     keysAuthored: true,
   };
@@ -459,7 +626,8 @@ export function editorWithRecommendedCleaning(
       standardization: defaultStandardizationForRows(
         editor.draft.metadata,
         getDefaultLinkageTerms(editor.draft.identity, editor.draft.metadata),
-        csv.rawRows,
+        seedRows(csv),
+        csv.dateInputFormat,
       ),
     },
   };
@@ -521,6 +689,29 @@ export function resetToRecommended(
   return editorFromCsv(editor.draft.identity, csv);
 }
 
+/** Reconcile an existing session onto a re-profiled file whose column set is
+ * unchanged: the authored draft (keys, cleaning, disclosure, transport) is kept and
+ * the profile-derived date-of-birth format is threaded back through the keep-keys
+ * reconciliation ({@link setDraftMetadataKeepingKeys}), so a re-profile refreshes the
+ * file's facts without discarding the operator's customizations. A sealed session is
+ * returned unchanged -- its terms are locked. The caller reseeds instead when the
+ * columns changed. */
+export function editorReprofiled(
+  editor: InviterEditor,
+  csv: AcquiredCsv,
+): InviterEditor {
+  if (editor.sealed === true) return editor;
+  return {
+    ...editor,
+    draft: setDraftMetadataKeepingKeys(
+      editor.draft,
+      editor.draft.metadata,
+      seedRows(csv),
+      csv.dateInputFormat,
+    ),
+  };
+}
+
 /** The result of a step-2 column edit: the reconciled session plus any
  * identifier columns the single-identifier rule demoted, for the caller to
  * announce. */
@@ -545,8 +736,18 @@ function withMetadata(
       // reconciliation (setDraftMetadata), never the standardization.
       draft:
         editor.keysAuthored === true
-          ? setDraftMetadataKeepingKeys(editor.draft, metadata, csv.rawRows)
-          : setDraftMetadata(editor.draft, metadata, csv.rawRows),
+          ? setDraftMetadataKeepingKeys(
+              editor.draft,
+              metadata,
+              seedRows(csv),
+              csv.dateInputFormat,
+            )
+          : setDraftMetadata(
+              editor.draft,
+              metadata,
+              seedRows(csv),
+              csv.dateInputFormat,
+            ),
     },
     demotedIdentifiers,
   };
@@ -596,14 +797,20 @@ export function identifierProblem(draft: AdvancedInviteDraft): boolean {
   return hasMultipleIdentifiers(draft.metadata);
 }
 
+/** A byte count as a compact size label, e.g. `8.4 MB`, `512 KB`, `2.1 GB`. The
+ * ladder floors at 1 KB and runs to GB, since CLI-scale console inputs reach
+ * gigabytes; shared by the file card and the server-file picker so their size ladders
+ * cannot drift. */
+export function byteSizeLabel(sizeBytes: number): string {
+  if (sizeBytes >= 1024 ** 3) return `${(sizeBytes / 1024 ** 3).toFixed(1)} GB`;
+  if (sizeBytes >= 1024 ** 2) return `${(sizeBytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
+}
+
 /** The file card's metadata line, e.g. `12,408 rows - 8.4 MB`. */
 export function fileCardMeta(rowCount: number, sizeBytes: number): string {
   const rows = new Intl.NumberFormat("en-US").format(rowCount);
-  const size =
-    sizeBytes >= 1024 ** 2
-      ? `${(sizeBytes / 1024 ** 2).toFixed(1)} MB`
-      : `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
-  return `${rows} rows - ${size}`;
+  return `${rows} rows - ${byteSizeLabel(sizeBytes)}`;
 }
 
 /** A lifetime as a plain duration phrase, e.g. `1 hour`, `7 days`. Whole
@@ -1054,7 +1261,7 @@ export function answersRows(
     },
     {
       label: "Your file",
-      value: `${csv.fileName} - ${new Intl.NumberFormat("en-US").format(csv.rawRows.length)} rows`,
+      value: `${sanitizeForDisplay(csv.fileName)} - ${new Intl.NumberFormat("en-US").format(csv.rowCount)} rows`,
       mono: true,
       changeTarget: "file",
     },
