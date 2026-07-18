@@ -1,12 +1,5 @@
 import { dirname, join, resolve } from "node:path";
-import {
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 
@@ -23,13 +16,13 @@ import {
 
 import type { ChildProcess } from "node:child_process";
 
-// The mounted-input drive path, demonstrated once against the REAL built server: with
-// an inputFile reference the manager snapshot-copies, a job can be driven from an
-// operator-mounted directory with no UI -- a single authenticated POST names a mounted
-// file and the server writes the fixed workdir input.csv from it. The job API is
-// loopback-gated with no token, so the loopback fetch is
-// permitted; the CLI is stubbed so no real exchange (or built CLI) is needed -- the
-// input.csv is written before the child spawns, so its bytes are the assertion.
+// The mounted-input drive path, demonstrated once against the REAL built server: a job
+// can be driven from an operator-mounted directory with no UI -- a single authenticated
+// POST names a mounted file and the CLI reads it in place, so no input.csv is copied
+// into the workdir. The job API is loopback-gated with no token, so the loopback fetch
+// is permitted; the CLI is stubbed so no real exchange (or built CLI) is needed. A
+// filedrop job composes its connection against the configured rendezvous mount, so the
+// server needs JOB_RENDEZVOUS_DIR set.
 //
 // Build-gated exactly like csvWorkerProd: the production entry exists only after
 // `npm run build -w apps/web`. CI builds the web app before the integration step,
@@ -53,11 +46,13 @@ describe.skipIf(!hasBuild)(
     let child: ChildProcess | undefined;
     let dataRoot: string | undefined;
     let inputDir: string | undefined;
+    let rendezvousDir: string | undefined;
     let port = 0;
 
     beforeAll(async () => {
       dataRoot = mkdtempSync(join(tmpdir(), "psilink-wp2-data-"));
       inputDir = mkdtempSync(join(tmpdir(), "psilink-wp2-input-"));
+      rendezvousDir = mkdtempSync(join(tmpdir(), "psilink-wp2-rdv-"));
       writeFileSync(join(inputDir, "mounted.csv"), SOURCE_CSV);
 
       port = await getFreePort();
@@ -68,6 +63,7 @@ describe.skipIf(!hasBuild)(
         {
           JOB_DATA_ROOT: dataRoot,
           JOB_INPUT_DIR: inputDir,
+          JOB_RENDEZVOUS_DIR: rendezvousDir,
           JOB_CLI_BINARY: stubCli,
         },
       );
@@ -79,12 +75,13 @@ describe.skipIf(!hasBuild)(
       await stopProdServer(child);
       if (dataRoot) rmSync(dataRoot, { recursive: true, force: true });
       if (inputDir) rmSync(inputDir, { recursive: true, force: true });
+      if (rendezvousDir)
+        rmSync(rendezvousDir, { recursive: true, force: true });
     });
 
-    test("POST /api/jobs with an inputFile reference writes input.csv from the mount", async () => {
+    test("POST /api/jobs with an inputFile reference reads the mount in place", async () => {
       if (dataRoot === undefined || inputDir === undefined)
         throw new Error("fixtures not initialized");
-      const stat = statSync(join(inputDir, "mounted.csv"));
       const intent = {
         channel: "filedrop",
         linkageTerms: {
@@ -92,11 +89,7 @@ describe.skipIf(!hasBuild)(
           date: "2026-07-18",
         },
         sharedSecret: VALID_SHARED_SECRET,
-        inputFile: {
-          name: "mounted.csv",
-          sizeBytes: stat.size,
-          modifiedAt: Math.trunc(stat.mtimeMs),
-        },
+        inputFile: { name: "mounted.csv" },
       };
 
       const response = await fetch(`http://127.0.0.1:${port}/api/jobs`, {
@@ -108,10 +101,9 @@ describe.skipIf(!hasBuild)(
       const { id } = (await response.json()) as { id: string };
       expect(typeof id).toBe("string");
 
-      // The snapshot copy is written synchronously before the CLI spawns, so the
-      // fixed workdir input.csv holds the mounted file's exact bytes.
-      const inputCsv = readFileSync(join(dataRoot, id, "input.csv"), "utf8");
-      expect(inputCsv).toBe(SOURCE_CSV);
+      // The CLI reads the mounted file in place, so nothing is copied into the
+      // workdir: no input.csv appears alongside the job's other artifacts.
+      expect(existsSync(join(dataRoot, id, "input.csv"))).toBe(false);
 
       await fetch(`http://127.0.0.1:${port}/api/jobs/${id}`, {
         method: "DELETE",
