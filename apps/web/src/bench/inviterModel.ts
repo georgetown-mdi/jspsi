@@ -4,6 +4,7 @@ import {
   disclosedColumnNames,
   getDefaultLinkageTerms,
   pipelineAlwaysDrops,
+  sanitizeForDisplay,
 } from "@psilink/core";
 
 import {
@@ -1242,7 +1243,7 @@ export function answersRows(
     },
     {
       label: "Your file",
-      value: `${csv.fileName} - ${new Intl.NumberFormat("en-US").format(csv.rowCount)} rows`,
+      value: `${sanitizeForDisplay(csv.fileName)} - ${new Intl.NumberFormat("en-US").format(csv.rowCount)} rows`,
       mono: true,
       changeTarget: "file",
     },
