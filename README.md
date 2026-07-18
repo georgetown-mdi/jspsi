@@ -89,14 +89,14 @@ For more information, see [apps/cli](apps/cli/).
 
 # Web Console Quickstart
 
-The same Docker image can serve the web interface from a machine you control, with no Node.js setup. The console serves one party and runs inside that party's own systems; it is never a shared meeting point for the two partners. An operator who connects to it over your network (or a VPN) gets the same guided experience as the web app.
+The same Docker image can serve the web console on the operator's own machine, with no Node.js setup. The console serves one party and runs on the same host, used by the same person, that conducts the exchange; it is a local server, not shared beyond that host, and never a shared meeting point for the two partners. It gives the same guided experience as the web app.
 
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) (as above).
 2. Run:
 ```sh
 docker run -d -p 3000:3000 vdorie/psi-link:latest serve
 ```
-3. Visit [http://localhost:3000](http://localhost:3000) (or the serving machine's address from another machine on your network).
+3. Visit [http://localhost:3000](http://localhost:3000) on that machine.
 
 This starts the web interface and its peer-coordination server; browser-to-browser exchanges work immediately. To let the console also run SFTP and shared-directory exchanges itself (rather than saving an exchange file for the command line app) enable its job API by supplying a directory for working files and an access token:
 
@@ -110,7 +110,7 @@ docker run -d -p 3000:3000 \
 
 Replacing each of the following:
    * `/host/jobs` - a directory on the serving machine where each exchange's working files are kept. Completed results stay here until you delete them.
-   * `ACCESS_TOKEN` - a secret the console requires on every job request. Required whenever the console is reachable from other machines.
+   * `ACCESS_TOKEN` - a secret the console requires on every job request, so that publishing the container's port does not expose the job API unauthenticated. The console is meant to run on your own machine, not shared beyond it.
 
 Running SFTP exchanges from the console additionally requires a file naming the SFTP servers it may connect to (`JOB_SFTP_REMOTES`). The file format, the security model, and further configuration are covered in [Server job API](docs/DEPLOYMENT.md#server-job-api) in the deployment guide.
 

@@ -446,7 +446,9 @@ export interface InvitationSummary {
    * `path` a single-directory file-drop endpoint carries (its folder name, minted
    * by the console inviter). Present only for such an endpoint. Advisory only -- the
    * accepting operator confirms it names the same synced folder mounted on their own
-   * appliance; it never flows to any config.
+   * appliance; it never flows to any config. Sanitized for TEXT display only: safe
+   * as a React text child, whose escaping is part of its safety, and never to be
+   * interpolated into an attribute value or raw HTML.
    */
   connectionPath?: string;
 }

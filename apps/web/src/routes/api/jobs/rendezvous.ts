@@ -10,10 +10,12 @@ import { useJobRendezvousDir } from "@jobs/jobRendezvous";
  * disabled, 401 on a bad bearer, no-store, no CORS).
  *
  * The body is `{ configured, path? }`. When `JOB_RENDEZVOUS_DIR` is unset the
- * console disables the filedrop transport. When set, the console mints the
- * directory as the invitation's advisory locator so a partner can confirm the
- * shared folder; the console is operator-local, so surfacing the operator's own
- * mount path here discloses nothing they do not already control.
+ * console disables the filedrop transport. When set, this returns the full mount
+ * path, which is operator-facing: the invitation's advisory locator carries only
+ * the directory's basename (see `rendezvousLocatorName`), so the partner confirms
+ * the shared folder without the token disclosing the appliance's absolute path.
+ * The console is operator-local, so surfacing the operator's own mount path here
+ * discloses nothing they do not already control.
  */
 export const Route = createFileRoute("/api/jobs/rendezvous")({
   server: {
