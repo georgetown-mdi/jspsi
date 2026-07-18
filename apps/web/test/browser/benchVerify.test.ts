@@ -1,6 +1,6 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 
 import { page, userEvent } from "vitest/browser";
 
@@ -13,7 +13,6 @@ import {
   serializeVerificationKeys,
 } from "@psilink/core";
 
-import { BenchLobby } from "@bench/BenchLobby";
 import { VerifyReceiptBench } from "@bench/VerifyReceiptBench";
 
 import { renderApp } from "./renderApp";
@@ -27,26 +26,6 @@ import type {
 } from "@psilink/core";
 import type { ReactNode } from "react";
 import type { Root } from "react-dom/client";
-
-// Router seam: the lobby's action cards are Links; render them as plain anchors
-// so the navigation-target assertion reads the href. (vitest hoists vi.mock.)
-vi.mock("@tanstack/react-router", () => ({
-  Link: ({
-    to,
-    className,
-    children,
-  }: {
-    to?: string;
-    className?: string;
-    children?: ReactNode;
-  }) =>
-    createElement(
-      "a",
-      { href: typeof to === "string" ? to : "#", className },
-      children,
-    ),
-  useNavigate: () => () => undefined,
-}));
 
 const LOCAL_TERMS: LinkageTerms = {
   version: "1.0.0",
@@ -131,15 +110,6 @@ afterEach(() => {
   container?.remove();
   root = undefined;
   container = undefined;
-});
-
-describe("bench lobby: verify a receipt link", () => {
-  test("the inline verify link below the two action cards navigates to the verify bench", async () => {
-    mount(createElement(BenchLobby));
-    const verifyLink = page.getByRole("link", { name: "Verify a receipt" });
-    await expect.element(verifyLink).toBeInTheDocument();
-    await expect.element(verifyLink).toHaveAttribute("href", "/verify");
-  });
 });
 
 describe("verify receipt bench", () => {

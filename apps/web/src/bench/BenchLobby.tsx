@@ -13,11 +13,10 @@ import styles from "./bench.module.css";
 /**
  * The quick path's screen: two primary actions side by side -- invite someone to a
  * one-off exchange, or accept an invitation you were sent -- above the standing how-it-works
- * explanation. Verifying a receipt is a secondary action, given as an inline text
- * link below the two cards rather than equal billing. It has its own route at
- * `/quick` and is also the home route's first-run landing (an empty or
- * unavailable managed store at `/` renders it directly, with no redirect); the
- * recurring-exchange list lives at `/saved`, which this screen links to.
+ * explanation. It has its own route at `/quick` and is also the home route's
+ * first-run landing (an empty or unavailable managed store at `/` renders it
+ * directly, with no redirect); the recurring-exchange list lives at `/saved`,
+ * which this screen links to.
  */
 export function BenchLobby() {
   const navigate = useNavigate();
@@ -143,13 +142,6 @@ export function BenchLobby() {
           lists the ones stored in this browser so you can run one without a new
           invitation, and is where you restore one from a backup file if this
           browser was cleared.
-        </p>
-        <p className={`${styles.sub} ${styles.small}`}>
-          Already have an exchange record?{" "}
-          <Anchor inherit component={Link} to="/verify">
-            Verify a receipt
-          </Anchor>{" "}
-          checks it&apos;s internally consistent, entirely in your browser.
         </p>
         <div className={styles.howItWorks}>
           <p>

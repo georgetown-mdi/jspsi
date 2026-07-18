@@ -346,12 +346,6 @@ describe("bench quick path", () => {
     await expect
       .element(page.getByLabelText("Invitation link or code"))
       .toBeInTheDocument();
-
-    // Verifying a receipt is a secondary action below the two cards, not a
-    // third card of equal billing.
-    await expect
-      .element(page.getByRole("link", { name: "Verify a receipt" }))
-      .toBeInTheDocument();
   });
 
   test("applies the bench surface tokens", async () => {
@@ -370,20 +364,17 @@ describe("bench quick path", () => {
     );
   });
 
-  test("the sample-data line and the verify link both sit at the small-print size", async () => {
+  test("the sample-data line sits at the small-print size", async () => {
     mount(createElement(BenchLobby));
 
     const demoLink = page.getByRole("button", {
       name: "Start with sample data",
     });
     await expect.element(demoLink).toBeInTheDocument();
-    const verifyLink = page.getByRole("link", { name: "Verify a receipt" });
-    await expect.element(verifyLink).toBeInTheDocument();
 
-    // Each link's enclosing small-print paragraph, and the link itself, share
-    // one font size: the `inherit` fix keeps the Anchor from rendering larger.
+    // The link's enclosing small-print paragraph and the link itself share one
+    // font size: the `inherit` fix keeps the Anchor from rendering larger.
     const demoElement = demoLink.element() as HTMLElement;
-    const verifyElement = verifyLink.element() as HTMLElement;
     const paragraphSize = (element: HTMLElement) =>
       getComputedStyle(element.closest("p") as Element).fontSize;
     const linkSize = (element: HTMLElement) =>
@@ -391,8 +382,6 @@ describe("bench quick path", () => {
 
     expect(paragraphSize(demoElement)).toBe("14px");
     expect(linkSize(demoElement)).toBe(paragraphSize(demoElement));
-    expect(paragraphSize(verifyElement)).toBe("14px");
-    expect(linkSize(verifyElement)).toBe(paragraphSize(verifyElement));
   });
 });
 
