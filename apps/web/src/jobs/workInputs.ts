@@ -23,8 +23,8 @@ import {
   MAX_STANDARDIZATION_TRANSFORMATIONS,
 } from "./intent";
 
-import type { Standardization } from "@psilink/core";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
+import type { Standardization } from "@psilink/core";
 
 /**
  * The environment variable naming the one operator-mounted directory the console

@@ -22,14 +22,12 @@ export interface WorkInputReference {
 /** The `GET /api/jobs/inputs` outcome: the listing, or an error (network / non-2xx
  * / malformed). */
 export type JobInputsResult =
-  | { kind: "listing"; listing: JobInputListing }
-  | { kind: "error" };
+  { kind: "listing"; listing: JobInputListing } | { kind: "error" };
 
 /** The `GET /api/jobs/inputs/profile` outcome: the profile, or unavailable (the
  * directory is unset, or the name resolves to no readable file). */
 export type JobInputProfileResult =
-  | { kind: "profile"; profile: JobInputProfile }
-  | { kind: "unavailable" };
+  { kind: "profile"; profile: JobInputProfile } | { kind: "unavailable" };
 
 /** The console's rendezvous configuration read off `GET /api/jobs/rendezvous`: the
  * mounted directory a filedrop exchange runs against. `configured: false` (the env

@@ -7,7 +7,6 @@ import {
   composeSftpConfigDocument,
 } from "./intent";
 import { JobInputNotFoundError, jobInputFilePath } from "./workInputs";
-import { rendezvousStartupWarnings } from "./jobRendezvous";
 import { classifyRestoredJob, listRestorableJobIds } from "./jobArtifacts";
 import {
   createWorkdir,
@@ -19,6 +18,7 @@ import {
   writeJobFile,
 } from "./workdir";
 import { resolveCliBinaryPath, spawnExchangeJob } from "./cliDriver";
+import { rendezvousStartupWarnings } from "./jobRendezvous";
 
 import type {
   CliDriverHandle,
@@ -285,16 +285,19 @@ export class JobManager {
       intent.channel === "sftp"
         ? this.acquireSftpRemote(intent.remote, id)
         : undefined;
-    if (intent.channel === "filedrop" && this.jobRendezvousDir === undefined)
-      throw new JobRendezvousUnavailableError();
-    const mountedInputPath =
-      intent.inputFile !== undefined
-        ? this.resolveWorkInputPath(intent.inputFile)
-        : undefined;
 
     this.creatingJobIds.add(id);
     let workdir: string | null = null;
     try {
+      // Resolve the rendezvous availability and the mounted input before creating
+      // the workdir, inside the try so a rejection releases any sftp latch and
+      // leaves nothing on disk.
+      if (intent.channel === "filedrop" && this.jobRendezvousDir === undefined)
+        throw new JobRendezvousUnavailableError();
+      const mountedInputPath =
+        intent.inputFile !== undefined
+          ? this.resolveWorkInputPath(intent.inputFile)
+          : undefined;
       const created = await createWorkdir(
         this.dataRoot,
         id,
@@ -406,7 +409,11 @@ export class JobManager {
       JOB_FILE_NAMES.key,
       keyDocument,
     );
-    const inputPath = await this.writeJobInput(intent, workdir, mountedInputPath);
+    const inputPath = await this.writeJobInput(
+      intent,
+      workdir,
+      mountedInputPath,
+    );
     const outputPath = path.join(workdir, JOB_FILE_NAMES.output);
     const recordPath = path.join(workdir, JOB_FILE_NAMES.record);
     const keysPath = path.join(workdir, JOB_FILE_NAMES.recordKeys);
@@ -871,6 +878,8 @@ function composeDocumentByChannel(
     return composeSftpConfigDocument(intent, remoteEntry);
   }
   if (rendezvousDir === undefined)
-    throw new Error("filedrop job reached compose without a rendezvous directory");
+    throw new Error(
+      "filedrop job reached compose without a rendezvous directory",
+    );
   return composeConfigDocument(intent, rendezvousDir);
 }

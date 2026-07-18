@@ -15,8 +15,8 @@ import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
 import { capturedInputHandle } from "@psi/managedInputHandle";
 import { columnSamplesFromRows } from "@psi/columnSamples";
 import { createManagedExchange } from "@psi/managedExchangeStore";
-import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 import { fetchJobRendezvous } from "@psi/workInputClient";
+import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
 import { deploymentProfile, isConsoleBuild } from "@utils/clientConfig";

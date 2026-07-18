@@ -77,7 +77,7 @@ function configFor() {
     token,
     acceptorName: "Accepting Org",
     edits,
-    inputCsv,
+    inputSource: { kind: "inline", csv: inputCsv },
   });
 }
 
@@ -112,11 +112,30 @@ describe("acceptorServerJobConfig", () => {
     );
   });
 
-  test("carries the acceptor's raw CSV text and the token's shared secret verbatim", () => {
+  test("carries the acceptor's inline CSV source and the token's shared secret verbatim", () => {
     const config = configFor();
 
-    expect(config.inputCsv).toBe(inputCsv);
+    expect(config.inputSource).toEqual({ kind: "inline", csv: inputCsv });
     expect(config.sharedSecret).toBe(token.sharedSecret);
+  });
+
+  test("threads a console workFile reference through as the input source verbatim", () => {
+    // The console accept sources from the operator-mounted file: the driver config
+    // carries only the reference (name + profiled freshness pair), never content, so
+    // the appliance's create can resolve and freshness-check the mounted file.
+    const workFile = {
+      kind: "workFile" as const,
+      name: "clients.csv",
+      sizeBytes: 4096,
+      modifiedAt: 1_700_000_000_000,
+    };
+    const config = acceptorServerJobConfig({
+      token,
+      acceptorName: "Accepting Org",
+      edits,
+      inputSource: workFile,
+    });
+    expect(config.inputSource).toEqual(workFile);
   });
 
   test("rides the filedrop transport: the accept guard admits no sftp endpoint", () => {
@@ -182,7 +201,7 @@ describe("acceptorServerJobConfig received-payload lock-in", () => {
       token: tokenWith(disclosed),
       acceptorName: "Accepting Org",
       edits,
-      inputCsv,
+      inputSource: { kind: "inline", csv: inputCsv },
     });
   }
 

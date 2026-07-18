@@ -76,9 +76,7 @@ export function rendezvousStartupWarnings(
   }
   if (stat !== undefined) {
     if (!stat.isDirectory())
-      warnings.push(
-        `the rendezvous path ${rendezvousDir} is not a directory`,
-      );
+      warnings.push(`the rendezvous path ${rendezvousDir} is not a directory`);
     else {
       try {
         fs.accessSync(rendezvousDir, fs.constants.W_OK);

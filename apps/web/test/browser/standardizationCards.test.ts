@@ -10,6 +10,7 @@ import { createRoot } from "react-dom/client";
 import { authoredLinkageFields } from "@psilink/core";
 
 import { StandardizationCards } from "@components/StandardizationCards";
+import { columnSamplesFromRows } from "@psi/columnSamples";
 
 import { expandFieldCards } from "./fieldCards";
 import { renderApp } from "./renderApp";
@@ -42,6 +43,10 @@ const metadata: Metadata = [
   { name: "dob_col", type: "date_of_birth", role: "linkage", isPayload: false },
 ];
 const rawRows = [{ maiden_col: "Smith", current_col: "Jones", dob_col: "X" }];
+const columnSamples = columnSamplesFromRows(
+  rawRows,
+  metadata.map((column) => column.name),
+);
 
 type CardsProps = Parameters<typeof StandardizationCards>[0];
 
@@ -58,7 +63,7 @@ function render(
         standardization,
         declaredFields: authoredLinkageFields(metadata, standardization),
         metadata,
-        rawRows,
+        columnSamples,
         onStepsChange: () => {},
         onInputColumnChange: () => {},
         onMissingField: "skip",

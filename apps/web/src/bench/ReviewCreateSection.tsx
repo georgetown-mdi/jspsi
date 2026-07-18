@@ -105,7 +105,11 @@ export function ReviewCreateSection({
     sftpLabel,
     sftpDescription,
     capabilityNote,
-  } = transportChooserCopy(isConsoleBuild(), sftpServerJob, rendezvousConfigured);
+  } = transportChooserCopy(
+    isConsoleBuild(),
+    sftpServerJob,
+    rendezvousConfigured,
+  );
   const canCreate = problems.length === 0 && !minting;
   // Voiced when the create gate flips either way; deferred so a blocked state
   // present when the section mounts still announces.

@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { useJobRendezvousDir } from "@jobs/jobRendezvous";
-import { jobJsonResponse } from "@jobs/gate";
 import { gateJobRoute } from "@jobs/routeSupport";
+import { jobJsonResponse } from "@jobs/gate";
+import { useJobRendezvousDir } from "@jobs/jobRendezvous";
 
 /**
  * `GET /api/jobs/rendezvous` -- report the operator-mounted rendezvous directory a
@@ -23,7 +23,9 @@ export const Route = createFileRoute("/api/jobs/rendezvous")({
         if (gate.kind === "response") return gate.response;
         const path = useJobRendezvousDir();
         return jobJsonResponse(
-          path === undefined ? { configured: false } : { configured: true, path },
+          path === undefined
+            ? { configured: false }
+            : { configured: true, path },
         );
       },
     },

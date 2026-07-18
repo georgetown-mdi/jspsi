@@ -34,9 +34,9 @@ import {
   runWithStages,
   stagesFor,
 } from "./exchangeRun";
+import { buildRunOutputs } from "./runOutputs";
 import { invitationUsable } from "./inviterModel";
 import { selectExchangeDriver } from "./exchangeDriverSelection";
-import { buildRunOutputs } from "./runOutputs";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 

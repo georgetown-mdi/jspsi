@@ -35,8 +35,7 @@ export type ServerJobExchangeTransport =
  * maps `inline` to the intent's `inputCsv` arm and `workFile` to its `inputFile`
  * arm (exactly one of the two is ever set). */
 export type JobInputSource =
-  | { kind: "inline"; csv: string }
-  | { kind: "workFile"; name: string };
+  { kind: "inline"; csv: string } | { kind: "workFile"; name: string };
 
 /** The construction-time inputs a server-job driver needs: the analog of the
  * browser driver's config, minus everything that only a peer-to-peer run has (no

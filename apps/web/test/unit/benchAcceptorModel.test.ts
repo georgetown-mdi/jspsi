@@ -2,10 +2,12 @@ import { describe, expect, test } from "vitest";
 
 import {
   ACCEPTOR_SEND_FORWARD_REFERENCE,
+  acceptUnsupported,
   acceptorConsentName,
   acceptorConsentReady,
   acceptorDoneLedgerRows,
   acceptorDoneLedgerTag,
+  acceptorHowItRunsLabel,
   acceptorLedgerRows,
   acceptorLedgerTag,
   acceptorLegalAgreementDisplay,
@@ -14,7 +16,17 @@ import {
   invitingPartyName,
 } from "@bench/acceptorModel";
 
-import type { InvitationToken, LinkageTerms, Metadata } from "@psilink/core";
+import type {
+  FileDropEndpoint,
+  InvitationToken,
+  LinkageTerms,
+  Metadata,
+  WebRTCEndpoint,
+} from "@psilink/core";
+
+/** The "How it runs" label the ledger tests pass through; the acceptor bench
+ * computes it from the endpoint and consults the ledger with it. */
+const HOW_IT_RUNS = "Browser";
 
 // A self-contained set of linkage terms with two keys, a payload, and a legal
 // agreement, so a single ledger render exercises every row. The identity carries
@@ -169,7 +181,7 @@ describe("acceptor ledger rows", () => {
   });
 
   test("per-key matched-on rows are numbered, one entry per key", () => {
-    const rows = acceptorLedgerRows(makeToken());
+    const rows = acceptorLedgerRows(makeToken(), HOW_IT_RUNS);
     expect(rowValue(rows, "Matched on")).toEqual([
       "1. SSN + DOB + last name",
       "2. last name + DOB + ZIP",
@@ -177,7 +189,7 @@ describe("acceptor ledger rows", () => {
   });
 
   test("the expiry row is the absolute decoded moment, not a relative phrase", () => {
-    const rows = acceptorLedgerRows(makeToken());
+    const rows = acceptorLedgerRows(makeToken(), HOW_IT_RUNS);
     const expires = rowValue(rows, "Expires");
     expect(typeof expires).toBe("string");
     expect(expires).toMatch(/2026/);
@@ -189,7 +201,7 @@ describe("acceptor ledger rows", () => {
     // the row points ahead rather than claiming "No additional columns" -- which
     // would overclaim, since the acceptor's own file, not the invitation, decides
     // what transmits.
-    const rows = acceptorLedgerRows(makeToken());
+    const rows = acceptorLedgerRows(makeToken(), HOW_IT_RUNS);
     expect(rowMuted(rows, "You will send")).toBe(
       ACCEPTOR_SEND_FORWARD_REFERENCE,
     );
@@ -207,7 +219,11 @@ describe("acceptor ledger rows", () => {
     // The acceptor's live metadata discloses a payload column the invitation never
     // requested (the inviter authored no payload.receive). The send row must name
     // it -- the state the security panel proved the old ledger hid.
-    const rows = acceptorLedgerRows(makeToken(), DISCLOSING_METADATA);
+    const rows = acceptorLedgerRows(
+      makeToken(),
+      HOW_IT_RUNS,
+      DISCLOSING_METADATA,
+    );
     const sent = rowValue(rows, "You will send");
     expect(typeof sent).toBe("string");
     expect(sent).toContain("enroll");
@@ -221,7 +237,11 @@ describe("acceptor ledger rows", () => {
   test("a metadata that discloses nothing reads no additional columns", () => {
     // Once a file exists but its metadata transmits nothing, the honest reading is
     // "No additional columns" -- the empty disclosed set, not the forward-reference.
-    const rows = acceptorLedgerRows(makeToken(), NON_DISCLOSING_METADATA);
+    const rows = acceptorLedgerRows(
+      makeToken(),
+      HOW_IT_RUNS,
+      NON_DISCLOSING_METADATA,
+    );
     expect(rowMuted(rows, "You will send")).toBe("No additional columns");
     expect(rowValue(rows, "You will send")).toBeUndefined();
   });
@@ -229,6 +249,7 @@ describe("acceptor ledger rows", () => {
   test("results go to only-you when the inviter withholds its own receipt", () => {
     const rows = acceptorLedgerRows(
       makeToken({ output: { expectsOutput: false, shareWithPartner: true } }),
+      HOW_IT_RUNS,
     );
     expect(rowValue(rows, "Results go to")).toBe("Only you");
   });
@@ -236,17 +257,25 @@ describe("acceptor ledger rows", () => {
   test("results go to only-your-partner when the acceptor is not shared with", () => {
     const rows = acceptorLedgerRows(
       makeToken({ output: { expectsOutput: true, shareWithPartner: false } }),
+      HOW_IT_RUNS,
     );
     expect(rowValue(rows, "Results go to")).toBe("Only your partner");
   });
 
   test("an absent legal agreement mutes the Agreement row", () => {
-    const rows = acceptorLedgerRows(makeToken({ legalAgreement: undefined }));
+    const rows = acceptorLedgerRows(
+      makeToken({ legalAgreement: undefined }),
+      HOW_IT_RUNS,
+    );
     expect(rowMuted(rows, "Agreement")).toBe("None");
   });
 
   test("the narrow share bar's marked subset is send, matched on, expires", () => {
-    const marked = acceptorLedgerRows(makeToken(), DISCLOSING_METADATA)
+    const marked = acceptorLedgerRows(
+      makeToken(),
+      HOW_IT_RUNS,
+      DISCLOSING_METADATA,
+    )
       .filter((row) => row.shareBar === true)
       .map((row) => row.label);
     expect(marked).toEqual(["You will send", "Matched on", "Expires"]);
@@ -268,6 +297,7 @@ describe("acceptor completion ledger", () => {
       makeToken(),
       { matchedRecordCount: 1847 },
       DISCLOSING_METADATA,
+      HOW_IT_RUNS,
     );
     expect(rows.map((row) => row.label)).toEqual([
       "You sent",
@@ -299,6 +329,7 @@ describe("acceptor completion ledger", () => {
       makeToken(),
       { matchedRecordCount: 1847 },
       NON_DISCLOSING_METADATA,
+      HOW_IT_RUNS,
     );
     expect(rowMuted(rows, "You sent")).toBe("No additional columns");
     expect(rowValue(rows, "You sent")).toBeUndefined();
@@ -309,6 +340,7 @@ describe("acceptor completion ledger", () => {
       makeToken(),
       { resultWithheld: true },
       DISCLOSING_METADATA,
+      HOW_IT_RUNS,
     );
     expect(rowValue(rows, "You received")).toBe(
       "No result table - withheld by the agreed terms",
@@ -320,6 +352,7 @@ describe("acceptor completion ledger", () => {
       makeToken({ payload: { send: [], receive: [] } }),
       { matchedRecordCount: 0 },
       NON_DISCLOSING_METADATA,
+      HOW_IT_RUNS,
     );
     // No received columns, so no suffix -- just the count.
     expect(rowValue(rows, "You received")).toBe("0 matched rows");
@@ -332,6 +365,7 @@ describe("acceptor completion ledger", () => {
       makeToken(),
       { matchedRecordCount: 1847 },
       DISCLOSING_METADATA,
+      HOW_IT_RUNS,
     )
       .filter((row) => row.shareBar === true)
       .map((row) => row.label);
@@ -430,5 +464,56 @@ describe("acceptor legal-agreement display", () => {
     expect(
       acceptorLegalAgreementDisplay(makeToken({ legalAgreement: undefined })),
     ).toBeUndefined();
+  });
+});
+
+const WEBRTC_ENDPOINT: WebRTCEndpoint = {
+  channel: "webrtc",
+  host: "127.0.0.1",
+  port: 3000,
+  path: "/api/",
+};
+const SINGLE_DIR_FILEDROP: FileDropEndpoint = {
+  channel: "filedrop",
+  path: "/mnt/rendezvous",
+};
+const SPLIT_FILEDROP: FileDropEndpoint = {
+  channel: "filedrop",
+  inboundPath: "/mnt/in",
+  outboundPath: "/mnt/out",
+};
+
+describe("acceptUnsupported (runnability by endpoint shape)", () => {
+  test("a WebRTC endpoint is out of scope on the appliance, pointing at the web app", () => {
+    const unsupported = acceptUnsupported(WEBRTC_ENDPOINT, true);
+    expect(unsupported?.message).toContain("out of scope");
+    expect(unsupported?.message).toContain("web app");
+  });
+
+  test("a split-directory filedrop endpoint points at the command-line tool", () => {
+    const unsupported = acceptUnsupported(SPLIT_FILEDROP, true);
+    expect(unsupported?.message).toContain("command-line tool");
+  });
+
+  test("a single-directory filedrop with no rendezvous names JOB_RENDEZVOUS_DIR", () => {
+    const unsupported = acceptUnsupported(SINGLE_DIR_FILEDROP, false);
+    expect(unsupported?.message).toContain("JOB_RENDEZVOUS_DIR");
+  });
+
+  test("a single-directory filedrop with a rendezvous mount is runnable", () => {
+    expect(acceptUnsupported(SINGLE_DIR_FILEDROP, true)).toBeUndefined();
+  });
+});
+
+describe("acceptorHowItRunsLabel", () => {
+  test("a console single-directory filedrop accept runs against the shared directory", () => {
+    expect(acceptorHowItRunsLabel(SINGLE_DIR_FILEDROP, true)).toContain(
+      "Shared directory",
+    );
+  });
+
+  test("a WebRTC accept, or any hosted accept, runs in the browser", () => {
+    expect(acceptorHowItRunsLabel(WEBRTC_ENDPOINT, true)).toBe("Browser");
+    expect(acceptorHowItRunsLabel(SINGLE_DIR_FILEDROP, false)).toBe("Browser");
   });
 });

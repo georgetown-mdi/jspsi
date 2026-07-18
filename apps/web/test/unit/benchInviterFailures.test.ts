@@ -1,6 +1,14 @@
 import { describe, expect, test } from "vitest";
 
+import { JobApiRequestError } from "@psi/serverJobExchangeDriver";
 import { failureFor } from "@bench/useInviterExchange";
+
+import type { JobInputSource } from "@psi/serverJobExchangeDriver";
+
+const WORK_FILE: JobInputSource = {
+  kind: "workFile",
+  name: "clients.csv",
+};
 
 describe("failureFor", () => {
   test("each category carries its alert title", () => {
@@ -48,5 +56,46 @@ describe("failureFor", () => {
       "The exchange could not be completed - usually a temporary " +
         "connection problem rather than an issue with your data.",
     );
+  });
+
+  test("a filedrop mounted-file 400 names the file as the cause", () => {
+    const failure = failureFor(
+      "config",
+      new JobApiRequestError(400, "POST /api/jobs failed with status 400"),
+      WORK_FILE,
+      "filedrop",
+    );
+    expect(failure.title).toBe("The appliance could not start this exchange");
+    expect(failure.message).not.toContain("status 400");
+    expect(failure.message).toContain("file");
+    expect(failure.message).not.toContain("SFTP");
+  });
+
+  test("an sftp mounted-file 400 names both the file and the destination", () => {
+    // The server returns the identical empty-bodied 400 for a vanished SFTP remote,
+    // so on the sftp channel the copy names both causes.
+    const failure = failureFor(
+      "config",
+      new JobApiRequestError(400, "POST /api/jobs failed with status 400"),
+      WORK_FILE,
+      "sftp",
+    );
+    expect(failure.title).toBe("The appliance could not start this exchange");
+    expect(failure.message).not.toContain("status 400");
+    expect(failure.message).toContain("SFTP");
+  });
+
+  test("a config fault that is not a mounted-file 400 keeps the generic copy", () => {
+    // An inline-source create rejection, and a CLI prepare-time config fault, both
+    // surface the plain config message -- only the workFile 400 names the file.
+    expect(
+      failureFor("config", new JobApiRequestError(400, "x"), {
+        kind: "inline",
+        csv: "a,b",
+      }).title,
+    ).toBe("Could not prepare the exchange");
+    expect(
+      failureFor("config", new JobApiRequestError(500, "x"), WORK_FILE).title,
+    ).toBe("Could not prepare the exchange");
   });
 });

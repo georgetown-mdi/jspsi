@@ -9,6 +9,7 @@ import { createRoot } from "react-dom/client";
 
 import { StandardizationPreview } from "@components/StandardizationPreview";
 import { StandardizationStepEditor } from "@components/StandardizationStepEditor";
+import { columnSamplesFromRows } from "@psi/columnSamples";
 
 import { renderApp } from "./renderApp";
 
@@ -34,6 +35,23 @@ function render(node: ReturnType<typeof createElement>) {
 }
 
 const FIRST_NAME: LinkageField = { name: "fn", type: "first_name" };
+
+// The preview takes the per-column sample map the console profiles server-side; each
+// case builds that map from its rows with columnSamplesFromRows, so it exercises the
+// component with a fixed, resolved sample.
+function previewElement(props: {
+  field: LinkageField;
+  inputColumn: string;
+  steps: Array<StandardizationStep>;
+  rawRows: Array<Record<string, string>>;
+}) {
+  const { rawRows, inputColumn, ...rest } = props;
+  return createElement(StandardizationPreview, {
+    ...rest,
+    inputColumn,
+    columnSamples: columnSamplesFromRows(rawRows, [inputColumn]),
+  });
+}
 
 // A stateful harness that wires the editor to the preview through one steps state,
 // mirroring how the "Prepare your data" screen docks them: an edit in the editor
@@ -61,7 +79,7 @@ function EditorWithPreview({
       steps,
       onStepsChange: setSteps,
     }),
-    createElement(StandardizationPreview, {
+    previewElement({
       field,
       inputColumn,
       steps,
@@ -73,7 +91,7 @@ function EditorWithPreview({
 describe("StandardizationPreview renders each pipeline outcome distinctly", () => {
   test("a cleaned value", async () => {
     render(
-      createElement(StandardizationPreview, {
+      previewElement({
         field: FIRST_NAME,
         inputColumn: "n",
         steps: [{ function: "to_upper_case" }],
@@ -87,7 +105,7 @@ describe("StandardizationPreview renders each pipeline outcome distinctly", () =
 
   test("a dropped (null) value", async () => {
     render(
-      createElement(StandardizationPreview, {
+      previewElement({
         field: FIRST_NAME,
         inputColumn: "n",
         steps: [{ function: "null_if", params: { values: ["mary"] } }],
@@ -101,7 +119,7 @@ describe("StandardizationPreview renders each pipeline outcome distinctly", () =
 
   test("a fan-out (Set) into several candidates", async () => {
     render(
-      createElement(StandardizationPreview, {
+      previewElement({
         field: FIRST_NAME,
         inputColumn: "n",
         steps: [{ function: "split_on", params: { delimiter: " " } }],
@@ -119,7 +137,7 @@ describe("StandardizationPreview renders each pipeline outcome distinctly", () =
   test("an empty cleaned value is shown distinctly from a dropped value", async () => {
     // remove_dashes turns "---" into "" -- a value (an empty PSI key), not a drop.
     render(
-      createElement(StandardizationPreview, {
+      previewElement({
         field: FIRST_NAME,
         inputColumn: "n",
         steps: [{ function: "remove_dashes" }],
@@ -137,7 +155,7 @@ describe("StandardizationPreview renders each pipeline outcome distinctly", () =
   test("an incomplete step shows guidance instead of crashing the preview", async () => {
     // pad_left with no length yet throws when compiled; the preview must catch it.
     render(
-      createElement(StandardizationPreview, {
+      previewElement({
         field: FIRST_NAME,
         inputColumn: "n",
         steps: [{ function: "pad_left" }],
@@ -161,7 +179,7 @@ describe("StandardizationPreview renders each pipeline outcome distinctly", () =
     // the oversized source never reaches compile and the operator sees the same
     // guidance the inline length error already explains.
     render(
-      createElement(StandardizationPreview, {
+      previewElement({
         field: FIRST_NAME,
         inputColumn: "n",
         steps: [
@@ -183,7 +201,7 @@ describe("StandardizationPreview renders each pipeline outcome distinctly", () =
 
   test("a value that violates a field constraint is badged (warn, not blocked)", async () => {
     render(
-      createElement(StandardizationPreview, {
+      previewElement({
         // allowedCharacters "A-Z " -> a lowercase residue is flagged.
         field: {
           name: "fn",
@@ -620,7 +638,7 @@ describe("preview outcomes reach assistive tech by text/label, not color alone",
     // remove_dashes turns "---" into "" -- an empty key. The chip is icon-style, so
     // its meaning must reach a screen reader as a label.
     render(
-      createElement(StandardizationPreview, {
+      previewElement({
         field: FIRST_NAME,
         inputColumn: "n",
         steps: [{ function: "remove_dashes" }],
@@ -634,7 +652,7 @@ describe("preview outcomes reach assistive tech by text/label, not color alone",
 
   test("a constraint violation is a labelled badge, distinct from the value color", async () => {
     render(
-      createElement(StandardizationPreview, {
+      previewElement({
         field: {
           name: "fn",
           type: "first_name",
@@ -652,7 +670,7 @@ describe("preview outcomes reach assistive tech by text/label, not color alone",
 
   test("a dropped value carries the word 'dropped', not a color cue alone", async () => {
     render(
-      createElement(StandardizationPreview, {
+      previewElement({
         field: FIRST_NAME,
         inputColumn: "n",
         steps: [{ function: "null_if", params: { values: ["mary"] } }],

@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { listJobInputs, useJobInputDir } from "@jobs/workInputs";
-import { jobJsonResponse } from "@jobs/gate";
 import { gateJobRoute } from "@jobs/routeSupport";
+import { jobJsonResponse } from "@jobs/gate";
 
 /**
  * `GET /api/jobs/inputs` -- list the operator-mounted input CSVs the console reads

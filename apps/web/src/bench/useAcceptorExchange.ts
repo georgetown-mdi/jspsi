@@ -136,8 +136,7 @@ export function acceptorServerJobConfig({
  * `inline`'s text into `{kind:"inline",csv}`, passing `workFile` through -- and the
  * browser (WebRTC) path uses the retained `rawRows`/`columns` and never reads it. */
 export type AcceptorLaunchSource =
-  | { kind: "inline"; file: File }
-  | { kind: "workFile"; name: string };
+  { kind: "inline"; file: File } | { kind: "workFile"; name: string };
 
 /** The launch the acceptor commits to on "Start the exchange": the decoded
  * invitation, the committed name recorded in the exchange record, the acquired
