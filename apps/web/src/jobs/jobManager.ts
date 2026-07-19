@@ -70,6 +70,22 @@ export class JobRendezvousUnavailableError extends Error {
 }
 
 /**
+ * Thrown by {@link JobManager.createJob} when a filedrop job is already running.
+ * The console facilitates a single exchange at a time over its one mounted
+ * rendezvous directory, so at most one filedrop job runs concurrently: two CLI
+ * children sharing that directory would corrupt each other's rendezvous
+ * handshake. The filedrop analog of {@link SftpRemoteBusyError}; the latch
+ * releases when the holding job reaches a terminal state (child exit, event
+ * overflow, or delete).
+ */
+export class FiledropBusyError extends Error {
+  constructor() {
+    super("a filedrop job is already running");
+    this.name = "FiledropBusyError";
+  }
+}
+
+/**
  * A single buffered event with its monotonic id. The full event list is retained
  * for the job's lifetime so every SSE connect can replay from the start (or from
  * a Last-Event-ID offset), per the full-history-replay design.
@@ -242,6 +258,13 @@ export class JobManager {
   /** The per-remote busy latch: remote name -> holding job id. */
   private readonly sftpRemoteHolders = new Map<string, string>();
   /**
+   * The single-holder filedrop busy latch: the running filedrop job's id, or
+   * null when none runs. The filedrop analog of {@link sftpRemoteHolders} -- the
+   * console conducts one exchange at a time over its single mounted rendezvous,
+   * so one holder rather than a per-remote map.
+   */
+  private filedropHolder: string | null = null;
+  /**
    * Job ids whose workdir is mid-creation (before the in-memory record is set)
    * or mid-deletion (after the record is dropped, before the workdir is gone).
    * A disk read during either window would otherwise misclassify the half-built
@@ -271,13 +294,14 @@ export class JobManager {
    * builds the workdir, writes the composed config, key, and input CSV under
    * fixed names, and spawns the CLI. Returns the new job's id.
    *
-   * An sftp intent resolves (and latches) its remote BEFORE any filesystem
-   * work, so an unknown or busy remote is rejected with nothing on disk. An
+   * Each channel latches its rendezvous BEFORE any filesystem work -- an sftp
+   * intent its named remote, a filedrop intent the single-holder filedrop latch
+   * -- so an unknown or busy target is rejected with nothing on disk. An
    * `inputFile` intent likewise resolves its mounted path before the workdir
    * exists (mirroring the unknown-remote flow): a name that resolves to no regular
-   * file is rejected with nothing on disk. A filedrop intent requires a configured
-   * rendezvous directory. The CLI reads the mounted file in place, so nothing is
-   * copied into the workdir.
+   * file is rejected with nothing on disk. A filedrop intent also requires a
+   * configured rendezvous directory. The CLI reads the mounted file in place, so
+   * nothing is copied into the workdir.
    */
   async createJob(intent: JobExchangeIntent): Promise<string> {
     const id = generateJobId();
@@ -285,6 +309,7 @@ export class JobManager {
       intent.channel === "sftp"
         ? this.acquireSftpRemote(intent.remote, id)
         : undefined;
+    if (intent.channel === "filedrop") this.acquireFiledrop(id);
 
     this.creatingJobIds.add(id);
     let workdir: string | null = null;
@@ -310,10 +335,12 @@ export class JobManager {
     } catch (error) {
       // A failure after the workdir exists must not strand it: the record may
       // not be in the table yet, so no DELETE or eviction could ever reach the
-      // directory (which may already hold the written key file). The remote
-      // latch is released the same way -- no terminal path could ever run.
+      // directory (which may already hold the written key file). The rendezvous
+      // latch (sftp remote or filedrop) is released the same way -- no terminal
+      // path could ever run.
       this.jobs.delete(id);
       if (intent.channel === "sftp") this.releaseSftpRemote(intent.remote, id);
+      if (intent.channel === "filedrop") this.releaseFiledrop(id);
       if (workdir !== null) await removeWorkdir(workdir);
       throw error;
     } finally {
@@ -362,6 +389,35 @@ export class JobManager {
   private releaseSftpRemoteForRecord(record: JobRecord): void {
     if (record.sftpRemote === null) return;
     this.releaseSftpRemote(record.sftpRemote, record.id);
+  }
+
+  /**
+   * Latch the filedrop rendezvous to the new job, rejecting a second concurrent
+   * filedrop job with {@link FiledropBusyError}. Records the holder id so only
+   * that job's own terminal path can release the latch. The filedrop mirror of
+   * {@link acquireSftpRemote}.
+   */
+  private acquireFiledrop(jobId: string): void {
+    if (this.filedropHolder !== null) throw new FiledropBusyError();
+    this.filedropHolder = jobId;
+  }
+
+  /** Release the filedrop latch, but only if this job is still its holder. */
+  private releaseFiledrop(jobId: string): void {
+    if (this.filedropHolder === jobId) this.filedropHolder = null;
+  }
+
+  /**
+   * Release the filedrop latch a job holds. Called only from
+   * {@link reconcileTerminal}, which fires on the child's `close` -- a child
+   * confirmed dead can no longer touch the rendezvous, so a successor may safely
+   * take it. The forced-kill paths (overflow, delete) must NOT release here:
+   * their SIGKILL is asynchronous and the child can still be running. The
+   * holder-id guard leaves this a no-op for any record that is not the holder
+   * (including every sftp job).
+   */
+  private releaseFiledropForRecord(record: JobRecord): void {
+    this.releaseFiledrop(record.id);
   }
 
   /**
@@ -631,6 +687,7 @@ export class JobManager {
     record.terminal = state;
     this.clearCancelTimers(record);
     this.releaseSftpRemoteForRecord(record);
+    this.releaseFiledropForRecord(record);
 
     // An already-emitted terminal is authoritative: a job failed on buffer
     // overflow signals SIGKILL, and if the child's own clean exit is observed
@@ -746,10 +803,11 @@ export class JobManager {
   /**
    * Delete a job: remove the in-memory record and the workdir on disk. Signals a
    * still-running child SIGKILL first so the delete does not leave an orphan.
-   * The remote latch is not released here: a SIGKILL is asynchronous, so the
-   * child may still be polling the remote's directory after this returns:
-   * {@link reconcileTerminal} releases the latch on the child's `close`, which
-   * keeps a successor job from rendezvousing with the dying child.
+   * The rendezvous latch (sftp remote or filedrop) is not released here: a
+   * SIGKILL is asynchronous, so the child may still be touching the rendezvous
+   * after this returns; {@link reconcileTerminal} releases the latch on the
+   * child's `close`, which keeps a successor job from rendezvousing with the
+   * dying child.
    */
   async deleteJob(id: string): Promise<boolean> {
     const record = this.jobs.get(id);
@@ -769,7 +827,7 @@ export class JobManager {
 
   /**
    * Delete a restart-restored job that has no in-memory record: a disk-only
-   * removal of the workdir. Such a job holds no child and no remote latch, so
+   * removal of the workdir. Such a job holds no child and no rendezvous latch, so
    * there is nothing to signal or release. Returns false when no workdir exists.
    */
   private async deleteRestoredJob(id: string): Promise<boolean> {

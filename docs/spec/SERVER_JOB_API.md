@@ -21,7 +21,7 @@ Every job response carries `Cache-Control: no-store` and no CORS headers -- the 
 
 | Method | Path | Success | Notes |
 | ------ | ---- | ------- | ----- |
-| `POST` | `/api/jobs` | `201` `{ "id": "<uuid>" }` | Create and start a job from a JSON intent. `413` (empty body) when the body exceeds the size cap (see [Size caps](#size-caps)). `400` on unparseable body, intent that fails schema validation, or an sftp intent naming an unknown remote (empty body, resolved before any workdir exists). `409` (empty body) when the named remote is held by a running job. |
+| `POST` | `/api/jobs` | `201` `{ "id": "<uuid>" }` | Create and start a job from a JSON intent. `413` (empty body) when the body exceeds the size cap (see [Size caps](#size-caps)). `400` on unparseable body, intent that fails schema validation, or an sftp intent naming an unknown remote (empty body, resolved before any workdir exists). `409` (empty body) when the named sftp remote is held by a running job, or when a filedrop job is already running. |
 | `GET` | `/api/jobs` | `200` `{ "jobs": [...] }` | List every job: live in-memory records and restart-restored jobs re-discovered from disk artifacts, deduped by id (the in-memory record wins). Each entry is `{ id, status, restored, resultAvailable, recordAvailable, recordCreatedAt? }`. See [Job lifetime and orphan handling](#job-lifetime-and-orphan-handling). |
 | `GET` | `/api/jobs/:jobId` | `200` status JSON | `404` on malformed or unknown id. A restart-restored job is served read-only from its disk artifacts. |
 | `DELETE` | `/api/jobs/:jobId` | `204` | Kills a still-running child, drops the record, removes the workdir. For a restart-restored job (no in-memory record) it removes the disk-only workdir. `404` when neither a record nor a workdir exists. |
@@ -100,7 +100,7 @@ The `expectedPayloadColumns` field is a list of partner-namespace column names -
 
 From a validated filedrop intent the server composes the CLI config document (snake_case YAML the CLI loads verbatim) through core's `mintExchangeFile`, so the assembled spec is validated by the CLI's own schema before it is written. The composition is fixed:
 
-- The connection is a credential-free `filedrop` locator whose one path field is set to the server-chosen `exchange` subdirectory of the workdir -- not to any client value. By core's `ExchangeFileInput` typing no credential is representable in a filedrop connection.
+- The connection is a credential-free `filedrop` locator whose one path field is set to the operator-configured rendezvous mount (`JOB_RENDEZVOUS_DIR`) -- server-side environment configuration, never a client value. By core's `ExchangeFileInput` typing no credential is representable in a filedrop connection.
 - No `authentication` block is ever assembled; the shared secret rides the separate key file.
 - The intent's `linkageTerms` reach the document only after core's schema validation.
 - The intent's `metadata` and `standardization`, when present, are attached as the config's `metadata` and `standardization` blocks (omitted when absent). Carrying them is what makes the operator's data-prep edits authoritative on this path: the CLI's `prepareForExchange` uses the composed metadata instead of falling back to `inferMetadata`, which would default an unrecognized column to disclosed payload and could silently disclose a column the operator marked ignored.
@@ -138,7 +138,7 @@ The validation rules, each load-bearing:
 
 The table is startup-frozen: changing hosts, names, or pins requires a restart. The referenced credential FILES are live -- the CLI child re-reads them at each job's config load -- so rotating a secret in place takes effect without one.
 
-**One running job per remote.** Unlike filedrop, whose rendezvous is a fresh per-job directory, every job against a remote shares that remote's directory. A second sftp job naming a remote held by a running job is refused with an empty-bodied `409`; the hold is released when the holding job reaches a terminal state or is deleted.
+**One running job per rendezvous.** An sftp job holds its named remote: every job against a remote shares that remote's directory, so a second sftp job naming a remote a running job holds is refused with an empty-bodied `409`. A filedrop job holds a single-holder latch: the console conducts one exchange at a time over its single mounted rendezvous (`JOB_RENDEZVOUS_DIR`), shared across jobs rather than a fresh per-job directory, so a second filedrop job while one is running is likewise refused with an empty-bodied `409`. Each hold is acquired before any workdir exists and released when the holding job reaches a terminal state or is deleted.
 
 ### `GET /api/jobs/remotes`
 
@@ -153,14 +153,13 @@ Each job gets a workdir at `<dataRoot>/<jobId>/`, created mode `0o700` (owner-on
 | `psilink.yaml` | The composed CLI config document. |
 | `.psilink.key` | The key file carrying the shared secret. |
 | `input.csv` | The client's input CSV content. |
-| `exchange/` | The rendezvous directory (mode `0o700`) the filedrop exchange reads and writes. |
 | `output.csv` | The CLI's matched-result output (written by the CLI on success). |
 | `record.json` | The self-attested exchange record (written by the CLI on success; the write is non-fatal, so it may be absent). |
 | `record.keys.json` | The private verification keys paired with the record (owner-only; written alongside the record under the same non-fatal write). |
 
 The client never supplies a filename: submitted content is written to these constant names, and the CLI is pointed at them by absolute path. Keeping the names constant is what makes "a client string never becomes a file path" hold.
 
-An sftp job's workdir has the same layout; its `exchange/` directory is created but unused (the rendezvous is the remote's own directory), and its `psilink.yaml` carries the remote entry's connection block -- locator, pinned fingerprint, and `@path` credential references, never a credential value.
+Neither channel's rendezvous lives in the workdir. A filedrop job's rendezvous is the operator-configured `JOB_RENDEZVOUS_DIR` mount (see [Composed CLI configuration](#composed-cli-configuration)), shared across jobs and held by the single-holder latch; an sftp job's rendezvous is the remote's own directory. An sftp job's workdir has the same fixed-name layout, and its `psilink.yaml` carries the remote entry's connection block -- locator, pinned fingerprint, and `@path` credential references, never a credential value.
 
 ## Subprocess invocation
 
@@ -255,7 +254,7 @@ Job state lives in server memory only and is never persisted:
 - **Restart empties the table; completed results are re-discoverable read-only.** The in-memory table -- running state, the terminal reconciliation, and the full event history -- does not survive a server restart, and no in-flight exchange is resumed or persisted (a restart cancels it rather than persisting another party's material). What does survive is the on-disk workdir of a completed job, and after a restart the API re-discovers those workdirs and re-surfaces each completed job read-only. Discovery reads the data root and admits an entry only when it is a real directory (a symlinked directory is not followed out of the root), its name is a canonical v4 UUID, and it resolves strictly under the resolved data root -- the same traversal guard the live routes apply. For each admitted id the restored view is derived purely from the output artifacts: `status` is `succeeded` when `output.csv` or `record.json` is present (a party whose terms give it no result of its own still writes the record on success) else `failed`, and `recordAvailable`/`recordCreatedAt` follow the same all-or-nothing rule as the live status body (`record.json` and `record.keys.json` both present and the record's `createdAt` parses). Restore reads only these output artifacts and their existence; it never reads or serves the key file (`.psilink.key`) or the connection config (`psilink.yaml`), so no shared secret or connection material re-enters server state. A restored job's `GET`, `result`, `record`, `keys`, and `DELETE` behave as a live job's do; there is no cancel and no event replay (`eventCount` is `0`, the SSE stream has no history to replay), and it is never re-run. An interrupted job (a workdir with neither a result nor a record) surfaces as `failed`/terminated, never `running` and never resumable.
 - **TTL eviction is memory-only.** One hour after a job reaches a terminal state, its in-memory record is evicted as a memory backstop. Eviction removes only the record; it leaves the workdir on disk, so a completed job then resolves read-only as a restored job (served from disk until an explicit `DELETE`) rather than `404`ing, with its event history gone. The eviction timer is `unref`ed and does not resurrect a record already removed by a `DELETE`.
 - **DELETE removes the disk.** `DELETE /api/jobs/:jobId` is the only operation that removes the workdir. It `SIGKILL`s a still-running child first so the delete leaves no orphan, drops the record, and `rm -rf`s the workdir (idempotent).
-- **Terminal states release the remote.** An sftp job's per-remote hold (see [SFTP remotes](#sftp-remotes)) is released when the job reaches a terminal state or is deleted; a restart empties the holds with the rest of the in-memory state.
+- **Terminal states release the rendezvous hold.** An sftp job's per-remote hold and a filedrop job's single-holder latch (see [SFTP remotes](#sftp-remotes)) are released when the job reaches a terminal state or is deleted; a restart empties the holds with the rest of the in-memory state.
 - **Shutdown signals every child.** On server shutdown (`SIGINT`/`SIGTERM`), every running child is sent `SIGTERM` so no orphaned CLI outlives the server. The shutdown hook is registered before the graceful-shutdown handler (signal listeners run in registration order), so children are signaled before any handler that may end the process. It is a no-op when the API was never enabled.
 
 ## See also

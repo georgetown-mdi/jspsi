@@ -627,6 +627,35 @@ describe("POST /api/jobs maps the sftp remote rejections to empty bodies", () =>
   });
 });
 
+describe("POST /api/jobs rejects a concurrent filedrop job", () => {
+  test("a second concurrent filedrop create is an empty-bodied 409", async () => {
+    const root = tempDataRoot("routes-filedrop");
+    roots.push(root);
+    vi.stubEnv("JOB_DATA_ROOT", root);
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      jobRendezvousDir: rvzRoot(),
+      childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), STUB_DELAY_MS: "5000" },
+    });
+    (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
+      manager;
+
+    const first = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent()),
+      params: {},
+    })) as Response;
+    expect(first.status).toBe(201);
+
+    const second = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent()),
+      params: {},
+    })) as Response;
+    expect(second.status).toBe(409);
+    expect(await second.text()).toBe("");
+  });
+});
+
 describe("GET /api/jobs/remotes", () => {
   test("is 404 when the API is disabled", async () => {
     vi.stubEnv("JOB_DATA_ROOT", "");
