@@ -28,12 +28,26 @@ import type { LocalFile } from "papaparse";
 export const CSV_LINE_BYTE_CEILING = 8 * 1024 * 1024;
 
 /**
+ * The error every {@link CSV_LINE_BYTE_CEILING} trip raises. A named subclass so a
+ * caller can classify the ceiling trip by `instanceof` -- distinguishing an
+ * oversized/unterminated line from an ordinary parse fault -- rather than matching
+ * the message string. The message stays operator-readable and carries only the byte
+ * ceiling, never file content or a path.
+ */
+export class CsvLineByteCeilingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CsvLineByteCeilingError";
+  }
+}
+
+/**
  * The single operator-readable error every {@link CSV_LINE_BYTE_CEILING} trip
  * raises, shared so the stream guard and the non-stream pre-read below cannot
  * drift to differently-worded messages for the same condition.
  */
-function singleLineCeilingError(byteCeiling: number): Error {
-  return new Error(
+function singleLineCeilingError(byteCeiling: number): CsvLineByteCeilingError {
+  return new CsvLineByteCeilingError(
     `CSV input exceeded the ${byteCeiling}-byte single-line limit before a ` +
       "line terminator; the file may be malformed (no newline) or carry an " +
       "oversized header or field",
@@ -459,7 +473,8 @@ export async function loadCSVFile(
  * -- so a streaming server pass and a browser worker wrapping loadCSVFile parse
  * identically. Resolves with the header column list once the parse settles;
  * rejects on a read/parse error or a ceiling trip, the same contract as
- * loadCSVFile.
+ * loadCSVFile. A ceiling trip rejects with a {@link CsvLineByteCeilingError}, so a
+ * caller can tell an oversized/unterminated line from an ordinary parse fault.
  */
 export async function streamCSVRows(
   file: LocalFile,
