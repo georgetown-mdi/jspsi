@@ -4,6 +4,7 @@ import path from "node:path";
 import { z } from "zod";
 
 import {
+  CsvLineByteCeilingError,
   INFER_DATE_SCAN_CAP,
   MAX_NAME_LENGTH,
   MAX_TRANSFORM_PATTERN_LENGTH,
@@ -54,6 +55,38 @@ export class JobInputNotFoundError extends Error {
   }
 }
 
+/**
+ * The closed set of reasons a profile pass fails other than not-found. Carried to
+ * the browser as a bare code so the operator gets a meaningful reason without any
+ * file content, path, or raw error object riding the wire:
+ * - `too_large`: a header, field, or unterminated line exceeded the CSV single-line
+ *   byte ceiling, so the file cannot be profiled in bounded memory.
+ * - `not_a_csv`: the parse produced no columns -- an empty file or one with no header.
+ * - `parse_failed`: any other read or parse fault (a mid-read I/O error, a malformed
+ *   structure the parser rejected).
+ */
+export type JobInputProfileErrorCode =
+  "too_large" | "not_a_csv" | "parse_failed";
+
+/** A profile fault the route maps to a 400 carrying only {@link code}. Never wraps
+ * the underlying error, so no path or cell bytes reach the response. */
+export class JobInputProfileError extends Error {
+  constructor(readonly code: JobInputProfileErrorCode) {
+    super(`job input profile failed: ${code}`);
+    this.name = "JobInputProfileError";
+  }
+}
+
+/** Signals that a {@link coverageJobInput} pass was aborted through its signal (a
+ * client disconnect or a superseded sweep). Carries no path, so the aborted pass
+ * never surfaces the mounted directory. */
+export class JobInputCoverageAbortedError extends Error {
+  constructor() {
+    super("job input coverage aborted");
+    this.name = "JobInputCoverageAbortedError";
+  }
+}
+
 declare global {
   var jobInputDirConfig: { resolvedDir?: string } | undefined;
 }
@@ -65,12 +98,18 @@ function mtimeMsInt(mtimeMs: number): number {
 }
 
 /**
- * Resolve `name` to a readable regular file inside `resolvedDir`. The name is a
- * single admissible segment ({@link isAdmissibleInputName}) so it never composes a
- * traversal even though the mounted directory is the operator's own; a name that
- * resolves to no regular file is a {@link JobInputNotFoundError}.
+ * Resolve `name` to a readable regular file inside `resolvedDir`, returning its path
+ * and the stat used to admit it. The name is a single admissible segment
+ * ({@link isAdmissibleInputName}) so it never composes a traversal even though the
+ * mounted directory is the operator's own; a name that resolves to no regular file
+ * is a {@link JobInputNotFoundError}. Returning the stat lets a caller read size and
+ * mtime without a second stat that could race the file away and surface a raw fs
+ * error carrying the mounted path.
  */
-function resolveJobInputPath(resolvedDir: string, name: string): string {
+function resolveJobInputFile(
+  resolvedDir: string,
+  name: string,
+): { filePath: string; stat: fs.Stats } {
   if (!isAdmissibleInputName(name)) throw new JobInputNotFoundError();
   const filePath = path.join(resolvedDir, name);
   let stat: fs.Stats;
@@ -80,7 +119,7 @@ function resolveJobInputPath(resolvedDir: string, name: string): string {
     throw new JobInputNotFoundError();
   }
   if (!stat.isFile()) throw new JobInputNotFoundError();
-  return filePath;
+  return { filePath, stat };
 }
 
 /**
@@ -89,7 +128,7 @@ function resolveJobInputPath(resolvedDir: string, name: string): string {
  * copying the content.
  */
 export function jobInputFilePath(resolvedDir: string, name: string): string {
-  return resolveJobInputPath(resolvedDir, name);
+  return resolveJobInputFile(resolvedDir, name).filePath;
 }
 
 /** One file in the listing response: an admissible name and its size/mtime. */
@@ -104,6 +143,12 @@ export interface JobInputListing {
   /** False when {@link JOB_INPUT_DIR_ENV} is unset -- the feature-off state -- with
    * an empty list. */
   configured: boolean;
+  /** False when the configured directory could not be enumerated (a mis-mount or a
+   * permission fault), so the operator is told the mount is unreadable rather than to
+   * place a file in a directory that already holds one. True in every other case,
+   * including the unconfigured state (nothing failed to read). The errno and the
+   * absolute path are deliberately NOT carried -- only this boolean. */
+  readable: boolean;
   files: Array<JobInputFileEntry>;
 }
 
@@ -111,18 +156,20 @@ export interface JobInputListing {
  * List the admissible input files, or the unconfigured state when `resolvedDir` is
  * undefined. Reads the directory non-recursively, admits regular files whose name
  * is admissible ({@link isAdmissibleInputName}), and sorts by name. An unreadable
- * directory (a mis-mount) yields an empty list rather than failing -- the operator
- * sees no files and checks their mount.
+ * directory (a mis-mount) reports `readable: false` with an empty list rather than an
+ * empty-but-readable directory, so the operator checks their mount instead of placing
+ * a file that is already there. On any ambiguity the listing still fails toward empty.
  */
 export function listJobInputs(
   resolvedDir: string | undefined,
 ): JobInputListing {
-  if (resolvedDir === undefined) return { configured: false, files: [] };
+  if (resolvedDir === undefined)
+    return { configured: false, readable: true, files: [] };
   let names: Array<string>;
   try {
     names = fs.readdirSync(resolvedDir);
   } catch {
-    return { configured: true, files: [] };
+    return { configured: true, readable: false, files: [] };
   }
   const files: Array<JobInputFileEntry> = [];
   for (const name of names) {
@@ -141,7 +188,7 @@ export function listJobInputs(
     });
   }
   files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  return { configured: true, files };
+  return { configured: true, readable: true, files };
 }
 
 /** One column's preview samples on the wire: the column name paired with its first
@@ -180,38 +227,50 @@ export async function profileJobInput(
   resolvedDir: string,
   name: string,
 ): Promise<JobInputProfile> {
-  const filePath = resolveJobInputPath(resolvedDir, name);
-  const stat = fs.statSync(filePath);
+  const { filePath, stat } = resolveJobInputFile(resolvedDir, name);
   const stream = fs.createReadStream(filePath);
   const samples = new Map<string, Array<string>>();
   const dobSample: Array<string> = [];
   let dobColumn: string | undefined;
   let dobResolved = false;
   let rowCount = 0;
-  const columns = await streamCSVRows(stream, (rows, cols) => {
-    if (!dobResolved && cols.length > 0) {
-      dobColumn = inferDateOfBirthColumn(cols);
-      dobResolved = true;
-    }
-    for (const row of rows) {
-      rowCount++;
-      for (const col of cols) {
-        let bucket = samples.get(col);
-        if (bucket === undefined) {
-          bucket = [];
-          samples.set(col, bucket);
+  let columns: Array<string>;
+  try {
+    columns = await streamCSVRows(stream, (rows, cols) => {
+      if (!dobResolved && cols.length > 0) {
+        dobColumn = inferDateOfBirthColumn(cols);
+        dobResolved = true;
+      }
+      for (const row of rows) {
+        rowCount++;
+        for (const col of cols) {
+          let bucket = samples.get(col);
+          if (bucket === undefined) {
+            bucket = [];
+            samples.set(col, bucket);
+          }
+          if (bucket.length < PREVIEW_SAMPLE_SIZE) {
+            const value = readRowColumn(row, col);
+            if (value !== undefined && value.trim() !== "") bucket.push(value);
+          }
         }
-        if (bucket.length < PREVIEW_SAMPLE_SIZE) {
-          const value = readRowColumn(row, col);
-          if (value !== undefined && value.trim() !== "") bucket.push(value);
+        if (dobColumn !== undefined && dobSample.length < INFER_DATE_SCAN_CAP) {
+          const value = readRowColumn(row, dobColumn);
+          if (value !== undefined && value.trim() !== "") dobSample.push(value);
         }
       }
-      if (dobColumn !== undefined && dobSample.length < INFER_DATE_SCAN_CAP) {
-        const value = readRowColumn(row, dobColumn);
-        if (value !== undefined && value.trim() !== "") dobSample.push(value);
-      }
-    }
-  });
+    });
+  } catch (error) {
+    // Classify the fault into a closed code; the underlying error (a read fault
+    // embedding the mounted path, or a parser error carrying cell bytes) is never
+    // surfaced. A ceiling trip is the one distinguishable non-generic case.
+    throw new JobInputProfileError(
+      error instanceof CsvLineByteCeilingError ? "too_large" : "parse_failed",
+    );
+  }
+  // A parse that yields no columns is not a usable CSV (an empty file, or one with
+  // no header row), a distinct operator-meaningful reason from a parse fault.
+  if (columns.length === 0) throw new JobInputProfileError("not_a_csv");
   const dateInputFormat =
     dobColumn !== undefined ? inferDateFormat(dobSample) : undefined;
   const columnSamples: Array<ColumnSample> = columns.map((col) => ({
@@ -233,18 +292,57 @@ export async function profileJobInput(
  * Sweep a mounted input's per-field coverage in ONE streaming pass, feeding the
  * shared per-row accumulator ({@link createFieldCoverageAccumulator}) so the result
  * equals `computeFieldCoverage` over the same rows.
+ *
+ * An optional `signal` stops the pass early: when the client disconnects or the
+ * browser supersedes the sweep it aborts, the read stream is destroyed, and the pass
+ * rejects with a {@link JobInputCoverageAbortedError} rather than scanning the rest
+ * of a CLI-scale file. The abort error carries no path or row bytes.
  */
 export async function coverageJobInput(
   resolvedDir: string,
   name: string,
   standardization: Standardization,
+  signal?: AbortSignal,
 ): Promise<Array<FieldValueCoverage>> {
-  const filePath = resolveJobInputPath(resolvedDir, name);
+  const { filePath } = resolveJobInputFile(resolvedDir, name);
+  if (signal?.aborted) throw new JobInputCoverageAbortedError();
   const stream = fs.createReadStream(filePath);
+  // A no-op error listener so destroying the stream on abort -- or an open fault that
+  // races the abort -- never surfaces as an uncaught 'error'; the parse rejection
+  // carries the real fault on the non-abort path.
+  stream.on("error", () => {});
   const accumulator = createFieldCoverageAccumulator(standardization);
-  await streamCSVRows(stream, (rows) => {
+  const parse = streamCSVRows(stream, (rows) => {
     for (const row of rows) accumulator.add(row);
   });
+
+  if (signal === undefined) {
+    await parse;
+    return accumulator.result();
+  }
+
+  // Race the parse against the abort: an abort destroys the stream so the pass stops
+  // rather than scanning the rest of a CLI-scale file. Swallow a late parse rejection
+  // once the abort has won the race.
+  parse.catch(() => {});
+  let onAbort: () => void = () => {};
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => {
+      stream.destroy();
+      reject(new JobInputCoverageAbortedError());
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    await Promise.race([parse, aborted]);
+  } catch (error) {
+    // An aborted signal always reports the clean aborted error, never a parser
+    // rejection that could embed the mounted path on a mid-stream read fault.
+    if (signal.aborted) throw new JobInputCoverageAbortedError();
+    throw error;
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
   return accumulator.result();
 }
 

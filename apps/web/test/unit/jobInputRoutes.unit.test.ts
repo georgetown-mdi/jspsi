@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -128,8 +129,23 @@ describe("GET /api/jobs/inputs", () => {
     enable();
     const response = await listing();
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ configured: false, files: [] });
+    expect(await response.json()).toEqual({
+      configured: false,
+      readable: true,
+      files: [],
+    });
     expect(response.headers.get("cache-control")).toContain("no-store");
+  });
+
+  test("reports the unreadable-mount state distinctly from empty", async () => {
+    enable({ inputDir: path.join(os.tmpdir(), "psilink-no-such-mount-xyz") });
+    const response = await listing();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      configured: true,
+      readable: false,
+      files: [],
+    });
   });
 
   test("lists the mounted input files", async () => {
@@ -171,6 +187,38 @@ describe("GET /api/jobs/inputs/profile", () => {
     const { dir } = inputDirWithFixture();
     enable({ inputDir: dir });
     expect((await profile("../escape")).status).toBe(404);
+  });
+
+  test("400 with the not_a_csv code for a file with no columns", async () => {
+    const dir = tempDir("inputs");
+    fs.writeFileSync(path.join(dir, "empty.csv"), "");
+    enable({ inputDir: dir });
+    const response = await profile("empty.csv");
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "not_a_csv" });
+  });
+
+  test("400 with the parse_failed code on a read fault, leaking no path or bytes", async () => {
+    const { dir, name } = inputDirWithFixture();
+    enable({ inputDir: dir });
+    const stream = new Readable({ read() {} });
+    vi.spyOn(fs, "createReadStream").mockReturnValue(
+      stream as unknown as fs.ReadStream,
+    );
+    const responsePromise = profile(name);
+    // Let the parser attach its stream listeners before the read faults, so the error
+    // flows through the parser rather than surfacing as an uncaught 'error'.
+    await new Promise((resolve) => setImmediate(resolve));
+    const leak = `${dir}/${name}: EIO 111223333`;
+    stream.destroy(new Error(leak));
+    const response = await responsePromise;
+    expect(response.status).toBe(400);
+    const raw = await response.text();
+    expect(JSON.parse(raw)).toEqual({ error: "parse_failed" });
+    // The response body carries the code only -- never the mounted path or cell bytes
+    // the underlying read error embeds.
+    expect(raw).not.toContain(dir);
+    expect(raw).not.toContain("111223333");
   });
 });
 
@@ -248,5 +296,23 @@ describe("POST /api/jobs/inputs/coverage", () => {
       standardization: [{ input: huge, output: "b", steps: [] }],
     });
     expect(response.status).toBe(413);
+  });
+
+  test("threads request.signal so an aborted request stops the sweep", async () => {
+    const { dir, name } = inputDirWithFixture();
+    enable({ inputDir: dir });
+    const controller = new AbortController();
+    const request = new Request("http://localhost/api/jobs/inputs/coverage", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(coverageBody(name)),
+      signal: controller.signal,
+    });
+    controller.abort();
+    const response = (await handlersOf(CoverageRoute).POST({
+      request,
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(499);
   });
 });

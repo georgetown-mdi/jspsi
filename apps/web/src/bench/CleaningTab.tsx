@@ -1,12 +1,16 @@
 import { useMemo } from "react";
 
-import { VisuallyHidden } from "@mantine/core";
+import { Alert, VisuallyHidden } from "@mantine/core";
+import { IconAlertCircle } from "@tabler/icons-react";
 
 import { SEMANTIC_TYPE_LABELS } from "@psi/metadataEditing";
 import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
+import {
+  COVERAGE_UNAVAILABLE_MESSAGE,
+  FieldCoverage,
+} from "@components/FieldCoverage";
 import { CleaningErrorBoundary } from "@components/CleaningErrorBoundary";
-import { FieldCoverage } from "@components/FieldCoverage";
 import { StandardizationCards } from "@components/StandardizationCards";
 
 import { declaredFieldsFor } from "./inviterModel";
@@ -29,6 +33,7 @@ export function CleaningTab({
   expertMode,
   rates,
   pending,
+  coverageUnavailable,
   onFieldSteps,
   onFieldInput,
   onFieldAdded,
@@ -53,6 +58,9 @@ export function CleaningTab({
   /** Whether a coverage recompute is in flight (drives the per-card "Checking..."
    * placeholder before the first result). */
   pending: boolean;
+  /** Whether the last sweep failed for good (a deterministic coverage failure), so the
+   * tab shows an explicit "coverage unavailable" notice rather than a blank readout. */
+  coverageUnavailable: boolean;
   onFieldSteps: (output: string, steps: Array<StandardizationStep>) => void;
   onFieldInput: (output: string, input: string) => void;
   onFieldAdded: (type: LinkageField["type"]) => void;
@@ -94,8 +102,9 @@ export function CleaningTab({
     }
     return [...labels];
   }, [rates, editor.draft.standardization, fieldTypeByName]);
-  const coverageAnnouncement =
-    silentEmptyLabels.length === 0
+  const coverageAnnouncement = coverageUnavailable
+    ? COVERAGE_UNAVAILABLE_MESSAGE
+    : silentEmptyLabels.length === 0
       ? ""
       : `Coverage warning: ${silentEmptyLabels.join(", ")} ${
           silentEmptyLabels.length === 1 ? "produces" : "produce"
@@ -125,6 +134,17 @@ export function CleaningTab({
           {coverageAnnouncement}
         </p>
       </VisuallyHidden>
+      {coverageUnavailable && (
+        <Alert
+          role="note"
+          color="gray"
+          icon={<IconAlertCircle aria-hidden />}
+          title="Could not check coverage"
+          mb="md"
+        >
+          {COVERAGE_UNAVAILABLE_MESSAGE}
+        </Alert>
+      )}
       <CleaningErrorBoundary onReset={onResetCleaning} resetKey={resetKey}>
         <StandardizationCards
           standardization={editor.draft.standardization}

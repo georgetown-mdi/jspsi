@@ -22,6 +22,10 @@ export interface NonEmptyRatesState {
   rates: ReadonlyMap<string, FieldValueCoverage> | null;
   /** True while a recompute is in flight (debounce pending or worker running). */
   pending: boolean;
+  /** True when the last sweep failed for good (a deterministic coverage failure, or a
+   * worker error) rather than being superseded or still running -- so the host shows
+   * an explicit "coverage unavailable" readout instead of hanging on "Checking...". */
+  unavailable: boolean;
 }
 
 /**
@@ -58,26 +62,45 @@ export const rowsCoverageProvider: CoverageProviderFactory<
 /**
  * The console coverage provider: each `compute` POSTs the file's name and the
  * standardization to the appliance's streaming coverage sweep
- * ({@link postJobInputCoverage}). A non-2xx (a schema 400 or a transient error) is
- * treated like a superseded response -- the returned promise never settles, so the
- * hook holds its honest "Checking..." pending state until the next debounced edit
- * supersedes it, rather than dropping to a false "coverage unknown". `dispose` aborts
- * any in-flight sweep.
+ * ({@link postJobInputCoverage}).
+ *
+ * The outcome decides the readout. A deterministic failure (a `4xx` other than `429`,
+ * or a malformed body) REJECTS, so the hook settles to an explicit "coverage
+ * unavailable" state rather than hanging -- the same input will not succeed on retry.
+ * A transient failure (`429`, a `5xx`, or a network error) never settles, so the hook
+ * holds its honest "Checking..." until the next debounced edit supersedes it. An abort
+ * (a superseded sweep) never settles either.
+ *
+ * Each `compute` gets its own {@link AbortController}, and starting one aborts the
+ * previous still-in-flight sweep, so a superseded sweep's fetch is cancelled -- which
+ * threads through to the server, stopping the whole-file pass rather than scanning to
+ * the end. `dispose` aborts the current sweep.
  */
 export const consoleCoverageProvider: CoverageProviderFactory<
   WorkInputReference
 > = (reference) => {
-  const controller = new AbortController();
+  let active: AbortController | null = null;
   return {
-    compute: (standardization) =>
-      new Promise<Array<FieldValueCoverage>>((resolve) => {
-        void postJobInputCoverage(reference, standardization, controller.signal)
-          .then((rates) => {
-            if (rates !== null) resolve(rates);
-          })
-          .catch(() => undefined);
-      }),
-    dispose: () => controller.abort(),
+    compute: (standardization) => {
+      active?.abort();
+      const controller = new AbortController();
+      active = controller;
+      return new Promise<Array<FieldValueCoverage>>((resolve, reject) => {
+        void postJobInputCoverage(
+          reference,
+          standardization,
+          controller.signal,
+        ).then((outcome) => {
+          if (controller.signal.aborted) return;
+          if (outcome.kind === "rates") resolve(outcome.rates);
+          else if (outcome.kind === "unavailable")
+            reject(new Error("coverage unavailable"));
+          // transient / aborted: never settle -- the hook holds pending until the
+          // next debounced edit supersedes this compute.
+        });
+      });
+    },
+    dispose: () => active?.abort(),
   };
 };
 
@@ -118,6 +141,7 @@ export function useNonEmptyRates<TInput>(
     FieldValueCoverage
   > | null>(null);
   const [pending, setPending] = useState(true);
+  const [unavailable, setUnavailable] = useState(false);
 
   // One provider per coverage input: a new file rebuilds it (and re-seeds the
   // worker); a standardization edit reuses it. Declared before the compute effect so
@@ -133,6 +157,7 @@ export function useNonEmptyRates<TInput>(
     // for the new input rather than relying on effect-ordering and update batching.
     setRates(null);
     setPending(true);
+    setUnavailable(false);
     return () => {
       provider.dispose();
       providerRef.current = null;
@@ -144,6 +169,7 @@ export function useNonEmptyRates<TInput>(
     if (provider === null) return;
     let cancelled = false;
     setPending(true);
+    setUnavailable(false);
     const handle = setTimeout(() => {
       provider
         .compute(standardization)
@@ -151,14 +177,19 @@ export function useNonEmptyRates<TInput>(
           if (cancelled) return;
           setRates(new Map(next.map((rate) => [rate.output, rate])));
           setPending(false);
+          setUnavailable(false);
         })
         .catch(() => {
-          // A provider error (dispose never settles -- see the controller) leaves the
-          // coverage unknown: clear the prior rates rather than leave a stale rate or
-          // alarm on screen, and clear pending so the UI never hangs mid-check.
+          // A settled provider failure (a deterministic coverage failure, or a worker
+          // error) leaves the coverage unavailable: clear the prior rates rather than
+          // leave a stale rate or alarm on screen, clear pending so the UI never hangs
+          // mid-check, and flag it so the host shows an explicit unavailable readout.
+          // A superseded compute never settles (never rejects), so it does not reach
+          // this branch.
           if (!cancelled) {
             setRates(null);
             setPending(false);
+            setUnavailable(true);
           }
         });
     }, AGGREGATE_DEBOUNCE_MS);
@@ -173,5 +204,5 @@ export function useNonEmptyRates<TInput>(
     // this only matters for a caller that varies makeProvider (e.g. a test).
   }, [input, standardization, makeProvider]);
 
-  return { rates, pending };
+  return { rates, pending, unavailable };
 }

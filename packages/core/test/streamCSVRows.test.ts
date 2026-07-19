@@ -2,7 +2,12 @@ import { Readable } from "node:stream";
 
 import { expect, test } from "vitest";
 
-import { CSV_LINE_BYTE_CEILING, loadCSVFile, streamCSVRows } from "../src/file";
+import {
+  CSV_LINE_BYTE_CEILING,
+  CsvLineByteCeilingError,
+  loadCSVFile,
+  streamCSVRows,
+} from "../src/file";
 import type { CSVRow } from "../src/file";
 
 /** A readable emitting `content` then EOF, standing in for a CSV file/stream. */
@@ -80,6 +85,17 @@ test("streamCSVRows enforces the single-line byte ceiling like loadCSVFile", asy
   await expect(streamCSVRows(streamOf(giant), () => undefined)).rejects.toThrow(
     /single-line limit/,
   );
+});
+
+test("streamCSVRows rejects a ceiling trip with a typed CsvLineByteCeilingError", async () => {
+  // A tiny explicit ceiling trips on a small unterminated line, so a caller can
+  // classify the ceiling trip by instanceof without a message match.
+  const error = await streamCSVRows(
+    streamOf("x".repeat(64)),
+    () => undefined,
+    16,
+  ).catch((thrown: unknown) => thrown);
+  expect(error).toBeInstanceOf(CsvLineByteCeilingError);
 });
 
 // PapaParse's local chunk size (Papa.LocalChunkSize is 10 MB): a file past it parses

@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import {
+  JobInputCoverageAbortedError,
   JobInputNotFoundError,
   MAX_COVERAGE_BODY_BYTES,
   coverageJobInput,
@@ -22,6 +23,10 @@ import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
  * compile cost lands on this event loop). An unset directory or a name that resolves
  * to no regular file is `404`, a bad or oversized body is `400`/`413`, and any other
  * sweep fault is `400`.
+ *
+ * `request.signal` threads into the sweep so a client disconnect stops the whole-file
+ * pass rather than scanning a CLI-scale file to completion after the browser has
+ * superseded or abandoned the request.
  */
 export const Route = createFileRoute("/api/jobs/inputs/coverage")({
   server: {
@@ -46,9 +51,14 @@ export const Route = createFileRoute("/api/jobs/inputs/coverage")({
             resolvedDir,
             name,
             standardization,
+            request.signal,
           );
           return jobJsonResponse({ rates });
         } catch (error) {
+          if (error instanceof JobInputCoverageAbortedError)
+            // The client already disconnected or superseded this sweep; nothing reads
+            // the response, so answer without spending a status on an aborted pass.
+            return jobEmptyResponse(499);
           if (error instanceof JobInputNotFoundError)
             return jobEmptyResponse(404);
           return jobEmptyResponse(400);

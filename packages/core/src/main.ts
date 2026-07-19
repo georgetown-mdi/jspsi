@@ -78,6 +78,7 @@ export {
   streamCSVRows,
   readRowColumn,
   CSV_LINE_BYTE_CEILING,
+  CsvLineByteCeilingError,
 } from "./file";
 export type { CSVRow } from "./file";
 export {

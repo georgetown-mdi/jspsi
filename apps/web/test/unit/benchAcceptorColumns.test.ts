@@ -333,6 +333,7 @@ describe("acceptor cleaning attention", () => {
       satisfiable.editorState.standardization,
       new Map(),
       0,
+      false,
     );
     expect(attention.needsAttention).toBe(false);
     expect(attention.railValue).toBeUndefined();
@@ -354,6 +355,7 @@ describe("acceptor cleaning attention", () => {
       satisfiable.editorState.standardization,
       rates,
       0,
+      false,
     );
     expect(attention.needsAttention).toBe(true);
     expect(attention.failingFieldCount).toBe(1);
@@ -365,9 +367,32 @@ describe("acceptor cleaning attention", () => {
       satisfiable.editorState.standardization,
       new Map(),
       1,
+      false,
     );
     expect(attention.needsAttention).toBe(true);
     expect(attention.failingFieldCount).toBe(0);
+    expect(attention.railValue).toBe("1 key to review");
+  });
+
+  test("an unavailable coverage sweep raises attention with a distinct rail value", () => {
+    const attention = acceptorCleaningAttention(
+      satisfiable.editorState.standardization,
+      null,
+      0,
+      true,
+    );
+    expect(attention.needsAttention).toBe(true);
+    expect(attention.failingFieldCount).toBe(0);
+    expect(attention.railValue).toBe("Coverage unavailable");
+  });
+
+  test("a dead key outranks an unavailable sweep in the rail value", () => {
+    const attention = acceptorCleaningAttention(
+      satisfiable.editorState.standardization,
+      null,
+      1,
+      true,
+    );
     expect(attention.railValue).toBe("1 key to review");
   });
 });
