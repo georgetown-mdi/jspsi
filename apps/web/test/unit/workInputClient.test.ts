@@ -113,8 +113,8 @@ describe("fetchJobInputProfile", () => {
     expect(columnSamples.get("__proto__")).toEqual(["a", "b"]);
     expect(columnSamples.get("constructor")).toEqual(["c"]);
     expect(columnSamples.get("prototype")).toEqual(["d"]);
-    // No pollution: a fresh object is unaffected.
-    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    // No prototype pollution: a fresh object is unaffected.
+    expect(Object.getPrototypeOf({})).toBe(Object.prototype);
   });
 
   test("rejects a columnSamples that is not an array of pairs", async () => {

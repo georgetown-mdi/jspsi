@@ -66,6 +66,33 @@ describe("rendezvousStartupWarnings overlap branch", () => {
     expect(warnings[0]).toContain("the work-input directory");
   });
 
+  test("warns when the work-input directory contains the rendezvous", () => {
+    const jobInput = tempDir("input");
+    const rendezvous = subDir(jobInput, "rendezvous");
+    const dataRoot = tempDir("data");
+    const warnings = overlapWarnings(
+      rendezvousStartupWarnings(rendezvous, jobInput, dataRoot),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("the work-input directory");
+  });
+
+  test("warns twice when the rendezvous contains both the data root and the work-input directory", () => {
+    const rendezvous = tempDir("rendezvous");
+    const dataRoot = subDir(rendezvous, "data");
+    const jobInput = subDir(rendezvous, "input");
+    const warnings = overlapWarnings(
+      rendezvousStartupWarnings(rendezvous, jobInput, dataRoot),
+    );
+    expect(warnings).toHaveLength(2);
+    expect(
+      warnings.some((warning) => warning.includes("the job data root")),
+    ).toBe(true);
+    expect(
+      warnings.some((warning) => warning.includes("the work-input directory")),
+    ).toBe(true);
+  });
+
   test("does not warn for non-overlapping sibling directories", () => {
     const rendezvous = tempDir("rendezvous");
     const jobInput = tempDir("input");

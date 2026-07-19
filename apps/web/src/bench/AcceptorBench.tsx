@@ -1239,6 +1239,7 @@ export function AcceptorBench() {
               outputs={outputs}
               failure={failure}
               warning={launched?.warning}
+              serverJob={acceptServerJob}
               onTryAgain={tryAgain}
               onFixColumns={backToColumns}
             />

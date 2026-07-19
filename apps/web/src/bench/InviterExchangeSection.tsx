@@ -12,6 +12,7 @@ import {
   DownloadRow,
   FailureAlert,
   RunWarningsAlert,
+  SERVER_JOB_KEEP_OPEN_BODY,
   WithheldResultInset,
 } from "./BenchRunSurface";
 import { StatusPanel } from "./StatusPanel";
@@ -186,7 +187,7 @@ export function InviterExchangeSection({
           <p className={styles.calloutLead}>Keep this tab open.</p>
           <p className={styles.small}>
             {serverJob
-              ? "This appliance is running the exchange. If you leave this page, the console cannot return to the run or its results."
+              ? SERVER_JOB_KEEP_OPEN_BODY
               : "Your browser is listening for your partner. Closing the tab cancels the invitation; reloading starts over."}
           </p>
         </div>

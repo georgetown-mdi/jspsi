@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -17,6 +17,7 @@ import {
   acceptUnsupported,
 } from "@bench/acceptorModel";
 import { AcceptorBench } from "@bench/AcceptorBench";
+import { SERVER_JOB_KEEP_OPEN_BODY } from "@bench/BenchRunSurface";
 
 import { renderApp } from "./renderApp";
 
@@ -231,5 +232,131 @@ describe("console acceptor advisory shared-folder locator", () => {
     await expect
       .element(page.getByText(FILEDROP_ENDPOINT.path!, { exact: false }))
       .toBeInTheDocument();
+  });
+});
+
+// A profiled mounted file whose columns satisfy the invitation's linkage fields
+// (first_name/last_name), so the confirm-columns verdict clears and the accept can
+// launch on the appliance.
+const ACCEPT_FILE = {
+  name: "cohort.csv",
+  sizeBytes: 4096,
+  modifiedAt: 1_700_000_000_000,
+};
+
+const ACCEPT_PROFILE = {
+  ...ACCEPT_FILE,
+  rowCount: 2,
+  columns: ["first_name", "last_name"],
+  dateInputFormat: "%m/%d/%Y",
+  columnSamples: [
+    { column: "first_name", values: ["Ann", "Bo"] },
+    { column: "last_name", values: ["Lee", "Ray"] },
+  ],
+};
+
+// The full same-origin job API a console server-job accept drives: a mounted
+// rendezvous and work directory, the file profile, the coverage sweep, and the job
+// POST plus event stream the appliance run reads. Unmatched URLs fall through to the
+// real fetch so the runner's own traffic is untouched.
+function stubServerJobAccept(): {
+  emitEvent: (event: object) => void;
+  closeEvents: () => void;
+  hasEventStream: () => boolean;
+} {
+  const realFetch = window.fetch.bind(window);
+  const encoder = new TextEncoder();
+  let sse: ReadableStreamDefaultController<Uint8Array> | undefined;
+  const jsonResponse = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  vi.stubGlobal(
+    "fetch",
+    (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = String(input);
+      if (!url.startsWith("/api/jobs")) return realFetch(input, init);
+      if (url === "/api/jobs/rendezvous")
+        return Promise.resolve(
+          jsonResponse({ configured: true, path: "/mnt/rendezvous" }),
+        );
+      if (url === "/api/jobs/inputs")
+        return Promise.resolve(
+          jsonResponse({ configured: true, files: [ACCEPT_FILE] }),
+        );
+      if (url.startsWith("/api/jobs/inputs/profile"))
+        return Promise.resolve(jsonResponse(ACCEPT_PROFILE));
+      if (url === "/api/jobs/inputs/coverage")
+        return Promise.resolve(jsonResponse({ rates: [] }));
+      if (url === "/api/jobs")
+        return Promise.resolve(jsonResponse({ id: "job-7" }, 201));
+      if (url === "/api/jobs/job-7/events")
+        return Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                sse = controller;
+              },
+            }),
+            { status: 200, headers: { "Content-Type": "text/event-stream" } },
+          ),
+        );
+      if (url === "/api/jobs/job-7")
+        return Promise.resolve(jsonResponse({ recordAvailable: false }));
+      if (url === "/api/jobs/job-7/cancel")
+        return Promise.resolve(new Response(null, { status: 200 }));
+      return Promise.resolve(new Response(null, { status: 404 }));
+    },
+  );
+  return {
+    emitEvent: (event) =>
+      sse?.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`)),
+    closeEvents: () => sse?.close(),
+    hasEventStream: () => sse !== undefined,
+  };
+}
+
+describe("console acceptor server-job keep-open callout", () => {
+  test("holds the callout while the appliance runs the accept, then clears it once the run settles", async () => {
+    const api = stubServerJobAccept();
+    window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
+    mount(createElement(AcceptorBench));
+
+    // Review -> consent: the rendezvous mount makes the filedrop accept runnable.
+    await page
+      .getByRole("button", { name: "Continue: consent & your file" })
+      .click();
+    await userEvent.fill(page.getByLabelText("Your name"), "Sam Alvarez");
+    await page.getByRole("checkbox").click();
+    await page.getByRole("button", { name: "Select cohort.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await page.getByRole("button", { name: "Accept and continue" }).click();
+
+    // Confirm columns -> start: the mounted file's columns satisfy the terms, so the
+    // accept launches on the appliance.
+    await expect
+      .element(page.getByRole("heading", { name: "Confirm your columns" }))
+      .toBeInTheDocument();
+    await page.getByRole("button", { name: "Start the exchange" }).click();
+
+    // The appliance is running the accept: the keep-open callout names the run the tab
+    // is holding, the same copy the inviter's server-job run shows.
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange in progress");
+    await expect
+      .element(page.getByText(SERVER_JOB_KEEP_OPEN_BODY))
+      .toBeInTheDocument();
+
+    // Settle the run from the appliance's event stream; the callout drops once results
+    // exist -- there is no longer a live run for the tab to hold open.
+    await vi.waitFor(() => expect(api.hasEventStream()).toBe(true));
+    api.emitEvent({ v: 1, type: "result", resultWritten: true });
+    api.closeEvents();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange complete");
+    expect(page.getByText(SERVER_JOB_KEEP_OPEN_BODY).query()).toBeNull();
   });
 });

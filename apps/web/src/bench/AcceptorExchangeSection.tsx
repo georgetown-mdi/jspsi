@@ -11,6 +11,7 @@ import {
   DonePanel,
   DownloadRow,
   FailureAlert,
+  SERVER_JOB_KEEP_OPEN_BODY,
   WithheldResultInset,
 } from "./BenchRunSurface";
 import { StatusPanel } from "./StatusPanel";
@@ -43,6 +44,7 @@ export function AcceptorExchangeSection({
   outputs,
   failure,
   warning,
+  serverJob,
   onTryAgain,
   onFixColumns,
 }: {
@@ -53,6 +55,11 @@ export function AcceptorExchangeSection({
   /** The confirm-columns step's partial-coverage advisory, kept visible through
    * the run and cleared on a failure. */
   warning: AlertContent | undefined;
+  /** Whether this accept executes on the console appliance (a server-job run)
+   * rather than in this browser. On the appliance the CLI child conducts the
+   * exchange while the tab stays open, so the keep-open callout names the running
+   * exchange the tab is holding. */
+  serverJob: boolean;
   onTryAgain: () => void;
   /** Return to the confirm-columns step with every setting intact -- a prepare-time
    * config failure's recovery, since the acceptor fixes its own settings there. */
@@ -154,6 +161,17 @@ export function AcceptorExchangeSection({
         >
           {warning.message}
         </Alert>
+      )}
+      {/* The appliance's CLI child conducts this accept and the tab holds the only
+          view of it: an in-app teardown cancels the run, a hard close strands it,
+          and either way the console cannot return to it. The claim is false the
+          moment a failure lands (the lifecycle tore down), so the callout outlives
+          no failure. Absent for the hosted in-browser accept, which owns no such run. */}
+      {phase === "running" && failure === undefined && serverJob && (
+        <div className={styles.callout}>
+          <p className={styles.calloutLead}>Keep this tab open.</p>
+          <p className={styles.small}>{SERVER_JOB_KEEP_OPEN_BODY}</p>
+        </div>
       )}
       {phase === "done" && (
         <DonePanel

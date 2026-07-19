@@ -381,12 +381,14 @@ describe("console inviter mint and run", () => {
       .toHaveTextContent("Your invitation is ready");
 
     // A server-job run: the keep-open callout names the appliance running the exchange
-    // (leaving the page abandons it), never a browser listener.
+    // and that leaving abandons it, never a browser listener. The whole sentence is
+    // asserted -- a substring would also pass a false "closing stops the run" claim.
     await expect
       .element(
-        page.getByText("This appliance is running the exchange", {
-          exact: false,
-        }),
+        page.getByText(
+          "This appliance is running the exchange. If you leave this page, " +
+            "the console cannot return to the run or its results.",
+        ),
       )
       .toBeInTheDocument();
     expect(
