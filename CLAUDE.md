@@ -61,7 +61,7 @@ Beyond the conventions in `CONTRIBUTING.md`:
 - Before committing, sweep your own diff: delete every comment that restates the code, narrates change history ("now", "previously", "moved here"), or cites a board item id. Thoroughness is demonstrated in tests and checks, not prose.
 - When you finish implementing a branch, end your report with a review-tier recommendation sized from the actual diff (`git diff "staging...HEAD" --stat` plus a security-surface check), not from the issue -- tiers and rule: `.claude/commands/start-issue.md`, Step 5.
 - Resolving a PR's checklist requires re-reading `.github/PULL_REQUEST_TEMPLATE.md` and actually performing the Docs line's enumeration of `docs/` and `docs/spec/` against the diff; an n/a box is checked with a reason tied to this diff, never left unchecked, and a changelog n/a names the skipped class it claims (bug fix, UI polish, individual flag, refactor, test/CI/tooling, core reshape, doc-only). CI (`npm run check:pr-checklist`) backstops the mechanical tells -- an unchecked box, a deleted required line, a bare n/a.
-- Board content is working context, never repo material: item ids and issue-body prose stay out of code, comments, docs, and commit messages.
+- Board content is working context, never repo material: item ids and issue-body prose stay out of code, comments, docs, and commit messages -- except the PR description, where the template's Implements/Part of/Depends on/Follow-on line belongs when a board item exists.
 - Prettier ignores markdown.
 - Branch names shouldn't use '/'.
 - Rebase and merge in a detached /tmp worktree (`git worktree add --detach`), never in /workspace: the IDE formatter/LSP races the working tree. Afterwards `git reset --hard` the branch in /workspace and remove the worktree.
