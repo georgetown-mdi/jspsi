@@ -1,6 +1,6 @@
 import log from "loglevel";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
@@ -14,8 +14,10 @@ import {
 
 import {
   JobApiRequestError,
+  createFetchJobApiClient,
   createServerJobExchangeDriver,
 } from "@psi/serverJobExchangeDriver";
+import { discardServerJob, writeAttachment } from "@psi/consoleJobAttachment";
 import { createBrowserExchangeDriver } from "@psi/exchangeDriver";
 import { hasRecoveryHint } from "@psi/authenticateExchange";
 import { inviterExchangeDataSpec } from "@psi/advancedInvite";
@@ -73,6 +75,21 @@ export function failureFor(
   channel?: Transport,
   seat: ExchangeSeat = "inviter",
 ): RunFailure {
+  // The appliance already holds an exchange (its single slot is occupied), so the
+  // create was rejected 409 -- the driver categorizes it retryable `exchange`. The
+  // copy is honest about the one-slot model: the run is not lost, it is elsewhere,
+  // and the ways back are its own page, the recovery panel's discard, or a restart.
+  // Retry then succeeds once the slot is freed.
+  if (error instanceof JobApiRequestError && error.status === 409) {
+    return {
+      category: "exchange",
+      title: "This appliance is already running an exchange",
+      message:
+        "This appliance is already holding an exchange. Return to the page " +
+        "where you started it, or discard it from the recovery panel; " +
+        "restarting the appliance also clears it.",
+    };
+  }
   // A console job create rejected the mounted file: a 400 the driver categorized
   // `config`. The operator's terms are fine -- the file is the fault -- so the alert
   // names the file cause. On the sftp channel that same empty-bodied 400 is as likely
@@ -228,11 +245,25 @@ export function useInviterExchange({
   failure: RunFailure | undefined;
   warnings: ReadonlyArray<string>;
   tryAgain: () => void;
+  abandonRun: () => void;
 } {
   const [run, setRun] = useState<ExchangeRun>(initialRun);
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [failure, setFailure] = useState<RunFailure>();
   const [warnings, setWarnings] = useState<Array<string>>([]);
+
+  // The job API client used by the deliberate-discard paths (try again, start
+  // over, run another): one instance per hook so the strand-recovery DELETEs ride
+  // the same fetch seam the driver does. The server-job driver keeps its own
+  // default client; this hook only needs one for `discardServerJob`.
+  const jobApiClient = useMemo(() => createFetchJobApiClient(), []);
+
+  // The appliance job id of the current run, stamped by the driver's `onJobCreated`
+  // once `POST /api/jobs` resolves. Read by `tryAgain` (to DELETE the failed job
+  // before recreating, which reject-until-DELETE would otherwise 409) and by
+  // `abandonRun` (to discard the current job when the operator deliberately leaves).
+  // Undefined on a browser run, and until the first job is created.
+  const currentJobIdRef = useRef<string | undefined>(undefined);
 
   // Drives the lifecycle's AbortSignal; the effect cleanup below aborts it so
   // an unmount (or a superseded invitation) tears down any in-flight wait or
@@ -365,6 +396,16 @@ export function useInviterExchange({
         ...(minted.standardization !== undefined
           ? { standardization: minted.standardization }
           : {}),
+        // Persist the created job's id so a reload or hard tab close can re-attach
+        // to the appliance's run, and track it for the deliberate-discard paths.
+        onJobCreated: (jobId) => {
+          currentJobIdRef.current = jobId;
+          writeAttachment({
+            jobId,
+            seat: "inviter",
+            channel: transport.channel,
+          });
+        },
       });
     };
 
@@ -453,10 +494,40 @@ export function useInviterExchange({
       !invitationUsable(invitation.expires, new Date())
     )
       return;
+    const retryInvitation = invitation;
     abortRef.current?.abort();
     abortRef.current = undefined;
-    start(invitation);
+    const runMode = selectExchangeDriver(
+      channel,
+      isConsoleBuild() ? "console" : "hosted",
+      sftpConfigured,
+    ).kind;
+    const failedJobId = currentJobIdRef.current;
+    // A server-job retry must DELETE the failed (already-terminal) job before
+    // recreating: reject-until-DELETE 409s the create while the prior exchange
+    // still occupies the appliance's single slot. A browser retry re-listens with
+    // no server job to discard.
+    if (runMode === "server-job" && failedJobId !== undefined) {
+      currentJobIdRef.current = undefined;
+      void discardServerJob(jobApiClient, failedJobId).then(() =>
+        start(retryInvitation),
+      );
+      return;
+    }
+    start(retryInvitation);
   }
 
-  return { run, outputs, failure, warnings, tryAgain };
+  // Discard the current server-job exchange when the operator deliberately leaves
+  // (start over, run another): cancel-if-running, DELETE, clear the recovery
+  // record. Fire-and-forget -- the caller navigates away -- and a no-op on a
+  // browser run or before any job exists. This is what frees the appliance's
+  // single slot for the next exchange.
+  function abandonRun() {
+    const jobId = currentJobIdRef.current;
+    if (jobId === undefined) return;
+    currentJobIdRef.current = undefined;
+    void discardServerJob(jobApiClient, jobId);
+  }
+
+  return { run, outputs, failure, warnings, tryAgain, abandonRun };
 }

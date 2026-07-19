@@ -96,6 +96,7 @@ function stubJobApi(options: StubOptions = {}): {
   captured: Array<CapturedRequest>;
   setListing: (listing: unknown) => void;
   setProfile: (profile: unknown) => void;
+  setJobStatus: (status: string) => void;
   emitEvent: (event: object) => void;
   closeEvents: () => void;
 } {
@@ -108,6 +109,9 @@ function stubJobApi(options: StubOptions = {}): {
     files: [CLIENTS_FILE],
   };
   let profile: unknown = options.profile ?? CLIENTS_PROFILE;
+  // The run status the job's GET status endpoint reports (the discard poll reads
+  // it); a test flips it to a terminal value to let a discard complete promptly.
+  let jobStatus = "running";
 
   const jsonResponse = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), {
@@ -162,8 +166,13 @@ function stubJobApi(options: StubOptions = {}): {
             { status: 200, headers: { "Content-Type": "text/event-stream" } },
           ),
         );
-      if (url === "/api/jobs/job-7")
-        return Promise.resolve(jsonResponse({ recordAvailable: false }));
+      if (url === "/api/jobs/job-7") {
+        if ((init?.method ?? "GET") === "DELETE")
+          return Promise.resolve(new Response(null, { status: 204 }));
+        return Promise.resolve(
+          jsonResponse({ status: jobStatus, recordAvailable: false }),
+        );
+      }
       if (url === "/api/jobs/job-7/cancel")
         return Promise.resolve(new Response(null, { status: 200 }));
       return Promise.resolve(new Response(null, { status: 404 }));
@@ -177,6 +186,9 @@ function stubJobApi(options: StubOptions = {}): {
     },
     setProfile: (next) => {
       profile = next;
+    },
+    setJobStatus: (next) => {
+      jobStatus = next;
     },
     emitEvent: (event) =>
       sse?.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`)),
@@ -204,6 +216,9 @@ afterEach(async () => {
   container?.remove();
   root = undefined;
   container = undefined;
+  // A server-job run persists a strand-recovery record; clear it so the next
+  // test's idle bench does not re-attach to a prior run's id.
+  window.localStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -425,14 +440,16 @@ describe("console inviter mint and run", () => {
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Your invitation is ready");
 
-    // A server-job run: the keep-open callout names the appliance running the exchange
-    // and that leaving abandons it, never a browser listener. The whole sentence is
-    // asserted -- a substring would also pass a false "closing stops the run" claim.
+    // A server-job run: the keep-open callout names the appliance running the
+    // exchange and that leaving leaves it running (the console re-attaches), never
+    // a browser listener. The whole sentence is asserted -- a substring would also
+    // pass a false "leaving abandons the run" claim.
     await expect
       .element(
         page.getByText(
-          "This appliance is running the exchange. If you leave this page, " +
-            "the console cannot return to the run or its results.",
+          "This appliance is running the exchange. If you leave this page the " +
+            "run continues here; return to this console to pick it up or discard " +
+            "it.",
         ),
       )
       .toBeInTheDocument();
@@ -480,7 +497,7 @@ describe("console inviter mint and run", () => {
       ).toBe(true),
     );
     // Advancing past the wait flips the phase to the active run; the keep-open
-    // callout persists through it -- the whole window the unload guard arms.
+    // callout persists through it.
     api.emitEvent({ v: 1, type: "stage", id: "confirming protocol" });
     await expect
       .element(page.getByRole("heading", { level: 1 }))
@@ -488,8 +505,9 @@ describe("console inviter mint and run", () => {
     await expect
       .element(
         page.getByText(
-          "This appliance is running the exchange. If you leave this page, " +
-            "the console cannot return to the run or its results.",
+          "This appliance is running the exchange. If you leave this page the " +
+            "run continues here; return to this console to pick it up or discard " +
+            "it.",
         ),
       )
       .toBeInTheDocument();
@@ -569,6 +587,87 @@ describe("console inviter mint and run", () => {
     expect(body.name).toBe("clients.csv");
     expect(body.sizeBytes).toBeUndefined();
     expect(body.modifiedAt).toBeUndefined();
+  });
+});
+
+describe("console inviter run teardown and abandonment", () => {
+  /** Reach a running server-job run: create the invitation (SFTP default), then
+   * advance past the wait so the appliance is conducting the exchange. */
+  async function reachRunningRun(
+    api: ReturnType<typeof stubJobApi>,
+  ): Promise<void> {
+    await reachReviewCreate();
+    await page.getByRole("button", { name: "Create the invitation" }).click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Your invitation is ready");
+    await vi.waitFor(() =>
+      expect(api.captured.some((r) => r.url === "/api/jobs/job-7/events")).toBe(
+        true,
+      ),
+    );
+    api.emitEvent({ v: 1, type: "stage", id: "confirming protocol" });
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange in progress");
+  }
+
+  test("leaving the page does not cancel the appliance run", async () => {
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+    });
+    mount(createElement(InviterBench));
+    await reachRunningRun(api);
+
+    // Unmount stands in for a navigation / reload / tab close. It must NOT POST a
+    // cancel: the appliance keeps running the exchange and the recovery panel is
+    // the way back. This is the whole point of the strand-recovery change.
+    root?.unmount();
+    root = undefined;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(api.captured.some((r) => r.url === "/api/jobs/job-7/cancel")).toBe(
+      false,
+    );
+  });
+
+  test("start over from a failed run discards it, freeing the slot", async () => {
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+    });
+    mount(createElement(InviterBench));
+    await reachRunningRun(api);
+
+    // A non-retryable (security) failure offers start-over; mark the job terminal
+    // on the appliance so the discard DELETEs it at once.
+    api.setJobStatus("failed");
+    api.emitEvent({
+      v: 1,
+      type: "error",
+      category: "security",
+      message: "could not verify the partner",
+    });
+    api.closeEvents();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: "Start over with a fresh invitation",
+        }),
+      )
+      .toBeInTheDocument();
+
+    await page
+      .getByRole("button", { name: "Start over with a fresh invitation" })
+      .click();
+
+    // Start over abandons the failed run: the terminal job is DELETEd (no cancel
+    // needed for an already-terminal job), freeing the appliance's single slot.
+    await vi.waitFor(() =>
+      expect(
+        api.captured.some(
+          (r) => r.url === "/api/jobs/job-7" && r.method === "DELETE",
+        ),
+      ).toBe(true),
+    );
   });
 });
 

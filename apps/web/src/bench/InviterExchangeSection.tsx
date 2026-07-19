@@ -13,6 +13,7 @@ import {
   FailureAlert,
   RunWarningsAlert,
   SERVER_JOB_KEEP_OPEN_BODY,
+  SERVER_JOB_PEER_WINDOW_BODY,
   WithheldResultInset,
 } from "./BenchRunSurface";
 import { StatusPanel } from "./StatusPanel";
@@ -43,6 +44,7 @@ export function InviterExchangeSection({
   serverJob,
   onTryAgain,
   onStartOver,
+  onAbandon,
 }: {
   invitation: GeneratedInvitation;
   run: ExchangeRun;
@@ -65,6 +67,11 @@ export function InviterExchangeSection({
   serverJob: boolean;
   onTryAgain: () => void;
   onStartOver: () => void;
+  /** Discard the current server-job exchange (cancel-if-running + DELETE), fired
+   * as the operator leaves for a fresh exchange from the completion workfoot, so
+   * the appliance's single slot frees for the next one. A no-op on a browser run
+   * (no appliance job). */
+  onAbandon: () => void;
 }) {
   const phase =
     outputs !== undefined ? "done" : awaitingPartner(run) ? "share" : "running";
@@ -194,6 +201,9 @@ export function InviterExchangeSection({
                 ? SERVER_JOB_KEEP_OPEN_BODY
                 : "Your browser is listening for your partner. Closing the tab cancels the invitation; reloading starts over."}
             </p>
+            {serverJob && (
+              <p className={styles.small}>{SERVER_JOB_PEER_WINDOW_BODY}</p>
+            )}
           </div>
         )}
       {phase === "done" && (
@@ -247,7 +257,7 @@ export function InviterExchangeSection({
         </>
       )}
       {(phase === "done" || failure?.category === "output") && (
-        <AnotherExchangeFoot />
+        <AnotherExchangeFoot onNavigate={onAbandon} />
       )}
     </>
   );

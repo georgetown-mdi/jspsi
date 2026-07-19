@@ -6,6 +6,7 @@ import {
   JobApiRequestError,
   createFetchJobApiClient,
   createServerJobExchangeDriver,
+  createServerJobReattachDriver,
   fetchSftpConnection,
 } from "@psi/serverJobExchangeDriver";
 import { buildRunOutputs } from "@bench/runOutputs";
@@ -78,6 +79,7 @@ function scriptedClient(
 ) {
   const createdIntents: Array<unknown> = [];
   const cancelledIds: Array<string> = [];
+  const deletedIds: Array<string> = [];
   const client: JobApiClient = {
     createJob: (intent) => {
       createdIntents.push(intent);
@@ -88,12 +90,17 @@ function scriptedClient(
       cancelledIds.push(jobId);
       return Promise.resolve();
     },
+    deleteJob: (jobId) => {
+      deletedIds.push(jobId);
+      return Promise.resolve();
+    },
+    fetchJobStatus: () => Promise.resolve({ status: "running" }),
     fetchRecordAvailability: () =>
       typeof availability === "function"
         ? availability()
         : Promise.resolve(availability),
   };
-  return { client, createdIntents, cancelledIds };
+  return { client, createdIntents, cancelledIds, deletedIds };
 }
 
 function stages(...ids: Array<string>): RelayEvent {
@@ -656,10 +663,46 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
     expect(events.onError).not.toHaveBeenCalled();
   });
 
-  test("aborting mid-stream POSTs cancel and emits no spurious error", async () => {
+  test("onJobCreated fires with the created id before the stream opens", async () => {
+    const order: Array<string> = [];
+    const created: Array<string> = [];
+    const client: JobApiClient = {
+      createJob: () => {
+        order.push("create");
+        return Promise.resolve("job-77");
+      },
+      openEventStream: () => {
+        order.push("stream");
+        return scriptedStream([result(true)]);
+      },
+      cancelJob: () => Promise.resolve(),
+      deleteJob: () => Promise.resolve(),
+      fetchJobStatus: () => Promise.resolve({ status: "running" }),
+      fetchRecordAvailability: () => Promise.resolve({ available: false }),
+    };
+    const config: ServerJobExchangeDriverConfig = {
+      ...driverConfig(),
+      onJobCreated: (jobId) => {
+        order.push("onJobCreated");
+        created.push(jobId);
+      },
+    };
+
+    await createServerJobExchangeDriver(config, client).run(
+      driverEvents(new AbortController().signal),
+    );
+
+    expect(created).toEqual(["job-77"]);
+    // The seam fires after create resolves and before the event stream opens, so
+    // the recovery record is persisted the instant the job exists on the appliance.
+    expect(order).toEqual(["create", "onJobCreated", "stream"]);
+  });
+
+  test("aborting mid-stream does NOT POST cancel and emits no spurious error", async () => {
     const controller = new AbortController();
-    // The stream aborts itself after the first stage, standing in for the caller
-    // pressing cancel while the job is still running.
+    // The stream aborts itself after the first stage, standing in for an unmount /
+    // reload / tab close mid-run. An abort now carries NO cancel intent: it only
+    // stops consuming the stream silently, and the appliance's run keeps going.
     async function* abortingStream(): AsyncIterable<RelayEvent> {
       await Promise.resolve();
       yield stage("prepare");
@@ -674,6 +717,8 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
         cancelledIds.push(jobId);
         return Promise.resolve();
       },
+      deleteJob: () => Promise.resolve(),
+      fetchJobStatus: () => Promise.resolve({ status: "running" }),
       fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
     const driver = createServerJobExchangeDriver(driverConfig(), client);
@@ -681,9 +726,10 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
 
     await driver.run(events);
 
-    expect(cancelledIds).toEqual(["job-42"]);
-    // The abort is a deliberate user-leave: no error, and the post-abort stage
-    // is never mapped.
+    // No cancel is POSTed off the signal.
+    expect(cancelledIds).toEqual([]);
+    // The abort is a silent user-leave: no error, and the post-abort stage is
+    // never mapped.
     expect(events.onError).not.toHaveBeenCalled();
     expect(events.onResult).not.toHaveBeenCalled();
     expect(events.onStage.mock.calls.map((call) => call[0])).toEqual([
@@ -697,6 +743,8 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
         Promise.reject(new JobApiRequestError(400, "bad intent")),
       openEventStream: () => scriptedStream([]),
       cancelJob: () => Promise.resolve(),
+      deleteJob: () => Promise.resolve(),
+      fetchJobStatus: () => Promise.resolve(null),
       fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
     const driver = createServerJobExchangeDriver(driverConfig(), failingClient);
@@ -714,6 +762,8 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
         Promise.reject(new JobApiRequestError(500, "server error")),
       openEventStream: () => scriptedStream([]),
       cancelJob: () => Promise.resolve(),
+      deleteJob: () => Promise.resolve(),
+      fetchJobStatus: () => Promise.resolve(null),
       fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
     const driver = createServerJobExchangeDriver(driverConfig(), client);
@@ -924,6 +974,141 @@ describe("createFetchJobApiClient over an injected fetch", () => {
         signal,
       ),
     ).resolves.toEqual({ available: false });
+  });
+});
+
+describe("createServerJobReattachDriver", () => {
+  test("replays a finished job's full history to onResult, creating no job", async () => {
+    const { client, createdIntents } = scriptedClient([
+      stages("prepare", "exchange"),
+      stage("prepare"),
+      stage("exchange"),
+      result(true),
+    ]);
+    const events = driverEvents(new AbortController().signal);
+
+    await createServerJobReattachDriver("job-1", client).run(events);
+
+    // Re-attach never creates a job; it only reads the id's stream.
+    expect(createdIntents).toHaveLength(0);
+    expect(events.onStages).toHaveBeenCalledTimes(1);
+    expect(events.onStage.mock.calls.map((call) => call[0])).toEqual([
+      "prepare",
+      "exchange",
+    ]);
+    expect(events.onResult).toHaveBeenCalledTimes(1);
+    const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
+    expect(outputs.resultsUrl).toBe("/api/jobs/job-1/result");
+    expect(events.onError).not.toHaveBeenCalled();
+  });
+
+  test("a stream 404 surfaces as the onError the recovery panel maps to stale", async () => {
+    const client: JobApiClient = {
+      createJob: () => Promise.reject(new Error("re-attach never creates")),
+      // Match the real stream: the non-ok status throws on the first pull.
+      openEventStream: () => ({
+        [Symbol.asyncIterator]: () => ({
+          next: () =>
+            Promise.reject(
+              new JobApiRequestError(
+                404,
+                "GET /api/jobs/job-x/events failed with status 404",
+              ),
+            ),
+        }),
+      }),
+      cancelJob: () => Promise.resolve(),
+      deleteJob: () => Promise.resolve(),
+      fetchJobStatus: () => Promise.resolve(null),
+      fetchRecordAvailability: () => Promise.resolve({ available: false }),
+    };
+    const events = driverEvents(new AbortController().signal);
+
+    await createServerJobReattachDriver("job-x", client).run(events);
+
+    expect(events.onResult).not.toHaveBeenCalled();
+    expect(events.onError).toHaveBeenCalledTimes(1);
+    const failure = events.onError.mock.calls[0][0] as {
+      category: string;
+      error: unknown;
+    };
+    expect(failure.category).toBe("exchange");
+    expect(failure.error).toBeInstanceOf(JobApiRequestError);
+    expect((failure.error as JobApiRequestError).status).toBe(404);
+  });
+
+  test("an already-aborted signal reads nothing", async () => {
+    const { client } = scriptedClient([result(true)]);
+    const controller = new AbortController();
+    controller.abort();
+    const events = driverEvents(controller.signal);
+
+    await createServerJobReattachDriver("job-1", client).run(events);
+
+    expect(events.onResult).not.toHaveBeenCalled();
+    expect(events.onError).not.toHaveBeenCalled();
+  });
+});
+
+describe("createFetchJobApiClient deleteJob and fetchJobStatus", () => {
+  function statusFetch(body: unknown, status = 200): typeof fetch {
+    return () =>
+      Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+  }
+
+  test("deleteJob issues a DELETE to the job endpoint", async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    const fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), method: init?.method ?? "GET" });
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }) as typeof fetch;
+
+    await createFetchJobApiClient(fetchImpl).deleteJob("job-5");
+
+    expect(calls).toEqual([{ url: "/api/jobs/job-5", method: "DELETE" }]);
+  });
+
+  test("fetchJobStatus reads a terminal status off a 200", async () => {
+    const signal = new AbortController().signal;
+    await expect(
+      createFetchJobApiClient(
+        statusFetch({ status: "succeeded" }),
+      ).fetchJobStatus("job-1", signal),
+    ).resolves.toEqual({ status: "succeeded" });
+  });
+
+  test("a 200 with no recognizable status defaults to running (never gone)", async () => {
+    const signal = new AbortController().signal;
+    // A live in-memory job the status route answered 200 for must never read as
+    // gone, or the recovery panel would delete it; default to running.
+    await expect(
+      createFetchJobApiClient(statusFetch({})).fetchJobStatus("job-1", signal),
+    ).resolves.toEqual({ status: "running" });
+  });
+
+  test("a 404, a 500, and a network error all read as null (not on the appliance)", async () => {
+    const signal = new AbortController().signal;
+    const notFound: typeof fetch = () =>
+      Promise.resolve(new Response(null, { status: 404 }));
+    await expect(
+      createFetchJobApiClient(notFound).fetchJobStatus("job-1", signal),
+    ).resolves.toBeNull();
+    await expect(
+      createFetchJobApiClient(statusFetch(null, 500)).fetchJobStatus(
+        "job-1",
+        signal,
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      createFetchJobApiClient(() =>
+        Promise.reject(new Error("offline")),
+      ).fetchJobStatus("job-1", signal),
+    ).resolves.toBeNull();
   });
 });
 

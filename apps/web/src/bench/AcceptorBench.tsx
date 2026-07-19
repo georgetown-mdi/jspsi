@@ -70,6 +70,7 @@ import { BenchShell } from "./BenchShell";
 import { Ledger } from "./Ledger";
 import { ManageExchangeOffer } from "./ManageExchangeOffer";
 import { Problems } from "./Problems";
+import { RecoveredExchangePanel } from "./RecoveredExchangePanel";
 import { ServerFilePicker } from "./ServerFilePicker";
 import { TopBar } from "./TopBar";
 import { acceptorTimelineSteps } from "./exchangeRun";
@@ -637,26 +638,19 @@ export function AcceptorBench() {
     // decode, so keying the memo on it alone cannot go stale.
   }, [launched]);
 
-  const { run, outputs, failure, tryAgain } = useAcceptorExchange({ launch });
-
-  // A console server-job accept is still executing on the appliance while it is
-  // launched and the run has not settled; leaving the page abandons it (an
-  // in-app teardown cancels the run, a hard close strands it).
-  const consoleExchangeRunning =
-    acceptServerJob &&
-    launched !== undefined &&
-    outputs === undefined &&
-    failure === undefined;
+  const { run, outputs, failure, tryAgain, abandonRun } = useAcceptorExchange({
+    launch,
+  });
 
   // The unload guard arms once the acceptor's file is chosen -- a browser drop on
   // the hosted build, or a committed mounted-file profile on the console -- and
-  // disarms once the exchange is launched (a browser run is dialing), unless a
-  // console server-job exchange is still running on the appliance, which keeps it
-  // armed until the run settles.
+  // disarms once the exchange is launched (a browser run is dialing). A console
+  // server-job accept is NOT armed: leaving the page does not abandon it (the
+  // appliance keeps running it and the recovery panel is the way back), so a
+  // prompt would assert a loss that does not happen.
   useUnloadGuard({
     hasFile: file !== undefined || consoleSource !== undefined,
     finalized: launched !== undefined,
-    consoleExchangeRunning,
   });
 
   // The coverage input, unified across builds: the browser's parsed rows on the
@@ -870,6 +864,10 @@ export function AcceptorBench() {
   // hook's effect cleanup and resets it) and return to the confirm-columns step
   // with every column-step input intact, where the acceptor fixes its settings.
   const backToColumns = () => {
+    // A server-job accept the operator is leaving is deliberately abandoned:
+    // cancel-if-running and DELETE, which frees the appliance's single slot for
+    // the re-launch. A no-op on a browser accept.
+    abandonRun();
     setLaunched(undefined);
     setManageStatus("idle");
     goToStep("columns");
@@ -949,6 +947,10 @@ export function AcceptorBench() {
     <BenchShell topBar={ready ? topBar : undefined} ledger={ledger}>
       <div ref={stepHeadingRef}>
         <Problems problems={launchedProblems} />
+        {/* The console's idle entry state (no token accepted yet -- the review
+            step, before consent and file): a way back to an exchange still running
+            from a prior visit. Renders nothing when there is none to recover. */}
+        {consoleBuild && step === "review" && <RecoveredExchangePanel />}
         {decode.status === "pending" && (
           <p aria-live="polite">Reading your invitation...</p>
         )}
@@ -1248,6 +1250,7 @@ export function AcceptorBench() {
               serverJob={acceptServerJob}
               onTryAgain={tryAgain}
               onFixColumns={backToColumns}
+              onAbandon={abandonRun}
             />
             {/* The manage offer is webrtc-only (its record composes a webrtc
                 locator from the invitation's endpoint) and is skippable: leaving

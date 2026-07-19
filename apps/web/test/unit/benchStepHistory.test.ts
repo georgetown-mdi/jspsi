@@ -127,36 +127,9 @@ describe("unloadGuardArmed", () => {
     ).toBe(true);
   });
 
-  test("armed while a console server-job exchange runs, though finalized", () => {
-    // The invitation is minted (finalized), but the appliance's CLI child is still
-    // conducting the exchange, so closing the tab strands it: the guard stays armed.
-    expect(
-      unloadGuardArmed({
-        hasFile: true,
-        finalized: true,
-        consoleExchangeRunning: true,
-      }),
-    ).toBe(true);
-  });
-
-  test("disarmed once the console server-job exchange settles", () => {
-    expect(
-      unloadGuardArmed({
-        hasFile: true,
-        finalized: true,
-        consoleExchangeRunning: false,
-      }),
-    ).toBe(false);
-  });
-
-  test("the synthetic sample stays disarmed even mid-run", () => {
-    expect(
-      unloadGuardArmed({
-        hasFile: true,
-        finalized: true,
-        consoleExchangeRunning: true,
-        demoActive: true,
-      }),
-    ).toBe(false);
+  test("stays disarmed once finalized even for a console server-job run", () => {
+    // A finalized console exchange runs on the appliance; leaving no longer
+    // abandons it (the recovery panel re-attaches), so the guard does not re-arm.
+    expect(unloadGuardArmed({ hasFile: true, finalized: true })).toBe(false);
   });
 });

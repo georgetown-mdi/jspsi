@@ -23,10 +23,15 @@ export interface WorkInputReference {
   name: string;
 }
 
-/** The `GET /api/jobs/inputs` outcome: the listing, or an error (network / non-2xx
- * / malformed). */
+/** The `GET /api/jobs/inputs` outcome: the listing, a stable `disabled` state (the
+ * job API is off -- `JOB_DATA_ROOT` unset -- so the gate 404s), or a transient
+ * `error` (another non-2xx, a network fault, or a malformed body). The picker
+ * renders these as three distinct states so an off-appliance signal reads as
+ * configuration, not a fault to retry. */
 export type JobInputsResult =
-  { kind: "listing"; listing: JobInputListing } | { kind: "error" };
+  | { kind: "listing"; listing: JobInputListing }
+  | { kind: "disabled" }
+  | { kind: "error" };
 
 /** The validated console profile: the wire {@link JobInputProfile}'s fields with
  * `columnSamples` rebuilt as a `Map` keyed by column name. A prototype-member column
@@ -160,12 +165,17 @@ function jobInputProfileOf(body: unknown): ProfiledJobInput | null {
   };
 }
 
-/** List the operator-mounted input files. */
+/** List the operator-mounted input files. A 404 is the deliberate API-disabled
+ * state (`JOB_DATA_ROOT` unset, so the route's gate answers 404): the route
+ * exists in every build and the picker renders only on a console build, so a 404
+ * here is unambiguous config, not a transient fault. Every other non-2xx, a
+ * network error, and a malformed body stay the transient `error` state. */
 export async function fetchJobInputs(
   fetchImpl: typeof fetch = fetch,
 ): Promise<JobInputsResult> {
   try {
     const response = await fetchImpl("/api/jobs/inputs", { method: "GET" });
+    if (response.status === 404) return { kind: "disabled" };
     if (!response.ok) return { kind: "error" };
     const body: unknown = await response.json();
     const listing = jobInputListingOf(body);

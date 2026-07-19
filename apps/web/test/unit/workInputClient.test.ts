@@ -54,12 +54,23 @@ describe("fetchJobInputs", () => {
     expect(result).toEqual({ kind: "listing", listing: LISTING });
   });
 
-  test("maps any non-2xx to error", async () => {
+  test("maps a 404 to the API-disabled state (JOB_DATA_ROOT unset)", async () => {
+    // The gate 404s when the API is off; the picker renders only on a console
+    // build, so a 404 here is deliberate config, not a transient fault.
     expect(
       await fetchJobInputs(() =>
-        Promise.resolve(new Response(null, { status: 500 })),
+        Promise.resolve(new Response(null, { status: 404 })),
       ),
-    ).toEqual({ kind: "error" });
+    ).toEqual({ kind: "disabled" });
+  });
+
+  test("maps any other non-2xx to the transient error state", async () => {
+    for (const status of [500, 502, 503])
+      expect(
+        await fetchJobInputs(() =>
+          Promise.resolve(new Response(null, { status })),
+        ),
+      ).toEqual({ kind: "error" });
   });
 
   test("carries the unreadable-mount state through", async () => {

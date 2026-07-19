@@ -71,6 +71,12 @@ export interface ServerJobExchangeDriverConfig {
    * leaves it undefined -- the lock-in is the acceptor's. */
   expectedPayloadColumns?: Array<string>;
   options?: JobExchangeOptions;
+  /** Invoked with the created job's id the moment `POST /api/jobs` resolves,
+   * before the event stream opens. The seam the console's strand-recovery record
+   * is written from ({@link ../psi/consoleJobAttachment}): the job exists on the
+   * appliance from this point, so persisting its id here lets a reload or a hard
+   * tab close re-attach to the run. */
+  onJobCreated?: (jobId: string) => void;
 }
 
 /** The exchange-record pair's availability on the appliance, read off
@@ -100,6 +106,21 @@ export interface JobApiClient {
   /** `POST /api/jobs/:id/cancel`; best-effort, errors are swallowed by the
    * caller since a cancel races a naturally-terminating job. */
   cancelJob: (jobId: string) => Promise<void>;
+  /** `DELETE /api/jobs/:id`; the one operation that removes the workdir. The
+   * caller swallows errors (best-effort, like {@link cancelJob}): a discard
+   * races a job the operator has already left, and a 404 for an already-gone id
+   * is a no-op. */
+  deleteJob: (jobId: string) => Promise<void>;
+  /** `GET /api/jobs/:id`, resolving the status body (a {@link JobStatusView}) or
+   * null when the id is unknown (a 404), unreachable, or malformed -- the
+   * recovery probe and the discard poll both read it. Null is the deliberate
+   * "the exchange is not on the appliance" signal (deleted or forgotten by a
+   * restart); a 200 always resolves a view, so a live job is never misread as
+   * gone. */
+  fetchJobStatus: (
+    jobId: string,
+    signal: AbortSignal,
+  ) => Promise<JobStatusView | null>;
   /** `GET /api/jobs/:id`, reading `recordAvailable`/`recordCreatedAt` off the
    * status body. A graceful-degrade metadata fetch: the driver delivers the
    * result without the record pair if this fails or aborts. */
@@ -107,6 +128,21 @@ export interface JobApiClient {
     jobId: string,
     signal: AbortSignal,
   ) => Promise<RecordAvailability>;
+}
+
+/** The exchange's live run status, read off `GET /api/jobs/:id`. `running` is a
+ * live child; the other three are terminal outcomes (the status flips from
+ * `running` once the child's terminal is reconciled). The recovery panel reads it
+ * to head the surface and the discard poll reads it to wait out a graceful
+ * cancel. */
+export type JobRunStatus = "running" | "succeeded" | "failed" | "cancelled";
+
+/** The status body a recovery probe or a discard poll needs off
+ * `GET /api/jobs/:id`: only the run status. The endpoint carries more (terminal,
+ * record availability), but re-attachment reconstructs the run from the event
+ * stream, so the status view stays minimal. */
+export interface JobStatusView {
+  status: JobRunStatus;
 }
 
 /** A non-2xx response from the job API, carrying the status so the driver can
@@ -174,6 +210,25 @@ export function createFetchJobApiClient(
     cancelJob: async (jobId) => {
       await fetchImpl(`/api/jobs/${jobId}/cancel`, { method: "POST" });
     },
+    deleteJob: async (jobId) => {
+      await fetchImpl(`/api/jobs/${jobId}`, { method: "DELETE" });
+    },
+    fetchJobStatus: async (jobId, signal) => {
+      try {
+        const response = await fetchImpl(`/api/jobs/${jobId}`, {
+          method: "GET",
+          signal,
+        });
+        // Any non-2xx (a 404 for a deleted/forgotten job, or an unreachable
+        // server) is "not on the appliance"; a 200 always yields a view, so a
+        // live in-memory job -- which the status route answers 200 for -- is
+        // never misread as gone.
+        if (!response.ok) return null;
+        return jobStatusViewOf(await response.json());
+      } catch {
+        return null;
+      }
+    },
     fetchRecordAvailability: async (jobId, signal) => {
       const response = await fetchImpl(`/api/jobs/${jobId}`, {
         method: "GET",
@@ -187,6 +242,24 @@ export function createFetchJobApiClient(
         return { available: false };
       return { available: true, createdAt };
     },
+  };
+}
+
+/** Read the run status off a `GET /api/jobs/:id` body, defaulting a missing or
+ * unrecognized value to `running`. A 200 always maps to a view: the response
+ * having come back at all proves the exchange is on the appliance, so it must
+ * never read as gone, and erring toward `running` keeps the discard poll waiting
+ * for a graceful cancel rather than deleting under a live child. */
+function jobStatusViewOf(body: unknown): JobStatusView {
+  const status =
+    body !== null && typeof body === "object"
+      ? (body as { status?: unknown }).status
+      : undefined;
+  return {
+    status:
+      status === "succeeded" || status === "failed" || status === "cancelled"
+        ? status
+        : "running",
   };
 }
 
@@ -441,25 +514,21 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
  * it is logged and dropped.
  *
  * Cancellation stays on the run's signal: an already-aborted signal starts
- * nothing; an abort mid-run POSTs a cancel and stops consuming the stream
- * without emitting a spurious error, matching how the browser lifecycle treats a
- * caller-initiated abort as silent.
+ * nothing, and an abort mid-run stops consuming the stream silently. It carries
+ * NO cancel intent -- an unmount, reload, or tab close leaves the appliance's
+ * exchange running, and only an explicit discard (start over, try again, run
+ * another, or the recovery panel's Stop/Discard) cancels or deletes it. So the
+ * driver never POSTs a cancel off the signal.
  */
 export function createServerJobExchangeDriver(
   config: ServerJobExchangeDriverConfig,
   client: JobApiClient = createFetchJobApiClient(),
 ): ExchangeDriver<RunOutputs> {
   return {
-    run: async ({
-      signal,
-      onStages,
-      onStage,
-      onResult,
-      onError,
-      onWarning,
-    }: ExchangeDriverEvents<RunOutputs>) => {
-      // Read the live abort state through a call so the re-checks across each
-      // `await` below are not narrowed to a constant by the first guard.
+    run: async (events: ExchangeDriverEvents<RunOutputs>) => {
+      const { signal } = events;
+      // Read the live abort state through a call so the re-check after the await
+      // is not narrowed to a constant by the first guard.
       const aborted = () => signal.aborted;
       if (aborted()) return;
 
@@ -470,101 +539,132 @@ export function createServerJobExchangeDriver(
         jobId = await client.createJob(intent, signal);
       } catch (error) {
         if (aborted()) return;
-        onError({ category: createJobFailureCategory(error), error });
+        events.onError({ category: createJobFailureCategory(error), error });
         return;
       }
 
-      // A caller-initiated abort is silent (no spurious error), matching the
-      // browser lifecycle; it best-effort cancels the server job and stops
-      // consuming the stream.
-      const onAbort = () => {
-        void client.cancelJob(jobId).catch((error) => {
-          log.error("server job cancel failed:", error);
-        });
-      };
-      if (aborted()) {
-        onAbort();
-        return;
-      }
-      signal.addEventListener("abort", onAbort, { once: true });
+      // The job now exists on the appliance; persist its id (the console's
+      // strand-recovery seam) before opening the stream, so a hard tab close
+      // between here and the terminal can still re-attach.
+      config.onJobCreated?.(jobId);
 
-      try {
-        for await (const event of client.openEventStream(jobId, signal)) {
-          if (aborted()) return;
-          switch (event.type) {
-            case "stages":
-              onStages(stagesOf(event));
-              break;
-            case "stage": {
-              const id = event.id;
-              if (typeof id === "string") onStage(id);
-              break;
-            }
-            case "warning": {
-              // Dev-gated like onError: event.message is server/CLI-controlled,
-              // so a production console carries none of it. The consumer's
-              // optional onWarning is the operator-facing slot; it renders
-              // through its own display-boundary sanitization.
-              whenDiagnostic(() =>
-                log.warn("server job warning:", event.message),
-              );
-              const message = event.message;
-              if (
-                onWarning !== undefined &&
-                typeof message === "string" &&
-                message.length > 0
-              )
-                onWarning(message);
-              break;
-            }
-            case "result": {
-              const outputs = baseResultOutputs(event, jobId);
-              const availability = await queryRecordAvailability(
-                client,
-                jobId,
-                signal,
-              );
-              // Re-check after the await: a caller-initiated abort mid-query
-              // stays silent, matching the browser lifecycle.
-              if (aborted()) return;
-              if (availability.available)
-                withRecordDownloads(outputs, jobId, availability.createdAt);
-              onResult(outputs);
-              return;
-            }
-            case "error":
-              onError({
-                category: errorCategoryOf(event),
-                error: new Error(errorMessageOf(event)),
-              });
-              return;
-            default:
-              // `stageEnd` and `metrics` are recognized progress/summary events
-              // (in RELAY_EVENT_TYPES so the relay does not degrade them) that the
-              // console does not yet surface; they carry no lifecycle mapping, so
-              // consume and ignore them rather than treating them as an error.
-              break;
-          }
-        }
-        // The job API reconciles a terminal event for every job before it closes
-        // the stream, so a terminal-less close is a truncated stream rather than
-        // a completed run. Surface it so the contract's exactly-one-terminal
-        // guarantee holds at the driver boundary instead of leaving the run hung.
-        if (!aborted())
-          onError({
-            category: "exchange",
-            error: new Error(
-              "the exchange event stream ended without a result",
-            ),
-          });
-      } catch (error) {
-        if (aborted()) return;
-        onError({ category: "exchange", error });
-      } finally {
-        signal.removeEventListener("abort", onAbort);
-      }
+      await consumeJobStream(client, jobId, events);
     },
   };
+}
+
+/**
+ * Re-attach to an already-created job by id: `run` skips creation and consumes
+ * `GET /api/jobs/:id/events` from offset 0. The SSE full-history replay
+ * reconstructs the whole lifecycle -- stages, warnings, and the terminal -- for a
+ * finished run in one request, and continues live for a running one, so the same
+ * event fold the hooks use drives the recovery surface unchanged. A 404 from the
+ * events route (the job was deleted, or a restart forgot it) surfaces as the
+ * existing terminal error the recovery panel maps to "stale". Carries no intent
+ * and no cancel: it only reads the stream.
+ */
+export function createServerJobReattachDriver(
+  jobId: string,
+  client: JobApiClient = createFetchJobApiClient(),
+): ExchangeDriver<RunOutputs> {
+  return {
+    run: async (events: ExchangeDriverEvents<RunOutputs>) => {
+      if (events.signal.aborted) return;
+      await consumeJobStream(client, jobId, events);
+    },
+  };
+}
+
+/**
+ * Consume a job's SSE event stream and fold each frame onto the typed lifecycle
+ * events, shared by the create-then-run and the re-attach drivers. An aborted
+ * signal stops consumption silently (no terminal, no cancel), matching the
+ * browser lifecycle's treatment of a caller-initiated abort.
+ */
+async function consumeJobStream(
+  client: JobApiClient,
+  jobId: string,
+  {
+    signal,
+    onStages,
+    onStage,
+    onResult,
+    onError,
+    onWarning,
+  }: ExchangeDriverEvents<RunOutputs>,
+): Promise<void> {
+  // Read the live abort state through a call so the re-checks across each
+  // `await` below are not narrowed to a constant by the first guard.
+  const aborted = () => signal.aborted;
+  try {
+    for await (const event of client.openEventStream(jobId, signal)) {
+      if (aborted()) return;
+      switch (event.type) {
+        case "stages":
+          onStages(stagesOf(event));
+          break;
+        case "stage": {
+          const id = event.id;
+          if (typeof id === "string") onStage(id);
+          break;
+        }
+        case "warning": {
+          // Dev-gated like onError: event.message is server/CLI-controlled,
+          // so a production console carries none of it. The consumer's
+          // optional onWarning is the operator-facing slot; it renders
+          // through its own display-boundary sanitization.
+          whenDiagnostic(() => log.warn("server job warning:", event.message));
+          const message = event.message;
+          if (
+            onWarning !== undefined &&
+            typeof message === "string" &&
+            message.length > 0
+          )
+            onWarning(message);
+          break;
+        }
+        case "result": {
+          const outputs = baseResultOutputs(event, jobId);
+          const availability = await queryRecordAvailability(
+            client,
+            jobId,
+            signal,
+          );
+          // Re-check after the await: a caller-initiated abort mid-query
+          // stays silent, matching the browser lifecycle.
+          if (aborted()) return;
+          if (availability.available)
+            withRecordDownloads(outputs, jobId, availability.createdAt);
+          onResult(outputs);
+          return;
+        }
+        case "error":
+          onError({
+            category: errorCategoryOf(event),
+            error: new Error(errorMessageOf(event)),
+          });
+          return;
+        default:
+          // `stageEnd` and `metrics` are recognized progress/summary events
+          // (in RELAY_EVENT_TYPES so the relay does not degrade them) that the
+          // console does not yet surface; they carry no lifecycle mapping, so
+          // consume and ignore them rather than treating them as an error.
+          break;
+      }
+    }
+    // The job API reconciles a terminal event for every job before it closes
+    // the stream, so a terminal-less close is a truncated stream rather than
+    // a completed run. Surface it so the contract's exactly-one-terminal
+    // guarantee holds at the driver boundary instead of leaving the run hung.
+    if (!aborted())
+      onError({
+        category: "exchange",
+        error: new Error("the exchange event stream ended without a result"),
+      });
+  } catch (error) {
+    if (aborted()) return;
+    onError({ category: "exchange", error });
+  }
 }
 
 /** Query the job's record availability as a graceful-degrade step: any failure

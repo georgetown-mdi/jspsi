@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Alert,
+  Anchor,
   Badge,
   Button,
   Group,
@@ -60,6 +61,8 @@ const PROFILE_UNAVAILABLE_COPY: Record<
 /** The listing settle copy for the aria-live status region. */
 function listingLiveMessage(listing: JobInputsResult | "loading"): string {
   if (listing === "loading") return "";
+  if (listing.kind === "disabled")
+    return "The job API is disabled on this appliance.";
   if (listing.kind === "error") return "The file listing could not be loaded.";
   const { files, configured, readable } = listing.listing;
   if (!configured) return "No work directory is configured on this appliance.";
@@ -245,6 +248,34 @@ function ListingView({
           Loading files from the appliance...
         </Text>
       </Group>
+    );
+
+  // The job API is deliberately off (JOB_DATA_ROOT unset), a stable config state
+  // -- so it reads as informational and names the variable to set, distinct from
+  // the red transient fault below whose advice is to retry.
+  if (listing.kind === "disabled")
+    return (
+      <Stack gap="sm">
+        <Alert
+          color="blue"
+          icon={<IconAlertCircle />}
+          title="The job API is disabled on this appliance"
+        >
+          The job API is off because JOB_DATA_ROOT is not set, so this appliance
+          cannot list or run files. Set it to the mounted data root and restart
+          the appliance -- see the{" "}
+          <Anchor
+            inherit
+            href="https://github.com/georgetown-mdi/jspsi/blob/main/docs/DEPLOYMENT.md"
+            target="_blank"
+            rel="noreferrer"
+          >
+            deployment guide
+          </Anchor>
+          .
+        </Alert>
+        {refreshButton}
+      </Stack>
     );
 
   if (listing.kind === "error")

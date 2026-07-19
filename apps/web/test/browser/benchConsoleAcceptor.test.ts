@@ -136,6 +136,9 @@ afterEach(async () => {
   root = undefined;
   container = undefined;
   window.location.hash = "";
+  // A server-job accept persists a strand-recovery record; clear it so the next
+  // test's idle bench does not re-attach to a prior run's id.
+  window.localStorage.clear();
   vi.unstubAllGlobals();
 });
 

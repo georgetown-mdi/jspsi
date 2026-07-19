@@ -12,6 +12,7 @@ import {
   DownloadRow,
   FailureAlert,
   SERVER_JOB_KEEP_OPEN_BODY,
+  SERVER_JOB_PEER_WINDOW_BODY,
   WithheldResultInset,
 } from "./BenchRunSurface";
 import { StatusPanel } from "./StatusPanel";
@@ -47,6 +48,7 @@ export function AcceptorExchangeSection({
   serverJob,
   onTryAgain,
   onFixColumns,
+  onAbandon,
 }: {
   invitation: AcceptableInvitation;
   run: ExchangeRun;
@@ -64,6 +66,11 @@ export function AcceptorExchangeSection({
   /** Return to the confirm-columns step with every setting intact -- a prepare-time
    * config failure's recovery, since the acceptor fixes its own settings there. */
   onFixColumns: () => void;
+  /** Discard the current server-job exchange (cancel-if-running + DELETE), fired as
+   * the operator leaves for a fresh invitation (the start-over link) or a new
+   * exchange (the completion workfoot), so the appliance's single slot frees. A
+   * no-op on a browser run. */
+  onAbandon: () => void;
 }) {
   const phase = outputs !== undefined ? "done" : "running";
 
@@ -135,6 +142,7 @@ export function AcceptorExchangeSection({
                 color="red"
                 variant="light"
                 mt="sm"
+                onClick={() => onAbandon()}
               >
                 Start over with a fresh invitation
               </Button>
@@ -171,6 +179,7 @@ export function AcceptorExchangeSection({
         <div className={styles.callout}>
           <p className={styles.calloutLead}>Keep this tab open.</p>
           <p className={styles.small}>{SERVER_JOB_KEEP_OPEN_BODY}</p>
+          <p className={styles.small}>{SERVER_JOB_PEER_WINDOW_BODY}</p>
         </div>
       )}
       {phase === "done" && (
@@ -223,7 +232,7 @@ export function AcceptorExchangeSection({
         </>
       )}
       {(phase === "done" || failure?.category === "output") && (
-        <AnotherExchangeFoot />
+        <AnotherExchangeFoot onNavigate={onAbandon} />
       )}
     </>
   );

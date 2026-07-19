@@ -95,6 +95,7 @@ import { Ledger } from "./Ledger";
 import { ManageExchangeOffer } from "./ManageExchangeOffer";
 import { MatchingSharingSection } from "./MatchingSharingSection";
 import { Problems } from "./Problems";
+import { RecoveredExchangePanel } from "./RecoveredExchangePanel";
 import { ReviewCreateSection } from "./ReviewCreateSection";
 import { SaveExchangeSection } from "./SaveExchangeSection";
 import { TopBar } from "./TopBar";
@@ -299,13 +300,14 @@ export function InviterBench() {
   // for a saved exchange. A `server-job` run mode runs live too -- the console
   // appliance carries it out -- so it drives the hook exactly as `browser` does.
   const runsLive = chosenRunMode !== "save-file";
-  const { run, outputs, failure, warnings, tryAgain } = useInviterExchange({
-    invitation: runsLive ? invitation : undefined,
-    inviterName: editor?.draft.identity ?? "",
-    channel: transport,
-    inputSource,
-    sftpConfigured,
-  });
+  const { run, outputs, failure, warnings, tryAgain, abandonRun } =
+    useInviterExchange({
+      invitation: runsLive ? invitation : undefined,
+      inviterName: editor?.draft.identity ?? "",
+      channel: transport,
+      inputSource,
+      sftpConfigured,
+    });
 
   // The coverage input, unified across builds: the browser's parsed rows on the
   // hosted build, the mounted-file reference on the console (whose sweep is a fetch
@@ -357,6 +359,10 @@ export function InviterBench() {
   // already torn down; the hook drops the run state), and the operator lands
   // back on Review & create, where the next create mints a fresh secret.
   function startOver() {
+    // A server-job run the operator is leaving is deliberately abandoned:
+    // cancel-if-running and DELETE, which also frees the appliance's single slot
+    // for the fresh create. A no-op on a browser run.
+    abandonRun();
     setEditor((current) =>
       current === undefined ? current : unsealEditor(current),
     );
@@ -446,25 +452,15 @@ export function InviterBench() {
     if (isSection(step)) return restoreSection(step);
   });
 
-  // A console server-job run is still executing on the appliance while its
-  // invitation is minted and the run has not settled; leaving the page abandons
-  // it (an in-app teardown cancels the run, a hard close strands it), so the
-  // guard stays armed through it.
-  const consoleExchangeRunning =
-    chosenRunMode === "server-job" &&
-    invitation !== undefined &&
-    outputs === undefined &&
-    failure === undefined;
-
   // The unload guard arms once a file is loaded and disarms once the exchange is
   // finalized -- the invitation minted (a browser run is listening) or the
-  // exchange file saved -- unless a console server-job exchange is still running on
-  // the appliance, which keeps it armed until the run settles.
+  // exchange file saved. A console server-job run is NOT armed: leaving the page
+  // does not abandon it (the appliance keeps running it and the recovery panel is
+  // the way back), so a prompt would assert a loss that does not happen.
   useUnloadGuard({
     hasFile: acquired !== undefined,
     finalized: invitation !== undefined || savedExchange !== undefined,
     demoActive,
-    consoleExchangeRunning,
   });
 
   function goTo(next: Section) {
@@ -1041,6 +1037,12 @@ export function InviterBench() {
     >
       <div ref={headingRef}>
         <Problems problems={problems} />
+        {/* The console's idle entry state (no file acquired): a way back to an
+            exchange still running from a prior visit. Renders nothing when there
+            is none to recover. */}
+        {isConsoleBuild() && section === "file" && acquired === undefined && (
+          <RecoveredExchangePanel />
+        )}
         {section === "file" && (
           <YourFileSection
             name={name}
@@ -1232,6 +1234,7 @@ export function InviterBench() {
               serverJob={chosenRunMode === "server-job"}
               onTryAgain={tryAgain}
               onStartOver={startOver}
+              onAbandon={abandonRun}
             />
             {/* The manage offer is webrtc-only (its record composes a webrtc
                 locator) and is skippable: leaving it untouched keeps the exchange
