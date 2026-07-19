@@ -6,6 +6,16 @@ It is a npm workspaces monorepo (`packages/core`, `apps/cli`, `apps/web`); apps 
 
 **Read `CONTRIBUTING.md` before your first edit or commit.** It holds the build/test/dev reference and every coding and commit convention (enforced by CI and review), none of it repeated here. This file is only the complement: project operations and agent-specific rules.
 
+## Applications
+
+Three applications make up psilink's surface:
+
+- **Public web application** (`apps/web`, deployed to Elastic Beanstalk): conducts WebRTC exchanges only, all data handling in the browser (the server only delivers the code). It owns the recurring-exchange management interface -- recurring exchanges in browser storage, run on a schedule as a PWA.
+- **Command line application** (`apps/cli`, containerized): conducts SFTP and synced-folder (filedrop) exchanges only. Connecting it to the web application awaits a Node.js WebRTC implementation and a WebSocket-to-TCP proxy, both out of scope.
+- **Console**: a local management GUI for the containerized CLI, repurposing the web application's machinery. It lowers the friction of the CLI -- writing a config and setting the right arguments -- so an operator runs one exchange, conducted either by invoking the CLI or by the Node server running it directly. It runs on the same machine, used by the same person, that conducts the exchange: a web server, but not shared beyond the host. It operates on one mounted working directory holding a single exchange's config, secret, input, and results; only one exchange's resources are mounted at a time.
+
+The console is NOT a store of named connections, a recurring-exchange or scheduling interface (that lives in the public web app; the CLI schedules from the command line), a multi-exchange job manager, or a network-shared management service with an access-control perimeter over the operator. The operator is the machine's own user; the only untrusted input is the remote partner's invitation content, which the exchange protocol already protects.
+
 ## Commands
 
 Non-obvious ones (full reference in `CONTRIBUTING.md`):
