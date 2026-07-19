@@ -32,11 +32,14 @@ export const EVENT_STREAM_VERSION = 1;
  * The closed vocabulary of event `type` values. This party owns every one of
  * these strings -- none is partner-derived -- so a consumer can switch on the
  * discriminant safely. `stages` is the one-shot stage-list event; `stage` marks
- * each stage transition; `warning` carries a non-fatal warning (a
- * terms-exchange warning or the cross-party host-key divergence notice);
- * `result` and `error` are the two terminal events (exactly one fires per run).
+ * each stage transition; `stageEnd` reports a completed stage's wall-clock
+ * duration; `warning` carries a non-fatal warning (a terms-exchange warning or
+ * the cross-party host-key divergence notice); `metrics` is the one-shot
+ * operational-counter summary emitted just before the terminal event; `result`
+ * and `error` are the two terminal events (exactly one fires per run).
  */
-export type EventType = "stages" | "stage" | "warning" | "result" | "error";
+export type EventType =
+  "stages" | "stage" | "stageEnd" | "warning" | "metrics" | "result" | "error";
 
 /**
  * The four terminal-error categories, lifted verbatim from the web's
@@ -93,12 +96,46 @@ export interface StageEvent extends EventBase {
 }
 
 /**
+ * A stage-completion event, emitted when a protocol stage finishes and carrying
+ * how long it ran. It pairs with the start-of-stage {@link StageEvent} so a
+ * supervisor can attribute wall-clock to the stage named by `id`. Only a
+ * completed stage is reported: a run that aborts mid-stage emits no `stageEnd`
+ * for the in-flight stage, so a reported duration is always a whole stage's time.
+ */
+export interface StageEndEvent extends EventBase {
+  type: "stageEnd";
+  /** The completed stage's identifier, matching an `id` from the `stages` event. */
+  id: string;
+  /** Wall-clock the stage ran, in whole milliseconds; never negative. */
+  durationMs: number;
+}
+
+/**
  * A non-fatal warning: a terms-exchange warning or the cross-party host-key
  * divergence notice.
  */
 export interface WarningEvent extends EventBase {
   type: "warning";
   message: string;
+}
+
+/**
+ * The per-run operational-counter summary, emitted exactly once immediately
+ * before the terminal {@link ResultEvent}/{@link ErrorEvent} (so the terminal
+ * event stays last). It reports this party's dataset size and how often the
+ * transport had to retry a data operation or re-establish the connection over
+ * the run. Every field is this party's own non-negative integer -- none is
+ * partner-derived -- so no sanitization applies. Not emitted on a signal exit,
+ * which emits no terminal event either.
+ */
+export interface MetricsEvent extends EventBase {
+  type: "metrics";
+  /** This party's input record count fed into the exchange. */
+  recordsProcessed: number;
+  /** Transport data-operation retries over the run; 0 when none occurred. */
+  transportRetries: number;
+  /** Connection re-establishment attempts over the run; 0 when none occurred. */
+  reconnects: number;
 }
 
 /** The success terminal event. Exactly one terminal event fires per run. */
@@ -121,7 +158,13 @@ export interface ErrorEvent extends EventBase {
 }
 
 export type StreamEvent =
-  StagesEvent | StageEvent | WarningEvent | ResultEvent | ErrorEvent;
+  | StagesEvent
+  | StageEvent
+  | StageEndEvent
+  | WarningEvent
+  | MetricsEvent
+  | ResultEvent
+  | ErrorEvent;
 
 // --- Pure event construction (no file descriptor) ----------------------------
 
@@ -181,6 +224,31 @@ export function buildStageEvent(id: string, label: string): StageEvent {
   };
 }
 
+/**
+ * Coerce a counter or duration to a non-negative whole number, so a malformed
+ * caller value (undefined, NaN, negative, fractional) can never produce an
+ * out-of-contract numeric field. These metric values are this party's own
+ * integers, so this is a robustness floor, not a sanitizer.
+ */
+function toCount(value: number): number {
+  return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
+}
+
+/** Build a stage-completion event from a stage id and its measured duration. */
+export function buildStageEndEvent(
+  id: string,
+  durationMs: number,
+): StageEndEvent {
+  return {
+    v: EVENT_STREAM_VERSION,
+    type: "stageEnd",
+    // The id echoes a partner-authorable stage identifier, sanitized exactly as
+    // the stage event's id is.
+    id: sanitizeForDisplay(id),
+    durationMs: toCount(durationMs),
+  };
+}
+
 /** Build a warning event from a non-fatal warning message. */
 export function buildWarningEvent(message: string): WarningEvent {
   return {
@@ -189,6 +257,21 @@ export function buildWarningEvent(message: string): WarningEvent {
     // Terms-exchange warnings can embed partner-authored column names, so
     // sanitize before the text reaches the stream.
     message: sanitizeForDisplay(message),
+  };
+}
+
+/** Build the per-run operational-counter summary event. */
+export function buildMetricsEvent(
+  recordsProcessed: number,
+  transportRetries: number,
+  reconnects: number,
+): MetricsEvent {
+  return {
+    v: EVENT_STREAM_VERSION,
+    type: "metrics",
+    recordsProcessed: toCount(recordsProcessed),
+    transportRetries: toCount(transportRetries),
+    reconnects: toCount(reconnects),
   };
 }
 
@@ -282,7 +365,13 @@ export class EventStreamWriter {
 export interface EventStreamEmitter {
   stages(stages: ExchangeStageDefinition[]): void;
   stage(id: string, label: string): void;
+  stageEnd(id: string, durationMs: number): void;
   warning(message: string): void;
+  metrics(
+    recordsProcessed: number,
+    transportRetries: number,
+    reconnects: number,
+  ): void;
   result(resultWritten: boolean): void;
   error(error: unknown, phase: ErrorPhase): void;
 }
@@ -297,7 +386,13 @@ export function createEventStreamEmitter(): EventStreamEmitter {
   return {
     stages: (stages) => writer.emit(buildStagesEvent(stages)),
     stage: (id, label) => writer.emit(buildStageEvent(id, label)),
+    stageEnd: (id, durationMs) =>
+      writer.emit(buildStageEndEvent(id, durationMs)),
     warning: (message) => writer.emit(buildWarningEvent(message)),
+    metrics: (recordsProcessed, transportRetries, reconnects) =>
+      writer.emit(
+        buildMetricsEvent(recordsProcessed, transportRetries, reconnects),
+      ),
     result: (resultWritten) => writer.emit(buildResultEvent(resultWritten)),
     error: (error, phase) => writer.emit(buildErrorEvent(error, phase)),
   };

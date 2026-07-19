@@ -23,13 +23,13 @@ Every line carries a schema-version field so the version is observable from any 
 | Field | Type | Value | Meaning |
 | ----- | ---- | ----- | ------- |
 | `v` | integer | `1` | Event-stream schema version. Starts at 1. Bumped on any breaking change to an event's field layout or to the classification rules below; an additive field need not bump it. |
-| `type` | string | one of `stages`, `stage`, `warning`, `result`, `error` | The event discriminant. This party owns every value; none is partner-derived, so a consumer can switch on it safely. |
+| `type` | string | one of `stages`, `stage`, `stageEnd`, `warning`, `metrics`, `result`, `error` | The event discriminant. This party owns every value; none is partner-derived, so a consumer can switch on it safely. |
 
 A write failure after the supervisor has closed its read end (an `EPIPE`) marks the stream broken and is swallowed: it never crashes the exchange. Once broken, no later event retries the write. A supervisor reads "the stream stopped before a terminal event, and the process exited" as its own signal (see [Terminal-event guarantees](#terminal-event-guarantees)).
 
 ## Event types
 
-The five event types, and the fields each carries in addition to `v` and `type`:
+The event types, and the fields each carries in addition to `v` and `type`:
 
 ### `stages`
 
@@ -56,6 +56,19 @@ Emitted at the start of each protocol stage, mirroring `onStage`. It marks a tra
 {"v":1,"type":"stage","id":"stage 1 / 2","label":"Linking key 1 / 2"}
 ```
 
+### `stageEnd`
+
+Emitted when a protocol stage completes, carrying how long it ran so a supervisor can attribute wall-clock to the stage. A stage completes when the next stage begins (its `stage` event closes the previous one) or when the exchange finishes (the last stage). Only a completed stage is reported: a run that aborts mid-stage emits no `stageEnd` for the in-flight stage, so a reported duration is always a whole stage's time. The local output stage (result-CSV and audit-record generation, after `runExchange` returns) is not a named protocol stage and is not timed.
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `id` | string | The completed stage's identifier, matching an `id` from the preceding `stages` event. Sanitized. |
+| `durationMs` | integer | The stage's wall-clock in whole milliseconds; never negative. |
+
+```json
+{"v":1,"type":"stageEnd","id":"stage 1 / 2","durationMs":1234}
+```
+
 ### `warning`
 
 Emitted for each non-fatal warning: the terms-exchange warnings mirroring `onWarning`, and the cross-party host-key divergence notice -- a security signal a supervisor that discards stderr would otherwise never see. A warning does not end the run.
@@ -66,6 +79,20 @@ Emitted for each non-fatal warning: the terms-exchange warnings mirroring `onWar
 
 ```json
 {"v":1,"type":"warning","message":"partner disclosed a column not in the agreed set"}
+```
+
+### `metrics`
+
+The per-run operational-counter summary. Emitted exactly once, immediately before the terminal `result` or `error` event (so the terminal event stays last on the stream), on any run that reaches the terminal-event site. It reports this party's dataset size and how often the transport had to retry a data operation or re-establish the connection over the run. Every field is this party's own non-negative integer -- none is partner-derived. On a signal exit no terminal event fires, so no `metrics` event fires either.
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `recordsProcessed` | integer | This party's input record count fed into the exchange. |
+| `transportRetries` | integer | Data-operation retries over the run: the count of transport-operation re-issues past the first attempt (the SFTP put/rename retry loops). `0` when none occurred, and always `0` on the filedrop channel, whose per-operation resilience is the poll-read loop rather than an operation re-issue. |
+| `reconnects` | integer | Connection re-establishment attempts over the run: the count of connect-retry re-dials past the first attempt (bounded by `max_reconnect_attempts`). `0` when none occurred. |
+
+```json
+{"v":1,"type":"metrics","recordsProcessed":1000,"transportRetries":0,"reconnects":1}
 ```
 
 ### `result`
@@ -112,7 +139,9 @@ The process exit code cannot distinguish a `security` failure from an ordinary o
 
 ## Terminal-event guarantees
 
-Exactly one terminal event -- a `result` on success, or one classified `error` on an organic failure -- is emitted per run. It is the last event on the stream. The `stages`, `stage`, and `warning` events that precede it are progress, not outcome.
+Exactly one terminal event -- a `result` on success, or one classified `error` on an organic failure -- is emitted per run. It is the last event on the stream. The `stages`, `stage`, `stageEnd`, `warning`, and `metrics` events that precede it are progress and summary, not outcome. The one `metrics` event is emitted immediately before the terminal event, so a supervisor reads the run's operational counters on the line just above the outcome.
+
+The classified terminal `error` category is the machine-readable abort reason: it names a `security`, `output`, `config`, or `exchange` failure independently of the free-text `message` (the same text stderr logs) and of the exit code. A supervisor keys the abort decision off that category, not off the human log line.
 
 The guarantee applies from protocol entry, immediately after the fd-3 preflight: every organic failure inside the protocol lifecycle -- including the pre-connection prepare checks (an expired or malformed shared secret, a bad key-file path) -- emits its one classified `error` event before the failure propagates to the process exit. A failure before the process reaches the protocol lifecycle at all -- the config file failing to load or validate in the command handler, a bad flag or positional, or the fd-3 preflight itself -- emits no events and exits 64; a supervisor distinguishes that from an interrupt by the exit code (64 versus 130/143).
 
@@ -122,8 +151,9 @@ A run interrupted by `SIGINT` or `SIGTERM` exits through the signal handler's `p
 
 No unsanitized partner- or server-controlled string reaches an event. Every free-text field is escaped at construction, using the same display-boundary sanitizers stderr uses, so a hostile value cannot inject a control sequence, a bidi override, a spoofed NDJSON line break, or a confusable character into a supervisor's parser or terminal:
 
-- Stage `label` and `id` and the `warning` `message` derive from linkage-key names and terms text the **partner** may have authored, so they are passed through `sanitizeForDisplay` (`packages/core/src/utils/sanitizeForDisplay.ts`) -- exactly as `protocol.ts` sanitizes the same strings before they reach stderr. Every code point outside printable ASCII is rewritten to a visible `\xHH` / `\uHHHH` / `\u{HHHHH}` escape, so a raw ESC (`\x1b`, the ANSI-sequence driver), a `U+202E` right-to-left override, a newline, a zero-width character, and a homoglyph are all neutralized.
+- Stage `label` and `id` (on both the `stage` and `stageEnd` events) and the `warning` `message` derive from linkage-key names and terms text the **partner** may have authored, so they are passed through `sanitizeForDisplay` (`packages/core/src/utils/sanitizeForDisplay.ts`) -- exactly as `protocol.ts` sanitizes the same strings before they reach stderr. Every code point outside printable ASCII is rewritten to a visible `\xHH` / `\uHHHH` / `\u{HHHHH}` escape, so a raw ESC (`\x1b`, the ANSI-sequence driver), a `U+202E` right-to-left override, a newline, a zero-width character, and a homoglyph are all neutralized.
 - The `error` `message` is rendered by `sanitizeErrorForDisplay`, which walks the error's `cause` chain, escapes each link through `sanitizeForDisplay`, and strips PEM/OpenSSH private-key blocks -- the same rendering stderr and `--log-file` receive.
+- The numeric fields carry no free text: the `stageEnd` `durationMs` and the `metrics` counters (`recordsProcessed`, `transportRetries`, `reconnects`) are this party's own integers, floored to a non-negative whole number at construction so a malformed value cannot produce an out-of-contract field. No partner-controlled string rides any metric event.
 - The enum-like fields (`type`, `category`, and the stage `id` values the CLI itself defines) are this party's own closed vocabulary, not partner-derived, so a consumer can trust them as discriminants. They are still routed through the same escape uniformly, since they are echoed on the wire in the same string form.
 
 Because sanitization runs before serialization, the `\n` that frames NDJSON lines can only ever be the writer's own line terminator -- a partner-supplied newline is already an escaped `\x0a` by the time the object is serialized, so it cannot forge a second line.
