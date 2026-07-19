@@ -7,7 +7,6 @@ import {
   composeSftpConfigDocument,
 } from "./intent";
 import { JobInputNotFoundError, jobInputFilePath } from "./workInputs";
-import { classifyRestoredJob, listRestorableJobIds } from "./jobArtifacts";
 import {
   createWorkdir,
   generateJobId,
@@ -15,6 +14,7 @@ import {
   readRecordCreatedAt,
   removeWorkdir,
   resolveWorkdir,
+  workdirDirectoryExists,
   writeJobFile,
 } from "./workdir";
 import { resolveCliBinaryPath, spawnExchangeJob } from "./cliDriver";
@@ -43,16 +43,18 @@ export class UnknownSftpRemoteError extends Error {
 }
 
 /**
- * Thrown by {@link JobManager.createJob} when the named remote is already held
- * by a running job. One running exchange per remote: two CLI children polling
- * the same remote directory would corrupt each other's rendezvous. The latch
- * releases when the holding job reaches a terminal state (child exit, event
- * overflow, or delete).
+ * Thrown by {@link JobManager.createJob} when an exchange is already occupying
+ * the single slot. The console facilitates one exchange at a time, so a second
+ * create -- of either channel -- is refused with an empty-bodied 409 until the
+ * running exchange is deleted. Channel is irrelevant: a running filedrop job
+ * blocks an sftp create and vice versa. The slot frees only when the exchange
+ * was deleted AND its child's exit was observed (or no child was ever spawned),
+ * so a successor can never rendezvous with a still-dying child.
  */
-export class SftpRemoteBusyError extends Error {
+export class ExchangeBusyError extends Error {
   constructor() {
-    super("the named sftp remote is held by a running job");
-    this.name = "SftpRemoteBusyError";
+    super("an exchange is already active");
+    this.name = "ExchangeBusyError";
   }
 }
 
@@ -70,22 +72,6 @@ export class JobRendezvousUnavailableError extends Error {
 }
 
 /**
- * Thrown by {@link JobManager.createJob} when a filedrop job is already running.
- * The console facilitates a single exchange at a time over its one mounted
- * rendezvous directory, so at most one filedrop job runs concurrently: two CLI
- * children sharing that directory would corrupt each other's rendezvous
- * handshake. The filedrop analog of {@link SftpRemoteBusyError}; the latch
- * releases when the holding job reaches a terminal state (child exit, event
- * overflow, or delete).
- */
-export class FiledropBusyError extends Error {
-  constructor() {
-    super("a filedrop job is already running");
-    this.name = "FiledropBusyError";
-  }
-}
-
-/**
  * A single buffered event with its monotonic id. The full event list is retained
  * for the job's lifetime so every SSE connect can replay from the start (or from
  * a Last-Event-ID offset), per the full-history-replay design.
@@ -99,18 +85,14 @@ export interface BufferedEvent {
 export type JobStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 /**
- * The uniform view the status and download routes consume, built either from a
- * live in-memory {@link JobRecord} or -- after a restart, when only the workdir
- * survives -- reconstructed from disk artifacts. A live view mirrors what the
- * routes report today; a restored view carries no event history (the events were
- * in memory and are gone) and is always terminal.
+ * The uniform view the status and download routes consume, built from the live
+ * in-memory {@link JobRecord}. There is at most one exchange, held in memory only;
+ * a restart forgets it, so there is no restored view.
  */
 export interface JobView {
   id: string;
   status: JobStatus;
-  /** True when this view was reconstructed from disk with no in-memory record. */
-  restored: boolean;
-  /** The reconciled terminal state; always null for a restored job. */
+  /** The reconciled terminal state, once the child has exited. */
   terminal: JobTerminalState | null;
   terminalEmitted: boolean;
   eventCount: number;
@@ -121,19 +103,6 @@ export interface JobView {
   outputPath: string;
   recordPath: string;
   keysPath: string;
-}
-
-/**
- * The listing subset of a {@link JobView} returned by {@link JobManager.listJobs}:
- * the fields a job list surfaces without the servable paths or event bookkeeping.
- */
-export interface JobSummary {
-  id: string;
-  status: JobStatus;
-  restored: boolean;
-  resultAvailable: boolean;
-  recordAvailable: boolean;
-  recordCreatedAt?: string;
 }
 
 /** A job record. Lives in server memory only; never persisted. */
@@ -147,24 +116,29 @@ export interface JobRecord {
   recordPath: string;
   /** The private verification-keys path paired with {@link recordPath}. */
   keysPath: string;
-  /** The remote name an sftp job holds (for the per-remote busy latch); null
-   * for filedrop. Only the holder recorded in the manager's latch map releases
-   * it, so a stale record cannot free a successor's hold. */
-  sftpRemote: string | null;
   status: JobStatus;
   events: Array<BufferedEvent>;
   /** True once a terminal event has been buffered; the SSE stream closes after it. */
   terminalEmitted: boolean;
   /** The reconciled terminal state, once the child has exited. */
   terminal: JobTerminalState | null;
-  /** When the terminal event was emitted, for TTL eviction. */
-  terminalAt: number | null;
   handle: CliDriverHandle | null;
   /** Registered SSE listeners, notified as events are appended. */
   listeners: Set<(entry: BufferedEvent) => void>;
   /** A cancellation escalation timer chain, cleared on exit. */
   cancelTimers: Array<NodeJS.Timeout>;
 }
+
+/**
+ * The single-exchange slot. `starting` is claimed synchronously at the top of
+ * {@link JobManager.createJob} (before any await) so two concurrent POSTs cannot
+ * both pass the null check; it becomes `active` once the record exists. The
+ * `deleted` flag makes the surface 404 immediately on DELETE while the slot stays
+ * occupied until the child's exit is observed (see {@link JobManager.maybeFreeSlot}).
+ */
+type ExchangeSlot =
+  | { phase: "starting"; id: string }
+  | { phase: "active"; record: JobRecord; deleted: boolean };
 
 /**
  * The hard cap on buffered events. The CLI stream is dozens of lines by design;
@@ -179,13 +153,6 @@ export const CANCEL_SIGTERM_GRACE_MS = 5000;
 export const CANCEL_SIGKILL_GRACE_MS = 5000;
 
 /**
- * The TTL after a job reaches a terminal state, after which the in-memory record
- * is evicted as a memory backstop. Eviction removes only the in-memory record;
- * it leaves the workdir on disk (only an explicit DELETE removes the disk).
- */
-export const JOB_TERMINAL_TTL_MS = 60 * 60 * 1000;
-
-/**
  * Options for {@link JobManager}, so tests can inject a stub binary path and
  * shortened timers without touching the environment.
  */
@@ -195,7 +162,6 @@ export interface JobManagerOptions {
   eventBufferCap?: number;
   cancelSigtermGraceMs?: number;
   cancelSigkillGraceMs?: number;
-  terminalTtlMs?: number;
   /**
    * The operator-provisioned SFTP remotes table (loaded fail-closed at server
    * startup; tests inject one directly). Absent when no remotes are
@@ -239,40 +205,22 @@ export interface SftpRemoteProjection {
 }
 
 /**
- * The in-memory job table and lifecycle. Owns the CLI driver, the per-job event
- * buffer, cancellation escalation, TTL eviction, and the shutdown hook that
- * SIGTERMs every running child so no orphaned CLI survives the server.
+ * The single-exchange job manager and lifecycle. Owns the CLI driver, the event
+ * buffer, cancellation escalation, and the shutdown hook that SIGTERMs the running
+ * child so no orphaned CLI survives the server. At most one exchange occupies the
+ * slot at a time; a second create is rejected until the current one is deleted.
  */
 export class JobManager {
-  private readonly jobs = new Map<string, JobRecord>();
+  private slot: ExchangeSlot | null = null;
   private readonly dataRoot: string;
   private readonly binaryPath: string;
   private readonly eventBufferCap: number;
   private readonly cancelSigtermGraceMs: number;
   private readonly cancelSigkillGraceMs: number;
-  private readonly terminalTtlMs: number;
   private readonly childEnv: NodeJS.ProcessEnv | undefined;
   private readonly sftpRemotes: JobSftpRemotesTable | undefined;
   private readonly jobInputDir: string | undefined;
   private readonly jobRendezvousDir: string | undefined;
-  /** The per-remote busy latch: remote name -> holding job id. */
-  private readonly sftpRemoteHolders = new Map<string, string>();
-  /**
-   * The single-holder filedrop busy latch: the running filedrop job's id, or
-   * null when none runs. The filedrop analog of {@link sftpRemoteHolders} -- the
-   * console conducts one exchange at a time over its single mounted rendezvous,
-   * so one holder rather than a per-remote map.
-   */
-  private filedropHolder: string | null = null;
-  /**
-   * Job ids whose workdir is mid-creation (before the in-memory record is set)
-   * or mid-deletion (after the record is dropped, before the workdir is gone).
-   * A disk read during either window would otherwise misclassify the half-built
-   * or half-removed workdir as a restored job, so these ids shadow the disk: a
-   * view or listing treats them as not-a-restored-job until the transition ends.
-   */
-  private readonly creatingJobIds = new Set<string>();
-  private readonly deletingJobIds = new Set<string>();
 
   constructor(options: JobManagerOptions) {
     this.dataRoot = options.dataRoot;
@@ -282,7 +230,6 @@ export class JobManager {
       options.cancelSigtermGraceMs ?? CANCEL_SIGTERM_GRACE_MS;
     this.cancelSigkillGraceMs =
       options.cancelSigkillGraceMs ?? CANCEL_SIGKILL_GRACE_MS;
-    this.terminalTtlMs = options.terminalTtlMs ?? JOB_TERMINAL_TTL_MS;
     this.sftpRemotes = options.sftpRemotes;
     this.jobInputDir = options.jobInputDir;
     this.jobRendezvousDir = options.jobRendezvousDir;
@@ -294,28 +241,37 @@ export class JobManager {
    * builds the workdir, writes the composed config, key, and input CSV under
    * fixed names, and spawns the CLI. Returns the new job's id.
    *
-   * Each channel resolves and latches its rendezvous BEFORE any filesystem work
-   * -- an sftp intent its named remote, a filedrop intent the single-holder
-   * filedrop latch over a configured rendezvous directory -- so an unknown, busy,
-   * or (for filedrop) unconfigured target is rejected with nothing on disk. An
-   * `inputFile` intent likewise resolves its mounted path before the workdir
-   * exists (mirroring the unknown-remote flow): a name that resolves to no regular
-   * file is rejected with nothing on disk. The CLI reads the mounted file in
-   * place, so nothing is copied into the workdir.
+   * The channel's provisioned resource is resolved synchronously first -- an sftp
+   * intent its named remote against the table, a filedrop intent a configured
+   * rendezvous directory -- so an unknown or unconfigured target is rejected before
+   * the slot is claimed and with nothing on disk. The single slot is then claimed
+   * with no await between the null check and the assignment, so two concurrent
+   * POSTs cannot both pass: a second create while an exchange occupies the slot is
+   * {@link ExchangeBusyError}. An `inputFile` intent resolves its mounted path
+   * inside the try (mirroring the unknown-remote flow): a name that resolves to no
+   * regular file is rejected and the slot freed with nothing on disk. The CLI reads
+   * the mounted file in place, so nothing is copied into the workdir.
    */
   async createJob(intent: JobExchangeIntent): Promise<string> {
     const id = generateJobId();
-    const remoteEntry =
-      intent.channel === "sftp"
-        ? this.acquireSftpRemote(intent.remote, id)
-        : undefined;
-    if (intent.channel === "filedrop") this.acquireFiledrop(id);
 
-    this.creatingJobIds.add(id);
+    let remoteEntry: JobSftpRemoteEntry | undefined;
+    if (intent.channel === "sftp") {
+      remoteEntry = this.sftpRemotes?.get(intent.remote);
+      if (remoteEntry === undefined) throw new UnknownSftpRemoteError();
+    }
+    if (intent.channel === "filedrop" && this.jobRendezvousDir === undefined)
+      throw new JobRendezvousUnavailableError();
+
+    // Claim the slot with no await between the null check and the assignment, so
+    // two concurrent POSTs cannot both observe a free slot.
+    if (this.slot !== null) throw new ExchangeBusyError();
+    this.slot = { phase: "starting", id };
+
     let workdir: string | null = null;
     try {
       // Resolve the mounted input before creating the workdir, inside the try so a
-      // rejection releases any latch and leaves nothing on disk.
+      // rejection frees the slot and leaves nothing on disk.
       const mountedInputPath =
         intent.inputFile !== undefined
           ? this.resolveWorkInputPath(intent.inputFile)
@@ -330,19 +286,31 @@ export class JobManager {
         mountedInputPath,
       );
     } catch (error) {
-      // A failure after the workdir exists must not strand it: the record may
-      // not be in the table yet, so no DELETE or eviction could ever reach the
-      // directory (which may already hold the written key file). The rendezvous
-      // latch (sftp remote or filedrop) is released the same way -- no terminal
-      // path could ever run.
-      this.jobs.delete(id);
-      if (intent.channel === "sftp") this.releaseSftpRemote(intent.remote, id);
-      if (intent.channel === "filedrop") this.releaseFiledrop(id);
+      // spawnExchangeJob is the final fallible step of startJobInWorkdir, so this
+      // catch is reachable only before any child was spawned. A slot record whose
+      // handle is already set would mean a live child, and freeing the slot here
+      // would strand it -- assert that never happens rather than trust the
+      // ordering.
+      const active = this.activeSlotRecord();
+      if (active !== null && active.handle !== null)
+        throw new Error(
+          "createJob cleanup reached with a spawned child; refusing to free the slot",
+        );
+      this.slot = null;
       if (workdir !== null) await removeWorkdir(workdir);
       throw error;
-    } finally {
-      this.creatingJobIds.delete(id);
     }
+  }
+
+  /**
+   * The active record the slot holds (in either deleted state), else null. Read
+   * through a method so the create-failure catch sees the record even where
+   * control-flow narrowing would otherwise hide the slot's `active` phase.
+   */
+  private activeSlotRecord(): JobRecord | null {
+    return this.slot !== null && this.slot.phase === "active"
+      ? this.slot.record
+      : null;
   }
 
   /**
@@ -354,71 +322,6 @@ export class JobManager {
   private resolveWorkInputPath(inputFile: JobInputFileReference): string {
     if (this.jobInputDir === undefined) throw new JobInputNotFoundError();
     return jobInputFilePath(this.jobInputDir, inputFile.name);
-  }
-
-  /**
-   * Resolve an sftp intent's remote name against the table by exact `Map.get`
-   * equality and latch it to the new job. Unknown names (including "any name"
-   * when no table is configured) and names held by a running job are typed
-   * rejections the routes map to status codes without echoing the name.
-   */
-  private acquireSftpRemote(remote: string, jobId: string): JobSftpRemoteEntry {
-    const entry = this.sftpRemotes?.get(remote);
-    if (entry === undefined) throw new UnknownSftpRemoteError();
-    if (this.sftpRemoteHolders.has(remote)) throw new SftpRemoteBusyError();
-    this.sftpRemoteHolders.set(remote, jobId);
-    return entry;
-  }
-
-  /** Release a remote latch, but only if this job is still its holder. */
-  private releaseSftpRemote(remote: string, jobId: string): void {
-    if (this.sftpRemoteHolders.get(remote) === jobId)
-      this.sftpRemoteHolders.delete(remote);
-  }
-
-  /**
-   * Release the remote latch a job holds. Called only from
-   * {@link reconcileTerminal}, which fires on the child's `close` -- a child
-   * confirmed dead can no longer poll the remote, so a successor may safely take
-   * it. The forced-kill paths (overflow, delete) must NOT release here: their
-   * SIGKILL is asynchronous and the child can still be running.
-   */
-  private releaseSftpRemoteForRecord(record: JobRecord): void {
-    if (record.sftpRemote === null) return;
-    this.releaseSftpRemote(record.sftpRemote, record.id);
-  }
-
-  /**
-   * Resolve the filedrop channel's availability and latch it to the new job, both
-   * before the latch is taken: an unconfigured rendezvous directory is
-   * {@link JobRendezvousUnavailableError} and a second concurrent filedrop job is
-   * {@link FiledropBusyError}. Records the holder id so only that job's own terminal
-   * path can release the latch. The filedrop mirror of {@link acquireSftpRemote},
-   * which likewise checks its remote before latching.
-   */
-  private acquireFiledrop(jobId: string): void {
-    if (this.jobRendezvousDir === undefined)
-      throw new JobRendezvousUnavailableError();
-    if (this.filedropHolder !== null) throw new FiledropBusyError();
-    this.filedropHolder = jobId;
-  }
-
-  /** Release the filedrop latch, but only if this job is still its holder. */
-  private releaseFiledrop(jobId: string): void {
-    if (this.filedropHolder === jobId) this.filedropHolder = null;
-  }
-
-  /**
-   * Release the filedrop latch a job holds. Called only from
-   * {@link reconcileTerminal}, which fires on the child's `close` -- a child
-   * confirmed dead can no longer touch the rendezvous, so a successor may safely
-   * take it. The forced-kill paths (overflow, delete) must NOT release here:
-   * their SIGKILL is asynchronous and the child can still be running. The
-   * holder-id guard leaves this a no-op for any record that is not the holder
-   * (including every sftp job).
-   */
-  private releaseFiledropForRecord(record: JobRecord): void {
-    this.releaseFiledrop(record.id);
   }
 
   /**
@@ -477,17 +380,15 @@ export class JobManager {
       outputPath,
       recordPath,
       keysPath,
-      sftpRemote: intent.channel === "sftp" ? intent.remote : null,
       status: "running",
       events: [],
       terminalEmitted: false,
       terminal: null,
-      terminalAt: null,
       handle: null,
       listeners: new Set(),
       cancelTimers: [],
     };
-    this.jobs.set(id, record);
+    this.slot = { phase: "active", record, deleted: false };
 
     if (intent.channel === "filedrop" && this.jobRendezvousDir !== undefined)
       for (const message of rendezvousStartupWarnings(
@@ -542,69 +443,27 @@ export class JobManager {
     throw new Error("job intent carries neither inputCsv nor inputFile");
   }
 
-  /** Look up a job by id, or undefined if unknown/evicted. */
+  /**
+   * The active record when the slot holds one matching this id and it has not been
+   * deleted, else undefined. A deleted (but not-yet-freed) slot surfaces 404 here,
+   * as today's eager delete did.
+   */
   getJob(id: string): JobRecord | undefined {
-    return this.jobs.get(id);
+    const slot = this.slot;
+    if (
+      slot !== null &&
+      slot.phase === "active" &&
+      slot.record.id === id &&
+      !slot.deleted
+    )
+      return slot.record;
+    return undefined;
   }
 
-  /**
-   * The uniform view for a job: the live in-memory record when one exists, else a
-   * restored view reconstructed from disk artifacts, else null (no record and no
-   * workdir). Routes resolve through this so a restart-restored job serves
-   * identically to a live one.
-   */
-  async getJobView(id: string): Promise<JobView | null> {
-    const record = this.jobs.get(id);
-    if (record !== undefined) return liveJobView(record);
-    if (this.creatingJobIds.has(id) || this.deletingJobIds.has(id)) return null;
-    const artifacts = await classifyRestoredJob(this.dataRoot, id);
-    if (artifacts === null) return null;
-    return {
-      id,
-      status: artifacts.status,
-      restored: true,
-      terminal: null,
-      terminalEmitted: true,
-      eventCount: 0,
-      resultAvailable: artifacts.resultAvailable,
-      recordAvailable: artifacts.recordAvailable,
-      ...(artifacts.recordCreatedAt !== undefined
-        ? { recordCreatedAt: artifacts.recordCreatedAt }
-        : {}),
-      outputPath: artifacts.outputPath,
-      recordPath: artifacts.recordPath,
-      keysPath: artifacts.keysPath,
-    };
-  }
-
-  /**
-   * The merged listing of every in-memory record and every restorable disk id not
-   * already in memory, deduped by id with the in-memory record winning. A live
-   * record is summarized exactly as its status route reports; a disk-only id is
-   * classified from its artifacts.
-   */
-  async listJobs(): Promise<Array<JobSummary>> {
-    const summaries = new Map<string, JobSummary>();
-    for (const record of this.jobs.values())
-      summaries.set(record.id, liveJobSummary(record));
-    const diskIds = await listRestorableJobIds(this.dataRoot);
-    for (const id of diskIds) {
-      if (summaries.has(id)) continue;
-      if (this.creatingJobIds.has(id) || this.deletingJobIds.has(id)) continue;
-      const artifacts = await classifyRestoredJob(this.dataRoot, id);
-      if (artifacts === null) continue;
-      summaries.set(id, {
-        id,
-        status: artifacts.status,
-        restored: true,
-        resultAvailable: artifacts.resultAvailable,
-        recordAvailable: artifacts.recordAvailable,
-        ...(artifacts.recordCreatedAt !== undefined
-          ? { recordCreatedAt: artifacts.recordCreatedAt }
-          : {}),
-      });
-    }
-    return [...summaries.values()];
+  /** The uniform view for a job, or null when no live record matches the id. */
+  getJobView(id: string): JobView | null {
+    const record = this.getJob(id);
+    return record !== undefined ? liveJobView(record) : null;
   }
 
   /**
@@ -667,10 +526,8 @@ export class JobManager {
     terminalType: "result" | "error",
   ): void {
     record.terminalEmitted = true;
-    record.terminalAt = Date.now();
     if (record.status === "running")
       record.status = terminalType === "result" ? "succeeded" : "failed";
-    this.scheduleEviction(record);
   }
 
   /**
@@ -683,58 +540,74 @@ export class JobManager {
    *   this covers a supervisor that missed it) synthesizes a `result`;
    * - any other exit without a terminal event means the stream broke, so
    *   synthesize a failure terminal.
+   *
+   * This is the only slot-release point besides the pre-spawn create failure: it
+   * fires on the child's `close` (or a spawn `error`), so a killed child is
+   * confirmed dead before {@link maybeFreeSlot} can free the slot for a successor.
    */
   private reconcileTerminal(record: JobRecord, state: JobTerminalState): void {
     record.terminal = state;
     this.clearCancelTimers(record);
-    this.releaseSftpRemoteForRecord(record);
-    this.releaseFiledropForRecord(record);
 
     // An already-emitted terminal is authoritative: a job failed on buffer
     // overflow signals SIGKILL, and if the child's own clean exit is observed
     // before that kill lands, this exit outcome must not overwrite the failed
     // status the overflow already committed.
-    if (record.terminalEmitted) {
-      record.terminalAt = record.terminalAt ?? Date.now();
-      this.scheduleEviction(record);
-      return;
+    if (!record.terminalEmitted) {
+      if (state.outcome === "succeeded") record.status = "succeeded";
+      else if (state.outcome === "cancelled") record.status = "cancelled";
+      else record.status = "failed";
+
+      if (state.outcome === "cancelled")
+        this.synthesizeTerminal(record, {
+          v: 1,
+          type: "error",
+          category: "exchange",
+          message:
+            state.exitCode === 130 || state.signal === "SIGINT"
+              ? "run cancelled (SIGINT)"
+              : "run cancelled (SIGTERM)",
+          cancelled: true,
+        });
+      else if (state.outcome === "succeeded")
+        this.synthesizeTerminal(record, {
+          v: 1,
+          type: "result",
+          resultWritten: true,
+        });
+      else
+        this.synthesizeTerminal(record, {
+          v: 1,
+          type: "error",
+          category: "exchange",
+          message:
+            "CLI exited without a terminal event; the event stream broke" +
+            (state.exitCode !== null ? ` (exit ${state.exitCode})` : ""),
+        });
     }
 
-    if (state.outcome === "succeeded") record.status = "succeeded";
-    else if (state.outcome === "cancelled") record.status = "cancelled";
-    else record.status = "failed";
+    this.maybeFreeSlot(record);
+  }
 
-    if (state.outcome === "cancelled") {
-      this.synthesizeTerminal(record, {
-        v: 1,
-        type: "error",
-        category: "exchange",
-        message:
-          state.exitCode === 130 || state.signal === "SIGINT"
-            ? "run cancelled (SIGINT)"
-            : "run cancelled (SIGTERM)",
-        cancelled: true,
-      });
-      return;
-    }
-
-    if (state.outcome === "succeeded") {
-      this.synthesizeTerminal(record, {
-        v: 1,
-        type: "result",
-        resultWritten: true,
-      });
-      return;
-    }
-
-    this.synthesizeTerminal(record, {
-      v: 1,
-      type: "error",
-      category: "exchange",
-      message:
-        "CLI exited without a terminal event; the event stream broke" +
-        (state.exitCode !== null ? ` (exit ${state.exitCode})` : ""),
-    });
+  /**
+   * Free the slot exactly when it is active for this record, the exchange was
+   * deleted, and the child's exit has been observed (`record.terminal !== null`,
+   * set only here in {@link reconcileTerminal}). Keying on `terminal` -- not
+   * `terminalEmitted`, which the overflow path sets while a SIGKILLed child may
+   * still be running -- is the encoded rendezvous-safety invariant: no path frees
+   * the slot while a killed child might still touch the shared rendezvous or remote
+   * directory.
+   */
+  private maybeFreeSlot(record: JobRecord): void {
+    const slot = this.slot;
+    if (
+      slot !== null &&
+      slot.phase === "active" &&
+      slot.record === record &&
+      slot.deleted &&
+      record.terminal !== null
+    )
+      this.slot = null;
   }
 
   /** Append a synthesized terminal event and close the streams. */
@@ -802,69 +675,72 @@ export class JobManager {
   }
 
   /**
-   * Delete a job: remove the in-memory record and the workdir on disk. Signals a
-   * still-running child SIGKILL first so the delete does not leave an orphan.
-   * The rendezvous latch (sftp remote or filedrop) is not released here: a
-   * SIGKILL is asynchronous, so the child may still be touching the rendezvous
-   * after this returns; {@link reconcileTerminal} releases the latch on the
-   * child's `close`, which keeps a successor job from rendezvousing with the
-   * dying child.
+   * Delete a job: mark the slot deleted and remove the workdir on disk. Signals a
+   * still-running child SIGKILL first so the delete does not leave an orphan. The
+   * slot is not freed here when the child was still running: a SIGKILL is
+   * asynchronous, so the child may still be touching the rendezvous after this
+   * returns; {@link reconcileTerminal} frees the slot on the child's `close`, which
+   * keeps a successor job from rendezvousing with the dying child.
+   *
+   * When no live record matches the id, the disk-only arm removes a
+   * restart-orphaned workdir named by a valid id -- reading no artifacts and
+   * serving nothing, so an explicit DELETE can still bound the at-rest exposure of
+   * a workdir the server forgot on restart. It refuses the slot's own id (a
+   * starting or already-deleted id whose directory a live or dying child owns).
    */
   async deleteJob(id: string): Promise<boolean> {
-    const record = this.jobs.get(id);
-    if (record === undefined) return this.deleteRestoredJob(id);
-    this.deletingJobIds.add(id);
-    try {
+    const slot = this.slot;
+    if (
+      slot !== null &&
+      slot.phase === "active" &&
+      slot.record.id === id &&
+      !slot.deleted
+    ) {
+      const record = slot.record;
       this.clearCancelTimers(record);
       if (record.handle?.isRunning()) record.handle.signal("SIGKILL");
-      this.jobs.delete(id);
+      slot.deleted = true;
       const workdir = resolveWorkdir(this.dataRoot, id);
       if (workdir !== null) await removeWorkdir(workdir);
+      this.maybeFreeSlot(record);
       return true;
-    } finally {
-      this.deletingJobIds.delete(id);
     }
+    return this.deleteOrphanWorkdir(id);
   }
 
   /**
-   * Delete a restart-restored job that has no in-memory record: a disk-only
-   * removal of the workdir. Such a job holds no child and no rendezvous latch, so
-   * there is nothing to signal or release. Returns false when no workdir exists.
+   * Remove a restart-orphaned workdir named by a valid id: a disk-only removal
+   * that touches no in-memory state and serves nothing. Refuses the slot's own id
+   * (its directory is owned by a live or still-dying child), then applies the
+   * containment check ({@link resolveWorkdir}) and the real-directory guard
+   * ({@link workdirDirectoryExists}, which lstats so a symlinked leaf is refused
+   * rather than followed). Returns false when nothing resolves.
    */
-  private async deleteRestoredJob(id: string): Promise<boolean> {
-    const artifacts = await classifyRestoredJob(this.dataRoot, id);
-    if (artifacts === null) return false;
-    this.deletingJobIds.add(id);
-    try {
-      await removeWorkdir(artifacts.workdir);
-      return true;
-    } finally {
-      this.deletingJobIds.delete(id);
-    }
+  private async deleteOrphanWorkdir(id: string): Promise<boolean> {
+    if (this.slotId() === id) return false;
+    const workdir = resolveWorkdir(this.dataRoot, id);
+    if (workdir === null) return false;
+    if (!(await workdirDirectoryExists(workdir))) return false;
+    await removeWorkdir(workdir);
+    return true;
+  }
+
+  /** The id the slot currently holds, in either phase, or null when free. */
+  private slotId(): string | null {
+    if (this.slot === null) return null;
+    return this.slot.phase === "starting" ? this.slot.id : this.slot.record.id;
   }
 
   /**
-   * Schedule TTL eviction of the in-memory record. Eviction removes only the
-   * record, never the disk (only an explicit DELETE removes the workdir).
-   */
-  private scheduleEviction(record: JobRecord): void {
-    const timer = setTimeout(() => {
-      // Evict only if still terminal and untouched: a DELETE may have already
-      // removed it, and a record is never resurrected once terminal.
-      if (this.jobs.get(record.id) === record) this.jobs.delete(record.id);
-    }, this.terminalTtlMs);
-    timer.unref();
-  }
-
-  /**
-   * Shutdown hook: SIGTERM every running child so no orphaned CLI outlives the
-   * server. Called from the server lifecycle on shutdown.
+   * Shutdown hook: SIGTERM the single active record's running child so no orphaned
+   * CLI outlives the server. Called from the server lifecycle on shutdown.
    */
   shutdown(): void {
-    for (const record of this.jobs.values()) {
-      this.clearCancelTimers(record);
-      if (record.handle?.isRunning()) record.handle.signal("SIGTERM");
-    }
+    const slot = this.slot;
+    if (slot === null || slot.phase !== "active") return;
+    const record = slot.record;
+    this.clearCancelTimers(record);
+    if (record.handle?.isRunning()) record.handle.signal("SIGTERM");
   }
 }
 
@@ -872,7 +748,7 @@ export class JobManager {
  * The record pair's availability for a live record, offered all-or-nothing: the
  * job succeeded, both the record and keys files exist, and the record's
  * `createdAt` parses. This is the same rule the status route applied when it read
- * the in-memory record directly, lifted here so live and restored views share it.
+ * the in-memory record directly, lifted here so the view shares it.
  */
 function liveRecordAvailability(
   record: JobRecord,
@@ -892,7 +768,6 @@ function liveJobView(record: JobRecord): JobView {
   return {
     id: record.id,
     status: record.status,
-    restored: false,
     terminal: record.terminal,
     terminalEmitted: record.terminalEmitted,
     eventCount: record.events.length,
@@ -901,17 +776,6 @@ function liveJobView(record: JobRecord): JobView {
     outputPath: record.outputPath,
     recordPath: record.recordPath,
     keysPath: record.keysPath,
-  };
-}
-
-/** The listing summary of a live in-memory record. */
-function liveJobSummary(record: JobRecord): JobSummary {
-  return {
-    id: record.id,
-    status: record.status,
-    restored: false,
-    resultAvailable: record.status === "succeeded",
-    ...liveRecordAvailability(record),
   };
 }
 

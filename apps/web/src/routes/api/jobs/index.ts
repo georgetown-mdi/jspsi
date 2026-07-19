@@ -1,9 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import {
-  FiledropBusyError,
+  ExchangeBusyError,
   JobRendezvousUnavailableError,
-  SftpRemoteBusyError,
   UnknownSftpRemoteError,
 } from "@jobs/jobManager";
 import {
@@ -16,10 +15,6 @@ import { JobInputNotFoundError } from "@jobs/workInputs";
 import { jobExchangeIntentSchema } from "@jobs/intent";
 
 /**
- * `GET /api/jobs` -- list every job the manager knows: live in-memory records
- * plus restart-restored jobs re-discovered from their on-disk artifacts, deduped
- * by id. Feature-gated.
- *
  * `POST /api/jobs` -- create and start an exchange job from a typed intent.
  *
  * Feature-gated. The request body is a JSON {@link JobExchangeIntent}: a filedrop
@@ -30,22 +25,21 @@ import { jobExchangeIntentSchema } from "@jobs/intent";
  * material drawn only from the operator-provisioned remotes table), writes the
  * inputs, and spawns the CLI. No client string reaches argv or a file path.
  *
+ * The console facilitates one exchange at a time: while an exchange occupies the
+ * single slot, a second create is an empty-bodied 409 until the current exchange
+ * is deleted.
+ *
  * The body is read under a byte cap ({@link MAX_JOB_BODY_BYTES}) streamed off the
  * request without trusting `Content-Length`, so an oversized body is a 413 (and
  * an unparseable one a 400) before schema validation runs.
  *
- * The busy rejections are EMPTY-bodied: an unknown sftp remote is 400, and a
- * busy sftp remote or an already-running filedrop job is 409; no response
- * reflects the requested name.
+ * The busy and unavailable rejections are EMPTY-bodied: an unknown sftp remote is
+ * 400, and a second concurrent exchange is 409; no response reflects the requested
+ * name.
  */
 export const Route = createFileRoute("/api/jobs/")({
   server: {
     handlers: {
-      GET: async () => {
-        const gate = gateJobRoute();
-        if (gate.kind === "response") return gate.response;
-        return jobJsonResponse({ jobs: await gate.manager.listJobs() });
-      },
       POST: async ({ request }) => {
         const gate = gateJobRoute();
         if (gate.kind === "response") return gate.response;
@@ -66,11 +60,7 @@ export const Route = createFileRoute("/api/jobs/")({
         } catch (error) {
           if (error instanceof UnknownSftpRemoteError)
             return jobEmptyResponse(400);
-          if (
-            error instanceof SftpRemoteBusyError ||
-            error instanceof FiledropBusyError
-          )
-            return jobEmptyResponse(409);
+          if (error instanceof ExchangeBusyError) return jobEmptyResponse(409);
           // A mounted input that names no regular file, or a filedrop intent with
           // no rendezvous directory configured, is a 400 (the manager left no
           // workdir behind).

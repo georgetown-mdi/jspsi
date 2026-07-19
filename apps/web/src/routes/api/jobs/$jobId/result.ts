@@ -14,8 +14,7 @@ import { resultFileExists } from "@jobs/workdir";
  * client input. Content-Type and Content-Disposition are set explicitly with a
  * fixed download name, and a nosniff/no-store discipline applies. A job that has
  * not succeeded, or whose result is missing, is 404 rather than leaking whether
- * an unfinished job exists. A restart-restored succeeded job serves byte-for-byte
- * identically to a live one, from the disk-resolved output path.
+ * an unfinished job exists.
  */
 export const Route = createFileRoute("/api/jobs/$jobId/result")({
   server: {
@@ -26,7 +25,7 @@ export const Route = createFileRoute("/api/jobs/$jobId/result")({
         const jobId = validateJobIdParam(params.jobId);
         if (jobId === null) return jobEmptyResponse(404);
 
-        const view = await gate.manager.getJobView(jobId);
+        const view = gate.manager.getJobView(jobId);
         if (view === null) return jobEmptyResponse(404);
         if (view.status !== "succeeded") return jobEmptyResponse(404);
         if (!resultFileExists(view.outputPath)) return jobEmptyResponse(404);
