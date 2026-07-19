@@ -20,7 +20,7 @@ import logLibrary from "loglevel";
 import { getLogger } from "@psilink/core";
 
 import { assertJobApiStartupSafe, readJobApiConfig } from "../src/jobs/gate";
-import { shutdownJobManager, useSftpRemotesTable } from "../src/jobs/index";
+import { shutdownJobManager, useSftpServer } from "../src/jobs/index";
 import { ConfigManager } from "../src/utils/serverConfig";
 import { registerServer } from "../src/httpServer";
 
@@ -66,10 +66,11 @@ assertJobApiStartupSafe(
   path !== undefined ? "localhost" : host,
 );
 
-// Same fail-closed posture for the SFTP remotes table: a configured remotes
-// file that does not load (or one configured without a data root) refuses to
-// start rather than deferring the error to the first sftp job request.
-useSftpRemotesTable();
+// Same fail-closed posture for the provisioned SFTP server: a configured server
+// file that does not load (or one configured without a data root, or the
+// superseded JOB_SFTP_REMOTES variable) refuses to start rather than deferring
+// the error to the first sftp job request.
+useSftpServer();
 
 // @ts-ignore part of preset
 const listener = server.listen(path ? { path } : { port, host }, (err) => {

@@ -6,7 +6,7 @@ import {
   JobApiRequestError,
   createFetchJobApiClient,
   createServerJobExchangeDriver,
-  fetchSftpRemotes,
+  fetchSftpConnection,
 } from "@psi/serverJobExchangeDriver";
 import { buildRunOutputs } from "@bench/runOutputs";
 
@@ -536,11 +536,11 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
     });
   });
 
-  test("an sftp transport POSTs the sftp arm carrying ONLY the remote name", async () => {
+  test("an sftp transport POSTs the sftp arm carrying NO connection field", async () => {
     const { client, createdIntents } = scriptedClient([result(true)]);
     const config: ServerJobExchangeDriverConfig = {
       ...driverConfig(),
-      transport: { channel: "sftp", remote: "prod_east" },
+      transport: { channel: "sftp" },
     };
     await createServerJobExchangeDriver(config, client).run(
       driverEvents(new AbortController().signal),
@@ -548,15 +548,13 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
 
     const intent = createdIntents[0] as Record<string, unknown>;
     expect(intent.channel).toBe("sftp");
-    expect(intent.remote).toBe("prod_east");
-    // Exactly one field beyond the filedrop shape: no host, port, path, or any
-    // other connection material can ride the intent.
+    // Only the shared fields beyond the discriminant: no remote, host, port,
+    // path, or any other connection material can ride the intent.
     expect(Object.keys(intent).sort()).toEqual([
       "channel",
       "eventStream",
       "inputCsv",
       "linkageTerms",
-      "remote",
       "sharedSecret",
     ]);
   });
@@ -570,7 +568,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
     const driver = createServerJobExchangeDriver(
       {
         ...driverConfig(),
-        transport: { channel: "sftp", remote: "prod_east" },
+        transport: { channel: "sftp" },
       },
       client,
     );
@@ -929,7 +927,7 @@ describe("createFetchJobApiClient over an injected fetch", () => {
   });
 });
 
-describe("fetchSftpRemotes", () => {
+describe("fetchSftpConnection", () => {
   function jsonResponse(body: unknown, status = 200): typeof fetch {
     return () =>
       Promise.resolve(
@@ -940,35 +938,42 @@ describe("fetchSftpRemotes", () => {
       );
   }
 
-  test("returns the validated projection array, optional fields preserved", async () => {
-    const remotes = await fetchSftpRemotes(
-      jsonResponse([
-        { name: "prod_east", host: "sftp.example.gov", port: 2222, path: "/x" },
-        { name: "dr-west", host: "dr.example.gov" },
-      ]),
-    );
-    expect(remotes).toEqual([
-      { name: "prod_east", host: "sftp.example.gov", port: 2222, path: "/x" },
-      { name: "dr-west", host: "dr.example.gov" },
-    ]);
+  test("returns the validated projection, optional fields preserved", async () => {
+    await expect(
+      fetchSftpConnection(
+        jsonResponse({
+          configured: true,
+          host: "sftp.example.gov",
+          port: 2222,
+          path: "/x",
+        }),
+      ),
+    ).resolves.toEqual({ host: "sftp.example.gov", port: 2222, path: "/x" });
+    await expect(
+      fetchSftpConnection(
+        jsonResponse({ configured: true, host: "dr.example.gov" }),
+      ),
+    ).resolves.toEqual({ host: "dr.example.gov" });
   });
 
-  test("GETs the remotes route", async () => {
+  test("GETs the sftp route", async () => {
     const urls: Array<string> = [];
-    await fetchSftpRemotes((input: RequestInfo | URL) => {
+    await fetchSftpConnection((input: RequestInfo | URL) => {
       urls.push(String(input));
       return Promise.resolve(
-        new Response("[]", {
+        new Response(JSON.stringify({ configured: false }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
       );
     });
-    expect(urls).toEqual(["/api/jobs/remotes"]);
+    expect(urls).toEqual(["/api/jobs/sftp"]);
   });
 
-  test("an enabled API with no remotes reads as none configured", async () => {
-    await expect(fetchSftpRemotes(jsonResponse([]))).resolves.toEqual([]);
+  test("an enabled API with no server reads as none configured", async () => {
+    await expect(
+      fetchSftpConnection(jsonResponse({ configured: false })),
+    ).resolves.toBeNull();
   });
 
   test("a non-2xx reads as none configured (fail toward save-file)", async () => {
@@ -976,39 +981,38 @@ describe("fetchSftpRemotes", () => {
     // server-job run can start here".
     for (const status of [404, 500])
       await expect(
-        fetchSftpRemotes(jsonResponse([{ name: "a", host: "h" }], status)),
-      ).resolves.toEqual([]);
+        fetchSftpConnection(
+          jsonResponse({ configured: true, host: "h" }, status),
+        ),
+      ).resolves.toBeNull();
   });
 
-  test("a malformed body reads as none configured, never a partial table", async () => {
+  test("a malformed body reads as none configured, never a partial connection", async () => {
     const malformed: Array<unknown> = [
-      { remotes: [] },
+      [],
       "prod_east",
-      [null],
-      ["prod_east"],
-      [{ host: "no-name.example.gov" }],
-      [{ name: "no_host" }],
-      [{ name: "", host: "h" }],
-      [{ name: "a", host: "" }],
-      [{ name: "a", host: "h", port: "2222" }],
-      [{ name: "a", host: "h", port: 0 }],
-      [{ name: "a", host: "h", port: 65536 }],
-      [{ name: "a", host: "h", path: "" }],
-      // One bad entry beside a good one fails the WHOLE listing closed.
-      [{ name: "good", host: "h" }, { name: "bad" }],
+      null,
+      { configured: true },
+      { configured: true, host: "" },
+      { host: "h" },
+      { configured: false, host: "h" },
+      { configured: true, host: "h", port: "2222" },
+      { configured: true, host: "h", port: 0 },
+      { configured: true, host: "h", port: 65536 },
+      { configured: true, host: "h", path: "" },
     ];
     for (const body of malformed)
-      await expect(fetchSftpRemotes(jsonResponse(body))).resolves.toEqual([]);
+      await expect(fetchSftpConnection(jsonResponse(body))).resolves.toBeNull();
   });
 
   test("a network error and a non-JSON body read as none configured", async () => {
     await expect(
-      fetchSftpRemotes(() => Promise.reject(new Error("offline"))),
-    ).resolves.toEqual([]);
+      fetchSftpConnection(() => Promise.reject(new Error("offline"))),
+    ).resolves.toBeNull();
     const htmlResponse: typeof fetch = () =>
       Promise.resolve(
         new Response("<html>gateway error</html>", { status: 200 }),
       );
-    await expect(fetchSftpRemotes(htmlResponse)).resolves.toEqual([]);
+    await expect(fetchSftpConnection(htmlResponse)).resolves.toBeNull();
   });
 });

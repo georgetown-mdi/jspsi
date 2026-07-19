@@ -205,8 +205,7 @@ export function useInviterExchange({
   inviterName,
   channel,
   inputSource,
-  sftpRemotesConfigured,
-  sftpRemote,
+  sftpConfigured,
 }: {
   invitation: GeneratedInvitation | undefined;
   inviterName: string;
@@ -219,13 +218,10 @@ export function useInviterExchange({
    * on the browser path, which re-parses the retained rows off the minted invitation
    * and never reads this. */
   inputSource: JobInputSource | undefined;
-  /** Whether the appliance has provisioned SFTP remotes -- the selector's third
+  /** Whether the appliance has a provisioned SFTP server -- the selector's third
    * input, threaded from the owner's fetch so this hook and the owner route
    * identically. */
-  sftpRemotesConfigured: boolean;
-  /** The picked provisioned remote's NAME for an sftp server-job run; the only
-   * connection field the intent carries. Undefined for every other channel. */
-  sftpRemote: string | undefined;
+  sftpConfigured: boolean;
 }): {
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
@@ -341,16 +337,12 @@ export function useInviterExchange({
         generateOutput,
       });
 
-    // The transport a server-job run rides: an sftp channel names the picked
-    // provisioned remote (the intent's only connection field), any other
+    // The transport a server-job run rides: an sftp channel carries no
+    // connection field (the appliance provisions the one server), any other
     // server-job channel is filedrop. Reached only for a server-job selection,
     // which the selector never produces for `browser`.
-    const serverJobTransport = (): ServerJobExchangeTransport => {
-      if (channel !== "sftp") return { channel: "filedrop" };
-      if (sftpRemote === undefined)
-        throw new Error("no provisioned remote picked for the sftp exchange");
-      return { channel: "sftp", remote: sftpRemote };
-    };
+    const serverJobTransport = (): ServerJobExchangeTransport =>
+      channel === "sftp" ? { channel: "sftp" } : { channel: "filedrop" };
 
     // The console appliance carries out the exchange: the driver POSTs the
     // sealed terms, this party's authored metadata/standardization (when
@@ -379,7 +371,7 @@ export function useInviterExchange({
     const runMode = selectExchangeDriver(
       channel,
       isConsoleBuild() ? "console" : "hosted",
-      sftpRemotesConfigured,
+      sftpConfigured,
     ).kind;
 
     void (async () => {

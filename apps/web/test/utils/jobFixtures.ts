@@ -8,10 +8,7 @@ import type {
   JobInputFileReference,
   JobSftpExchangeIntent,
 } from "@jobs/intent";
-import type {
-  JobSftpRemoteEntry,
-  JobSftpRemotesTable,
-} from "@jobs/sftpRemotes";
+import type { JobSftpServerEntry } from "@jobs/sftpServer";
 import type { LinkageTerms } from "@psilink/core";
 
 /** The stub CLI the driver tests point JOB_CLI_BINARY at. */
@@ -64,19 +61,19 @@ export function validInputFileIntent(
   };
 }
 
-/** The remote name {@link testSftpRemotesTable} provisions. */
+/** A would-be remote-name string, used only by the tests that assert a sent
+ * `remote` field is rejected as an unknown key (the sftp arm carries none). */
 export const TEST_SFTP_REMOTE_NAME = "prod_east";
 
 /** A canonical-format host-key fingerprint (43 standard base64 chars). */
 export const TEST_HOST_KEY_FINGERPRINT = `SHA256:${"A".repeat(43)}`;
 
-/** A valid sftp job intent naming the fixture remote; overrides merge over it. */
+/** A valid sftp job intent (no connection field); overrides merge over it. */
 export function validSftpIntent(
   overrides: Partial<JobSftpExchangeIntent> = {},
 ): JobSftpExchangeIntent {
   return {
     channel: "sftp",
-    remote: TEST_SFTP_REMOTE_NAME,
     linkageTerms: validLinkageTerms(),
     sharedSecret: VALID_SHARED_SECRET,
     inputCsv: "ssn,last_name,date_of_birth\n111223333,smith,1990-01-01\n",
@@ -84,8 +81,9 @@ export function validSftpIntent(
   };
 }
 
-/** A boot-shape remote entry: @path credential, pinned fingerprint. */
-export function testSftpRemoteEntry(): JobSftpRemoteEntry {
+/** A boot-shape provisioned SFTP server entry: @path credential, pinned
+ * fingerprint. */
+export function testSftpServerEntry(): JobSftpServerEntry {
   return {
     host: "sftp.example.org",
     port: 2222,
@@ -94,11 +92,6 @@ export function testSftpRemoteEntry(): JobSftpRemoteEntry {
     password: "@/etc/psilink/prod-east-password",
     hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
   };
-}
-
-/** A one-entry remotes table keyed by {@link TEST_SFTP_REMOTE_NAME}. */
-export function testSftpRemotesTable(): JobSftpRemotesTable {
-  return new Map([[TEST_SFTP_REMOTE_NAME, testSftpRemoteEntry()]]);
 }
 
 /** A throwaway data-root directory path unique per call (not created here). */

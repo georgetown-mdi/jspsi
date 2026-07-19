@@ -649,12 +649,12 @@ describe("availableTransports matrix", () => {
     expect(byTransport.get("filedrop")).toMatchObject({ disabled: true });
   });
 
-  test("console with a rendezvous mount and no remotes defaults to filedrop", () => {
+  test("console with a rendezvous mount and no sftp server defaults to filedrop", () => {
     const available = availableTransports(true, false, true);
     expect(available.defaultTransport).toBe("filedrop");
     const byTransport = optionByTransport(true, false, true);
     expect(byTransport.get("browser")).toMatchObject({ disabled: true });
-    // With no provisioned remote to name, SFTP falls back to save-a-file.
+    // With no provisioned server, SFTP falls back to save-a-file.
     expect(byTransport.get("sftp")).toMatchObject({ runMode: "save-file" });
     expect(byTransport.get("filedrop")).toMatchObject({
       disabled: false,
@@ -692,7 +692,7 @@ describe("transport chooser copy by deployment", () => {
     expect(copy.filedropDescription).toContain("JOB_RENDEZVOUS_DIR");
   });
 
-  test("SFTP stays a command-line save everywhere without provisioned remotes", () => {
+  test("SFTP stays a command-line save everywhere without a provisioned server", () => {
     for (const consoleBuild of [false, true]) {
       const copy = transportChooserCopy(consoleBuild, false, false);
       expect(copy.sftpLabel).toBe(
@@ -702,7 +702,7 @@ describe("transport chooser copy by deployment", () => {
     }
   });
 
-  test("a console build with provisioned remotes offers to run SFTP here", () => {
+  test("a console build with a provisioned server offers to run SFTP here", () => {
     const copy = transportChooserCopy(true, true, true);
     expect(copy.sftpLabel).toBe("Over SFTP, run here");
     expect(copy.sftpDescription).toContain(

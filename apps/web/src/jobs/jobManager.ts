@@ -26,19 +26,19 @@ import type {
   RelayEvent,
 } from "./cliDriver";
 import type { JobExchangeIntent, JobInputFileReference } from "./intent";
-import type { JobSftpRemoteEntry, JobSftpRemotesTable } from "./sftpRemotes";
+import type { JobSftpServerEntry } from "./sftpServer";
 
 /**
- * Thrown by {@link JobManager.createJob} when an sftp intent names a remote
- * that is not in the operator-provisioned table (or no table is configured).
- * The message never carries the requested name: the route maps this to an
- * empty-bodied 400, and nothing client-chosen should ride an error object
- * toward a log or response either.
+ * Thrown by {@link JobManager.createJob} when an sftp intent arrives but no
+ * SFTP server is provisioned (`JOB_SFTP_SERVER` unset). The console UI falls
+ * back to the save-a-file surface in that state, so this is the server-side
+ * backstop for an intent that reached the API anyway; the route maps it to a
+ * 400, mirroring {@link JobRendezvousUnavailableError}.
  */
-export class UnknownSftpRemoteError extends Error {
+export class SftpUnavailableError extends Error {
   constructor() {
-    super("the intent names an sftp remote that is not provisioned");
-    this.name = "UnknownSftpRemoteError";
+    super("an sftp intent arrived but no server is provisioned");
+    this.name = "SftpUnavailableError";
   }
 }
 
@@ -163,12 +163,12 @@ export interface JobManagerOptions {
   cancelSigtermGraceMs?: number;
   cancelSigkillGraceMs?: number;
   /**
-   * The operator-provisioned SFTP remotes table (loaded fail-closed at server
-   * startup; tests inject one directly). Absent when no remotes are
-   * configured, in which case every sftp intent fails with
-   * {@link UnknownSftpRemoteError}. Never derived from a request.
+   * The operator-provisioned SFTP server (loaded fail-closed at server startup;
+   * tests inject one directly). Absent when no server is configured, in which
+   * case every sftp intent fails with {@link SftpUnavailableError}. Never
+   * derived from a request.
    */
-  sftpRemotes?: JobSftpRemotesTable;
+  sftpServer?: JobSftpServerEntry;
   /**
    * The resolved work-input directory (from {@link useJobInputDir}). Absent when
    * `JOB_INPUT_DIR` is unset, in which case an intent naming an `inputFile` fails
@@ -191,14 +191,13 @@ export interface JobManagerOptions {
 }
 
 /**
- * The public, credential-free projection of one provisioned remote served by
- * `GET /api/jobs/remotes`: the name a client may select plus the locator
- * fields an operator needs to recognize it. Constructed field-by-field from
- * the table entry -- never by spreading it -- so no credential reference,
- * fingerprint, or future field can ride along.
+ * The public, credential-free projection of the provisioned SFTP server served
+ * by `GET /api/jobs/sftp`: the locator fields an operator needs to recognize it
+ * and the client needs to author an invitation endpoint from. Constructed
+ * field-by-field from the entry -- never by spreading it -- so no credential
+ * reference, fingerprint, or future field can ride along.
  */
-export interface SftpRemoteProjection {
-  name: string;
+export interface SftpConnectionProjection {
   host: string;
   port?: number;
   path?: string;
@@ -218,7 +217,7 @@ export class JobManager {
   private readonly cancelSigtermGraceMs: number;
   private readonly cancelSigkillGraceMs: number;
   private readonly childEnv: NodeJS.ProcessEnv | undefined;
-  private readonly sftpRemotes: JobSftpRemotesTable | undefined;
+  private readonly sftpServer: JobSftpServerEntry | undefined;
   private readonly jobInputDir: string | undefined;
   private readonly jobRendezvousDir: string | undefined;
 
@@ -230,7 +229,7 @@ export class JobManager {
       options.cancelSigtermGraceMs ?? CANCEL_SIGTERM_GRACE_MS;
     this.cancelSigkillGraceMs =
       options.cancelSigkillGraceMs ?? CANCEL_SIGKILL_GRACE_MS;
-    this.sftpRemotes = options.sftpRemotes;
+    this.sftpServer = options.sftpServer;
     this.jobInputDir = options.jobInputDir;
     this.jobRendezvousDir = options.jobRendezvousDir;
     this.childEnv = options.childEnv;
@@ -242,8 +241,8 @@ export class JobManager {
    * fixed names, and spawns the CLI. Returns the new job's id.
    *
    * The channel's provisioned resource is resolved synchronously first -- an sftp
-   * intent its named remote against the table, a filedrop intent a configured
-   * rendezvous directory -- so an unknown or unconfigured target is rejected before
+   * intent the single provisioned server, a filedrop intent a configured
+   * rendezvous directory -- so an unconfigured target is rejected before
    * the slot is claimed and with nothing on disk. The single slot is then claimed
    * with no await between the null check and the assignment, so two concurrent
    * POSTs cannot both pass: a second create while an exchange occupies the slot is
@@ -255,10 +254,10 @@ export class JobManager {
   async createJob(intent: JobExchangeIntent): Promise<string> {
     const id = generateJobId();
 
-    let remoteEntry: JobSftpRemoteEntry | undefined;
+    let serverEntry: JobSftpServerEntry | undefined;
     if (intent.channel === "sftp") {
-      remoteEntry = this.sftpRemotes?.get(intent.remote);
-      if (remoteEntry === undefined) throw new UnknownSftpRemoteError();
+      if (this.sftpServer === undefined) throw new SftpUnavailableError();
+      serverEntry = this.sftpServer;
     }
     if (intent.channel === "filedrop" && this.jobRendezvousDir === undefined)
       throw new JobRendezvousUnavailableError();
@@ -282,7 +281,7 @@ export class JobManager {
         intent,
         id,
         created.workdir,
-        remoteEntry,
+        serverEntry,
         mountedInputPath,
       );
     } catch (error) {
@@ -325,19 +324,17 @@ export class JobManager {
   }
 
   /**
-   * The credential-free projection of the provisioned remotes for
-   * `GET /api/jobs/remotes`. Explicitly mapped field-by-field (never a spread)
-   * so only {name, host, port, path} can ever cross the response boundary.
+   * The credential-free projection of the provisioned SFTP server for
+   * `GET /api/jobs/sftp`, or null when none is provisioned. Explicitly mapped
+   * field-by-field (never a spread) so only {host, port, path} can ever cross
+   * the response boundary.
    */
-  listSftpRemotes(): Array<SftpRemoteProjection> {
-    const projection: Array<SftpRemoteProjection> = [];
-    if (this.sftpRemotes === undefined) return projection;
-    for (const [name, entry] of this.sftpRemotes) {
-      const item: SftpRemoteProjection = { name, host: entry.host };
-      if (entry.port !== undefined) item.port = entry.port;
-      if (entry.path !== undefined) item.path = entry.path;
-      projection.push(item);
-    }
+  sftpProjection(): SftpConnectionProjection | null {
+    const entry = this.sftpServer;
+    if (entry === undefined) return null;
+    const projection: SftpConnectionProjection = { host: entry.host };
+    if (entry.port !== undefined) projection.port = entry.port;
+    if (entry.path !== undefined) projection.path = entry.path;
     return projection;
   }
 
@@ -345,13 +342,13 @@ export class JobManager {
     intent: JobExchangeIntent,
     id: string,
     workdir: string,
-    remoteEntry: JobSftpRemoteEntry | undefined,
+    serverEntry: JobSftpServerEntry | undefined,
     mountedInputPath: string | undefined,
   ): Promise<string> {
     const configDocument = composeDocumentByChannel(
       intent,
       this.jobRendezvousDir,
-      remoteEntry,
+      serverEntry,
     );
     const keyDocument = composeKeyFileDocument(intent);
 
@@ -782,19 +779,19 @@ function liveJobView(record: JobRecord): JobView {
 /**
  * Compose the CLI config document for the intent's channel: filedrop rendezvous in
  * the operator-configured rendezvous mount; sftp rendezvous at the
- * operator-provisioned remote. Each arm requires the resource `createJob` already
- * resolved -- the sftp remote entry, the filedrop rendezvous directory -- so a
+ * operator-provisioned server. Each arm requires the resource `createJob` already
+ * resolved -- the sftp server entry, the filedrop rendezvous directory -- so a
  * missing one here is a caller bug surfaced as a hard error, not a silent fallback.
  */
 function composeDocumentByChannel(
   intent: JobExchangeIntent,
   rendezvousDir: string | undefined,
-  remoteEntry: JobSftpRemoteEntry | undefined,
+  serverEntry: JobSftpServerEntry | undefined,
 ): string {
   if (intent.channel === "sftp") {
-    if (remoteEntry === undefined)
-      throw new Error("sftp job reached compose without a resolved remote");
-    return composeSftpConfigDocument(intent, remoteEntry);
+    if (serverEntry === undefined)
+      throw new Error("sftp job reached compose without a resolved server");
+    return composeSftpConfigDocument(intent, serverEntry);
   }
   if (rendezvousDir === undefined)
     throw new Error(

@@ -85,7 +85,7 @@ interface StubOptions {
   profile?: unknown;
   profileStatus?: number;
   profileErrorCode?: string;
-  remotes?: unknown;
+  sftp?: unknown;
   rendezvous?: unknown;
   coverageStatus?: number;
 }
@@ -141,8 +141,10 @@ function stubJobApi(options: StubOptions = {}): {
             ? new Response(null, { status: options.coverageStatus })
             : jsonResponse({ rates: [] }),
         );
-      if (url === "/api/jobs/remotes")
-        return Promise.resolve(jsonResponse(options.remotes ?? []));
+      if (url === "/api/jobs/sftp")
+        return Promise.resolve(
+          jsonResponse(options.sftp ?? { configured: false }),
+        );
       if (url === "/api/jobs/rendezvous")
         return Promise.resolve(
           jsonResponse(options.rendezvous ?? { configured: false }),
@@ -349,22 +351,30 @@ describe("console inviter transports and sample data", () => {
       .toBeInTheDocument();
   });
 
-  test("with provisioned remotes the default transport is SFTP (run here)", async () => {
-    stubJobApi({ remotes: [{ name: "prod_east", host: "sftp.example.gov" }] });
+  test("with a provisioned server the default transport is SFTP (run here)", async () => {
+    stubJobApi({
+      sftp: { configured: true, host: "sftp.example.gov", port: 2222 },
+    });
     mount(createElement(InviterBench));
     await reachReviewCreate();
-    // SFTP is selected by default and shows the run-here copy plus the picker.
+    // SFTP is selected by default and shows the run-here copy plus the single
+    // connection's locator as static text (no picker).
     await expect
       .element(page.getByLabelText("Over SFTP, run here"))
       .toBeChecked();
     await expect
-      .element(page.getByLabelText("SFTP server"))
+      .element(page.getByText("Runs through", { exact: false }))
       .toBeInTheDocument();
+    await expect
+      .element(page.getByText("sftp.example.gov:2222", { exact: false }))
+      .toBeInTheDocument();
+    // No remote picker: the operator selects nothing.
+    expect(page.getByLabelText("SFTP server").query()).toBeNull();
   });
 
-  test("with a rendezvous mount and no remotes the filedrop card runs here by default", async () => {
+  test("with a rendezvous mount and no sftp server the filedrop card runs here by default", async () => {
     stubJobApi({
-      remotes: [],
+      sftp: { configured: false },
       rendezvous: { configured: true, path: "/mnt/rendezvous" },
     });
     mount(createElement(InviterBench));
@@ -375,7 +385,10 @@ describe("console inviter transports and sample data", () => {
   });
 
   test("with no rendezvous mount the filedrop card is disabled", async () => {
-    stubJobApi({ remotes: [], rendezvous: { configured: false } });
+    stubJobApi({
+      sftp: { configured: false },
+      rendezvous: { configured: false },
+    });
     mount(createElement(InviterBench));
     await reachReviewCreate();
     await expect
@@ -391,14 +404,12 @@ describe("console inviter transports and sample data", () => {
 describe("console inviter mint and run", () => {
   test("seeds from the profile and runs a job whose intent carries inputFile, not inputCsv", async () => {
     const api = stubJobApi({
-      remotes: [
-        {
-          name: "dr_west",
-          host: "dr.example.gov",
-          port: 2222,
-          path: "/drops/psilink",
-        },
-      ],
+      sftp: {
+        configured: true,
+        host: "dr.example.gov",
+        port: 2222,
+        path: "/drops/psilink",
+      },
     });
     mount(createElement(InviterBench));
     await reachReviewCreate();
@@ -429,7 +440,8 @@ describe("console inviter mint and run", () => {
       page.getByText("Your browser is listening for your partner").query(),
     ).toBeNull();
 
-    // The minted code carries the picked remote's locator, never inline content.
+    // The minted code carries the provisioned connection's locator, never inline
+    // content.
     await page.getByRole("button", { name: "Show full code" }).click();
     const encoded = (
       document.querySelector(`.${styles.revealArea}`) as HTMLTextAreaElement
@@ -442,7 +454,8 @@ describe("console inviter mint and run", () => {
       path: "/drops/psilink",
     });
 
-    // The run POSTs an intent carrying the mounted-file REFERENCE, not the content.
+    // The run POSTs an intent carrying the mounted-file REFERENCE, not the content,
+    // and no connection field (the appliance provisions the one server).
     await vi.waitFor(() => {
       expect(
         api.captured.some(
@@ -455,7 +468,7 @@ describe("console inviter mint and run", () => {
     );
     const intent = JSON.parse(post?.body ?? "{}") as Record<string, unknown>;
     expect(intent.channel).toBe("sftp");
-    expect(intent.remote).toBe("dr_west");
+    expect(intent.remote).toBeUndefined();
     expect(intent.inputCsv).toBeUndefined();
     expect(intent.inputFile).toEqual({ name: "clients.csv" });
 
@@ -502,12 +515,12 @@ describe("console inviter mint and run", () => {
 
   test("a filedrop invitation carries only the rendezvous folder name, not its absolute path", async () => {
     stubJobApi({
-      remotes: [],
+      sftp: { configured: false },
       rendezvous: { configured: true, path: "/srv/exchanges/psilink" },
     });
     mount(createElement(InviterBench));
     await reachReviewCreate();
-    // Filedrop is the default (a rendezvous mount, no remotes) and runs here.
+    // Filedrop is the default (a rendezvous mount, no sftp server) and runs here.
     await expect
       .element(page.getByLabelText("Over a shared directory, run here"))
       .toBeChecked();

@@ -176,12 +176,12 @@ const TRANSPORT_ORDER: ReadonlyArray<Transport> = [
  * in-tab WebRTC exchange is out of scope on the appliance) and runs its filedrop
  * card here as a server job against the mounted rendezvous directory -- disabled
  * when `JOB_RENDEZVOUS_DIR` is unset. The console default is SFTP when the appliance
- * has provisioned remotes, else the filedrop card when a rendezvous directory is
+ * has a provisioned server, else the filedrop card when a rendezvous directory is
  * mounted, else SFTP.
  */
 export function availableTransports(
   consoleBuild: boolean,
-  sftpRemotesConfigured: boolean,
+  sftpConfigured: boolean,
   rendezvousConfigured: boolean,
 ): AvailableTransports {
   const profile: DeploymentProfile = consoleBuild ? "console" : "hosted";
@@ -193,12 +193,12 @@ export function availableTransports(
     const runMode: TransportRunMode = selectExchangeDriver(
       transport,
       profile,
-      sftpRemotesConfigured,
+      sftpConfigured,
     ).kind;
     return { transport, offered: true, disabled, runMode };
   });
   const defaultTransport: Transport = consoleBuild
-    ? sftpRemotesConfigured
+    ? sftpConfigured
       ? "sftp"
       : rendezvousConfigured
         ? "filedrop"
@@ -270,7 +270,7 @@ function capabilityNoteFor(
  * exchanges for the CLI. On the console appliance (`consoleBuild`) the Browser card
  * is disabled as out of scope, the filedrop card runs here against the mounted
  * rendezvous directory when one is configured (`rendezvousConfigured`, else it is
- * disabled), and -- when the appliance has provisioned SFTP remotes (`sftpServerJob`)
+ * disabled), and -- when the appliance has a provisioned SFTP server (`sftpConfigured`)
  * -- the SFTP card offers to run here and reads the file on the appliance. The
  * capability note is regenerated from {@link availableTransports} so it cannot drift
  * from behavior. */
@@ -286,15 +286,15 @@ export interface TransportChooserCopy {
 
 export function transportChooserCopy(
   consoleBuild: boolean,
-  sftpServerJob: boolean,
+  sftpConfigured: boolean,
   rendezvousConfigured: boolean,
 ): TransportChooserCopy {
   const available = availableTransports(
     consoleBuild,
-    sftpServerJob,
+    sftpConfigured,
     rendezvousConfigured,
   );
-  const sftpRunsHere = consoleBuild && sftpServerJob;
+  const sftpRunsHere = consoleBuild && sftpConfigured;
   const filedropRunsHere = consoleBuild && rendezvousConfigured;
   return {
     browserLabel: "Live, in this browser",

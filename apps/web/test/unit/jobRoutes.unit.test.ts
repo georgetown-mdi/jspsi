@@ -16,13 +16,13 @@ import { Route as EventsRoute } from "../../src/routes/api/jobs/$jobId/events";
 import { Route as JobRoute } from "../../src/routes/api/jobs/$jobId/index";
 import { Route as KeysRoute } from "../../src/routes/api/jobs/$jobId/keys";
 import { Route as RecordRoute } from "../../src/routes/api/jobs/$jobId/record";
-import { Route as RemotesRoute } from "../../src/routes/api/jobs/remotes";
 import { Route as ResultRoute } from "../../src/routes/api/jobs/$jobId/result";
+import { Route as SftpRoute } from "../../src/routes/api/jobs/sftp";
 
 import {
   STUB_CLI_PATH,
   tempDataRoot,
-  testSftpRemotesTable,
+  testSftpServerEntry,
   validInputFileIntent,
   validIntent,
   validSftpIntent,
@@ -48,11 +48,10 @@ afterEach(() => {
   seeded?.shutdown();
   for (const root of roots.splice(0))
     fs.rmSync(root, { recursive: true, force: true });
-  // Reset the memoized manager and remotes table so each test starts clean.
+  // Reset the memoized manager and sftp server so each test starts clean.
   (globalThis as { jobManagerInstance?: unknown }).jobManagerInstance =
     undefined;
-  (globalThis as { jobSftpRemotesTable?: unknown }).jobSftpRemotesTable =
-    undefined;
+  (globalThis as { jobSftpServer?: unknown }).jobSftpServer = undefined;
   (globalThis as { jobInputDirConfig?: unknown }).jobInputDirConfig = undefined;
   (globalThis as { jobRendezvousDirConfig?: unknown }).jobRendezvousDirConfig =
     undefined;
@@ -444,17 +443,19 @@ describe("status route reports record availability", () => {
 });
 
 /**
- * Enable the API and seed the global manager with an sftp remotes table (the
- * startup-loaded table production wiring passes), pointed at the stub CLI.
+ * Enable the API and seed the global manager with a provisioned sftp server (the
+ * startup-loaded entry production wiring passes), pointed at the stub CLI.
  */
-function enableJobApiWithRemotes(stubEnv: NodeJS.ProcessEnv = {}): JobManager {
-  const root = tempDataRoot("routes-remotes");
+function enableJobApiWithSftpServer(
+  stubEnv: NodeJS.ProcessEnv = {},
+): JobManager {
+  const root = tempDataRoot("routes-sftp");
   roots.push(root);
   vi.stubEnv("JOB_DATA_ROOT", root);
   const manager = new JobManager({
     dataRoot: root,
     binaryPath: STUB_CLI_PATH,
-    sftpRemotes: testSftpRemotesTable(),
+    sftpServer: testSftpServerEntry(),
     jobRendezvousDir: rvzRoot(),
     childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), ...stubEnv },
   });
@@ -522,19 +523,9 @@ describe("POST /api/jobs drives a job from a mounted work input", () => {
   });
 });
 
-describe("POST /api/jobs maps the sftp remote rejections to empty bodies", () => {
-  test("an unknown remote is an empty-bodied 400", async () => {
-    enableJobApiWithRemotes();
-    const response = (await handlersOf(CreateRoute).POST({
-      request: createRequest(validSftpIntent({ remote: "not_provisioned" })),
-      params: {},
-    })) as Response;
-    expect(response.status).toBe(400);
-    expect(await response.text()).toBe("");
-  });
-
-  test("a busy remote is an empty-bodied 409 that never echoes the name", async () => {
-    enableJobApiWithRemotes({ STUB_DELAY_MS: "5000" });
+describe("POST /api/jobs and the provisioned sftp server", () => {
+  test("a second concurrent sftp create is an empty-bodied 409", async () => {
+    enableJobApiWithSftpServer({ STUB_DELAY_MS: "5000" });
     const first = (await handlersOf(CreateRoute).POST({
       request: createRequest(validSftpIntent()),
       params: {},
@@ -549,7 +540,7 @@ describe("POST /api/jobs maps the sftp remote rejections to empty bodies", () =>
     expect(await second.text()).toBe("");
   });
 
-  test("an sftp intent without a configured table is an empty-bodied 400", async () => {
+  test("an sftp intent without a provisioned server is an empty-bodied 400", async () => {
     enableJobApi();
     const response = (await handlersOf(CreateRoute).POST({
       request: createRequest(validSftpIntent()),
@@ -557,6 +548,33 @@ describe("POST /api/jobs maps the sftp remote rejections to empty bodies", () =>
     })) as Response;
     expect(response.status).toBe(400);
     expect(await response.text()).toBe("");
+  });
+
+  test("the create path composes the provisioned server into the job config", async () => {
+    // The connection material comes only from the provisioned entry: the composed
+    // psilink.yaml carries its host and @path credential ref, and nothing
+    // client-chosen.
+    const root = tempDataRoot("routes-sftp-compose");
+    roots.push(root);
+    vi.stubEnv("JOB_DATA_ROOT", root);
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      sftpServer: testSftpServerEntry(),
+      childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), STUB_DELAY_MS: "5000" },
+    });
+    (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
+      manager;
+
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validSftpIntent()),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(201);
+    const { id } = (await response.json()) as { id: string };
+    const composed = fs.readFileSync(`${root}/${id}/psilink.yaml`, "utf8");
+    expect(composed).toContain("sftp.example.org");
+    expect(composed).toContain("@/etc/psilink/prod-east-password");
   });
 });
 
@@ -620,31 +638,31 @@ describe("DELETE frees the slot for a new POST", () => {
   });
 });
 
-describe("GET /api/jobs/remotes", () => {
+describe("GET /api/jobs/sftp", () => {
   test("is 404 when the API is disabled", async () => {
     vi.stubEnv("JOB_DATA_ROOT", "");
-    const response = (await handlersOf(RemotesRoute).GET({
-      request: new Request("http://localhost/api/jobs/remotes"),
+    const response = (await handlersOf(SftpRoute).GET({
+      request: new Request("http://localhost/api/jobs/sftp"),
       params: {},
     })) as Response;
     expect(response.status).toBe(404);
   });
 
-  test("serves [] when the API is enabled but no remotes are configured", async () => {
+  test("reads configured:false when the API is enabled but no server is provisioned", async () => {
     enableJobApi();
-    const response = (await handlersOf(RemotesRoute).GET({
-      request: new Request("http://localhost/api/jobs/remotes"),
+    const response = (await handlersOf(SftpRoute).GET({
+      request: new Request("http://localhost/api/jobs/sftp"),
       params: {},
     })) as Response;
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual([]);
+    expect(await response.json()).toEqual({ configured: false });
   });
 
-  test("the projection carries only {name, host, port, path} and no @ ref", async () => {
-    enableJobApiWithRemotes();
-    const response = (await handlersOf(RemotesRoute).GET({
-      request: new Request("http://localhost/api/jobs/remotes"),
+  test("the projection carries only {host, port, path} and no @ ref or fingerprint", async () => {
+    enableJobApiWithSftpServer();
+    const response = (await handlersOf(SftpRoute).GET({
+      request: new Request("http://localhost/api/jobs/sftp"),
       params: {},
     })) as Response;
     expect(response.status).toBe(200);
@@ -654,28 +672,26 @@ describe("GET /api/jobs/remotes", () => {
     expect(body).not.toContain("@");
     expect(body).not.toContain("SHA256");
 
-    const items = JSON.parse(body) as Array<Record<string, unknown>>;
-    expect(items).toHaveLength(1);
-    for (const item of items)
-      for (const key of Object.keys(item))
-        expect(["name", "host", "port", "path"]).toContain(key);
-    expect(items[0]).toEqual({
-      name: "prod_east",
+    const item = JSON.parse(body) as Record<string, unknown>;
+    for (const key of Object.keys(item))
+      expect(["configured", "host", "port", "path"]).toContain(key);
+    expect(item).toEqual({
+      configured: true,
       host: "sftp.example.org",
       port: 2222,
       path: "/exchange",
     });
   });
 
-  test("'remotes' can never be captured as a job id", async () => {
+  test("'sftp' can never be captured as a job id", async () => {
     // The traversal guard every $jobId route applies rejects the static
     // segment outright, so even a router that mis-ranked the routes could not
-    // reach the filesystem with "remotes" as an id.
-    expect(validateJobIdParam("remotes")).toBeNull();
+    // reach the filesystem with "sftp" as an id.
+    expect(validateJobIdParam("sftp")).toBeNull();
     enableJobApi();
     const response = (await handlersOf(JobRoute).GET({
-      request: new Request("http://localhost/api/jobs/remotes"),
-      params: { jobId: "remotes" },
+      request: new Request("http://localhost/api/jobs/sftp"),
+      params: { jobId: "sftp" },
     })) as Response;
     expect(response.status).toBe(404);
   });

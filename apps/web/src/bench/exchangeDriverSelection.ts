@@ -16,11 +16,10 @@ export type ExchangeDriverSelection =
  * Map a chosen `channel`, the build's `profile`, and the appliance's sftp
  * server-job availability to how the exchange runs. A filedrop channel runs
  * server-side on the console appliance; an sftp channel runs server-side only
- * when the build is a console AND the appliance has at least one
- * operator-provisioned remote to name (`sftpRemotesConfigured`) -- with none,
- * there is no server-side connection material, so it saves a file for the
- * command-line tool instead of arming a run that cannot start. Browser always
- * runs live.
+ * when the build is a console AND the appliance has a provisioned SFTP server
+ * (`sftpConfigured`) -- with none, there is no server-side connection material,
+ * so it saves a file for the command-line tool instead of arming a run that
+ * cannot start. Browser always runs live.
  *
  * The `channel` switch is exhaustive over {@link Transport} with no default: a
  * new channel makes this fail to compile rather than silently falling through
@@ -30,7 +29,7 @@ export type ExchangeDriverSelection =
 export function selectExchangeDriver(
   channel: Transport,
   profile: DeploymentProfile,
-  sftpRemotesConfigured: boolean,
+  sftpConfigured: boolean,
 ): ExchangeDriverSelection {
   switch (channel) {
     case "browser":
@@ -40,7 +39,7 @@ export function selectExchangeDriver(
         ? { kind: "server-job" }
         : { kind: "save-file" };
     case "sftp":
-      return profile === "console" && sftpRemotesConfigured
+      return profile === "console" && sftpConfigured
         ? { kind: "server-job" }
         : { kind: "save-file" };
   }

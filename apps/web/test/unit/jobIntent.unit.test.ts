@@ -27,7 +27,7 @@ import {
   SAMPLE_INPUT_FILE_REF,
   TEST_HOST_KEY_FINGERPRINT,
   TEST_SFTP_REMOTE_NAME,
-  testSftpRemoteEntry,
+  testSftpServerEntry,
   validInputFileIntent,
   validIntent,
   validLinkageTerms,
@@ -143,7 +143,6 @@ describe("jobExchangeIntentSchema enforces exactly-one-of inputCsv/inputFile", (
       jobExchangeIntentSchema.safeParse({
         ...validInputFileIntent(),
         channel: "sftp",
-        remote: TEST_SFTP_REMOTE_NAME,
       }).success,
     ).toBe(true);
   });
@@ -392,9 +391,11 @@ describe("jobExchangeIntentSchema rejects injection-shaped intents", () => {
     expect(jobExchangeIntentSchema.safeParse(validIntent()).success).toBe(true);
   });
 
-  test("rejects an sftp intent that names no remote", () => {
+  test("accepts an sftp intent with no connection field", () => {
+    // The sftp arm carries no `remote`: a filedrop intent's shared fields with
+    // the channel flipped to sftp is a well-formed sftp intent.
     const intent = { ...validIntent(), channel: "sftp" };
-    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(true);
   });
 
   test("rejects an unknown channel", () => {
@@ -497,18 +498,11 @@ describe("the sftp intent arm", () => {
     expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
   });
 
-  test("rejects a remote outside the name charset", () => {
-    for (const remote of [
-      "",
-      "../evil",
-      "a b",
-      "-leading",
-      "name/with/slash",
-      "a".repeat(65),
-    ]) {
-      const intent = validSftpIntent({ remote });
-      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
-    }
+  test("the sftp arm rejects a sent remote field as an unknown key", () => {
+    // The connection field is gone: the appliance provisions the one server, so
+    // a client that still sends a `remote` is rejected by the strict parse.
+    const intent = { ...validSftpIntent(), remote: TEST_SFTP_REMOTE_NAME };
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
   });
 
   test("the filedrop arm rejects a remote field", () => {
@@ -538,7 +532,7 @@ describe("the sftp intent arm", () => {
 describe("composeSftpConfigDocument", () => {
   test("writes snake_case fields with @path credential refs verbatim at rest", () => {
     const entry = {
-      ...testSftpRemoteEntry(),
+      ...testSftpServerEntry(),
       keyboardInteractive: true,
     };
     const yaml = composeSftpConfigDocument(validSftpIntent(), entry);
@@ -560,11 +554,14 @@ describe("composeSftpConfigDocument", () => {
     expect(yaml).not.toContain("keyboardInteractive");
   });
 
-  test("the remote NAME appears nowhere in the document", () => {
+  test("carries no client connection field (server block is the entry alone)", () => {
     const yaml = composeSftpConfigDocument(
       validSftpIntent(),
-      testSftpRemoteEntry(),
+      testSftpServerEntry(),
     );
+    // The intent contributes no connection material: no `remote` key, and no
+    // would-be remote name reaches the document.
+    expect(yaml).not.toContain("remote");
     expect(yaml).not.toContain(TEST_SFTP_REMOTE_NAME);
   });
 
@@ -577,7 +574,7 @@ describe("composeSftpConfigDocument", () => {
     const sftpDoc = parseYaml(
       composeSftpConfigDocument(
         validSftpIntent(intentFields),
-        testSftpRemoteEntry(),
+        testSftpServerEntry(),
       ),
     ) as Record<string, unknown>;
     const filedropDoc = parseYaml(
@@ -593,7 +590,7 @@ describe("composeSftpConfigDocument", () => {
 
   test("never assembles an authentication block", () => {
     const doc = parseYaml(
-      composeSftpConfigDocument(validSftpIntent(), testSftpRemoteEntry()),
+      composeSftpConfigDocument(validSftpIntent(), testSftpServerEntry()),
     ) as Record<string, unknown>;
     expect(doc.authentication).toBeUndefined();
   });
@@ -603,7 +600,7 @@ describe("composeSftpConfigDocument", () => {
       validSftpIntent({
         options: { pollIntervalMs: 5000, retainFiles: false },
       }),
-      testSftpRemoteEntry(),
+      testSftpServerEntry(),
     );
     const doc = parseYaml(yaml) as {
       connection: { options?: Record<string, unknown> };
@@ -615,7 +612,7 @@ describe("composeSftpConfigDocument", () => {
   test("the document parses back through core's exchange-spec schema", () => {
     const yaml = composeSftpConfigDocument(
       validSftpIntent(),
-      testSftpRemoteEntry(),
+      testSftpServerEntry(),
     );
     const parsed = safeParseExchangeSpec(parseYaml(yaml));
     expect(parsed.success).toBe(true);

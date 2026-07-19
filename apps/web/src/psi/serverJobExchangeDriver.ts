@@ -12,19 +12,18 @@ import type { JobExchangeIntent, JobExchangeOptions } from "@jobs/intent";
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 import type { RelayEvent, RelayEventType } from "@jobs/cliDriver";
 import type { RunOutputs } from "@bench/runOutputs";
-import type { SftpRemoteProjection } from "@jobs/jobManager";
+import type { SftpConnectionProjection } from "@jobs/jobManager";
 
 const log = getLogger("serverJobExchangeDriver");
 
 /** The channel a server job runs over, mirroring the {@link JobExchangeIntent}
  * discriminant so the driver stays transport-blind past intent construction.
- * The sftp variant carries exactly one extra field: the opaque NAME of an
- * operator-provisioned remote (`GET /api/jobs/remotes`). No free-form
- * connection field exists here by construction -- every host, port, path, and
- * credential reference lives in the appliance's remotes table, never in the
- * browser. */
+ * The sftp variant carries no connection field at all: the appliance is
+ * provisioned with exactly one SFTP server (`GET /api/jobs/sftp`), so every
+ * host, port, path, and credential reference lives on the appliance, never in
+ * the browser. */
 export type ServerJobExchangeTransport =
-  { channel: "filedrop" } | { channel: "sftp"; remote: string };
+  { channel: "filedrop" } | { channel: "sftp" };
 
 /**
  * Where the appliance reads this party's input from. `inline` carries the CSV
@@ -192,56 +191,52 @@ export function createFetchJobApiClient(
 }
 
 /**
- * Fetch the appliance's operator-provisioned SFTP remotes
- * (`GET /api/jobs/remotes`) as the validated projection array. Fail-safe toward
- * "none configured": a non-2xx, a network error, or a body that is not an array
- * of `{name, host, port?, path?}` entries resolves to an empty array, so the
- * bench falls back to the save-a-file surface rather than arming a server-job
- * run it cannot name a remote for.
+ * Fetch the appliance's operator-provisioned SFTP server
+ * (`GET /api/jobs/sftp`) as the validated projection, or null when none is
+ * provisioned. Fail-safe toward "none configured": a non-2xx, a network error,
+ * a `{ configured: false }` body, or a malformed `{ configured: true, ... }`
+ * body all resolve to null, so the bench falls back to the save-a-file surface
+ * rather than arming a server-job run it has no connection for.
  */
-export async function fetchSftpRemotes(
+export async function fetchSftpConnection(
   fetchImpl: typeof fetch = fetch,
-): Promise<Array<SftpRemoteProjection>> {
+): Promise<SftpConnectionProjection | null> {
   try {
-    const response = await fetchImpl("/api/jobs/remotes", { method: "GET" });
-    if (!response.ok) return [];
+    const response = await fetchImpl("/api/jobs/sftp", { method: "GET" });
+    if (!response.ok) return null;
     const body: unknown = await response.json();
-    return sftpRemotesProjectionOf(body) ?? [];
+    return sftpConnectionProjectionOf(body);
   } catch {
-    return [];
+    return null;
   }
 }
 
-/** Validate the remotes response body into the projection array, or null when
- * any entry is malformed -- one bad entry fails the whole listing closed rather
- * than serving a partial table the operator did not provision. */
-function sftpRemotesProjectionOf(
+/** Validate the sftp response body into the projection, or null when it reports
+ * `configured: false` or is malformed -- a partial or ill-formed body fails
+ * closed to save-a-file rather than arming a run against a connection the
+ * operator did not provision. */
+function sftpConnectionProjectionOf(
   body: unknown,
-): Array<SftpRemoteProjection> | null {
-  if (!Array.isArray(body)) return null;
-  const remotes: Array<SftpRemoteProjection> = [];
-  for (const entry of body) {
-    if (entry === null || typeof entry !== "object" || Array.isArray(entry))
-      return null;
-    const { name, host, port, path } = entry as Record<string, unknown>;
-    if (typeof name !== "string" || name.length === 0) return null;
-    if (typeof host !== "string" || host.length === 0) return null;
-    if (
-      port !== undefined &&
-      (typeof port !== "number" ||
-        !Number.isInteger(port) ||
-        port < 1 ||
-        port > 65535)
-    )
-      return null;
-    if (path !== undefined && (typeof path !== "string" || path.length === 0))
-      return null;
-    const remote: SftpRemoteProjection = { name, host };
-    if (port !== undefined) remote.port = port;
-    if (path !== undefined) remote.path = path;
-    remotes.push(remote);
-  }
-  return remotes;
+): SftpConnectionProjection | null {
+  if (body === null || typeof body !== "object" || Array.isArray(body))
+    return null;
+  const { configured, host, port, path } = body as Record<string, unknown>;
+  if (configured !== true) return null;
+  if (typeof host !== "string" || host.length === 0) return null;
+  if (
+    port !== undefined &&
+    (typeof port !== "number" ||
+      !Number.isInteger(port) ||
+      port < 1 ||
+      port > 65535)
+  )
+    return null;
+  if (path !== undefined && (typeof path !== "string" || path.length === 0))
+    return null;
+  const connection: SftpConnectionProjection = { host };
+  if (port !== undefined) connection.port = port;
+  if (path !== undefined) connection.path = path;
+  return connection;
 }
 
 /** Open the SSE event stream and yield each parsed frame as a {@link RelayEvent}.
@@ -397,8 +392,9 @@ function errorMessageOf(event: RelayEvent): string {
 }
 
 /** Build the {@link JobExchangeIntent} a run POSTs from the driver config: the
- * `transport` picks the arm (the sftp arm adds only the remote NAME), and
- * everything after the discriminant is channel-independent. */
+ * `transport` picks the arm (neither adds a connection field -- the sftp arm
+ * carries no `remote`, the appliance provisions the one server), and everything
+ * after the discriminant is channel-independent. */
 function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
   const {
     transport,
@@ -423,14 +419,14 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
     eventStream: true,
   };
   return transport.channel === "sftp"
-    ? { channel: "sftp", remote: transport.remote, ...shared }
+    ? { channel: "sftp", ...shared }
     : { channel: "filedrop", ...shared };
 }
 
 /**
  * Build a server-job {@link ExchangeDriver}: `run` POSTs a
  * {@link JobExchangeIntent} for the config's transport (filedrop, or sftp over
- * an operator-provisioned named remote) to the job API and maps the server's
+ * the operator-provisioned server) to the job API and maps the server's
  * SSE event stream onto the typed lifecycle events, so it is a drop-in for the
  * in-browser WebRTC driver behind the same contract. It owns no peer
  * connection, PSI library, or exchange result -- the result is written on the

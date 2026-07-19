@@ -8,7 +8,7 @@ import {
   ExchangeBusyError,
   JobManager,
   JobRendezvousUnavailableError,
-  UnknownSftpRemoteError,
+  SftpUnavailableError,
 } from "@jobs/jobManager";
 import { generateJobId, writeJobFile } from "@jobs/workdir";
 import { JobInputNotFoundError } from "@jobs/workInputs";
@@ -16,7 +16,7 @@ import { JobInputNotFoundError } from "@jobs/workInputs";
 import {
   STUB_CLI_PATH,
   tempDataRoot,
-  testSftpRemotesTable,
+  testSftpServerEntry,
   validInputFileIntent,
   validIntent,
   validSftpIntent,
@@ -25,7 +25,7 @@ import {
 import type { BufferedEvent, JobRecord } from "@jobs/jobManager";
 import type { CliDriverHandlers } from "@jobs/cliDriver";
 import type { JobInputFileReference } from "@jobs/intent";
-import type { JobSftpRemotesTable } from "@jobs/sftpRemotes";
+import type { JobSftpServerEntry } from "@jobs/sftpServer";
 
 vi.mock("@jobs/workdir", { spy: true });
 
@@ -53,7 +53,7 @@ function makeManager(options: {
   ignoreSigint?: boolean;
   ignoreSigterm?: boolean;
   eventBufferCap?: number;
-  sftpRemotes?: JobSftpRemotesTable;
+  sftpServer?: JobSftpServerEntry;
   jobInputDir?: string;
   jobRendezvousDir?: string;
   recordJson?: string;
@@ -92,7 +92,7 @@ function makeManager(options: {
     cancelSigtermGraceMs: 40,
     cancelSigkillGraceMs: 40,
     eventBufferCap: options.eventBufferCap,
-    sftpRemotes: options.sftpRemotes,
+    sftpServer: options.sftpServer,
     jobInputDir: options.jobInputDir,
     jobRendezvousDir: rendezvousDir,
     childEnv,
@@ -117,7 +117,7 @@ function rendezvousRoot(): string {
  * exposed through the returned ref.
  */
 function makeStubSpawnManager(
-  options: { sftpRemotes?: JobSftpRemotesTable } = {},
+  options: { sftpServer?: JobSftpServerEntry } = {},
 ): {
   manager: JobManager;
   handlersRef: { current: CliDriverHandlers | null };
@@ -133,8 +133,8 @@ function makeStubSpawnManager(
     dataRoot: root,
     binaryPath: STUB_CLI_PATH,
     jobRendezvousDir: rendezvousRoot(),
-    ...(options.sftpRemotes !== undefined
-      ? { sftpRemotes: options.sftpRemotes }
+    ...(options.sftpServer !== undefined
+      ? { sftpServer: options.sftpServer }
       : {}),
   });
   managers.push(manager);
@@ -455,7 +455,7 @@ describe("createJob failure cleanup", () => {
     const manager = makeManager({
       events: [RESULT_EVENT],
       exitCode: 0,
-      sftpRemotes: testSftpRemotesTable(),
+      sftpServer: testSftpServerEntry(),
     });
     const root = roots[roots.length - 1];
     vi.mocked(writeJobFile).mockRejectedValueOnce(new Error("disk full"));
@@ -552,24 +552,15 @@ describe("mounted work input read in place at create", () => {
   });
 });
 
-describe("sftp remote resolution", () => {
-  test("an unknown remote is a typed error and creates NO workdir", async () => {
-    const manager = makeManager({ sftpRemotes: testSftpRemotesTable() });
-    const root = roots[roots.length - 1];
-    await expect(
-      manager.createJob(validSftpIntent({ remote: "not_provisioned" })),
-    ).rejects.toThrow(UnknownSftpRemoteError);
-    // The remote resolves BEFORE the slot is claimed and BEFORE createWorkdir:
-    // nothing touched the disk, not even the data root.
-    expect(fs.existsSync(root)).toBe(false);
-  });
-
-  test("an absent table rejects every sftp intent the same way", async () => {
+describe("sftp server resolution", () => {
+  test("an absent server rejects every sftp intent and creates NO workdir", async () => {
     const manager = makeManager({});
     const root = roots[roots.length - 1];
     await expect(manager.createJob(validSftpIntent())).rejects.toThrow(
-      UnknownSftpRemoteError,
+      SftpUnavailableError,
     );
+    // The server resolves BEFORE the slot is claimed and BEFORE createWorkdir:
+    // nothing touched the disk, not even the data root.
     expect(fs.existsSync(root)).toBe(false);
   });
 
@@ -577,7 +568,7 @@ describe("sftp remote resolution", () => {
     const manager = makeManager({
       events: [RESULT_EVENT],
       exitCode: 0,
-      sftpRemotes: testSftpRemotesTable(),
+      sftpServer: testSftpServerEntry(),
     });
     const id = await manager.createJob(validSftpIntent());
     const record = manager.getJob(id)!;
@@ -589,10 +580,12 @@ describe("sftp remote resolution", () => {
     );
     expect(configYaml).toContain("channel: sftp");
     expect(configYaml).toContain("host: sftp.example.org");
-    expect(configYaml).not.toContain("prod_east");
+    // The provisioned server's @path credential reference lands verbatim; no
+    // secret byte reaches the composed config.
+    expect(configYaml).toContain("@/etc/psilink/prod-east-password");
   });
 
-  test("filedrop jobs are unaffected by an absent remotes table", async () => {
+  test("filedrop jobs are unaffected by an absent sftp server", async () => {
     const manager = makeManager({ events: [RESULT_EVENT], exitCode: 0 });
     const id = await manager.createJob(validIntent());
     const record = manager.getJob(id)!;
@@ -607,7 +600,7 @@ describe("sftp job driven by a mounted work input", () => {
     const manager = makeManager({
       events: [RESULT_EVENT],
       exitCode: 0,
-      sftpRemotes: testSftpRemotesTable(),
+      sftpServer: testSftpServerEntry(),
       jobInputDir: dir,
     });
     const root = roots[roots.length - 1];
@@ -634,7 +627,7 @@ describe("sftp job driven by a mounted work input", () => {
     const manager = makeManager({
       events: [RESULT_EVENT],
       exitCode: 0,
-      sftpRemotes: testSftpRemotesTable(),
+      sftpServer: testSftpServerEntry(),
       jobInputDir: dir,
     });
     const id = await manager.createJob(
@@ -704,7 +697,7 @@ describe("the single exchange slot", () => {
   test("a running filedrop job rejects a second create of either channel", async () => {
     const manager = makeManager({
       delayMs: 5000,
-      sftpRemotes: testSftpRemotesTable(),
+      sftpServer: testSftpServerEntry(),
     });
     const firstId = await manager.createJob(validIntent());
     const first = manager.getJob(firstId)!;
@@ -723,7 +716,7 @@ describe("the single exchange slot", () => {
   test("a running sftp job rejects a second create of either channel", async () => {
     const manager = makeManager({
       delayMs: 5000,
-      sftpRemotes: testSftpRemotesTable(),
+      sftpServer: testSftpServerEntry(),
     });
     const firstId = await manager.createJob(validSftpIntent());
     const first = manager.getJob(firstId)!;
