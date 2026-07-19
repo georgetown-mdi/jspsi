@@ -290,7 +290,9 @@ async function* streamJobEvents(
 const RELAY_EVENT_TYPES = new Set<RelayEventType>([
   "stages",
   "stage",
+  "stageEnd",
   "warning",
+  "metrics",
   "result",
   "error",
 ]);
@@ -541,6 +543,12 @@ export function createServerJobExchangeDriver(
                 error: new Error(errorMessageOf(event)),
               });
               return;
+            default:
+              // `stageEnd` and `metrics` are recognized progress/summary events
+              // (in RELAY_EVENT_TYPES so the relay does not degrade them) that the
+              // console does not yet surface; they carry no lifecycle mapping, so
+              // consume and ignore them rather than treating them as an error.
+              break;
           }
         }
         // The job API reconciles a terminal event for every job before it closes

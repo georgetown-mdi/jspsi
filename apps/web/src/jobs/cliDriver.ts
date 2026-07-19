@@ -17,7 +17,7 @@ import type { Readable } from "node:stream";
  * crash.
  */
 export type RelayEventType =
-  "stages" | "stage" | "warning" | "result" | "error";
+  "stages" | "stage" | "stageEnd" | "warning" | "metrics" | "result" | "error";
 
 /** A relayed CLI event after schema validation and field sanitization. */
 export interface RelayEvent {
@@ -278,7 +278,9 @@ function handleFd3Line(line: string, handlers: CliDriverHandlers): void {
 const RELAY_EVENT_TYPES = new Set<RelayEventType>([
   "stages",
   "stage",
+  "stageEnd",
   "warning",
+  "metrics",
   "result",
   "error",
 ]);

@@ -35,8 +35,6 @@ import {
  * mount.
  */
 export class LocalFSClient implements FileTransportClient {
-  // Connection re-establishment attempts (connect-retry loop re-attempts) over
-  // this client's life, surfaced for the CLI machine-interface metrics summary.
   private reconnectAttempts = 0;
 
   /**

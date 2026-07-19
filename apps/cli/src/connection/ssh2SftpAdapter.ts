@@ -141,9 +141,6 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // stack duplicate listeners and eventually trip a MaxListenersExceeded
   // warning. See attachKeyboardInteractive.
   private keyboardInteractiveAttached = false;
-  // Connection re-establishment attempts (connect-retry loop re-attempts) over
-  // this adapter's life, and transport data-operation retries (put/rename
-  // re-issues), surfaced for the CLI machine-interface metrics summary.
   private reconnectAttempts = 0;
   private transportRetries = 0;
   // The per-operation liveness bound (ms) every server-driven op is held to. See
