@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import * as cliDriver from "@jobs/cliDriver";
 import {
+  FiledropBusyError,
   JobManager,
   JobRendezvousUnavailableError,
   SftpRemoteBusyError,
@@ -730,6 +731,140 @@ describe("filedrop rendezvous facilitation", () => {
       (entry) => entry.event.type === "warning",
     );
     expect(warnings.length).toBeGreaterThan(0);
+  });
+});
+
+describe("filedrop single-holder busy latch", () => {
+  test("an unconfigured rendezvous is rejected before the latch is taken", () => {
+    const root = tempDataRoot("no-rvz-latch");
+    roots.push(root);
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      childEnv: { STUB_FD3_EVENTS: "[]" },
+    });
+    managers.push(manager);
+    const internals = manager as unknown as {
+      acquireFiledrop: (jobId: string) => void;
+      filedropHolder: string | null;
+    };
+    // The rendezvous-configured check lives inside acquireFiledrop and precedes
+    // the latch, matching acquireSftpRemote: a rejected acquire never records a
+    // holder, so nothing has to be released to undo it.
+    expect(() => internals.acquireFiledrop("job-1")).toThrow(
+      JobRendezvousUnavailableError,
+    );
+    expect(internals.filedropHolder).toBeNull();
+  });
+
+  test("a running filedrop job is busy; a terminal state releases the latch", async () => {
+    const manager = makeManager({ delayMs: 5000 });
+    const firstId = await manager.createJob(validIntent());
+    const first = manager.getJob(firstId)!;
+
+    await expect(manager.createJob(validIntent())).rejects.toThrow(
+      FiledropBusyError,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    manager.cancelJob(first);
+    await waitForTerminal(first);
+    await vi.waitFor(() => expect(first.terminal).not.toBeNull());
+
+    const secondId = await manager.createJob(validIntent());
+    expect(secondId).not.toBe(firstId);
+  });
+
+  test("a held filedrop latch leaves an sftp job free to acquire", async () => {
+    const manager = makeManager({
+      delayMs: 5000,
+      sftpRemotes: testSftpRemotesTable(),
+    });
+    await manager.createJob(validIntent());
+    // The two latches are independent: a held filedrop rendezvous does not gate
+    // the sftp remote.
+    const sftpId = await manager.createJob(validSftpIntent());
+    expect(manager.getJob(sftpId)).toBeDefined();
+  });
+
+  test("the holder-id guard keeps a stale record from freeing a successor's hold", async () => {
+    const manager = makeManager({ delayMs: 5000 });
+    const firstId = await manager.createJob(validIntent());
+    const first = manager.getJob(firstId)!;
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    manager.cancelJob(first);
+    await waitForTerminal(first);
+    await vi.waitFor(() => expect(first.terminal).not.toBeNull());
+
+    // A successor acquires the freed latch.
+    const secondId = await manager.createJob(validIntent());
+    const second = manager.getJob(secondId)!;
+
+    // A stale release from the already-terminal first record must not free the
+    // successor's hold: the guard frees the latch only for its recorded holder.
+    (
+      manager as unknown as {
+        releaseFiledropForRecord: (record: JobRecord) => void;
+      }
+    ).releaseFiledropForRecord(first);
+
+    await expect(manager.createJob(validIntent())).rejects.toThrow(
+      FiledropBusyError,
+    );
+
+    manager.cancelJob(second);
+    await waitForTerminal(second);
+  });
+
+  test("overflow keeps the latch held; the child's exit is what releases it", async () => {
+    const manager = makeManager({ delayMs: 5000 });
+    const firstId = await manager.createJob(validIntent());
+    const first = manager.getJob(firstId)!;
+    const holder = manager as unknown as { filedropHolder: string | null };
+
+    // The overflow path SIGKILLs and fails the job but must NOT release the latch:
+    // the SIGKILL is asynchronous, so the child may still be touching the
+    // rendezvous. Right after the synchronous overflow the latch is still held.
+    (
+      manager as unknown as { failOnOverflow: (record: JobRecord) => void }
+    ).failOnOverflow(first);
+    expect(first.status).toBe("failed");
+    expect(holder.filedropHolder).toBe(firstId);
+
+    // The child's exit (reconcileTerminal on `close`) is what frees it.
+    await waitForTerminal(first);
+    await vi.waitFor(() => expect(holder.filedropHolder).toBeNull());
+    const secondId = await manager.createJob(validIntent());
+    expect(secondId).not.toBe(firstId);
+  });
+
+  test("deleting the holding filedrop job releases the latch when its child exits", async () => {
+    const manager = makeManager({ delayMs: 5000 });
+    const firstId = await manager.createJob(validIntent());
+    const first = manager.getJob(firstId)!;
+    await expect(manager.createJob(validIntent())).rejects.toThrow(
+      FiledropBusyError,
+    );
+    expect(await manager.deleteJob(firstId)).toBe(true);
+    // The latch releases when the SIGKILL'd child actually exits, not on the
+    // delete request, so a successor cannot rendezvous with the dying child.
+    await waitForTerminal(first);
+    const secondId = await manager.createJob(validIntent());
+    expect(manager.getJob(secondId)).toBeDefined();
+  });
+
+  test("a failed filedrop job write releases the latch with the workdir", async () => {
+    const manager = makeManager({ events: [RESULT_EVENT], exitCode: 0 });
+    const root = roots[roots.length - 1];
+    vi.mocked(writeJobFile).mockRejectedValueOnce(new Error("disk full"));
+    await expect(manager.createJob(validIntent())).rejects.toThrow("disk full");
+    expect(fs.readdirSync(root)).toEqual([]);
+    // The latch did not leak: a fresh filedrop job is immediately acquirable.
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    expect(record.status).toBe("succeeded");
   });
 });
 

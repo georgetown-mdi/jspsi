@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import {
+  FiledropBusyError,
   JobRendezvousUnavailableError,
   SftpRemoteBusyError,
   UnknownSftpRemoteError,
@@ -33,8 +34,9 @@ import { jobExchangeIntentSchema } from "@jobs/intent";
  * request without trusting `Content-Length`, so an oversized body is a 413 (and
  * an unparseable one a 400) before schema validation runs.
  *
- * The sftp rejections are EMPTY-bodied: an unknown remote is 400 and a busy
- * one 409, and neither response reflects the requested name.
+ * The busy rejections are EMPTY-bodied: an unknown sftp remote is 400, and a
+ * busy sftp remote or an already-running filedrop job is 409; no response
+ * reflects the requested name.
  */
 export const Route = createFileRoute("/api/jobs/")({
   server: {
@@ -64,7 +66,10 @@ export const Route = createFileRoute("/api/jobs/")({
         } catch (error) {
           if (error instanceof UnknownSftpRemoteError)
             return jobEmptyResponse(400);
-          if (error instanceof SftpRemoteBusyError)
+          if (
+            error instanceof SftpRemoteBusyError ||
+            error instanceof FiledropBusyError
+          )
             return jobEmptyResponse(409);
           // A mounted input that names no regular file, or a filedrop intent with
           // no rendezvous directory configured, is a 400 (the manager left no
