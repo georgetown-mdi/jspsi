@@ -354,22 +354,27 @@ export interface AcceptorCleaningAttention {
    * are the partner's to fix). */
   failingFieldCount: number;
   /** The Customize-menu fact string: undefined (em-dash) when no attention is
-   * needed, else the amber "N field(s) failing" value. */
+   * needed, else the amber value naming the reason -- the failing-field count, the
+   * dead-key count, or the coverage-unavailable state. */
   railValue: string | undefined;
 }
 
 /**
  * Derive the Cleaning tab's attention state from the effective standardization, the
- * full-CSV coverage, and the dead-key count. A field is "failing" when its transform
- * drops every row ({@link isSilentEmpty}) or an authored step is invalid; the count
- * de-duplicates by field name. A dead key alone still raises attention (there is a
- * reason to open the tab -- the dead-key advisory renders there) but contributes no
- * failing-FIELD count, since the acceptor cannot fix it.
+ * full-CSV coverage, the dead-key count, and whether the coverage sweep failed for
+ * good. A field is "failing" when its transform drops every row ({@link isSilentEmpty})
+ * or an authored step is invalid; the count de-duplicates by field name. A dead key
+ * alone still raises attention (there is a reason to open the tab -- the dead-key
+ * advisory renders there) but contributes no failing-FIELD count, since the acceptor
+ * cannot fix it. A `coverageUnavailable` sweep (a deterministic coverage failure)
+ * raises attention as the lowest-priority reason -- with no field or key count -- so
+ * the rail flags that the check could not run rather than staying silent.
  */
 export function acceptorCleaningAttention(
   standardization: Standardization,
   rates: ReadonlyMap<string, FieldValueCoverage> | null,
   deadKeyCount: number,
+  coverageUnavailable: boolean,
 ): AcceptorCleaningAttention {
   const failing = new Set<string>();
   for (const transformation of standardization) {
@@ -381,11 +386,14 @@ export function acceptorCleaningAttention(
     if (silentEmpty || invalid) failing.add(transformation.output);
   }
   const failingFieldCount = failing.size;
-  const needsAttention = failingFieldCount > 0 || deadKeyCount > 0;
+  const needsAttention =
+    failingFieldCount > 0 || deadKeyCount > 0 || coverageUnavailable;
   const railValue = !needsAttention
     ? undefined
     : failingFieldCount > 0
       ? `${failingFieldCount} field${failingFieldCount === 1 ? "" : "s"} failing`
-      : `${deadKeyCount} key${deadKeyCount === 1 ? "" : "s"} to review`;
+      : deadKeyCount > 0
+        ? `${deadKeyCount} key${deadKeyCount === 1 ? "" : "s"} to review`
+        : "Coverage unavailable";
   return { needsAttention, failingFieldCount, railValue };
 }

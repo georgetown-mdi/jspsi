@@ -353,7 +353,11 @@ export function InviterBench() {
     editor?.draft.standardization ?? EMPTY_STANDARDIZATION,
     benchCoverageProvider,
   );
-  const cleaningAttention = inviterCleaningAttention(editor, rates);
+  const cleaningAttention = inviterCleaningAttention(
+    editor,
+    rates,
+    ratesUnavailable,
+  );
   const coverageProblems = cleaningCoverageProblems(editor, rates);
 
   // The failure alerts' "start over with a fresh invitation": the seal lifts

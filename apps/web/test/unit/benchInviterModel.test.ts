@@ -361,7 +361,7 @@ describe("inviter cleaning attention", () => {
   }
 
   test("no file raises no attention and no coverage problems", () => {
-    const attention = inviterCleaningAttention(undefined, new Map());
+    const attention = inviterCleaningAttention(undefined, new Map(), false);
     expect(attention.needsAttention).toBe(false);
     expect(attention.railValue).toBeUndefined();
     expect(cleaningCoverageProblems(undefined, new Map())).toEqual([]);
@@ -369,7 +369,7 @@ describe("inviter cleaning attention", () => {
 
   test("a null (pending) rate map raises nothing", () => {
     const editor = editorFromCsv("Dana", csv);
-    const attention = inviterCleaningAttention(editor, null);
+    const attention = inviterCleaningAttention(editor, null, false);
     expect(attention.needsAttention).toBe(false);
     expect(attention.failingFieldCount).toBe(0);
     expect(attention.railValue).toBeUndefined();
@@ -384,7 +384,7 @@ describe("inviter cleaning attention", () => {
         covered(t.output, t.input),
       ]),
     );
-    const attention = inviterCleaningAttention(editor, rates);
+    const attention = inviterCleaningAttention(editor, rates, false);
     expect(attention.needsAttention).toBe(false);
     expect(attention.railValue).toBeUndefined();
     expect(cleaningCoverageProblems(editor, rates)).toEqual([]);
@@ -395,7 +395,7 @@ describe("inviter cleaning attention", () => {
     const rates = new Map<string, FieldValueCoverage>([
       ["date_of_birth", collapsed("date_of_birth", "dob")],
     ]);
-    const attention = inviterCleaningAttention(editor, rates);
+    const attention = inviterCleaningAttention(editor, rates, false);
     expect(attention.needsAttention).toBe(true);
     expect(attention.failingFieldCount).toBe(1);
     expect(attention.railValue).toBe("1 field failing");
@@ -422,7 +422,7 @@ describe("inviter cleaning attention", () => {
       ["first_name", collapsed("first_name", "first_name")],
       ["last_name", collapsed("last_name", "last_name")],
     ]);
-    const attention = inviterCleaningAttention(editor, rates);
+    const attention = inviterCleaningAttention(editor, rates, false);
     expect(attention.failingFieldCount).toBe(2);
     expect(attention.railValue).toBe("2 fields failing");
     const problems = cleaningCoverageProblems(editor, rates);
@@ -464,7 +464,7 @@ describe("inviter cleaning attention", () => {
       ["first_name_2", collapsed("first_name_2", "nickname")],
     ]);
     expect(
-      inviterCleaningAttention(editor, bothFailing).failingFieldCount,
+      inviterCleaningAttention(editor, bothFailing, false).failingFieldCount,
     ).toBe(2);
     const problems = cleaningCoverageProblems(editor, bothFailing);
     expect(problems.map((problem) => problem.message)).toEqual([
@@ -494,11 +494,13 @@ describe("inviter cleaning attention", () => {
     const failing = new Map<string, FieldValueCoverage>([
       ["date_of_birth", collapsed("date_of_birth", "dob")],
     ]);
-    expect(inviterCleaningAttention(editor, failing).needsAttention).toBe(true);
+    expect(
+      inviterCleaningAttention(editor, failing, false).needsAttention,
+    ).toBe(true);
     const recovered = new Map<string, FieldValueCoverage>([
       ["date_of_birth", covered("date_of_birth", "dob")],
     ]);
-    const attention = inviterCleaningAttention(editor, recovered);
+    const attention = inviterCleaningAttention(editor, recovered, false);
     expect(attention.needsAttention).toBe(false);
     expect(attention.railValue).toBeUndefined();
     expect(cleaningCoverageProblems(editor, recovered)).toEqual([]);
@@ -514,10 +516,27 @@ describe("inviter cleaning attention", () => {
     const rates = new Map<string, FieldValueCoverage>([
       ["date_of_birth", collapsed("date_of_birth", "dob")],
     ]);
-    const attention = inviterCleaningAttention(editor, rates);
+    const attention = inviterCleaningAttention(editor, rates, false);
     const amber = inviterRailFacts(editor, attention)[0];
     expect(amber.tone).toBe("attention");
     expect(amber.fact).toBe("1 field failing");
+  });
+
+  test("an unavailable sweep surfaces a distinct rail fact, not the plain count", () => {
+    const editor = editorFromCsv("Dana", csv);
+    const attention = inviterCleaningAttention(editor, null, true);
+    expect(attention.needsAttention).toBe(true);
+    expect(attention.failingFieldCount).toBe(0);
+    expect(attention.railValue).toBe("Coverage unavailable");
+    const fact = inviterRailFacts(editor, attention)[0];
+    expect(fact.tone).toBe("attention");
+    expect(fact.fact).toBe("Coverage unavailable");
+  });
+
+  test("an unavailable sweep with no file raises no attention", () => {
+    const attention = inviterCleaningAttention(undefined, null, true);
+    expect(attention.needsAttention).toBe(false);
+    expect(attention.railValue).toBeUndefined();
   });
 });
 

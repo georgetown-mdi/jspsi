@@ -700,6 +700,7 @@ export function AcceptorBench() {
           editorState.standardization,
           rates,
           verdict.deadKeyCount,
+          ratesUnavailable,
         )
       : undefined;
 

@@ -1047,20 +1047,25 @@ export interface InviterCleaningAttention {
    * amber "N field(s) failing" value. */
   failingFieldCount: number;
   /** The Customize-menu fact string: undefined (em-dash) when no attention is
-   * needed, else the amber "N field(s) failing" value (matching the acceptor's). */
+   * needed, else the amber value -- the failing-field count, or the
+   * coverage-unavailable state (both matching the acceptor's). */
   railValue: string | undefined;
 }
 
 /**
- * Derive the Cleaning tab's attention state from the session's standardization
- * and the full-CSV coverage. A silent-empty field ({@link isSilentEmpty}) is a
- * failing field; the count de-duplicates by field name. No file (`editor`
- * undefined) or a null (pending) rate map raises nothing -- coverage is not yet
- * known, not a collapse.
+ * Derive the Cleaning tab's attention state from the session's standardization,
+ * the full-CSV coverage, and whether the coverage sweep failed for good. A
+ * silent-empty field ({@link isSilentEmpty}) is a failing field; the count
+ * de-duplicates by field name. No file (`editor` undefined) or a null (pending)
+ * rate map raises nothing -- coverage is not yet known, not a collapse. A
+ * `coverageUnavailable` sweep (a deterministic coverage failure) over a loaded
+ * file raises attention with no field count, so the rail flags that the check
+ * could not run instead of showing the plain field count as if it had.
  */
 export function inviterCleaningAttention(
   editor: InviterEditor | undefined,
   rates: ReadonlyMap<string, FieldValueCoverage> | null,
+  coverageUnavailable: boolean,
 ): InviterCleaningAttention {
   const failing = new Set<string>();
   if (editor !== undefined && rates !== null)
@@ -1070,13 +1075,16 @@ export function inviterCleaningAttention(
         failing.add(transformation.output);
     }
   const failingFieldCount = failing.size;
+  const unavailable = editor !== undefined && coverageUnavailable;
   return {
-    needsAttention: failingFieldCount > 0,
+    needsAttention: failingFieldCount > 0 || unavailable,
     failingFieldCount,
     railValue:
       failingFieldCount > 0
         ? `${plural(failingFieldCount, "field")} failing`
-        : undefined,
+        : unavailable
+          ? "Coverage unavailable"
+          : undefined,
   };
 }
 
