@@ -115,10 +115,11 @@ test("list omits subdirectories", async () => {
 test("list omits a file that disappears between readdir and stat", async () => {
   await fs.writeFile(path.join(dir, "keep.txt"), "a");
   await fs.writeFile(path.join(dir, "gone.txt"), "b");
-  // Intercept fs.stat to simulate ENOENT for "gone.txt", replicating the
-  // readdir/stat race window without requiring a real concurrent deletion.
-  const realStat = fs.stat.bind(fs);
-  const spy = vi.spyOn(fs, "stat").mockImplementation(((filePath: string) => {
+  // Intercept fs.lstat (list stats entries with lstat) to simulate ENOENT for
+  // "gone.txt", replicating the readdir/stat race window without requiring a
+  // real concurrent deletion.
+  const realStat = fs.lstat.bind(fs);
+  const spy = vi.spyOn(fs, "lstat").mockImplementation(((filePath: string) => {
     if (filePath.endsWith("gone.txt"))
       return Promise.reject(
         Object.assign(new Error("ENOENT: no such file or directory"), {
@@ -189,7 +190,7 @@ test("list accepts a directory at exactly the entry cap", async () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const openSpy = vi.spyOn(fs, "opendir").mockResolvedValue(atCap as any);
   const statSpy = vi
-    .spyOn(fs, "stat")
+    .spyOn(fs, "lstat")
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .mockResolvedValue({ mtimeMs: 1, size: 0 } as any);
   try {
@@ -292,6 +293,21 @@ test("put writes a ReadableStream", async () => {
   const stream = Readable.from(["chunk1", "chunk2"]);
   await client.put(stream, dest);
   expect(await fs.readFile(dest, "utf8")).toBe("chunk1chunk2");
+});
+
+test("put leaves an existing dest untouched when the stream source throws", async () => {
+  // dest is opened (O_CREAT|O_TRUNC) only AFTER a plain stream source is fully
+  // drained, so a source that throws mid-read never truncates an existing dest.
+  const dest = path.join(dir, "interrupted.bin");
+  await fs.writeFile(dest, "original-contents");
+  async function* throwing() {
+    yield Buffer.from("partial");
+    throw new Error("source blew up mid-stream");
+  }
+  await expect(client.put(Readable.from(throwing()), dest)).rejects.toThrow(
+    "source blew up mid-stream",
+  );
+  expect(await fs.readFile(dest, "utf8")).toBe("original-contents");
 });
 
 test("put with flags: 'a' appends to an existing file", async () => {
@@ -429,6 +445,95 @@ test("exists returns true for an existing file", async () => {
 
 test("exists returns false for a missing file", async () => {
   expect(await client.exists(path.join(dir, "absent.txt"))).toBe(false);
+});
+
+// --- symlink refusal ---------------------------------------------------------
+
+describe("symlink refusal in the rendezvous directory", () => {
+  // The rendezvous directory is partner-writable, so the peer could plant a
+  // symlink in it. On the read path list() is the load-bearing control: it
+  // enumerates via opendir and keeps only Dirent.isFile() names, so a symlink is
+  // filtered out before get() is handed the name, and openNoFollow (O_NOFOLLOW)
+  // is the backstop for a symlink swapped in after the listing (a TOCTOU race).
+  // On the write path put()/createExclusive() destinations come from protocol
+  // state, never from list(), so O_NOFOLLOW is the primary defense against a
+  // pre-planted symlink there. Both the filter and the per-primitive refusal are
+  // asserted here so the invariant is locked rather than incidental.
+  //
+  // POSIX-only: O_NOFOLLOW is absent on Windows and symlink creation there needs
+  // privilege, so the primitive-level assertions are skipped on win32.
+
+  test("list omits both a valid-target and a dangling symlink", async () => {
+    // This is the invariant every rendezvous read rests on: a symlink is never
+    // handed to the read primitive because list() drops it here.
+    if (process.platform === "win32") return;
+    await fs.writeFile(path.join(dir, "real.txt"), "payload");
+    await fs.symlink(path.join(dir, "real.txt"), path.join(dir, "valid-link"));
+    await fs.symlink(
+      path.join(dir, "no-such-target"),
+      path.join(dir, "dangling-link"),
+    );
+    const names = (await client.list(dir)).map((e) => e.name);
+    expect(names).toEqual(["real.txt"]);
+  });
+
+  test("get refuses a symlink instead of following it to the target", async () => {
+    if (process.platform === "win32") return;
+    const target = path.join(dir, "target.txt");
+    await fs.writeFile(target, "secret-target-contents");
+    const link = path.join(dir, "link-to-target");
+    await fs.symlink(target, link);
+    // Both the unbounded fast path and the bounded path must refuse at the open,
+    // never resolving to the link target's contents.
+    await expect(client.get(link)).rejects.toMatchObject({ code: "ELOOP" });
+    await expect(client.get(link, { maxBytes: 1024 })).rejects.toMatchObject({
+      code: "ELOOP",
+    });
+  });
+
+  test("get refuses a dangling symlink at the link itself", async () => {
+    if (process.platform === "win32") return;
+    const link = path.join(dir, "dangling-get");
+    await fs.symlink(path.join(dir, "missing-target"), link);
+    // ELOOP (refused at the link), not ENOENT (which a followed dead link gives).
+    await expect(client.get(link)).rejects.toMatchObject({ code: "ELOOP" });
+  });
+
+  test("put refuses to write through a symlink and leaves the target intact", async () => {
+    if (process.platform === "win32") return;
+    const target = path.join(dir, "put-target.txt");
+    await fs.writeFile(target, "original");
+    const link = path.join(dir, "put-link");
+    await fs.symlink(target, link);
+    await expect(
+      client.put(Buffer.from("attacker"), link),
+    ).rejects.toMatchObject({ code: "ELOOP" });
+    expect(await fs.readFile(target, "utf8")).toBe("original");
+    // The link itself is untouched -- not truncated or replaced with a file.
+    expect((await fs.lstat(link)).isSymbolicLink()).toBe(true);
+  });
+
+  test("createExclusive refuses a symlink pre-planted at the target", async () => {
+    if (process.platform === "win32") return;
+    const target = path.join(dir, "excl-target.txt");
+    await fs.writeFile(target, "original");
+    const link = path.join(dir, "excl-link");
+    await fs.symlink(target, link);
+    // O_EXCL refuses the existing entry (EEXIST); the open never follows the link
+    // to its target, so the target keeps its contents.
+    await expect(client.createExclusive(link)).rejects.toThrow();
+    expect(await fs.readFile(target, "utf8")).toBe("original");
+  });
+
+  test("ordinary regular-file read and write are unaffected", async () => {
+    if (process.platform === "win32") return;
+    const file = path.join(dir, "plain.bin");
+    await client.put(Buffer.from([1, 2, 3]), file);
+    expect(await client.get(file)).toEqual(Buffer.from([1, 2, 3]));
+    expect(await client.get(file, { maxBytes: 16 })).toEqual(
+      Buffer.from([1, 2, 3]),
+    );
+  });
 });
 
 // --- connect: retry and timeout ----------------------------------------------

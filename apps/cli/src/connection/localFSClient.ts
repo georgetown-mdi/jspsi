@@ -23,6 +23,49 @@ import {
   filenameTooLongError,
 } from "./listingGuard";
 
+// O_NOFOLLOW makes an open refuse a final-component symlink (ELOOP on POSIX), so
+// a symlink planted at a rendezvous entry in the partner-writable directory is
+// never traversed by the read/write primitives below. It refuses only a
+// symlinked *entry*, not a symlinked mount point: an intermediate directory
+// component (a symlinked share root) is still followed, so a legitimate
+// symlinked mount is unaffected. @types/node types O_NOFOLLOW as a number, but
+// it is absent on Windows, where `?? 0` drops it from the mask -- leaving the
+// open otherwise unchanged -- mirroring the writeFileOwnerOnly / writeFileAtomic
+// hardening in fileUtils.ts.
+const OPEN_FLAGS = {
+  r: fs.constants.O_RDONLY,
+  w: fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC,
+  a: fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_APPEND,
+  wx: fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL,
+} as const;
+
+/**
+ * Opens `filePath` with the numeric equivalent of the string `flag` plus
+ * `O_NOFOLLOW`, so the open refuses to traverse a symlink at the final path
+ * component rather than following it. What this refusal defends against differs
+ * by primitive: for the read primitive ({@link LocalFSClient.get}) it is a
+ * backstop, since {@link LocalFSClient.list} already filters symlink entries out
+ * (its `opendir` walk keeps only `Dirent.isFile()` names) and every read reads a
+ * name the listing surfaced, so `O_NOFOLLOW` only catches a symlink swapped in
+ * after the listing committed the name (a TOCTOU race). For the write primitives
+ * ({@link LocalFSClient.put}, {@link LocalFSClient.createExclusive}) it is the
+ * primary defense, not a backstop: their destinations are built from protocol
+ * state at predictable names and never pass through `list()`, so `O_NOFOLLOW` is
+ * what refuses a symlink pre-planted at one of those names.
+ */
+function openNoFollow(filePath: string, flag: keyof typeof OPEN_FLAGS) {
+  return fs.open(filePath, OPEN_FLAGS[flag] | (fs.constants.O_NOFOLLOW ?? 0));
+}
+
+/** Pulls a stream source fully into one Buffer before any file is opened. */
+async function drainStream(src: NodeJS.ReadableStream): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of src) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
 /**
  * {@link FileTransportClient} backed by the local filesystem. Use this when
  * both parties share a network-mounted folder (e.g. an IT-provisioned share
@@ -137,13 +180,16 @@ export class LocalFSClient implements FileTransportClient {
       if (entry.isFile()) fileNames.push(entry.name);
     }
     // opendir provides the file type but not mtimeMs; a stat per file is
-    // unavoidable. Promise.all keeps the calls parallel. ENOENT means a file was
-    // deleted between the walk and stat (e.g. by the peer's cleanup); omit it
-    // rather than failing the whole listing.
+    // unavoidable. lstat (not stat) keeps this metadata read from following a
+    // symlink swapped in after the isFile() walk committed the name -- it would
+    // report the link target's size, which the poll loop's size check consumes.
+    // Promise.all keeps the calls parallel. ENOENT means a file was deleted
+    // between the walk and stat (e.g. by the peer's cleanup); omit it rather
+    // than failing the whole listing.
     const results = await Promise.all(
       fileNames.map(async (name) => {
         try {
-          const stat = await fs.stat(path.join(dir, name));
+          const stat = await fs.lstat(path.join(dir, name));
           return {
             name,
             modifyTime: Math.floor(stat.mtimeMs),
@@ -169,17 +215,29 @@ export class LocalFSClient implements FileTransportClient {
    * file handle, so that read pulls exactly the fstat'd size; a writer that
    * appends after the stat (a TOCTOU race a plain `stat` + `readFile` would
    * lose) cannot drive an allocation past the cap. Omitting `maxBytes` keeps the
-   * original unbounded
-   * `readFile` fast path.
+   * unbounded fast path.
+   *
+   * Both paths open through {@link openNoFollow}, so a symlink at `filePath` is
+   * refused rather than followed to its target.
    */
   async get(
     filePath: string,
     options?: GetOptions,
   ): Promise<Buffer<ArrayBufferLike>> {
     const maxBytes = options?.maxBytes;
-    if (maxBytes === undefined) return fs.readFile(filePath);
+    if (maxBytes === undefined) {
+      const handle = await openNoFollow(filePath, "r");
+      try {
+        return (await handle.readFile()) as Buffer<ArrayBufferLike>;
+      } finally {
+        // Read-only handle: a failed close carries no data-integrity meaning and
+        // must not replace the returned buffer, the same reason the bounded path
+        // below swallows its close error.
+        await handle.close().catch(() => {});
+      }
+    }
 
-    const handle = await fs.open(filePath, "r");
+    const handle = await openNoFollow(filePath, "r");
     try {
       const { size } = await handle.stat();
       if (size > maxBytes)
@@ -222,43 +280,44 @@ export class LocalFSClient implements FileTransportClient {
           "stream",
       );
     }
-    const writeOptions = {
-      flag: options?.flags ?? "w",
-      encoding: options?.encoding as BufferEncoding | null | undefined,
-    };
-    if (Buffer.isBuffer(src)) {
-      await fs.writeFile(dest, src, writeOptions);
-    } else if (Array.isArray(src)) {
-      // A [header, payload] chunk list: write the parts back-to-back with one
-      // positional writev so the 10-byte header is prepended WITHOUT
-      // concatenating the payload into a fresh buffer (the send-path
-      // peak-shaving this mirrors -- for a binary frame the payload is never
-      // copied). The resulting on-disk bytes are the parts joined, byte-identical
-      // to writing their concatenation. writeOptions.encoding does not apply here
-      // and is deliberately not passed: a chunk list is raw bytes, so writev
-      // (unlike fs.writeFile) has no string to decode -- every chunk-list call
-      // site passes encoding: null.
-      const handle = await fs.open(dest, writeOptions.flag);
-      try {
-        await handle.writev(src);
-      } catch (err) {
-        // Preserve the writev failure: close best-effort so a close error on the
-        // already-failed path cannot replace (mask) why the write failed, the
-        // same reason get() swallows its own close error.
-        await handle.close().catch(() => {});
-        throw err;
+    const flag = options?.flags ?? "w";
+    const encoding = options?.encoding as BufferEncoding | null | undefined;
+    // Drain a plain stream source to a Buffer BEFORE opening dest. The open
+    // below is O_CREAT|O_TRUNC, so opening first and then pulling from the
+    // stream would truncate dest up front and, if the source threw partway,
+    // leave it truncated rather than untouched. A Buffer or [header, payload]
+    // chunk list is already fully in memory, so it is written as-is.
+    const payload: Buffer | Uint8Array[] =
+      Buffer.isBuffer(src) || Array.isArray(src) ? src : await drainStream(src);
+    // Write through an O_NOFOLLOW handle so a symlink planted at `dest` is
+    // refused rather than redirecting the write to the link's target. Opening
+    // the handle here (rather than deferring the flag to fs.writeFile) is what
+    // lets the numeric O_NOFOLLOW mask apply on every write branch.
+    const handle = await openNoFollow(dest, flag);
+    try {
+      if (Array.isArray(payload)) {
+        // A [header, payload] chunk list: write the parts back-to-back with one
+        // positional writev so the 10-byte header is prepended WITHOUT
+        // concatenating the payload into a fresh buffer (the send-path
+        // peak-shaving this mirrors -- for a binary frame the payload is never
+        // copied). The resulting on-disk bytes are the parts joined,
+        // byte-identical to writing their concatenation. encoding does not apply
+        // to a raw chunk list and is deliberately not passed.
+        await handle.writev(payload);
+      } else {
+        await handle.writeFile(payload, { encoding });
       }
-      // Write succeeded: await close and surface its error rather than swallow it
-      // -- on a write handle a failed close can signal the bytes did not durably
-      // land (e.g. a deferred ENOSPC), the same as createExclusive's direct close.
-      await handle.close();
-    } else {
-      const chunks: Buffer[] = [];
-      for await (const chunk of src) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-      }
-      await fs.writeFile(dest, Buffer.concat(chunks), writeOptions);
+    } catch (err) {
+      // Preserve the write failure: close best-effort so a close error on the
+      // already-failed path cannot replace (mask) why the write failed, the same
+      // reason get() swallows its own close error.
+      await handle.close().catch(() => {});
+      throw err;
     }
+    // Write succeeded: await close and surface its error rather than swallow it
+    // -- on a write handle a failed close can signal the bytes did not durably
+    // land (e.g. a deferred ENOSPC), the same as createExclusive's direct close.
+    await handle.close();
   }
 
   async delete(filePath: string): Promise<void> {
@@ -274,7 +333,9 @@ export class LocalFSClient implements FileTransportClient {
   }
 
   async createExclusive(filePath: string): Promise<void> {
-    const handle = await fs.open(filePath, "wx");
+    // O_EXCL already refuses any pre-existing entry (a planted symlink included);
+    // O_NOFOLLOW via openNoFollow is defense in depth on the same open.
+    const handle = await openNoFollow(filePath, "wx");
     await handle.close();
   }
 
