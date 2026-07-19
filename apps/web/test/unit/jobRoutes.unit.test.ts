@@ -72,7 +72,7 @@ function handlersOf(route: {
   return handlers as Handlers;
 }
 
-function enableJobApi(options: { token?: string } = {}): string {
+function enableJobApi(): string {
   const rvz = rvzRoot();
   const root = tempDataRoot("routes");
   roots.push(root);
@@ -81,7 +81,6 @@ function enableJobApi(options: { token?: string } = {}): string {
   vi.stubEnv("JOB_CLI_BINARY", STUB_CLI_PATH);
   vi.stubEnv("STUB_FD3_EVENTS", JSON.stringify([]));
   vi.stubEnv("STUB_EXIT_CODE", "0");
-  if (options.token !== undefined) vi.stubEnv("JOB_API_TOKEN", options.token);
   return root;
 }
 
@@ -135,11 +134,9 @@ async function createSucceededJob(stubEnv: NodeJS.ProcessEnv): Promise<string> {
  * Run a job to success, then install a FRESH manager over the same data root as
  * the global -- a simulated restart: the in-memory record is gone, only the disk
  * survives. Returns the succeeded job's id and its data root. The API is left
- * enabled (optionally token-gated) so the routes resolve the restarted manager.
+ * enabled so the routes resolve the restarted manager.
  */
-async function restartAfterSucceededJob(
-  options: { token?: string } = {},
-): Promise<{
+async function restartAfterSucceededJob(): Promise<{
   id: string;
   root: string;
 }> {
@@ -158,7 +155,6 @@ async function restartAfterSucceededJob(
   });
   (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
     restarted;
-  if (options.token !== undefined) vi.stubEnv("JOB_API_TOKEN", options.token);
   return { id, root };
 }
 
@@ -179,40 +175,6 @@ describe("the feature gate keeps the API dark when disabled", () => {
       params: { jobId: "00000000-0000-4000-8000-000000000000" },
     })) as Response;
     expect(response.status).toBe(404);
-  });
-});
-
-describe("the auth gate enforces the bearer token", () => {
-  test("POST without a bearer is 401 when a token is set", async () => {
-    enableJobApi({ token: "the-token" });
-    const response = (await handlersOf(CreateRoute).POST({
-      request: createRequest(validIntent()),
-      params: {},
-    })) as Response;
-    expect(response.status).toBe(401);
-  });
-
-  test("POST with the wrong bearer is 401", async () => {
-    enableJobApi({ token: "the-token" });
-    const response = (await handlersOf(CreateRoute).POST({
-      request: createRequest(validIntent(), {
-        authorization: "Bearer wrong",
-      }),
-      params: {},
-    })) as Response;
-    expect(response.status).toBe(401);
-  });
-
-  test("POST with the right bearer is accepted", async () => {
-    enableJobApi({ token: "the-token" });
-    const response = (await handlersOf(CreateRoute).POST({
-      request: createRequest(validIntent(), {
-        authorization: "Bearer the-token",
-      }),
-      params: {},
-    })) as Response;
-    expect(response.status).toBe(201);
-    expect(response.headers.get("cache-control")).toBe("no-store");
   });
 });
 
@@ -240,6 +202,7 @@ describe("create validates and never CORS", () => {
     })) as Response;
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
     expect(response.status).toBe(201);
+    expect(response.headers.get("cache-control")).toBe("no-store");
   });
 });
 
@@ -425,18 +388,6 @@ describe("record and keys routes serve the exchange-record pair after success", 
       params: { jobId },
     })) as Response;
     expect(keysResp.status).toBe(404);
-  });
-
-  test("the keys route is auth-gated identically to result", async () => {
-    // The keys serve private material; a missing bearer must 401 exactly as any
-    // other job route does, never leaking the file.
-    enableJobApi({ token: "the-token" });
-    const jobId = "00000000-0000-4000-8000-000000000000";
-    const keysResp = (await handlersOf(KeysRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${jobId}/keys`),
-      params: { jobId },
-    })) as Response;
-    expect(keysResp.status).toBe(401);
   });
 });
 
@@ -666,17 +617,6 @@ describe("GET /api/jobs/remotes", () => {
     expect(response.status).toBe(404);
   });
 
-  test("is 401 on a wrong bearer", async () => {
-    enableJobApi({ token: "the-token" });
-    const response = (await handlersOf(RemotesRoute).GET({
-      request: new Request("http://localhost/api/jobs/remotes", {
-        headers: { authorization: "Bearer wrong" },
-      }),
-      params: {},
-    })) as Response;
-    expect(response.status).toBe(401);
-  });
-
   test("serves [] when the API is enabled but no remotes are configured", async () => {
     enableJobApi();
     const response = (await handlersOf(RemotesRoute).GET({
@@ -879,19 +819,6 @@ describe("POST /api/jobs bounds the body before schema parse", () => {
     // A 404 (not 413) proves the oversized body was never read: the gate ran first.
     expect(response.status).toBe(404);
   });
-
-  test("the gate short-circuits before the body is read (bad bearer -> 401)", async () => {
-    enableJobApi({ token: "the-token" });
-    const chunkBytes = 1024 * 1024;
-    const chunkCount = MAX_JOB_BODY_BYTES / chunkBytes + 4;
-    const response = (await handlersOf(CreateRoute).POST({
-      request: streamingPostRequest(chunkBytes, chunkCount, {
-        authorization: "Bearer wrong",
-      }),
-      params: {},
-    })) as Response;
-    expect(response.status).toBe(401);
-  });
 });
 
 describe("GET /api/jobs lists jobs and is gated", () => {
@@ -902,17 +829,6 @@ describe("GET /api/jobs lists jobs and is gated", () => {
       params: {},
     })) as Response;
     expect(response.status).toBe(404);
-  });
-
-  test("is 401 on a wrong bearer", async () => {
-    enableJobApi({ token: "the-token" });
-    const response = (await handlersOf(CreateRoute).GET({
-      request: new Request("http://localhost/api/jobs", {
-        headers: { authorization: "Bearer wrong" },
-      }),
-      params: {},
-    })) as Response;
-    expect(response.status).toBe(401);
   });
 
   test("lists a live succeeded job with no-store", async () => {
@@ -1029,25 +945,6 @@ describe("restore after a restart surfaces completed jobs read-only", () => {
         params: { jobId: id },
       })) as Response;
       expect(resp.status).toBe(404);
-    }
-  });
-
-  test("the restored surfaces are 401 on a bad bearer", async () => {
-    const { id } = await restartAfterSucceededJob({ token: "the-token" });
-    const bad = { authorization: "Bearer wrong" };
-    const listResp = (await handlersOf(CreateRoute).GET({
-      request: new Request("http://localhost/api/jobs", { headers: bad }),
-      params: {},
-    })) as Response;
-    expect(listResp.status).toBe(401);
-    for (const route of [ResultRoute, RecordRoute, KeysRoute]) {
-      const resp = (await handlersOf(route).GET({
-        request: new Request(`http://localhost/api/jobs/${id}/x`, {
-          headers: bad,
-        }),
-        params: { jobId: id },
-      })) as Response;
-      expect(resp.status).toBe(401);
     }
   });
 

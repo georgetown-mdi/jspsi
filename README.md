@@ -98,12 +98,12 @@ docker run -d -p 3000:3000 vdorie/psi-link:latest serve
 ```
 3. Visit [http://localhost:3000](http://localhost:3000) on that machine.
 
-This starts the web interface and its peer-coordination server. On the console the exchange runs on this machine over SFTP or a shared directory; the guided browser experience is the same, but the browser-to-browser (live, in-tab) transport is the public web app's domain and is not offered here. To let the console run the SFTP and shared-directory exchanges itself (rather than saving an exchange file for the command line app) enable its job API by supplying directories for working files and your input, plus an access token:
+This starts the web interface and its peer-coordination server. On the console the exchange runs on this machine over SFTP or a shared directory; the guided browser experience is the same, but the browser-to-browser (live, in-tab) transport is the public web app's domain and is not offered here. To let the console run the SFTP and shared-directory exchanges itself (rather than saving an exchange file for the command line app) enable its job API by supplying directories for working files and your input. The job API is unauthenticated and refuses to start unless it is bound to loopback, so run the container on the host's network and bind it to the host loopback interface:
 
 ```sh
-docker run -d -p 3000:3000 \
+docker run -d --network host \
+  --env HOST=127.0.0.1 \
   --env JOB_DATA_ROOT=/data/jobs \
-  --env JOB_API_TOKEN=ACCESS_TOKEN \
   --env JOB_INPUT_DIR=/data/input \
   --env JOB_RENDEZVOUS_DIR=/data/rendezvous \
   -v /host/jobs:/data/jobs \
@@ -112,9 +112,8 @@ docker run -d -p 3000:3000 \
   vdorie/psi-link:latest serve
 ```
 
-Replacing each of the following:
+`--network host` and `HOST=127.0.0.1` keep the job API on the host's own loopback interface, so it is reachable only from this machine and never from the network -- the console is meant to run on your own machine, not shared beyond it. Publishing a port instead (`-p 3000:3000`) would leave the app refusing to start rather than exposing the unauthenticated API. Replacing each of the following:
    * `/host/jobs` - a directory on the serving machine where each exchange's working files are kept. Completed results stay here until you delete them.
-   * `ACCESS_TOKEN` - a secret the console requires on every job request, so that publishing the container's port does not expose the job API unauthenticated. The console is meant to run on your own machine, not shared beyond it.
    * `/host/input` - the directory holding your input CSVs. The console lists the files here so you can pick the one to link; the tool reads it in place. See [the mounted work-input directory](docs/DEPLOYMENT.md#mounted-work-input-directory) in the deployment guide.
    * `/host/rendezvous` - a synced folder both parties can reach (for example, a shared-drive mount), used for shared-directory exchanges. Omit this variable and its mount if you only run SFTP exchanges.
 

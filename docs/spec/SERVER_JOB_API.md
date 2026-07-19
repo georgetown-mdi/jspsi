@@ -6,14 +6,11 @@ title: "Web Server Job API"
 
 This document specifies the web application's server-side job API: the HTTP endpoints through which a supervisor creates, observes, cancels, and deletes an exchange job that the Nitro server drives as a `psilink` CLI subprocess, the typed intent the client submits and the validation that makes it injection-closed, the operator-provisioned SFTP remotes table and its validation, the on-disk workdir layout and modes, the SSE event relay and its full-history replay, the exit-code reconciliation and cancellation escalation, the environment variables that gate and configure the feature, and the memory-only job lifetime. It is the spec-tier complement to the operator-facing overview in [DEPLOYMENT.md](../DEPLOYMENT.md#server-job-api), which says what the feature is for and how to turn it on; this document says how each request, file, and event is constructed. It consumes -- and re-validates at the trust boundary -- the CLI's fd-3 event stream specified in [CLI_EVENTS.md](CLI_EVENTS.md); it does not respecify that stream's construction (see there). It does not cover the exchange protocol that produces the events (see [PROTOCOL.md](PROTOCOL.md)) or the display-sanitization escape format the fields reuse (see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#display-sanitization-escape-format)). Intended readers are implementors writing a supervisor against this API and security auditors.
 
-The job API exists for the console-appliance deployment: a container serving one party, inside that party's trust boundary, that drives the party's own `psilink exchange` runs without the operator invoking the CLI by hand. It is not a shared rendezvous between parties; the trust invariant it rests on and what would violate it are in [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#single-party-appliance-trust-boundary). The API is off unless a data root is configured, and its whole design -- server-composed CLI inputs, memory-only state, loopback-or-token auth -- is calibrated to that single-operator posture. The console UI operates a single exchange at a time; the multi-job listing and the read-only restore of completed jobs after a restart are internal to this API, not an operator-facing exchange-management interface.
+The job API exists for the console-appliance deployment: a container serving one party, inside that party's trust boundary, that drives the party's own `psilink exchange` runs without the operator invoking the CLI by hand. It is not a shared rendezvous between parties; the trust invariant it rests on and what would violate it are in [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#single-party-appliance-trust-boundary). The API is off unless a data root is configured, and its whole design -- server-composed CLI inputs, memory-only state, a loopback-only bind -- is calibrated to that single-operator posture. The console UI operates a single exchange at a time; the multi-job listing and the read-only restore of completed jobs after a restart are internal to this API, not an operator-facing exchange-management interface.
 
-## Feature gate and authentication
+## Feature gate
 
-The API is dark by default. Every endpoint resolves a gate before any filesystem access or subprocess spawn, in a fixed order:
-
-1. **Feature gate.** If no data root is configured (`JOB_DATA_ROOT` unset or empty), the endpoint answers `404` and consults nothing further -- indistinguishable from an unknown route to a hosted probe, so the API's presence is not observable to an unauthenticated caller.
-2. **Bearer token.** If a token is configured (`JOB_API_TOKEN` non-empty), the request must present `Authorization: Bearer <token>`. A missing or non-matching bearer is `401`. The comparison is constant-time (both sides hashed with SHA-256 and compared with `timingSafeEqual`, never short-circuiting on length), so the token is not recoverable through response timing. When no token is configured, the gate allows the request (the loopback appliance case; see the startup rule below).
+The API is dark by default. Every endpoint resolves the feature gate before any filesystem access or subprocess spawn: if no data root is configured (`JOB_DATA_ROOT` unset or empty), the endpoint answers `404` and consults nothing further -- indistinguishable from an unknown route to a hosted probe, so the API's presence is not observable to a caller. There is no per-request authentication: the API is loopback-only (the startup rule below refuses a non-loopback bind), so its only reachable caller is the local operator.
 
 Every job response carries `Cache-Control: no-store` and no CORS headers -- the API is same-origin appliance-local, so a cross-origin caller is never granted access. These are additive to the defense-in-depth response headers the server entry already applies globally (see [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#channel-security)).
 
@@ -32,7 +29,7 @@ Every job response carries `Cache-Control: no-store` and no CORS headers -- the 
 | `GET` | `/api/jobs/:jobId/keys` | `200` `application/json` | The private verification keys paired with the record, only after the job succeeded. `404` otherwise. |
 | `GET` | `/api/jobs/remotes` | `200` JSON array | The operator-provisioned SFTP remotes as a credential-free projection; `[]` when none are configured. See [SFTP remotes](#sftp-remotes). |
 
-Auth applies to every endpoint uniformly: a disabled API is `404` and a bad bearer is `401` on all of them, resolved before the id is even parsed.
+The feature gate applies to every endpoint uniformly: a disabled API is `404` on all of them, resolved before the id is even parsed.
 
 ### Job id and the traversal guard
 
@@ -89,7 +86,7 @@ The `metadata` and `standardization` fields are validated structured data -- cor
 
 ### Size caps
 
-The intent is operator-authored, never partner-supplied, and the API is feature-gated and loopback-or-token gated, so the worst case an oversized intent reaches is a single operator exhausting their own appliance's memory -- not a remote surface. Two defense-in-depth layers bound it anyway, so neither the request nor a persisted artifact can grow without limit:
+The intent is operator-authored, never partner-supplied, and the API is feature-gated and loopback-only, so the worst case an oversized intent reaches is a single operator exhausting their own appliance's memory -- not a remote surface. Two defense-in-depth layers bound it anyway, so neither the request nor a persisted artifact can grow without limit:
 
 - **Boundary body cap.** `POST /api/jobs` reads its body under a hard byte cap (224 MiB), streamed off the request and counted chunk by chunk; the read aborts the moment the running total exceeds the cap, and `Content-Length` is never trusted (it can be absent or understated on a chunked request). An oversized body is a `413` before the body is fully buffered or any schema parse runs. The cap sits well above the JSON-encoded size of a realistic schema-valid intent -- real CSV text barely grows under JSON string escaping -- so a legitimate intent reaches a clean schema error rather than a boundary `413`. It is deliberately not sized to clear a pathological payload built from control characters that each escape to a 6-byte `\uXXXX` sequence (not valid CSV), nor an unbounded standardization `params`; bounding those here is exactly the memory guard's job.
 - **Schema caps.** The intent schema bounds `inputCsv` (anchored to the browser intake's 100 MiB file gate), the `expectedPayloadColumns` array and its entries, the `metadata` array and each `description`, and the `standardization` array, each transformation's `steps`, and its `output`/`input`. The bounds are deliberately generous -- far above any legitimate intent -- and apply to both channel arms. They are enforced web-side at this boundary rather than in core's shared schemas, so partner-facing validation elsewhere is unchanged.
@@ -126,7 +123,7 @@ remotes:
     host_key_fingerprint: "SHA256:..."
 ```
 
-The file is read and validated once at server startup, fail-closed: any invalid entry refuses startup with an error naming the offending field path (never a value), the same posture as the loopback-or-token rule. Setting `JOB_SFTP_REMOTES` without `JOB_DATA_ROOT` is itself a startup error. The variable is set only server-side, never derived from a request.
+The file is read and validated once at server startup, fail-closed: any invalid entry refuses startup with an error naming the offending field path (never a value), the same posture as the loopback-only startup rule. Setting `JOB_SFTP_REMOTES` without `JOB_DATA_ROOT` is itself a startup error. The variable is set only server-side, never derived from a request.
 
 The validation rules, each load-bearing:
 
@@ -237,13 +234,12 @@ The escalation timers are cleared when the child exits, so a child that stops on
 | Variable | Semantics |
 | -------- | --------- |
 | `JOB_DATA_ROOT` | The feature gate and the data root. Empty or unset -> the API is disabled (every endpoint `404`, no manager constructed, no child spawned). Non-empty -> per-job workdirs are created under this resolved directory. Read with surrounding whitespace trimmed. |
-| `JOB_API_TOKEN` | The bearer token. Non-empty -> every endpoint requires a matching `Authorization: Bearer` header (constant-time compared). Empty -> unauthenticated, permitted only on a loopback bind (see the startup rule). |
 | `JOB_CLI_BINARY` | Overrides the CLI entry path the driver spawns. Unset -> the workspace-relative built entry (`apps/cli/dist/index.js`, resolved four levels up from the jobs module). Used by production overrides and by tests pointing the driver at a stub. It is set only server-side, never derived from a request. |
 | `JOB_SFTP_REMOTES` | The SFTP remotes table (see [SFTP remotes](#sftp-remotes)). Empty or unset -> every sftp intent is rejected; the API is otherwise unchanged. Non-empty -> the named YAML file is loaded and validated at startup, fail-closed. Requires `JOB_DATA_ROOT`; set only server-side, never derived from a request. |
 
 ### Fail-closed startup rule
 
-Before the server binds, if the API is enabled (`JOB_DATA_ROOT` set) and no token is configured (`JOB_API_TOKEN` empty) and the bind host is not loopback, startup is refused with a configuration error rather than exposing an unauthenticated CLI driver on a public interface. A bind host is loopback when it is `localhost`, `::1`/`[::1]`, or a `127.` address; an unset host (the default all-interfaces bind) is treated as non-loopback and fails closed rather than assuming loopback. A unix-socket bind is appliance-local and treated as loopback for this check. The safe configurations -- disabled, loopback, or token-protected -- start normally.
+Before the server binds, if the API is enabled (`JOB_DATA_ROOT` set) and the bind host is not loopback, startup is refused with a configuration error rather than exposing the unauthenticated CLI driver on a public interface. A bind host is loopback when it is `localhost`, `::1`/`[::1]`, or a `127.` address; an unset host (the default all-interfaces bind) is treated as non-loopback and fails closed rather than assuming loopback. A unix-socket bind is appliance-local and treated as loopback for this check. The safe configurations -- disabled or loopback -- start normally; there is no token or other override, so a non-loopback bind with the API enabled always refuses to start.
 
 The same posture covers the remotes table: a configured `JOB_SFTP_REMOTES` that is unreadable or invalid, or one configured without `JOB_DATA_ROOT`, refuses startup.
 

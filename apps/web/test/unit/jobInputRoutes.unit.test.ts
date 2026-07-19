@@ -67,11 +67,10 @@ function handlersOf(route: {
 }
 
 /** Enable the job API (a real data root) and, optionally, the input directory. */
-function enable(options: { token?: string; inputDir?: string } = {}): void {
+function enable(options: { inputDir?: string } = {}): void {
   const dataRoot = tempDir("data");
   vi.stubEnv("JOB_DATA_ROOT", dataRoot);
   vi.stubEnv("JOB_CLI_BINARY", STUB_CLI_PATH);
-  if (options.token !== undefined) vi.stubEnv("JOB_API_TOKEN", options.token);
   if (options.inputDir !== undefined)
     vi.stubEnv("JOB_INPUT_DIR", options.inputDir);
 }
@@ -115,34 +114,12 @@ async function coverage(body: unknown): Promise<Response> {
   })) as Response;
 }
 
-describe("gating parity: every route is dark when disabled and gated on auth", () => {
+describe("gating parity: every route is dark when disabled", () => {
   test("all three routes are 404 when JOB_DATA_ROOT is unset", async () => {
     vi.stubEnv("JOB_DATA_ROOT", "");
     expect((await listing()).status).toBe(404);
     expect((await profile("input.csv")).status).toBe(404);
     expect((await coverage(coverageBody("input.csv"))).status).toBe(404);
-  });
-
-  test("all three routes are 401 on a wrong bearer", async () => {
-    enable({ token: "the-token" });
-    const bad = { authorization: "Bearer wrong" };
-    const l = (await handlersOf(InputsRoute).GET({
-      request: new Request("http://localhost/api/jobs/inputs", {
-        headers: bad,
-      }),
-      params: {},
-    })) as Response;
-    expect(l.status).toBe(401);
-    const p = (await handlersOf(ProfileRoute).GET({
-      request: new Request(profileRequest("input.csv"), { headers: bad }),
-      params: {},
-    })) as Response;
-    expect(p.status).toBe(401);
-    const c = (await handlersOf(CoverageRoute).POST({
-      request: coverageRequest(coverageBody("input.csv"), bad),
-      params: {},
-    })) as Response;
-    expect(c.status).toBe(401);
   });
 });
 

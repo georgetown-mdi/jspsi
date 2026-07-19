@@ -9,7 +9,7 @@ import { jobFileExists } from "@jobs/workdir";
 /**
  * `GET /api/jobs/:jobId/record` -- serve the job's self-attested exchange record.
  *
- * A near-exact mirror of the result route: auth-gated, id-validated, and served
+ * A near-exact mirror of the result route: feature-gated, id-validated, and served
  * only after the job succeeded, from the job's server-chosen record path inside
  * its workdir (never derived from client input). A job that has not succeeded, or
  * whose record is missing, is 404. A restart-restored succeeded job serves from
@@ -20,8 +20,8 @@ import { jobFileExists } from "@jobs/workdir";
 export const Route = createFileRoute("/api/jobs/$jobId/record")({
   server: {
     handlers: {
-      GET: async ({ request, params }) => {
-        const gate = gateJobRoute(request);
+      GET: async ({ params }) => {
+        const gate = gateJobRoute();
         if (gate.kind === "response") return gate.response;
         const jobId = validateJobIdParam(params.jobId);
         if (jobId === null) return jobEmptyResponse(404);

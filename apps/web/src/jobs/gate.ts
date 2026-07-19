@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import net from "node:net";
 
 /**
@@ -10,13 +9,10 @@ export interface JobApiConfig {
   /** The data root under which per-job workdirs are created. Empty means the API
    * is disabled. */
   dataRoot: string;
-  /** The bearer token; empty means no auth (loopback-only, enforced at startup). */
-  token: string;
 }
 
 /** The environment variable names the job API reads. */
 export const JOB_DATA_ROOT_ENV = "JOB_DATA_ROOT";
-export const JOB_API_TOKEN_ENV = "JOB_API_TOKEN";
 
 /** Read the job-API configuration from an environment map. */
 export function readJobApiConfig(
@@ -24,7 +20,6 @@ export function readJobApiConfig(
 ): JobApiConfig {
   return {
     dataRoot: (env[JOB_DATA_ROOT_ENV] ?? "").trim(),
-    token: (env[JOB_API_TOKEN_ENV] ?? "").trim(),
   };
 }
 
@@ -34,58 +29,9 @@ export function isJobApiEnabled(config: JobApiConfig): boolean {
 }
 
 /**
- * The three gate outcomes a job route resolves before doing any work:
- * - `disabled`: the feature gate is off -> the route answers 404 and spawns
- *   nothing (indistinguishable from an unknown route to a hosted probe).
- * - `unauthorized`: the token is required and the request did not present a
- *   matching bearer -> 401.
- * - `allowed`: proceed.
- */
-export type GateResult = "disabled" | "unauthorized" | "allowed";
-
-/**
- * Gate a request: enforce the feature gate, then the bearer-token auth when a
- * token is configured. The token comparison is constant-time to avoid leaking the
- * token through response timing. A disabled API reports `disabled` (mapped to
- * 404) without ever consulting the token, so the presence of the API is not
- * observable to an unauthenticated probe.
- */
-export function gateRequest(
-  config: JobApiConfig,
-  authorizationHeader: string | null,
-): GateResult {
-  if (!isJobApiEnabled(config)) return "disabled";
-  if (config.token.length === 0) return "allowed";
-  const presented = bearerFromHeader(authorizationHeader);
-  if (presented === null) return "unauthorized";
-  return constantTimeEquals(presented, config.token)
-    ? "allowed"
-    : "unauthorized";
-}
-
-/** Extract the bearer credential from an `Authorization` header, or null. */
-function bearerFromHeader(header: string | null): string | null {
-  if (header === null) return null;
-  const match = /^Bearer (.+)$/.exec(header);
-  return match === null ? null : match[1];
-}
-
-/**
- * Constant-time string comparison. `crypto.timingSafeEqual` requires equal-length
- * buffers, so unequal lengths are compared against a fixed-length digest of each
- * side (never short-circuiting on length), keeping the comparison timing
- * independent of where a mismatch falls.
- */
-export function constantTimeEquals(a: string, b: string): boolean {
-  const aDigest = crypto.createHash("sha256").update(a, "utf8").digest();
-  const bDigest = crypto.createHash("sha256").update(b, "utf8").digest();
-  return crypto.timingSafeEqual(aDigest, bDigest);
-}
-
-/**
- * Whether a bind host is a loopback address. A non-loopback bind with the job API
- * enabled and no token is a fail-closed startup error; a loopback bind without a
- * token is allowed (the appliance case).
+ * Whether a bind host is a loopback address. The job API is unauthenticated by
+ * design (a single local operator), so a non-loopback bind with it enabled is a
+ * fail-closed startup error and only a loopback bind runs the API.
  *
  * A host is loopback only when it is the literal `localhost` or an IP literal in a
  * loopback range. A `127.`-prefixed value must parse as a real IPv4 literal: a
@@ -121,24 +67,23 @@ export class JobApiConfigError extends Error {
 }
 
 /**
- * Fail-closed startup check: if the job API is enabled on a non-loopback bind
- * without a token, refuse to start. A hosted deployment that turns the API on
- * without an auth token would otherwise expose an unauthenticated CLI driver on a
- * public interface. Returns normally when the configuration is safe (disabled,
- * loopback, or token-protected).
+ * Fail-closed startup check: if the job API is enabled on a non-loopback bind,
+ * refuse to start. The API is unauthenticated by design (a single local
+ * operator), so a non-loopback bind would expose an unauthenticated CLI driver on
+ * a public interface. Returns normally when the configuration is safe (disabled or
+ * loopback).
  */
 export function assertJobApiStartupSafe(
   config: JobApiConfig,
   bindHost: string | undefined,
 ): void {
   if (!isJobApiEnabled(config)) return;
-  if (config.token.length > 0) return;
   if (isLoopbackHost(bindHost)) return;
   throw new JobApiConfigError(
-    `${JOB_DATA_ROOT_ENV} enables the job API but ${JOB_API_TOKEN_ENV} is unset ` +
-      `and the bind host (${bindHost ?? "all interfaces"}) is not loopback; ` +
-      "set a token or bind to loopback. Refusing to start with an " +
-      "unauthenticated job API on a non-loopback interface.",
+    `${JOB_DATA_ROOT_ENV} enables the job API but the bind host ` +
+      `(${bindHost ?? "all interfaces"}) is not loopback; bind the server to ` +
+      "loopback (HOST=127.0.0.1). Refusing to start an unauthenticated job API " +
+      "on a non-loopback interface.",
   );
 }
 
@@ -164,7 +109,7 @@ export function jobJsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-/** Build an empty job-API response (for a 204/404/401) with the no-store header. */
+/** Build an empty job-API response (for a 204/404) with the no-store header. */
 export function jobEmptyResponse(status: number): Response {
   return new Response(null, {
     status,

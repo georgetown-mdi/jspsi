@@ -17,12 +17,12 @@ import {
 import type { ChildProcess } from "node:child_process";
 
 // The mounted-input drive path, demonstrated once against the REAL built server: a job
-// can be driven from an operator-mounted directory with no UI -- a single authenticated
-// POST names a mounted file and the CLI reads it in place, so no input.csv is copied
-// into the workdir. The job API is loopback-gated with no token, so the loopback fetch
-// is permitted; the CLI is stubbed so no real exchange (or built CLI) is needed. A
-// filedrop job composes its connection against the configured rendezvous mount, so the
-// server needs JOB_RENDEZVOUS_DIR set.
+// can be driven from an operator-mounted directory with no UI -- a single POST names a
+// mounted file and the CLI reads it in place, so no input.csv is copied into the
+// workdir. The job API is loopback-only (the server binds NITRO_HOST=127.0.0.1), so the
+// loopback fetch is permitted; the CLI is stubbed so no real exchange (or built CLI) is
+// needed. A filedrop job composes its connection against the configured rendezvous
+// mount, so the server needs JOB_RENDEZVOUS_DIR set.
 //
 // Build-gated exactly like csvWorkerProd: the production entry exists only after
 // `npm run build -w apps/web`. CI builds the web app before the integration step,
