@@ -106,9 +106,11 @@ export function stepFromPopState(state: unknown): string | undefined {
  * nothing the operator has not already secured, so the guard disarms.
  *
  * `consoleExchangeRunning` overrides that disarm: on a console server-job run the
- * appliance's CLI child conducts the exchange while this tab stays open, and closing
- * or navigating away stops it. The guard stays armed for the running exchange even
- * though the invitation is minted (finalized), and disarms once the run settles.
+ * appliance's CLI child conducts the exchange while this tab holds the only view of
+ * it, and leaving the page abandons the run -- an in-app teardown cancels it, a hard
+ * close strands it unattended, and either way the console cannot return to it. The
+ * guard stays armed for the running exchange even though the invitation is minted
+ * (finalized), and disarms once the run settles.
  *
  * `demoActive` disarms it regardless: the loaded file is the synthetic sample
  * (pristine or with edited terms), which the visitor did not bring and nothing regrets

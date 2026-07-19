@@ -640,7 +640,8 @@ export function AcceptorBench() {
   const { run, outputs, failure, tryAgain } = useAcceptorExchange({ launch });
 
   // A console server-job accept is still executing on the appliance while it is
-  // launched and the run has not settled; closing or navigating away stops it.
+  // launched and the run has not settled; leaving the page abandons it (an
+  // in-app teardown cancels the run, a hard close strands it).
   const consoleExchangeRunning =
     acceptServerJob &&
     launched !== undefined &&

@@ -447,8 +447,9 @@ export function InviterBench() {
   });
 
   // A console server-job run is still executing on the appliance while its
-  // invitation is minted and the run has not settled; closing or navigating away
-  // stops it, so the guard stays armed through it.
+  // invitation is minted and the run has not settled; leaving the page abandons
+  // it (an in-app teardown cancels the run, a hard close strands it), so the
+  // guard stays armed through it.
   const consoleExchangeRunning =
     chosenRunMode === "server-job" &&
     invitation !== undefined &&

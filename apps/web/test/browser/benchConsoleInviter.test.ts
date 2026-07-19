@@ -381,7 +381,7 @@ describe("console inviter mint and run", () => {
       .toHaveTextContent("Your invitation is ready");
 
     // A server-job run: the keep-open callout names the appliance running the exchange
-    // (closing the tab stops it), never a browser listener.
+    // (leaving the page abandons it), never a browser listener.
     await expect
       .element(
         page.getByText("This appliance is running the exchange", {

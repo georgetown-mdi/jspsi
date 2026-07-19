@@ -177,14 +177,16 @@ export function InviterExchangeSection({
       {/* The listening/running claim is false the moment any failure lands (the
           lifecycle tore down), so the callout outlives no failure -- not even
           a retryable one. On a server-job run the appliance's CLI child conducts
-          the exchange while this tab stays open, so closing or navigating away
-          stops the running exchange rather than cancelling a browser listener. */}
+          the exchange and this tab holds the only view of it: an in-app teardown
+          cancels the run, a hard close strands it unattended, and either way the
+          console cannot return to it -- so the copy claims abandonment, never
+          that leaving stops the run. */}
       {phase === "share" && failure === undefined && (
         <div className={styles.callout}>
           <p className={styles.calloutLead}>Keep this tab open.</p>
           <p className={styles.small}>
             {serverJob
-              ? "This appliance is running the exchange. Closing this tab or navigating away stops it before it finishes."
+              ? "This appliance is running the exchange. If you leave this page, the console cannot return to the run or its results."
               : "Your browser is listening for your partner. Closing the tab cancels the invitation; reloading starts over."}
           </p>
         </div>
