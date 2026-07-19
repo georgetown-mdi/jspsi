@@ -87,35 +87,43 @@ test("streamCSVRows enforces the single-line byte ceiling like loadCSVFile", asy
 // rather than dropped or truncated.
 const PAPA_LOCAL_CHUNK_BYTES = 10 * 1024 * 1024;
 
-test("streamCSVRows reassembles rows split across chunk boundaries in a >10MB file", async () => {
-  const rowCount = 130_000;
-  const csv = csvWithSequentialRows(rowCount);
-  expect(Buffer.byteLength(csv)).toBeGreaterThan(PAPA_LOCAL_CHUNK_BYTES);
+// Generating and parsing the >10MB fixture runs right at vitest's 5s default
+// timeout on a fast machine and past it on a slower CI runner; the generous
+// explicit timeout keeps the bound a hang backstop, not a speed assertion.
+test(
+  "streamCSVRows reassembles rows split across chunk boundaries in a >10MB file",
+  { timeout: 60_000 },
+  async () => {
+    const rowCount = 130_000;
+    const csv = csvWithSequentialRows(rowCount);
+    expect(Buffer.byteLength(csv)).toBeGreaterThan(PAPA_LOCAL_CHUNK_BYTES);
 
-  const collected: Array<CSVRow> = [];
-  const firstRowsAfterBoundary: Array<CSVRow> = [];
-  let chunkCalls = 0;
-  await streamCSVRows(streamOfSlices(csv, 4 * 1024 * 1024), (rows) => {
-    if (chunkCalls > 0 && rows.length > 0) firstRowsAfterBoundary.push(rows[0]);
-    chunkCalls++;
-    for (const row of rows) collected.push(row);
-  });
+    const collected: Array<CSVRow> = [];
+    const firstRowsAfterBoundary: Array<CSVRow> = [];
+    let chunkCalls = 0;
+    await streamCSVRows(streamOfSlices(csv, 4 * 1024 * 1024), (rows) => {
+      if (chunkCalls > 0 && rows.length > 0)
+        firstRowsAfterBoundary.push(rows[0]);
+      chunkCalls++;
+      for (const row of rows) collected.push(row);
+    });
 
-  // The >10MB input genuinely crossed a chunk boundary.
-  expect(chunkCalls).toBeGreaterThan(1);
-  // Every row survived, in order, with its value intact: a mis-joined boundary row
-  // would break the sequential id run.
-  expect(collected.length).toBe(rowCount);
-  let idsInOrder = true;
-  for (let i = 0; i < rowCount; i++)
-    if (collected[i].id !== `id${String(i).padStart(8, "0")}`) {
-      idsInOrder = false;
-      break;
-    }
-  expect(idsInOrder).toBe(true);
-  // The row straddling each boundary is the first of a later chunk; its payload is the
-  // full 60-character tail, not a fragment truncated at the split.
-  expect(firstRowsAfterBoundary.length).toBeGreaterThan(0);
-  for (const row of firstRowsAfterBoundary)
-    expect(row.payload).toMatch(/^payload-\d{8}-z{60}$/);
-});
+    // The >10MB input genuinely crossed a chunk boundary.
+    expect(chunkCalls).toBeGreaterThan(1);
+    // Every row survived, in order, with its value intact: a mis-joined boundary row
+    // would break the sequential id run.
+    expect(collected.length).toBe(rowCount);
+    let idsInOrder = true;
+    for (let i = 0; i < rowCount; i++)
+      if (collected[i].id !== `id${String(i).padStart(8, "0")}`) {
+        idsInOrder = false;
+        break;
+      }
+    expect(idsInOrder).toBe(true);
+    // The row straddling each boundary is the first of a later chunk; its payload is the
+    // full 60-character tail, not a fragment truncated at the split.
+    expect(firstRowsAfterBoundary.length).toBeGreaterThan(0);
+    for (const row of firstRowsAfterBoundary)
+      expect(row.payload).toMatch(/^payload-\d{8}-z{60}$/);
+  },
+);
