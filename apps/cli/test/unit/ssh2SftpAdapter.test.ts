@@ -86,6 +86,43 @@ describe("connect retry", () => {
     }
   });
 
+  test("counts each connect re-attempt as a reconnect for the metrics summary", async () => {
+    vi.useFakeTimers();
+    const adapter = new SSH2SFTPClientAdapter();
+    // A clean adapter has re-dialed zero times.
+    expect(adapter.reconnectCount).toBe(0);
+    let calls = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = {
+      sftp: {
+        open: vi.fn(),
+        close: vi.fn(),
+        opendir: vi.fn(),
+        readdir: vi.fn(),
+        on: vi.fn(),
+      },
+      connect: vi.fn().mockImplementation(async () => {
+        if (++calls < 3) throw new Error("connection refused");
+      }),
+      client: noDelayClient(),
+    };
+
+    try {
+      const p = adapter.connect({
+        host: "sftp.example.org",
+        maxReconnectAttempts: 2,
+      });
+      await vi.advanceTimersByTimeAsync(2_001);
+      await p;
+      // Two re-dials past the initial attempt are reported as reconnects; the
+      // per-operation transport-retry counter is untouched by connect.
+      expect(adapter.reconnectCount).toBe(2);
+      expect(adapter.transportRetryCount).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("throws after exhausting maxReconnectAttempts", async () => {
     vi.useFakeTimers();
     const adapter = new SSH2SFTPClientAdapter();
@@ -434,6 +471,35 @@ describe("rename retry", () => {
       await vi.advanceTimersByTimeAsync(250);
       await expect(renaming).resolves.toBeUndefined();
       expect(calls).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("counts each rename re-issue as a transport retry for the metrics summary", async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = new SSH2SFTPClientAdapter();
+      // A clean adapter has re-issued no operations.
+      expect(adapter.transportRetryCount).toBe(0);
+      let calls = 0;
+      const rename = vi.fn().mockImplementation(async () => {
+        if (++calls < 3) throw sftpError("_rename: Failure", 4);
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).log = { warn: vi.fn() };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).options = {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (adapter as any).client = { rename };
+
+      const renaming = adapter.rename("/remote/a.json", "/remote/b.json");
+      await vi.advanceTimersByTimeAsync(250);
+      await renaming;
+      // Two re-issues past the initial attempt are reported as transport
+      // retries; connect re-dials are counted separately and stay zero here.
+      expect(adapter.transportRetryCount).toBe(2);
+      expect(adapter.reconnectCount).toBe(0);
     } finally {
       vi.useRealTimers();
     }

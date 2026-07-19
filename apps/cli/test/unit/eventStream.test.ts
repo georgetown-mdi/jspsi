@@ -15,7 +15,9 @@ import {
   EventStreamWriter,
   assertEventStreamFdOpen,
   buildErrorEvent,
+  buildMetricsEvent,
   buildResultEvent,
+  buildStageEndEvent,
   buildStageEvent,
   buildStagesEvent,
   buildWarningEvent,
@@ -60,8 +62,24 @@ function validateEvent(event: unknown): event is StreamEvent {
       );
     case "stage":
       return typeof event.id === "string" && typeof event.label === "string";
+    case "stageEnd":
+      return (
+        typeof event.id === "string" &&
+        typeof event.durationMs === "number" &&
+        Number.isInteger(event.durationMs) &&
+        event.durationMs >= 0
+      );
     case "warning":
       return typeof event.message === "string";
+    case "metrics":
+      return (
+        ["recordsProcessed", "transportRetries", "reconnects"] as const
+      ).every(
+        (k) =>
+          typeof event[k] === "number" &&
+          Number.isInteger(event[k] as number) &&
+          (event[k] as number) >= 0,
+      );
     case "result":
       return typeof event.resultWritten === "boolean";
     case "error":
@@ -88,7 +106,9 @@ test("every event type validates against the schema and carries a version", () =
       { id: "confirming protocol", label: "Confirming protocol" },
     ]),
     buildStageEvent("stage 1 / 2", "Linking key 1 / 2"),
+    buildStageEndEvent("stage 1 / 2", 1234),
     buildWarningEvent("a terms warning"),
+    buildMetricsEvent(1000, 2, 1),
     buildResultEvent(true),
     buildResultEvent(false),
     buildErrorEvent(new Error("boom"), "run"),
@@ -97,6 +117,54 @@ test("every event type validates against the schema and carries a version", () =
     expect(validateEvent(event)).toBe(true);
     expect(event.v).toBe(EVENT_STREAM_VERSION);
   }
+});
+
+// --- Stage timing and operational counters -----------------------------------
+
+test("a metrics event carries the operational counters verbatim", () => {
+  const event = buildMetricsEvent(4200, 3, 2);
+  expect(validateEvent(event)).toBe(true);
+  expect(event.recordsProcessed).toBe(4200);
+  expect(event.transportRetries).toBe(3);
+  expect(event.reconnects).toBe(2);
+  expect(event.v).toBe(EVENT_STREAM_VERSION);
+});
+
+test("a simulated retry/reconnect is reported as a non-zero count", () => {
+  // The counter source (a transport client's connect/operation retry loop) is
+  // tested against a real simulated retry in the adapter suites; here the count
+  // it yields is shown to ride the metrics event as a non-zero field.
+  const event = buildMetricsEvent(10, 0, 1);
+  expect(event.reconnects).toBe(1);
+  const retried = buildMetricsEvent(10, 2, 0);
+  expect(retried.transportRetries).toBe(2);
+});
+
+test("metrics counters and stage durations are clamped to non-negative integers", () => {
+  // The values are this party's own integers, but the builder floors any
+  // malformed input so a schema-invalid numeric field can never be emitted.
+  const metrics = buildMetricsEvent(-5, Number.NaN, 1.9);
+  expect(metrics.recordsProcessed).toBe(0);
+  expect(metrics.transportRetries).toBe(0);
+  expect(metrics.reconnects).toBe(1);
+  expect(validateEvent(metrics)).toBe(true);
+
+  const stageEnd = buildStageEndEvent("stage 1 / 1", -7);
+  expect(stageEnd.durationMs).toBe(0);
+  expect(validateEvent(stageEnd)).toBe(true);
+});
+
+test("a stageEnd event pairs an id with a whole-millisecond duration", () => {
+  const event = buildStageEndEvent("stage 2 / 2", 512);
+  expect(validateEvent(event)).toBe(true);
+  expect(event.id).toBe("stage 2 / 2");
+  expect(event.durationMs).toBe(512);
+});
+
+test("sanitizes a hostile stageEnd id (partner-authored linkage-key name)", () => {
+  const event = buildStageEndEvent(RLO_INJECTION, 10);
+  expect(event.id).not.toContain("\u202e");
+  expect(event.id).toContain("\\u202e");
 });
 
 // --- Terminal-error classification for each of the four categories -----------
@@ -257,19 +325,27 @@ test("emits one NDJSON object per line to fd 3, each a valid event", () => {
   const emitter = createEventStreamEmitter();
   emitter.stages([{ id: "confirming protocol", label: "Confirming protocol" }]);
   emitter.stage("stage 1 / 1", "Linking key 1 / 1");
+  emitter.stageEnd("stage 1 / 1", 42);
   emitter.warning("a warning");
+  emitter.metrics(500, 1, 2);
   emitter.result(true);
 
   const lines = cap.lines();
-  expect(lines).toHaveLength(4);
+  expect(lines).toHaveLength(6);
   for (const line of lines) {
     const parsed: unknown = JSON.parse(line);
     expect(validateEvent(parsed)).toBe(true);
     // The version is readable from any single line on its own.
     expect((parsed as { v: number }).v).toBe(EVENT_STREAM_VERSION);
   }
-  expect((JSON.parse(lines[0]) as StreamEvent).type).toBe("stages");
-  expect((JSON.parse(lines[3]) as StreamEvent).type).toBe("result");
+  expect(lines.map((l) => (JSON.parse(l) as StreamEvent).type)).toEqual([
+    "stages",
+    "stage",
+    "stageEnd",
+    "warning",
+    "metrics",
+    "result",
+  ]);
 });
 
 test("drains a short write so a long line is never truncated", () => {

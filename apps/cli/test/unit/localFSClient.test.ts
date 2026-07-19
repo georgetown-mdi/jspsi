@@ -77,6 +77,40 @@ test("connect rejects when directory does not exist", async () => {
   ).rejects.toThrow("cannot read/write filedrop directory");
 });
 
+test("connect counts a transient reconnect and surfaces the count", async () => {
+  // A clean connect never re-dials, so its reconnect counter starts at zero.
+  expect(client.reconnectCount).toBe(0);
+  expect(client.transportRetryCount).toBe(0);
+
+  // Fail the first access check with a fast transient error so the connect-retry
+  // loop re-dials once, then succeeds. The reconnect counter -- what the metrics
+  // summary reports for the run -- must land at 1.
+  const realAccess = fs.access.bind(fs);
+  let calls = 0;
+  const spy = vi.spyOn(fs, "access").mockImplementation(((
+    target: string,
+    mode?: number,
+  ) => {
+    calls += 1;
+    if (calls === 1)
+      return Promise.reject(
+        Object.assign(new Error("EAGAIN: resource temporarily unavailable"), {
+          code: "EAGAIN",
+        }),
+      );
+    return realAccess(target, mode);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  }) as any);
+  try {
+    await client.connect({ path: dir });
+    expect(calls).toBe(2);
+    expect(client.reconnectCount).toBe(1);
+    expect(client.transportRetryCount).toBe(0);
+  } finally {
+    spy.mockRestore();
+  }
+});
+
 test("end is a no-op and resolves", async () => {
   await expect(client.end()).resolves.toBeUndefined();
 });

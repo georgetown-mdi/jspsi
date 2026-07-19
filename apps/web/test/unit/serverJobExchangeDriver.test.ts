@@ -108,6 +108,20 @@ function stage(id: string): RelayEvent {
   return { v: 1, type: "stage", id, label: id };
 }
 
+function stageEnd(id: string, durationMs: number): RelayEvent {
+  return { v: 1, type: "stageEnd", id, durationMs };
+}
+
+function metrics(): RelayEvent {
+  return {
+    v: 1,
+    type: "metrics",
+    recordsProcessed: 1000,
+    transportRetries: 0,
+    reconnects: 1,
+  };
+}
+
 function result(resultWritten: boolean): RelayEvent {
   return { v: 1, type: "result", resultWritten };
 }
@@ -149,6 +163,31 @@ describe("createServerJobExchangeDriver event mapping", () => {
     expect(events.onStage.mock.invocationCallOrder.at(-1)).toBeLessThan(
       events.onResult.mock.invocationCallOrder[0],
     );
+  });
+
+  test("consumes stageEnd and metrics events, then still delivers the result", async () => {
+    const { client } = scriptedClient([
+      stages("prepare", "exchange"),
+      stage("prepare"),
+      stageEnd("prepare", 12),
+      stage("exchange"),
+      stageEnd("exchange", 34),
+      metrics(),
+      result(true),
+    ]);
+    const driver = createServerJobExchangeDriver(driverConfig(), client);
+    const events = driverEvents(new AbortController().signal);
+
+    await driver.run(events);
+
+    // stageEnd and metrics carry no lifecycle mapping: they are neither dropped
+    // as unknown nor treated as an error, so the run reaches its terminal result.
+    expect(events.onError).not.toHaveBeenCalled();
+    expect(events.onResult).toHaveBeenCalledTimes(1);
+    expect(events.onStage.mock.calls.map((call) => call[0])).toEqual([
+      "prepare",
+      "exchange",
+    ]);
   });
 
   test("a written result maps to onResult with the appliance result url", async () => {
@@ -766,6 +805,35 @@ describe("createFetchJobApiClient over an injected fetch", () => {
       keysUrl: "/api/jobs/job-9/keys",
       keysFileName: "psilink-record-2026-07-08T14-32-00-000Z.keys.json",
     });
+  });
+
+  test("recognizes streamed stageEnd and metrics frames (relayed, not dropped)", async () => {
+    const fetchImpl = ((input: RequestInfo | URL): Promise<Response> => {
+      void input;
+      return Promise.resolve(
+        sseResponse(
+          'id: 1\ndata: {"v":1,"type":"stageEnd","id":"stage 1 / 2","durationMs":1234}\n\n' +
+            'id: 2\ndata: {"v":1,"type":"metrics","recordsProcessed":1000,"transportRetries":0,"reconnects":1}\n\n' +
+            'id: 3\ndata: {"v":1,"type":"result","resultWritten":true}\n\n',
+        ),
+      );
+    }) as typeof fetch;
+
+    const client = createFetchJobApiClient(fetchImpl);
+    const received: Array<RelayEvent> = [];
+    for await (const event of client.openEventStream(
+      "job-7",
+      new AbortController().signal,
+    ))
+      received.push(event);
+
+    // A recognized frame is yielded; an unknown one is silently dropped by
+    // parseSseFrame, so all three surviving means the allowlist accepts them.
+    expect(received.map((event) => event.type)).toEqual([
+      "stageEnd",
+      "metrics",
+      "result",
+    ]);
   });
 
   test("a streamed security error frame maps to category 'security'", async () => {

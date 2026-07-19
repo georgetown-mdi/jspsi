@@ -69,6 +69,32 @@ describe("validateAndSanitizeEvent enforces the v1 vocabulary and sanitizes", ()
     expect(event?.type).toBe("result");
   });
 
+  test("accepts a stageEnd event (recognized, not degraded)", () => {
+    const event = validateAndSanitizeEvent({
+      v: 1,
+      type: "stageEnd",
+      id: "stage 1 / 2",
+      durationMs: 1234,
+    });
+    expect(event).not.toBeNull();
+    expect(event?.type).toBe("stageEnd");
+    expect(event?.durationMs).toBe(1234);
+  });
+
+  test("accepts a metrics event (recognized, not degraded)", () => {
+    const event = validateAndSanitizeEvent({
+      v: 1,
+      type: "metrics",
+      recordsProcessed: 1000,
+      transportRetries: 0,
+      reconnects: 1,
+    });
+    expect(event).not.toBeNull();
+    expect(event?.type).toBe("metrics");
+    expect(event?.recordsProcessed).toBe(1000);
+    expect(event?.reconnects).toBe(1);
+  });
+
   test("rejects a wrong schema version", () => {
     expect(
       validateAndSanitizeEvent({ v: 2, type: "result", resultWritten: true }),

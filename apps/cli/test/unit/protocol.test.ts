@@ -3013,21 +3013,23 @@ test("an expired shared secret under --event-stream emits exactly one terminal e
     vi.mocked(fs.fstatSync).mockRestore();
   }
 
-  // The event was flushed before the rejection propagated (emit precedes the
-  // rethrow), so it is already in the capture here. Exactly one line: the
-  // classified terminal error, carrying the schema version.
+  // The events were flushed before the rejection propagated (emit precedes the
+  // rethrow), so they are already in the capture here. The metrics summary
+  // precedes the classified terminal error; both carry the schema version.
   const lines = takeFd3Lines();
-  expect(lines).toHaveLength(1);
-  expect(lines[0].type).toBe("error");
-  expect(lines[0].category).toBe("exchange");
-  expect(lines[0].v).toBe(1);
-  expect(String(lines[0].message)).toContain("expired");
+  expect(lines).toHaveLength(2);
+  expect(lines[0].type).toBe("metrics");
+  expect(lines[1].type).toBe("error");
+  expect(lines[1].category).toBe("exchange");
+  expect(lines[1].v).toBe(1);
+  expect(String(lines[1].message)).toContain("expired");
 });
 
 test("a main-try failure under --event-stream emits exactly one terminal error event (no double emission)", async () => {
   // conn.open() on a nonexistent drop path rejects inside the main try, whose
-  // catch is the other emission site. Exactly one captured line proves the
-  // prepare block's catch did not also fire for the same failure.
+  // catch is the other emission site. Exactly one terminal (error) line -- after
+  // the single metrics summary -- proves the prepare block's catch did not also
+  // fire for the same failure.
   mockFd3Open();
   try {
     await expect(
@@ -3052,10 +3054,11 @@ test("a main-try failure under --event-stream emits exactly one terminal error e
   }
 
   const lines = takeFd3Lines();
-  expect(lines).toHaveLength(1);
-  expect(lines[0].type).toBe("error");
-  expect(lines[0].category).toBe("exchange");
-  expect(lines[0].v).toBe(1);
+  expect(lines).toHaveLength(2);
+  expect(lines[0].type).toBe("metrics");
+  expect(lines[1].type).toBe("error");
+  expect(lines[1].category).toBe("exchange");
+  expect(lines[1].v).toBe(1);
 });
 
 // --- Stage/warning stderr sanitization -----------------------------------------
@@ -3180,12 +3183,13 @@ test("a mismatched shared secret under --event-stream emits category security an
     "key exchange authentication failed",
   );
 
-  // Exactly one terminal event, classified security.
+  // Exactly one terminal event, classified security, after the metrics summary.
   const lines = takeFd3Lines();
-  expect(lines).toHaveLength(1);
-  expect(lines[0].type).toBe("error");
-  expect(lines[0].category).toBe("security");
-  expect(lines[0].v).toBe(1);
+  expect(lines).toHaveLength(2);
+  expect(lines[0].type).toBe("metrics");
+  expect(lines[1].type).toBe("error");
+  expect(lines[1].category).toBe("security");
+  expect(lines[1].v).toBe(1);
 
   // The exit code stays 69: feed the real captured error through the real
   // command exit mapper (a ConnectionError is not a UsageError and carries no
@@ -3238,10 +3242,11 @@ test("an SFTP host-key mismatch under --event-stream emits category security and
   expect((err as ConnectionError).kind).toBe("security");
 
   const lines = takeFd3Lines();
-  expect(lines).toHaveLength(1);
-  expect(lines[0].type).toBe("error");
-  expect(lines[0].category).toBe("security");
-  expect(lines[0].v).toBe(1);
+  expect(lines).toHaveLength(2);
+  expect(lines[0].type).toBe("metrics");
+  expect(lines[1].type).toBe("error");
+  expect(lines[1].category).toBe("security");
+  expect(lines[1].v).toBe(1);
 
   const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
   try {
@@ -3303,16 +3308,155 @@ test("a host-key divergence under --event-stream emits a warning event and still
   }
 
   // A's full stream: the one-shot (empty, mocked) stage list, the divergence
-  // warning, and the success terminal event.
+  // warning, the metrics summary, and the success terminal event. The mocked
+  // runExchange fires no onStage, so there is no stageEnd line.
   const lines = takeFd3Lines();
-  expect(lines).toHaveLength(3);
+  expect(lines).toHaveLength(4);
   expect(lines[0].type).toBe("stages");
   expect(lines[1].type).toBe("warning");
   expect(lines[1].v).toBe(1);
   expect(lines[1].message).toBe(divergence);
-  expect(lines[2].type).toBe("result");
+  expect(lines[2].type).toBe("metrics");
+  expect(lines[3].type).toBe("result");
 
   // The stderr warn line is preserved verbatim: un-prefixed, unlike the
   // "terms exchange:" lines onWarning produces.
   expect(mockState.warnings).toContain(divergence);
+});
+
+// --- Stage timing and operational counters -------------------------------------
+
+test("a successful run under --event-stream reports stage timing and counters", async () => {
+  // Drive two real stage transitions through the mocked runExchange so the
+  // stream carries a stageEnd (with a duration) for each completed stage, then a
+  // metrics summary, then the success terminal event. recordsProcessed reflects
+  // this party's own input row count; a clean filedrop run retried/reconnected
+  // zero times.
+  const preparedWithRows = { rowCount: 7 } as unknown as PreparedExchange;
+  vi.mocked(runExchange).mockImplementation((async (...args: unknown[]) => {
+    const options = args[3] as { onStage?: (id: string) => void };
+    options.onStage?.("stage 1 / 2");
+    options.onStage?.("stage 2 / 2");
+    return defaultRunExchange();
+  }) as never);
+
+  mockFd3Open();
+  try {
+    // Party A runs flag-on; party B flag-off, so every captured fd-3 line is A's.
+    await Promise.all([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        preparedWithRows,
+        undefined,
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        preparedWithRows,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  const lines = takeFd3Lines();
+  // A stageEnd closes each stage: the first when the second starts, the second
+  // when the exchange completes. The metrics summary precedes the terminal event.
+  expect(lines.map((l) => l.type)).toEqual([
+    "stages",
+    "stage",
+    "stageEnd",
+    "stage",
+    "stageEnd",
+    "metrics",
+    "result",
+  ]);
+
+  const stageEnds = lines.filter((l) => l.type === "stageEnd");
+  expect(stageEnds.map((l) => l.id)).toEqual(["stage 1 / 2", "stage 2 / 2"]);
+  for (const stageEnd of stageEnds) {
+    expect(typeof stageEnd.durationMs).toBe("number");
+    expect(stageEnd.durationMs as number).toBeGreaterThanOrEqual(0);
+  }
+
+  const metrics = lines.find((l) => l.type === "metrics")!;
+  expect(metrics.v).toBe(1);
+  expect(metrics.recordsProcessed).toBe(7);
+  expect(metrics.transportRetries).toBe(0);
+  expect(metrics.reconnects).toBe(0);
+});
+
+test("an aborted run under --event-stream reports metrics then the classified reason", async () => {
+  // A mid-run fault after a stage started: the completed stage's timing is
+  // already on the stream, and the terminal sequence is the metrics summary
+  // followed by the classified error -- the machine-readable abort reason,
+  // distinct from the free-text stderr log. No stageEnd fires for the in-flight
+  // stage (only completed stages are timed).
+  const preparedWithRows = { rowCount: 4 } as unknown as PreparedExchange;
+  vi.mocked(runExchange).mockImplementation((async (...args: unknown[]) => {
+    const options = args[3] as { onStage?: (id: string) => void };
+    options.onStage?.("stage 1 / 1");
+    throw new Error("simulated mid-run transport fault");
+  }) as never);
+
+  // Two parties complete the real rendezvous before either reaches the mocked
+  // runExchange, where both then throw. Only party A is flag-on; its outcome is
+  // the one asserted (party B's is not).
+  mockFd3Open();
+  let resA: PromiseSettledResult<unknown>;
+  try {
+    [resA] = await Promise.allSettled([
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        preparedWithRows,
+        undefined,
+        -1,
+        "test-a",
+        undefined,
+        undefined,
+        undefined,
+        { eventStream: true },
+      ),
+      runProtocol(
+        { channel: "filedrop", path: dropDir, options: { pollIntervalMs: 1 } },
+        null,
+        preparedWithRows,
+        undefined,
+        -1,
+        "test-b",
+      ),
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+  expect(resA.status).toBe("rejected");
+  expect(String((resA as PromiseRejectedResult).reason)).toContain(
+    "simulated mid-run transport fault",
+  );
+
+  const lines = takeFd3Lines();
+  // stages, stage(1) -- no stageEnd for the aborted in-flight stage -- metrics,
+  // then the classified terminal error.
+  expect(lines.map((l) => l.type)).toEqual([
+    "stages",
+    "stage",
+    "metrics",
+    "error",
+  ]);
+  const metrics = lines.find((l) => l.type === "metrics")!;
+  expect(metrics.recordsProcessed).toBe(4);
+  const errorLine = lines.find((l) => l.type === "error")!;
+  expect(errorLine.category).toBe("exchange");
+  expect(String(errorLine.message)).toContain("simulated mid-run transport");
 });

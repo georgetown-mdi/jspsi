@@ -309,8 +309,43 @@ export async function runProtocol(
   // Captured in the outer scope so the post-handshake saveKeyFile call below
   // can reuse the trimmed value without re-reading auth.keyFilePath.
   let trimmedKeyFilePath: string | undefined;
+  // The file-transport client, hoisted so the terminal metrics event can read
+  // its retry/reconnect counters after the run. Undefined until the prepare
+  // block constructs it (and on the earliest prepare failures that fail before
+  // construction), which the metrics helper treats as zero counts.
+  let client: LocalFSClient | SSH2SFTPClientAdapter | undefined;
   let conn: FileSyncConnection;
   let mc: ReturnType<typeof fromEventConnection>;
+
+  // Per-stage wall-clock timing for the machine-interface stream. onStage marks
+  // the START of each stage; a stage COMPLETES when the next one starts or when
+  // the exchange finishes, at which point its duration is emitted as a stageEnd
+  // event. Only completed stages are reported, so a stageEnd is always a whole
+  // stage's time -- a run that aborts mid-stage emits none for the in-flight one.
+  let currentStage: { id: string; startedAt: number } | undefined;
+  const closeCurrentStage = (): void => {
+    if (currentStage === undefined) return;
+    const { id, startedAt } = currentStage;
+    // Clamp against a wall-clock adjustment so a duration is never negative.
+    const durationMs = Math.max(0, Date.now() - startedAt);
+    emit((e) => e.stageEnd(id, durationMs));
+    currentStage = undefined;
+  };
+
+  // The one operational-counter summary, emitted immediately before each
+  // terminal event so the terminal event stays last on the stream. recordsProcessed
+  // is this party's own input row count; the retry/reconnect counts are read from
+  // the transport client's existing loops -- all this party's own integers, never
+  // partner-controlled.
+  const emitMetrics = (): void => {
+    emit((e) =>
+      e.metrics(
+        prepared.rowCount,
+        client?.transportRetryCount ?? 0,
+        client?.reconnectCount ?? 0,
+      ),
+    );
+  };
   // Pre-connection prepare block. Its throw sites -- the channel and caller-
   // contract guards, the shared-secret readiness check (an expired or malformed
   // secret), the key-file-path preflight, and the client/connection/bridge
@@ -383,7 +418,7 @@ export async function runProtocol(
       // the saveKeyFile call below reuses without re-reading the caller's auth.
       trimmedKeyFilePath = preflightKeyFilePath(auth.keyFilePath, log);
     }
-    const client =
+    client =
       connection.channel === "filedrop"
         ? new LocalFSClient()
         : new SSH2SFTPClientAdapter({ verbosity });
@@ -420,6 +455,7 @@ export async function runProtocol(
       inactivityHint: PEER_SILENCE_GUIDANCE,
     });
   } catch (err) {
+    emitMetrics();
     emit((e) => e.error(err, "prepare"));
     throw err;
   }
@@ -999,6 +1035,10 @@ export async function runProtocol(
           log.info(
             sanitizeForDisplay(label.charAt(0).toLowerCase() + label.slice(1)),
           );
+          // Close the previous stage's timing before entering this one, then
+          // start the clock for the new stage. The emitter sanitizes the id.
+          closeCurrentStage();
+          currentStage = { id, startedAt: Date.now() };
           emit((e) => e.stage(id, label));
         },
         onWarning: (msg: string) => {
@@ -1060,6 +1100,10 @@ export async function runProtocol(
     // help here: it resolves the decision for close(), but writeAbortMarker writes
     // regardless, and the gate keys on abortArmed, still true.)
     exchangeComplete = true;
+    // The last PSI stage completed when runExchange returned; emit its duration
+    // before the terminal event. The output stage below is local I/O, not a named
+    // protocol stage, so it is not timed here.
+    closeCurrentStage();
     // From here on any failure is a purely-local "output"-stage fault (result CSV
     // or audit record), never a run fault: the exchange already succeeded and the
     // operator must not re-run it, so the catch classifies it as "output".
@@ -1127,7 +1171,9 @@ export async function runProtocol(
     // output stage (result CSV plus the non-fatal record) finished, so exactly one
     // terminal event has now fired. resultWritten is false for a helper whose
     // agreed terms give it no output table (associationTable withheld), true when a
-    // result CSV was produced.
+    // result CSV was produced. The metrics summary precedes it so the terminal
+    // event stays last on the stream.
+    emitMetrics();
     emit((e) => e.result(associationTable !== undefined));
     return {
       bootstrap,
@@ -1355,6 +1401,9 @@ export async function runProtocol(
     // classified against the phase the run reached: "output" once the exchange
     // completed, otherwise "run" or "prepare". Exactly one terminal event fires
     // per run, so this is the only error emission and it precedes the rethrow.
+    // The metrics summary (with whatever counts the run accrued before the fault)
+    // precedes it so the terminal event stays last on the stream.
+    emitMetrics();
     emit((e) => e.error(err, terminalPhase));
     throw err;
   } finally {

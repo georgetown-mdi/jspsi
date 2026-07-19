@@ -78,6 +78,28 @@ async function drainStream(src: NodeJS.ReadableStream): Promise<Buffer> {
  * mount.
  */
 export class LocalFSClient implements FileTransportClient {
+  private reconnectAttempts = 0;
+
+  /**
+   * Connection re-establishment attempts over this client's life: the number of
+   * connect-retry re-attempts past the first, summed across every `connect()`
+   * call. A plain operational counter, never a partner-controlled value.
+   */
+  get reconnectCount(): number {
+    return this.reconnectAttempts;
+  }
+
+  /**
+   * Transport data-operation retries over this client's life. Always 0 for the
+   * filedrop transport: its per-operation resilience is the poll-read loop in
+   * {@link FileSyncConnection}, not a re-issue of the operation, so there is no
+   * operation-retry loop to count here. Present so both file-transport clients
+   * expose the same metrics surface.
+   */
+  get transportRetryCount(): number {
+    return 0;
+  }
+
   /**
    * Verifies read/write access to the directory specified by `options.path`.
    * Enforces `options.connectTimeoutMs` (default: 30s) per attempt. A fast
@@ -109,9 +131,15 @@ export class LocalFSClient implements FileTransportClient {
     // enforces the per-attempt deadline rather than waiting out the OS-level
     // retry window (which can be several minutes). A timed-out attempt is
     // terminal; see the shouldRetry predicate below for why a retry cannot help.
+    // Count each re-attempt (every access past the first) as a reconnect, for
+    // the metrics summary. Incrementing inside the retried callback ties the
+    // count to the retry loop's own re-issue decision -- no separate state.
+    let attempted = false;
     await retryPromise(
-      () =>
-        withTimeout(
+      () => {
+        if (attempted) this.reconnectAttempts += 1;
+        attempted = true;
+        return withTimeout(
           fs
             .access(dirPath, fs.constants.R_OK | fs.constants.W_OK)
             .catch((err: unknown) => {
@@ -122,7 +150,8 @@ export class LocalFSClient implements FileTransportClient {
             }),
           connectTimeoutMs,
           `timed out opening ${dirPath}`,
-        ),
+        );
+      },
       maxReconnects,
       1_000,
       // A TimeoutError means the mount did not answer within the budget. The

@@ -141,6 +141,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // stack duplicate listeners and eventually trip a MaxListenersExceeded
   // warning. See attachKeyboardInteractive.
   private keyboardInteractiveAttached = false;
+  private reconnectAttempts = 0;
+  private transportRetries = 0;
   // The per-operation liveness bound (ms) every server-driven op is held to. See
   // the constructor's stallDeadlineMs doc for the test-seam and
   // not-operator-configurable rationale.
@@ -204,6 +206,49 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       ping: () => this.sendKeepalive(),
       log: this.log,
     });
+  }
+
+  /**
+   * Connection re-establishment attempts over this adapter's life: the number of
+   * connect-retry re-attempts past the first. A plain operational counter, never
+   * a partner-controlled value.
+   */
+  get reconnectCount(): number {
+    return this.reconnectAttempts;
+  }
+
+  /**
+   * Transport data-operation retries over this adapter's life: the number of
+   * put/rename re-issues past the first attempt, summed across every operation.
+   * A plain operational counter, never a partner-controlled value.
+   */
+  get transportRetryCount(): number {
+    return this.transportRetries;
+  }
+
+  /**
+   * Wrap {@link retryPromise} for a data operation so each re-attempt (every
+   * invocation of `fn` past the first) bumps {@link transportRetries}. Surfaces
+   * how often an operation was re-issued over the run for the metrics summary,
+   * reusing the operation's own retry loop rather than adding parallel state.
+   */
+  private countedOperationRetry<T>(
+    fn: () => Promise<T>,
+    retries: number,
+    delay: number,
+    shouldRetry: (error: unknown) => boolean,
+  ): Promise<T> {
+    let attempted = false;
+    return retryPromise(
+      () => {
+        if (attempted) this.transportRetries += 1;
+        attempted = true;
+        return fn();
+      },
+      retries,
+      delay,
+      shouldRetry,
+    );
   }
 
   // The heartbeat's no-op keepalive: a single realPath(".") -- the cheapest real
@@ -443,8 +488,16 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       typeof connectOptions.password === "string"
     )
       this.attachKeyboardInteractive();
+    // Count each re-attempt (every re-dial past the first) as a reconnect, for
+    // the metrics summary; the flag ties the count to the retry loop's own
+    // re-issue decision without a separate counter.
+    let connectAttempted = false;
     await retryPromise(
-      () => this.client.connect(connectOptions),
+      () => {
+        if (connectAttempted) this.reconnectAttempts += 1;
+        connectAttempted = true;
+        return this.client.connect(connectOptions);
+      },
       maxReconnects,
       1_000,
       // Host-key verification failure is terminal: the server is actively
@@ -856,7 +909,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         : src.reduce((total, part) => total + part.length, 0);
       return this.tracked(
         this.warnIfSlow(
-          retryPromise(
+          this.countedOperationRetry(
             () => {
               // Re-check the dead-session guard before EVERY attempt, not only at
               // method entry -- mirroring rename(). A fatal SFTP protocol error can
@@ -918,7 +971,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     const retries = typeof src === "string" ? (this.options!.retries ?? 5) : 0;
     return this.tracked(
       this.warnIfSlow(
-        retryPromise(
+        this.countedOperationRetry(
           () => {
             // Re-check the dead-session guard before every attempt, as the Buffer
             // branch does: a fatal SFTP error landing between string-src retries
@@ -1024,7 +1077,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // 'ERR_GENERIC_CLIENT') is not 4 and so is not retried.
     return this.tracked(
       this.warnIfSlow(
-        retryPromise(
+        this.countedOperationRetry(
           () => {
             // Re-check the dead-session guard before EVERY attempt, not only at
             // method entry. A fatal SFTP protocol error can land in the gap
