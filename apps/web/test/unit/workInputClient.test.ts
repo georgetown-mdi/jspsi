@@ -113,8 +113,8 @@ describe("fetchJobInputProfile", () => {
     expect(columnSamples.get("__proto__")).toEqual(["a", "b"]);
     expect(columnSamples.get("constructor")).toEqual(["c"]);
     expect(columnSamples.get("prototype")).toEqual(["d"]);
-    // No prototype pollution: a fresh object is unaffected.
-    expect(Object.getPrototypeOf({})).toBe(Object.prototype);
+    // No prototype pollution: Object.prototype gained no enumerable key.
+    expect(Object.keys(Object.prototype)).toEqual([]);
   });
 
   test("rejects a columnSamples that is not an array of pairs", async () => {

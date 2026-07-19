@@ -30,8 +30,10 @@ import type {
   LinkageTerms,
 } from "@psilink/core";
 
-// This suite exercises the CONSOLE acceptor seat's honest unsupported-shape gate. The
-// dev server has no rendezvous mount configured, so `/api/jobs/rendezvous` reports
+// This suite exercises the CONSOLE acceptor seat: the honest unsupported-shape
+// gate, the advisory shared-folder locator, and the server-job run surface (the
+// keep-open callout through a stubbed filedrop accept). For the gate, the dev
+// server has no rendezvous mount configured, so `/api/jobs/rendezvous` reports
 // unavailable: a WebRTC accept is out of scope on the appliance, and a
 // single-directory file-drop accept needs JOB_RENDEZVOUS_DIR. Both are stopped at the
 // review step -- before consent or intake -- with an honest state naming where the

@@ -181,17 +181,21 @@ export function InviterExchangeSection({
           the exchange and this tab holds the only view of it: an in-app teardown
           cancels the run, a hard close strands it unattended, and either way the
           console cannot return to it -- so the copy claims abandonment, never
-          that leaving stops the run. */}
-      {phase === "share" && failure === undefined && (
-        <div className={styles.callout}>
-          <p className={styles.calloutLead}>Keep this tab open.</p>
-          <p className={styles.small}>
-            {serverJob
-              ? SERVER_JOB_KEEP_OPEN_BODY
-              : "Your browser is listening for your partner. Closing the tab cancels the invitation; reloading starts over."}
-          </p>
-        </div>
-      )}
+          that leaving stops the run, and the callout persists through the active
+          protocol phase, the whole window the unload guard arms. The browser
+          listener's copy is share-only: once the partner connects, nothing it
+          says still holds. */}
+      {(phase === "share" || (phase === "running" && serverJob)) &&
+        failure === undefined && (
+          <div className={styles.callout}>
+            <p className={styles.calloutLead}>Keep this tab open.</p>
+            <p className={styles.small}>
+              {serverJob
+                ? SERVER_JOB_KEEP_OPEN_BODY
+                : "Your browser is listening for your partner. Closing the tab cancels the invitation; reloading starts over."}
+            </p>
+          </div>
+        )}
       {phase === "done" && (
         <DonePanel
           matchedRecordCount={outputs?.matchedRecordCount}

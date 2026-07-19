@@ -432,6 +432,21 @@ describe("console inviter mint and run", () => {
         ),
       ).toBe(true),
     );
+    // Advancing past the wait flips the phase to the active run; the keep-open
+    // callout persists through it -- the whole window the unload guard arms.
+    api.emitEvent({ v: 1, type: "stage", id: "confirming protocol" });
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange in progress");
+    await expect
+      .element(
+        page.getByText(
+          "This appliance is running the exchange. If you leave this page, " +
+            "the console cannot return to the run or its results.",
+        ),
+      )
+      .toBeInTheDocument();
+
     // A relay warning (the host-key divergence notice the security review requires
     // the operator to see) surfaces in the run UI without ending the run.
     api.emitEvent({
