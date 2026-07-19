@@ -7,7 +7,7 @@ import { renderSseFrame, resumeOffsetFrom } from "@jobs/sse";
 /**
  * `GET /api/jobs/:jobId/events` -- the job's event stream over SSE.
  *
- * Auth-gated and id-validated. Every connect replays the job's complete event
+ * Feature-gated and id-validated. Every connect replays the job's complete event
  * history from the start with monotonic ids; a `Last-Event-ID` header (or a
  * `?lastEventId=` query fallback) resumes from that offset. The stream closes
  * after the terminal event is delivered. Since a job's full history is retained
@@ -17,7 +17,7 @@ export const Route = createFileRoute("/api/jobs/$jobId/events")({
   server: {
     handlers: {
       GET: ({ request, params }) => {
-        const gate = gateJobRoute(request);
+        const gate = gateJobRoute();
         if (gate.kind === "response") return gate.response;
         const jobId = validateJobIdParam(params.jobId);
         if (jobId === null) return jobEmptyResponse(404);

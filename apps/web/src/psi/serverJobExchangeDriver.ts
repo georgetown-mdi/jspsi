@@ -141,9 +141,8 @@ function jobKeysUrl(jobId: string): string {
 }
 
 /** The default {@link JobApiClient}, hitting the real same-origin job endpoints
- * with a streaming `fetch` (not `EventSource`, which cannot carry an
- * `Authorization` header the appliance API may require and is harder to drive
- * from a unit test). Every connect replays the job's full event history and the
+ * with a streaming `fetch` (not `EventSource`, which is harder to drive from a
+ * unit test). Every connect replays the job's full event history and the
  * server closes the stream after the terminal event, so one request carries a
  * whole run's lifecycle. */
 export function createFetchJobApiClient(

@@ -9,7 +9,7 @@ import { resultFileExists } from "@jobs/workdir";
 /**
  * `GET /api/jobs/:jobId/result` -- serve the job's matched-result CSV.
  *
- * Auth-gated and id-validated, served only after the job succeeded. The path is
+ * Feature-gated and id-validated, served only after the job succeeded. The path is
  * the job's server-chosen output file inside its workdir -- never derived from
  * client input. Content-Type and Content-Disposition are set explicitly with a
  * fixed download name, and a nosniff/no-store discipline applies. A job that has
@@ -20,8 +20,8 @@ import { resultFileExists } from "@jobs/workdir";
 export const Route = createFileRoute("/api/jobs/$jobId/result")({
   server: {
     handlers: {
-      GET: async ({ request, params }) => {
-        const gate = gateJobRoute(request);
+      GET: async ({ params }) => {
+        const gate = gateJobRoute();
         if (gate.kind === "response") return gate.response;
         const jobId = validateJobIdParam(params.jobId);
         if (jobId === null) return jobEmptyResponse(404);

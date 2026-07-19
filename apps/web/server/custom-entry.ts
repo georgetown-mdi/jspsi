@@ -57,10 +57,10 @@ const host = process.env.NITRO_HOST || process.env.HOST;
 
 const path = process.env.NITRO_UNIX_SOCKET;
 
-// Fail closed before binding: if the job API is enabled on a non-loopback bind
-// without an auth token, refuse to start rather than expose an unauthenticated
-// CLI driver on a public interface. A unix-socket bind is appliance-local, so it
-// is treated as loopback for this check.
+// Fail closed before binding: if the job API is enabled on a non-loopback bind,
+// refuse to start rather than expose the unauthenticated CLI driver on a public
+// interface. A unix-socket bind is appliance-local, so it is treated as loopback
+// for this check.
 assertJobApiStartupSafe(
   readJobApiConfig(),
   path !== undefined ? "localhost" : host,

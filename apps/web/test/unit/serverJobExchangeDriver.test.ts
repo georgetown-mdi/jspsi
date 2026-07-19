@@ -904,9 +904,9 @@ describe("fetchSftpRemotes", () => {
   });
 
   test("a non-2xx reads as none configured (fail toward save-file)", async () => {
-    // 404 is also the gate's disabled-API response, and 401 its bad-bearer
-    // response; both mean "no server-job run can start here".
-    for (const status of [401, 404, 500])
+    // 404 is also the gate's disabled-API response; any non-2xx means "no
+    // server-job run can start here".
+    for (const status of [404, 500])
       await expect(
         fetchSftpRemotes(jsonResponse([{ name: "a", host: "h" }], status)),
       ).resolves.toEqual([]);

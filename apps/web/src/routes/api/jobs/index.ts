@@ -17,11 +17,11 @@ import { jobExchangeIntentSchema } from "@jobs/intent";
 /**
  * `GET /api/jobs` -- list every job the manager knows: live in-memory records
  * plus restart-restored jobs re-discovered from their on-disk artifacts, deduped
- * by id. Auth-gated.
+ * by id. Feature-gated.
  *
  * `POST /api/jobs` -- create and start an exchange job from a typed intent.
  *
- * Auth-gated. The request body is a JSON {@link JobExchangeIntent}: a filedrop
+ * Feature-gated. The request body is a JSON {@link JobExchangeIntent}: a filedrop
  * or sftp exchange with validated linkage terms, a shared secret, and exactly one
  * input source -- inline CSV content or a reference to an operator-mounted file the
  * CLI reads in place. The server generates the job id, composes the CLI config from
@@ -39,13 +39,13 @@ import { jobExchangeIntentSchema } from "@jobs/intent";
 export const Route = createFileRoute("/api/jobs/")({
   server: {
     handlers: {
-      GET: async ({ request }) => {
-        const gate = gateJobRoute(request);
+      GET: async () => {
+        const gate = gateJobRoute();
         if (gate.kind === "response") return gate.response;
         return jobJsonResponse({ jobs: await gate.manager.listJobs() });
       },
       POST: async ({ request }) => {
-        const gate = gateJobRoute(request);
+        const gate = gateJobRoute();
         if (gate.kind === "response") return gate.response;
 
         const bodyResult = await readJobRequestBody(

@@ -3,8 +3,6 @@ import { describe, expect, test } from "vitest";
 import {
   JobApiConfigError,
   assertJobApiStartupSafe,
-  constantTimeEquals,
-  gateRequest,
   isJobApiEnabled,
   isLoopbackHost,
   readJobApiConfig,
@@ -12,67 +10,17 @@ import {
 
 import type { JobApiConfig } from "@jobs/gate";
 
-const enabledNoToken: JobApiConfig = { dataRoot: "/srv/jobs", token: "" };
-const enabledWithToken: JobApiConfig = {
-  dataRoot: "/srv/jobs",
-  token: "s3cret-token",
-};
-const disabled: JobApiConfig = { dataRoot: "", token: "" };
+const enabled: JobApiConfig = { dataRoot: "/srv/jobs" };
+const disabled: JobApiConfig = { dataRoot: "" };
 
 describe("readJobApiConfig", () => {
-  test("reads the env vars and trims the data root", () => {
-    const config = readJobApiConfig({
-      JOB_DATA_ROOT: "  /srv/jobs  ",
-      JOB_API_TOKEN: "tok",
-    });
+  test("reads the data root and trims it", () => {
+    const config = readJobApiConfig({ JOB_DATA_ROOT: "  /srv/jobs  " });
     expect(config.dataRoot).toBe("/srv/jobs");
-    expect(config.token).toBe("tok");
   });
 
   test("an unset data root disables the API", () => {
     expect(isJobApiEnabled(readJobApiConfig({}))).toBe(false);
-  });
-
-  test("a whitespace-only token is treated as unset, not real auth", () => {
-    const config = readJobApiConfig({
-      JOB_DATA_ROOT: "/srv/jobs",
-      JOB_API_TOKEN: "   ",
-    });
-    expect(config.token).toBe("");
-    // A blank token must not satisfy the startup gate on a non-loopback bind.
-    expect(() => assertJobApiStartupSafe(config, "0.0.0.0")).toThrow(
-      JobApiConfigError,
-    );
-  });
-});
-
-describe("gateRequest", () => {
-  test("a disabled API reports disabled without consulting the token", () => {
-    expect(gateRequest(disabled, "Bearer anything")).toBe("disabled");
-  });
-
-  test("an enabled unauthenticated API allows any request", () => {
-    expect(gateRequest(enabledNoToken, null)).toBe("allowed");
-  });
-
-  test("a token-protected API requires a matching bearer", () => {
-    expect(gateRequest(enabledWithToken, null)).toBe("unauthorized");
-    expect(gateRequest(enabledWithToken, "Bearer wrong")).toBe("unauthorized");
-    expect(gateRequest(enabledWithToken, "Basic s3cret-token")).toBe(
-      "unauthorized",
-    );
-    expect(gateRequest(enabledWithToken, "Bearer s3cret-token")).toBe(
-      "allowed",
-    );
-  });
-});
-
-describe("constantTimeEquals", () => {
-  test("matches identical strings and rejects differing ones of any length", () => {
-    expect(constantTimeEquals("abc", "abc")).toBe(true);
-    expect(constantTimeEquals("abc", "abcd")).toBe(false);
-    expect(constantTimeEquals("abc", "abx")).toBe(false);
-    expect(constantTimeEquals("", "")).toBe(true);
   });
 });
 
@@ -100,25 +48,23 @@ describe("isLoopbackHost", () => {
 });
 
 describe("assertJobApiStartupSafe fails closed", () => {
-  test("refuses a non-loopback bind with the API enabled and no token", () => {
-    expect(() => assertJobApiStartupSafe(enabledNoToken, "0.0.0.0")).toThrow(
+  test("refuses a non-loopback bind whenever the API is enabled", () => {
+    // Loopback is the only supported bind: there is no token or other override
+    // that admits a non-loopback bind.
+    expect(() => assertJobApiStartupSafe(enabled, "0.0.0.0")).toThrow(
       JobApiConfigError,
     );
-    expect(() => assertJobApiStartupSafe(enabledNoToken, undefined)).toThrow(
+    expect(() => assertJobApiStartupSafe(enabled, "10.0.0.5")).toThrow(
+      JobApiConfigError,
+    );
+    expect(() => assertJobApiStartupSafe(enabled, undefined)).toThrow(
       JobApiConfigError,
     );
   });
 
-  test("allows a loopback bind without a token", () => {
-    expect(() =>
-      assertJobApiStartupSafe(enabledNoToken, "127.0.0.1"),
-    ).not.toThrow();
-  });
-
-  test("allows a non-loopback bind when a token is set", () => {
-    expect(() =>
-      assertJobApiStartupSafe(enabledWithToken, "0.0.0.0"),
-    ).not.toThrow();
+  test("allows a loopback bind", () => {
+    expect(() => assertJobApiStartupSafe(enabled, "127.0.0.1")).not.toThrow();
+    expect(() => assertJobApiStartupSafe(enabled, "localhost")).not.toThrow();
   });
 
   test("allows a disabled API on any bind", () => {

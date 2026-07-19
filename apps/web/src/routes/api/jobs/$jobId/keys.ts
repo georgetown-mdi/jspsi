@@ -9,7 +9,7 @@ import { jobFileExists } from "@jobs/workdir";
 /**
  * `GET /api/jobs/:jobId/keys` -- serve the job's private verification keys.
  *
- * A near-exact mirror of the result route: auth-gated, id-validated, and served
+ * A near-exact mirror of the result route: feature-gated, id-validated, and served
  * only after the job succeeded, from the job's server-chosen keys path inside its
  * workdir (never derived from client input). A job that has not succeeded, or
  * whose keys file is missing, is 404. A restart-restored succeeded job serves from
@@ -22,8 +22,8 @@ import { jobFileExists } from "@jobs/workdir";
 export const Route = createFileRoute("/api/jobs/$jobId/keys")({
   server: {
     handlers: {
-      GET: async ({ request, params }) => {
-        const gate = gateJobRoute(request);
+      GET: async ({ params }) => {
+        const gate = gateJobRoute();
         if (gate.kind === "response") return gate.response;
         const jobId = validateJobIdParam(params.jobId);
         if (jobId === null) return jobEmptyResponse(404);

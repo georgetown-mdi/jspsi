@@ -7,7 +7,7 @@ import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
  * `GET /api/jobs/:jobId` -- the job's status and terminal state.
  * `DELETE /api/jobs/:jobId` -- remove the in-memory record and the workdir.
  *
- * Both auth-gated and id-validated. An unknown or evicted job (or a malformed id)
+ * Both feature-gated and id-validated. An unknown or evicted job (or a malformed id)
  * is 404. GET reports status, the reconciled terminal outcome, whether a result
  * file is available, and whether the exchange-record pair is available (with its
  * `createdAt` when it is), plus a `restored` flag: true when the view was
@@ -18,8 +18,8 @@ import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
 export const Route = createFileRoute("/api/jobs/$jobId/")({
   server: {
     handlers: {
-      GET: async ({ request, params }) => {
-        const gate = gateJobRoute(request);
+      GET: async ({ params }) => {
+        const gate = gateJobRoute();
         if (gate.kind === "response") return gate.response;
         const jobId = validateJobIdParam(params.jobId);
         if (jobId === null) return jobEmptyResponse(404);
@@ -41,8 +41,8 @@ export const Route = createFileRoute("/api/jobs/$jobId/")({
             : {}),
         });
       },
-      DELETE: async ({ request, params }) => {
-        const gate = gateJobRoute(request);
+      DELETE: async ({ params }) => {
+        const gate = gateJobRoute();
         if (gate.kind === "response") return gate.response;
         const jobId = validateJobIdParam(params.jobId);
         if (jobId === null) return jobEmptyResponse(404);

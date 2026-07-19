@@ -7,7 +7,7 @@ import { useJobRendezvousDir } from "@jobs/jobRendezvous";
 /**
  * `GET /api/jobs/rendezvous` -- report the operator-mounted rendezvous directory a
  * filedrop exchange runs against. Shares `gateJobRoute` (404 when the API is
- * disabled, 401 on a bad bearer, no-store, no CORS).
+ * disabled, no-store, no CORS).
  *
  * The body is `{ configured, path? }`. When `JOB_RENDEZVOUS_DIR` is unset the
  * console disables the filedrop transport. When set, this returns the full mount
@@ -20,8 +20,8 @@ import { useJobRendezvousDir } from "@jobs/jobRendezvous";
 export const Route = createFileRoute("/api/jobs/rendezvous")({
   server: {
     handlers: {
-      GET: ({ request }) => {
-        const gate = gateJobRoute(request);
+      GET: () => {
+        const gate = gateJobRoute();
         if (gate.kind === "response") return gate.response;
         const path = useJobRendezvousDir();
         return jobJsonResponse(
