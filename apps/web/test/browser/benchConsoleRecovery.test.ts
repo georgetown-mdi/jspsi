@@ -207,7 +207,7 @@ describe("console inputs disabled state", () => {
 });
 
 describe("console strand recovery panel", () => {
-  test("renders for a live persisted id and discards it (cancel + DELETE), clearing the record", async () => {
+  test("renders for a live persisted id and discards it (cancel + DELETE) after a confirm, clearing the record", async () => {
     persistAttachment("job-live");
     const api = stubRecoveryApi({ jobId: "job-live", status: "running" });
     mount(createElement(InviterBench));
@@ -220,9 +220,25 @@ describe("console strand recovery panel", () => {
       )
       .toBeInTheDocument();
 
+    // Discard is irreversible and removes appliance-only data, so it confirms
+    // first: the first click only opens the modal -- nothing is deleted yet.
     await page.getByRole("button", { name: "Discard" }).click();
+    await expect
+      .element(page.getByText("This cannot be undone", { exact: false }))
+      .toBeInTheDocument();
+    expect(
+      api.captured.some(
+        (r) => r.url === "/api/jobs/job-live" && r.method === "DELETE",
+      ),
+    ).toBe(false);
 
-    // A running job is cancelled first, then DELETEd -- the one disk-remover.
+    // Confirm the discard: the modal's own Discard, scoped to the dialog so the
+    // panel's Discard behind the overlay is never the target. A running job is
+    // cancelled first, then DELETEd -- the one disk-remover.
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Discard" })
+      .click();
     await vi.waitFor(
       () => {
         expect(
@@ -240,6 +256,139 @@ describe("console strand recovery panel", () => {
     await vi.waitFor(() =>
       expect(window.localStorage.getItem(ATTACHMENT_KEY)).toBeNull(),
     );
+    expect(
+      page
+        .getByText("An exchange started from this console", { exact: false })
+        .query(),
+    ).toBeNull();
+  });
+
+  test("cancelling the discard confirm removes nothing and keeps the record", async () => {
+    persistAttachment("job-live");
+    const api = stubRecoveryApi({ jobId: "job-live", status: "running" });
+    mount(createElement(InviterBench));
+
+    await expect
+      .element(
+        page.getByText(
+          "An exchange started from this console is still running",
+        ),
+      )
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Discard" }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Cancel" })
+      .click();
+
+    // Dismissing the confirm is a no-op: no cancel, no DELETE, record intact, and
+    // the panel is still there.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(
+      api.captured.some((r) => r.url === "/api/jobs/job-live/cancel"),
+    ).toBe(false);
+    expect(
+      api.captured.some(
+        (r) => r.url === "/api/jobs/job-live" && r.method === "DELETE",
+      ),
+    ).toBe(false);
+    expect(window.localStorage.getItem(ATTACHMENT_KEY)).not.toBeNull();
+    await expect
+      .element(
+        page.getByText(
+          "An exchange started from this console is still running",
+        ),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("a finished re-attach heads finished and renders the download rows", async () => {
+    persistAttachment("job-done");
+    const api = stubRecoveryApi({ jobId: "job-done", status: "succeeded" });
+    mount(createElement(InviterBench));
+
+    // The probe reads succeeded, so the panel heads as finished immediately.
+    await expect
+      .element(
+        page.getByText("An exchange started from this console has finished"),
+      )
+      .toBeInTheDocument();
+
+    // The replay delivers the result frame; the appliance download row renders.
+    await vi.waitFor(() =>
+      expect(
+        api.captured.some((r) => r.url === "/api/jobs/job-done/events"),
+      ).toBe(true),
+    );
+    api.emit({ v: 1, type: "result", resultWritten: true });
+    api.close();
+
+    await expect
+      .element(page.getByRole("heading", { level: 3, name: "Downloads" }))
+      .toBeInTheDocument();
+    await expect.element(page.getByText("results.csv")).toBeInTheDocument();
+    expect(
+      page
+        .getByText("An exchange started from this console is still running")
+        .query(),
+    ).toBeNull();
+  });
+
+  test("a re-attach whose replay fails heads stopped and promises no downloads", async () => {
+    // A run that was still going when the operator left (status running); the
+    // replay then delivers a FAILURE terminal (e.g. a peer-timeout while away).
+    persistAttachment("job-fail");
+    const api = stubRecoveryApi({ jobId: "job-fail", status: "running" });
+    mount(createElement(InviterBench));
+
+    await vi.waitFor(() =>
+      expect(
+        api.captured.some((r) => r.url === "/api/jobs/job-fail/events"),
+      ).toBe(true),
+    );
+    api.emit({
+      v: 1,
+      type: "error",
+      category: "exchange",
+      message: "the partner never connected",
+    });
+    api.close();
+
+    // The stopped render: heading and body must NOT promise downloads, and the
+    // failure alert -- not a Downloads block -- is what the operator sees.
+    await expect
+      .element(page.getByText("An exchange started from this console stopped"))
+      .toBeInTheDocument();
+    await expect.element(page.getByText("Exchange failed")).toBeInTheDocument();
+    expect(
+      page.getByText("Download its results below", { exact: false }).query(),
+    ).toBeNull();
+    expect(
+      page
+        .getByText("An exchange started from this console has finished")
+        .query(),
+    ).toBeNull();
+    expect(
+      page.getByRole("heading", { level: 3, name: "Downloads" }).query(),
+    ).toBeNull();
+  });
+
+  test("a transient status failure leaves the record intact for the next mount", async () => {
+    // A non-404 fault on the status probe: unreachable, NOT a confirmed removal.
+    persistAttachment("job-live");
+    const api = stubRecoveryApi({ jobId: "job-live", statusCode: 503 });
+    mount(createElement(InviterBench));
+
+    // Let the probe resolve. The blip must not delete the orphan nor clear the
+    // record -- the next mount has to be able to recover a still-live exchange.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(
+      api.captured.some(
+        (r) => r.url === "/api/jobs/job-live" && r.method === "DELETE",
+      ),
+    ).toBe(false);
+    expect(window.localStorage.getItem(ATTACHMENT_KEY)).not.toBeNull();
     expect(
       page
         .getByText("An exchange started from this console", { exact: false })

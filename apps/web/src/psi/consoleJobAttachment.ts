@@ -138,9 +138,11 @@ function realDelay(ms: number): Promise<void> {
  * a completed discard always leaves no dangling recovery record.
  *
  * Best-effort throughout: a failed status/cancel/delete is dev-logged and the
- * sequence proceeds, and the attachment is cleared even if a step failed, since a
- * dangling record that can no longer reach its job is worse than a leaked workdir
- * (which a later restart's orphan sweep can still remove).
+ * sequence proceeds, and the attachment is cleared even if a step failed. A
+ * dangling record that can no longer reach its job is worse than a workdir left
+ * on disk: nothing reclaims a workdir automatically -- the explicit DELETE is its
+ * only remover -- so the record is dropped rather than left re-failing recovery
+ * on every mount.
  */
 export async function discardServerJob(
   client: JobApiClient,
@@ -149,7 +151,7 @@ export async function discardServerJob(
 ): Promise<void> {
   try {
     const status = await client.fetchJobStatus(jobId, NEVER_ABORT);
-    if (status?.status === "running") {
+    if (status.kind === "live" && status.status === "running") {
       await client.cancelJob(jobId).catch((error) => {
         whenDiagnostic(() => log.warn("server job cancel failed:", error));
       });
@@ -157,7 +159,10 @@ export async function discardServerJob(
       while (Date.now() < deadline) {
         await delay(DISCARD_POLL_INTERVAL_MS);
         const polled = await client.fetchJobStatus(jobId, NEVER_ABORT);
-        if (polled === null || polled.status !== "running") break;
+        // Stop waiting once the job is no longer a live running child -- a
+        // terminal status, a confirmed removal, or an unreachable blip -- then
+        // fall through to the DELETE.
+        if (polled.kind !== "live" || polled.status !== "running") break;
       }
     }
     await client.deleteJob(jobId).catch((error) => {

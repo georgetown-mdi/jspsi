@@ -94,7 +94,7 @@ function scriptedClient(
       deletedIds.push(jobId);
       return Promise.resolve();
     },
-    fetchJobStatus: () => Promise.resolve({ status: "running" }),
+    fetchJobStatus: () => Promise.resolve({ kind: "live", status: "running" }),
     fetchRecordAvailability: () =>
       typeof availability === "function"
         ? availability()
@@ -677,7 +677,8 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
       },
       cancelJob: () => Promise.resolve(),
       deleteJob: () => Promise.resolve(),
-      fetchJobStatus: () => Promise.resolve({ status: "running" }),
+      fetchJobStatus: () =>
+        Promise.resolve({ kind: "live", status: "running" }),
       fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
     const config: ServerJobExchangeDriverConfig = {
@@ -718,7 +719,8 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
         return Promise.resolve();
       },
       deleteJob: () => Promise.resolve(),
-      fetchJobStatus: () => Promise.resolve({ status: "running" }),
+      fetchJobStatus: () =>
+        Promise.resolve({ kind: "live", status: "running" }),
       fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
     const driver = createServerJobExchangeDriver(driverConfig(), client);
@@ -744,7 +746,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
       openEventStream: () => scriptedStream([]),
       cancelJob: () => Promise.resolve(),
       deleteJob: () => Promise.resolve(),
-      fetchJobStatus: () => Promise.resolve(null),
+      fetchJobStatus: () => Promise.resolve({ kind: "gone" }),
       fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
     const driver = createServerJobExchangeDriver(driverConfig(), failingClient);
@@ -763,7 +765,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
       openEventStream: () => scriptedStream([]),
       cancelJob: () => Promise.resolve(),
       deleteJob: () => Promise.resolve(),
-      fetchJobStatus: () => Promise.resolve(null),
+      fetchJobStatus: () => Promise.resolve({ kind: "gone" }),
       fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
     const driver = createServerJobExchangeDriver(driverConfig(), client);
@@ -1019,7 +1021,7 @@ describe("createServerJobReattachDriver", () => {
       }),
       cancelJob: () => Promise.resolve(),
       deleteJob: () => Promise.resolve(),
-      fetchJobStatus: () => Promise.resolve(null),
+      fetchJobStatus: () => Promise.resolve({ kind: "gone" }),
       fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
     const events = driverEvents(new AbortController().signal);
@@ -1073,42 +1075,45 @@ describe("createFetchJobApiClient deleteJob and fetchJobStatus", () => {
     expect(calls).toEqual([{ url: "/api/jobs/job-5", method: "DELETE" }]);
   });
 
-  test("fetchJobStatus reads a terminal status off a 200", async () => {
+  test("fetchJobStatus reads a terminal status off a 200 as live", async () => {
     const signal = new AbortController().signal;
     await expect(
       createFetchJobApiClient(
         statusFetch({ status: "succeeded" }),
       ).fetchJobStatus("job-1", signal),
-    ).resolves.toEqual({ status: "succeeded" });
+    ).resolves.toEqual({ kind: "live", status: "succeeded" });
   });
 
-  test("a 200 with no recognizable status defaults to running (never gone)", async () => {
+  test("a 200 with no recognizable status is live, defaulting to running (never gone)", async () => {
     const signal = new AbortController().signal;
     // A live in-memory job the status route answered 200 for must never read as
     // gone, or the recovery panel would delete it; default to running.
     await expect(
       createFetchJobApiClient(statusFetch({})).fetchJobStatus("job-1", signal),
-    ).resolves.toEqual({ status: "running" });
+    ).resolves.toEqual({ kind: "live", status: "running" });
   });
 
-  test("a 404, a 500, and a network error all read as null (not on the appliance)", async () => {
+  test("only a confirmed 404 is gone; a 500 or a network error is unreachable", async () => {
     const signal = new AbortController().signal;
     const notFound: typeof fetch = () =>
       Promise.resolve(new Response(null, { status: 404 }));
+    // A confirmed 404 is the only outcome that authorizes a destructive reclaim.
     await expect(
       createFetchJobApiClient(notFound).fetchJobStatus("job-1", signal),
-    ).resolves.toBeNull();
+    ).resolves.toEqual({ kind: "gone" });
+    // A non-404 fault and a network error are transient, NOT a removal: the caller
+    // leaves the record intact rather than delete a live exchange over a blip.
     await expect(
       createFetchJobApiClient(statusFetch(null, 500)).fetchJobStatus(
         "job-1",
         signal,
       ),
-    ).resolves.toBeNull();
+    ).resolves.toEqual({ kind: "unreachable" });
     await expect(
       createFetchJobApiClient(() =>
         Promise.reject(new Error("offline")),
       ).fetchJobStatus("job-1", signal),
-    ).resolves.toBeNull();
+    ).resolves.toEqual({ kind: "unreachable" });
   });
 });
 

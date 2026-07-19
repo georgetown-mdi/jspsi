@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { Alert, Button, CopyButton } from "@mantine/core";
+import { Alert, Button, CopyButton, Group, Modal } from "@mantine/core";
 import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 
@@ -345,17 +345,60 @@ export function RunWarningsAlert({
  * operator leaves for a new exchange -- the console seat passes its `abandonRun`
  * here so a settled server-job exchange is discarded (cancel-if-needed + DELETE),
  * freeing the appliance's single slot for the next one; the browser seat leaves
- * it unset. It does not block the navigation. */
+ * it unset. It does not block the navigation.
+ *
+ * On a server-job completion the result/record/keys exist only as appliance
+ * endpoint hrefs -- there is no browser blob -- so the discard is an irreversible
+ * removal of data the operator may not have downloaded. `confirmBeforeLeave` gates
+ * the leave behind a confirm there; a browser run keeps its results in local blobs
+ * and needs none, so it stays false and navigates straight through. */
 export function AnotherExchangeFoot({
   onNavigate,
+  confirmBeforeLeave = false,
 }: {
   onNavigate?: () => void;
+  confirmBeforeLeave?: boolean;
 }) {
+  const [confirming, setConfirming] = useState(false);
+  if (!confirmBeforeLeave)
+    return (
+      <div className={styles.workFoot}>
+        <Button component={Link} to="/quick" onClick={() => onNavigate?.()}>
+          Set up another exchange
+        </Button>
+      </div>
+    );
   return (
     <div className={styles.workFoot}>
-      <Button component={Link} to="/quick" onClick={() => onNavigate?.()}>
+      <Button onClick={() => setConfirming(true)}>
         Set up another exchange
       </Button>
+      <Modal
+        opened={confirming}
+        onClose={() => setConfirming(false)}
+        title="Start another exchange?"
+        centered
+        transitionProps={{ duration: 0 }}
+      >
+        <p>
+          Starting another exchange removes this one&apos;s results from this
+          appliance -- download anything you need first.
+        </p>
+        <Group mt="md">
+          <Button variant="default" onClick={() => setConfirming(false)}>
+            Cancel
+          </Button>
+          <Button
+            component={Link}
+            to="/quick"
+            color="red"
+            variant="light"
+            onClick={() => onNavigate?.()}
+          >
+            Set up another exchange
+          </Button>
+        </Group>
+      </Modal>
     </div>
   );
 }

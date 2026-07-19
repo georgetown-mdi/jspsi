@@ -111,16 +111,17 @@ export interface JobApiClient {
    * races a job the operator has already left, and a 404 for an already-gone id
    * is a no-op. */
   deleteJob: (jobId: string) => Promise<void>;
-  /** `GET /api/jobs/:id`, resolving the status body (a {@link JobStatusView}) or
-   * null when the id is unknown (a 404), unreachable, or malformed -- the
-   * recovery probe and the discard poll both read it. Null is the deliberate
-   * "the exchange is not on the appliance" signal (deleted or forgotten by a
-   * restart); a 200 always resolves a view, so a live job is never misread as
-   * gone. */
+  /** `GET /api/jobs/:id`, resolving a {@link JobStatusProbe} the recovery probe and
+   * the discard poll both read. A confirmed HTTP 404 is `gone` -- the exchange is
+   * not on the appliance (deleted, or forgotten by a restart) -- and is the only
+   * outcome that authorizes a destructive reclaim. A network error or any other
+   * non-2xx is `unreachable`: a transient fault, NOT a confirmed removal, so the
+   * caller leaves the record intact for the next probe rather than deleting a
+   * still-live exchange over a blip. A 200 is `live` with the run status. */
   fetchJobStatus: (
     jobId: string,
     signal: AbortSignal,
-  ) => Promise<JobStatusView | null>;
+  ) => Promise<JobStatusProbe>;
   /** `GET /api/jobs/:id`, reading `recordAvailable`/`recordCreatedAt` off the
    * status body. A graceful-degrade metadata fetch: the driver delivers the
    * result without the record pair if this fails or aborts. */
@@ -144,6 +145,16 @@ export type JobRunStatus = "running" | "succeeded" | "failed" | "cancelled";
 export interface JobStatusView {
   status: JobRunStatus;
 }
+
+/** The outcome of a `GET /api/jobs/:id` probe, distinguishing a CONFIRMED-gone
+ * exchange from a transient failure so only the former drives a destructive
+ * reclaim. `live` carries the run status off a 200; `gone` is a confirmed HTTP
+ * 404 (deleted, or forgotten by a restart); `unreachable` is a network error or
+ * any other non-2xx -- a transient blip the caller must not treat as removal. */
+export type JobStatusProbe =
+  | { kind: "live"; status: JobRunStatus }
+  | { kind: "gone" }
+  | { kind: "unreachable" };
 
 /** A non-2xx response from the job API, carrying the status so the driver can
  * pick the failure category (a 400 is a rejected/invalid intent -> `config`;
@@ -214,19 +225,30 @@ export function createFetchJobApiClient(
       await fetchImpl(`/api/jobs/${jobId}`, { method: "DELETE" });
     },
     fetchJobStatus: async (jobId, signal) => {
+      let response: Response;
       try {
-        const response = await fetchImpl(`/api/jobs/${jobId}`, {
+        response = await fetchImpl(`/api/jobs/${jobId}`, {
           method: "GET",
           signal,
         });
-        // Any non-2xx (a 404 for a deleted/forgotten job, or an unreachable
-        // server) is "not on the appliance"; a 200 always yields a view, so a
-        // live in-memory job -- which the status route answers 200 for -- is
-        // never misread as gone.
-        if (!response.ok) return null;
-        return jobStatusViewOf(await response.json());
       } catch {
-        return null;
+        // A network error / unreachable server is transient, not a confirmed
+        // removal: report it so the caller leaves the record intact.
+        return { kind: "unreachable" };
+      }
+      // A confirmed 404 is the only "gone": the exchange is not on the appliance
+      // (deleted, or a restart forgot it). Any other non-2xx is a transient fault.
+      if (response.status === 404) return { kind: "gone" };
+      if (!response.ok) return { kind: "unreachable" };
+      try {
+        return {
+          kind: "live",
+          status: jobStatusViewOf(await response.json()).status,
+        };
+      } catch {
+        // A 200 proves the exchange is present; an unparseable body reads as
+        // running, never gone.
+        return { kind: "live", status: "running" };
       }
     },
     fetchRecordAvailability: async (jobId, signal) => {
@@ -246,10 +268,9 @@ export function createFetchJobApiClient(
 }
 
 /** Read the run status off a `GET /api/jobs/:id` body, defaulting a missing or
- * unrecognized value to `running`. A 200 always maps to a view: the response
- * having come back at all proves the exchange is on the appliance, so it must
- * never read as gone, and erring toward `running` keeps the discard poll waiting
- * for a graceful cancel rather than deleting under a live child. */
+ * unrecognized value to `running`. Called only for a 200, which proves the
+ * exchange is present; erring toward `running` keeps the discard poll waiting for
+ * a graceful cancel rather than deleting under a live child. */
 function jobStatusViewOf(body: unknown): JobStatusView {
   const status =
     body !== null && typeof body === "object"

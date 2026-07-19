@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { Alert, Button, Group } from "@mantine/core";
+import { Alert, Button, Group, Modal } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 
 import { whenDiagnostic } from "@utils/diagnostics";
@@ -30,6 +30,7 @@ import styles from "./bench.module.css";
 
 import type { ConsoleJobAttachment } from "@psi/consoleJobAttachment";
 import type { ExchangeRun } from "./exchangeRun";
+import type { JobRunStatus } from "@psi/serverJobExchangeDriver";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "./runOutputs";
 
@@ -40,12 +41,17 @@ import type { RunOutputs } from "./runOutputs";
  * is exactly one exchange, named by the persisted attachment record.
  *
  * On mount it reads the attachment and probes `GET /api/jobs/:id`. Nothing
- * persisted, or a probe that finds the id gone (deleted, or a restart forgot it),
- * renders nothing -- and a gone id is best-effort DELETEd first, so a
+ * persisted renders nothing. A CONFIRMED-gone id (an HTTP 404: deleted, or a
+ * restart forgot it) renders nothing too -- and is best-effort DELETEd first, so a
  * restart-orphaned workdir's at-rest exposure is bounded, then the record cleared.
- * A live id renders the panel: a heading, the re-attached run's timeline (replayed
- * through the same run-state fold the hooks use), the appliance download hrefs on
- * a finished run, "Stop this exchange" while running, and "Discard" always.
+ * A transient/unreachable probe (a network error or non-404 fault) renders nothing
+ * but LEAVES the record intact, so a blip never destroys the way back to a live
+ * exchange. A live id renders the panel: one of three headings -- still running,
+ * finished, or stopped (failed/cancelled) -- the re-attached run's timeline
+ * (replayed through the same run-state fold the hooks use), the appliance download
+ * hrefs on a finished run only, "Stop this exchange" while running, and "Discard"
+ * (behind a confirm, since it is an irreversible removal of appliance-only data)
+ * always.
  *
  * Unmounting the panel aborts only its own stream consumption -- it carries no
  * cancel intent, so the appliance's run keeps going and the panel is the way back
@@ -60,10 +66,11 @@ export function RecoveredExchangePanel() {
   const [run, setRun] = useState<ExchangeRun>();
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [failure, setFailure] = useState<RunFailure>();
-  // The probe's read of whether the exchange was still running, so a re-attached
-  // finished run heads as finished immediately rather than flashing "still
-  // running" until the replay lands.
-  const [initiallyRunning, setInitiallyRunning] = useState(true);
+  // The probe's initial read of the run status, so a re-attached terminal run
+  // heads correctly -- finished-successful or stopped -- immediately rather than
+  // flashing "still running" until the replay lands.
+  const [initialStatus, setInitialStatus] = useState<JobRunStatus>("running");
+  const [confirming, setConfirming] = useState(false);
   const [discarding, setDiscarding] = useState(false);
 
   const client = useMemo(() => createFetchJobApiClient(), []);
@@ -84,11 +91,11 @@ export function RecoveredExchangePanel() {
         controller.signal,
       );
       if (aborted()) return;
-      if (status === null) {
-        // The exchange is gone from the appliance (deleted, or a restart forgot
-        // it). The persisted id's last duty is to bound a restart-orphaned
-        // workdir's at-rest exposure through the disk-only DELETE arm; then clear
-        // the record and render nothing.
+      if (status.kind === "gone") {
+        // A CONFIRMED 404: the exchange is not on the appliance (deleted, or a
+        // restart forgot it). The persisted id's last duty is to bound a
+        // restart-orphaned workdir's at-rest exposure through the disk-only DELETE
+        // arm; then clear the record and render nothing.
         try {
           await client.deleteJob(stored.jobId);
         } catch (error) {
@@ -98,7 +105,14 @@ export function RecoveredExchangePanel() {
         if (!aborted()) setAttachment(null);
         return;
       }
-      setInitiallyRunning(status.status === "running");
+      if (status.kind === "unreachable") {
+        // A transient unreachability, NOT a confirmed removal: render nothing but
+        // LEAVE the record intact so the next mount can recover a still-live
+        // exchange rather than the blip destroying the way back to it.
+        setAttachment(null);
+        return;
+      }
+      setInitialStatus(status.status);
       setRun(initialRun(stored.seat));
       setAttachment(stored);
       const driver = createServerJobReattachDriver(stored.jobId, client);
@@ -153,20 +167,34 @@ export function RecoveredExchangePanel() {
 
   if (attachment == null || run === undefined) return null;
 
-  const settled = outputs !== undefined || failure !== undefined;
-  const running = !settled && initiallyRunning;
+  // Three distinct renders. A delivered terminal wins over the probe's initial
+  // reading; before the replay lands, that reading drives the heading so a
+  // re-attached terminal run never flashes the wrong copy. `stopped` (failed or
+  // cancelled -- including this panel's own Stop) must NOT promise downloads:
+  // there is no result, so the copy points at the failure alert and Discard.
+  const stopped =
+    failure !== undefined ||
+    (outputs === undefined &&
+      (initialStatus === "failed" || initialStatus === "cancelled"));
+  const finished =
+    !stopped && (outputs !== undefined || initialStatus === "succeeded");
+  const running = !stopped && !finished;
 
   return (
     <section className={styles.callout} aria-label="Recovered exchange">
       <h2 style={{ marginTop: 0 }}>
         {running
           ? "An exchange started from this console is still running"
-          : "An exchange started from this console has finished"}
+          : finished
+            ? "An exchange started from this console has finished"
+            : "An exchange started from this console stopped"}
       </h2>
       <p className={styles.small}>
         {running
           ? "This appliance is still running an exchange you started here. Watch it finish, stop it, or discard it and its files."
-          : "This appliance finished an exchange you started here. Download its results below, or discard it to remove its files from this appliance."}
+          : finished
+            ? "This appliance finished an exchange you started here. Download its results below, or discard it to remove its files from this appliance."
+            : "This appliance stopped an exchange you started here before it finished, so there are no results to download. The reason is shown below; discard it to remove its files from this appliance."}
       </p>
       {failure !== undefined && (
         <Alert
@@ -222,11 +250,37 @@ export function RecoveredExchangePanel() {
           color="red"
           variant="light"
           loading={discarding}
-          onClick={discard}
+          onClick={() => setConfirming(true)}
         >
           Discard
         </Button>
       </Group>
+      <Modal
+        opened={confirming}
+        onClose={() => setConfirming(false)}
+        title="Discard this exchange?"
+        centered
+        transitionProps={{ duration: 0 }}
+      >
+        <p>
+          Discarding removes this exchange and any results from this appliance,
+          and stops it if it is still running. This cannot be undone -- download
+          anything you need first.
+        </p>
+        <Group mt="md">
+          <Button variant="default" onClick={() => setConfirming(false)}>
+            Cancel
+          </Button>
+          <Button
+            color="red"
+            variant="light"
+            loading={discarding}
+            onClick={discard}
+          >
+            Discard
+          </Button>
+        </Group>
+      </Modal>
     </section>
   );
 }

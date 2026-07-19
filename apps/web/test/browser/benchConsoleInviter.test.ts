@@ -669,6 +669,49 @@ describe("console inviter run teardown and abandonment", () => {
       ).toBe(true),
     );
   });
+
+  test("try again DELETEs the failed job before re-creating so the recreate is not 409'd", async () => {
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+    });
+    mount(createElement(InviterBench));
+    await reachRunningRun(api);
+
+    // A retryable (exchange) failure offers Try again; mark the job terminal on the
+    // appliance so the discard goes straight to DELETE (no cancel/poll wait).
+    api.setJobStatus("failed");
+    api.emitEvent({
+      v: 1,
+      type: "error",
+      category: "exchange",
+      message: "temporary connection problem",
+    });
+    api.closeEvents();
+    await expect
+      .element(page.getByRole("button", { name: "Try again" }))
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Try again" }).click();
+
+    // The retry DELETEs the terminal job before POSTing the recreate: under
+    // reject-until-DELETE a create that raced the still-occupied single slot 409s,
+    // so the DELETE must land first.
+    await vi.waitFor(() =>
+      expect(
+        api.captured.filter((r) => r.url === "/api/jobs" && r.method === "POST")
+          .length,
+      ).toBeGreaterThanOrEqual(2),
+    );
+    const deleteIndex = api.captured.findIndex(
+      (r) => r.url === "/api/jobs/job-7" && r.method === "DELETE",
+    );
+    const secondPostIndex = api.captured
+      .map((r, index) => ({ r, index }))
+      .filter(({ r }) => r.url === "/api/jobs" && r.method === "POST")
+      .map(({ index }) => index)[1];
+    expect(deleteIndex).toBeGreaterThanOrEqual(0);
+    expect(deleteIndex).toBeLessThan(secondPostIndex);
+  });
 });
 
 describe("console inviter picker accessibility", () => {

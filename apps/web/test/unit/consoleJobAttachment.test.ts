@@ -7,7 +7,10 @@ import {
   writeAttachment,
 } from "@psi/consoleJobAttachment";
 
-import type { JobApiClient, JobStatusView } from "@psi/serverJobExchangeDriver";
+import type {
+  JobApiClient,
+  JobStatusProbe,
+} from "@psi/serverJobExchangeDriver";
 import type { ConsoleJobAttachment } from "@psi/consoleJobAttachment";
 
 const KEY = "psilink-console-last-job";
@@ -36,7 +39,7 @@ function installStorage(): Map<string, string> {
 /** A {@link JobApiClient} whose status calls follow a fixed script (a further poll
  * past the script reads as gone), recording the discard's cancel/delete/status
  * order so the sequence is asserted deterministically. */
-function scriptedDiscardClient(statuses: Array<JobStatusView | null>) {
+function scriptedDiscardClient(statuses: Array<JobStatusProbe>) {
   const order: Array<string> = [];
   let call = 0;
   const client: JobApiClient = {
@@ -54,7 +57,8 @@ function scriptedDiscardClient(statuses: Array<JobStatusView | null>) {
     },
     fetchJobStatus: (jobId) => {
       order.push(`status:${jobId}`);
-      const status = call < statuses.length ? statuses[call] : null;
+      const status: JobStatusProbe =
+        call < statuses.length ? statuses[call] : { kind: "gone" };
       call++;
       return Promise.resolve(status);
     },
@@ -135,7 +139,9 @@ describe("discardServerJob", () => {
   test("a terminal job is DELETEd and cleared, without cancelling", async () => {
     const store = installStorage();
     writeAttachment({ jobId: "job-1", seat: "inviter", channel: "sftp" });
-    const { client, order } = scriptedDiscardClient([{ status: "succeeded" }]);
+    const { client, order } = scriptedDiscardClient([
+      { kind: "live", status: "succeeded" },
+    ]);
 
     await discardServerJob(client, "job-1", NO_DELAY);
 
@@ -149,9 +155,9 @@ describe("discardServerJob", () => {
     writeAttachment({ jobId: "job-9", seat: "acceptor", channel: "filedrop" });
     // probe: running -> cancel -> poll running -> poll cancelled -> DELETE.
     const { client, order } = scriptedDiscardClient([
-      { status: "running" },
-      { status: "running" },
-      { status: "cancelled" },
+      { kind: "live", status: "running" },
+      { kind: "live", status: "running" },
+      { kind: "live", status: "cancelled" },
     ]);
 
     await discardServerJob(client, "job-9", NO_DELAY);
@@ -169,8 +175,8 @@ describe("discardServerJob", () => {
   test("a poll that finds the job gone stops waiting and DELETEs", async () => {
     installStorage();
     const { client, order } = scriptedDiscardClient([
-      { status: "running" },
-      null,
+      { kind: "live", status: "running" },
+      { kind: "gone" },
     ]);
 
     await discardServerJob(client, "job-3", NO_DELAY);
@@ -193,7 +199,8 @@ describe("discardServerJob", () => {
       },
       cancelJob: () => Promise.resolve(),
       deleteJob: () => Promise.reject(new Error("delete failed")),
-      fetchJobStatus: () => Promise.resolve({ status: "succeeded" }),
+      fetchJobStatus: () =>
+        Promise.resolve({ kind: "live", status: "succeeded" }),
       fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
 

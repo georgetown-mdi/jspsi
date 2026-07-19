@@ -170,11 +170,11 @@ export function AcceptorExchangeSection({
           {warning.message}
         </Alert>
       )}
-      {/* The appliance's CLI child conducts this accept and the tab holds the only
-          view of it: an in-app teardown cancels the run, a hard close strands it,
-          and either way the console cannot return to it. The claim is false the
-          moment a failure lands (the lifecycle tore down), so the callout outlives
-          no failure. Absent for the hosted in-browser accept, which owns no such run. */}
+      {/* The appliance conducts this accept and the tab only watches it: leaving
+          does not stop the run, and the recovery panel is the way back. The callout
+          drops the moment a failure lands (the run it describes has torn down), so
+          it outlives no failure. Absent for the hosted in-browser accept, which owns
+          no such run. */}
       {phase === "running" && failure === undefined && serverJob && (
         <div className={styles.callout}>
           <p className={styles.calloutLead}>Keep this tab open.</p>
@@ -232,7 +232,10 @@ export function AcceptorExchangeSection({
         </>
       )}
       {(phase === "done" || failure?.category === "output") && (
-        <AnotherExchangeFoot onNavigate={onAbandon} />
+        <AnotherExchangeFoot
+          onNavigate={onAbandon}
+          confirmBeforeLeave={serverJob}
+        />
       )}
     </>
   );
