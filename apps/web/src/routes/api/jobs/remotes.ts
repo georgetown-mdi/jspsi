@@ -9,10 +9,10 @@ import { jobJsonResponse } from "@jobs/gate";
  *
  * Gated like every job route (404 when the API is disabled). The body is the
  * manager's explicitly mapped projection -- name and locator fields only, never a
- * credential reference or fingerprint -- and an
- * enabled API with no remotes configured serves an empty array. The static
- * `remotes` segment can never be captured as a `$jobId` parameter: job ids are
- * validated as v4 UUIDs before any use, which `remotes` is not.
+ * credential reference or fingerprint -- and an enabled API with no remotes
+ * configured serves an empty array. The static `remotes` segment can never be
+ * captured as a `$jobId` parameter: job ids are validated as v4 UUIDs before any
+ * use, which `remotes` is not.
  */
 export const Route = createFileRoute("/api/jobs/remotes")({
   server: {
