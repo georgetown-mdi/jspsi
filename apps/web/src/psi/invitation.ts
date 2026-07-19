@@ -322,8 +322,20 @@ function resolveConnectionEndpoint(
 export async function generateInvitation(params: {
   inviterName: string;
   /** The inviter's CSV; parsed here (see the function summary -- this is the
-   * parse boundary). The terms are derived from its columns. */
-  file: InvitationCSVInput;
+   * parse boundary). The terms are derived from its columns. Exactly one of `file`
+   * or `profiledColumns` is set. */
+  file?: InvitationCSVInput;
+  /**
+   * The column names profiled server-side for a console server-job transport -- the
+   * alternative to `file`. When supplied, the invitation binds to THESE columns
+   * (with the authored terms / metadata / standardization) WITHOUT re-parsing a
+   * File: on the console the file is never read in the browser. The fail-closed
+   * satisfiability re-check stays columns-based, so it still runs. The returned
+   * `rawRows` are empty on this path -- the browser-transport run that would consume
+   * them does not exist on the console. Exactly one of `file` or `profiledColumns`
+   * must be set.
+   */
+  profiledColumns?: Array<string>;
   location: InvitationLocation;
   /**
    * Invitation lifetime in seconds; defaults to {@link INVITATION_LIFETIME_SECONDS}
@@ -379,10 +391,18 @@ export async function generateInvitation(params: {
   const {
     inviterName,
     file,
+    profiledColumns,
     location,
     lifetimeSeconds = INVITATION_LIFETIME_SECONDS,
     connectionEndpoint = { channel: "webrtc" },
   } = params;
+
+  // Exactly one input source: a browser File to parse, or the console's
+  // server-side profiled columns to bind directly. Neither and both are misuse.
+  if ((file === undefined) === (profiledColumns === undefined))
+    throw new Error(
+      "generateInvitation requires exactly one of file or profiledColumns",
+    );
 
   // Bound the selected lifetime up front, where the cause is clear, rather than
   // leaving it to encodeInvitation's "expires must be in the future" backstop
@@ -404,15 +424,22 @@ export async function generateInvitation(params: {
   // Parse the inviter's CSV here, before anything is minted, so an unreadable
   // file aborts with no token. loadCSVFileOffMainThread rejects only on a read/stream
   // error (a malformed-but-readable CSV resolves with rows); wrap that into the typed
-  // user-actionable failure.
+  // user-actionable failure. On the console's profiled-columns path there is no file
+  // to read: the columns are bound directly and no rows are produced (the
+  // browser-transport run that would consume them does not exist on the console).
   let rawRows: Array<CSVRow>;
   let columns: Array<string>;
-  try {
-    const csvResult = await loadCSVFileOffMainThread(file);
-    rawRows = csvResult.data;
-    columns = csvResult.meta.fields ?? [];
-  } catch (cause) {
-    throw new InvitationFileError({ kind: "unreadable", cause });
+  if (file !== undefined) {
+    try {
+      const csvResult = await loadCSVFileOffMainThread(file);
+      rawRows = csvResult.data;
+      columns = csvResult.meta.fields ?? [];
+    } catch (cause) {
+      throw new InvitationFileError({ kind: "unreadable", cause });
+    }
+  } else {
+    rawRows = [];
+    columns = profiledColumns ?? [];
   }
 
   // Refuse an unnamed-column header before any inference or minting. inferMetadata

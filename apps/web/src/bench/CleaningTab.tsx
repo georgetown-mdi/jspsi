@@ -12,9 +12,10 @@ import { StandardizationCards } from "@components/StandardizationCards";
 import { declaredFieldsFor } from "./inviterModel";
 import styles from "./bench.module.css";
 
-import type { AcquiredCsv, InviterEditor } from "./inviterModel";
 import type { LinkageField, StandardizationStep } from "@psilink/core";
+import type { ColumnSamples } from "@psi/columnSamples";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
+import type { InviterEditor } from "./inviterModel";
 
 /**
  * The Cleaning tab: per-field pipelines with previews and whole-file coverage,
@@ -24,7 +25,7 @@ import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
  */
 export function CleaningTab({
   editor,
-  csv,
+  columnSamples,
   expertMode,
   rates,
   pending,
@@ -34,10 +35,15 @@ export function CleaningTab({
   onFieldRemoved,
   onResetCleaning,
   cleaningError,
+  coveragePendingLabel,
   onBack,
 }: {
   editor: InviterEditor;
-  csv: AcquiredCsv;
+  /** The per-column preview samples the before/after preview reads: computed from
+   * the rows on the hosted build, read from the server-side profile on the console
+   * (which never holds the rows). Supplied by the host so this tab never touches
+   * `csv.rawRows`, which the console acquired shape does not carry. */
+  columnSamples: ColumnSamples;
   expertMode: boolean;
   /** The full-CSV per-field coverage, swept once at the bench and shared with the
    * Customize fact and the coverage Problems entry (`null` before the first sweep
@@ -55,6 +61,9 @@ export function CleaningTab({
   /** The validation message for the cleaning, rendered inline (the work
    * column's Problems block carries it too). */
   cleaningError: string | undefined;
+  /** Provider-aware coverage pending copy (the console sweep is a whole-file pass on
+   * the appliance); the hosted build leaves it undefined to keep the default. */
+  coveragePendingLabel?: string;
   onBack: () => void;
 }) {
   const declaredFields = useMemo(
@@ -121,7 +130,7 @@ export function CleaningTab({
           standardization={editor.draft.standardization}
           declaredFields={declaredFields}
           metadata={editor.draft.metadata}
-          rawRows={csv.rawRows}
+          columnSamples={columnSamples}
           onStepsChange={(output, _input, steps) => onFieldSteps(output, steps)}
           onInputColumnChange={onFieldInput}
           onAddField={expertMode ? onFieldAdded : undefined}
@@ -130,6 +139,7 @@ export function CleaningTab({
             <FieldCoverage
               rate={rates?.get(output)}
               pending={rates !== null && pending}
+              pendingLabel={coveragePendingLabel}
             />
           )}
           isFieldSilentEmpty={(output) => {

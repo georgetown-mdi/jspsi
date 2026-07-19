@@ -7,6 +7,7 @@ import {
   LIFETIME_CHOICES,
   RESULTS_DIRECTION_LABELS,
   answersRows,
+  availableTransports,
   expiryLabel,
   transportChooserCopy,
 } from "./inviterModel";
@@ -53,6 +54,7 @@ export function ReviewCreateSection({
   minting,
   sftpRemotes,
   sftpRemoteName,
+  rendezvousConfigured,
   onSftpRemote,
   onLifetime,
   onDirection,
@@ -71,6 +73,10 @@ export function ReviewCreateSection({
    * save-a-file flow. */
   sftpRemotes: Array<SftpRemoteProjection> | undefined;
   sftpRemoteName: string | undefined;
+  /** Whether the appliance has a rendezvous directory mounted (`JOB_RENDEZVOUS_DIR`
+   * set). The filedrop card runs here when true and renders disabled with a config
+   * hint when false. Off a console build it is unused (filedrop saves a file). */
+  rendezvousConfigured: boolean;
   onSftpRemote: (name: string) => void;
   onLifetime: (seconds: number) => void;
   onDirection: (direction: OutputDirection) => void;
@@ -79,15 +85,31 @@ export function ReviewCreateSection({
   onCreate: () => void;
   onNavigate: (target: SpineTarget) => void;
 }) {
-  const transport = editor.transport ?? "browser";
   const sftpServerJob = sftpRemotes !== undefined && sftpRemotes.length > 0;
+  const available = availableTransports(
+    isConsoleBuild(),
+    sftpServerJob,
+    rendezvousConfigured,
+  );
+  const transport = editor.transport ?? available.defaultTransport;
+  const disabledFor = (candidate: Transport): boolean =>
+    available.options.find((option) => option.transport === candidate)
+      ?.disabled === true;
+  const browserDisabled = disabledFor("browser");
+  const filedropDisabled = disabledFor("filedrop");
   const {
+    browserLabel,
+    browserDescription,
     filedropLabel,
     filedropDescription,
     sftpLabel,
     sftpDescription,
     capabilityNote,
-  } = transportChooserCopy(isConsoleBuild(), sftpServerJob);
+  } = transportChooserCopy(
+    isConsoleBuild(),
+    sftpServerJob,
+    rendezvousConfigured,
+  );
   const canCreate = problems.length === 0 && !minting;
   // Voiced when the create gate flips either way; deferred so a blocked state
   // present when the section mounts still announces.
@@ -142,9 +164,10 @@ export function ReviewCreateSection({
           <Radio
             name="transport"
             checked={transport === "browser"}
+            disabled={browserDisabled}
             onChange={() => onTransport("browser")}
-            label="Live, in this browser"
-            description="Your browsers connect directly. You get an invitation link and code to share; keep this tab open while your partner accepts."
+            label={browserLabel}
+            description={browserDescription}
           />
         </div>
         <div
@@ -185,6 +208,7 @@ export function ReviewCreateSection({
           <Radio
             name="transport"
             checked={transport === "filedrop"}
+            disabled={filedropDisabled}
             onChange={() => onTransport("filedrop")}
             label={filedropLabel}
             description={filedropDescription}

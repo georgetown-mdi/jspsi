@@ -89,28 +89,34 @@ For more information, see [apps/cli](apps/cli/).
 
 # Web Console Quickstart
 
-The same Docker image can serve the web interface from a machine you control, with no Node.js setup. The console serves one party and runs inside that party's own systems; it is never a shared meeting point for the two partners. An operator who connects to it over your network (or a VPN) gets the same guided experience as the web app.
+The same Docker image can serve the web console on the operator's own machine, with no Node.js setup. The console serves one party and runs on the same host, used by the same person, that conducts the exchange; it is a local server, not shared beyond that host, and never a shared meeting point for the two partners. It gives the same guided experience as the web app.
 
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) (as above).
 2. Run:
 ```sh
 docker run -d -p 3000:3000 vdorie/psi-link:latest serve
 ```
-3. Visit [http://localhost:3000](http://localhost:3000) (or the serving machine's address from another machine on your network).
+3. Visit [http://localhost:3000](http://localhost:3000) on that machine.
 
-This starts the web interface and its peer-coordination server; browser-to-browser exchanges work immediately. To let the console also run SFTP and shared-directory exchanges itself (rather than saving an exchange file for the command line app) enable its job API by supplying a directory for working files and an access token:
+This starts the web interface and its peer-coordination server. On the console the exchange runs on this machine over SFTP or a shared directory; the guided browser experience is the same, but the browser-to-browser (live, in-tab) transport is the public web app's domain and is not offered here. To let the console run the SFTP and shared-directory exchanges itself (rather than saving an exchange file for the command line app) enable its job API by supplying directories for working files and your input, plus an access token:
 
 ```sh
 docker run -d -p 3000:3000 \
   --env JOB_DATA_ROOT=/data/jobs \
   --env JOB_API_TOKEN=ACCESS_TOKEN \
+  --env JOB_INPUT_DIR=/data/input \
+  --env JOB_RENDEZVOUS_DIR=/data/rendezvous \
   -v /host/jobs:/data/jobs \
+  -v /host/input:/data/input \
+  -v /host/rendezvous:/data/rendezvous \
   vdorie/psi-link:latest serve
 ```
 
 Replacing each of the following:
    * `/host/jobs` - a directory on the serving machine where each exchange's working files are kept. Completed results stay here until you delete them.
-   * `ACCESS_TOKEN` - a secret the console requires on every job request. Required whenever the console is reachable from other machines.
+   * `ACCESS_TOKEN` - a secret the console requires on every job request, so that publishing the container's port does not expose the job API unauthenticated. The console is meant to run on your own machine, not shared beyond it.
+   * `/host/input` - the directory holding your input CSVs. The console lists the files here so you can pick the one to link; the tool reads it in place. See [the mounted work-input directory](docs/DEPLOYMENT.md#mounted-work-input-directory) in the deployment guide.
+   * `/host/rendezvous` - a synced folder both parties can reach (for example, a shared-drive mount), used for shared-directory exchanges. Omit this variable and its mount if you only run SFTP exchanges.
 
 Running SFTP exchanges from the console additionally requires a file naming the SFTP servers it may connect to (`JOB_SFTP_REMOTES`). The file format, the security model, and further configuration are covered in [Server job API](docs/DEPLOYMENT.md#server-job-api) in the deployment guide.
 

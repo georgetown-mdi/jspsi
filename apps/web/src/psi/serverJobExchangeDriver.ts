@@ -26,6 +26,17 @@ const log = getLogger("serverJobExchangeDriver");
 export type ServerJobExchangeTransport =
   { channel: "filedrop" } | { channel: "sftp"; remote: string };
 
+/**
+ * Where the appliance reads this party's input from. `inline` carries the CSV
+ * content the browser holds (the hosted-shaped path: the server writes it to the
+ * fixed workdir name). `workFile` carries only a REFERENCE to a file in the
+ * operator-mounted work-input directory -- an opaque single-segment name -- so no
+ * content transits the browser and the CLI reads the file in place. `intentFor`
+ * maps `inline` to the intent's `inputCsv` arm and `workFile` to its `inputFile`
+ * arm (exactly one of the two is ever set). */
+export type JobInputSource =
+  { kind: "inline"; csv: string } | { kind: "workFile"; name: string };
+
 /** The construction-time inputs a server-job driver needs: the analog of the
  * browser driver's config, minus everything that only a peer-to-peer run has (no
  * `acquire`, no PSI library, no `generateOutput`). These are exactly the
@@ -37,7 +48,11 @@ export interface ServerJobExchangeDriverConfig {
   transport: ServerJobExchangeTransport;
   linkageTerms: LinkageTerms;
   sharedSecret: string;
-  inputCsv: string;
+  /** Where the appliance reads this party's input from: inline CSV content, or a
+   * reference to a file in the operator-mounted work-input directory
+   * ({@link JobInputSource}). Mapped to the intent's `inputCsv` / `inputFile` arm by
+   * {@link intentFor}. */
+  inputSource: JobInputSource;
   /** This party's authored column metadata (which columns are sent vs ignored,
    * their roles/types). Carried into the intent so the appliance's CLI uses the
    * operator's edits instead of inferring metadata from the column names -- an
@@ -388,7 +403,7 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
     transport,
     linkageTerms,
     sharedSecret,
-    inputCsv,
+    inputSource,
     metadata,
     standardization,
     expectedPayloadColumns,
@@ -397,7 +412,9 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
   const shared = {
     linkageTerms,
     sharedSecret,
-    inputCsv,
+    ...(inputSource.kind === "inline"
+      ? { inputCsv: inputSource.csv }
+      : { inputFile: { name: inputSource.name } }),
     ...(metadata !== undefined ? { metadata } : {}),
     ...(standardization !== undefined ? { standardization } : {}),
     ...(expectedPayloadColumns !== undefined ? { expectedPayloadColumns } : {}),

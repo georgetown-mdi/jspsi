@@ -38,11 +38,14 @@ import type {
 } from "@psi/acceptInvitation";
 import type { Acquire, GenerateOutput } from "@psi/exchangeLifecycle";
 import type { CSVRow, InvitationToken } from "@psilink/core";
+import type {
+  JobInputSource,
+  ServerJobExchangeDriverConfig,
+} from "@psi/serverJobExchangeDriver";
 import type { ExchangeDriver } from "@psi/exchangeDriver";
 import type { ExchangeRun } from "./exchangeRun";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "./runOutputs";
-import type { ServerJobExchangeDriverConfig } from "@psi/serverJobExchangeDriver";
 import type { Transport } from "./inviterModel";
 
 /** The connection-endpoint channels the acceptor can drive, narrowed from the
@@ -99,18 +102,18 @@ export function acceptorServerJobConfig({
   token,
   acceptorName,
   edits,
-  inputCsv,
+  inputSource,
 }: {
   token: InvitationToken;
   acceptorName: string;
   edits: AcceptorDataEdits;
-  inputCsv: string;
+  inputSource: JobInputSource;
 }): ServerJobExchangeDriverConfig {
   return {
     transport: { channel: "filedrop" },
     linkageTerms: deriveAcceptedLinkageTerms(token.linkageTerms, acceptorName),
     sharedSecret: token.sharedSecret,
-    inputCsv,
+    inputSource,
     metadata: edits.metadata,
     standardization: edits.standardization,
     // The received-payload lock-in, mirrored from the invitation's disclosed set
@@ -125,9 +128,19 @@ export function acceptorServerJobConfig({
   };
 }
 
+/** Where the acceptor's own input comes from on a server-job run. `inline` carries
+ * the browser's File, whose text the hook reads at run time (the hosted-shaped path);
+ * `workFile` carries only a REFERENCE to a file in the appliance's mounted work-input
+ * directory (the console picker's profiled snapshot), so no content transits the
+ * browser. The hook resolves this to the driver's {@link JobInputSource} -- reading
+ * `inline`'s text into `{kind:"inline",csv}`, passing `workFile` through -- and the
+ * browser (WebRTC) path uses the retained `rawRows`/`columns` and never reads it. */
+export type AcceptorLaunchSource =
+  { kind: "inline"; file: File } | { kind: "workFile"; name: string };
+
 /** The launch the acceptor commits to on "Start the exchange": the decoded
  * invitation, the committed name recorded in the exchange record, the acquired
- * CSV, the confirm-columns edits, and the original file. A fresh object per
+ * CSV, the confirm-columns edits, and the input source. A fresh object per
  * launch keys the run effect, so a superseded or discarded launch aborts and
  * resets. */
 export interface AcceptorLaunch {
@@ -136,11 +149,24 @@ export interface AcceptorLaunch {
   rawRows: Array<CSVRow>;
   columns: Array<string>;
   edits: AcceptorDataEdits;
-  /** The original CSV file, the server-job driver's `inputCsv` source. The
-   * server-job path submits the file's raw text; the browser path uses the
-   * retained `rawRows`/`columns` and never reads this. Mirrors the inviter's
-   * `sourceFile`. */
-  sourceFile: File;
+  /** Where the appliance reads this party's input from on a server-job run
+   * ({@link AcceptorLaunchSource}): the browser File on the hosted-shaped inline
+   * path, or the console picker's mounted-file reference. The browser (WebRTC) path
+   * uses the retained `rawRows`/`columns` and never reads it. Mirrors the inviter's
+   * `inputSource`. */
+  inputSource: AcceptorLaunchSource;
+}
+
+/** Resolve an {@link AcceptorLaunchSource} to the driver's {@link JobInputSource}:
+ * an `inline` File is read to its text (the hosted path keeps File + text()), a
+ * `workFile` reference passes through unchanged (the console path submits no
+ * content). */
+async function resolveJobInputSource(
+  source: AcceptorLaunchSource,
+): Promise<JobInputSource> {
+  return source.kind === "inline"
+    ? { kind: "inline", csv: await source.file.text() }
+    : { kind: "workFile", name: source.name };
 }
 
 /**
@@ -163,8 +189,9 @@ export interface AcceptorLaunch {
  * On a console build accepting a filedrop invitation the appliance runs the
  * exchange through the job API instead ({@link acceptorServerJobConfig} ->
  * {@link createServerJobExchangeDriver}), mirroring the inviter's server-job
- * path: no dial, no PSI library here, and the acceptor's own-perspective terms
- * and raw CSV text go to the appliance.
+ * path: no dial, no PSI library here, and the acceptor's own-perspective terms go
+ * to the appliance alongside its mounted-file reference (no file content transits
+ * the browser).
  *
  * Try again (the retryable "exchange" category only) re-dials the same invitation
  * while it is still usable, exactly like the inviter's re-listen.
@@ -219,9 +246,14 @@ export function useAcceptorExchange({
     setOutputs(undefined);
     setFailure(undefined);
 
-    const { invitation, acceptorName, rawRows, columns, edits, sourceFile } =
+    const { invitation, acceptorName, rawRows, columns, edits, inputSource } =
       current;
     const { token, endpoint } = invitation;
+    // The bench transport this endpoint runs over, threaded to failureFor so a
+    // console mounted-file create rejection (a workFile 400) names the file cause
+    // and routes recovery to the file step. The accept guard admits no sftp
+    // endpoint, so this is `filedrop` (-> server-job) or `browser` (-> WebRTC).
+    const channel = transportForEndpointChannel(endpoint.channel);
 
     // Output-generation half. The URLs the build creates are revoked when the
     // outputs are replaced or the bench unmounts (effect above); a throw
@@ -288,16 +320,25 @@ export function useAcceptorExchange({
       });
 
     // The console appliance carries out the filedrop exchange: the driver POSTs
-    // the acceptor's OWN-PERSPECTIVE terms, the shared secret, and the file's raw
-    // text to the job API and maps the server's event stream onto the same
-    // lifecycle events. It owns no peer connection or PSI library, so
-    // `acquire`/`generateOutput` and the dial go unused on this path. Reading the
-    // file's text is the only async step before the run, so it precedes the
-    // driver build.
+    // the acceptor's OWN-PERSPECTIVE terms, the shared secret, and the input source
+    // to the job API and maps the server's event stream onto the same lifecycle
+    // events. It owns no peer connection or PSI library, so `acquire`/`generateOutput`
+    // and the dial go unused on this path. On the console the input source is a
+    // REFERENCE to the operator-mounted file (no content transits the browser);
+    // resolving it (a `workFile` passes through, an inline File is read to text) is
+    // the only async step before the run, so it precedes the driver build. The
+    // resolved source is captured so failureFor can name the file cause on a create
+    // rejection.
+    let jobInputSource: JobInputSource | undefined;
     const serverJobDriver = async (): Promise<ExchangeDriver<RunOutputs>> => {
-      const inputCsv = await sourceFile.text();
+      jobInputSource = await resolveJobInputSource(inputSource);
       return createServerJobExchangeDriver(
-        acceptorServerJobConfig({ token, acceptorName, edits, inputCsv }),
+        acceptorServerJobConfig({
+          token,
+          acceptorName,
+          edits,
+          inputSource: jobInputSource,
+        }),
       );
     };
 
@@ -310,11 +351,7 @@ export function useAcceptorExchange({
     // The remotes flag is the selector's sftp-only input; the accept guard
     // admits no sftp endpoint (webrtc and console filedrop only), so it is
     // constant false here.
-    const selection = selectExchangeDriver(
-      transportForEndpointChannel(endpoint.channel),
-      deploymentProfile(),
-      false,
-    );
+    const selection = selectExchangeDriver(channel, deploymentProfile(), false);
     if (selection.kind === "save-file") {
       setFailure(
         failureFor(
@@ -356,7 +393,9 @@ export function useAcceptorExchange({
           // on) keeps the full object. The user-facing alert is separately
           // sanitized in failureFor.
           whenDiagnostic(() => console.error(error));
-          setFailure(failureFor(category, error));
+          setFailure(
+            failureFor(category, error, jobInputSource, channel, "acceptor"),
+          );
           setRun((prev) => runWithFailure(prev));
         },
       });

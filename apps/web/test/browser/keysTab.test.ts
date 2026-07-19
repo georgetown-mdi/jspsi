@@ -10,6 +10,7 @@ import { createRoot } from "react-dom/client";
 import { editorFromCsv, editorWithAuthoredDraft } from "@bench/inviterModel";
 
 import { KeysTab } from "@bench/KeysTab";
+import { consoleAcquiredCsv } from "@bench/consoleAcquiredCsv";
 
 import { renderApp } from "./renderApp";
 
@@ -31,6 +32,7 @@ const csv: AcquiredCsv = {
     },
   ],
   columns: ["client_id", "first_name", "last_name", "dob", "ssn4"],
+  rowCount: 1,
 };
 
 // Author a self-defeating parse_date onto the date_of_birth element of the
@@ -108,5 +110,54 @@ describe("KeysTab: the guided-list dead-key badge", () => {
     });
     await expect.element(badge).toBeInTheDocument();
     await expect.element(badge).toHaveTextContent("won't match");
+  });
+});
+
+describe("KeysTab: expert import/export over a rows-withheld console shape", () => {
+  test("renders the terms import without reading the throwing rawRows getter", async () => {
+    // The console acquires a server-side profile, not the rows, so its `rawRows` is
+    // a getter that throws in dev/test. KeysTab must feed the import/export the
+    // rows-withheld seed ([]), not the getter -- so expert mode renders rather than
+    // crashing the bench.
+    const consoleCsv = consoleAcquiredCsv({
+      fileName: "clients.csv",
+      sizeBytes: 4096,
+      columns: ["client_id", "first_name", "last_name", "dob", "ssn4"],
+      rowCount: 12408,
+      dateInputFormat: "%m/%d/%Y",
+    });
+    const editor = editorFromCsv("Dana Okafor", consoleCsv);
+    root!.render(
+      renderApp(
+        createElement(KeysTab, {
+          editor,
+          csv: consoleCsv,
+          expertMode: true,
+          onExpertMode: () => undefined,
+          onKeyEnabled: () => undefined,
+          onKeyMoved: () => undefined,
+          onAuthoredDraft: () => undefined,
+          onStrategy: () => undefined,
+          onAlgorithm: () => undefined,
+          onDeduplicate: () => undefined,
+          onImport: () => undefined,
+          keysError: undefined,
+          announce: () => undefined,
+          onBack: () => undefined,
+        }),
+      ),
+    );
+
+    await expect
+      .element(page.getByRole("heading", { name: "Matching keys" }))
+      .toBeInTheDocument();
+    // The import/export surface rendered -- proof the throwing getter was never read.
+    await expect
+      .element(
+        page.getByLabelText(
+          "Paste a JSON or YAML linkage-terms document to import",
+        ),
+      )
+      .toBeInTheDocument();
   });
 });

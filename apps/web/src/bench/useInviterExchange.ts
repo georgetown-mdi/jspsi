@@ -12,17 +12,18 @@ import {
   sanitizeForDisplay,
 } from "@psilink/core";
 
+import {
+  JobApiRequestError,
+  createServerJobExchangeDriver,
+} from "@psi/serverJobExchangeDriver";
 import { createBrowserExchangeDriver } from "@psi/exchangeDriver";
-import { createServerJobExchangeDriver } from "@psi/serverJobExchangeDriver";
 import { hasRecoveryHint } from "@psi/authenticateExchange";
 import { inviterExchangeDataSpec } from "@psi/advancedInvite";
 import { listenAsInviter } from "@psi/rendezvous";
 import { waitForIncomingConnection } from "@psi/waitForConnection";
 
-import { deploymentProfile } from "@utils/clientConfig";
+import { isConsoleBuild } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
-
-import { selectExchangeDriver } from "./exchangeDriverSelection";
 
 import {
   WAITING_STAGE_ID,
@@ -35,6 +36,7 @@ import {
 } from "./exchangeRun";
 import { buildRunOutputs } from "./runOutputs";
 import { invitationUsable } from "./inviterModel";
+import { selectExchangeDriver } from "./exchangeDriverSelection";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
@@ -43,11 +45,14 @@ import type {
   ExchangeErrorCategory,
   GenerateOutput,
 } from "@psi/exchangeLifecycle";
+import type { ExchangeRun, ExchangeSeat } from "./exchangeRun";
+import type {
+  JobInputSource,
+  ServerJobExchangeTransport,
+} from "@psi/serverJobExchangeDriver";
 import type { ExchangeDriver } from "@psi/exchangeDriver";
-import type { ExchangeRun } from "./exchangeRun";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { RunOutputs } from "./runOutputs";
-import type { ServerJobExchangeTransport } from "@psi/serverJobExchangeDriver";
 import type { Transport } from "./inviterModel";
 
 /** A failed run, ready to render: the lifecycle's category (which decides the
@@ -64,7 +69,41 @@ export interface RunFailure {
 export function failureFor(
   category: ExchangeErrorCategory,
   error: unknown,
+  inputSource?: JobInputSource,
+  channel?: Transport,
+  seat: ExchangeSeat = "inviter",
 ): RunFailure {
+  // A console job create rejected the mounted file: a 400 the driver categorized
+  // `config`. The operator's terms are fine -- the file is the fault -- so the alert
+  // names the file cause. On the sftp channel that same empty-bodied 400 is as likely
+  // a vanished picked remote, so the copy names both causes. Each recovery names the
+  // control the seat's alert actually offers: the inviter's start-over reaches the
+  // file picker, while the acceptor's only recovery returns to its columns step
+  // (whose own Back link re-selects the file). The accept guard admits no sftp
+  // endpoint, so the sftp branch is the inviter's alone.
+  if (
+    category === "config" &&
+    inputSource?.kind === "workFile" &&
+    error instanceof JobApiRequestError &&
+    error.status === 400
+  ) {
+    const fileGone =
+      "The appliance could not use this file. It may have been removed " +
+      "since you selected it. ";
+    return {
+      category,
+      title: "The appliance could not start this exchange",
+      message:
+        channel === "sftp"
+          ? "The appliance could not use this file, or the selected SFTP " +
+            "destination is no longer available. Start over and check the file " +
+            "and destination."
+          : seat === "acceptor"
+            ? fileGone +
+              "Go back to your columns, then choose a different file."
+            : fileGone + "Start over and select it again.",
+    };
+  }
   if (category === "output") {
     // The exchange succeeded; only results-file generation failed. The user
     // must not be told to re-run a privacy-sensitive exchange, so unlike the
@@ -129,12 +168,21 @@ export function failureFor(
   // stays in the dev-gated console.error for diagnosis. A mid-run drop lands
   // here too, after agreed payload columns may already have flowed to the
   // authenticated partner, so the copy must not claim the data stayed local.
+  //
+  // A filedrop run never opens a connection: its two halves rendezvous through a
+  // synced shared folder, so a temporary-connection message misdirects. Name the
+  // shared-state cause instead, built only from operator-known facts (never the
+  // partner's path or raw fs error text). Both messages keep the retry affordance.
   return {
     category,
     title: "Exchange failed",
     message:
-      "The exchange could not be completed - usually a temporary " +
-      "connection problem rather than an issue with your data.",
+      channel === "filedrop"
+        ? "The partner's half never appeared in the shared folder. Confirm you " +
+          "both point at the same synced directory and that it is syncing, then " +
+          "try again."
+        : "The exchange could not be completed - usually a temporary " +
+          "connection problem rather than an issue with your data.",
   };
 }
 
@@ -156,7 +204,7 @@ export function useInviterExchange({
   invitation,
   inviterName,
   channel,
-  sourceFile,
+  inputSource,
   sftpRemotesConfigured,
   sftpRemote,
 }: {
@@ -166,10 +214,11 @@ export function useInviterExchange({
    * this run builds. A live run only ever starts for a channel the selector maps
    * to a live kind; the owner withholds the invitation for a save-file channel. */
   channel: Transport;
-  /** The original CSV file, the server-job driver's `inputCsv` source. The
-   * server-job path submits the file's raw text; the browser path re-parses the
-   * retained rows off the minted invitation and never reads this. */
-  sourceFile: File | undefined;
+  /** Where the appliance reads this party's input from on a server-job run
+   * ({@link JobInputSource}): the console picker's mounted-file reference. Undefined
+   * on the browser path, which re-parses the retained rows off the minted invitation
+   * and never reads this. */
+  inputSource: JobInputSource | undefined;
   /** Whether the appliance has provisioned SFTP remotes -- the selector's third
    * input, threaded from the owner's fetch so this hook and the owner route
    * identically. */
@@ -306,21 +355,20 @@ export function useInviterExchange({
     // The console appliance carries out the exchange: the driver POSTs the
     // sealed terms, this party's authored metadata/standardization (when
     // present, so the CLI honors the operator's data-prep edits rather than
-    // inferring), the shared secret, and the file's raw text to the job API and
-    // maps the server's event stream onto the same lifecycle events. It owns no
-    // peer connection or PSI library, so `acquire`/`generateOutput` go unused on
-    // this path. Reading the file's text is the only async step before the run,
-    // so it precedes the driver build.
-    const serverJobDriver = async (): Promise<ExchangeDriver<RunOutputs>> => {
-      if (sourceFile === undefined)
-        throw new Error("no source file for the server-job exchange");
+    // inferring), the shared secret, and the input source to the job API and maps
+    // the server's event stream onto the same lifecycle events. On the console the
+    // input source is a REFERENCE to the operator-mounted file (no content transits
+    // the browser). It owns no peer connection or PSI library, so
+    // `acquire`/`generateOutput` go unused on this path.
+    const serverJobDriver = (): ExchangeDriver<RunOutputs> => {
+      if (inputSource === undefined)
+        throw new Error("no input source for the server-job exchange");
       const transport = serverJobTransport();
-      const inputCsv = await sourceFile.text();
       return createServerJobExchangeDriver({
         transport,
         linkageTerms: minted.linkageTerms,
         sharedSecret: minted.sharedSecret,
-        inputCsv,
+        inputSource,
         ...(minted.metadata !== undefined ? { metadata: minted.metadata } : {}),
         ...(minted.standardization !== undefined
           ? { standardization: minted.standardization }
@@ -328,19 +376,16 @@ export function useInviterExchange({
       });
     };
 
-    const selection = selectExchangeDriver(
+    const runMode = selectExchangeDriver(
       channel,
-      deploymentProfile(),
+      isConsoleBuild() ? "console" : "hosted",
       sftpRemotesConfigured,
-    );
+    ).kind;
 
     void (async () => {
       let driver: ExchangeDriver<RunOutputs>;
       try {
-        driver =
-          selection.kind === "server-job"
-            ? await serverJobDriver()
-            : browserDriver();
+        driver = runMode === "server-job" ? serverJobDriver() : browserDriver();
       } catch (error) {
         if (controller.signal.aborted) return;
         whenDiagnostic(() => console.error(error));
@@ -370,7 +415,7 @@ export function useInviterExchange({
           // on) keeps the full object. The user-facing alert is separately
           // sanitized in failureFor.
           whenDiagnostic(() => console.error(error));
-          setFailure(failureFor(category, error));
+          setFailure(failureFor(category, error, inputSource, channel));
           setRun((current) => runWithFailure(current));
         },
       });

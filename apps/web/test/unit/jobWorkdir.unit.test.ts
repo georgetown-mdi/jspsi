@@ -53,25 +53,20 @@ describe("resolveWorkdir keeps the path under the data root", () => {
 });
 
 describe("createWorkdir and writeJobFile enforce least-privilege modes", () => {
-  test("creates the workdir and exchange subdir mode 0o700", async () => {
+  test("creates the workdir mode 0o700", async () => {
     const root = tempDataRoot("workdir");
     created.push(root);
     const id = generateJobId();
-    const { workdir, exchangeDirectory } = await createWorkdir(
-      root,
-      id,
-      "exchange",
-    );
+    const { workdir } = await createWorkdir(root, id);
     expect(fs.statSync(workdir).mode & 0o777).toBe(WORKDIR_MODE);
-    expect(fs.statSync(exchangeDirectory).mode & 0o777).toBe(WORKDIR_MODE);
-    expect(exchangeDirectory).toBe(path.join(workdir, "exchange"));
+    expect(workdir).toBe(path.join(root, id));
   });
 
   test("writes a file mode 0o600 with the given content", async () => {
     const root = tempDataRoot("files");
     created.push(root);
     const id = generateJobId();
-    const { workdir } = await createWorkdir(root, id, "exchange");
+    const { workdir } = await createWorkdir(root, id);
     const filePath = await writeJobFile(workdir, ".psilink.key", "secret");
     expect(fs.statSync(filePath).mode & 0o777).toBe(JOB_FILE_MODE);
     expect(fs.readFileSync(filePath, "utf8")).toBe("secret");
@@ -81,7 +76,7 @@ describe("createWorkdir and writeJobFile enforce least-privilege modes", () => {
     const root = tempDataRoot("remove");
     created.push(root);
     const id = generateJobId();
-    const { workdir } = await createWorkdir(root, id, "exchange");
+    const { workdir } = await createWorkdir(root, id);
     await removeWorkdir(workdir);
     expect(fs.existsSync(workdir)).toBe(false);
     await expect(removeWorkdir(workdir)).resolves.toBeUndefined();

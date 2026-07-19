@@ -119,8 +119,11 @@ const FD3_LINE_CAP = 1_048_576;
 
 /**
  * Spawn the CLI to run a filedrop `exchange`, wiring fd 3 for the event stream.
- * argv is assembled ONLY from fixed templates plus the server-generated paths in
- * `paths`; no client-supplied string reaches argv, and `shell` is never used.
+ * argv is assembled from fixed templates plus server-generated absolute paths, and
+ * `shell` is never used. The one path carrying a client value is `inputPath`: the
+ * mounted `inputFile.name`, admitted to a single safe segment and joined under the
+ * server-anchored input mount, so the argv element is always an absolute path passed
+ * positionally -- no client string is ever an interpretable token or flag.
  *
  * `spawn` (not `execFile`) is used deliberately: the caller passes an argv ARRAY
  * with `shell: false`, which gives identical allowlisted-argv, no-shell safety,
@@ -148,8 +151,9 @@ export function spawnExchangeJob(args: {
   const { binaryPath, configPath, keyPath, inputPath, outputPath } = args;
   const { recordPath, workdir, handlers, eventStream, extraEnv } = args;
 
-  // Fixed argv template. Every element is a server constant or a server-generated
-  // absolute path; nothing here derives from client text.
+  // Fixed argv template. Every element is a server constant or a server-anchored
+  // absolute path; the one path with a client-derived segment (inputPath's final
+  // name) is passed positionally, never as an interpretable token or flag.
   const argv: Array<string> = [
     binaryPath,
     "exchange",

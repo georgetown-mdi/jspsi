@@ -13,33 +13,44 @@ import {
 
 import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
 import { capturedInputHandle } from "@psi/managedInputHandle";
+import { columnSamplesFromRows } from "@psi/columnSamples";
 import { createManagedExchange } from "@psi/managedExchangeStore";
+import { fetchJobRendezvous } from "@psi/workInputClient";
 import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
-import { deploymentProfile } from "@utils/clientConfig";
+import { deploymentProfile, isConsoleBuild } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
+import {
+  benchCoverageProvider,
+  useNonEmptyRates,
+} from "@components/useNonEmptyRates";
+import { CONSOLE_COVERAGE_PENDING_LABEL } from "@components/FieldCoverage";
 import { InvitationTerms } from "@components/InvitationTerms";
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 import { setColumnTypeForMatching } from "@psi/metadataEditing";
-import { useNonEmptyRates } from "@components/useNonEmptyRates";
 
 import {
   ACCEPTOR_COLUMNS_LEDGER_FOOTER,
-  ACCEPTOR_DONE_LEDGER_FOOTER,
   ACCEPTOR_LEDGER_FOOTER,
+  acceptUnsupported,
+  acceptorAdvisoryLocator,
   acceptorConsentName,
   acceptorConsentReady,
+  acceptorDoneLedgerFooter,
   acceptorDoneLedgerRows,
   acceptorDoneLedgerTag,
+  acceptorHowItRunsLabel,
   acceptorLedgerRows,
   acceptorLedgerTag,
   acceptorLegalAgreementDisplay,
   acceptorRailFacts,
+  acceptorRunsAsServerJob,
   acceptorSpine,
   invitingPartyName,
 } from "./acceptorModel";
+import { APPLIANCE_FILE_ASSURANCE, FILE_ASSURANCE_LINE } from "./fileAssurance";
 import {
   acceptorCleaningAttention,
   acceptorColumnsEditorState,
@@ -56,13 +67,15 @@ import { AcceptorCleaningStep } from "./AcceptorCleaningStep";
 import { AcceptorColumnsStep } from "./AcceptorColumnsStep";
 import { AcceptorExchangeSection } from "./AcceptorExchangeSection";
 import { BenchShell } from "./BenchShell";
-import { FILE_ASSURANCE_LINE } from "./fileAssurance";
 import { Ledger } from "./Ledger";
 import { ManageExchangeOffer } from "./ManageExchangeOffer";
 import { Problems } from "./Problems";
+import { ServerFilePicker } from "./ServerFilePicker";
 import { TopBar } from "./TopBar";
 import { acceptorTimelineSteps } from "./exchangeRun";
+import { consoleAcquiredCsv } from "./consoleAcquiredCsv";
 import { restorablePosition } from "./stepRestore";
+import { seedRows } from "./inviterModel";
 import styles from "./bench.module.css";
 import { useAcceptorExchange } from "./useAcceptorExchange";
 import { useStepHistory } from "./useStepHistory";
@@ -83,19 +96,33 @@ import type {
   Standardization,
   StandardizationStep,
 } from "@psilink/core";
+import type { AcceptorLaunchSource } from "./useAcceptorExchange";
 import type { AcceptorStep } from "./acceptorModel";
 import type { AlertContent } from "@components/csvIntake";
+import type { BenchCoverageInput } from "@components/useNonEmptyRates";
+import type { ColumnSamples } from "@psi/columnSamples";
 import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 import type { FileRejection } from "@mantine/dropzone";
 import type { IntakeAlert } from "./YourFileSection";
 import type { ManageOfferChoices } from "./manageOfferModel";
 import type { ManageOfferStatus } from "./ManageExchangeOffer";
+import type { ProfiledJobInput } from "@psi/workInputClient";
 import type { RailStep } from "./inviterModel";
 
 /** Stable empty inputs for {@link useNonEmptyRates} before a file is acquired, so the
  * hook's controller is not rebuilt every render on a fresh `[]` identity. */
 const EMPTY_ROWS: ReadonlyArray<CSVRow> = [];
 const EMPTY_STANDARDIZATION: Standardization = [];
+
+/** Stable "no file yet" coverage input and preview samples, so the coverage hook's
+ * provider is not rebuilt every render on a fresh identity before a file is acquired.
+ * The empty-rows coverage input drives the hosted worker provider over no rows, never
+ * a console fetch (mirrors {@link InviterBench}). */
+const EMPTY_COVERAGE_INPUT: BenchCoverageInput = {
+  kind: "rows",
+  rows: EMPTY_ROWS,
+};
+const EMPTY_COLUMN_SAMPLES: ColumnSamples = new Map();
 
 /** The columns-step sub-section: the main confirm surface, or the Cleaning tab the
  * Customize menu navigates to (mirroring how InviterBench mounts its
@@ -152,8 +179,11 @@ function fileSizeLabel(sizeBytes: number): string {
  * The acceptor's pre-columns working surface. It decodes the invitation from the
  * URL fragment (failing closed before anything renders), reviews the partner's
  * terms, captures explicit consent and a name, and takes the acceptor's file --
- * then parses it behind the consent gate and hands off to the (stubbed) confirm-
- * columns step.
+ * then commits it behind the consent gate (parsing it in the browser on the hosted
+ * build, or referencing the appliance-profiled mounted file on the console) and
+ * hands off to the confirm-columns step. On the console an invitation whose endpoint
+ * the appliance cannot run -- no accept channel is appliance-runnable today -- is
+ * stopped at the review step with an honest state before consent or intake.
  *
  * The consent semantics are re-surfaced from the hardened legacy flow, never
  * re-derived: {@link InvitationTerms} renders the full, never-condensed terms at
@@ -162,6 +192,7 @@ function fileSizeLabel(sizeBytes: number): string {
  * re-check inside the handler, exactly as the legacy accept flow did.
  */
 export function AcceptorBench() {
+  const consoleBuild = isConsoleBuild();
   const [decode, setDecode] = useState<DecodeState>({ status: "pending" });
   const [step, setStep] = useState<AcceptorStep>("review");
   // The columns-step sub-section: the confirm surface, or the Cleaning tab the
@@ -194,7 +225,18 @@ export function AcceptorBench() {
   // managed deposit can persist a reusable pointer to the input without a second
   // picker dialog. Absent for a click-selected file and a browser without the API.
   const [sourceHandle, setSourceHandle] = useState<FileSystemFileHandle>();
+  // The console profile behind the acquired shape: the appliance reads the file, so
+  // the browser holds only the profile (name, size, mtime, columns, samples, date
+  // format), committed via the picker's "Use this file" before consent. It backs the
+  // columns seed, the run's mounted-file reference, the coverage sweep, and the preview
+  // samples. Undefined on the hosted build, which reads the file in the browser behind
+  // the consent gate instead.
+  const [consoleSource, setConsoleSource] = useState<ProfiledJobInput>();
   const [columnsState, setColumnsState] = useState<AcceptorColumnsState>();
+  // Whether the appliance has a rendezvous mount, fetched once on a console build.
+  // Undefined before it resolves; a console filedrop accept is runnable only when
+  // `configured` is true (the exchange runs against the mounted directory).
+  const [rendezvousConfigured, setRendezvousConfigured] = useState<boolean>();
   const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
   // The launched exchange (the assembled edits + optional advisory); rendering the
   // minimal run stub the next package replaces.
@@ -224,8 +266,16 @@ export function AcceptorBench() {
         const invitation = await prepareAcceptedInvitation(encoded, {
           profile: deploymentProfile(),
         });
-        if (!controller.signal.aborted)
+        // Learn the rendezvous state before revealing the terms so the review step
+        // decides a console filedrop accept's runnability with the mount known,
+        // rather than flashing "unavailable" while a fetch settles.
+        const rvzConfigured = consoleBuild
+          ? (await fetchJobRendezvous()).configured
+          : false;
+        if (!controller.signal.aborted) {
+          setRendezvousConfigured(rvzConfigured);
           setDecode({ status: "ready", invitation });
+        }
       } catch (error) {
         if (!controller.signal.aborted)
           setDecode({ status: "error", message: describeDecodeError(error) });
@@ -234,17 +284,36 @@ export function AcceptorBench() {
     return () => controller.abort();
   }, []);
 
+  // A console accept whose endpoint the appliance cannot run, decided by the endpoint
+  // SHAPE ({@link acceptUnsupported}): a WebRTC accept is out of scope here, a
+  // split-directory file-drop needs the command-line tool, and a single-directory
+  // file-drop needs a rendezvous mount. Surfaced at the review step BEFORE consent or
+  // intake, so the operator meets an honest block naming where it CAN run rather than a
+  // doomed run. Off the console every admitted endpoint runs in the browser, so this is
+  // undefined there.
+  const unsupported =
+    consoleBuild && decode.status === "ready"
+      ? acceptUnsupported(
+          decode.invitation.endpoint,
+          rendezvousConfigured === true,
+        )
+      : undefined;
+
   // On the review step, move focus to the terms heading once the decode resolves
-  // to ready, or to the error alert once it resolves to error, so a screen-reader
-  // user is taken to the revealed terms or the failure rather than left on the
+  // to ready, to the unsupported notice when the appliance cannot run this accept,
+  // or to the error alert once it resolves to error, so a screen-reader user is
+  // taken to the revealed terms, the block, or the failure rather than left on the
   // spinner. The consent and columns steps own their own heading focus below.
   const termsHeadingRef = useRef<HTMLHeadingElement>(null);
+  const unsupportedRef = useRef<HTMLDivElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
+  const unsupportedShown = unsupported !== undefined;
   useEffect(() => {
     if (step !== "review") return;
-    if (decode.status === "ready") termsHeadingRef.current?.focus();
+    if (decode.status === "ready")
+      (unsupportedShown ? unsupportedRef : termsHeadingRef).current?.focus();
     else if (decode.status === "error") errorRef.current?.focus();
-  }, [decode.status, step]);
+  }, [decode.status, step, unsupportedShown]);
 
   // Moving to the consent step replaces the work column, so focus is sent to the
   // incoming h1 (it carries tabIndex -1) or a screen-reader user is left on a control
@@ -312,14 +381,6 @@ export function AcceptorBench() {
 
   const { pushStep } = useStepHistory("review", restorePosition);
 
-  // The unload guard arms once the acceptor's file is chosen and disarms once
-  // the exchange is launched (the run is dialing); leaving a launched exchange
-  // costs nothing the acceptor has not already committed.
-  useUnloadGuard({
-    hasFile: file !== undefined,
-    finalized: launched !== undefined,
-  });
-
   // Move to a new step and its sub-section, pushing a history entry so Back
   // returns here. Every in-bench step transition routes through this.
   function goToStep(
@@ -338,6 +399,15 @@ export function AcceptorBench() {
     setFieldErrors((current) => ({ ...current, file: false }));
     setFile(chosen);
   }
+
+  // The file-assurance line for the acceptor's own intake: with the console now
+  // reading the file on the appliance, the acceptor opts into the mounted-directory
+  // claim explicitly (as the inviter's YourFileSection does), while the hosted build
+  // keeps the browser-only line. Not FILE_ASSURANCE_LINE alone -- that resolves to no
+  // claim on the console, which would leave this truthful surface silent.
+  const acceptAssuranceLine = consoleBuild
+    ? APPLIANCE_FILE_ASSURANCE
+    : FILE_ASSURANCE_LINE;
 
   // The dropzone enforces the size cap and type list itself but only flashes a
   // reject icon; name why. Codes only in the log -- a rejected file's NAME can
@@ -360,22 +430,81 @@ export function AcceptorBench() {
     );
   }
 
+  // Commit a profiled mounted file (the console picker's "Use this file") to the
+  // consent step. A blank header cell is refused early with the shared unnameable
+  // alert -- core's inferMetadata would otherwise throw when the columns-step editor
+  // seeds and unmount the bench. The editor is seeded here from the profile's column
+  // NAMES (which the operator already saw in the picker's confirm panel, not from
+  // file content), reconciling a re-profile of the committed file the way the inviter
+  // does: unchanged columns keep the operator's remaps and cleaning edits, changed
+  // columns reseed. `acquired` stays unset until the consent gate passes, so the
+  // columns step is still gated on "Accept and continue".
+  function commitConsoleAcceptFile(profile: ProfiledJobInput) {
+    const emptyPositions = emptyColumnPositions(profile.columns);
+    if (emptyPositions.length > 0) {
+      setParseAlert(unnameableColumnsAlert(emptyPositions));
+      return;
+    }
+    setParseAlert(undefined);
+    setFieldErrors((current) => ({ ...current, file: false }));
+    const columnsUnchanged =
+      consoleSource !== undefined &&
+      consoleSource.name === profile.name &&
+      columnsState !== undefined &&
+      consoleSource.columns.length === profile.columns.length &&
+      consoleSource.columns.every(
+        (column, index) => column === profile.columns[index],
+      );
+    setConsoleSource(profile);
+    if (!columnsUnchanged)
+      setColumnsState(acceptorInitialColumnsState(profile.columns));
+  }
+
   // "Accept and continue": re-check the consent gate in the handler (not the
   // disabled state alone), surface the mockup's inline errors when a submit slips
-  // past it, then parse the file behind the gate with the inviter bench's intake
-  // checks. Only a clean parse advances to the confirm-columns step.
+  // past it, then commit the file behind the gate. On the hosted build the file is
+  // parsed here (the browser holds the rows); on the console the appliance already
+  // profiled it, so the acquired shape is built from the committed profile (no rows,
+  // no parse). Only a clean commit advances to the confirm-columns step.
   async function acceptAndContinue() {
     if (decode.status !== "ready") return;
     const name = acceptorConsentName({ consented, name: acceptorName });
-    const nextErrors: FieldErrors = {};
-    if (name === undefined && acceptorName.trim() === "")
-      nextErrors.name = "Your name is required";
-    if (file === undefined) nextErrors.file = true;
-    if (name === undefined || file === undefined) {
+    const fileChosen = consoleBuild
+      ? consoleSource !== undefined
+      : file !== undefined;
+    if (name === undefined || !fileChosen) {
+      const nextErrors: FieldErrors = {};
+      if (name === undefined && acceptorName.trim() === "")
+        nextErrors.name = "Your name is required";
+      if (!fileChosen) nextErrors.file = true;
       setFieldErrors(nextErrors);
       return;
     }
     setFieldErrors({});
+
+    if (consoleBuild) {
+      // The console reads the file on the appliance: the profile was committed and
+      // the columns seeded via the picker, so there is no browser parse behind the
+      // gate. Build the acquired shape from the profile (rows withheld) and advance,
+      // committing the gate-checked name so the run records it even if the input is
+      // later edited.
+      if (consoleSource === undefined) return;
+      setCommittedName(name);
+      setAcquired(
+        consoleAcquiredCsv({
+          fileName: consoleSource.name,
+          sizeBytes: consoleSource.sizeBytes,
+          columns: consoleSource.columns,
+          rowCount: consoleSource.rowCount,
+          dateInputFormat: consoleSource.dateInputFormat,
+        }),
+      );
+      goToStep("columns");
+      return;
+    }
+
+    // Narrows `file` for the hosted parse below (the `fileChosen` boolean does not).
+    if (file === undefined) return;
     const id = ++parseId.current;
     parseAbort.current?.abort();
     const controller = new AbortController();
@@ -405,6 +534,7 @@ export function AcceptorBench() {
         sizeBytes: file.size,
         columns,
         rawRows: result.data,
+        rowCount: result.data.length,
       });
       setColumnsState(acceptorInitialColumnsState(columns));
       goToStep("columns");
@@ -423,6 +553,26 @@ export function AcceptorBench() {
 
   const ready = decode.status === "ready";
   const token = ready ? decode.invitation.token : undefined;
+  // Whether this accept runs on the appliance as a server job (a console file-drop)
+  // rather than in the browser: the one signal behind the "How it runs" ledger row
+  // and the settled footer's "never left this browser" claim.
+  const acceptServerJob =
+    ready && acceptorRunsAsServerJob(decode.invitation.endpoint, consoleBuild);
+  // The ledger's "How it runs" phrasing, from the accepted endpoint's run mode: a
+  // console single-directory file-drop accept runs on the appliance (the shared
+  // directory), every other admitted accept in this browser.
+  const howItRuns = ready
+    ? acceptorHowItRunsLabel(decode.invitation.endpoint, consoleBuild)
+    : "";
+  // The partner's advisory shared-directory locator, shown read-only at the consent
+  // step for a runnable console file-drop accept so the operator confirms it names the
+  // same synced folder mounted on this appliance. Partner-supplied and sanitized
+  // through summarizeInvitation; never flows to config. Present only once the accept
+  // is runnable (past the unsupported gate), so a doomed accept does not surface it.
+  const advisoryLocator =
+    ready && acceptServerJob && unsupported === undefined
+      ? acceptorAdvisoryLocator(decode.invitation.token)
+      : undefined;
   const linkageTerms = token?.linkageTerms;
   // The sanitized legal-agreement values the consent step displays beside the
   // attestation; undefined when the invitation attaches none (no fieldset then).
@@ -437,7 +587,12 @@ export function AcceptorBench() {
     columnsState !== undefined &&
     acquired !== undefined &&
     linkageTerms !== undefined
-      ? acceptorColumnsEditorState(columnsState, linkageTerms, acquired.rawRows)
+      ? acceptorColumnsEditorState(
+          columnsState,
+          linkageTerms,
+          seedRows(acquired),
+          acquired.dateInputFormat,
+        )
       : undefined;
   const verdict =
     editorState !== undefined &&
@@ -456,31 +611,84 @@ export function AcceptorBench() {
     if (
       launched === undefined ||
       decode.status !== "ready" ||
-      acquired === undefined ||
-      acceptedFile === undefined
+      acquired === undefined
     )
       return undefined;
+    // The run's input source: the console's mounted-file reference (no content
+    // transits the browser), or the hosted browser File the server-job inline path
+    // reads. The WebRTC path uses the retained rows and never reads it.
+    const inputSource: AcceptorLaunchSource | undefined =
+      consoleSource !== undefined
+        ? { kind: "workFile", name: consoleSource.name }
+        : acceptedFile !== undefined
+          ? { kind: "inline", file: acceptedFile }
+          : undefined;
+    if (inputSource === undefined) return undefined;
     return {
       invitation: decode.invitation,
       acceptorName: committedName,
-      rawRows: acquired.rawRows,
+      rawRows: seedRows(acquired),
       columns: acquired.columns,
       edits: launched.edits,
-      sourceFile: acceptedFile,
+      inputSource,
     };
     // `launched` is the launch key: it is set once, from the same render that
-    // fixes the acquired CSV, its source file, the committed name, and the ready
+    // fixes the acquired CSV, its input source, the committed name, and the ready
     // decode, so keying the memo on it alone cannot go stale.
   }, [launched]);
 
   const { run, outputs, failure, tryAgain } = useAcceptorExchange({ launch });
 
+  // A console server-job accept is still executing on the appliance while it is
+  // launched and the run has not settled; leaving the page abandons it (an
+  // in-app teardown cancels the run, a hard close strands it).
+  const consoleExchangeRunning =
+    acceptServerJob &&
+    launched !== undefined &&
+    outputs === undefined &&
+    failure === undefined;
+
+  // The unload guard arms once the acceptor's file is chosen -- a browser drop on
+  // the hosted build, or a committed mounted-file profile on the console -- and
+  // disarms once the exchange is launched (a browser run is dialing), unless a
+  // console server-job exchange is still running on the appliance, which keeps it
+  // armed until the run settles.
+  useUnloadGuard({
+    hasFile: file !== undefined || consoleSource !== undefined,
+    finalized: launched !== undefined,
+    consoleExchangeRunning,
+  });
+
+  // The coverage input, unified across builds: the browser's parsed rows on the
+  // hosted build, the mounted-file reference on the console (whose sweep is a fetch
+  // to the appliance). Memoized so a standardization edit reuses the provider and
+  // only a new file rebuilds it. The console reads no rows -- `acquired.rawRows` is a
+  // throwing getter there -- so this never touches it on that path.
+  const coverageInput = useMemo<BenchCoverageInput>(() => {
+    if (consoleSource !== undefined)
+      return { kind: "workFile", reference: { name: consoleSource.name } };
+    if (!consoleBuild && acquired !== undefined)
+      return { kind: "rows", rows: acquired.rawRows };
+    return EMPTY_COVERAGE_INPUT;
+  }, [acquired, consoleSource, consoleBuild]);
+
+  // The per-column preview samples the Cleaning tab reads: computed from the browser
+  // rows on the hosted build, read from the server-side profile on the console. Kept
+  // off `acquired.rawRows` on the console for the same reason as the coverage input.
+  const columnSamples = useMemo<ColumnSamples>(() => {
+    if (consoleSource !== undefined) return consoleSource.columnSamples;
+    if (!consoleBuild && acquired !== undefined)
+      return columnSamplesFromRows(acquired.rawRows, acquired.columns);
+    return EMPTY_COLUMN_SAMPLES;
+  }, [acquired, consoleSource, consoleBuild]);
+
   // Full-CSV coverage for the cleaning tab and the Customize menu's
   // Cleaning-attention value, one sweep shared by both. The hook must run
-  // every render, so it takes empty inputs until a file is acquired.
+  // every render, so it takes stable empty inputs until a file is acquired.
   const { rates, pending: ratesPending } = useNonEmptyRates(
-    acquired?.rawRows ?? EMPTY_ROWS,
+    coverageInput,
     editorState?.standardization ?? EMPTY_STANDARDIZATION,
+    benchCoverageProvider,
   );
   const cleaningAttention =
     editorState !== undefined && verdict !== undefined
@@ -557,12 +765,13 @@ export function AcceptorBench() {
                 resultWithheld: outputs.resultWithheld,
               },
               launched.edits.metadata,
+              howItRuns,
             )
           : // From the confirm-columns step onward the live metadata governs what
             // leaves this browser, so the send row names exactly that; before a
             // file exists (`editorState` undefined) the row forward-references the
             // confirm-columns step.
-            acceptorLedgerRows(token, editorState?.metadata)
+            acceptorLedgerRows(token, howItRuns, editorState?.metadata)
         ).map((row) => ({
           label: row.label,
           muted: row.muted,
@@ -582,7 +791,7 @@ export function AcceptorBench() {
         }))}
         footer={
           settled
-            ? ACCEPTOR_DONE_LEDGER_FOOTER
+            ? acceptorDoneLedgerFooter(acceptServerJob)
             : step === "columns"
               ? ACCEPTOR_COLUMNS_LEDGER_FOOTER
               : ACCEPTOR_LEDGER_FOOTER
@@ -762,11 +971,27 @@ export function AcceptorBench() {
               headingOrder={1}
               headingRef={termsHeadingRef}
             />
-            <div className={styles.workFoot}>
-              <Button onClick={() => goToStep("consent")}>
-                Continue: consent &amp; your file
-              </Button>
-            </div>
+            {/* The appliance cannot run this endpoint's shape: stop here, before
+                consent or intake, with an honest state naming where the operator CAN
+                run it rather than a doomed run. */}
+            {unsupported !== undefined ? (
+              <Alert
+                color="orange"
+                icon={<IconAlertCircle aria-hidden />}
+                title={unsupported.title}
+                ref={unsupportedRef}
+                tabIndex={-1}
+                mt="md"
+              >
+                {unsupported.message}
+              </Alert>
+            ) : (
+              <div className={styles.workFoot}>
+                <Button onClick={() => goToStep("consent")}>
+                  Continue: consent &amp; your file
+                </Button>
+              </div>
+            )}
           </>
         )}
         {decode.status === "ready" && step === "consent" && (
@@ -775,7 +1000,9 @@ export function AcceptorBench() {
             <h1 tabIndex={-1}>Consent &amp; your file</h1>
             <p className={`${styles.small} ${styles.sub}`}>
               This invitation should have reached you over a trusted channel.
-              Your browser connects directly to your partner.
+              {consoleBuild
+                ? " This appliance runs the exchange from its mounted work directory."
+                : " Your browser connects directly to your partner."}
             </p>
             <Checkbox
               mt="md"
@@ -801,64 +1028,95 @@ export function AcceptorBench() {
                   }));
               }}
             />
-            <Dropzone
-              className={styles.dropzone}
-              openRef={openFilePicker}
-              onDrop={(files) => {
-                const chosen = files.at(0);
-                if (chosen !== undefined) selectFile(chosen);
-              }}
-              onReject={handleReject}
-              accept={["text/plain", "text/csv", "application/vnd.ms-excel"]}
-              maxSize={MAX_CSV_FILE_BYTES}
-              multiple={false}
-              loading={parsing}
-              aria-label="Your data file"
-              mt="md"
-            >
-              <p>
-                <strong>Drag files here or click to select</strong>
-              </p>
-              <p className={styles.dropzoneMax}>(Max file size: {maxMb} MB)</p>
-            </Dropzone>
-            {rejectionMessage !== undefined && (
-              <Text role="alert" c="red" size="sm" mt="xs">
-                {rejectionMessage}
-              </Text>
-            )}
-            {file !== undefined && (
-              <div className={styles.fileCard}>
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  aria-hidden="true"
+            {consoleBuild ? (
+              <ServerFilePicker
+                committed={
+                  consoleSource !== undefined
+                    ? { name: consoleSource.name }
+                    : undefined
+                }
+                onUse={commitConsoleAcceptFile}
+              />
+            ) : (
+              <>
+                <Dropzone
+                  className={styles.dropzone}
+                  openRef={openFilePicker}
+                  onDrop={(files) => {
+                    const chosen = files.at(0);
+                    if (chosen !== undefined) selectFile(chosen);
+                  }}
+                  onReject={handleReject}
+                  accept={[
+                    "text/plain",
+                    "text/csv",
+                    "application/vnd.ms-excel",
+                  ]}
+                  maxSize={MAX_CSV_FILE_BYTES}
+                  multiple={false}
+                  loading={parsing}
+                  aria-label="Your data file"
+                  mt="md"
                 >
-                  <path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z" />
-                  <path d="M13 3v6h6" />
-                </svg>
-                <div>
-                  <div className={`${styles.fileName} ${styles.mono}`}>
-                    {file.name}
+                  <p>
+                    <strong>Drag files here or click to select</strong>
+                  </p>
+                  <p className={styles.dropzoneMax}>
+                    (Max file size: {maxMb} MB)
+                  </p>
+                </Dropzone>
+                {rejectionMessage !== undefined && (
+                  <Text role="alert" c="red" size="sm" mt="xs">
+                    {rejectionMessage}
+                  </Text>
+                )}
+                {file !== undefined && (
+                  <div className={styles.fileCard}>
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      aria-hidden="true"
+                    >
+                      <path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z" />
+                      <path d="M13 3v6h6" />
+                    </svg>
+                    <div>
+                      <div className={`${styles.fileName} ${styles.mono}`}>
+                        {file.name}
+                      </div>
+                      <div className={`${styles.fileMeta} ${styles.mono}`}>
+                        {fileSizeLabel(file.size)}
+                      </div>
+                    </div>
+                    <Button
+                      variant="subtle"
+                      size="compact-sm"
+                      ml="auto"
+                      onClick={() => openFilePicker.current?.()}
+                    >
+                      Choose a different file
+                    </Button>
                   </div>
-                  <div className={`${styles.fileMeta} ${styles.mono}`}>
-                    {fileSizeLabel(file.size)}
-                  </div>
-                </div>
-                <Button
-                  variant="subtle"
-                  size="compact-sm"
-                  ml="auto"
-                  onClick={() => openFilePicker.current?.()}
-                >
-                  Choose a different file
-                </Button>
-              </div>
+                )}
+              </>
             )}
-            {FILE_ASSURANCE_LINE !== undefined && (
+            {advisoryLocator !== undefined && (
+              <Alert
+                color="blue"
+                icon={<IconAlertCircle aria-hidden />}
+                title="Confirm the shared folder"
+                mt="md"
+              >
+                Your partner named this shared folder:{" "}
+                <span className={styles.mono}>{advisoryLocator}</span>. Confirm
+                it is the synced folder mounted on this appliance.
+              </Alert>
+            )}
+            {acceptAssuranceLine !== undefined && (
               <p className={`${styles.small} ${styles.sub}`}>
-                {FILE_ASSURANCE_LINE}
+                {acceptAssuranceLine}
               </p>
             )}
             {fieldErrors.file === true && (
@@ -868,8 +1126,9 @@ export function AcceptorBench() {
                 icon={<IconAlertCircle aria-hidden />}
                 mt="md"
               >
-                A file is needed before the exchange can be set up. Drag one
-                into the dropzone or click it to select.
+                {consoleBuild
+                  ? "A file is needed before the exchange can be set up. Choose one from the work directory above."
+                  : "A file is needed before the exchange can be set up. Drag one into the dropzone or click it to select."}
               </Alert>
             )}
             {parseAlert !== undefined && (
@@ -958,11 +1217,14 @@ export function AcceptorBench() {
               declaredFields={linkageTerms.linkageFields}
               metadata={editorState.metadata}
               standardization={editorState.standardization}
-              rawRows={acquired.rawRows}
+              columnSamples={columnSamples}
               rates={rates}
               ratesPending={ratesPending}
               deadKeyCount={verdict.deadKeyCount}
               cleaningResetKey={cleaningResetKey}
+              {...(consoleSource !== undefined
+                ? { coveragePendingLabel: CONSOLE_COVERAGE_PENDING_LABEL }
+                : {})}
               onFieldSteps={setFieldSteps}
               onFieldInput={setFieldInput}
               onReset={resetColumns}
@@ -977,6 +1239,7 @@ export function AcceptorBench() {
               outputs={outputs}
               failure={failure}
               warning={launched?.warning}
+              serverJob={acceptServerJob}
               onTryAgain={tryAgain}
               onFixColumns={backToColumns}
             />

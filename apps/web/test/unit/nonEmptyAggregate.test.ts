@@ -1,9 +1,12 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
+
+import { StandardizedField } from "@psilink/core";
 
 import {
   NON_EMPTY_WORKER_CHAR_THRESHOLD,
   NON_EMPTY_WORKER_ROW_THRESHOLD,
   computeFieldCoverage,
+  createFieldCoverageAccumulator,
   isSilentEmpty,
   shouldComputeOffThread,
 } from "../../src/psi/nonEmptyAggregate.js";
@@ -17,6 +20,10 @@ import type {
 } from "../../src/psi/nonEmptyAggregateController.js";
 
 import type { CSVRow, Standardization } from "@psilink/core";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("computeFieldCoverage: the silent-empty defense", () => {
   test("a transform that collapses every row to null surfaces a 0% coverage alarm", () => {
@@ -320,5 +327,84 @@ describe("NonEmptyRateController: off-main-thread dispatch above the threshold",
     await Promise.resolve();
     expect(settled).not.toHaveBeenCalled();
     expect(fake.received.filter((m) => m.kind === "compute")).toHaveLength(0);
+  });
+});
+
+describe("createFieldCoverageAccumulator: streaming equals batch", () => {
+  const standardization: Standardization = [
+    {
+      output: "last_name",
+      input: "last_name",
+      steps: [{ function: "to_upper_case" }],
+    },
+    {
+      output: "birth_date",
+      input: "dob",
+      steps: [
+        { function: "parse_date", params: { inputFormat: "YYYY-MM-DD" } },
+      ],
+    },
+    // A field left mid-edit stays `unavailable` on both drivers.
+    {
+      output: "pad",
+      input: "last_name",
+      steps: [{ function: "pad_left", params: {} }],
+    },
+  ];
+
+  test("feeding rows one at a time equals computeFieldCoverage over the whole set", () => {
+    const rows: Array<CSVRow> = [
+      { last_name: "Public", dob: "1990-01-02" },
+      { last_name: "", dob: "not-a-date" },
+      { last_name: "Adams", dob: "2000-05-14" },
+      { dob: "1972-03-08" },
+    ];
+    const accumulator = createFieldCoverageAccumulator(standardization);
+    for (const row of rows) accumulator.add(row);
+    expect(accumulator.result()).toEqual(
+      computeFieldCoverage(rows, standardization),
+    );
+  });
+
+  test("an empty stream reports zero totals, not a divide-by-zero", () => {
+    const accumulator = createFieldCoverageAccumulator(standardization);
+    expect(accumulator.result()).toEqual(
+      computeFieldCoverage([], standardization),
+    );
+  });
+
+  test("a field whose pipeline throws on a row degrades to unavailable, not a sweep abort", () => {
+    const rows: Array<CSVRow> = [
+      { last_name: "Public" },
+      { last_name: "boom" },
+      { last_name: "Adams" },
+    ];
+    const realEvaluateRow = StandardizedField.prototype.evaluateRow;
+    // A compiled pipeline can still throw on a specific row's value (a step that
+    // slips past the validity gate). That row must degrade the field to unavailable
+    // and stop its evaluation, never abort the whole sweep -- server-side one bad row
+    // would otherwise 400 the entire coverage request.
+    vi.spyOn(StandardizedField.prototype, "evaluateRow").mockImplementation(
+      function (this: StandardizedField, row: CSVRow): Array<string> {
+        if (row.last_name === "boom")
+          throw new Error("row-time pipeline throw");
+        return realEvaluateRow.call(this, row);
+      },
+    );
+    const accumulator = createFieldCoverageAccumulator([
+      {
+        output: "last_name",
+        input: "last_name",
+        steps: [{ function: "to_upper_case" }],
+      },
+    ]);
+    expect(() => {
+      for (const row of rows) accumulator.add(row);
+    }).not.toThrow();
+    const [coverage] = accumulator.result();
+    expect(coverage.total).toBe(3);
+    expect(coverage.produced).toBe(0);
+    expect(coverage.unavailable).toBe(true);
+    expect(isSilentEmpty(coverage)).toBe(false);
   });
 });

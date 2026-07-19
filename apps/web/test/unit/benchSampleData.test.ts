@@ -39,6 +39,7 @@ async function acquire(
     sizeBytes: csvText.length,
     rawRows: result.data,
     columns: result.meta.fields ?? [],
+    rowCount: result.data.length,
   };
 }
 

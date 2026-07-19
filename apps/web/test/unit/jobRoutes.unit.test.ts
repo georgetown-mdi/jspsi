@@ -23,13 +23,23 @@ import {
   STUB_CLI_PATH,
   tempDataRoot,
   testSftpRemotesTable,
+  validInputFileIntent,
   validIntent,
   validSftpIntent,
 } from "../utils/jobFixtures";
 
+import type { JobInputFileReference } from "@jobs/intent";
 import type { JobManager as JobManagerType } from "@jobs/jobManager";
 
 const roots: Array<string> = [];
+
+/** A created rendezvous directory a filedrop job needs, registered for cleanup. */
+function rvzRoot(): string {
+  const dir = tempDataRoot("routes-rvz");
+  roots.push(dir);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -42,6 +52,9 @@ afterEach(() => {
   (globalThis as { jobManagerInstance?: unknown }).jobManagerInstance =
     undefined;
   (globalThis as { jobSftpRemotesTable?: unknown }).jobSftpRemotesTable =
+    undefined;
+  (globalThis as { jobInputDirConfig?: unknown }).jobInputDirConfig = undefined;
+  (globalThis as { jobRendezvousDirConfig?: unknown }).jobRendezvousDirConfig =
     undefined;
 });
 
@@ -60,9 +73,11 @@ function handlersOf(route: {
 }
 
 function enableJobApi(options: { token?: string } = {}): string {
+  const rvz = rvzRoot();
   const root = tempDataRoot("routes");
   roots.push(root);
   vi.stubEnv("JOB_DATA_ROOT", root);
+  vi.stubEnv("JOB_RENDEZVOUS_DIR", rvz);
   vi.stubEnv("JOB_CLI_BINARY", STUB_CLI_PATH);
   vi.stubEnv("STUB_FD3_EVENTS", JSON.stringify([]));
   vi.stubEnv("STUB_EXIT_CODE", "0");
@@ -91,12 +106,16 @@ function recordJson(createdAt: string): string {
  * succeeded. `stubEnv` scripts the stub: what output/record files it writes.
  */
 async function createSucceededJob(stubEnv: NodeJS.ProcessEnv): Promise<string> {
+  // Create the rendezvous dir first so the data root stays the last-pushed cleanup
+  // entry that restartAfterSucceededJob resolves.
+  const rendezvousDir = rvzRoot();
   const root = tempDataRoot("routes-succeed");
   roots.push(root);
   vi.stubEnv("JOB_DATA_ROOT", root);
   const manager = new JobManager({
     dataRoot: root,
     binaryPath: STUB_CLI_PATH,
+    jobRendezvousDir: rendezvousDir,
     childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), ...stubEnv },
   });
   (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
@@ -232,6 +251,7 @@ describe("GET /api/jobs/:id/events guards an already-aborted request", () => {
     const manager = new JobManager({
       dataRoot: root,
       binaryPath: STUB_CLI_PATH,
+      jobRendezvousDir: rvzRoot(),
       // A delayed stub keeps the job non-terminal, so the route reaches the
       // live-subscribe path rather than closing on an already-terminal replay.
       childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), STUB_DELAY_MS: "5000" },
@@ -502,12 +522,72 @@ function enableJobApiWithRemotes(stubEnv: NodeJS.ProcessEnv = {}): JobManager {
     dataRoot: root,
     binaryPath: STUB_CLI_PATH,
     sftpRemotes: testSftpRemotesTable(),
+    jobRendezvousDir: rvzRoot(),
     childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), ...stubEnv },
   });
   (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
     manager;
   return manager;
 }
+
+/**
+ * Enable the API and seed the global manager with a resolved work-input directory
+ * (the production wiring passes it from {@link useJobInputDir}), pointed at the stub
+ * CLI. Returns the input directory and a reference to the one CSV in it.
+ */
+function enableJobApiWithInputDir(stubEnv: NodeJS.ProcessEnv = {}): {
+  dataRoot: string;
+  ref: JobInputFileReference;
+  content: string;
+} {
+  const dataRoot = tempDataRoot("routes-inputs-data");
+  roots.push(dataRoot);
+  const inputDir = tempDataRoot("routes-inputs-mount");
+  roots.push(inputDir);
+  fs.mkdirSync(inputDir, { recursive: true });
+  const content = "ssn,last_name,date_of_birth\n111223333,smith,1990-01-01\n";
+  const name = "mounted.csv";
+  fs.writeFileSync(`${inputDir}/${name}`, content);
+  const rendezvousDir = tempDataRoot("routes-inputs-rvz");
+  roots.push(rendezvousDir);
+  fs.mkdirSync(rendezvousDir, { recursive: true });
+
+  vi.stubEnv("JOB_DATA_ROOT", dataRoot);
+  const manager = new JobManager({
+    dataRoot,
+    binaryPath: STUB_CLI_PATH,
+    jobInputDir: inputDir,
+    jobRendezvousDir: rendezvousDir,
+    childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), ...stubEnv },
+  });
+  (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
+    manager;
+  return { dataRoot, ref: { name }, content };
+}
+
+describe("POST /api/jobs drives a job from a mounted work input", () => {
+  test("a valid inputFile reference creates a job that reads the mount in place", async () => {
+    const { dataRoot, ref } = enableJobApiWithInputDir();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validInputFileIntent(ref)),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(201);
+    const { id } = (await response.json()) as { id: string };
+    // Read in place: nothing is copied into the job workdir.
+    expect(fs.existsSync(`${dataRoot}/${id}/input.csv`)).toBe(false);
+  });
+
+  test("an unknown mounted name is an empty-bodied 400", async () => {
+    enableJobApiWithInputDir();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validInputFileIntent({ name: "absent.csv" })),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(400);
+    expect(await response.text()).toBe("");
+  });
+});
 
 describe("POST /api/jobs maps the sftp remote rejections to empty bodies", () => {
   test("an unknown remote is an empty-bodied 400", async () => {
@@ -625,6 +705,7 @@ describe("create failure is a clean 500", () => {
     roots.push(root);
     fs.writeFileSync(root, "");
     vi.stubEnv("JOB_DATA_ROOT", root);
+    vi.stubEnv("JOB_RENDEZVOUS_DIR", rvzRoot());
     vi.stubEnv("JOB_CLI_BINARY", STUB_CLI_PATH);
     const response = (await handlersOf(CreateRoute).POST({
       request: createRequest(validIntent()),

@@ -1,12 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import {
+  JobRendezvousUnavailableError,
+  SftpRemoteBusyError,
+  UnknownSftpRemoteError,
+} from "@jobs/jobManager";
+import {
   MAX_JOB_BODY_BYTES,
   gateJobRoute,
   readJobRequestBody,
 } from "@jobs/routeSupport";
-import { SftpRemoteBusyError, UnknownSftpRemoteError } from "@jobs/jobManager";
 import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
+import { JobInputNotFoundError } from "@jobs/workInputs";
 import { jobExchangeIntentSchema } from "@jobs/intent";
 
 /**
@@ -17,9 +22,10 @@ import { jobExchangeIntentSchema } from "@jobs/intent";
  * `POST /api/jobs` -- create and start an exchange job from a typed intent.
  *
  * Auth-gated. The request body is a JSON {@link JobExchangeIntent}: a filedrop
- * or sftp exchange with validated linkage terms, a shared secret, and inline CSV
- * content. The server generates the job id, composes the CLI config from the
- * intent (every path a server-chosen name in the workdir; sftp connection
+ * or sftp exchange with validated linkage terms, a shared secret, and exactly one
+ * input source -- inline CSV content or a reference to an operator-mounted file the
+ * CLI reads in place. The server generates the job id, composes the CLI config from
+ * the intent (every path a server-chosen name in the workdir; sftp connection
  * material drawn only from the operator-provisioned remotes table), writes the
  * inputs, and spawns the CLI. No client string reaches argv or a file path.
  *
@@ -60,6 +66,14 @@ export const Route = createFileRoute("/api/jobs/")({
             return jobEmptyResponse(400);
           if (error instanceof SftpRemoteBusyError)
             return jobEmptyResponse(409);
+          // A mounted input that names no regular file, or a filedrop intent with
+          // no rendezvous directory configured, is a 400 (the manager left no
+          // workdir behind).
+          if (
+            error instanceof JobInputNotFoundError ||
+            error instanceof JobRendezvousUnavailableError
+          )
+            return jobEmptyResponse(400);
           // Workdir creation or an input write failed (the manager has already
           // cleaned up); no internal detail crosses the boundary.
           return jobEmptyResponse(500);

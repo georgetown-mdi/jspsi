@@ -96,16 +96,19 @@ export interface ProdServer {
  * so teardown can signal the whole tree. Yields one tick so a spawn failure (e.g.
  * a missing node) surfaces before returning. NITRO_HOST pins the loopback bind;
  * PORT pins the free port (the nitro entry reads it straight from process.env, no
- * dotenv override). */
+ * dotenv override). `extraEnv` merges over the inherited environment, for suites
+ * that enable a feature-gated surface (e.g. the job API) at boot. */
 export async function spawnProdServer(
   prodEntry: string,
   webRoot: string,
   port: number,
+  extraEnv: NodeJS.ProcessEnv = {},
 ): Promise<ProdServer> {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PORT: String(port),
     NITRO_HOST: "127.0.0.1",
+    ...extraEnv,
   };
   const proc = spawn("node", [prodEntry], {
     cwd: webRoot,

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import * as cliDriver from "@jobs/cliDriver";
 import {
   JobManager,
+  JobRendezvousUnavailableError,
   SftpRemoteBusyError,
   UnknownSftpRemoteError,
 } from "@jobs/jobManager";
@@ -15,17 +16,20 @@ import {
   removeWorkdir,
   writeJobFile,
 } from "@jobs/workdir";
+import { JobInputNotFoundError } from "@jobs/workInputs";
 
 import {
   STUB_CLI_PATH,
   tempDataRoot,
   testSftpRemotesTable,
+  validInputFileIntent,
   validIntent,
   validSftpIntent,
 } from "../utils/jobFixtures";
 
 import type { BufferedEvent, JobRecord } from "@jobs/jobManager";
 import type { CliDriverHandlers } from "@jobs/cliDriver";
+import type { JobInputFileReference } from "@jobs/intent";
 import type { JobSftpRemotesTable } from "@jobs/sftpRemotes";
 
 vi.mock("@jobs/workdir", { spy: true });
@@ -55,6 +59,8 @@ function makeManager(options: {
   ignoreSigterm?: boolean;
   eventBufferCap?: number;
   sftpRemotes?: JobSftpRemotesTable;
+  jobInputDir?: string;
+  jobRendezvousDir?: string;
   recordJson?: string;
 }): JobManager {
   // The stub reads its scenario from the child environment; the driver's
@@ -74,6 +80,15 @@ function makeManager(options: {
   if (options.ignoreSigint) childEnv.STUB_IGNORE_SIGINT = "1";
   if (options.ignoreSigterm) childEnv.STUB_IGNORE_SIGTERM = "1";
 
+  // A filedrop job requires a configured rendezvous directory; default one so the
+  // filedrop tests run, unless the case under test overrides it. Created before the
+  // data root so the data root stays the last-pushed cleanup entry.
+  let rendezvousDir = options.jobRendezvousDir;
+  if (rendezvousDir === undefined) {
+    rendezvousDir = tempDataRoot("rvz");
+    roots.push(rendezvousDir);
+    fs.mkdirSync(rendezvousDir, { recursive: true });
+  }
   const root = tempDataRoot("mgr");
   roots.push(root);
   const manager = new JobManager({
@@ -83,6 +98,8 @@ function makeManager(options: {
     cancelSigkillGraceMs: 40,
     eventBufferCap: options.eventBufferCap,
     sftpRemotes: options.sftpRemotes,
+    jobInputDir: options.jobInputDir,
+    jobRendezvousDir: rendezvousDir,
     childEnv,
   });
   managers.push(manager);
@@ -95,6 +112,15 @@ function freshRoot(label: string): string {
   const root = tempDataRoot(label);
   roots.push(root);
   return root;
+}
+
+/** A created, writable rendezvous directory a filedrop job needs, registered for
+ * cleanup and disjoint from the data root so it raises no preflight warning. */
+function rendezvousRoot(): string {
+  const dir = tempDataRoot("rvz");
+  roots.push(dir);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 /**
@@ -261,6 +287,7 @@ describe("SSE replay", () => {
     const manager = new JobManager({
       dataRoot: root,
       binaryPath: STUB_CLI_PATH,
+      jobRendezvousDir: rendezvousRoot(),
     });
     managers.push(manager);
 
@@ -321,6 +348,7 @@ describe("event cap fails the job", () => {
       dataRoot: root,
       binaryPath: STUB_CLI_PATH,
       eventBufferCap: 3,
+      jobRendezvousDir: rendezvousRoot(),
     });
     managers.push(manager);
 
@@ -435,6 +463,87 @@ describe("createJob failure cleanup", () => {
   });
 });
 
+/** Write a fresh work-input directory holding one CSV and return the directory plus
+ * the reference a client would submit -- its opaque name. The CLI reads the mounted
+ * file in place, so no size/mtime snapshot travels. */
+function writeInputDir(
+  label: string,
+  content = "ssn,last_name,date_of_birth\n111223333,smith,1990-01-01\n",
+  name = "input.csv",
+): { dir: string; ref: JobInputFileReference } {
+  const dir = tempDataRoot(label);
+  roots.push(dir);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, name), content);
+  return { dir, ref: { name } };
+}
+
+describe("mounted work input read in place at create", () => {
+  test("points the CLI at the mounted file and writes no input.csv into the workdir", async () => {
+    const content = "ssn,last_name,date_of_birth\n555667777,jones,1975-06-02\n";
+    const { dir, ref } = writeInputDir("inplace", content, "clients.csv");
+    const captured: Array<{ inputPath: string; workdir: string }> = [];
+    const spy = vi
+      .spyOn(cliDriver, "spawnExchangeJob")
+      .mockImplementation((args) => {
+        captured.push({ inputPath: args.inputPath, workdir: args.workdir });
+        return { signal: () => true, isRunning: () => true };
+      });
+
+    const inlineId = await manager0(dir).createJob(validIntent());
+    const managerB = manager0(dir);
+    const fileId = await managerB.createJob(validInputFileIntent(ref));
+
+    const inline = captured.find((c) => c.workdir.endsWith(inlineId))!;
+    const mounted = captured.find((c) => c.workdir.endsWith(fileId))!;
+    // An inline job writes and reads input.csv in its own workdir; a mounted job
+    // reads the operator's file in place, so the CLI's input path IS the mounted
+    // file and nothing is copied into the job workdir.
+    expect(inline.inputPath).toBe(path.join(inline.workdir, "input.csv"));
+    expect(mounted.inputPath).toBe(path.join(dir, "clients.csv"));
+    expect(fs.existsSync(path.join(mounted.workdir, "input.csv"))).toBe(false);
+
+    spy.mockRestore();
+  });
+
+  function manager0(dir: string): JobManager {
+    return makeManager({ jobInputDir: dir });
+  }
+
+  test("a valid mounted inputFile runs to a succeeded terminal", async () => {
+    const { dir, ref } = writeInputDir("run");
+    const manager = makeManager({
+      events: [RESULT_EVENT],
+      exitCode: 0,
+      jobInputDir: dir,
+    });
+    const id = await manager.createJob(validInputFileIntent(ref));
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    expect(record.status).toBe("succeeded");
+  });
+
+  test("an unknown/vanished name is JobInputNotFoundError and leaves no workdir", async () => {
+    const { dir } = writeInputDir("vanished");
+    const manager = makeManager({ jobInputDir: dir });
+    const root = roots[roots.length - 1]; // makeManager pushes the data root last
+    await expect(
+      manager.createJob(validInputFileIntent({ name: "absent.csv" })),
+    ).rejects.toBeInstanceOf(JobInputNotFoundError);
+    expect(fs.existsSync(root)).toBe(false);
+  });
+
+  test("an inputFile intent with no directory configured is JobInputNotFoundError", async () => {
+    const rvz = tempDataRoot("rvz-only");
+    roots.push(rvz);
+    fs.mkdirSync(rvz, { recursive: true });
+    const manager = makeManager({ jobRendezvousDir: rvz });
+    await expect(
+      manager.createJob(validInputFileIntent()),
+    ).rejects.toBeInstanceOf(JobInputNotFoundError);
+  });
+});
+
 describe("sftp remote resolution and the per-remote busy latch", () => {
   test("an unknown remote is a typed error and creates NO workdir", async () => {
     const manager = makeManager({ sftpRemotes: testSftpRemotesTable() });
@@ -520,6 +629,107 @@ describe("sftp remote resolution and the per-remote busy latch", () => {
     const record = manager.getJob(id)!;
     await waitForTerminal(record);
     expect(record.status).toBe("succeeded");
+  });
+});
+
+describe("sftp job driven by a mounted work input", () => {
+  test("an inputFile naming no file fails without latching the remote", async () => {
+    const { dir } = writeInputDir("sftp-input-missing");
+    const manager = makeManager({
+      events: [RESULT_EVENT],
+      exitCode: 0,
+      sftpRemotes: testSftpRemotesTable(),
+      jobInputDir: dir,
+    });
+    const root = roots[roots.length - 1];
+    // The remote latches BEFORE the input resolves; a vanished name is the only
+    // thing that can release the latch.
+    await expect(
+      manager.createJob(
+        validSftpIntent({
+          inputCsv: undefined,
+          inputFile: { name: "absent.csv" },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(JobInputNotFoundError);
+    // The resolve failed before createWorkdir: nothing on disk, not even the data root.
+    expect(fs.existsSync(root)).toBe(false);
+    // The latch did not leak: a subsequent valid job over the same remote is
+    // accepted (no SftpRemoteBusyError) and runs.
+    const id = await manager.createJob(validSftpIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    expect(record.status).toBe("succeeded");
+  });
+
+  test("a valid inputFile reads the mount in place and composes the sftp config", async () => {
+    const { dir, ref } = writeInputDir("sftp-input-valid");
+    const manager = makeManager({
+      events: [RESULT_EVENT],
+      exitCode: 0,
+      sftpRemotes: testSftpRemotesTable(),
+      jobInputDir: dir,
+    });
+    const id = await manager.createJob(
+      validSftpIntent({ inputCsv: undefined, inputFile: ref }),
+    );
+    const record = manager.getJob(id)!;
+    // Read in place: nothing is copied into the workdir.
+    expect(fs.existsSync(path.join(record.workdir, "input.csv"))).toBe(false);
+    await waitForTerminal(record);
+    expect(record.status).toBe("succeeded");
+    const configYaml = fs.readFileSync(
+      `${record.workdir}/psilink.yaml`,
+      "utf8",
+    );
+    expect(configYaml).toContain("channel: sftp");
+  });
+});
+
+describe("filedrop rendezvous facilitation", () => {
+  test("composes the configured rendezvous mount as the filedrop connection path", async () => {
+    const rvz = tempDataRoot("rvz-path");
+    roots.push(rvz);
+    fs.mkdirSync(rvz, { recursive: true });
+    const manager = makeManager({ jobRendezvousDir: rvz });
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    const configYaml = fs.readFileSync(
+      `${record.workdir}/psilink.yaml`,
+      "utf8",
+    );
+    expect(configYaml).toContain("channel: filedrop");
+    expect(configYaml).toContain(`path: ${rvz}`);
+  });
+
+  test("a filedrop intent with no rendezvous configured is rejected, no workdir", async () => {
+    const root = tempDataRoot("no-rvz");
+    roots.push(root);
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      childEnv: { STUB_FD3_EVENTS: "[]" },
+    });
+    managers.push(manager);
+    await expect(manager.createJob(validIntent())).rejects.toBeInstanceOf(
+      JobRendezvousUnavailableError,
+    );
+    expect(fs.existsSync(root)).toBe(false);
+  });
+
+  test("warns through the job stream when the rendezvous mount is missing", async () => {
+    const rvz = path.join(tempDataRoot("rvz-missing"), "not-created");
+    const manager = makeManager({
+      events: [RESULT_EVENT],
+      exitCode: 0,
+      jobRendezvousDir: rvz,
+    });
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    const warnings = record.events.filter(
+      (entry) => entry.event.type === "warning",
+    );
+    expect(warnings.length).toBeGreaterThan(0);
   });
 });
 
@@ -683,16 +893,12 @@ describe("restore after a simulated restart", () => {
     const paused = new Promise<void>((resolve) => (release = resolve));
     // Pause createWorkdir after the workdir exists but before the record is set,
     // so a concurrent read lands squarely in the creation window.
-    vi.mocked(createWorkdir).mockImplementationOnce(
-      async (dataRoot, jobId, subdir) => {
-        const workdir = path.join(dataRoot, jobId);
-        await fs.promises.mkdir(workdir, { recursive: true });
-        const exchangeDirectory = path.join(workdir, subdir);
-        await fs.promises.mkdir(exchangeDirectory, { recursive: true });
-        await paused;
-        return { workdir, exchangeDirectory };
-      },
-    );
+    vi.mocked(createWorkdir).mockImplementationOnce(async (dataRoot, jobId) => {
+      const workdir = path.join(dataRoot, jobId);
+      await fs.promises.mkdir(workdir, { recursive: true });
+      await paused;
+      return { workdir };
+    });
     const manager = makeManager({
       events: [RESULT_EVENT],
       exitCode: 0,

@@ -10,6 +10,16 @@ import styles from "./bench.module.css";
 import type { ReactNode } from "react";
 import type { RunFailure } from "./useInviterExchange";
 
+/**
+ * The keep-open callout body for a run the console appliance conducts on the
+ * operator's behalf (a server-job run): the tab holds the only view of it, so
+ * leaving abandons the run rather than merely stopping a browser listener. Shared
+ * by both seats' run columns so the two cannot drift.
+ */
+export const SERVER_JOB_KEEP_OPEN_BODY =
+  "This appliance is running the exchange. If you leave this page, the console " +
+  "cannot return to the run or its results.";
+
 const PREVIEW_EDGE_CHARS = 8;
 const COPY_STATUS_CLEAR_MS = 2000;
 

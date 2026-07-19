@@ -1,6 +1,11 @@
 import type { Argv, Arguments } from "yargs";
 
-import { getDefaultLinkageTerms, getLogger, UsageError } from "@psilink/core";
+import {
+  getDefaultLinkageTerms,
+  getLogger,
+  inferDateInputFormatFromSource,
+  UsageError,
+} from "@psilink/core";
 
 import { DEFAULT_CONFIG_PATH } from "../config";
 import {
@@ -15,11 +20,12 @@ import {
   assertNoUnknownOptions,
   configureLogging,
   LOG_LEVELS,
+  openInputSource,
   promptConfirm,
   runOrExit,
   singleValue,
 } from "../util/cli";
-import { buildDataSpec, loadInputRowsForInference } from "../onlineBootstrap";
+import { buildDataSpec } from "../onlineBootstrap";
 
 // The identity written into a fresh template when --identity is not given. A
 // placeholder, like the connection's host/username -- init produces a scaffold to
@@ -192,8 +198,12 @@ export function resolveInitInput(
  * default linkage terms when it is not. Reuses `buildDataSpec` -- the same
  * inference `invite`/`accept`/zero-setup run -- so the template's terms match
  * what those commands would author from the same file. Reads the input through
- * `loadInputRowsForInference` (header plus a bounded DOB sample), not the full
- * row set the exchange commands load, since init's inference needs no more.
+ * `inferDateInputFormatFromSource` (header plus a bounded DOB sample), not the
+ * full row set the exchange commands load, since init's inference needs no more:
+ * it wants only the column header and the DOB date-input format, and the bounded
+ * sample yields the same format as a full read (see that helper). The metadata,
+ * linkage fields, and standardization then follow from the header alone in
+ * `buildDataSpec`, fed the pre-inferred format.
  *
  * @internal exported for testing
  */
@@ -205,9 +215,11 @@ export async function buildTemplateData(
   if (input === undefined)
     return { linkageTerms: getDefaultLinkageTerms(identity) };
 
-  let rows;
+  let inferred;
   try {
-    rows = await loadInputRowsForInference(input, { allowStdin: true });
+    inferred = await inferDateInputFormatFromSource(
+      openInputSource(input, { allowStdin: true }),
+    );
   } catch (err) {
     // openInputSource's stdin-specific rejections (`-` disallowed, `-` at a bare
     // TTY) are already UsageErrors with actionable wording -- keep them. A missing
@@ -221,7 +233,13 @@ export async function buildTemplateData(
     );
   }
 
-  const { dataSpec, warnings } = buildDataSpec({ identity, rows });
+  const { dataSpec, warnings } = buildDataSpec({
+    identity,
+    rows: { rawRows: [], columns: inferred.columns },
+    ...(inferred.dateInputFormat !== undefined
+      ? { dateInputFormat: inferred.dateInputFormat }
+      : {}),
+  });
   for (const w of warnings) log.warn(w);
   return dataSpec;
 }

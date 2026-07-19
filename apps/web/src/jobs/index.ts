@@ -1,6 +1,8 @@
 import { isJobApiEnabled, readJobApiConfig } from "./gate";
 import { JobManager } from "./jobManager";
 import { loadSftpRemotesFromEnv } from "./sftpRemotes";
+import { useJobInputDir } from "./workInputs";
+import { useJobRendezvousDir } from "./jobRendezvous";
 
 import type { JobApiConfig } from "./gate";
 import type { JobSftpRemotesTable } from "./sftpRemotes";
@@ -38,8 +40,8 @@ export function useSftpRemotesTable(
  * Return the shared {@link JobManager}, or null when the job API is disabled (no
  * data root configured). Constructs the manager lazily on first use with a data
  * root read from the environment, so a disabled deployment builds nothing and
- * spawns nothing. The manager carries the startup-loaded SFTP remotes table when
- * one is configured; the table never varies per request.
+ * spawns nothing. The manager carries the startup-loaded SFTP remotes table and
+ * the resolved work-input directory when configured; neither varies per request.
  */
 export function useJobManager(
   config: JobApiConfig = readJobApiConfig(),
@@ -47,9 +49,13 @@ export function useJobManager(
   if (!isJobApiEnabled(config)) return null;
   if (globalThis.jobManagerInstance === undefined) {
     const sftpRemotes = useSftpRemotesTable();
+    const jobInputDir = useJobInputDir();
+    const jobRendezvousDir = useJobRendezvousDir();
     globalThis.jobManagerInstance = new JobManager({
       dataRoot: config.dataRoot,
       ...(sftpRemotes !== undefined ? { sftpRemotes } : {}),
+      ...(jobInputDir !== undefined ? { jobInputDir } : {}),
+      ...(jobRendezvousDir !== undefined ? { jobRendezvousDir } : {}),
     });
   }
   return globalThis.jobManagerInstance;

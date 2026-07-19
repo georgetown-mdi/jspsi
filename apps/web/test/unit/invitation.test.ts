@@ -685,6 +685,68 @@ describe("generateInvitation", () => {
   });
 });
 
+describe("generateInvitation from profiled columns (console path)", () => {
+  const ALL_COLUMNS = ["ssn", "ssn4", "first_name", "last_name", "dob"];
+
+  test("binds the same terms as parsing the same columns, with no rawRows", async () => {
+    const inviterName = "County Health Dept";
+    const fromColumns = await generateInvitation({
+      inviterName,
+      profiledColumns: ALL_COLUMNS,
+      location,
+    });
+    const fromFile = await generateInvitation({
+      inviterName,
+      file: csvStream(),
+      location,
+    });
+
+    const columnsToken = await decodeInvitation(fromColumns.encoded);
+    // Columns-derived terms equal the file-derived terms (the quick path infers
+    // metadata from columns either way).
+    expect(columnsToken.linkageTerms).toStrictEqual(fromFile.linkageTerms);
+    expect(fromColumns.columns).toEqual(ALL_COLUMNS);
+    // No rows are produced on this path -- the console browser-transport run that
+    // would consume them does not exist.
+    expect(fromColumns.rawRows).toEqual([]);
+  });
+
+  test("keeps the columns-based satisfiability re-check: an unlinkable column set is refused", async () => {
+    // A column set that satisfies no default linkage key -- no name, dob, ssn, etc.
+    const error: unknown = await generateInvitation({
+      inviterName: "Org",
+      profiledColumns: ["member_id", "notes"],
+      location,
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(InvitationFileError);
+    expect((error as InvitationFileError).failure.kind).toBe("unlinkable");
+  });
+
+  test("rejects supplying neither file nor profiledColumns", async () => {
+    const error: unknown = await generateInvitation({
+      inviterName: "Org",
+      location,
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain(
+      "exactly one of file or profiledColumns",
+    );
+  });
+
+  test("rejects supplying both file and profiledColumns", async () => {
+    const error: unknown = await generateInvitation({
+      inviterName: "Org",
+      file: csvStream(),
+      profiledColumns: ALL_COLUMNS,
+      location,
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain(
+      "exactly one of file or profiledColumns",
+    );
+  });
+});
+
 describe("generateInvitation fail-closed before mint", () => {
   test("rejects an unreadable file with an InvitationFileError (no token minted)", async () => {
     // A stream that errors on read stands in for an unreadable file. The failure

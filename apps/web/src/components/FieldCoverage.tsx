@@ -5,6 +5,19 @@ import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
+/** The default coverage pending copy: the hosted sweep runs in the browser, so it
+ * reads as the near-instant local check it is. */
+export const COVERAGE_PENDING_LABEL =
+  "Checking how many of your rows produce a value...";
+
+/** The console coverage pending copy: the sweep is a streaming pass over the whole
+ * mounted file on the appliance -- honestly seconds, and tens of seconds at CLI
+ * scale -- so the copy says so rather than reading as instant-local (the register of
+ * the picker's profile-loading copy). */
+export const CONSOLE_COVERAGE_PENDING_LABEL =
+  "Checking how many of your rows produce a value. The appliance reads the " +
+  "whole file, so this can take a while on a large file.";
+
 /** Format the share of rows that produce a key. The ends are guarded so the percent
  * never overstates the extremes: a non-zero rate that rounds to 0% shows "<1%"
  * (never a "0%" that reads like the silent-empty alarm), and a sub-100% rate that
@@ -43,6 +56,7 @@ function formatRate(coverage: FieldValueCoverage): string {
 export function FieldCoverage({
   rate,
   pending,
+  pendingLabel = COVERAGE_PENDING_LABEL,
 }: {
   /** This field's coverage, or `undefined` before the first sweep settles. */
   rate: FieldValueCoverage | undefined;
@@ -52,11 +66,15 @@ export function FieldCoverage({
    * the background sweep is debounced precisely so the readout does not flicker on
    * every keystroke. */
   pending: boolean;
+  /** The pending-placeholder copy, provider-aware: the console passes
+   * {@link CONSOLE_COVERAGE_PENDING_LABEL} because its sweep is a whole-file pass on
+   * the appliance, not the near-instant local compute the default copy implies. */
+  pendingLabel?: string;
 }) {
   if (rate === undefined)
     return pending ? (
       <Text size="xs" c="dimmed" data-testid="coverage-pending">
-        Checking how many of your rows produce a value...
+        {pendingLabel}
       </Text>
     ) : null;
 

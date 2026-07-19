@@ -92,33 +92,40 @@ export function stepFromPopState(state: unknown): string | undefined {
 }
 
 /**
- * Whether the browser unload guard (`beforeunload`) should be armed: exactly
- * while a REAL participant file is loaded AND the exchange has not yet been
- * finalized (created and listening, or its exchange file saved/sent). The
- * in-bench Back/Forward this model integrates keeps the component mounted, so
- * the guard exists only to catch the navigation paths History integration
- * cannot handle gracefully -- closing the tab, reloading, typing a URL, or
- * following an external link -- before the loaded file and in-progress terms
- * would be lost.
+ * Whether the browser unload guard (`beforeunload`) should be armed: while a REAL
+ * participant file is loaded AND either the exchange has not yet been finalized OR a
+ * console server-job exchange is still running on the appliance. The in-bench
+ * Back/Forward this model integrates keeps the component mounted, so the guard exists
+ * only to catch the navigation paths History integration cannot handle gracefully --
+ * closing the tab, reloading, typing a URL, or following an external link -- before
+ * the loaded file and in-progress terms are lost, or a running appliance exchange is
+ * stranded.
  *
- * `finalized` covers every state past the point of no data loss: once the
- * invitation is minted (the live run is listening) or the exchange file is
- * saved, leaving costs nothing the operator has not already secured, so the
- * guard disarms.
+ * `finalized` covers the browser-local point of no data loss: once the invitation is
+ * minted (a browser run is listening) or the exchange file is saved, leaving costs
+ * nothing the operator has not already secured, so the guard disarms.
  *
- * `demoActive` disarms it too: the loaded file is the synthetic sample (pristine
- * or with edited terms), which the visitor did not bring and nothing regrets
- * losing. A real file replacing the sample clears `demoActive`, re-arming the
- * guard.
+ * `consoleExchangeRunning` overrides that disarm: on a console server-job run the
+ * appliance's CLI child conducts the exchange while this tab holds the only view of
+ * it, and leaving the page abandons the run -- an in-app teardown cancels it, a hard
+ * close strands it unattended, and either way the console cannot return to it. The
+ * guard stays armed for the running exchange even though the invitation is minted
+ * (finalized), and disarms once the run settles.
+ *
+ * `demoActive` disarms it regardless: the loaded file is the synthetic sample
+ * (pristine or with edited terms), which the visitor did not bring and nothing regrets
+ * losing. A real file replacing the sample clears `demoActive`, re-arming the guard.
  */
 export function unloadGuardArmed({
   hasFile,
   finalized,
   demoActive = false,
+  consoleExchangeRunning = false,
 }: {
   hasFile: boolean;
   finalized: boolean;
   demoActive?: boolean;
+  consoleExchangeRunning?: boolean;
 }): boolean {
-  return hasFile && !finalized && !demoActive;
+  return hasFile && !demoActive && (!finalized || consoleExchangeRunning);
 }

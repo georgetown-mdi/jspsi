@@ -3,8 +3,6 @@ import type { Arguments } from "yargs";
 import {
   getLogger,
   loadCSVFile,
-  loadCSVColumnSample,
-  INFER_DATE_SCAN_CAP,
   prepareForExchange,
   inferMetadata,
   getDefaultLinkageTerms,
@@ -383,47 +381,6 @@ export async function loadInputRows(
   };
 }
 
-/**
- * Load only what `init`'s inference needs from a CSV -- the column header names
- * and a bounded sample of the date-of-birth column -- instead of the full row set
- * {@link loadInputRows} reads. `init` infers column metadata and linkage fields
- * from the header alone and the date-input format from the DOB column, and never
- * consumes any other row data, so this caps `init`'s peak memory at one parse
- * chunk rather than letting it scale with the input file.
- *
- * The result is shaped exactly as {@link loadInputRows}'s -- `{ rawRows, columns
- * }` -- so it drops straight into {@link buildDataSpec} unchanged, keeping `init`
- * on the same inference path as `invite`/`accept` (matching their inferred terms
- * is a design goal). The trick is that `buildDataSpec` reads `rawRows` for one
- * purpose only: the DOB column's values, fed to {@link inferDateFormat}. So
- * `rawRows` here holds just that column's bounded sample, projected to one-field
- * records keyed by the DOB column name. The bound is exact, not heuristic: the
- * sample caps at {@link INFER_DATE_SCAN_CAP} non-empty values, the same cap
- * `inferDateFormat` stops its own scan at, so the date format inferred from the
- * sample is identical to one inferred from a full read.
- *
- * The DOB column is resolved by running {@link inferMetadata} over the header --
- * the same resolution `buildDataSpec` repeats internally, so the column the sample
- * is keyed on always matches the one `buildDataSpec` reads. The loader reports the
- * column it sampled, so that resolution runs once. When no DOB column is inferred,
- * the sample is empty and `rawRows` is empty (only the header was read).
- */
-export async function loadInputRowsForInference(
-  input: string,
-  { allowStdin = false }: { allowStdin?: boolean } = {},
-): Promise<{ rawRows: Array<CSVRow>; columns: string[] }> {
-  const { columns, sampledColumn, sample } = await loadCSVColumnSample(
-    openInputSource(input, { allowStdin }),
-    (cols) => inferMetadata(cols).find((c) => c.type === "date_of_birth")?.name,
-    INFER_DATE_SCAN_CAP,
-  );
-  const rawRows =
-    sampledColumn !== undefined
-      ? sample.map((value) => ({ [sampledColumn]: value }))
-      : [];
-  return { rawRows, columns };
-}
-
 // --- Linkage strategy selection ----------------------------------------------
 
 /**
@@ -510,11 +467,19 @@ export function singlePassDisclosureNotice(): string {
  * agreed strategy), the selection is not applied -- the partner's choice stands.
  * Absent (or `cascade`) leaves the default strategy untouched, so omitting the
  * selection is byte-identical to before the flag existed.
+ *
+ * `dateInputFormat`, when given, is the DOB date-input format the caller already
+ * inferred (via `inferDateInputFormatFromSource`, from a bounded sample) and
+ * short-circuits this function's own inference from `rawRows`. `init` uses it
+ * because its bounded read carries no full row set to scan; the invite/accept paths
+ * omit it and this function infers the format from their full `rawRows` exactly as
+ * before -- so the parameter is additive and behavior-preserving for them.
  */
 export function buildDataSpec(args: {
   terms?: LinkageTerms;
   identity: string;
   rows?: { rawRows: Array<CSVRow>; columns: string[] };
+  dateInputFormat?: string;
   linkageStrategy?: LinkageStrategy;
 }): { dataSpec: ResolvedDataSpec; warnings: string[] } {
   const { terms, identity, rows, linkageStrategy } = args;
@@ -538,9 +503,10 @@ export function buildDataSpec(args: {
 
   const dobCol = metadata.find((c) => c.type === "date_of_birth");
   const dateInputFormat =
-    dobCol !== undefined
+    args.dateInputFormat ??
+    (dobCol !== undefined
       ? inferDateFormat(columnValues(rows.rawRows, dobCol.name))
-      : undefined;
+      : undefined);
 
   try {
     const standardization = getDefaultStandardization(metadata, linkageTerms, {

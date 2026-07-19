@@ -12,6 +12,7 @@ import {
   DownloadRow,
   FailureAlert,
   RunWarningsAlert,
+  SERVER_JOB_KEEP_OPEN_BODY,
   WithheldResultInset,
 } from "./BenchRunSurface";
 import { StatusPanel } from "./StatusPanel";
@@ -39,6 +40,7 @@ export function InviterExchangeSection({
   failure,
   warnings,
   partnerAcceptsByCli,
+  serverJob,
   onTryAgain,
   onStartOver,
 }: {
@@ -56,6 +58,11 @@ export function InviterExchangeSection({
    * (tokenFromInput), so the bare code adds nothing but a second secret to
    * leave on screen. */
   partnerAcceptsByCli: boolean;
+  /** Whether this run executes on the console appliance (a server-job run) rather
+   * than in this browser. On the appliance the CLI child conducts the exchange
+   * while the tab stays open, so the keep-open callout names the running exchange
+   * the tab is holding rather than a browser listener. */
+  serverJob: boolean;
   onTryAgain: () => void;
   onStartOver: () => void;
 }) {
@@ -68,6 +75,12 @@ export function InviterExchangeSection({
   const retryable =
     failure?.category === "exchange" &&
     invitationUsable(invitation.expires, new Date());
+
+  // Every non-retryable failure except output (whose exchange already succeeded, so
+  // nothing here may invite a re-run) offers exactly one recovery: a fresh invitation
+  // via start-over, back to Review & create with every input intact.
+  const offersStartOver =
+    !retryable && failure !== undefined && failure.category !== "output";
 
   // The phase-level focus throughline. The bench host moves focus to the h1
   // when the section mounts; within the section, focus moves again when the
@@ -113,10 +126,7 @@ export function InviterExchangeSection({
               Try again
             </Button>
           )}
-          {/* Every non-retryable failure except "output" (whose exchange
-              already succeeded, so nothing here may invite a re-run) offers
-              exactly one recovery: a fresh invitation. */}
-          {!retryable && failure.category !== "output" && (
+          {offersStartOver && (
             <Button color="red" variant="light" mt="sm" onClick={onStartOver}>
               Start over with a fresh invitation
             </Button>
@@ -165,18 +175,27 @@ export function InviterExchangeSection({
           </p>
         </>
       )}
-      {/* The "listening" claim is false the moment any failure lands (the
+      {/* The listening/running claim is false the moment any failure lands (the
           lifecycle tore down), so the callout outlives no failure -- not even
-          a retryable one. */}
-      {phase === "share" && failure === undefined && (
-        <div className={styles.callout}>
-          <p className={styles.calloutLead}>Keep this tab open.</p>
-          <p className={styles.small}>
-            Your browser is listening for your partner. Closing the tab cancels
-            the invitation; reloading starts over.
-          </p>
-        </div>
-      )}
+          a retryable one. On a server-job run the appliance's CLI child conducts
+          the exchange and this tab holds the only view of it: an in-app teardown
+          cancels the run, a hard close strands it unattended, and either way the
+          console cannot return to it -- so the copy claims abandonment, never
+          that leaving stops the run, and the callout persists through the active
+          protocol phase, the whole window the unload guard arms. The browser
+          listener's copy is share-only: once the partner connects, nothing it
+          says still holds. */}
+      {(phase === "share" || (phase === "running" && serverJob)) &&
+        failure === undefined && (
+          <div className={styles.callout}>
+            <p className={styles.calloutLead}>Keep this tab open.</p>
+            <p className={styles.small}>
+              {serverJob
+                ? SERVER_JOB_KEEP_OPEN_BODY
+                : "Your browser is listening for your partner. Closing the tab cancels the invitation; reloading starts over."}
+            </p>
+          </div>
+        )}
       {phase === "done" && (
         <DonePanel
           matchedRecordCount={outputs?.matchedRecordCount}

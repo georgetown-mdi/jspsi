@@ -24,9 +24,11 @@ import {
 } from "@jobs/intent";
 
 import {
+  SAMPLE_INPUT_FILE_REF,
   TEST_HOST_KEY_FINGERPRINT,
   TEST_SFTP_REMOTE_NAME,
   testSftpRemoteEntry,
+  validInputFileIntent,
   validIntent,
   validLinkageTerms,
   validSftpIntent,
@@ -131,6 +133,57 @@ const intentArms: Array<{
     build: (overrides) => ({ ...validSftpIntent(), ...overrides }),
   },
 ];
+
+describe("jobExchangeIntentSchema enforces exactly-one-of inputCsv/inputFile", () => {
+  test("accepts an inputFile reference and no inputCsv, both arms", () => {
+    expect(
+      jobExchangeIntentSchema.safeParse(validInputFileIntent()).success,
+    ).toBe(true);
+    expect(
+      jobExchangeIntentSchema.safeParse({
+        ...validInputFileIntent(),
+        channel: "sftp",
+        remote: TEST_SFTP_REMOTE_NAME,
+      }).success,
+    ).toBe(true);
+  });
+
+  test("rejects an intent carrying BOTH inputCsv and inputFile", () => {
+    const both = { ...validIntent(), inputFile: SAMPLE_INPUT_FILE_REF };
+    expect(jobExchangeIntentSchema.safeParse(both).success).toBe(false);
+  });
+
+  test("rejects an intent carrying NEITHER inputCsv nor inputFile", () => {
+    const neither: Record<string, unknown> = { ...validInputFileIntent() };
+    delete neither.inputFile;
+    expect(jobExchangeIntentSchema.safeParse(neither).success).toBe(false);
+  });
+
+  test("rejects a smuggled extra field inside inputFile (sub-object is strict)", () => {
+    // A client attempts to smuggle an absolute path alongside the opaque name.
+    const intent = {
+      ...validInputFileIntent(),
+      inputFile: { ...SAMPLE_INPUT_FILE_REF, path: "/etc/passwd" },
+    };
+    expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
+  test("rejects a non-segment inputFile name (same shape rule as the listing)", () => {
+    for (const name of ["../secret", "a/b", ".psilink.key", ""]) {
+      const intent = validInputFileIntent({ ...SAMPLE_INPUT_FILE_REF, name });
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+    }
+  });
+
+  test("rejects an inputFile carrying an unknown field (strict)", () => {
+    const intent = validInputFileIntent();
+    const smuggled = {
+      ...intent,
+      inputFile: { name: "input.csv", sizeBytes: 42 },
+    };
+    expect(jobExchangeIntentSchema.safeParse(smuggled).success).toBe(false);
+  });
+});
 
 describe("jobExchangeIntentSchema bounds the intent's sizes", () => {
   for (const arm of intentArms) {
