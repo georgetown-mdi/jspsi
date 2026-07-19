@@ -198,11 +198,13 @@ describe("console inputs disabled state", () => {
       page.getByText("check that the job API is reachable").query(),
     ).toBeNull();
     // Nothing to recover, so no recovery panel.
-    expect(
-      page
-        .getByText("An exchange started from this console", { exact: false })
-        .query(),
-    ).toBeNull();
+    await vi.waitFor(() =>
+      expect(
+        page
+          .getByText("An exchange started from this console", { exact: false })
+          .query(),
+      ).toBeNull(),
+    );
   });
 });
 
@@ -256,11 +258,13 @@ describe("console strand recovery panel", () => {
     await vi.waitFor(() =>
       expect(window.localStorage.getItem(ATTACHMENT_KEY)).toBeNull(),
     );
-    expect(
-      page
-        .getByText("An exchange started from this console", { exact: false })
-        .query(),
-    ).toBeNull();
+    await vi.waitFor(() =>
+      expect(
+        page
+          .getByText("An exchange started from this console", { exact: false })
+          .query(),
+      ).toBeNull(),
+    );
   });
 
   test("cancelling the discard confirm removes nothing and keeps the record", async () => {
@@ -389,11 +393,13 @@ describe("console strand recovery panel", () => {
       ),
     ).toBe(false);
     expect(window.localStorage.getItem(ATTACHMENT_KEY)).not.toBeNull();
-    expect(
-      page
-        .getByText("An exchange started from this console", { exact: false })
-        .query(),
-    ).toBeNull();
+    await vi.waitFor(() =>
+      expect(
+        page
+          .getByText("An exchange started from this console", { exact: false })
+          .query(),
+      ).toBeNull(),
+    );
   });
 
   test("a 404 probe deletes the orphan id and renders nothing", async () => {
@@ -413,11 +419,13 @@ describe("console strand recovery panel", () => {
     await vi.waitFor(() =>
       expect(window.localStorage.getItem(ATTACHMENT_KEY)).toBeNull(),
     );
-    expect(
-      page
-        .getByText("An exchange started from this console", { exact: false })
-        .query(),
-    ).toBeNull();
+    await vi.waitFor(() =>
+      expect(
+        page
+          .getByText("An exchange started from this console", { exact: false })
+          .query(),
+      ).toBeNull(),
+    );
   });
 
   test("unmounting the panel does NOT cancel the running exchange", async () => {
