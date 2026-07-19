@@ -42,14 +42,28 @@ const OPEN_FLAGS = {
 /**
  * Opens `filePath` with the numeric equivalent of the string `flag` plus
  * `O_NOFOLLOW`, so the open refuses to traverse a symlink at the final path
- * component rather than following it. Defense in depth for the rendezvous
- * read/write primitives: {@link LocalFSClient.list} already filters symlink
- * entries out (its `opendir` walk keeps only `Dirent.isFile()` names), so a
- * symlink is never handed to a primitive in the first place -- this refusal is
- * the backstop for that invariant.
+ * component rather than following it. What this refusal defends against differs
+ * by primitive: for the read primitive ({@link LocalFSClient.get}) it is a
+ * backstop, since {@link LocalFSClient.list} already filters symlink entries out
+ * (its `opendir` walk keeps only `Dirent.isFile()` names) and every read reads a
+ * name the listing surfaced, so `O_NOFOLLOW` only catches a symlink swapped in
+ * after the listing committed the name (a TOCTOU race). For the write primitives
+ * ({@link LocalFSClient.put}, {@link LocalFSClient.createExclusive}) it is the
+ * primary defense, not a backstop: their destinations are built from protocol
+ * state at predictable names and never pass through `list()`, so `O_NOFOLLOW` is
+ * what refuses a symlink pre-planted at one of those names.
  */
 function openNoFollow(filePath: string, flag: keyof typeof OPEN_FLAGS) {
   return fs.open(filePath, OPEN_FLAGS[flag] | (fs.constants.O_NOFOLLOW ?? 0));
+}
+
+/** Pulls a stream source fully into one Buffer before any file is opened. */
+async function drainStream(src: NodeJS.ReadableStream): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of src) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
 }
 
 /**
@@ -268,15 +282,20 @@ export class LocalFSClient implements FileTransportClient {
     }
     const flag = options?.flags ?? "w";
     const encoding = options?.encoding as BufferEncoding | null | undefined;
+    // Drain a plain stream source to a Buffer BEFORE opening dest. The open
+    // below is O_CREAT|O_TRUNC, so opening first and then pulling from the
+    // stream would truncate dest up front and, if the source threw partway,
+    // leave it truncated rather than untouched. A Buffer or [header, payload]
+    // chunk list is already fully in memory, so it is written as-is.
+    const payload: Buffer | Uint8Array[] =
+      Buffer.isBuffer(src) || Array.isArray(src) ? src : await drainStream(src);
     // Write through an O_NOFOLLOW handle so a symlink planted at `dest` is
     // refused rather than redirecting the write to the link's target. Opening
     // the handle here (rather than deferring the flag to fs.writeFile) is what
     // lets the numeric O_NOFOLLOW mask apply on every write branch.
     const handle = await openNoFollow(dest, flag);
     try {
-      if (Buffer.isBuffer(src)) {
-        await handle.writeFile(src, { encoding });
-      } else if (Array.isArray(src)) {
+      if (Array.isArray(payload)) {
         // A [header, payload] chunk list: write the parts back-to-back with one
         // positional writev so the 10-byte header is prepended WITHOUT
         // concatenating the payload into a fresh buffer (the send-path
@@ -284,13 +303,9 @@ export class LocalFSClient implements FileTransportClient {
         // copied). The resulting on-disk bytes are the parts joined,
         // byte-identical to writing their concatenation. encoding does not apply
         // to a raw chunk list and is deliberately not passed.
-        await handle.writev(src);
+        await handle.writev(payload);
       } else {
-        const chunks: Buffer[] = [];
-        for await (const chunk of src) {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-        }
-        await handle.writeFile(Buffer.concat(chunks), { encoding });
+        await handle.writeFile(payload, { encoding });
       }
     } catch (err) {
       // Preserve the write failure: close best-effort so a close error on the

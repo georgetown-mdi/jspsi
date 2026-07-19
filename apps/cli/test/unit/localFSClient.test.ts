@@ -295,6 +295,21 @@ test("put writes a ReadableStream", async () => {
   expect(await fs.readFile(dest, "utf8")).toBe("chunk1chunk2");
 });
 
+test("put leaves an existing dest untouched when the stream source throws", async () => {
+  // dest is opened (O_CREAT|O_TRUNC) only AFTER a plain stream source is fully
+  // drained, so a source that throws mid-read never truncates an existing dest.
+  const dest = path.join(dir, "interrupted.bin");
+  await fs.writeFile(dest, "original-contents");
+  async function* throwing() {
+    yield Buffer.from("partial");
+    throw new Error("source blew up mid-stream");
+  }
+  await expect(client.put(Readable.from(throwing()), dest)).rejects.toThrow(
+    "source blew up mid-stream",
+  );
+  expect(await fs.readFile(dest, "utf8")).toBe("original-contents");
+});
+
 test("put with flags: 'a' appends to an existing file", async () => {
   const dest = path.join(dir, "append.txt");
   await fs.writeFile(dest, "hello");
@@ -436,11 +451,14 @@ test("exists returns false for a missing file", async () => {
 
 describe("symlink refusal in the rendezvous directory", () => {
   // The rendezvous directory is partner-writable, so the peer could plant a
-  // symlink in it. The load-bearing control is list(): it enumerates via opendir
-  // and keeps only Dirent.isFile() names, so a symlink is filtered out before it
-  // reaches a read/write primitive. openNoFollow (O_NOFOLLOW) is the backstop on
-  // each primitive should a symlink path reach one directly. Both are asserted
-  // here so the invariant is locked rather than incidental.
+  // symlink in it. On the read path list() is the load-bearing control: it
+  // enumerates via opendir and keeps only Dirent.isFile() names, so a symlink is
+  // filtered out before get() is handed the name, and openNoFollow (O_NOFOLLOW)
+  // is the backstop for a symlink swapped in after the listing (a TOCTOU race).
+  // On the write path put()/createExclusive() destinations come from protocol
+  // state, never from list(), so O_NOFOLLOW is the primary defense against a
+  // pre-planted symlink there. Both the filter and the per-primitive refusal are
+  // asserted here so the invariant is locked rather than incidental.
   //
   // POSIX-only: O_NOFOLLOW is absent on Windows and symlink creation there needs
   // privilege, so the primitive-level assertions are skipped on win32.
