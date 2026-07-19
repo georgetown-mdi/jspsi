@@ -22,17 +22,48 @@ import styles from "./bench.module.css";
 
 import type {
   JobInputProfileResult,
+  JobInputProfileUnavailableReason,
   JobInputsResult,
   ProfiledJobInput,
   WorkInputReference,
 } from "@psi/workInputClient";
 
+/** The picker's per-reason copy for a profile that could not be read: a title and a
+ * body, so each distinct failure names what to fix instead of one generic "removed or
+ * replaced". */
+const PROFILE_UNAVAILABLE_COPY: Record<
+  JobInputProfileUnavailableReason,
+  { title: string; body: string }
+> = {
+  not_found: {
+    title: "This file is no longer in the work directory",
+    body: "It may have been removed or replaced since the listing. Refresh the file list and try another.",
+  },
+  too_large: {
+    title: "This file is too large to read",
+    body: "It has a header, field, or line beyond the size this can read. Check that it is a normal CSV, then try another.",
+  },
+  not_a_csv: {
+    title: "This does not look like a CSV",
+    body: "It has no columns to read -- it may be empty or may not be a CSV. Choose a CSV file with a header row.",
+  },
+  parse_failed: {
+    title: "Could not read this file as a CSV",
+    body: "The appliance could not parse it. Check that it is a valid CSV, then try another.",
+  },
+  unknown: {
+    title: "Could not profile this file",
+    body: "The appliance could not read this file. Refresh the file list and try again.",
+  },
+};
+
 /** The listing settle copy for the aria-live status region. */
 function listingLiveMessage(listing: JobInputsResult | "loading"): string {
   if (listing === "loading") return "";
   if (listing.kind === "error") return "The file listing could not be loaded.";
-  const { files, configured } = listing.listing;
+  const { files, configured, readable } = listing.listing;
   if (!configured) return "No work directory is configured on this appliance.";
+  if (!readable) return "The work directory could not be read.";
   if (files.length === 0) return "No usable files in the work directory.";
   return `Loaded ${files.length} ${files.length === 1 ? "file" : "files"} from the work directory.`;
 }
@@ -43,7 +74,8 @@ function profileLiveMessage(
 ): string {
   if (profile === undefined) return "";
   if (profile === "loading") return "Profiling the file on the appliance.";
-  if (profile.kind !== "profile") return "The file could not be profiled.";
+  if (profile.kind !== "profile")
+    return PROFILE_UNAVAILABLE_COPY[profile.reason].title + ".";
   return "File profile ready. Confirm the file before using it.";
 }
 
@@ -230,7 +262,7 @@ function ListingView({
       </Stack>
     );
 
-  const { files, configured } = listing.listing;
+  const { files, configured, readable } = listing.listing;
 
   // An unconfigured JOB_INPUT_DIR and an empty-but-mounted directory both list zero
   // files; the unconfigured case is a deployment-config gap, so it names the env var
@@ -245,6 +277,24 @@ function ListingView({
         >
           No work directory is configured on this appliance. Set JOB_INPUT_DIR
           to the mounted input directory.
+        </Alert>
+        {refreshButton}
+      </Stack>
+    );
+
+  // A configured-but-unreadable mount is distinct from an empty one: the directory is
+  // there but could not be read (a mis-mount or a permission fault), so tell the
+  // operator to check the mount rather than to place a file that may already be there.
+  if (!readable)
+    return (
+      <Stack gap="sm">
+        <Alert
+          color="red"
+          icon={<IconAlertCircle />}
+          title="Could not read the work directory"
+        >
+          The mounted work directory could not be read. Check that it is mounted
+          and readable on this appliance, then refresh.
         </Alert>
         {refreshButton}
       </Stack>
@@ -368,16 +418,12 @@ function ConfirmPanel({
       </Stack>
     );
 
-  if (profile.kind !== "profile")
+  if (profile.kind !== "profile") {
+    const copy = PROFILE_UNAVAILABLE_COPY[profile.reason];
     return (
       <Stack gap="sm">
-        <Alert
-          color="red"
-          icon={<IconAlertCircle />}
-          title="Could not profile this file"
-        >
-          The appliance could not read this file. It may have been removed or
-          replaced since the listing. Refresh the file list and try another.
+        <Alert color="red" icon={<IconAlertCircle />} title={copy.title}>
+          {copy.body}
         </Alert>
         <Group>
           <Button variant="light" size="xs" onClick={onRetry}>
@@ -389,6 +435,7 @@ function ConfirmPanel({
         </Group>
       </Stack>
     );
+  }
 
   const profiled = profile.profile;
   return (

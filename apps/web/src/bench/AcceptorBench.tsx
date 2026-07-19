@@ -685,7 +685,11 @@ export function AcceptorBench() {
   // Full-CSV coverage for the cleaning tab and the Customize menu's
   // Cleaning-attention value, one sweep shared by both. The hook must run
   // every render, so it takes stable empty inputs until a file is acquired.
-  const { rates, pending: ratesPending } = useNonEmptyRates(
+  const {
+    rates,
+    pending: ratesPending,
+    unavailable: ratesUnavailable,
+  } = useNonEmptyRates(
     coverageInput,
     editorState?.standardization ?? EMPTY_STANDARDIZATION,
     benchCoverageProvider,
@@ -1220,6 +1224,7 @@ export function AcceptorBench() {
               columnSamples={columnSamples}
               rates={rates}
               ratesPending={ratesPending}
+              coverageUnavailable={ratesUnavailable}
               deadKeyCount={verdict.deadKeyCount}
               cleaningResetKey={cleaningResetKey}
               {...(consoleSource !== undefined

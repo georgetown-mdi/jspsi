@@ -1,4 +1,8 @@
-import type { JobInputListing, JobInputProfile } from "@jobs/workInputs";
+import type {
+  JobInputListing,
+  JobInputProfile,
+  JobInputProfileErrorCode,
+} from "@jobs/workInputs";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 import type { Standardization } from "@psilink/core";
 
@@ -32,10 +36,36 @@ export type ProfiledJobInput = Omit<JobInputProfile, "columnSamples"> & {
   columnSamples: Map<string, Array<string>>;
 };
 
-/** The `GET /api/jobs/inputs/profile` outcome: the profile, or unavailable (the
- * directory is unset, or the name resolves to no readable file). */
+/** Why a profile is unavailable, a closed set the picker turns into copy. `not_found`
+ * is the 404 (the file is gone -- removed or replaced since the listing); the three
+ * fault codes are the profile route's ({@link JobInputProfileErrorCode}); `unknown`
+ * is the catch-all for a network error, an off-console 404, or a malformed body -- it
+ * carries no free text, keeping the set closed. */
+export type JobInputProfileUnavailableReason =
+  "not_found" | JobInputProfileErrorCode | "unknown";
+
+/** The `GET /api/jobs/inputs/profile` outcome: the profile, or unavailable with a
+ * closed reason the picker renders. */
 export type JobInputProfileResult =
-  { kind: "profile"; profile: ProfiledJobInput } | { kind: "unavailable" };
+  | { kind: "profile"; profile: ProfiledJobInput }
+  | { kind: "unavailable"; reason: JobInputProfileUnavailableReason };
+
+/** The closed profile-fault codes the route may carry in a 400 body, so a body whose
+ * `error` is anything else degrades to `unknown` rather than passing free text
+ * through. */
+const PROFILE_ERROR_CODES: ReadonlyArray<JobInputProfileErrorCode> = [
+  "too_large",
+  "not_a_csv",
+  "parse_failed",
+];
+
+/** Read the closed profile-fault code from a 400 body, or `unknown` for any other
+ * shape (an empty body, or an unrecognized `error` value). */
+function profileErrorReasonOf(body: unknown): JobInputProfileUnavailableReason {
+  if (!isRecord(body)) return "unknown";
+  const code = body.error;
+  return PROFILE_ERROR_CODES.find((known) => known === code) ?? "unknown";
+}
 
 /** The console's rendezvous configuration read off `GET /api/jobs/rendezvous`: the
  * mounted directory a filedrop exchange runs against. `configured: false` (the env
@@ -50,6 +80,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+/** Decode a response body as JSON, or null when it is empty or not JSON (an error
+ * response may carry no body). */
+async function readJsonOrNull(response: Response): Promise<unknown> {
+  try {
+    return (await response.json()) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 function isStringArray(value: unknown): value is Array<string> {
   return (
     Array.isArray(value) && value.every((entry) => typeof entry === "string")
@@ -60,8 +100,11 @@ function isStringArray(value: unknown): value is Array<string> {
  * a bad body degrades to the error state rather than rendering a partial list. */
 function jobInputListingOf(body: unknown): JobInputListing | null {
   if (!isRecord(body)) return null;
-  const { configured, files } = body;
+  const { configured, readable, files } = body;
   if (typeof configured !== "boolean") return null;
+  // Absent `readable` reads as readable: true -- the non-alarming direction, so an
+  // older/partial body shows its files rather than a false "unreadable mount".
+  if (readable !== undefined && typeof readable !== "boolean") return null;
   if (!Array.isArray(files)) return null;
   const parsed: JobInputListing["files"] = [];
   for (const entry of files) {
@@ -74,7 +117,7 @@ function jobInputListingOf(body: unknown): JobInputListing | null {
       return null;
     parsed.push({ name, sizeBytes, modifiedAt });
   }
-  return { configured, files: parsed };
+  return { configured, readable: readable ?? true, files: parsed };
 }
 
 /** Validate a profile response body, returning null when any required field is
@@ -132,7 +175,10 @@ export async function fetchJobInputs(
   }
 }
 
-/** Profile one mounted input file by its admissible name. */
+/** Profile one mounted input file by its admissible name. A 404 is `not_found` (the
+ * file is gone since the listing); a 400 carries a closed profile-fault code the
+ * picker names; anything else (another non-2xx, a malformed body, a network error) is
+ * `unknown`. */
 export async function fetchJobInputProfile(
   name: string,
   fetchImpl: typeof fetch = fetch,
@@ -142,37 +188,78 @@ export async function fetchJobInputProfile(
       `/api/jobs/inputs/profile?name=${encodeURIComponent(name)}`,
       { method: "GET" },
     );
-    if (!response.ok) return { kind: "unavailable" };
+    if (!response.ok) {
+      if (response.status === 404)
+        return { kind: "unavailable", reason: "not_found" };
+      if (response.status === 400)
+        return {
+          kind: "unavailable",
+          reason: profileErrorReasonOf(await readJsonOrNull(response)),
+        };
+      return { kind: "unavailable", reason: "unknown" };
+    }
     const body: unknown = await response.json();
     const profile = jobInputProfileOf(body);
     return profile === null
-      ? { kind: "unavailable" }
+      ? { kind: "unavailable", reason: "unknown" }
       : { kind: "profile", profile };
   } catch {
-    return { kind: "unavailable" };
+    return { kind: "unavailable", reason: "unknown" };
   }
 }
 
-/** Read the console's rendezvous configuration. Fail-safe toward "unavailable": a
- * non-2xx, a network error, or a malformed body resolves to `{ configured: false }`,
- * so the filedrop transport is offered only when the appliance confirms a mount. */
-export async function fetchJobRendezvous(
-  fetchImpl: typeof fetch = fetch,
-): Promise<JobRendezvousConfig> {
+/** The default number of rendezvous-probe attempts and the delay between them. A
+ * failed probe retries in-page rather than leaving the filedrop transport disabled
+ * until a full page reload; a definitive answer (a clean 200) never retries. */
+export const RENDEZVOUS_PROBE_ATTEMPTS = 3;
+const RENDEZVOUS_PROBE_RETRY_MS = 400;
+
+/** One rendezvous probe: the config on a definitive answer, or null when the probe
+ * itself failed (a non-2xx, a network error, or a malformed body) and is worth
+ * retrying. A clean 200 -- whether configured or not -- is definitive. */
+async function probeJobRendezvous(
+  fetchImpl: typeof fetch,
+): Promise<JobRendezvousConfig | null> {
   try {
     const response = await fetchImpl("/api/jobs/rendezvous", { method: "GET" });
-    if (!response.ok) return { configured: false };
+    if (!response.ok) return null;
     const body: unknown = await response.json();
-    if (!isRecord(body) || typeof body.configured !== "boolean")
-      return { configured: false };
-    const path = body.path;
+    if (!isRecord(body) || typeof body.configured !== "boolean") return null;
     if (!body.configured) return { configured: false };
+    const path = body.path;
     if (typeof path !== "string" || path.length === 0)
       return { configured: false };
     return { configured: true, path };
   } catch {
-    return { configured: false };
+    return null;
   }
+}
+
+/**
+ * Read the console's rendezvous configuration, retrying a failed probe in-page. A
+ * transient probe failure (a non-2xx, a network error, or a malformed body) retries
+ * up to `attempts` times before failing safe, so a momentary hiccup recovers without a
+ * page reload rather than silently disabling the filedrop transport for the session.
+ *
+ * Fail-safe toward "unavailable": once the attempts are spent the result is
+ * `{ configured: false }`, so filedrop is offered only when the appliance confirms a
+ * mount. A definitive `200` (configured or not) returns at once without retrying.
+ *
+ * `attempts` and `delay` are injectable so a test drives the retry deterministically
+ * without a real timer.
+ */
+export async function fetchJobRendezvous(
+  fetchImpl: typeof fetch = fetch,
+  attempts: number = RENDEZVOUS_PROBE_ATTEMPTS,
+  delay: (ms: number) => Promise<void> = (ms) =>
+    new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<JobRendezvousConfig> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const result = await probeJobRendezvous(fetchImpl);
+    if (result !== null) return result;
+    if (attempt < attempts - 1) await delay(RENDEZVOUS_PROBE_RETRY_MS);
+  }
+  return { configured: false };
 }
 
 /** Validate a coverage response body's `rates` into the coverage array, or null on
@@ -211,18 +298,33 @@ function coverageRatesOf(body: unknown): Array<FieldValueCoverage> | null {
 }
 
 /**
- * Sweep per-field coverage for a mounted file under `standardization`. Resolves the
- * coverage array on a clean sweep; resolves null on ANY non-2xx (a schema/not-found
- * response, or a transient server error) or a rejected fetch (offline, abort), so
- * the caller can treat it like a superseded response rather than surfacing a generic
- * error.
+ * The outcome of a coverage sweep, split so the caller settles a deterministic
+ * failure but holds a transient one:
+ * - `rates`: a clean sweep.
+ * - `unavailable`: a deterministic failure (a `4xx` other than `429`, or a malformed
+ *   body) -- the same input will not succeed on retry, so the readout should settle.
+ * - `transient`: a retryable failure (`429`, a `5xx`, or a network error) -- a later
+ *   sweep may recover, so the readout should stay pending.
+ * - `aborted`: the sweep was aborted through its signal (superseded or disposed).
+ */
+export type CoverageSweepOutcome =
+  | { kind: "rates"; rates: Array<FieldValueCoverage> }
+  | { kind: "unavailable" }
+  | { kind: "transient" }
+  | { kind: "aborted" };
+
+/**
+ * Sweep per-field coverage for a mounted file under `standardization`. Classifies the
+ * response so the caller can tell a deterministic failure (settle the readout) from a
+ * transient one (hold it pending) and from an abort (superseded). No error body rides
+ * back: only the outcome kind.
  */
 export async function postJobInputCoverage(
   reference: WorkInputReference,
   standardization: Standardization,
   signal: AbortSignal,
   fetchImpl: typeof fetch = fetch,
-): Promise<Array<FieldValueCoverage> | null> {
+): Promise<CoverageSweepOutcome> {
   try {
     const response = await fetchImpl("/api/jobs/inputs/coverage", {
       method: "POST",
@@ -233,10 +335,18 @@ export async function postJobInputCoverage(
       }),
       signal,
     });
-    if (!response.ok) return null;
-    const body: unknown = await response.json();
-    return coverageRatesOf(body);
+    if (response.ok) {
+      const rates = coverageRatesOf(await readJsonOrNull(response));
+      return rates === null
+        ? { kind: "unavailable" }
+        : { kind: "rates", rates };
+    }
+    if (response.status === 429 || response.status >= 500)
+      return { kind: "transient" };
+    return { kind: "unavailable" };
   } catch {
-    return null;
+    // A signal abort and a genuine network failure both reject here. An abort is a
+    // supersede (drop it); a network failure is retryable (hold pending).
+    return signal.aborted ? { kind: "aborted" } : { kind: "transient" };
   }
 }

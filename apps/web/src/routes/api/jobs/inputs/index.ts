@@ -9,9 +9,11 @@ import { jobJsonResponse } from "@jobs/gate";
  * (name, size, modified time). Shares `gateJobRoute` (404 when the API is disabled,
  * 401 on a bad bearer, no-store, no CORS).
  *
- * The body is `{ configured, files }`. When `JOB_INPUT_DIR` is unset the listing is
- * `configured: false` with an empty list, so the console renders its no-directory
- * state rather than a mysteriously empty list.
+ * The body is `{ configured, readable, files }`. When `JOB_INPUT_DIR` is unset the
+ * listing is `configured: false` with an empty list, so the console renders its
+ * no-directory state; a configured-but-unreadable mount is `readable: false` with an
+ * empty list, distinct from an empty-but-readable directory, so the console tells the
+ * operator to check the mount rather than to place a file that may already be there.
  */
 export const Route = createFileRoute("/api/jobs/inputs/")({
   server: {

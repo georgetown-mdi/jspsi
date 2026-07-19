@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef } from "react";
 
 import { Alert, VisuallyHidden } from "@mantine/core";
-import { IconAlertTriangle } from "@tabler/icons-react";
+import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
 
 import { SEMANTIC_TYPE_LABELS } from "@psi/metadataEditing";
 import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
+import {
+  COVERAGE_UNAVAILABLE_MESSAGE,
+  FieldCoverage,
+} from "@components/FieldCoverage";
 import { CleaningErrorBoundary } from "@components/CleaningErrorBoundary";
-import { FieldCoverage } from "@components/FieldCoverage";
 import { StandardizationCards } from "@components/StandardizationCards";
 
 import styles from "./bench.module.css";
@@ -42,6 +45,7 @@ export function AcceptorCleaningStep({
   columnSamples,
   rates,
   ratesPending,
+  coverageUnavailable,
   deadKeyCount,
   cleaningResetKey,
   coveragePendingLabel,
@@ -61,6 +65,9 @@ export function AcceptorCleaningStep({
   /** Full-CSV per-field coverage, or null before the first sweep settles. */
   rates: ReadonlyMap<string, FieldValueCoverage> | null;
   ratesPending: boolean;
+  /** Whether the last sweep failed for good (a deterministic coverage failure), so the
+   * step shows an explicit "coverage unavailable" notice rather than a blank readout. */
+  coverageUnavailable: boolean;
   /** The count of self-defeating adopted keys, for the dead-key advisory. */
   deadKeyCount: number;
   /** A signature of each field's input binding, so a remap or reset auto-recovers
@@ -100,8 +107,9 @@ export function AcceptorCleaningStep({
     }
     return [...labels];
   }, [rates, standardization, fieldByName]);
-  const coverageAnnouncement =
-    silentEmptyLabels.length === 0
+  const coverageAnnouncement = coverageUnavailable
+    ? COVERAGE_UNAVAILABLE_MESSAGE
+    : silentEmptyLabels.length === 0
       ? ""
       : `Coverage warning: ${silentEmptyLabels.join(", ")} ${
           silentEmptyLabels.length === 1 ? "produces" : "produce"
@@ -142,6 +150,18 @@ export function AcceptorCleaningStep({
           {deadKeyCount === 1 ? "A key" : "Some keys"} produced no usable rows
           from your file after cleaning. The key came with the invitation, so
           you cannot edit it here - ask your partner for a corrected invitation.
+        </Alert>
+      )}
+
+      {coverageUnavailable && (
+        <Alert
+          role="note"
+          color="gray"
+          icon={<IconAlertCircle aria-hidden />}
+          title="Could not check coverage"
+          mb="md"
+        >
+          {COVERAGE_UNAVAILABLE_MESSAGE}
         </Alert>
       )}
 

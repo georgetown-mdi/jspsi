@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   fetchJobInputProfile,
   fetchJobInputs,
+  fetchJobRendezvous,
   postJobInputCoverage,
 } from "@psi/workInputClient";
 import { consoleCoverageProvider } from "@components/useNonEmptyRates";
@@ -18,6 +19,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 const LISTING = {
   configured: true,
+  readable: true,
   files: [
     { name: "clients.csv", sizeBytes: 4096, modifiedAt: 1_700_000_000_000 },
   ],
@@ -56,6 +58,38 @@ describe("fetchJobInputs", () => {
     expect(
       await fetchJobInputs(() =>
         Promise.resolve(new Response(null, { status: 500 })),
+      ),
+    ).toEqual({ kind: "error" });
+  });
+
+  test("carries the unreadable-mount state through", async () => {
+    const result = await fetchJobInputs(() =>
+      Promise.resolve(
+        jsonResponse({ configured: true, readable: false, files: [] }),
+      ),
+    );
+    expect(result).toEqual({
+      kind: "listing",
+      listing: { configured: true, readable: false, files: [] },
+    });
+  });
+
+  test("defaults an absent readable to true (non-alarming direction)", async () => {
+    const result = await fetchJobInputs(() =>
+      Promise.resolve(jsonResponse({ configured: true, files: [] })),
+    );
+    expect(result).toEqual({
+      kind: "listing",
+      listing: { configured: true, readable: true, files: [] },
+    });
+  });
+
+  test("rejects a non-boolean readable as a malformed body", async () => {
+    expect(
+      await fetchJobInputs(() =>
+        Promise.resolve(
+          jsonResponse({ configured: true, readable: "no", files: [] }),
+        ),
       ),
     ).toEqual({ kind: "error" });
   });
@@ -128,16 +162,46 @@ describe("fetchJobInputProfile", () => {
         await fetchJobInputProfile("x", () =>
           Promise.resolve(jsonResponse(bad)),
         ),
-      ).toEqual({ kind: "unavailable" });
+      ).toEqual({ kind: "unavailable", reason: "unknown" });
     }
   });
 
-  test("maps a non-2xx to unavailable", async () => {
+  test("maps a 404 to the not_found reason", async () => {
     expect(
       await fetchJobInputProfile("x", () =>
         Promise.resolve(new Response(null, { status: 404 })),
       ),
-    ).toEqual({ kind: "unavailable" });
+    ).toEqual({ kind: "unavailable", reason: "not_found" });
+  });
+
+  test("reads each closed profile-fault code off a 400 body", async () => {
+    for (const reason of ["too_large", "not_a_csv", "parse_failed"] as const) {
+      expect(
+        await fetchJobInputProfile("x", () =>
+          Promise.resolve(jsonResponse({ error: reason }, 400)),
+        ),
+      ).toEqual({ kind: "unavailable", reason });
+    }
+  });
+
+  test("degrades an unrecognized or bodiless 400 to unknown", async () => {
+    for (const response of [
+      jsonResponse({ error: "surprise" }, 400),
+      jsonResponse({}, 400),
+      new Response(null, { status: 400 }),
+    ]) {
+      expect(
+        await fetchJobInputProfile("x", () => Promise.resolve(response)),
+      ).toEqual({ kind: "unavailable", reason: "unknown" });
+    }
+  });
+
+  test("maps another non-2xx to unknown", async () => {
+    expect(
+      await fetchJobInputProfile("x", () =>
+        Promise.resolve(new Response(null, { status: 500 })),
+      ),
+    ).toEqual({ kind: "unavailable", reason: "unknown" });
   });
 });
 
@@ -161,7 +225,7 @@ describe("postJobInputCoverage", () => {
       controller.signal,
       fetchImpl,
     );
-    expect(result).toEqual(rates);
+    expect(result).toEqual({ kind: "rates", rates });
     const [, init] = fetchImpl.mock.calls[0] as unknown as [
       string,
       RequestInit,
@@ -172,32 +236,56 @@ describe("postJobInputCoverage", () => {
     });
   });
 
-  test("returns null on any non-2xx", async () => {
-    for (const status of [400, 413, 429, 500]) {
+  test("classifies a deterministic non-2xx as unavailable", async () => {
+    for (const status of [400, 404, 413]) {
       const result = await postJobInputCoverage(
         REFERENCE,
         STANDARDIZATION,
         new AbortController().signal,
         () => Promise.resolve(new Response(null, { status })),
       );
-      expect(result).toBeNull();
+      expect(result).toEqual({ kind: "unavailable" });
     }
   });
 
-  test("resolves null when the fetch rejects (offline / abort)", async () => {
-    const result = await postJobInputCoverage(
-      REFERENCE,
-      STANDARDIZATION,
-      new AbortController().signal,
-      () => Promise.reject(new Error("network down")),
-    );
-    expect(result).toBeNull();
+  test("classifies a 429 or 5xx as transient", async () => {
+    for (const status of [429, 500, 503]) {
+      const result = await postJobInputCoverage(
+        REFERENCE,
+        STANDARDIZATION,
+        new AbortController().signal,
+        () => Promise.resolve(new Response(null, { status })),
+      );
+      expect(result).toEqual({ kind: "transient" });
+    }
+  });
+
+  test("classifies a network reject as transient, an aborted one as aborted", async () => {
+    expect(
+      await postJobInputCoverage(
+        REFERENCE,
+        STANDARDIZATION,
+        new AbortController().signal,
+        () => Promise.reject(new Error("network down")),
+      ),
+    ).toEqual({ kind: "transient" });
+
+    const aborted = new AbortController();
+    aborted.abort();
+    expect(
+      await postJobInputCoverage(
+        REFERENCE,
+        STANDARDIZATION,
+        aborted.signal,
+        () => Promise.reject(new DOMException("aborted", "AbortError")),
+      ),
+    ).toEqual({ kind: "aborted" });
   });
 
   test("rejects a body whose entry has a malformed numeric field", async () => {
     // A NaN/undefined numeric that reached the silent-empty gate would fail it OPEN
-    // for that field, so a malformed entry degrades the whole body to the error
-    // state (null) rather than reporting a false coverage.
+    // for that field, so a malformed entry degrades the whole body to the unavailable
+    // state rather than reporting a false coverage.
     for (const bad of [
       { output: "name", input: "first_name", produced: 2, total: 2 },
       { output: "name", input: "first_name", produced: "2", total: 2, rate: 1 },
@@ -224,7 +312,7 @@ describe("postJobInputCoverage", () => {
         new AbortController().signal,
         () => Promise.resolve(jsonResponse({ rates: [bad] })),
       );
-      expect(result).toBeNull();
+      expect(result).toEqual({ kind: "unavailable" });
     }
   });
 
@@ -248,16 +336,76 @@ describe("postJobInputCoverage", () => {
           }),
         ),
     );
-    expect(result).toEqual([
-      {
-        output: "name",
-        input: "first_name",
-        produced: 2,
-        total: 2,
-        rate: 1,
-        unavailable: false,
-      },
-    ]);
+    expect(result).toEqual({
+      kind: "rates",
+      rates: [
+        {
+          output: "name",
+          input: "first_name",
+          produced: 2,
+          total: 2,
+          rate: 1,
+          unavailable: false,
+        },
+      ],
+    });
+  });
+});
+
+describe("fetchJobRendezvous", () => {
+  const noDelay = () => Promise.resolve();
+
+  test("returns a configured mount from a clean 200 without retrying", async () => {
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(jsonResponse({ configured: true, path: "/mnt/rvz" })),
+    );
+    expect(await fetchJobRendezvous(fetchImpl, 3, noDelay)).toEqual({
+      configured: true,
+      path: "/mnt/rvz",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  test("treats a clean 200 unconfigured as definitive (no retry)", async () => {
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(jsonResponse({ configured: false })),
+    );
+    expect(await fetchJobRendezvous(fetchImpl, 3, noDelay)).toEqual({
+      configured: false,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  test("retries a failed probe in-page, then fails safe to unconfigured", async () => {
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(new Response(null, { status: 503 })),
+    );
+    expect(await fetchJobRendezvous(fetchImpl, 3, noDelay)).toEqual({
+      configured: false,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  test("recovers when a later attempt succeeds", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(
+        jsonResponse({ configured: true, path: "/mnt/rvz" }),
+      );
+    expect(await fetchJobRendezvous(fetchImpl, 3, noDelay)).toEqual({
+      configured: true,
+      path: "/mnt/rvz",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  test("retries a rejected fetch as well", async () => {
+    const fetchImpl = vi.fn(() => Promise.reject(new Error("offline")));
+    expect(await fetchJobRendezvous(fetchImpl, 2, noDelay)).toEqual({
+      configured: false,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -293,12 +441,43 @@ describe("consoleCoverageProvider", () => {
     provider.dispose();
   });
 
-  test("treats a 429 like a superseded response: the compute never settles", async () => {
+  test("treats a transient 429 like a superseded response: the compute never settles", async () => {
     vi.stubGlobal("fetch", () =>
       Promise.resolve(new Response(null, { status: 429 })),
     );
     const provider = consoleCoverageProvider(REFERENCE);
     expect(await race(provider.compute(STANDARDIZATION), 50)).toBe("pending");
     provider.dispose();
+  });
+
+  test("settles a deterministic failure by rejecting rather than hanging", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve(new Response(null, { status: 400 })),
+    );
+    const provider = consoleCoverageProvider(REFERENCE);
+    await expect(provider.compute(STANDARDIZATION)).rejects.toThrow();
+    provider.dispose();
+  });
+
+  test("aborts the previous in-flight sweep when a new compute starts", () => {
+    // Each fetch resolves only after its own signal aborts (so a live sweep never
+    // settles on its own), letting the test observe that starting a second compute
+    // aborts the first's signal.
+    const signals: Array<AbortSignal> = [];
+    vi.stubGlobal("fetch", (_url: string, init: RequestInit) => {
+      const signal = init.signal as AbortSignal;
+      signals.push(signal);
+      return new Promise<Response>(() => {
+        /* never settles on its own */
+      });
+    });
+    const provider = consoleCoverageProvider(REFERENCE);
+    void provider.compute(STANDARDIZATION);
+    void provider.compute(STANDARDIZATION);
+    expect(signals).toHaveLength(2);
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
+    provider.dispose();
+    expect(signals[1].aborted).toBe(true);
   });
 });

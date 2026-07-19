@@ -344,7 +344,11 @@ export function InviterBench() {
   // to the bench so the fact and the create gate render regardless of the active
   // section (the AcceptorBench lift). The hook must run every render, so it takes
   // stable empty inputs until a file is acquired.
-  const { rates, pending: ratesPending } = useNonEmptyRates(
+  const {
+    rates,
+    pending: ratesPending,
+    unavailable: ratesUnavailable,
+  } = useNonEmptyRates(
     coverageInput,
     editor?.draft.standardization ?? EMPTY_STANDARDIZATION,
     benchCoverageProvider,
@@ -1142,6 +1146,7 @@ export function InviterBench() {
               expertMode={expertMode}
               rates={rates}
               pending={ratesPending}
+              coverageUnavailable={ratesUnavailable}
               onFieldSteps={(output, fieldSteps) =>
                 applyEditor(editorWithFieldSteps(editor, output, fieldSteps))
               }

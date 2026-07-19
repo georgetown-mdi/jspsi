@@ -18,6 +18,13 @@ export const CONSOLE_COVERAGE_PENDING_LABEL =
   "Checking how many of your rows produce a value. The appliance reads the " +
   "whole file, so this can take a while on a large file.";
 
+/** The explicit "coverage unavailable" copy: a deterministic coverage failure (or a
+ * worker error) settled the sweep without a result, so the host says the check could
+ * not run rather than hanging on the pending placeholder or going blank. */
+export const COVERAGE_UNAVAILABLE_MESSAGE =
+  "We could not check how many of your rows produce a value. Your cleaning " +
+  "steps still apply; this check just did not run.";
+
 /** Format the share of rows that produce a key. The ends are guarded so the percent
  * never overstates the extremes: a non-zero rate that rounds to 0% shows "<1%"
  * (never a "0%" that reads like the silent-empty alarm), and a sub-100% rate that

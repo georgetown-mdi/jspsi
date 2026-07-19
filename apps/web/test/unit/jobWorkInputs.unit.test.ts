@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -5,6 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
+  CSV_LINE_BYTE_CEILING,
   MAX_TRANSFORM_PATTERN_LENGTH,
   columnValues,
   inferDateFormat,
@@ -12,7 +14,9 @@ import {
 } from "@psilink/core";
 
 import {
+  JobInputCoverageAbortedError,
   JobInputNotFoundError,
+  JobInputProfileError,
   coverageJobInput,
   coverageRequestSchema,
   isAdmissibleInputName,
@@ -78,7 +82,11 @@ describe("useJobInputDir", () => {
 
 describe("listJobInputs", () => {
   test("reports the unconfigured state for an undefined directory", () => {
-    expect(listJobInputs(undefined)).toEqual({ configured: false, files: [] });
+    expect(listJobInputs(undefined)).toEqual({
+      configured: false,
+      readable: true,
+      files: [],
+    });
   });
 
   test("admits regular files with admissible names, sorted by name", () => {
@@ -96,10 +104,21 @@ describe("listJobInputs", () => {
     }
   });
 
-  test("returns an empty list for a directory that cannot be read", () => {
+  test("reports the unreadable state for a directory that cannot be read", () => {
+    // A configured-but-unreadable mount is distinct from an empty one: readable is
+    // false, so the operator is told to check the mount rather than to place a file.
     expect(
       listJobInputs(path.join(os.tmpdir(), "psilink-missing-xyz")),
-    ).toEqual({ configured: true, files: [] });
+    ).toEqual({ configured: true, readable: false, files: [] });
+  });
+
+  test("reports readable for an empty but present directory", () => {
+    const dir = tempDir("input");
+    expect(listJobInputs(dir)).toEqual({
+      configured: true,
+      readable: true,
+      files: [],
+    });
   });
 
   test("lists a symlink to a regular file (statSync follows the link)", () => {
@@ -207,6 +226,49 @@ describe("profileJobInput", () => {
       JobInputNotFoundError,
     );
   });
+
+  test("classifies an empty file as not_a_csv", async () => {
+    const dir = tempDir("input");
+    fs.writeFileSync(path.join(dir, "empty.csv"), "");
+    await expect(profileJobInput(dir, "empty.csv")).rejects.toMatchObject({
+      code: "not_a_csv",
+    });
+  });
+
+  test("classifies a single-line ceiling trip as too_large", async () => {
+    // A header line with no terminator past the CSV single-line byte ceiling trips
+    // the core guard, which the profile pass maps to the too_large code.
+    const dir = tempDir("input");
+    fs.writeFileSync(
+      path.join(dir, "huge.csv"),
+      "a".repeat(CSV_LINE_BYTE_CEILING + 8),
+    );
+    await expect(profileJobInput(dir, "huge.csv")).rejects.toMatchObject({
+      code: "too_large",
+    });
+  });
+
+  test("classifies a mid-read fault as parse_failed without leaking the error", async () => {
+    // Simulate a read fault whose message embeds the mounted path and cell bytes; the
+    // classified error must carry only the code, never that message.
+    const dir = tempDir("input");
+    writeFixture(dir);
+    const stream = new Readable({ read() {} });
+    vi.spyOn(fs, "createReadStream").mockReturnValue(
+      stream as unknown as fs.ReadStream,
+    );
+    const promise = profileJobInput(dir, "input.csv");
+    // Let the parser attach its stream listeners before the read faults, so the error
+    // flows through the parser rather than surfacing as an uncaught 'error'.
+    await new Promise((resolve) => setImmediate(resolve));
+    const leak = `${dir}/input.csv: EIO 111223333`;
+    stream.destroy(new Error(leak));
+    const error = await promise.catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(JobInputProfileError);
+    expect((error as JobInputProfileError).code).toBe("parse_failed");
+    expect((error as JobInputProfileError).message).not.toContain(dir);
+    expect((error as JobInputProfileError).message).not.toContain("111223333");
+  });
 });
 
 describe("coverageJobInput", () => {
@@ -231,6 +293,32 @@ describe("coverageJobInput", () => {
     await expect(
       coverageJobInput(dir, "missing.csv", standardization),
     ).rejects.toBeInstanceOf(JobInputNotFoundError);
+  });
+
+  test("aborts before reading when the signal is already aborted", async () => {
+    const dir = tempDir("input");
+    writeFixture(dir);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      coverageJobInput(dir, "input.csv", standardization, controller.signal),
+    ).rejects.toBeInstanceOf(JobInputCoverageAbortedError);
+  });
+
+  test("stops the pass when the signal aborts, rejecting with the aborted error", async () => {
+    // The abort listener is registered synchronously before the stream is read, so an
+    // abort issued right after the call destroys the stream before it scans the file.
+    const dir = tempDir("input");
+    writeFixture(dir);
+    const controller = new AbortController();
+    const promise = coverageJobInput(
+      dir,
+      "input.csv",
+      standardization,
+      controller.signal,
+    );
+    controller.abort();
+    await expect(promise).rejects.toBeInstanceOf(JobInputCoverageAbortedError);
   });
 });
 

@@ -84,6 +84,7 @@ interface StubOptions {
   listing?: unknown;
   profile?: unknown;
   profileStatus?: number;
+  profileErrorCode?: string;
   remotes?: unknown;
   rendezvous?: unknown;
   coverageStatus?: number;
@@ -128,9 +129,11 @@ function stubJobApi(options: StubOptions = {}): {
         return Promise.resolve(jsonResponse(listing));
       if (url.startsWith("/api/jobs/inputs/profile"))
         return Promise.resolve(
-          options.profileStatus !== undefined
-            ? new Response(null, { status: options.profileStatus })
-            : jsonResponse(profile),
+          options.profileErrorCode !== undefined
+            ? jsonResponse({ error: options.profileErrorCode }, 400)
+            : options.profileStatus !== undefined
+              ? new Response(null, { status: options.profileStatus })
+              : jsonResponse(profile),
         );
       if (url === "/api/jobs/inputs/coverage")
         return Promise.resolve(
@@ -261,6 +264,37 @@ describe("console inviter file picker states", () => {
     stubJobApi({ listing: { configured: true, files: [CLIENTS_FILE] } });
     mount(createElement(InviterBench));
     await expect.element(page.getByText("clients.csv")).toBeInTheDocument();
+  });
+
+  test("an unreadable mount is distinct from an empty directory", async () => {
+    stubJobApi({
+      listing: { configured: true, readable: false, files: [] },
+    });
+    mount(createElement(InviterBench));
+    // A mounted-but-unreadable directory tells the operator to check the mount, not
+    // to place a file that may already be there (the empty-directory copy).
+    await expect
+      .element(
+        page.getByText("Could not read the work directory", { exact: true }),
+      )
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByText("No usable files in the work directory", { exact: true })
+        .query(),
+    ).toBeNull();
+  });
+
+  test("a profile fault names its reason instead of a generic message", async () => {
+    stubJobApi({ profileErrorCode: "too_large" });
+    mount(createElement(InviterBench));
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await expect
+      .element(
+        page.getByText("This file is too large to read", { exact: true }),
+      )
+      .toBeInTheDocument();
   });
 });
 
