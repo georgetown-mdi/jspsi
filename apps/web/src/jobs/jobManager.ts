@@ -294,14 +294,14 @@ export class JobManager {
    * builds the workdir, writes the composed config, key, and input CSV under
    * fixed names, and spawns the CLI. Returns the new job's id.
    *
-   * Each channel latches its rendezvous BEFORE any filesystem work -- an sftp
-   * intent its named remote, a filedrop intent the single-holder filedrop latch
-   * -- so an unknown or busy target is rejected with nothing on disk. An
+   * Each channel resolves and latches its rendezvous BEFORE any filesystem work
+   * -- an sftp intent its named remote, a filedrop intent the single-holder
+   * filedrop latch over a configured rendezvous directory -- so an unknown, busy,
+   * or (for filedrop) unconfigured target is rejected with nothing on disk. An
    * `inputFile` intent likewise resolves its mounted path before the workdir
    * exists (mirroring the unknown-remote flow): a name that resolves to no regular
-   * file is rejected with nothing on disk. A filedrop intent also requires a
-   * configured rendezvous directory. The CLI reads the mounted file in place, so
-   * nothing is copied into the workdir.
+   * file is rejected with nothing on disk. The CLI reads the mounted file in
+   * place, so nothing is copied into the workdir.
    */
   async createJob(intent: JobExchangeIntent): Promise<string> {
     const id = generateJobId();
@@ -314,11 +314,8 @@ export class JobManager {
     this.creatingJobIds.add(id);
     let workdir: string | null = null;
     try {
-      // Resolve the rendezvous availability and the mounted input before creating
-      // the workdir, inside the try so a rejection releases any sftp latch and
-      // leaves nothing on disk.
-      if (intent.channel === "filedrop" && this.jobRendezvousDir === undefined)
-        throw new JobRendezvousUnavailableError();
+      // Resolve the mounted input before creating the workdir, inside the try so a
+      // rejection releases any latch and leaves nothing on disk.
       const mountedInputPath =
         intent.inputFile !== undefined
           ? this.resolveWorkInputPath(intent.inputFile)
@@ -392,12 +389,16 @@ export class JobManager {
   }
 
   /**
-   * Latch the filedrop rendezvous to the new job, rejecting a second concurrent
-   * filedrop job with {@link FiledropBusyError}. Records the holder id so only
-   * that job's own terminal path can release the latch. The filedrop mirror of
-   * {@link acquireSftpRemote}.
+   * Resolve the filedrop channel's availability and latch it to the new job, both
+   * before the latch is taken: an unconfigured rendezvous directory is
+   * {@link JobRendezvousUnavailableError} and a second concurrent filedrop job is
+   * {@link FiledropBusyError}. Records the holder id so only that job's own terminal
+   * path can release the latch. The filedrop mirror of {@link acquireSftpRemote},
+   * which likewise checks its remote before latching.
    */
   private acquireFiledrop(jobId: string): void {
+    if (this.jobRendezvousDir === undefined)
+      throw new JobRendezvousUnavailableError();
     if (this.filedropHolder !== null) throw new FiledropBusyError();
     this.filedropHolder = jobId;
   }

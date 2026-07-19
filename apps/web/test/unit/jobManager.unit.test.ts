@@ -735,6 +735,28 @@ describe("filedrop rendezvous facilitation", () => {
 });
 
 describe("filedrop single-holder busy latch", () => {
+  test("an unconfigured rendezvous is rejected before the latch is taken", () => {
+    const root = tempDataRoot("no-rvz-latch");
+    roots.push(root);
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      childEnv: { STUB_FD3_EVENTS: "[]" },
+    });
+    managers.push(manager);
+    const internals = manager as unknown as {
+      acquireFiledrop: (jobId: string) => void;
+      filedropHolder: string | null;
+    };
+    // The rendezvous-configured check lives inside acquireFiledrop and precedes
+    // the latch, matching acquireSftpRemote: a rejected acquire never records a
+    // holder, so nothing has to be released to undo it.
+    expect(() => internals.acquireFiledrop("job-1")).toThrow(
+      JobRendezvousUnavailableError,
+    );
+    expect(internals.filedropHolder).toBeNull();
+  });
+
   test("a running filedrop job is busy; a terminal state releases the latch", async () => {
     const manager = makeManager({ delayMs: 5000 });
     const firstId = await manager.createJob(validIntent());
