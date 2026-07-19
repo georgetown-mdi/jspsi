@@ -39,6 +39,7 @@ export function InviterExchangeSection({
   failure,
   warnings,
   partnerAcceptsByCli,
+  serverJob,
   onTryAgain,
   onStartOver,
 }: {
@@ -56,6 +57,11 @@ export function InviterExchangeSection({
    * (tokenFromInput), so the bare code adds nothing but a second secret to
    * leave on screen. */
   partnerAcceptsByCli: boolean;
+  /** Whether this run executes on the console appliance (a server-job run) rather
+   * than in this browser. On the appliance the CLI child conducts the exchange
+   * while the tab stays open, so the keep-open callout names the running exchange
+   * the tab is holding rather than a browser listener. */
+  serverJob: boolean;
   onTryAgain: () => void;
   onStartOver: () => void;
 }) {
@@ -168,15 +174,18 @@ export function InviterExchangeSection({
           </p>
         </>
       )}
-      {/* The "listening" claim is false the moment any failure lands (the
+      {/* The listening/running claim is false the moment any failure lands (the
           lifecycle tore down), so the callout outlives no failure -- not even
-          a retryable one. */}
+          a retryable one. On a server-job run the appliance's CLI child conducts
+          the exchange while this tab stays open, so closing or navigating away
+          stops the running exchange rather than cancelling a browser listener. */}
       {phase === "share" && failure === undefined && (
         <div className={styles.callout}>
           <p className={styles.calloutLead}>Keep this tab open.</p>
           <p className={styles.small}>
-            Your browser is listening for your partner. Closing the tab cancels
-            the invitation; reloading starts over.
+            {serverJob
+              ? "This appliance is running the exchange. Closing this tab or navigating away stops it before it finishes."
+              : "Your browser is listening for your partner. Closing the tab cancels the invitation; reloading starts over."}
           </p>
         </div>
       )}

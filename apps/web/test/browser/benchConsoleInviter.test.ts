@@ -65,13 +65,13 @@ const CLIENTS_PROFILE = {
   rowCount: 2,
   columns: ["client_id", "first_name", "last_name", "dob", "program_code"],
   dateInputFormat: "%m/%d/%Y",
-  columnSamples: {
-    client_id: ["1", "2"],
-    first_name: ["Ann", "Bo"],
-    last_name: ["Lee", "Ray"],
-    dob: ["01/02/1990", "03/04/1985"],
-    program_code: ["A", "B"],
-  },
+  columnSamples: [
+    { column: "client_id", values: ["1", "2"] },
+    { column: "first_name", values: ["Ann", "Bo"] },
+    { column: "last_name", values: ["Lee", "Ray"] },
+    { column: "dob", values: ["01/02/1990", "03/04/1985"] },
+    { column: "program_code", values: ["A", "B"] },
+  ],
 };
 
 interface CapturedRequest {
@@ -380,6 +380,19 @@ describe("console inviter mint and run", () => {
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Your invitation is ready");
 
+    // A server-job run: the keep-open callout names the appliance running the exchange
+    // (closing the tab stops it), never a browser listener.
+    await expect
+      .element(
+        page.getByText("This appliance is running the exchange", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    expect(
+      page.getByText("Your browser is listening for your partner").query(),
+    ).toBeNull();
+
     // The minted code carries the picked remote's locator, never inline content.
     await page.getByRole("button", { name: "Show full code" }).click();
     const encoded = (
@@ -588,7 +601,10 @@ describe("console inviter picker re-profile", () => {
     api.setProfile({
       ...CLIENTS_PROFILE,
       columns: ["client_id", "email"],
-      columnSamples: { client_id: ["1", "2"], email: ["a@x.gov", "b@x.gov"] },
+      columnSamples: [
+        { column: "client_id", values: ["1", "2"] },
+        { column: "email", values: ["a@x.gov", "b@x.gov"] },
+      ],
     });
     await page.getByRole("button", { name: "Re-profile clients.csv" }).click();
     await page.getByRole("button", { name: "Use this file" }).click();
@@ -604,11 +620,11 @@ describe("console inviter picker re-profile", () => {
       profile: {
         ...CLIENTS_PROFILE,
         columns: ["client_id", "", "dob"],
-        columnSamples: {
-          client_id: ["1", "2"],
-          "": ["x", "y"],
-          dob: ["01/02/1990", "03/04/1985"],
-        },
+        columnSamples: [
+          { column: "client_id", values: ["1", "2"] },
+          { column: "", values: ["x", "y"] },
+          { column: "dob", values: ["01/02/1990", "03/04/1985"] },
+        ],
       },
     });
     mount(createElement(InviterBench));

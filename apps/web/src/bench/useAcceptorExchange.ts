@@ -393,7 +393,9 @@ export function useAcceptorExchange({
           // on) keeps the full object. The user-facing alert is separately
           // sanitized in failureFor.
           whenDiagnostic(() => console.error(error));
-          setFailure(failureFor(category, error, jobInputSource, channel));
+          setFailure(
+            failureFor(category, error, jobInputSource, channel, "acceptor"),
+          );
           setRun((prev) => runWithFailure(prev));
         },
       });

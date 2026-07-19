@@ -23,9 +23,9 @@ import styles from "./bench.module.css";
 import type {
   JobInputProfileResult,
   JobInputsResult,
+  ProfiledJobInput,
   WorkInputReference,
 } from "@psi/workInputClient";
-import type { JobInputProfile } from "@jobs/workInputs";
 
 /** The listing settle copy for the aria-live status region. */
 function listingLiveMessage(listing: JobInputsResult | "loading"): string {
@@ -69,7 +69,7 @@ export function ServerFilePicker({
    * marked. */
   committed: WorkInputReference | undefined;
   /** Commit a profiled file to the bench -- the second stage's "Use this file". */
-  onUse: (profile: JobInputProfile) => void;
+  onUse: (profile: ProfiledJobInput) => void;
 }) {
   const [listing, setListing] = useState<JobInputsResult | "loading">(
     "loading",
@@ -116,7 +116,7 @@ export function ServerFilePicker({
     setProfile(undefined);
   }
 
-  function useProfiled(profiled: JobInputProfile) {
+  function useProfiled(profiled: ProfiledJobInput) {
     onUse(profiled);
     cancelSelection();
   }
@@ -259,7 +259,7 @@ function ListingView({
           title="No usable files in the work directory"
         >
           Place your input CSV in this appliance's mounted work directory, then
-          refresh. Directories, symbolic links, and dot-files are not listed.
+          refresh. Directories and dot-prefixed files are not listed.
         </Alert>
         {refreshButton}
       </Stack>
@@ -333,7 +333,7 @@ function ConfirmPanel({
 }: {
   name: string;
   profile: JobInputProfileResult | "loading" | undefined;
-  onUse: (profile: JobInputProfile) => void;
+  onUse: (profile: ProfiledJobInput) => void;
   onCancel: () => void;
   onRetry: () => void;
 }) {
@@ -342,7 +342,7 @@ function ConfirmPanel({
     if (profile.kind !== "profile") return [];
     return profile.profile.columns.map((column) => ({
       column,
-      values: profile.profile.columnSamples[column] ?? [],
+      values: profile.profile.columnSamples.get(column) ?? [],
     }));
   }, [profile]);
 

@@ -144,7 +144,18 @@ export function listJobInputs(
   return { configured: true, files };
 }
 
-/** The `GET /api/jobs/inputs/profile` response shape. */
+/** One column's preview samples on the wire: the column name paired with its first
+ * {@link PREVIEW_SAMPLE_SIZE} non-empty values. Carried as an array element -- never
+ * an object key -- so a column named an `Object.prototype` member (`__proto__`,
+ * `constructor`, `prototype`) is ordinary data rather than a prototype-setter hazard. */
+export interface ColumnSample {
+  column: string;
+  values: Array<string>;
+}
+
+/** The `GET /api/jobs/inputs/profile` response shape. `columnSamples` is an ordered
+ * array of per-column pairs, so a prototype-member column name rides the wire as
+ * plain data; the client validates it into a keyed map. */
 export interface JobInputProfile {
   name: string;
   sizeBytes: number;
@@ -152,7 +163,7 @@ export interface JobInputProfile {
   rowCount: number;
   columns: Array<string>;
   dateInputFormat?: string;
-  columnSamples: Record<string, Array<string>>;
+  columnSamples: Array<ColumnSample>;
 }
 
 /**
@@ -203,8 +214,10 @@ export async function profileJobInput(
   });
   const dateInputFormat =
     dobColumn !== undefined ? inferDateFormat(dobSample) : undefined;
-  const columnSamples: Record<string, Array<string>> = {};
-  for (const col of columns) columnSamples[col] = samples.get(col) ?? [];
+  const columnSamples: Array<ColumnSample> = columns.map((col) => ({
+    column: col,
+    values: samples.get(col) ?? [],
+  }));
   return {
     name,
     sizeBytes: stat.size,

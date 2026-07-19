@@ -113,13 +113,15 @@ import type {
   ConnectionEndpointRequest,
   GeneratedInvitation,
 } from "@psi/invitation";
+import type {
+  JobRendezvousConfig,
+  ProfiledJobInput,
+} from "@psi/workInputClient";
 import type { BenchCoverageInput } from "@components/useNonEmptyRates";
 import type { ColumnSamples } from "@psi/columnSamples";
 import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { IntakeAlert } from "./YourFileSection";
-import type { JobInputProfile } from "@jobs/workInputs";
 import type { JobInputSource } from "@psi/serverJobExchangeDriver";
-import type { JobRendezvousConfig } from "@psi/workInputClient";
 import type { ManageOfferChoices } from "./manageOfferModel";
 import type { ManageOfferStatus } from "./ManageExchangeOffer";
 import type { SavedExchange } from "./SaveExchangeSection";
@@ -203,7 +205,7 @@ export function InviterBench() {
   // format). It backs the mint (columns), the run (the mounted-file reference), the
   // coverage sweep, and the preview samples. Undefined on the hosted build, which
   // reads the file in the browser instead.
-  const [consoleSource, setConsoleSource] = useState<JobInputProfile>();
+  const [consoleSource, setConsoleSource] = useState<ProfiledJobInput>();
   const [sourceFile, setSourceFile] = useState<File>();
   // The File System Access handle a drop attached to the selected file, where the
   // platform yielded one; captured so a managed deposit can persist a reusable
@@ -331,8 +333,7 @@ export function InviterBench() {
   // profile on the console. Kept off `acquired.rawRows` on the console for the same
   // reason as the coverage input.
   const columnSamples = useMemo<ColumnSamples>(() => {
-    if (consoleSource !== undefined)
-      return new Map(Object.entries(consoleSource.columnSamples));
+    if (consoleSource !== undefined) return consoleSource.columnSamples;
     if (!isConsoleBuild() && acquired !== undefined)
       return columnSamplesFromRows(acquired.rawRows, acquired.columns);
     return EMPTY_COLUMN_SAMPLES;
@@ -445,14 +446,24 @@ export function InviterBench() {
     if (isSection(step)) return restoreSection(step);
   });
 
+  // A console server-job run is still executing on the appliance while its
+  // invitation is minted and the run has not settled; closing or navigating away
+  // stops it, so the guard stays armed through it.
+  const consoleExchangeRunning =
+    chosenRunMode === "server-job" &&
+    invitation !== undefined &&
+    outputs === undefined &&
+    failure === undefined;
+
   // The unload guard arms once a file is loaded and disarms once the exchange is
-  // finalized -- the invitation minted (the live run is listening) or the
-  // exchange file saved. In either finalized state, leaving costs nothing the
-  // operator has not already secured.
+  // finalized -- the invitation minted (a browser run is listening) or the
+  // exchange file saved -- unless a console server-job exchange is still running on
+  // the appliance, which keeps it armed until the run settles.
   useUnloadGuard({
     hasFile: acquired !== undefined,
     finalized: invitation !== undefined || savedExchange !== undefined,
     demoActive,
+    consoleExchangeRunning,
   });
 
   function goTo(next: Section) {
@@ -600,7 +611,7 @@ export function InviterBench() {
   // unmount the bench. Re-profiling the same committed file keeps the authored draft
   // when its columns are unchanged and only refreshes the profile-derived facts;
   // otherwise it reseeds from the profile.
-  function commitConsoleFile(profile: JobInputProfile) {
+  function commitConsoleFile(profile: ProfiledJobInput) {
     const emptyPositions = emptyColumnPositions(profile.columns);
     if (emptyPositions.length > 0) {
       discardRead(unnameableColumnsAlert(emptyPositions));
@@ -1218,6 +1229,7 @@ export function InviterBench() {
               failure={failure}
               warnings={warnings}
               partnerAcceptsByCli={isCliTransport(transport)}
+              serverJob={chosenRunMode === "server-job"}
               onTryAgain={tryAgain}
               onStartOver={startOver}
             />

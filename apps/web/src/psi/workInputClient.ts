@@ -24,10 +24,18 @@ export interface WorkInputReference {
 export type JobInputsResult =
   { kind: "listing"; listing: JobInputListing } | { kind: "error" };
 
+/** The validated console profile: the wire {@link JobInputProfile}'s fields with
+ * `columnSamples` rebuilt as a `Map` keyed by column name. A prototype-member column
+ * name (`__proto__`, `constructor`, `prototype`) is ordinary map data on this hop, so
+ * no read resolves to an inherited member and no write drives a prototype setter. */
+export type ProfiledJobInput = Omit<JobInputProfile, "columnSamples"> & {
+  columnSamples: Map<string, Array<string>>;
+};
+
 /** The `GET /api/jobs/inputs/profile` outcome: the profile, or unavailable (the
  * directory is unset, or the name resolves to no readable file). */
 export type JobInputProfileResult =
-  { kind: "profile"; profile: JobInputProfile } | { kind: "unavailable" };
+  { kind: "profile"; profile: ProfiledJobInput } | { kind: "unavailable" };
 
 /** The console's rendezvous configuration read off `GET /api/jobs/rendezvous`: the
  * mounted directory a filedrop exchange runs against. `configured: false` (the env
@@ -70,8 +78,12 @@ function jobInputListingOf(body: unknown): JobInputListing | null {
 }
 
 /** Validate a profile response body, returning null when any required field is
- * malformed. `columnSamples` is coerced to a `{ [column]: string[] }` map. */
-function jobInputProfileOf(body: unknown): JobInputProfile | null {
+ * malformed. `columnSamples` arrives as an ordered array of `{ column, values }`
+ * pairs and is validated into a `Map`, so a prototype-member column name stays plain
+ * data (a `{ [column]: values }` object would drive the prototype setter on write and
+ * resolve inherited members on read). A blank column name is admitted -- the bench
+ * raises its own unnamed-column alert -- and a repeated name keeps the last pair. */
+function jobInputProfileOf(body: unknown): ProfiledJobInput | null {
   if (!isRecord(body)) return null;
   const { name, sizeBytes, modifiedAt, rowCount, columns, columnSamples } =
     body;
@@ -82,11 +94,14 @@ function jobInputProfileOf(body: unknown): JobInputProfile | null {
     return null;
   if (typeof rowCount !== "number" || !Number.isInteger(rowCount)) return null;
   if (!isStringArray(columns)) return null;
-  if (!isRecord(columnSamples)) return null;
-  const samples: Record<string, Array<string>> = {};
-  for (const [column, values] of Object.entries(columnSamples)) {
+  if (!Array.isArray(columnSamples)) return null;
+  const samples = new Map<string, Array<string>>();
+  for (const entry of columnSamples) {
+    if (!isRecord(entry)) return null;
+    const { column, values } = entry;
+    if (typeof column !== "string") return null;
     if (!isStringArray(values)) return null;
-    samples[column] = values;
+    samples.set(column, values);
   }
   const dateInputFormat = body.dateInputFormat;
   if (dateInputFormat !== undefined && typeof dateInputFormat !== "string")

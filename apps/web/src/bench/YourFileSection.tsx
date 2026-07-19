@@ -14,10 +14,12 @@ import { ServerFilePicker } from "./ServerFilePicker";
 import { fileCardMeta } from "./inviterModel";
 import styles from "./bench.module.css";
 
+import type {
+  ProfiledJobInput,
+  WorkInputReference,
+} from "@psi/workInputClient";
 import type { AcquiredCsv } from "./inviterModel";
 import type { FileRejection } from "@mantine/dropzone";
-import type { JobInputProfile } from "@jobs/workInputs";
-import type { WorkInputReference } from "@psi/workInputClient";
 
 /** A titled alert for a failed or unusable read, focused when it appears so
  * the failure is announced without clearing the operator's input. */
@@ -65,7 +67,7 @@ export function YourFileSection({
   committed?: WorkInputReference;
   /** Commit a profiled console file to the bench (the picker's "Use this file");
    * unused off the console. */
-  onCommit?: (profile: JobInputProfile) => void;
+  onCommit?: (profile: ProfiledJobInput) => void;
   onContinue: () => void;
   /** Seed the synthetic sample into this exchange in place. Hosted build only -- the
    * console cannot read an in-browser file, so its sample affordance is download-only. */

@@ -23,14 +23,19 @@ const LISTING = {
   ],
 };
 
-const PROFILE = {
+// The wire profile: columnSamples ride as an ordered array of {column, values}
+// pairs, which the client validates into a Map.
+const PROFILE_WIRE = {
   name: "clients.csv",
   sizeBytes: 4096,
   modifiedAt: 1_700_000_000_000,
   rowCount: 2,
   columns: ["first_name", "dob"],
   dateInputFormat: "%m/%d/%Y",
-  columnSamples: { first_name: ["Ann"], dob: ["01/02/1990"] },
+  columnSamples: [
+    { column: "first_name", values: ["Ann"] },
+    { column: "dob", values: ["01/02/1990"] },
+  ],
 };
 
 const REFERENCE = {
@@ -69,13 +74,62 @@ describe("fetchJobInputs", () => {
 
 describe("fetchJobInputProfile", () => {
   test("returns the validated profile on a 200 and encodes the name", async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve(jsonResponse(PROFILE)));
+    const fetchImpl = vi.fn(() => Promise.resolve(jsonResponse(PROFILE_WIRE)));
     const result = await fetchJobInputProfile("a b.csv", fetchImpl);
-    expect(result).toEqual({ kind: "profile", profile: PROFILE });
+    expect(result.kind).toBe("profile");
+    if (result.kind !== "profile") throw new Error("expected a profile");
+    const { profile } = result;
+    expect(profile.name).toBe("clients.csv");
+    expect(profile.columns).toEqual(["first_name", "dob"]);
+    expect(profile.dateInputFormat).toBe("%m/%d/%Y");
+    expect(profile.columnSamples).toBeInstanceOf(Map);
+    expect(profile.columnSamples.get("first_name")).toEqual(["Ann"]);
+    expect(profile.columnSamples.get("dob")).toEqual(["01/02/1990"]);
     expect(fetchImpl).toHaveBeenCalledWith(
       "/api/jobs/inputs/profile?name=a%20b.csv",
       { method: "GET" },
     );
+  });
+
+  test("validates prototype-member column names into ordinary map data", async () => {
+    // A column named __proto__/constructor/prototype arrives as an array element, so
+    // the validator keys it into a Map with no prototype-setter write and no inherited
+    // member resolved on read.
+    const wire = {
+      ...PROFILE_WIRE,
+      columns: ["__proto__", "constructor", "prototype"],
+      columnSamples: [
+        { column: "__proto__", values: ["a", "b"] },
+        { column: "constructor", values: ["c"] },
+        { column: "prototype", values: ["d"] },
+      ],
+    };
+    const result = await fetchJobInputProfile("x", () =>
+      Promise.resolve(jsonResponse(wire)),
+    );
+    expect(result.kind).toBe("profile");
+    if (result.kind !== "profile") throw new Error("expected a profile");
+    const { columnSamples } = result.profile;
+    expect(columnSamples.get("__proto__")).toEqual(["a", "b"]);
+    expect(columnSamples.get("constructor")).toEqual(["c"]);
+    expect(columnSamples.get("prototype")).toEqual(["d"]);
+    // No pollution: a fresh object is unaffected.
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  test("rejects a columnSamples that is not an array of pairs", async () => {
+    for (const bad of [
+      { ...PROFILE_WIRE, columnSamples: { first_name: ["Ann"] } },
+      { ...PROFILE_WIRE, columnSamples: [{ column: "a", values: "Ann" }] },
+      { ...PROFILE_WIRE, columnSamples: [{ column: 1, values: ["Ann"] }] },
+      { ...PROFILE_WIRE, columnSamples: [{ values: ["Ann"] }] },
+    ]) {
+      expect(
+        await fetchJobInputProfile("x", () =>
+          Promise.resolve(jsonResponse(bad)),
+        ),
+      ).toEqual({ kind: "unavailable" });
+    }
   });
 
   test("maps a non-2xx to unavailable", async () => {

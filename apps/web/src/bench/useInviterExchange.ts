@@ -45,12 +45,12 @@ import type {
   ExchangeErrorCategory,
   GenerateOutput,
 } from "@psi/exchangeLifecycle";
+import type { ExchangeRun, ExchangeSeat } from "./exchangeRun";
 import type {
   JobInputSource,
   ServerJobExchangeTransport,
 } from "@psi/serverJobExchangeDriver";
 import type { ExchangeDriver } from "@psi/exchangeDriver";
-import type { ExchangeRun } from "./exchangeRun";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { RunOutputs } from "./runOutputs";
 import type { Transport } from "./inviterModel";
@@ -71,18 +71,25 @@ export function failureFor(
   error: unknown,
   inputSource?: JobInputSource,
   channel?: Transport,
+  seat: ExchangeSeat = "inviter",
 ): RunFailure {
   // A console job create rejected the mounted file: a 400 the driver categorized
   // `config`. The operator's terms are fine -- the file is the fault -- so the alert
   // names the file cause. On the sftp channel that same empty-bodied 400 is as likely
-  // a vanished picked remote, so the copy names both causes. The category's start-over
-  // route (back to Review & create, every input intact) carries the recovery.
+  // a vanished picked remote, so the copy names both causes. Each recovery names the
+  // control the seat's alert actually offers: the inviter's start-over reaches the
+  // file picker, while the acceptor's only recovery returns to its columns step
+  // (whose own Back link re-selects the file). The accept guard admits no sftp
+  // endpoint, so the sftp branch is the inviter's alone.
   if (
     category === "config" &&
     inputSource?.kind === "workFile" &&
     error instanceof JobApiRequestError &&
     error.status === 400
   ) {
+    const fileGone =
+      "The appliance could not use this file. It may have been removed " +
+      "since you selected it. ";
     return {
       category,
       title: "The appliance could not start this exchange",
@@ -91,8 +98,10 @@ export function failureFor(
           ? "The appliance could not use this file, or the selected SFTP " +
             "destination is no longer available. Start over and check the file " +
             "and destination."
-          : "The appliance could not use this file. It may have been removed " +
-            "since you selected it. Start over and select it again.",
+          : seat === "acceptor"
+            ? fileGone +
+              "Go back to your columns, then choose a different file."
+            : fileGone + "Start over and select it again.",
     };
   }
   if (category === "output") {
@@ -159,12 +168,21 @@ export function failureFor(
   // stays in the dev-gated console.error for diagnosis. A mid-run drop lands
   // here too, after agreed payload columns may already have flowed to the
   // authenticated partner, so the copy must not claim the data stayed local.
+  //
+  // A filedrop run never opens a connection: its two halves rendezvous through a
+  // synced shared folder, so a temporary-connection message misdirects. Name the
+  // shared-state cause instead, built only from operator-known facts (never the
+  // partner's path or raw fs error text). Both messages keep the retry affordance.
   return {
     category,
     title: "Exchange failed",
     message:
-      "The exchange could not be completed - usually a temporary " +
-      "connection problem rather than an issue with your data.",
+      channel === "filedrop"
+        ? "The partner's half never appeared in the shared folder. Confirm you " +
+          "both point at the same synced directory and that it is syncing, then " +
+          "try again."
+        : "The exchange could not be completed - usually a temporary " +
+          "connection problem rather than an issue with your data.",
   };
 }
 

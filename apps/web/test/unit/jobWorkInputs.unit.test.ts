@@ -101,6 +101,21 @@ describe("listJobInputs", () => {
       listJobInputs(path.join(os.tmpdir(), "psilink-missing-xyz")),
     ).toEqual({ configured: true, files: [] });
   });
+
+  test("lists a symlink to a regular file (statSync follows the link)", () => {
+    // The listing stats through symlinks, so an operator who symlinks a PII CSV into
+    // the mounted directory rather than copying it sees the linked file listed. This
+    // is the deliberate design: no lstat exclusion enforces a confinement the mount
+    // model disclaims.
+    const dir = tempDir("input");
+    const target = tempDir("target");
+    const realFile = path.join(target, "real.csv");
+    fs.writeFileSync(realFile, FIXTURE_CSV);
+    fs.symlinkSync(realFile, path.join(dir, "linked.csv"));
+    const listing = listJobInputs(dir);
+    expect(listing.files.map((file) => file.name)).toEqual(["linked.csv"]);
+    expect(listing.files[0].sizeBytes).toBeGreaterThan(0);
+  });
 });
 
 describe("profileJobInput", () => {
@@ -118,19 +133,54 @@ describe("profileJobInput", () => {
     ]);
     expect(profile.dateInputFormat).toBe("YYYY-MM-DD");
 
-    // The samples equal sampleInputValues over the parsed rows: the first
-    // PREVIEW_SAMPLE_SIZE non-empty values per column in row order.
+    // The samples ride the wire as an ordered array of {column, values} pairs, one
+    // per column in the profile's column order, each equal to sampleInputValues over
+    // the parsed rows: the first PREVIEW_SAMPLE_SIZE non-empty values in row order.
     const { data } = await loadCSVFile(
       fs.createReadStream(path.join(dir, "input.csv")),
     );
     const rows = data;
-    for (const column of profile.columns)
-      expect(profile.columnSamples[column]).toEqual(
-        sampleInputValues(rows, column),
-      );
-    expect(profile.columnSamples.first_name.length).toBeLessThanOrEqual(
-      PREVIEW_SAMPLE_SIZE,
+    expect(profile.columnSamples.map((sample) => sample.column)).toEqual(
+      profile.columns,
     );
+    for (const { column, values } of profile.columnSamples)
+      expect(values).toEqual(sampleInputValues(rows, column));
+    const firstName = profile.columnSamples.find(
+      (sample) => sample.column === "first_name",
+    );
+    expect(firstName?.values.length).toBeLessThanOrEqual(PREVIEW_SAMPLE_SIZE);
+  });
+
+  test("prototype-member column names are ordinary sample data", async () => {
+    // A column literally named __proto__/constructor/prototype must ride the profile
+    // as plain data, never a key that drives a prototype setter or resolves to an
+    // inherited member. The samples are an array of pairs, so every such column is
+    // present with its own values and none pollutes the profile.
+    const dir = tempDir("input");
+    const csv = [
+      "__proto__,constructor,prototype",
+      "polluted,ctor,proto",
+      "second,ctor2,proto2",
+    ].join("\n");
+    fs.writeFileSync(path.join(dir, "proto.csv"), csv);
+    const profile = await profileJobInput(dir, "proto.csv");
+    expect(profile.columns).toEqual(["__proto__", "constructor", "prototype"]);
+    expect(profile.columnSamples.map((sample) => sample.column)).toEqual([
+      "__proto__",
+      "constructor",
+      "prototype",
+    ]);
+    const byColumn = (name: string) =>
+      profile.columnSamples.find((sample) => sample.column === name)?.values;
+    // constructor/prototype carry ordinary own-property values; __proto__ is a
+    // prototype accessor the CSV parser cannot represent as a cell, so it profiles as
+    // an empty (but present) sample rather than being dropped or crashing.
+    expect(Array.isArray(byColumn("__proto__"))).toBe(true);
+    expect(byColumn("constructor")).toEqual(["ctor", "ctor2"]);
+    expect(byColumn("prototype")).toEqual(["proto", "proto2"]);
+    // No prototype pollution: a fresh object is unaffected.
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.getPrototypeOf({})).toBe(Object.prototype);
   });
 
   test("date format equals inferDateFormat over the whole date column", async () => {

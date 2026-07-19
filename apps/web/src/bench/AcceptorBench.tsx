@@ -104,9 +104,9 @@ import type { ColumnSamples } from "@psi/columnSamples";
 import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 import type { FileRejection } from "@mantine/dropzone";
 import type { IntakeAlert } from "./YourFileSection";
-import type { JobInputProfile } from "@jobs/workInputs";
 import type { ManageOfferChoices } from "./manageOfferModel";
 import type { ManageOfferStatus } from "./ManageExchangeOffer";
+import type { ProfiledJobInput } from "@psi/workInputClient";
 import type { RailStep } from "./inviterModel";
 
 /** Stable empty inputs for {@link useNonEmptyRates} before a file is acquired, so the
@@ -231,7 +231,7 @@ export function AcceptorBench() {
   // columns seed, the run's mounted-file reference, the coverage sweep, and the preview
   // samples. Undefined on the hosted build, which reads the file in the browser behind
   // the consent gate instead.
-  const [consoleSource, setConsoleSource] = useState<JobInputProfile>();
+  const [consoleSource, setConsoleSource] = useState<ProfiledJobInput>();
   const [columnsState, setColumnsState] = useState<AcceptorColumnsState>();
   // Whether the appliance has a rendezvous mount, fetched once on a console build.
   // Undefined before it resolves; a console filedrop accept is runnable only when
@@ -381,15 +381,6 @@ export function AcceptorBench() {
 
   const { pushStep } = useStepHistory("review", restorePosition);
 
-  // The unload guard arms once the acceptor's file is chosen -- a browser drop on
-  // the hosted build, or a committed mounted-file profile on the console -- and
-  // disarms once the exchange is launched (the run is dialing); leaving a launched
-  // exchange costs nothing the acceptor has not already committed.
-  useUnloadGuard({
-    hasFile: file !== undefined || consoleSource !== undefined,
-    finalized: launched !== undefined,
-  });
-
   // Move to a new step and its sub-section, pushing a history entry so Back
   // returns here. Every in-bench step transition routes through this.
   function goToStep(
@@ -448,7 +439,7 @@ export function AcceptorBench() {
   // does: unchanged columns keep the operator's remaps and cleaning edits, changed
   // columns reseed. `acquired` stays unset until the consent gate passes, so the
   // columns step is still gated on "Accept and continue".
-  function commitConsoleAcceptFile(profile: JobInputProfile) {
+  function commitConsoleAcceptFile(profile: ProfiledJobInput) {
     const emptyPositions = emptyColumnPositions(profile.columns);
     if (emptyPositions.length > 0) {
       setParseAlert(unnameableColumnsAlert(emptyPositions));
@@ -648,6 +639,25 @@ export function AcceptorBench() {
 
   const { run, outputs, failure, tryAgain } = useAcceptorExchange({ launch });
 
+  // A console server-job accept is still executing on the appliance while it is
+  // launched and the run has not settled; closing or navigating away stops it.
+  const consoleExchangeRunning =
+    acceptServerJob &&
+    launched !== undefined &&
+    outputs === undefined &&
+    failure === undefined;
+
+  // The unload guard arms once the acceptor's file is chosen -- a browser drop on
+  // the hosted build, or a committed mounted-file profile on the console -- and
+  // disarms once the exchange is launched (a browser run is dialing), unless a
+  // console server-job exchange is still running on the appliance, which keeps it
+  // armed until the run settles.
+  useUnloadGuard({
+    hasFile: file !== undefined || consoleSource !== undefined,
+    finalized: launched !== undefined,
+    consoleExchangeRunning,
+  });
+
   // The coverage input, unified across builds: the browser's parsed rows on the
   // hosted build, the mounted-file reference on the console (whose sweep is a fetch
   // to the appliance). Memoized so a standardization edit reuses the provider and
@@ -665,8 +675,7 @@ export function AcceptorBench() {
   // rows on the hosted build, read from the server-side profile on the console. Kept
   // off `acquired.rawRows` on the console for the same reason as the coverage input.
   const columnSamples = useMemo<ColumnSamples>(() => {
-    if (consoleSource !== undefined)
-      return new Map(Object.entries(consoleSource.columnSamples));
+    if (consoleSource !== undefined) return consoleSource.columnSamples;
     if (!consoleBuild && acquired !== undefined)
       return columnSamplesFromRows(acquired.rawRows, acquired.columns);
     return EMPTY_COLUMN_SAMPLES;

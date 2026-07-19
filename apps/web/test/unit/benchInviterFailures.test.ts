@@ -58,6 +58,22 @@ describe("failureFor", () => {
     );
   });
 
+  test("a filedrop exchange failure names the shared folder, not a connection", () => {
+    // A filedrop run never opens a connection -- it rendezvouses through a synced
+    // folder -- so the copy names the shared-state cause and keeps the retry.
+    const failure = failureFor(
+      "exchange",
+      new Error("no rendezvous"),
+      undefined,
+      "filedrop",
+    );
+    expect(failure.title).toBe("Exchange failed");
+    expect(failure.message).toContain("shared folder");
+    expect(failure.message).toContain("syncing");
+    expect(failure.message).toContain("try again");
+    expect(failure.message).not.toContain("connection problem");
+  });
+
   test("a filedrop mounted-file 400 names the file as the cause", () => {
     const failure = failureFor(
       "config",
@@ -83,6 +99,31 @@ describe("failureFor", () => {
     expect(failure.title).toBe("The appliance could not start this exchange");
     expect(failure.message).not.toContain("status 400");
     expect(failure.message).toContain("SFTP");
+  });
+
+  test("the acceptor mounted-file 400 names its columns-step recovery", () => {
+    // The acceptor's only config recovery button returns to its columns step (whose
+    // own Back link re-selects the file), not a start-over that reaches the picker, so
+    // the copy must name that control rather than the inviter's "Start over".
+    const failure = failureFor(
+      "config",
+      new JobApiRequestError(400, "POST /api/jobs failed with status 400"),
+      WORK_FILE,
+      "filedrop",
+      "acceptor",
+    );
+    expect(failure.title).toBe("The appliance could not start this exchange");
+    expect(failure.message).toContain("columns");
+    expect(failure.message).toContain("choose a different file");
+    expect(failure.message).not.toContain("Start over");
+    // The inviter path keeps its start-over wording (its start-over reaches the picker).
+    const inviter = failureFor(
+      "config",
+      new JobApiRequestError(400, "POST /api/jobs failed with status 400"),
+      WORK_FILE,
+      "filedrop",
+    );
+    expect(inviter.message).toContain("Start over and select it again");
   });
 
   test("a config fault that is not a mounted-file 400 keeps the generic copy", () => {

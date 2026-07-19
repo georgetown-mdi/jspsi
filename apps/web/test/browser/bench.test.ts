@@ -1525,6 +1525,15 @@ describe("inviter bench", () => {
     await expect
       .element(page.getByText("Keep this tab open."))
       .toBeInTheDocument();
+    // A hosted browser run: the callout names the browser listener, not an appliance
+    // running the exchange.
+    await expect
+      .element(
+        page.getByText("Your browser is listening for your partner", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
 
     // The run started as the responder on the minted secret the moment the
     // invitation existed, and the sealed ledger marks the frozen terms.
