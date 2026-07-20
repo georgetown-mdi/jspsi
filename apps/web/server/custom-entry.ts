@@ -19,7 +19,11 @@ import logLibrary from "loglevel";
 
 import { getLogger } from "@psilink/core";
 
-import { shutdownJobManager, useSftpServer } from "../src/jobs/index";
+import {
+  shutdownJobManager,
+  useSftpServer,
+  warnJobApiProfileMismatch,
+} from "../src/jobs/index";
 import { ConfigManager } from "../src/utils/serverConfig";
 import { registerServer } from "../src/httpServer";
 
@@ -61,6 +65,10 @@ const path = process.env.NITRO_UNIX_SOCKET;
 // JOB_SFTP_REMOTES variable) refuses to start rather than deferring the error to
 // the first sftp job request.
 useSftpServer();
+
+// Warn (non-fatal) when JOB_DATA_ROOT is set on a non-console build, so the job
+// API stays disabled: the app enables it only in a console build.
+warnJobApiProfileMismatch();
 
 // @ts-ignore part of preset
 const listener = server.listen(path ? { path } : { port, host }, (err) => {

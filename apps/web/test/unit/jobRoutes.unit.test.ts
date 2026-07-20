@@ -1,6 +1,6 @@
 import fs from "node:fs";
 
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   MAX_JOB_BODY_BYTES,
@@ -32,6 +32,13 @@ import type { JobInputFileReference } from "@jobs/intent";
 import type { JobManager as JobManagerType } from "@jobs/jobManager";
 
 const roots: Array<string> = [];
+
+beforeEach(() => {
+  // The server-side job API runs only in a console build, so every enabled case
+  // here supplies the console profile. A disabled case still relies on an empty
+  // JOB_DATA_ROOT, which the profile does not re-enable.
+  vi.stubEnv("VITE_DEPLOYMENT_PROFILE", "console");
+});
 
 /** A created rendezvous directory a filedrop job needs, registered for cleanup. */
 function rvzRoot(): string {

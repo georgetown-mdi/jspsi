@@ -8,6 +8,7 @@
   "main": "index.tsx",
   "scripts": {
     "dev": "vite dev",
+    "dev:console": "VITE_DEPLOYMENT_PROFILE=console vite dev",
     "build": "vite build",
     "lint": "npx eslint src --ignore-pattern src/contrib/**",
     "type-check": "tsc --noEmit",

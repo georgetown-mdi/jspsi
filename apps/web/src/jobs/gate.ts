@@ -1,16 +1,36 @@
 /**
  * The resolved job-API configuration read from the environment. The job API is a
- * console-appliance feature that runs inside one party's trust boundary, gated
- * off by default so a hosted deployment never exposes it.
+ * console-appliance feature that runs inside one party's trust boundary. It is
+ * enabled only in a `console` deployment build with a data root configured; a
+ * hosted build serves every job route disabled (404) whatever the data root, so
+ * the public deployment can never run the server-side job driver.
  */
 export interface JobApiConfig {
   /** The data root under which per-job workdirs are created. Empty means the API
    * is disabled. */
   dataRoot: string;
+  /** Whether this deployment build is the console appliance (its
+   * `VITE_DEPLOYMENT_PROFILE` is `console`). The job API is enabled only in a
+   * console build. */
+  consoleProfile: boolean;
 }
 
-/** The environment variable names the job API reads. */
+/** The environment variable naming the data root the job API creates workdirs
+ * under. */
 export const JOB_DATA_ROOT_ENV = "JOB_DATA_ROOT";
+
+/**
+ * The build-time deployment-profile variable, read server-side the same way the
+ * client reads it (see utils/clientConfig.ts). The console image sets it to
+ * `console` (a `Dockerfile` `ENV`, so it persists to the container runtime); a
+ * hosted build leaves it unset. Reading the one signal on both sides keeps the
+ * server gate from drifting from the client build -- a second, server-only
+ * variable could fall out of sync and is a security hazard.
+ */
+export const DEPLOYMENT_PROFILE_ENV = "VITE_DEPLOYMENT_PROFILE";
+
+/** The deployment-profile value that identifies the console appliance build. */
+export const CONSOLE_PROFILE = "console";
 
 /** Read the job-API configuration from an environment map. */
 export function readJobApiConfig(
@@ -18,12 +38,21 @@ export function readJobApiConfig(
 ): JobApiConfig {
   return {
     dataRoot: (env[JOB_DATA_ROOT_ENV] ?? "").trim(),
+    consoleProfile:
+      (env[DEPLOYMENT_PROFILE_ENV] ?? "").trim() === CONSOLE_PROFILE,
   };
 }
 
-/** Whether the job API is enabled (a data root is configured). */
+/**
+ * Whether the job API is enabled: a data root is configured AND this is a console
+ * build. A hosted build (any non-`console` profile, unset included) serves every
+ * job route disabled (404) regardless of `JOB_DATA_ROOT` -- the app-layer
+ * backstop that keeps the unauthenticated server-side driver out of the public
+ * deployment. A pure function of its argument (no environment access), so the
+ * invariant is unit-testable without env mocking.
+ */
 export function isJobApiEnabled(config: JobApiConfig): boolean {
-  return config.dataRoot.length > 0;
+  return config.dataRoot.length > 0 && config.consoleProfile;
 }
 
 /** A configuration error surfaced at server startup. */

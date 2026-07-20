@@ -72,6 +72,9 @@ function handlersOf(route: {
  * layout by placing inputs directly under it. */
 function enable(options: { inputDir?: string } = {}): string {
   const dataRoot = tempDir("data");
+  // The job API is enabled only in a console build, so the input routes gate on
+  // the console profile alongside the data root.
+  vi.stubEnv("VITE_DEPLOYMENT_PROFILE", "console");
   vi.stubEnv("JOB_DATA_ROOT", dataRoot);
   vi.stubEnv("JOB_CLI_BINARY", STUB_CLI_PATH);
   if (options.inputDir !== undefined)
