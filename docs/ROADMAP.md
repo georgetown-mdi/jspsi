@@ -33,7 +33,6 @@ Work required before the 1.0 release.
 - Synchronous protocol execution for the CLI (the web WebRTC path is already synchronous; this eliminates file-based polling latency where the channel allows)
 - Provisioning of supporting services (peer coordination, STUN/TURN, SFTP, WebSocket-to-TCP proxy)
 - Reference configurations and deployment guides for each supporting service; the section pointers in [DEPLOYMENT.md](DEPLOYMENT.md) will be replaced with concrete guidance
-- Signed exchange receipts: certificate-backed signing of a dual-signed exchange record, giving third-party-verifiable proof that a specific data set flowed between the two parties (deferred from the initial 1.0 scope). The signing-identity foundation -- per-party Ed25519 keys, self-signed certificates, and fingerprint pinning -- is implemented today; receipt assembly, signing, and the receipt swap remain
 - Metadata classification
 
 ## Possible later work
