@@ -23,16 +23,20 @@ import {
   MAX_STANDARDIZATION_STEPS,
   MAX_STANDARDIZATION_TRANSFORMATIONS,
 } from "./intent";
+import { JOB_DATA_ROOT_ENV } from "./gate";
 
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 import type { Standardization } from "@psilink/core";
 
 /**
- * The environment variable naming the one operator-mounted directory the console
- * lists and reads input CSVs from. Unset or empty leaves the feature off: the
- * listing reports `configured: false` with an empty list and the profile/coverage
- * routes answer 404. The operator is present at the host and mounts their own data,
- * so the directory is trusted local input, not a shared-service surface.
+ * The environment variable naming the operator-mounted directory the console lists
+ * and reads input CSVs from. When unset or empty the input directory falls back to
+ * `JOB_DATA_ROOT`, so a single-folder console -- one mount, only `JOB_DATA_ROOT`
+ * set -- lists inputs out of the data root. The feature is off only when both are
+ * unset: the listing then reports `configured: false` with an empty list and the
+ * profile/coverage routes answer 404. The operator is present at the host and mounts
+ * their own data, so the directory is trusted local input, not a shared-service
+ * surface.
  */
 export const JOB_INPUT_DIR_ENV = "JOB_INPUT_DIR";
 
@@ -140,8 +144,8 @@ export interface JobInputFileEntry {
 
 /** The `GET /api/jobs/inputs` response shape. */
 export interface JobInputListing {
-  /** False when {@link JOB_INPUT_DIR_ENV} is unset -- the feature-off state -- with
-   * an empty list. */
+  /** False when neither {@link JOB_INPUT_DIR_ENV} nor the {@link JOB_DATA_ROOT_ENV}
+   * fallback resolves a directory -- the feature-off state -- with an empty list. */
   configured: boolean;
   /** False when the configured directory could not be enumerated (a mis-mount or a
    * permission fault), so the operator is told the mount is unreadable rather than to
@@ -346,14 +350,18 @@ export async function coverageJobInput(
   return accumulator.result();
 }
 
-/** Read {@link JOB_INPUT_DIR_ENV} and resolve the input directory to an absolute
- * path, or undefined when it is unset. The mounted directory is trusted operator
- * data, so this is a plain resolve -- no containment check against the data root,
- * no fail-closed existence assertion (a mis-mount surfaces as an empty listing). */
+/** Resolve the input directory to an absolute path from {@link JOB_INPUT_DIR_ENV},
+ * falling back to {@link JOB_DATA_ROOT_ENV} when it is unset so one mount runs a full
+ * console, or undefined when both are unset. The mounted directory is trusted
+ * operator data, so this is a plain resolve -- no containment check against the data
+ * root, no fail-closed existence assertion (a mis-mount surfaces as an empty
+ * listing). */
 function loadJobInputDir(env: NodeJS.ProcessEnv): string | undefined {
   const configured = (env[JOB_INPUT_DIR_ENV] ?? "").trim();
-  if (configured.length === 0) return undefined;
-  return path.resolve(configured);
+  const resolved =
+    configured.length > 0 ? configured : (env[JOB_DATA_ROOT_ENV] ?? "").trim();
+  if (resolved.length === 0) return undefined;
+  return path.resolve(resolved);
 }
 
 /**

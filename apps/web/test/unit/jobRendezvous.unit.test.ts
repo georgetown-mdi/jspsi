@@ -4,7 +4,10 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { rendezvousStartupWarnings } from "@jobs/jobRendezvous";
+import {
+  rendezvousStartupWarnings,
+  useJobRendezvousDir,
+} from "@jobs/jobRendezvous";
 
 const dirs: Array<string> = [];
 
@@ -27,6 +30,42 @@ function subDir(parent: string, name: string): string {
 afterEach(() => {
   for (const dir of dirs.splice(0))
     fs.rmSync(dir, { recursive: true, force: true });
+  (globalThis as { jobRendezvousDirConfig?: unknown }).jobRendezvousDirConfig =
+    undefined;
+});
+
+describe("useJobRendezvousDir", () => {
+  test("resolves a set directory to an absolute path and memoizes it", () => {
+    const dir = tempDir("rendezvous");
+    const first = useJobRendezvousDir({ JOB_RENDEZVOUS_DIR: dir });
+    expect(first).toBe(path.resolve(dir));
+    // The second call ignores a changed env: the value is memoized on globalThis.
+    expect(useJobRendezvousDir({ JOB_RENDEZVOUS_DIR: "/elsewhere" })).toBe(
+      first,
+    );
+  });
+
+  test("defaults to JOB_DATA_ROOT when JOB_RENDEZVOUS_DIR is unset", () => {
+    const dataRoot = tempDir("data");
+    expect(useJobRendezvousDir({ JOB_DATA_ROOT: dataRoot })).toBe(
+      path.resolve(dataRoot),
+    );
+  });
+
+  test("an explicit JOB_RENDEZVOUS_DIR overrides the data-root fallback", () => {
+    const rendezvous = tempDir("rendezvous");
+    const dataRoot = tempDir("data");
+    expect(
+      useJobRendezvousDir({
+        JOB_RENDEZVOUS_DIR: rendezvous,
+        JOB_DATA_ROOT: dataRoot,
+      }),
+    ).toBe(path.resolve(rendezvous));
+  });
+
+  test("is undefined when both JOB_RENDEZVOUS_DIR and JOB_DATA_ROOT are unset", () => {
+    expect(useJobRendezvousDir({})).toBeUndefined();
+  });
 });
 
 /** The overlap warnings alone, isolating the containment branch from the stat-based

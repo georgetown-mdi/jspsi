@@ -60,9 +60,10 @@ export class ExchangeBusyError extends Error {
 
 /**
  * Thrown by {@link JobManager.createJob} when a filedrop intent arrives but no
- * rendezvous directory is configured (`JOB_RENDEZVOUS_DIR` unset). The console UI
- * disables the filedrop transport in that state, so this is the server-side backstop
- * for an intent that reached the API anyway; the route maps it to a 400.
+ * rendezvous directory is resolved (neither `JOB_RENDEZVOUS_DIR` nor its
+ * `JOB_DATA_ROOT` fallback is set). The console UI disables the filedrop transport in
+ * that state, so this is the server-side backstop for an intent that reached the API
+ * anyway; the route maps it to a 400.
  */
 export class JobRendezvousUnavailableError extends Error {
   constructor() {
@@ -170,16 +171,17 @@ export interface JobManagerOptions {
    */
   sftpServer?: JobSftpServerEntry;
   /**
-   * The resolved work-input directory (from {@link useJobInputDir}). Absent when
-   * `JOB_INPUT_DIR` is unset, in which case an intent naming an `inputFile` fails
-   * with {@link JobInputNotFoundError}. Never derived from a request.
+   * The resolved work-input directory (from {@link useJobInputDir}), which falls back
+   * to the data root when `JOB_INPUT_DIR` is unset. Absent only when neither resolves;
+   * an intent naming an `inputFile` then fails with {@link JobInputNotFoundError}.
+   * Never derived from a request.
    */
   jobInputDir?: string;
   /**
    * The resolved rendezvous directory (from {@link useJobRendezvousDir}) a filedrop
-   * exchange reads and writes. Absent when `JOB_RENDEZVOUS_DIR` is unset, in which
-   * case a filedrop intent fails with {@link JobRendezvousUnavailableError}. Never
-   * derived from a request.
+   * exchange reads and writes, which falls back to the data root when
+   * `JOB_RENDEZVOUS_DIR` is unset. Absent only when neither resolves; a filedrop intent
+   * then fails with {@link JobRendezvousUnavailableError}. Never derived from a request.
    */
   jobRendezvousDir?: string;
   /**

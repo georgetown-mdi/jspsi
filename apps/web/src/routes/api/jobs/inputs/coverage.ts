@@ -20,9 +20,10 @@ import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
  * The body `{ name, standardization }` is read under a 1 MiB cap and validated: the
  * standardization goes through the same bounded schema the job intent uses PLUS a
  * route-level per-step pattern-length cap (RE2JS is linear at run time, but its
- * compile cost lands on this event loop). An unset directory or a name that resolves
- * to no regular file is `404`, a bad or oversized body is `400`/`413`, and any other
- * sweep fault is `400`.
+ * compile cost lands on this event loop). The input directory defaults to
+ * `JOB_DATA_ROOT` when `JOB_INPUT_DIR` is unset, so once the job API is enabled a
+ * directory is always resolved; a name that resolves to no regular file is `404`, a
+ * bad or oversized body is `400`/`413`, and any other sweep fault is `400`.
  *
  * `request.signal` threads into the sweep so a client disconnect stops the whole-file
  * pass rather than scanning a CLI-scale file to completion after the browser has

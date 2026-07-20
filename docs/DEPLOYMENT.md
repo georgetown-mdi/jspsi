@@ -108,9 +108,9 @@ The web application can run as a **console appliance** for a single party: a con
 
 The job API is **off by default.** It does nothing -- serves no endpoint, spawns no CLI -- until you configure a data root. These environment variables configure it:
 
-- `JOB_DATA_ROOT` -- the feature gate and the directory under which each job's working files are created. Set it to turn the API on; leave it unset to keep it off. A hosted deployment that does not set it never exposes the API.
-- `JOB_INPUT_DIR` -- the mounted work-input directory the console lists and profiles for this party's input CSVs; the CLI reads the file you select in place (see [Mounted work-input directory](#mounted-work-input-directory)). Leave it unset and the console offers no mounted input.
-- `JOB_RENDEZVOUS_DIR` -- the mounted synced-folder rendezvous directory a shared-directory (`filedrop`) exchange runs over. Leave it unset and the filedrop transport is unavailable on the console.
+- `JOB_DATA_ROOT` -- the feature gate and the directory under which each job's working files are created. Set it to turn the API on; leave it unset to keep it off. The input and rendezvous directories both default to it, so setting `JOB_DATA_ROOT` alone -- one mounted directory -- lights up the full console. A hosted deployment that does not set it never exposes the API.
+- `JOB_INPUT_DIR` -- the mounted work-input directory the console lists and profiles for this party's input CSVs; the CLI reads the file you select in place (see [Mounted work-input directory](#mounted-work-input-directory)). Leave it unset and the console lists input CSVs out of `JOB_DATA_ROOT`; set it to give the inputs their own mount.
+- `JOB_RENDEZVOUS_DIR` -- the mounted synced-folder rendezvous directory a shared-directory (`filedrop`) exchange runs over. Leave it unset and the filedrop transport runs over `JOB_DATA_ROOT`; set it to a separate mount to keep the partner-synced directory apart from your working files, which is recommended (see [Mounted work-input directory](#mounted-work-input-directory)).
 - `JOB_SFTP_SERVER` -- the path to a mounted file naming the one SFTP server the appliance may connect out to. Set it to let the appliance run SFTP exchanges through the job API; leave it unset and SFTP stays save-a-file. (The superseded `JOB_SFTP_REMOTES`, which named a multi-server table, is no longer supported: a deployment that still sets it refuses to start with a migration message.)
 
 **Reachable only where you publish it.** The API assumes a single operator, not multiple tenants, and it carries no authentication, so it must reach only the operator's own machine. The app does not inspect its own bind interface; what the API is reachable from is governed by how you publish the container's port and by the host firewall. Publish it to the host loopback -- `-p 127.0.0.1:3000:3000` -- and the unauthenticated API is reachable only from the operator's own machine (see [Running the web console appliance](#running-the-web-console-appliance)). This works identically on Linux, macOS, and Windows, Docker Desktop included.
@@ -125,9 +125,9 @@ The endpoint contract, the request schema, the working-directory layout and file
 
 ### Mounted work-input directory
 
-Mount the directory holding this party's input CSVs at `JOB_INPUT_DIR`. The console lists the files in it and profiles the one the operator selects -- its columns, a bounded per-column sample of values, and per-field coverage -- and the CLI then reads that same file in place when it runs the exchange. The listing is non-recursive: it shows only the files directly in the mounted directory, so mount the directory that holds the CSVs, not a parent, and dot-prefixed files are not shown. No copy is made and nothing is written back to the directory, so mount it read-only. The container runs as root, so a read-only mount is what keeps a root process from writing to the operator's source data; leave the variable unset to offer no mounted input at all.
+The console lists this party's input CSVs out of `JOB_INPUT_DIR`, falling back to `JOB_DATA_ROOT` when that variable is unset -- so a single-folder console, one mount with only `JOB_DATA_ROOT` set, lists inputs out of the data root. It profiles the file the operator selects -- its columns, a bounded per-column sample of values, and per-field coverage -- and the CLI then reads that same file in place when it runs the exchange. The listing is non-recursive: it shows only the files directly in the directory, so mount the directory that holds the CSVs, not a parent, and dot-prefixed files and subdirectories (the per-job working directories) are not shown. No copy is made and nothing is written back to the input directory. Set `JOB_INPUT_DIR` to give the inputs their own mount, which you can mount read-only; because the container runs as root, a read-only mount is what keeps a root process from writing to the operator's source data.
 
-A shared-directory (`filedrop`) exchange instead runs over the rendezvous directory at `JOB_RENDEZVOUS_DIR`, which the remote partner writes into over the synced folder. Mount it read-write, and keep it a dedicated directory -- separate from, and not nested with, the working directory that holds your key, input, and results -- so the partner's write access reaches only the rendezvous mailbox and not your own secrets. The console warns at job start if the configured rendezvous path overlaps the work-input directory or the data root, but the operator's own directory layout is theirs to choose, so a dedicated rendezvous directory is the reliable safeguard.
+A shared-directory (`filedrop`) exchange runs over the rendezvous directory at `JOB_RENDEZVOUS_DIR`, which the remote partner writes into over the synced folder; it too falls back to `JOB_DATA_ROOT` when unset, so the single-folder console rendezvouses out of the data root. Setting `JOB_RENDEZVOUS_DIR` to a dedicated mount -- separate from, and not nested with, the working directory that holds your key, input, and results -- is recommended, because the rendezvous directory is partner-writable: a dedicated mount keeps the partner's write access to the rendezvous mailbox and away from your own secrets. The console warns at job start when the rendezvous path overlaps the work-input directory or the data root (as it does in the single-folder layout), but the operator's own directory layout is theirs to choose, so the exchange still runs; a dedicated rendezvous directory is the reliable safeguard, not a requirement.
 
 ## SFTP server
 
@@ -151,7 +151,18 @@ This is unchanged; existing CLI usage (`exchange`, `invite`, `accept`, and the r
 
 ### Running the web console appliance
 
-Pass `serve` as the first argument to run the single-party console appliance instead. The image bakes the `console` web build (see [Server job API](#server-job-api)), so no build-time configuration is needed; the Nitro server listens on port 3000. Publish that port to the host loopback so the appliance is reachable only from the operator's own machine:
+Pass `serve` as the first argument to run the single-party console appliance instead. The image bakes the `console` web build (see [Server job API](#server-job-api)), so no build-time configuration is needed; the Nitro server listens on port 3000. Publish that port to the host loopback so the appliance is reachable only from the operator's own machine. The simplest console is a single mount and a single environment variable:
+
+```sh
+docker run -d -p 127.0.0.1:3000:3000 \
+  --env JOB_DATA_ROOT=/data \
+  -v /host/work:/data \
+  vdorie/psi-link:latest serve
+```
+
+With only `JOB_DATA_ROOT` set, the input listing and the filedrop rendezvous both default to that directory, so one mounted directory runs a full console: the operator drops their input CSVs into `/host/work`, and a shared-directory exchange rendezvouses there too.
+
+You can split those directories into separate mounts by setting `JOB_INPUT_DIR` and `JOB_RENDEZVOUS_DIR`. Doing so is recommended for the rendezvous directory, because it is partner-synced (see [Mounted work-input directory](#mounted-work-input-directory)):
 
 ```sh
 docker run -d \
