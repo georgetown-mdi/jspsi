@@ -198,7 +198,7 @@ export function InviterExchangeSection({
                 ? SERVER_JOB_KEEP_OPEN_BODY
                 : "Your browser is listening for your partner. Closing the tab cancels the invitation; reloading starts over."}
             </p>
-            {serverJob && (
+            {serverJob && phase === "share" && (
               <p className={styles.small}>{SERVER_JOB_PEER_WINDOW_BODY}</p>
             )}
           </div>
