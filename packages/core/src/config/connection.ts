@@ -525,6 +525,14 @@ export interface SharedOptions {
 export const DEFAULT_SERVER_CONNECT_TIMEOUT_MS = 30000;
 
 /**
+ * Default number of reconnect attempts after a transient connection failure when
+ * the connection options do not set `maxReconnectAttempts`. Exported for the same
+ * reason as {@link DEFAULT_SERVER_CONNECT_TIMEOUT_MS}; bounded above by
+ * {@link MAX_RECONNECT_ATTEMPTS}.
+ */
+export const DEFAULT_MAX_RECONNECT_ATTEMPTS = 3;
+
+/**
  * Upper bound on {@link SharedOptions.maxReconnectAttempts}: 604800 attempts.
  * Derived, not arbitrary -- it is the connect-retry phase's existing wall-clock
  * ceiling expressed as a count. The connect-retry loop (`retryPromise` at every

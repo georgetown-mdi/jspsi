@@ -818,7 +818,7 @@ test("tryKeyboard is not set when keyboard_interactive is absent", async () => {
 });
 
 test("tryKeyboard is not set when keyboard_interactive has no password", async () => {
-  // The schema refine rejects this combination, but buildSftpConnectOptions
+  // The schema refine rejects this combination, but buildConnectOptions
   // guards it independently: with no password there is nothing to answer prompts
   // with, so tryKeyboard is withheld rather than enabling an un-answerable method
   // (defends a direct library caller that bypasses the schema).

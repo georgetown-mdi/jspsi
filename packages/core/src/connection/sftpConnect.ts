@@ -4,10 +4,10 @@
 // pure function of its arguments or a module constant -- no instance state, no
 // I/O -- so the blob view, the defensive verdict delivery, and the two
 // provider-option allowlists live in one place rather than being re-derived per
-// verifier. The methods that CLOSE OVER connection state (buildSftpConnectOptions,
+// verifier. The methods that CLOSE OVER session state (buildConnectOptions,
 // applyProviderOptions, filterAlgorithms, probeHostKeyFingerprint, and the three
-// inline verifiers) deliberately stay on FileSyncConnection; they import these
-// back.
+// verifiers) live in ./sftpSession on the SftpSession subsystem; they import
+// these back.
 //
 // The host-key verification RATIONALE -- why the fingerprint is pinned, the
 // fail-closed default, the first-use trust flow, the provider-options
@@ -28,7 +28,7 @@
 
 /**
  * The host key a server presented on the SFTP channel, as observed by
- * {@link FileSyncConnection.probeHostKeyFingerprint}. Both fields are public
+ * {@link SftpSession.probeHostKeyFingerprint}. Both fields are public
  * (a host key and its fingerprint are not secret): the CLI surfaces them to the
  * operator on a first-use trust prompt and persists `fingerprint` as the pin.
  */
@@ -119,7 +119,7 @@ export const settleVerify = (
  *
  * `readyTimeout` is intentionally excluded: psilink derives it from
  * `serverConnectTimeoutMs`, and the structured value must win. `algorithms` is
- * permitted but handled specially (see {@link FileSyncConnection.filterAlgorithms}),
+ * permitted but handled specially (see {@link SftpSession.filterAlgorithms}),
  * filtered to its non-host-key sub-categories. See docs/EXCHANGE_REFERENCE.md
  * (`connection.provider_options`).
  *
