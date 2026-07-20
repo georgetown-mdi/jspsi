@@ -368,7 +368,7 @@ The responder confirms first (in msg2); the initiator verifies `responder_confir
 The pre-shared secret that authenticates a recurring exchange is a 32-byte value encoded as unpadded base64url (43 characters). Two mechanisms mint one, differing only in how the 32 bytes are produced:
 
 - **Invitation tokens** are generated directly from a CSPRNG (`crypto.getRandomValues`), giving 256 bits of entropy.
-- **Rotation tokens** are derived from the 32-byte session key (above) with the application HKDF (`hkdfDerive`: HKDF-SHA-256, 32-byte zero salt), so a rotated secret carries the same 256-bit security level as the session key it derives from:
+- **Rotation tokens** are derived from the 32-byte session key (above) with the application HKDF (`hkdfDerive`: HKDF-SHA-256, 32-byte zero salt). The session key mixes the pre-shared secret with the ephemeral X25519 Diffie-Hellman, so a rotated secret is a full 32-byte value that stays secret against any party that does not hold both inputs; against a party that holds the superseded secret, its confidentiality rests on the ephemeral exchange alone, the ~128-bit X25519 forward-secrecy level:
 
 ```
 rotated_secret = HKDF(session_key, "psilink-shared-secret-rotation-v1", 32)
