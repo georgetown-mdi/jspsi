@@ -219,7 +219,10 @@ test("fromEventConnection over FileSyncConnection: a send-time transport failure
   // drain waits for the exact lastSentFile, so point it at the planted name.
   const outName = `${conn.id}-99.json`;
   files.set(`/test/${outName}`, Buffer.from(JSON.stringify({ stale: 1 })));
-  (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
+  // lastSentFile lives on the composed message loop; poke it there.
+  (
+    conn as unknown as { messageLoop: { lastSentFile?: string } }
+  ).messageLoop.lastSentFile = outName;
 
   const mc = fromEventConnection(conn);
   const err = await mc.send({ next: true }).catch((e: unknown) => e);
