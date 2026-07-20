@@ -12,7 +12,7 @@ import type { JobApiClient } from "@psi/serverJobExchangeDriver";
  * The record survives a hard tab close (localStorage, not sessionStorage -- the
  * strand case this exists for is exactly a close that sessionStorage would not
  * survive) and holds no secret: a v4 UUID plus two enum labels. Access to the job
- * rides the loopback-only origin the console appliance binds, never knowledge of
+ * rides the operator-local origin the console appliance serves, never knowledge of
  * the id, so persisting the id discloses nothing an attacker could not already
  * reach.
  */

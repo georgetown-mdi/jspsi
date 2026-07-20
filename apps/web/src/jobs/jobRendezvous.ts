@@ -1,14 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { JOB_DATA_ROOT_ENV } from "./gate";
+
 /**
- * The environment variable naming the one operator-mounted rendezvous directory a
- * filedrop exchange reads and writes, symmetric with `JOB_INPUT_DIR` and
- * `JOB_DATA_ROOT`. Unset or empty leaves the filedrop transport unavailable on the
- * console: the invite chooser disables its card and the accept flow reports the
- * unavailable state. The directory is server-side configuration, never a
- * browser-sent path; it feeds the CLI config the child reads, so nothing about it
- * reaches argv.
+ * The environment variable naming the operator-mounted rendezvous directory a
+ * filedrop exchange reads and writes, symmetric with `JOB_INPUT_DIR`. When unset or
+ * empty the rendezvous directory falls back to `JOB_DATA_ROOT`, so a single-folder
+ * console -- one mount, only `JOB_DATA_ROOT` set -- rendezvouses out of the data
+ * root. The filedrop transport is unavailable only when both are unset: the invite
+ * chooser then disables its card and the accept flow reports the unavailable state.
+ * The directory is server-side configuration, never a browser-sent path; it feeds
+ * the CLI config the child reads, so nothing about it reaches argv.
  */
 export const JOB_RENDEZVOUS_DIR_ENV = "JOB_RENDEZVOUS_DIR";
 
@@ -16,13 +19,17 @@ declare global {
   var jobRendezvousDirConfig: { resolvedDir?: string } | undefined;
 }
 
-/** Read {@link JOB_RENDEZVOUS_DIR_ENV} and resolve it to an absolute path, or
- * undefined when unset. A plain resolve -- the rendezvous mount is the operator's
- * own directory; the preflight below warns rather than fails on anything wrong. */
+/** Resolve the rendezvous directory to an absolute path from
+ * {@link JOB_RENDEZVOUS_DIR_ENV}, falling back to {@link JOB_DATA_ROOT_ENV} when it is
+ * unset so one mount runs a full console, or undefined when both are unset. A plain
+ * resolve -- the rendezvous mount is the operator's own directory; the preflight
+ * below warns rather than fails on anything wrong. */
 function loadJobRendezvousDir(env: NodeJS.ProcessEnv): string | undefined {
   const configured = (env[JOB_RENDEZVOUS_DIR_ENV] ?? "").trim();
-  if (configured.length === 0) return undefined;
-  return path.resolve(configured);
+  const resolved =
+    configured.length > 0 ? configured : (env[JOB_DATA_ROOT_ENV] ?? "").trim();
+  if (resolved.length === 0) return undefined;
+  return path.resolve(resolved);
 }
 
 /**

@@ -1,4 +1,12 @@
-import { isJobApiEnabled, readJobApiConfig } from "./gate";
+import { getLogger } from "@psilink/core";
+
+import {
+  CONSOLE_PROFILE,
+  DEPLOYMENT_PROFILE_ENV,
+  JOB_DATA_ROOT_ENV,
+  isJobApiEnabled,
+  readJobApiConfig,
+} from "./gate";
 import { JobManager } from "./jobManager";
 import { loadSftpServerFromEnv } from "./sftpServer";
 import { useJobInputDir } from "./workInputs";
@@ -6,6 +14,8 @@ import { useJobRendezvousDir } from "./jobRendezvous";
 
 import type { JobApiConfig } from "./gate";
 import type { JobSftpServerEntry } from "./sftpServer";
+
+const log = getLogger("job-api");
 
 /**
  * The process-wide job manager, memoized on globalThis (not module scope). Like
@@ -27,13 +37,35 @@ declare global {
  * on first use, or undefined when no server file is configured. The server
  * entry calls this at startup so a malformed block (or a server file without a
  * data root, or the superseded `JOB_SFTP_REMOTES` variable) refuses to boot --
- * the same fail-closed posture as `assertJobApiStartupSafe`; a
- * {@link JobApiConfigError} propagates to the caller either way.
+ * fail-closed at startup; a {@link JobApiConfigError} propagates to the caller
+ * either way.
  */
 export function useSftpServer(
   env: NodeJS.ProcessEnv = process.env,
 ): JobSftpServerEntry | undefined {
   return (globalThis.jobSftpServer ??= loadSftpServerFromEnv(env));
+}
+
+/**
+ * Log a startup diagnostic when a data root is configured but the deployment
+ * profile is not `console`, so the job API stays disabled despite
+ * `JOB_DATA_ROOT`. A no-op in a console build (the API is enabled) and in the
+ * plain hosted case (no data root, nothing an operator meant to turn on). The
+ * server entry calls this once at startup, the only point at which the mismatch
+ * is reachable: {@link isJobApiEnabled} gates every route to 404 before
+ * {@link useJobManager} runs, so a mismatched config never reaches the manager
+ * on a request. Non-fatal -- a misconfigured hosted build boots with the job API
+ * dark rather than refusing to start.
+ */
+export function warnJobApiProfileMismatch(
+  config: JobApiConfig = readJobApiConfig(),
+): void {
+  if (isJobApiEnabled(config) || config.dataRoot.length === 0) return;
+  log.warn(
+    `${JOB_DATA_ROOT_ENV} is set but ${DEPLOYMENT_PROFILE_ENV} is not ` +
+      `"${CONSOLE_PROFILE}"; the job API stays disabled (it runs only in a ` +
+      "console build).",
+  );
 }
 
 /**

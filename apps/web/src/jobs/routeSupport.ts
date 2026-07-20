@@ -18,8 +18,9 @@ export type GateOutcome =
 /**
  * Gate a job route: read config, enforce the feature gate, and resolve the
  * manager. Every job route calls this first, before any filesystem use or spawn.
- * The API is loopback-only (the startup check refuses a non-loopback bind), so
- * there is no per-request auth beyond the feature gate.
+ * The API is reached only from the operator's own machine (the deployment
+ * publishes to host loopback), so there is no per-request auth beyond the
+ * feature gate.
  */
 export function gateJobRoute(): GateOutcome {
   const config = readJobApiConfig();

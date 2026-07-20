@@ -67,13 +67,19 @@ function handlersOf(route: {
   return handlers as Handlers;
 }
 
-/** Enable the job API (a real data root) and, optionally, the input directory. */
-function enable(options: { inputDir?: string } = {}): void {
+/** Enable the job API (a real data root) and, optionally, a distinct input
+ * directory. Returns the data root so a test can exercise the flat single-folder
+ * layout by placing inputs directly under it. */
+function enable(options: { inputDir?: string } = {}): string {
   const dataRoot = tempDir("data");
+  // The job API is enabled only in a console build, so the input routes gate on
+  // the console profile alongside the data root.
+  vi.stubEnv("VITE_DEPLOYMENT_PROFILE", "console");
   vi.stubEnv("JOB_DATA_ROOT", dataRoot);
   vi.stubEnv("JOB_CLI_BINARY", STUB_CLI_PATH);
   if (options.inputDir !== undefined)
     vi.stubEnv("JOB_INPUT_DIR", options.inputDir);
+  return dataRoot;
 }
 
 function profileRequest(name: string): Request {
@@ -125,15 +131,21 @@ describe("gating parity: every route is dark when disabled", () => {
 });
 
 describe("GET /api/jobs/inputs", () => {
-  test("reports the unconfigured state when JOB_INPUT_DIR is unset", async () => {
-    enable();
+  test("defaults the listing to JOB_DATA_ROOT when JOB_INPUT_DIR is unset", async () => {
+    // The flat single-folder layout: only the data root is mounted, so the input
+    // listing reads out of it and reports configured.
+    const dataRoot = enable();
+    fs.writeFileSync(path.join(dataRoot, "input.csv"), FIXTURE_CSV);
     const response = await listing();
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      configured: false,
-      readable: true,
-      files: [],
-    });
+    const body = (await response.json()) as {
+      configured: boolean;
+      readable: boolean;
+      files: Array<{ name: string }>;
+    };
+    expect(body.configured).toBe(true);
+    expect(body.readable).toBe(true);
+    expect(body.files.map((file) => file.name)).toEqual(["input.csv"]);
     expect(response.headers.get("cache-control")).toContain("no-store");
   });
 
@@ -163,7 +175,7 @@ describe("GET /api/jobs/inputs", () => {
 });
 
 describe("GET /api/jobs/inputs/profile", () => {
-  test("404 when the input directory is unset", async () => {
+  test("404 for a name absent from the data-root default", async () => {
     enable();
     expect((await profile("input.csv")).status).toBe(404);
   });
@@ -223,7 +235,7 @@ describe("GET /api/jobs/inputs/profile", () => {
 });
 
 describe("POST /api/jobs/inputs/coverage", () => {
-  test("404 when the input directory is unset", async () => {
+  test("404 for a name absent from the data-root default", async () => {
     enable();
     expect((await coverage(coverageBody("input.csv"))).status).toBe(404);
   });

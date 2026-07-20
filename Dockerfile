@@ -1,3 +1,11 @@
+# The deployment profile is one build-time source of truth shared by both stages:
+# the builder bakes it into the client bundle (vite `import.meta.env`), and the
+# runtime stage exports the SAME value into the server's process environment so
+# the job-API gate reads the identical profile at runtime (apps/web/src/jobs/gate.ts).
+# A single ARG keeps the client build and the server gate from drifting. Override
+# with --build-arg VITE_DEPLOYMENT_PROFILE=hosted to build a hosted image.
+ARG VITE_DEPLOYMENT_PROFILE=console
+
 # Base pinned to node:26-alpine's multi-arch index digest (both stages) so builds
 # resolve one exact image; a base bump for a node or musl patch is a deliberate
 # digest update, not an automatic float. See docs/spec/DEPENDENCY_PINS.md.
@@ -39,11 +47,12 @@ COPY apps/web/public apps/web/public/
 # browser-only file-assurance copy and routes a filedrop channel to the
 # server-side job driver (see apps/web/src/utils/clientConfig.ts). vite build
 # produces a self-contained apps/web/.output/ (server entry + bundled
-# node_modules + public assets), so the runtime stage copies only that. The ARG
-# is promoted to ENV so vite's `import.meta.env.VITE_*` reads it from the build
-# process environment (a bare ARG is not exported into the RUN child); this ENV
-# lives only in the builder stage and never reaches the runtime image.
-ARG VITE_DEPLOYMENT_PROFILE=console
+# node_modules + public assets), so the runtime stage copies only that. The
+# global ARG is re-declared here and promoted to ENV so vite's
+# `import.meta.env.VITE_*` reads it from the build process environment (a bare
+# ARG is not exported into the RUN child). This bakes the profile into the client
+# bundle; the runtime stage exports the same ARG so the server gate matches it.
+ARG VITE_DEPLOYMENT_PROFILE
 ENV VITE_DEPLOYMENT_PROFILE=${VITE_DEPLOYMENT_PROFILE}
 RUN npm run build -w apps/web
 
@@ -79,6 +88,15 @@ COPY --from=builder /build/apps/cli/dist/psiWorker.worker.js apps/cli/dist/psiWo
 # apps/web/.output/ (server entry + bundled node_modules + public assets), so the
 # runtime stage copies only that -- no apps/web production `npm ci` is needed.
 COPY --from=builder /build/apps/web/.output apps/web/.output
+
+# Export the deployment profile into the runtime environment so the server-side
+# job-API gate (apps/web/src/jobs/gate.ts) reads the SAME value the client bundle
+# was baked with: a console image enables the job API, a hosted one keeps it
+# disabled. The Nitro server has no build-time env baking, so it must come from
+# the process environment here; re-declaring the global ARG keeps it in sync with
+# the client build rather than hardcoding a value that could drift from it.
+ARG VITE_DEPLOYMENT_PROFILE
+ENV VITE_DEPLOYMENT_PROFILE=${VITE_DEPLOYMENT_PROFILE}
 
 # The server spawns the CLI as a subprocess; its default binary resolution walks
 # up from the server module and would not find the CLI in this image layout, so

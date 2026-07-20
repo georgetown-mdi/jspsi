@@ -67,7 +67,7 @@ function writeFixture(dir: string, name = "input.csv"): string {
 }
 
 describe("useJobInputDir", () => {
-  test("is undefined when JOB_INPUT_DIR is unset", () => {
+  test("is undefined when both JOB_INPUT_DIR and JOB_DATA_ROOT are unset", () => {
     expect(useJobInputDir({})).toBeUndefined();
   });
 
@@ -77,6 +77,21 @@ describe("useJobInputDir", () => {
     expect(first).toBe(path.resolve(dir));
     // The second call ignores a changed env: the value is memoized on globalThis.
     expect(useJobInputDir({ JOB_INPUT_DIR: "/elsewhere" })).toBe(first);
+  });
+
+  test("defaults to JOB_DATA_ROOT when JOB_INPUT_DIR is unset", () => {
+    const dataRoot = tempDir("data");
+    expect(useJobInputDir({ JOB_DATA_ROOT: dataRoot })).toBe(
+      path.resolve(dataRoot),
+    );
+  });
+
+  test("an explicit JOB_INPUT_DIR overrides the data-root fallback", () => {
+    const inputDir = tempDir("input");
+    const dataRoot = tempDir("data");
+    expect(
+      useJobInputDir({ JOB_INPUT_DIR: inputDir, JOB_DATA_ROOT: dataRoot }),
+    ).toBe(path.resolve(inputDir));
   });
 });
 

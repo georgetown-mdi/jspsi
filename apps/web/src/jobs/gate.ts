@@ -1,18 +1,36 @@
-import net from "node:net";
-
 /**
  * The resolved job-API configuration read from the environment. The job API is a
- * console-appliance feature that runs inside one party's trust boundary, gated
- * off by default so a hosted deployment never exposes it.
+ * console-appliance feature that runs inside one party's trust boundary. It is
+ * enabled only in a `console` deployment build with a data root configured; a
+ * hosted build serves every job route disabled (404) whatever the data root, so
+ * the public deployment can never run the server-side job driver.
  */
 export interface JobApiConfig {
   /** The data root under which per-job workdirs are created. Empty means the API
    * is disabled. */
   dataRoot: string;
+  /** Whether this deployment build is the console appliance (its
+   * `VITE_DEPLOYMENT_PROFILE` is `console`). The job API is enabled only in a
+   * console build. */
+  consoleProfile: boolean;
 }
 
-/** The environment variable names the job API reads. */
+/** The environment variable naming the data root the job API creates workdirs
+ * under. */
 export const JOB_DATA_ROOT_ENV = "JOB_DATA_ROOT";
+
+/**
+ * The build-time deployment-profile variable, read server-side the same way the
+ * client reads it (see utils/clientConfig.ts). The console image sets it to
+ * `console` (a `Dockerfile` `ENV`, so it persists to the container runtime); a
+ * hosted build leaves it unset. Reading the one signal on both sides keeps the
+ * server gate from drifting from the client build -- a second, server-only
+ * variable could fall out of sync and is a security hazard.
+ */
+export const DEPLOYMENT_PROFILE_ENV = "VITE_DEPLOYMENT_PROFILE";
+
+/** The deployment-profile value that identifies the console appliance build. */
+export const CONSOLE_PROFILE = "console";
 
 /** Read the job-API configuration from an environment map. */
 export function readJobApiConfig(
@@ -20,42 +38,21 @@ export function readJobApiConfig(
 ): JobApiConfig {
   return {
     dataRoot: (env[JOB_DATA_ROOT_ENV] ?? "").trim(),
+    consoleProfile:
+      (env[DEPLOYMENT_PROFILE_ENV] ?? "").trim() === CONSOLE_PROFILE,
   };
 }
 
-/** Whether the job API is enabled (a data root is configured). */
-export function isJobApiEnabled(config: JobApiConfig): boolean {
-  return config.dataRoot.length > 0;
-}
-
 /**
- * Whether a bind host is a loopback address. The job API is unauthenticated by
- * design (a single local operator), so a non-loopback bind with it enabled is a
- * fail-closed startup error and only a loopback bind runs the API.
- *
- * A host is loopback only when it is the literal `localhost` or an IP literal in a
- * loopback range. A `127.`-prefixed value must parse as a real IPv4 literal: a
- * hostname such as `127.example.com` is NOT loopback (it can resolve to a public
- * address), so it must fail closed rather than pass the startup gate on the
- * string prefix alone. Anything that is neither `localhost` nor a recognized IP
- * literal is treated as non-loopback.
+ * Whether the job API is enabled: a data root is configured AND this is a console
+ * build. A hosted build (any non-`console` profile, unset included) serves every
+ * job route disabled (404) regardless of `JOB_DATA_ROOT` -- the app-layer
+ * backstop that keeps the unauthenticated server-side driver out of the public
+ * deployment. A pure function of its argument (no environment access), so the
+ * invariant is unit-testable without env mocking.
  */
-export function isLoopbackHost(host: string | undefined): boolean {
-  if (host === undefined || host === "") {
-    // No explicit host: the server default binds all interfaces, which is not
-    // loopback. Fail closed rather than assume loopback.
-    return false;
-  }
-  const normalized = host.trim().toLowerCase();
-  if (normalized === "localhost") return true;
-  const literal =
-    normalized.startsWith("[") && normalized.endsWith("]")
-      ? normalized.slice(1, -1)
-      : normalized;
-  if (net.isIPv4(literal)) return literal.startsWith("127.");
-  if (net.isIPv6(literal))
-    return literal === "::1" || literal === "0:0:0:0:0:0:0:1";
-  return false;
+export function isJobApiEnabled(config: JobApiConfig): boolean {
+  return config.dataRoot.length > 0 && config.consoleProfile;
 }
 
 /** A configuration error surfaced at server startup. */
@@ -64,27 +61,6 @@ export class JobApiConfigError extends Error {
     super(message);
     this.name = "JobApiConfigError";
   }
-}
-
-/**
- * Fail-closed startup check: if the job API is enabled on a non-loopback bind,
- * refuse to start. The API is unauthenticated by design (a single local
- * operator), so a non-loopback bind would expose an unauthenticated CLI driver on
- * a public interface. Returns normally when the configuration is safe (disabled or
- * loopback).
- */
-export function assertJobApiStartupSafe(
-  config: JobApiConfig,
-  bindHost: string | undefined,
-): void {
-  if (!isJobApiEnabled(config)) return;
-  if (isLoopbackHost(bindHost)) return;
-  throw new JobApiConfigError(
-    `${JOB_DATA_ROOT_ENV} enables the job API but the bind host ` +
-      `(${bindHost ?? "all interfaces"}) is not loopback; bind the server to ` +
-      "loopback (HOST=127.0.0.1). Refusing to start an unauthenticated job API " +
-      "on a non-loopback interface.",
-  );
 }
 
 /**
