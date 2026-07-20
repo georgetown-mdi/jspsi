@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 
 import {
   exchangeTerms,
+  probeProtocolVersion,
   resolveRole,
   PROTOCOL_VERSION,
   PROTOCOL_VERSION_MISMATCH_MESSAGE,
@@ -514,6 +515,24 @@ test("a non-object terms frame degrades cleanly (probe returns no version, stric
   const abort = await connA.receive();
   expect(abort).toMatchObject({ decision: "abort" });
   await expect(responder).rejects.toThrow(/failed to parse/);
+});
+
+test("a throwing protocolVersion getter degrades to no readable version", () => {
+  // The hardened edge of the probe's "no readable version" contract, fed to the
+  // probe directly because it is the one frame shape a real transport's
+  // deserialized wire data can never carry: a frame whose `protocolVersion` read
+  // THROWS (a throwing getter) must degrade to `undefined` -- the same legacy-peer
+  // outcome as a garbled, absent, or non-object version -- rather than escaping the
+  // schema's `.catch`. Without the hardening the read throws instead of returning
+  // undefined, so this check fails loudly if a future change removes it.
+  const frame = {
+    linkageTerms: termsA,
+    recordCount: 100,
+    get protocolVersion(): unknown {
+      throw new Error("boom");
+    },
+  };
+  expect(probeProtocolVersion(frame)).toBeUndefined();
 });
 
 test("a version mismatch is diagnosed ahead of a simultaneous terms mismatch", async () => {
