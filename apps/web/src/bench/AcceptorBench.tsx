@@ -1015,7 +1015,7 @@ export function AcceptorBench() {
               mt="md"
               checked={consented}
               onChange={(event) => setConsented(event.currentTarget.checked)}
-              label="I have reviewed my partner's proposed terms and consent to this exchange"
+              label="I have reviewed my partner's proposed configuration and consent to this exchange"
             />
             <TextInput
               mt="md"

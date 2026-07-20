@@ -38,7 +38,7 @@ const ANNOUNCE_DEBOUNCE_MS = 600;
 /** The single-identifier conflict text, shared by the visible error and its
  * announcement so the two cannot drift. */
 const SINGLE_IDENTIFIER_MESSAGE =
-  "Only one column can be the record identifier. Choose a single identifier.";
+  "Only one column can be the record identifier. Choose a single column that you can use to import the data back into your system.";
 
 /**
  * The error-association props for a Type control that is one of the offenders in a

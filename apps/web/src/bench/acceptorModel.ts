@@ -40,9 +40,9 @@ export type AcceptorSpineStepName = "review" | "consent" | "columns";
  * `launched` is not a spine step -- the top bar switches to the run timeline there. */
 export type AcceptorStep = AcceptorSpineStepName | "launched";
 
-/** The spine step labels, exactly as the mockup names them. */
+/** The spine step labels shown in the top-bar stepper. */
 export const ACCEPTOR_STEP_LABELS: Record<AcceptorSpineStepName, string> = {
-  review: "Review terms",
+  review: "Review configuration",
   consent: "Consent & your file",
   columns: "Confirm your columns",
 };

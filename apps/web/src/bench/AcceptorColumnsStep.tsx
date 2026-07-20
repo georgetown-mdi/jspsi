@@ -130,7 +130,7 @@ export function AcceptorColumnsStep({
       <p className={`${styles.small} ${styles.sub}`}>
         Tell us what each column in your file is and what should be done with
         it. Nothing here is sent to your partner except the columns you mark as
-        shared; these settings stay on your device.
+        shared.
       </p>
 
       <Stack>
@@ -280,8 +280,8 @@ export function AcceptorColumnsStep({
           caption="Your columns: type and use"
         />
         <p className={`${styles.small} ${styles.sub}`}>
-          Only one column can be the record identifier. Choose a single
-          identifier.
+          Only one column can be the record identifier. Choose a single column
+          that you can use to import the data back into your system.
         </p>
 
         {!standardizationValid && (

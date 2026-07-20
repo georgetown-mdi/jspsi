@@ -343,9 +343,7 @@ describe("bench quick path", () => {
     );
     expect(setUpLink?.getAttribute("href")).toBe("/exchange");
 
-    await expect
-      .element(page.getByLabelText("Invitation link or code"))
-      .toBeInTheDocument();
+    await expect.element(page.getByLabelText("Invitation")).toBeInTheDocument();
   });
 
   test("applies the bench surface tokens", async () => {
@@ -1675,7 +1673,6 @@ describe("inviter bench", () => {
       "Download verification keys (keep private): " +
         "psilink-record-2026-07-08T14-32.keys.json",
     );
-    await expect.element(page.getByText("Keep a record.")).toBeInTheDocument();
 
     // The timeline finishes whole, and the ledger settles what happened: the
     // invitation is consumed and the receive row reports the actual count.

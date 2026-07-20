@@ -19,6 +19,7 @@ import {
   markManagedExchangeBackedUp,
   markManagedExchangeSpent,
 } from "@psi/managedLocalState";
+import { BenchLobby } from "@bench/BenchLobby";
 import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 
 import { renderApp } from "./renderApp";
@@ -154,6 +155,36 @@ describe("home route: conditional on a stored exchange existing", () => {
       page.getByText("You have none saved yet.", { exact: false }).query(),
     ).toBeNull();
     expect(page.getByRole("button", { name: "Run" }).query()).toBeNull();
+  });
+});
+
+describe("lobby: the recurring-exchange pointer is gated on a saved exchange", () => {
+  test("no saved exchange -> the restore-from-backup pointer stands, the run-again framing is withheld", async () => {
+    mount(createElement(BenchLobby));
+
+    // The restore path must stay discoverable with nothing saved: a wholesale
+    // eviction leaves no rows yet is exactly when a backup import matters.
+    await expect
+      .element(page.getByText("Cleared this browser", { exact: false }))
+      .toBeInTheDocument();
+    // Nothing to run again, so that framing is not offered.
+    expect(
+      page
+        .getByText("Saved an exchange to run again?", { exact: false })
+        .query(),
+    ).toBeNull();
+  });
+
+  test("a saved exchange -> the run-again framing appears", async () => {
+    await createManagedExchange(newExchange());
+
+    mount(createElement(BenchLobby));
+
+    await expect
+      .element(
+        page.getByText("Saved an exchange to run again?", { exact: false }),
+      )
+      .toBeInTheDocument();
   });
 });
 

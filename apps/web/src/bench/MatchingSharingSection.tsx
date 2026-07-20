@@ -77,11 +77,7 @@ export function MatchingSharingSection({
     <>
       <p className={styles.eyebrow}>Step 2 of 3</p>
       <h1 tabIndex={-1}>Matching &amp; sharing</h1>
-      <p>
-        Confirm what each column is and what it is used for. This is the one
-        review every exchange needs: it decides exactly what your partner can
-        ever see.
-      </p>
+      <p>Confirm what each column is and what it is used for.</p>
       <div className={styles.tableScroll}>
         <table className={styles.benchTable}>
           <caption className={styles.visuallyHidden}>
@@ -143,8 +139,8 @@ export function MatchingSharingSection({
         </table>
       </div>
       <p className={`${styles.small} ${styles.sub}`}>
-        Only one column can be the record identifier. Choose a single
-        identifier.
+        Only one column can be the record identifier. Choose a single column
+        that you can use to import the data back into your system.
       </p>
       {/* Always mounted so assistive tech observes content changes; kept
           separate from the hint above so clearing a notice never re-announces
@@ -162,18 +158,6 @@ export function MatchingSharingSection({
       <VisuallyHidden role="status" aria-live="polite" aria-atomic="true">
         {conflictAnnouncement}
       </VisuallyHidden>
-      <h2>Extra data for matched records</h2>
-      <p className={styles.small}>
-        <strong>You will send:</strong>{" "}
-        {sent.length > 0 ? (
-          <span className={styles.mono}>{sent.join(", ")}</span>
-        ) : (
-          "nothing"
-        )}
-        <br />
-        <strong>You will receive:</strong> the columns your partner marks as
-        sent, for each matched row.
-      </p>
       {sent.length > 0 ? (
         <>
           <p>

@@ -507,7 +507,13 @@ export function StepListEditor({
             {addStepLabel}
           </Button>
         </Menu.Target>
-        <Menu.Dropdown>
+        {/* The transform catalog is long enough to exceed the viewport; cap the
+            dropdown and let it scroll within itself, so reaching a function near
+            the bottom no longer means scrolling the page (which slides the anchor
+            out of view and dismisses the menu). */}
+        <Menu.Dropdown
+          style={{ maxHeight: "min(60vh, 420px)", overflowY: "auto" }}
+        >
           {STANDARDIZATION_FUNCTION_GROUPS.map(renderMenuGroup)}
           {/* The raw-pattern (regex) family appears after a divider, only where the
               host enables it, so it is never mixed into the standard menu or offered
