@@ -364,11 +364,7 @@ async function sendAbort(
 // reconciles to the named skew rather than a parse error; a non-object frame, or one
 // carrying no version, probes to `undefined` (treated as a legacy peer). `.catch`
 // degrades a non-object frame to that "no readable version" rather than a parse
-// error on this path. Every frame this is fed is transport-deserialized wire data --
-// plain JSON/data with no accessors, see the two call sites -- so it does not throw
-// on any reachable input; it is not relied on to survive an arbitrary in-process
-// object (a throwing getter on `protocolVersion` would escape `.catch`, but no wire
-// peer can inject one).
+// error on this path.
 const protocolVersionProbe = z
   .object({ protocolVersion: z.unknown().optional() })
   .catch({ protocolVersion: undefined });
@@ -378,10 +374,21 @@ const protocolVersionProbe = z
  * requiring the whole envelope to parse (see {@link protocolVersionProbe}), so
  * {@link reconcileProtocolVersion} can diagnose a version skew even when a sibling
  * field would fail the strict parse. Returns `undefined` for a frame that carries
- * no version (a legacy peer) or that is not an object.
+ * no version (a legacy peer), that is not an object, or whose `protocolVersion`
+ * read throws -- a throwing getter degrades to the same "no readable version"
+ * outcome (pinned by the "throwing protocolVersion getter" test).
+ *
+ * @internal exported for the throwing-getter probe test.
  */
-function probeProtocolVersion(rawData: unknown): unknown {
-  return protocolVersionProbe.parse(rawData).protocolVersion;
+export function probeProtocolVersion(rawData: unknown): unknown {
+  // A throwing `protocolVersion` getter escapes the schema's `.catch` (which only
+  // handles validation failures), so degrade a thrown read to `undefined` here --
+  // the same "no readable version" outcome as a garbled or absent value.
+  try {
+    return protocolVersionProbe.parse(rawData).protocolVersion;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
