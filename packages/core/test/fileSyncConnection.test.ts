@@ -3,12 +3,14 @@ import { expect, test, vi } from "vitest";
 import {
   FileSyncConnection,
   normalizeFiledropPath,
+  TERMINAL_FRAME_DRAIN_TIMEOUT_MS,
+} from "../src/connection/fileSyncConnection";
+import {
   serializeFileSyncMessage,
   MESSAGE_TYPE_OBJECT,
   MESSAGE_TYPE_BINARY,
   MESSAGE_HEADER_BYTES,
-  TERMINAL_FRAME_DRAIN_TIMEOUT_MS,
-} from "../src/connection/fileSyncConnection";
+} from "../src/connection/fileSyncFraming";
 import {
   ADVERTISE_HELLO_RETRY_ATTEMPTS,
   cancellableDelay,

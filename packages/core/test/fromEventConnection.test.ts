@@ -1,10 +1,10 @@
 import { expect, test } from "vitest";
 
+import { FileSyncConnection } from "../src/connection/fileSyncConnection";
 import {
-  FileSyncConnection,
   serializeFileSyncMessage,
   MESSAGE_TYPE_OBJECT,
-} from "../src/connection/fileSyncConnection";
+} from "../src/connection/fileSyncFraming";
 import type {
   FileTransportClient,
   FileInfo,
