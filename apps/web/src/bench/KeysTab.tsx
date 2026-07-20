@@ -193,8 +193,8 @@ export function KeysTab({
         />
       ) : (
         <Alert variant="light" color="gray">
-          Fixed in this version. Turn on Expert authoring to edit keys element
-          by element and to import or export the terms.
+          Turn on Expert authoring to edit keys element by element and to import
+          or export the terms.
         </Alert>
       )}
       <h2>Matching settings</h2>

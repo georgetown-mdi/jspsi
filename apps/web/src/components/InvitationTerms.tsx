@@ -641,7 +641,7 @@ export function InvitationTerms({
   // orders).
   const tierHeadingOrder = (headingOrder + 1) as 2 | 3 | 4;
   return (
-    <Stack gap="sm">
+    <Stack gap="xs">
       <Title
         order={headingOrder}
         size="h2"
@@ -699,7 +699,7 @@ export function InvitationTerms({
         <Stack role="group" aria-labelledby={discloseGroupLabelId} gap="xs">
           <Title
             order={tierHeadingOrder}
-            fz="sm"
+            fz="md"
             fw={600}
             id={discloseGroupLabelId}
           >
@@ -808,7 +808,7 @@ export function InvitationTerms({
       <Stack role="group" aria-labelledby={produceGroupLabelId} gap="xs">
         <Title
           order={tierHeadingOrder}
-          fz="sm"
+          fz="md"
           fw={600}
           id={produceGroupLabelId}
         >
@@ -926,7 +926,7 @@ export function InvitationTerms({
           <Stack role="group" aria-labelledby={receiveGroupLabelId} gap="xs">
             <Title
               order={tierHeadingOrder}
-              fz="sm"
+              fz="md"
               fw={600}
               id={receiveGroupLabelId}
             >
@@ -956,7 +956,7 @@ export function InvitationTerms({
         <Stack role="group" aria-labelledby={matchingGroupLabelId} gap="xs">
           <Title
             order={tierHeadingOrder}
-            fz="sm"
+            fz="md"
             fw={600}
             id={matchingGroupLabelId}
           >
@@ -1070,7 +1070,7 @@ export function InvitationTerms({
           <Stack role="group" aria-labelledby={constraintGroupLabelId} gap="xs">
             <Title
               order={tierHeadingOrder}
-              fz="sm"
+              fz="md"
               fw={600}
               id={constraintGroupLabelId}
             >
@@ -1131,7 +1131,7 @@ export function InvitationTerms({
           text enters the name. */}
         {summary.legalAgreement !== undefined && (
           <Stack role="group" aria-label="Legal agreement" gap={2}>
-            <Title order={tierHeadingOrder} fz="sm" fw={600}>
+            <Title order={tierHeadingOrder} fz="md" fw={600}>
               This invitation attaches a legal agreement.
             </Title>
             <Text size="sm">Reference: {summary.legalAgreement.reference}</Text>

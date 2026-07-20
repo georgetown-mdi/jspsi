@@ -1,13 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Anchor, Button, Textarea, VisuallyHidden } from "@mantine/core";
 import { Link, useNavigate } from "@tanstack/react-router";
 
+import {
+  listManagedExchanges,
+  openManagedExchangeDatabase,
+} from "@psi/managedExchangeStore";
+import { listManagedLocalState } from "@psi/managedLocalState";
 import { tokenFromInput } from "@psi/invitation";
 
 import { BenchPage } from "./BenchPage";
 import { FILE_ASSURANCE_LINE } from "./fileAssurance";
 import { downloadSampleCsvs } from "./sampleData";
+import { loadSavedExchanges } from "./savedExchangesLoad";
 import styles from "./bench.module.css";
 
 /**
@@ -22,6 +28,31 @@ export function BenchLobby() {
   const navigate = useNavigate();
   const [invitation, setInvitation] = useState("");
   const [invitationError, setInvitationError] = useState<string>();
+
+  // Whether this browser already holds a saved recurring exchange, read once on
+  // mount. The "run it again" pointer below is gated on it, so a first-run visitor
+  // is not offered a list they have nothing in; the restore-from-backup pointer
+  // stands either way -- a wholesale eviction leaves no saved rows yet is exactly
+  // when restoring from a backup matters (see savedExchangesLoad / /saved).
+  // Undefined until the async store read settles, so the pointer slot renders
+  // nothing rather than flashing the empty-state copy at a visitor who has saved
+  // exchanges (the /quick path reaches this screen with a populated store).
+  const [hasSavedExchanges, setHasSavedExchanges] = useState<boolean>();
+  useEffect(() => {
+    let live = true;
+    void loadSavedExchanges({
+      openStore: openManagedExchangeDatabase,
+      listExchanges: listManagedExchanges,
+      listLocalState: listManagedLocalState,
+      now: Date.now,
+    }).then((result) => {
+      if (live)
+        setHasSavedExchanges(result.kind === "ready" && result.rows.length > 0);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   // "Review invitation" peels the token out of whatever was pasted -- a bare
   // code or a deep-link URL -- via the shared AcceptForm rule, and routes to the
@@ -52,7 +83,6 @@ export function BenchLobby() {
   return (
     <BenchPage>
       <main className={styles.lobby}>
-        <div className={styles.wordmark}>psilink</div>
         <h1>psilink - private record linkage</h1>
         <p className={styles.tagline}>
           Find the records you both hold - without either of you seeing the
@@ -71,8 +101,8 @@ export function BenchLobby() {
             <h3>Invite someone to exchange data</h3>
             <p className={`${styles.small} ${styles.sub}`}>
               Choose a file, confirm what you disclose, and share an invitation.
-              Default terms come from your file; most exchanges need nothing
-              more.
+              Default configuration comes from your file and can be customized
+              if needed.
             </p>
             <p>
               <Button component={Link} to="/exchange">
@@ -83,8 +113,8 @@ export function BenchLobby() {
           <div className={styles.actionCard}>
             <h3>Accept an invitation you were sent</h3>
             <Textarea
-              label="Invitation link or code"
-              description="Paste the link or code your partner sent you"
+              aria-label="Invitation"
+              description="Paste the invitation your partner sent to you"
               placeholder="https://...#... or the bare code"
               autosize
               minRows={2}
@@ -123,10 +153,6 @@ export function BenchLobby() {
           for practicing.
         </p>
         <p className={`${styles.sub} ${styles.small}`}>
-          Running exchanges on a schedule? The same setup saves an SFTP exchange
-          file for the command-line tool.
-        </p>
-        <p className={`${styles.sub} ${styles.small}`}>
           No data to link yet?{" "}
           <Anchor inherit component="button" type="button" onClick={loadSample}>
             Start with sample data
@@ -134,15 +160,25 @@ export function BenchLobby() {
           seeds an exchange with synthetic records and downloads the two CSVs so
           you can run both sides.
         </p>
-        <p className={`${styles.sub} ${styles.small}`}>
-          Saved an exchange to run again?{" "}
-          <Anchor inherit component={Link} to="/saved">
-            Recurring exchanges
-          </Anchor>{" "}
-          lists the ones stored in this browser so you can run one without a new
-          invitation, and is where you restore one from a backup file if this
-          browser was cleared.
-        </p>
+        {hasSavedExchanges === undefined ? null : hasSavedExchanges ? (
+          <p className={`${styles.sub} ${styles.small}`}>
+            Saved an exchange to run again?{" "}
+            <Anchor inherit component={Link} to="/saved">
+              Recurring exchanges
+            </Anchor>{" "}
+            lists the ones stored in this browser so you can run one without a
+            new invitation, and is where you restore one from a backup file if
+            this browser was cleared.
+          </p>
+        ) : (
+          <p className={`${styles.sub} ${styles.small}`}>
+            Cleared this browser, or moving to a new device?{" "}
+            <Anchor inherit component={Link} to="/saved">
+              Recurring exchanges
+            </Anchor>{" "}
+            is where you restore a saved exchange from a backup file.
+          </p>
+        )}
         <div className={styles.howItWorks}>
           <p>
             <strong>How it works.</strong> Each of you keeps your file on your

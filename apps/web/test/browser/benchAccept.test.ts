@@ -299,13 +299,11 @@ async function consentAndName() {
 describe("bench lobby: review invitation", () => {
   test("a pasted token navigates to the accept bench with the token in the hash", async () => {
     mount(createElement(BenchLobby));
-    await expect
-      .element(page.getByLabelText("Invitation link or code"))
-      .toBeInTheDocument();
+    await expect.element(page.getByLabelText("Invitation")).toBeInTheDocument();
 
     // A deep-link URL: the token is everything after the first '#'.
     await userEvent.fill(
-      page.getByLabelText("Invitation link or code"),
+      page.getByLabelText("Invitation"),
       "https://example.test/accept#ABC123",
     );
     await userEvent.click(
@@ -321,20 +319,17 @@ describe("bench lobby: review invitation", () => {
     // Empty field: nothing to review, so the action is withheld.
     await expect.element(review).toBeDisabled();
 
-    await userEvent.fill(
-      page.getByLabelText("Invitation link or code"),
-      "MYTOKEN",
-    );
+    await userEvent.fill(page.getByLabelText("Invitation"), "MYTOKEN");
     await expect.element(review).toBeEnabled();
 
     // Whitespace alone is not a usable token (tokenFromInput trims), so the gate
     // closes again rather than offering an action that would no-op.
-    await userEvent.fill(page.getByLabelText("Invitation link or code"), "   ");
+    await userEvent.fill(page.getByLabelText("Invitation"), "   ");
     await expect.element(review).toBeDisabled();
 
     // A URL whose fragment is empty also extracts to no token.
     await userEvent.fill(
-      page.getByLabelText("Invitation link or code"),
+      page.getByLabelText("Invitation"),
       "https://example.test/accept#",
     );
     await expect.element(review).toBeDisabled();
@@ -450,8 +445,8 @@ describe("acceptor bench: review terms", () => {
       "PII for linkage is encrypted locally before leaving your machine.",
     );
 
-    // The top bar walks the acceptor spine with Review terms current; the
-    // step indicators share the button's text, so read the label node.
+    // The top bar walks the acceptor spine with Review configuration current;
+    // the step indicators share the button's text, so read the label node.
     const rail = document.querySelector(
       'nav[aria-label="Accept an invitation"]',
     );
@@ -460,7 +455,7 @@ describe("acceptor bench: review terms", () => {
       (rail as Element).querySelector(
         '[aria-current="step"] .mantine-Stepper-stepLabel',
       )?.textContent,
-    ).toBe("Review terms");
+    ).toBe("Review configuration");
   });
 
   test("Continue advances to the consent step", async () => {

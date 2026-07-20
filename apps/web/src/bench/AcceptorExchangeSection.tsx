@@ -218,15 +218,6 @@ export function AcceptorExchangeSection({
                 href={outputs.record.keysUrl}
                 fileName={outputs.record.keysFileName}
               />
-              <div className={styles.callout}>
-                <p className={styles.calloutLead}>Keep a record.</p>
-                <p className={styles.small}>
-                  File the record JSON with your project documentation - it is
-                  safe to share and lets either party verify this run later. The
-                  verification keys prove the record came from this exchange;
-                  store them where only you can read them.
-                </p>
-              </div>
             </>
           )}
         </>

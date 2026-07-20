@@ -59,8 +59,7 @@ export const SEMANTIC_TYPE_LABELS: Record<SemanticType, string> = {
  * the label, not by color or by an opaque role name. */
 export const DISCLOSURE_LABELS: Record<DisclosureChoice, string> = {
   match: "Used to match - not sent",
-  identifier:
-    "Unique record identifier (to import into your system) - not sent",
+  identifier: "Unique record identifier - not sent",
   payload: "Sent to your partner",
   ignored: "Ignored",
 };

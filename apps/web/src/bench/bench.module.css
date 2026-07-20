@@ -980,9 +980,12 @@
 .lobby {
   max-width: 880px;
   margin: 0 auto;
-  padding: 56px 32px 40px 32px;
+  padding: 40px 32px 40px 32px;
 }
 
+/* Used by the /saved surfaces (the recurring list and the storage-unavailable
+   degrade), which still render the wordmark inside .lobby; the landing page
+   dropped its own wordmark but these keep the tighter gap. */
 .lobby .wordmark {
   margin-bottom: 8px;
 }
@@ -996,7 +999,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 24px;
-  margin: 1.8rem 0 1.2rem 0;
+  margin: 1.4rem 0 1rem 0;
 }
 
 /* Below-cards copy should read at the cards' width, not the standing
@@ -1010,10 +1013,20 @@
 }
 
 .actionCard {
+  display: flex;
+  flex-direction: column;
   background: var(--bench-column);
   border: 2px solid var(--bench-rule);
   border-radius: 10px;
   padding: 22px 24px 24px 24px;
+}
+
+/* The cards stretch to equal height in the grid; pushing each card's action
+   paragraph (its last child) to the bottom lines the two buttons up on one
+   baseline regardless of how much copy or field sits above them. */
+.actionCard > p:last-child {
+  margin-top: auto;
+  margin-bottom: 0;
 }
 
 .actionCard h3 {
