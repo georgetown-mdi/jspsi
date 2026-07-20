@@ -19,7 +19,7 @@ import { capturedInputHandle } from "@psi/managedInputHandle";
 import { columnSamplesFromRows } from "@psi/columnSamples";
 import { createManagedExchange } from "@psi/managedExchangeStore";
 import { fetchJobRendezvous } from "@psi/workInputClient";
-import { fetchSftpRemotes } from "@psi/serverJobExchangeDriver";
+import { fetchSftpConnection } from "@psi/serverJobExchangeDriver";
 import { invitationLocation } from "@psi/invitationLocation";
 import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 
@@ -95,13 +95,14 @@ import { Ledger } from "./Ledger";
 import { ManageExchangeOffer } from "./ManageExchangeOffer";
 import { MatchingSharingSection } from "./MatchingSharingSection";
 import { Problems } from "./Problems";
+import { RecoveredExchangePanel } from "./RecoveredExchangePanel";
 import { ReviewCreateSection } from "./ReviewCreateSection";
 import { SaveExchangeSection } from "./SaveExchangeSection";
 import { TopBar } from "./TopBar";
 import { YourFileSection } from "./YourFileSection";
 import { consoleAcquiredCsv } from "./consoleAcquiredCsv";
 import { restorableSection } from "./stepRestore";
-import { sftpEndpointForRemote } from "./sftpRemoteChoice";
+import { sftpEndpointForConnection } from "./sftpConnectionChoice";
 import { timelineSteps } from "./exchangeRun";
 import { useInviterExchange } from "./useInviterExchange";
 import { useStepHistory } from "./useStepHistory";
@@ -126,7 +127,7 @@ import type { ManageOfferChoices } from "./manageOfferModel";
 import type { ManageOfferStatus } from "./ManageExchangeOffer";
 import type { SavedExchange } from "./SaveExchangeSection";
 import type { Section } from "./stepRestore";
-import type { SftpRemoteProjection } from "@jobs/jobManager";
+import type { SftpConnectionProjection } from "@jobs/jobManager";
 
 import type { CSVRow, SemanticType, Standardization } from "@psilink/core";
 
@@ -226,8 +227,12 @@ export function InviterBench() {
   const [savedExchange, setSavedExchange] = useState<SavedExchange>();
   const [saving, setSaving] = useState(false);
   const [saveAlert, setSaveAlert] = useState<IntakeAlert>();
-  const [sftpRemotes, setSftpRemotes] = useState<Array<SftpRemoteProjection>>();
-  const [sftpRemoteName, setSftpRemoteName] = useState<string>();
+  // The console's provisioned SFTP connection, fetched once on a console build.
+  // Undefined before it resolves; null when the appliance provisions none; the
+  // projection when one is provisioned. `sftpConfigured` (below) gates the SFTP
+  // transport, and its locator is authored into an sftp invitation's endpoint.
+  const [sftpConnection, setSftpConnection] =
+    useState<SftpConnectionProjection | null>();
   // The console's rendezvous mount, fetched once on a console build. Undefined before
   // it resolves; `configured` gates the filedrop transport (offered iff a directory is
   // mounted) and `path` is the advisory locator minted into a filedrop invitation.
@@ -235,29 +240,22 @@ export function InviterBench() {
   const [demoActive, setDemoActive] = useState(false);
   const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
 
-  // Fetch the appliance's provisioned SFTP remotes once on a console build; the
-  // table is boot-static on the server, so one fetch per bench serves the session,
-  // and the default transport reads its presence (SFTP when provisioned, else the
-  // filedrop save-a-file card). The helper resolves to an empty array on any
-  // failure, so Create then falls back to the save-file surface rather than arming a
-  // server-job run with no remote to name. The picker defaults to the first remote
-  // so a chosen name always exists while the picker is shown.
+  // Fetch the appliance's provisioned SFTP connection once on a console build; the
+  // server is boot-static, so one fetch per bench serves the session, and the
+  // default transport reads its presence (SFTP when provisioned, else the filedrop
+  // save-a-file card). The helper resolves to null on any failure or when none is
+  // provisioned, so Create then falls back to the save-file surface rather than
+  // arming a server-job run with no connection.
   useEffect(() => {
-    if (!isConsoleBuild() || sftpRemotes !== undefined) return;
+    if (!isConsoleBuild() || sftpConnection !== undefined) return;
     let cancelled = false;
-    void fetchSftpRemotes().then((remotes) => {
-      if (cancelled) return;
-      setSftpRemotes(remotes);
-      setSftpRemoteName((current) =>
-        remotes.some((remote) => remote.name === current)
-          ? current
-          : remotes[0]?.name,
-      );
+    void fetchSftpConnection().then((connection) => {
+      if (!cancelled) setSftpConnection(connection);
     });
     return () => {
       cancelled = true;
     };
-  }, [sftpRemotes]);
+  }, [sftpConnection]);
 
   // Fetch the appliance's rendezvous mount once on a console build; the mount is
   // boot-static on the server, so one fetch per bench serves the session. The helper
@@ -274,15 +272,11 @@ export function InviterBench() {
     };
   }, [rendezvous]);
 
-  const sftpRemotesConfigured =
-    sftpRemotes !== undefined && sftpRemotes.length > 0;
+  const sftpConfigured = sftpConnection != null;
   const rendezvousConfigured = rendezvous?.configured === true;
-  const chosenSftpRemote = sftpRemotes?.find(
-    (remote) => remote.name === sftpRemoteName,
-  );
   const available = availableTransports(
     isConsoleBuild(),
-    sftpRemotesConfigured,
+    sftpConfigured,
     rendezvousConfigured,
   );
   const transport = editor?.transport ?? available.defaultTransport;
@@ -306,14 +300,14 @@ export function InviterBench() {
   // for a saved exchange. A `server-job` run mode runs live too -- the console
   // appliance carries it out -- so it drives the hook exactly as `browser` does.
   const runsLive = chosenRunMode !== "save-file";
-  const { run, outputs, failure, warnings, tryAgain } = useInviterExchange({
-    invitation: runsLive ? invitation : undefined,
-    inviterName: editor?.draft.identity ?? "",
-    channel: transport,
-    inputSource,
-    sftpRemotesConfigured,
-    sftpRemote: chosenSftpRemote?.name,
-  });
+  const { run, outputs, failure, warnings, tryAgain, abandonRun } =
+    useInviterExchange({
+      invitation: runsLive ? invitation : undefined,
+      inviterName: editor?.draft.identity ?? "",
+      channel: transport,
+      inputSource,
+      sftpConfigured,
+    });
 
   // The coverage input, unified across builds: the browser's parsed rows on the
   // hosted build, the mounted-file reference on the console (whose sweep is a fetch
@@ -365,6 +359,10 @@ export function InviterBench() {
   // already torn down; the hook drops the run state), and the operator lands
   // back on Review & create, where the next create mints a fresh secret.
   function startOver() {
+    // A server-job run the operator is leaving is deliberately abandoned:
+    // cancel-if-running and DELETE, which also frees the appliance's single slot
+    // for the fresh create. A no-op on a browser run.
+    abandonRun();
     setEditor((current) =>
       current === undefined ? current : unsealEditor(current),
     );
@@ -454,25 +452,15 @@ export function InviterBench() {
     if (isSection(step)) return restoreSection(step);
   });
 
-  // A console server-job run is still executing on the appliance while its
-  // invitation is minted and the run has not settled; leaving the page abandons
-  // it (an in-app teardown cancels the run, a hard close strands it), so the
-  // guard stays armed through it.
-  const consoleExchangeRunning =
-    chosenRunMode === "server-job" &&
-    invitation !== undefined &&
-    outputs === undefined &&
-    failure === undefined;
-
   // The unload guard arms once a file is loaded and disarms once the exchange is
   // finalized -- the invitation minted (a browser run is listening) or the
-  // exchange file saved -- unless a console server-job exchange is still running on
-  // the appliance, which keeps it armed until the run settles.
+  // exchange file saved. A console server-job run is NOT armed: leaving the page
+  // does not abandon it (the appliance keeps running it and the recovery panel is
+  // the way back), so a prompt would assert a loss that does not happen.
   useUnloadGuard({
     hasFile: acquired !== undefined,
     finalized: invitation !== undefined || savedExchange !== undefined,
     demoActive,
-    consoleExchangeRunning,
   });
 
   function goTo(next: Section) {
@@ -767,16 +755,16 @@ export function InviterBench() {
       goTo("save");
       return;
     }
-    // An sftp server-job run authors the invitation's endpoint from the picked
-    // provisioned remote's locator -- the same connectionEndpoint seam the save
-    // surface's free-text fields feed -- so the partner's CLI meets the
-    // appliance where it will actually connect. The picker defaults to the
-    // first remote, so a missing choice here means the remotes state changed
-    // mid-create; refuse rather than mint a code with the wrong rendezvous.
+    // An sftp server-job run authors the invitation's endpoint from the
+    // provisioned connection's locator -- the same connectionEndpoint seam the
+    // save surface's free-text fields feed -- so the partner's CLI meets the
+    // appliance where it will actually connect. A missing connection here means
+    // the fetch had not resolved or reported none; refuse rather than mint a
+    // code with no rendezvous.
     let connectionEndpoint: ConnectionEndpointRequest | undefined;
     if (transport === "sftp") {
-      if (chosenSftpRemote === undefined) return;
-      connectionEndpoint = sftpEndpointForRemote(chosenSftpRemote);
+      if (sftpConnection == null) return;
+      connectionEndpoint = sftpEndpointForConnection(sftpConnection);
     } else if (transport === "filedrop") {
       // A console filedrop server-job carries the rendezvous directory's NAME (its
       // basename) as the invitation's advisory locator, so the partner can confirm the
@@ -1049,6 +1037,12 @@ export function InviterBench() {
     >
       <div ref={headingRef}>
         <Problems problems={problems} />
+        {/* The console's idle entry state (no file acquired): a way back to an
+            exchange still running from a prior visit. Renders nothing when there
+            is none to recover. */}
+        {isConsoleBuild() && section === "file" && acquired === undefined && (
+          <RecoveredExchangePanel />
+        )}
         {section === "file" && (
           <YourFileSection
             name={name}
@@ -1107,10 +1101,8 @@ export function InviterBench() {
                 csv={acquired}
                 problems={openProblems}
                 minting={minting}
-                sftpRemotes={sftpRemotes}
-                sftpRemoteName={sftpRemoteName}
+                sftpConnection={sftpConnection}
                 rendezvousConfigured={rendezvousConfigured}
-                onSftpRemote={setSftpRemoteName}
                 onLifetime={(seconds) =>
                   applyEditor(editorWithLifetime(editor, seconds))
                 }
@@ -1242,6 +1234,7 @@ export function InviterBench() {
               serverJob={chosenRunMode === "server-job"}
               onTryAgain={tryAgain}
               onStartOver={startOver}
+              onAbandon={abandonRun}
             />
             {/* The manage offer is webrtc-only (its record composes a webrtc
                 locator) and is skippable: leaving it untouched keeps the exchange

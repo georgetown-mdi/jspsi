@@ -4,20 +4,20 @@ import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 
 import {
-  JOB_SFTP_REMOTES_ENV,
-  SFTP_REMOTE_NAME_REGEX,
-  loadSftpRemotesFromEnv,
-  loadSftpRemotesTable,
-} from "@jobs/sftpRemotes";
+  JOB_SFTP_SERVER_ENV,
+  LEGACY_JOB_SFTP_REMOTES_ENV,
+  loadSftpServer,
+  loadSftpServerFromEnv,
+} from "@jobs/sftpServer";
 import { JobApiConfigError } from "@jobs/gate";
-import { useSftpRemotesTable } from "@jobs/index";
+import { useSftpServer } from "@jobs/index";
 
 import { TEST_HOST_KEY_FINGERPRINT, tempDataRoot } from "../utils/jobFixtures";
 
-// The loader is the boot-time gate between an operator's remotes file and the
+// The loader is the boot-time gate between an operator's SFTP server file and the
 // connection block the appliance later composes into CLI configs. These pin its
 // strictness: only the allowlisted fields, only @path credentials outside the
-// data root, only literal canonical fingerprints, names kept verbatim.
+// data root, only literal canonical fingerprints, a single server block.
 
 const dirs: Array<string> = [];
 
@@ -26,17 +26,17 @@ afterEach(() => {
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
-/** A scratch directory holding the remotes file and any referenced secrets. */
+/** A scratch directory holding the server file and any referenced secrets. */
 function scratchDir(): string {
-  const dir = tempDataRoot("remotes");
+  const dir = tempDataRoot("sftp-server");
   fs.mkdirSync(dir, { recursive: true });
   dirs.push(dir);
   return dir;
 }
 
-/** Write a remotes YAML document to disk, returning its path. */
-function writeRemotesFile(dir: string, content: string): string {
-  const filePath = path.join(dir, "remotes.yaml");
+/** Write an sftp server YAML document to disk, returning its path. */
+function writeServerFile(dir: string, content: string): string {
+  const filePath = path.join(dir, "sftp-server.yaml");
   fs.writeFileSync(filePath, content);
   return filePath;
 }
@@ -48,40 +48,31 @@ function writeSecretFile(dir: string): string {
   return filePath;
 }
 
-/** Compose a remotes document with one named entry from YAML body lines. */
-function remotesYaml(name: string, entryLines: Array<string>): string {
-  return [
-    "remotes:",
-    `  ${name}:`,
-    ...entryLines.map((line) => `    ${line}`),
-    "",
-  ].join("\n");
+/** Compose a server document from YAML body lines. */
+function serverYaml(entryLines: Array<string>): string {
+  return ["server:", ...entryLines.map((line) => `  ${line}`), ""].join("\n");
 }
 
 function loadSingle(
   entryLines: Array<string>,
   options?: {
-    name?: string;
     dataRoot?: string;
   },
 ) {
   const dir = scratchDir();
   const dataRoot = options?.dataRoot ?? path.join(dir, "data-root");
-  const filePath = writeRemotesFile(
-    dir,
-    remotesYaml(options?.name ?? "prod_east", entryLines),
-  );
-  return loadSftpRemotesTable(filePath, dataRoot);
+  const filePath = writeServerFile(dir, serverYaml(entryLines));
+  return loadSftpServer(filePath, dataRoot);
 }
 
-describe("loadSftpRemotesTable happy path", () => {
-  test("loads a full entry, camelizing fields but never the name", () => {
+describe("loadSftpServer happy path", () => {
+  test("loads a full entry, camelizing fields", () => {
     const dir = scratchDir();
     const secretPath = writeSecretFile(dir);
     const dataRoot = path.join(dir, "data-root");
-    const filePath = writeRemotesFile(
+    const filePath = writeServerFile(
       dir,
-      remotesYaml("prod_east", [
+      serverYaml([
         "host: sftp.example.org",
         "port: 2222",
         "username: linkage",
@@ -92,9 +83,7 @@ describe("loadSftpRemotesTable happy path", () => {
       ]),
     );
 
-    const table = loadSftpRemotesTable(filePath, dataRoot);
-    expect([...table.keys()]).toEqual(["prod_east"]);
-    const entry = table.get("prod_east")!;
+    const entry = loadSftpServer(filePath, dataRoot);
     expect(entry.host).toBe("sftp.example.org");
     expect(entry.port).toBe(2222);
     expect(entry.username).toBe("linkage");
@@ -104,25 +93,18 @@ describe("loadSftpRemotesTable happy path", () => {
     expect(entry.keyboardInteractive).toBe(true);
   });
 
-  test("a snake_case name is retrievable verbatim and nothing else", () => {
-    const table = loadSingle([
+  test("loads a minimal entry (host plus mandatory fingerprint)", () => {
+    const entry = loadSingle([
       "host: sftp.example.org",
       `host_key_fingerprint: ${TEST_HOST_KEY_FINGERPRINT}`,
     ]);
-    expect(table.get("prod_east")).toBeDefined();
-    expect(table.get("prodEast")).toBeUndefined();
-    expect(table.get("PROD_EAST")).toBeUndefined();
-  });
-
-  test("an empty remotes mapping loads as an empty table", () => {
-    const dir = scratchDir();
-    const filePath = writeRemotesFile(dir, "remotes: {}\n");
-    const table = loadSftpRemotesTable(filePath, path.join(dir, "data-root"));
-    expect(table.size).toBe(0);
+    expect(entry.host).toBe("sftp.example.org");
+    expect(entry.port).toBeUndefined();
+    expect(entry.path).toBeUndefined();
   });
 });
 
-describe("loadSftpRemotesTable rejects unknown and disallowed keys", () => {
+describe("loadSftpServer rejects unknown and disallowed keys", () => {
   test("provision is rejected, named in the error", () => {
     expect(() =>
       loadSingle([
@@ -198,7 +180,7 @@ describe("loadSftpRemotesTable rejects unknown and disallowed keys", () => {
   });
 });
 
-describe("loadSftpRemotesTable credential reference rules", () => {
+describe("loadSftpServer credential reference rules", () => {
   test("an inline (non-@) credential is rejected without echoing the value", () => {
     let caught: Error | null = null;
     try {
@@ -211,7 +193,7 @@ describe("loadSftpRemotesTable credential reference rules", () => {
       caught = error as Error;
     }
     expect(caught).toBeInstanceOf(JobApiConfigError);
-    expect(caught?.message).toContain("remotes.prod_east.password");
+    expect(caught?.message).toContain("server.password");
     expect(caught?.message).not.toContain("hunter2-inline-secret");
   });
 
@@ -283,7 +265,7 @@ describe("loadSftpRemotesTable credential reference rules", () => {
     const secretPath = path.join(dir, "data-root-secrets", "pw");
     fs.mkdirSync(path.dirname(secretPath), { recursive: true });
     fs.writeFileSync(secretPath, "x");
-    const table = loadSingle(
+    const entry = loadSingle(
       [
         "host: sftp.example.org",
         `host_key_fingerprint: ${TEST_HOST_KEY_FINGERPRINT}`,
@@ -291,7 +273,7 @@ describe("loadSftpRemotesTable credential reference rules", () => {
       ],
       { dataRoot },
     );
-    expect(table.get("prod_east")?.password).toBe(`@${secretPath}`);
+    expect(entry.password).toBe(`@${secretPath}`);
   });
 
   test("a reference to a missing file is rejected without echoing the path value", () => {
@@ -308,7 +290,7 @@ describe("loadSftpRemotesTable credential reference rules", () => {
       caught = error as Error;
     }
     expect(caught).toBeInstanceOf(JobApiConfigError);
-    expect(caught?.message).toContain("remotes.prod_east.password");
+    expect(caught?.message).toContain("server.password");
     expect(caught?.message).not.toContain(missing);
   });
 
@@ -326,14 +308,14 @@ describe("loadSftpRemotesTable credential reference rules", () => {
       expect.objectContaining({
         name: "JobApiConfigError",
         message: expect.stringContaining(
-          "remotes.prod_east.privateKeyPassphrase",
+          "server.privateKeyPassphrase",
         ) as string,
       }) as Error,
     );
   });
 });
 
-describe("loadSftpRemotesTable fingerprint rules", () => {
+describe("loadSftpServer fingerprint rules", () => {
   test("a missing fingerprint is rejected", () => {
     expect(() => loadSingle(["host: sftp.example.org"])).toThrowError(
       expect.objectContaining({
@@ -389,53 +371,51 @@ describe("loadSftpRemotesTable fingerprint rules", () => {
   });
 });
 
-describe("loadSftpRemotesTable name and document shape rules", () => {
-  test("a name outside the charset is rejected", () => {
-    for (const name of ["-leading-dash", "has space", "a/b"]) {
-      const dir = scratchDir();
-      const filePath = writeRemotesFile(
-        dir,
-        remotesYaml(JSON.stringify(name), [
-          "host: sftp.example.org",
-          `host_key_fingerprint: ${TEST_HOST_KEY_FINGERPRINT}`,
-        ]),
-      );
-      expect(() =>
-        loadSftpRemotesTable(filePath, path.join(dir, "data-root")),
-      ).toThrow(JobApiConfigError);
-      expect(SFTP_REMOTE_NAME_REGEX.test(name)).toBe(false);
-    }
-  });
-
-  test("a name longer than 64 characters is rejected", () => {
-    expect(() =>
-      loadSingle(
-        [
-          "host: sftp.example.org",
-          `host_key_fingerprint: ${TEST_HOST_KEY_FINGERPRINT}`,
-        ],
-        { name: "a".repeat(65) },
-      ),
-    ).toThrow(JobApiConfigError);
-  });
-
-  test("a document without the remotes key is rejected", () => {
+describe("loadSftpServer document shape rules", () => {
+  test("a document without the server key is rejected", () => {
     const dir = scratchDir();
-    const filePath = writeRemotesFile(dir, "servers: {}\n");
+    const filePath = writeServerFile(dir, "servers: {}\n");
+    expect(() => loadSftpServer(filePath, path.join(dir, "data-root"))).toThrow(
+      JobApiConfigError,
+    );
+  });
+
+  test("a document with a second top-level key is rejected", () => {
+    const dir = scratchDir();
+    const filePath = writeServerFile(
+      dir,
+      [
+        "server:",
+        "  host: sftp.example.org",
+        `  host_key_fingerprint: ${TEST_HOST_KEY_FINGERPRINT}`,
+        "remotes: {}",
+        "",
+      ].join("\n"),
+    );
     expect(() =>
-      loadSftpRemotesTable(filePath, path.join(dir, "data-root")),
-    ).toThrow(JobApiConfigError);
+      loadSftpServer(filePath, path.join(dir, "data-root")),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "JobApiConfigError",
+        message: expect.stringContaining("remotes") as string,
+      }) as Error,
+    );
+  });
+
+  test("a server key mapping to a non-mapping is rejected", () => {
+    const dir = scratchDir();
+    const filePath = writeServerFile(dir, "server: not-a-mapping\n");
+    expect(() => loadSftpServer(filePath, path.join(dir, "data-root"))).toThrow(
+      JobApiConfigError,
+    );
   });
 
   test("unparseable YAML is a config error that never echoes the source", () => {
     const dir = scratchDir();
-    const filePath = writeRemotesFile(
-      dir,
-      "remotes: {inline-looking-secret: [",
-    );
+    const filePath = writeServerFile(dir, "server: {inline-looking-secret: [");
     let caught: Error | null = null;
     try {
-      loadSftpRemotesTable(filePath, path.join(dir, "data-root"));
+      loadSftpServer(filePath, path.join(dir, "data-root"));
     } catch (error) {
       caught = error as Error;
     }
@@ -443,10 +423,10 @@ describe("loadSftpRemotesTable name and document shape rules", () => {
     expect(caught?.message).not.toContain("inline-looking-secret");
   });
 
-  test("a missing remotes file is a config error", () => {
+  test("a missing server file is a config error", () => {
     const dir = scratchDir();
     expect(() =>
-      loadSftpRemotesTable(
+      loadSftpServer(
         path.join(dir, "no-such-file.yaml"),
         path.join(dir, "data-root"),
       ),
@@ -454,7 +434,7 @@ describe("loadSftpRemotesTable name and document shape rules", () => {
   });
 });
 
-describe("loadSftpRemotesTable runs core's cross-field refines at boot", () => {
+describe("loadSftpServer runs core's cross-field refines at boot", () => {
   test("password and privateKey together are rejected", () => {
     const dir = scratchDir();
     const secretPath = writeSecretFile(dir);
@@ -486,29 +466,47 @@ describe("loadSftpRemotesTable runs core's cross-field refines at boot", () => {
   });
 });
 
-describe("loadSftpRemotesFromEnv startup posture", () => {
-  test("unset JOB_SFTP_REMOTES loads no table", () => {
-    expect(loadSftpRemotesFromEnv({})).toBeUndefined();
+describe("loadSftpServerFromEnv startup posture", () => {
+  test("unset JOB_SFTP_SERVER loads no server", () => {
+    expect(loadSftpServerFromEnv({})).toBeUndefined();
     expect(
-      loadSftpRemotesFromEnv({ [JOB_SFTP_REMOTES_ENV]: "  " }),
+      loadSftpServerFromEnv({ [JOB_SFTP_SERVER_ENV]: "  " }),
     ).toBeUndefined();
   });
 
-  test("JOB_SFTP_REMOTES without JOB_DATA_ROOT is a config error", () => {
+  test("JOB_SFTP_SERVER without JOB_DATA_ROOT is a config error", () => {
     expect(() =>
-      loadSftpRemotesFromEnv({ [JOB_SFTP_REMOTES_ENV]: "/etc/remotes.yaml" }),
+      loadSftpServerFromEnv({ [JOB_SFTP_SERVER_ENV]: "/etc/sftp-server.yaml" }),
     ).toThrow(JobApiConfigError);
   });
 
-  test("an invalid remotes file fails the load, not just the first request", () => {
+  test("the superseded JOB_SFTP_REMOTES variable refuses the boot with a migration message", () => {
+    let caught: Error | null = null;
+    try {
+      loadSftpServerFromEnv({
+        [LEGACY_JOB_SFTP_REMOTES_ENV]: "/etc/remotes.yaml",
+        JOB_DATA_ROOT: "/srv/data",
+      });
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(caught).toBeInstanceOf(JobApiConfigError);
+    // The message names the new variable and the single-server shape so an
+    // operator migrating a table knows what to set instead.
+    expect(caught?.message).toContain(LEGACY_JOB_SFTP_REMOTES_ENV);
+    expect(caught?.message).toContain(JOB_SFTP_SERVER_ENV);
+    expect(caught?.message).toContain("server");
+  });
+
+  test("an invalid server file fails the load, not just the first request", () => {
     const dir = scratchDir();
-    const filePath = writeRemotesFile(
+    const filePath = writeServerFile(
       dir,
-      remotesYaml("prod_east", ["host: sftp.example.org"]),
+      serverYaml(["host: sftp.example.org"]),
     );
     expect(() =>
-      loadSftpRemotesFromEnv({
-        [JOB_SFTP_REMOTES_ENV]: filePath,
+      loadSftpServerFromEnv({
+        [JOB_SFTP_SERVER_ENV]: filePath,
         JOB_DATA_ROOT: path.join(dir, "data-root"),
       }),
     ).toThrow(JobApiConfigError);
@@ -516,48 +514,47 @@ describe("loadSftpRemotesFromEnv startup posture", () => {
 
   test("a valid file loads through the env reader", () => {
     const dir = scratchDir();
-    const filePath = writeRemotesFile(
+    const filePath = writeServerFile(
       dir,
-      remotesYaml("prod_east", [
+      serverYaml([
         "host: sftp.example.org",
         `host_key_fingerprint: ${TEST_HOST_KEY_FINGERPRINT}`,
       ]),
     );
-    const table = loadSftpRemotesFromEnv({
-      [JOB_SFTP_REMOTES_ENV]: filePath,
+    const entry = loadSftpServerFromEnv({
+      [JOB_SFTP_SERVER_ENV]: filePath,
       JOB_DATA_ROOT: path.join(dir, "data-root"),
     });
-    expect(table?.get("prod_east")?.host).toBe("sftp.example.org");
+    expect(entry?.host).toBe("sftp.example.org");
   });
 });
 
-describe("useSftpRemotesTable (the call the server entry makes at boot)", () => {
+describe("useSftpServer (the call the server entry makes at boot)", () => {
   afterEach(() => {
-    (globalThis as { jobSftpRemotesTable?: unknown }).jobSftpRemotesTable =
-      undefined;
+    (globalThis as { jobSftpServer?: unknown }).jobSftpServer = undefined;
   });
 
-  test("propagates the config error so a bad table refuses the boot", () => {
+  test("propagates the config error so a bad server file refuses the boot", () => {
     expect(() =>
-      useSftpRemotesTable({ [JOB_SFTP_REMOTES_ENV]: "/etc/remotes.yaml" }),
+      useSftpServer({ [JOB_SFTP_SERVER_ENV]: "/etc/sftp-server.yaml" }),
     ).toThrow(JobApiConfigError);
   });
 
-  test("memoizes the loaded table for the lazy manager construction", () => {
+  test("memoizes the loaded entry for the lazy manager construction", () => {
     const dir = scratchDir();
-    const filePath = writeRemotesFile(
+    const filePath = writeServerFile(
       dir,
-      remotesYaml("prod_east", [
+      serverYaml([
         "host: sftp.example.org",
         `host_key_fingerprint: ${TEST_HOST_KEY_FINGERPRINT}`,
       ]),
     );
     const env = {
-      [JOB_SFTP_REMOTES_ENV]: filePath,
+      [JOB_SFTP_SERVER_ENV]: filePath,
       JOB_DATA_ROOT: path.join(dir, "data-root"),
     };
-    const first = useSftpRemotesTable(env);
-    expect(first?.get("prod_east")).toBeDefined();
-    expect(useSftpRemotesTable(env)).toBe(first);
+    const first = useSftpServer(env);
+    expect(first?.host).toBe("sftp.example.org");
+    expect(useSftpServer(env)).toBe(first);
   });
 });

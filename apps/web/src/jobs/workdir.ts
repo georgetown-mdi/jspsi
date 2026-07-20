@@ -133,3 +133,21 @@ export function readRecordCreatedAt(recordPath: string): string | null {
 export async function removeWorkdir(workdir: string): Promise<void> {
   await fsp.rm(workdir, { recursive: true, force: true });
 }
+
+/**
+ * Whether the workdir leaf is a real directory. `lstat` (not `stat`) so a symlink
+ * planted at `<dataRoot>/<jobId>` reports as not-a-directory and is refused rather
+ * than followed -- the disk-only DELETE arm's guard against removing through a
+ * link out of the data root. A missing leaf is false, not an error.
+ */
+export async function workdirDirectoryExists(
+  workdir: string,
+): Promise<boolean> {
+  try {
+    const stats = await fsp.lstat(workdir);
+    return stats.isDirectory();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}

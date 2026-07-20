@@ -12,19 +12,18 @@ import type { JobExchangeIntent, JobExchangeOptions } from "@jobs/intent";
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 import type { RelayEvent, RelayEventType } from "@jobs/cliDriver";
 import type { RunOutputs } from "@bench/runOutputs";
-import type { SftpRemoteProjection } from "@jobs/jobManager";
+import type { SftpConnectionProjection } from "@jobs/jobManager";
 
 const log = getLogger("serverJobExchangeDriver");
 
 /** The channel a server job runs over, mirroring the {@link JobExchangeIntent}
  * discriminant so the driver stays transport-blind past intent construction.
- * The sftp variant carries exactly one extra field: the opaque NAME of an
- * operator-provisioned remote (`GET /api/jobs/remotes`). No free-form
- * connection field exists here by construction -- every host, port, path, and
- * credential reference lives in the appliance's remotes table, never in the
- * browser. */
+ * The sftp variant carries no connection field at all: the appliance is
+ * provisioned with exactly one SFTP server (`GET /api/jobs/sftp`), so every
+ * host, port, path, and credential reference lives on the appliance, never in
+ * the browser. */
 export type ServerJobExchangeTransport =
-  { channel: "filedrop" } | { channel: "sftp"; remote: string };
+  { channel: "filedrop" } | { channel: "sftp" };
 
 /**
  * Where the appliance reads this party's input from. `inline` carries the CSV
@@ -72,6 +71,12 @@ export interface ServerJobExchangeDriverConfig {
    * leaves it undefined -- the lock-in is the acceptor's. */
   expectedPayloadColumns?: Array<string>;
   options?: JobExchangeOptions;
+  /** Invoked with the created job's id the moment `POST /api/jobs` resolves,
+   * before the event stream opens. The seam the console's strand-recovery record
+   * is written from ({@link ../psi/consoleJobAttachment}): the job exists on the
+   * appliance from this point, so persisting its id here lets a reload or a hard
+   * tab close re-attach to the run. */
+  onJobCreated?: (jobId: string) => void;
 }
 
 /** The exchange-record pair's availability on the appliance, read off
@@ -101,6 +106,22 @@ export interface JobApiClient {
   /** `POST /api/jobs/:id/cancel`; best-effort, errors are swallowed by the
    * caller since a cancel races a naturally-terminating job. */
   cancelJob: (jobId: string) => Promise<void>;
+  /** `DELETE /api/jobs/:id`; the one operation that removes the workdir. The
+   * caller swallows errors (best-effort, like {@link cancelJob}): a discard
+   * races a job the operator has already left, and a 404 for an already-gone id
+   * is a no-op. */
+  deleteJob: (jobId: string) => Promise<void>;
+  /** `GET /api/jobs/:id`, resolving a {@link JobStatusProbe} the recovery probe and
+   * the discard poll both read. A confirmed HTTP 404 is `gone` -- the exchange is
+   * not on the appliance (deleted, or forgotten by a restart) -- and is the only
+   * outcome that authorizes a destructive reclaim. A network error or any other
+   * non-2xx is `unreachable`: a transient fault, NOT a confirmed removal, so the
+   * caller leaves the record intact for the next probe rather than deleting a
+   * still-live exchange over a blip. A 200 is `live` with the run status. */
+  fetchJobStatus: (
+    jobId: string,
+    signal: AbortSignal,
+  ) => Promise<JobStatusProbe>;
   /** `GET /api/jobs/:id`, reading `recordAvailable`/`recordCreatedAt` off the
    * status body. A graceful-degrade metadata fetch: the driver delivers the
    * result without the record pair if this fails or aborts. */
@@ -109,6 +130,31 @@ export interface JobApiClient {
     signal: AbortSignal,
   ) => Promise<RecordAvailability>;
 }
+
+/** The exchange's live run status, read off `GET /api/jobs/:id`. `running` is a
+ * live child; the other three are terminal outcomes (the status flips from
+ * `running` once the child's terminal is reconciled). The recovery panel reads it
+ * to head the surface and the discard poll reads it to wait out a graceful
+ * cancel. */
+export type JobRunStatus = "running" | "succeeded" | "failed" | "cancelled";
+
+/** The status body a recovery probe or a discard poll needs off
+ * `GET /api/jobs/:id`: only the run status. The endpoint carries more (terminal,
+ * record availability), but re-attachment reconstructs the run from the event
+ * stream, so the status view stays minimal. */
+export interface JobStatusView {
+  status: JobRunStatus;
+}
+
+/** The outcome of a `GET /api/jobs/:id` probe, distinguishing a CONFIRMED-gone
+ * exchange from a transient failure so only the former drives a destructive
+ * reclaim. `live` carries the run status off a 200; `gone` is a confirmed HTTP
+ * 404 (deleted, or forgotten by a restart); `unreachable` is a network error or
+ * any other non-2xx -- a transient blip the caller must not treat as removal. */
+export type JobStatusProbe =
+  | { kind: "live"; status: JobRunStatus }
+  | { kind: "gone" }
+  | { kind: "unreachable" };
 
 /** A non-2xx response from the job API, carrying the status so the driver can
  * pick the failure category (a 400 is a rejected/invalid intent -> `config`;
@@ -175,6 +221,36 @@ export function createFetchJobApiClient(
     cancelJob: async (jobId) => {
       await fetchImpl(`/api/jobs/${jobId}/cancel`, { method: "POST" });
     },
+    deleteJob: async (jobId) => {
+      await fetchImpl(`/api/jobs/${jobId}`, { method: "DELETE" });
+    },
+    fetchJobStatus: async (jobId, signal) => {
+      let response: Response;
+      try {
+        response = await fetchImpl(`/api/jobs/${jobId}`, {
+          method: "GET",
+          signal,
+        });
+      } catch {
+        // A network error / unreachable server is transient, not a confirmed
+        // removal: report it so the caller leaves the record intact.
+        return { kind: "unreachable" };
+      }
+      // A confirmed 404 is the only "gone": the exchange is not on the appliance
+      // (deleted, or a restart forgot it). Any other non-2xx is a transient fault.
+      if (response.status === 404) return { kind: "gone" };
+      if (!response.ok) return { kind: "unreachable" };
+      try {
+        return {
+          kind: "live",
+          status: jobStatusViewOf(await response.json()).status,
+        };
+      } catch {
+        // A 200 proves the exchange is present; an unparseable body reads as
+        // running, never gone.
+        return { kind: "live", status: "running" };
+      }
+    },
     fetchRecordAvailability: async (jobId, signal) => {
       const response = await fetchImpl(`/api/jobs/${jobId}`, {
         method: "GET",
@@ -191,57 +267,70 @@ export function createFetchJobApiClient(
   };
 }
 
+/** Read the run status off a `GET /api/jobs/:id` body, defaulting a missing or
+ * unrecognized value to `running`. Called only for a 200, which proves the
+ * exchange is present; erring toward `running` keeps the discard poll waiting for
+ * a graceful cancel rather than deleting under a live child. */
+function jobStatusViewOf(body: unknown): JobStatusView {
+  const status =
+    body !== null && typeof body === "object"
+      ? (body as { status?: unknown }).status
+      : undefined;
+  return {
+    status:
+      status === "succeeded" || status === "failed" || status === "cancelled"
+        ? status
+        : "running",
+  };
+}
+
 /**
- * Fetch the appliance's operator-provisioned SFTP remotes
- * (`GET /api/jobs/remotes`) as the validated projection array. Fail-safe toward
- * "none configured": a non-2xx, a network error, or a body that is not an array
- * of `{name, host, port?, path?}` entries resolves to an empty array, so the
- * bench falls back to the save-a-file surface rather than arming a server-job
- * run it cannot name a remote for.
+ * Fetch the appliance's operator-provisioned SFTP server
+ * (`GET /api/jobs/sftp`) as the validated projection, or null when none is
+ * provisioned. Fail-safe toward "none configured": a non-2xx, a network error,
+ * a `{ configured: false }` body, or a malformed `{ configured: true, ... }`
+ * body all resolve to null, so the bench falls back to the save-a-file surface
+ * rather than arming a server-job run it has no connection for.
  */
-export async function fetchSftpRemotes(
+export async function fetchSftpConnection(
   fetchImpl: typeof fetch = fetch,
-): Promise<Array<SftpRemoteProjection>> {
+): Promise<SftpConnectionProjection | null> {
   try {
-    const response = await fetchImpl("/api/jobs/remotes", { method: "GET" });
-    if (!response.ok) return [];
+    const response = await fetchImpl("/api/jobs/sftp", { method: "GET" });
+    if (!response.ok) return null;
     const body: unknown = await response.json();
-    return sftpRemotesProjectionOf(body) ?? [];
+    return sftpConnectionProjectionOf(body);
   } catch {
-    return [];
+    return null;
   }
 }
 
-/** Validate the remotes response body into the projection array, or null when
- * any entry is malformed -- one bad entry fails the whole listing closed rather
- * than serving a partial table the operator did not provision. */
-function sftpRemotesProjectionOf(
+/** Validate the sftp response body into the projection, or null when it reports
+ * `configured: false` or is malformed -- a partial or ill-formed body fails
+ * closed to save-a-file rather than arming a run against a connection the
+ * operator did not provision. */
+function sftpConnectionProjectionOf(
   body: unknown,
-): Array<SftpRemoteProjection> | null {
-  if (!Array.isArray(body)) return null;
-  const remotes: Array<SftpRemoteProjection> = [];
-  for (const entry of body) {
-    if (entry === null || typeof entry !== "object" || Array.isArray(entry))
-      return null;
-    const { name, host, port, path } = entry as Record<string, unknown>;
-    if (typeof name !== "string" || name.length === 0) return null;
-    if (typeof host !== "string" || host.length === 0) return null;
-    if (
-      port !== undefined &&
-      (typeof port !== "number" ||
-        !Number.isInteger(port) ||
-        port < 1 ||
-        port > 65535)
-    )
-      return null;
-    if (path !== undefined && (typeof path !== "string" || path.length === 0))
-      return null;
-    const remote: SftpRemoteProjection = { name, host };
-    if (port !== undefined) remote.port = port;
-    if (path !== undefined) remote.path = path;
-    remotes.push(remote);
-  }
-  return remotes;
+): SftpConnectionProjection | null {
+  if (body === null || typeof body !== "object" || Array.isArray(body))
+    return null;
+  const { configured, host, port, path } = body as Record<string, unknown>;
+  if (configured !== true) return null;
+  if (typeof host !== "string" || host.length === 0) return null;
+  if (
+    port !== undefined &&
+    (typeof port !== "number" ||
+      !Number.isInteger(port) ||
+      port < 1 ||
+      port > 65535)
+  )
+    return null;
+  if (path !== undefined && (typeof path !== "string" || path.length === 0))
+    return null;
+  const connection: SftpConnectionProjection = { host };
+  if (port !== undefined) connection.port = port;
+  if (path !== undefined) connection.path = path;
+  return connection;
 }
 
 /** Open the SSE event stream and yield each parsed frame as a {@link RelayEvent}.
@@ -397,8 +486,9 @@ function errorMessageOf(event: RelayEvent): string {
 }
 
 /** Build the {@link JobExchangeIntent} a run POSTs from the driver config: the
- * `transport` picks the arm (the sftp arm adds only the remote NAME), and
- * everything after the discriminant is channel-independent. */
+ * `transport` picks the arm (neither adds a connection field -- the sftp arm
+ * carries no `remote`, the appliance provisions the one server), and everything
+ * after the discriminant is channel-independent. */
 function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
   const {
     transport,
@@ -423,14 +513,14 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
     eventStream: true,
   };
   return transport.channel === "sftp"
-    ? { channel: "sftp", remote: transport.remote, ...shared }
+    ? { channel: "sftp", ...shared }
     : { channel: "filedrop", ...shared };
 }
 
 /**
  * Build a server-job {@link ExchangeDriver}: `run` POSTs a
  * {@link JobExchangeIntent} for the config's transport (filedrop, or sftp over
- * an operator-provisioned named remote) to the job API and maps the server's
+ * the operator-provisioned server) to the job API and maps the server's
  * SSE event stream onto the typed lifecycle events, so it is a drop-in for the
  * in-browser WebRTC driver behind the same contract. It owns no peer
  * connection, PSI library, or exchange result -- the result is written on the
@@ -445,25 +535,21 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
  * it is logged and dropped.
  *
  * Cancellation stays on the run's signal: an already-aborted signal starts
- * nothing; an abort mid-run POSTs a cancel and stops consuming the stream
- * without emitting a spurious error, matching how the browser lifecycle treats a
- * caller-initiated abort as silent.
+ * nothing, and an abort mid-run stops consuming the stream silently. It carries
+ * NO cancel intent -- an unmount, reload, or tab close leaves the appliance's
+ * exchange running, and only an explicit discard (start over, try again, run
+ * another, or the recovery panel's Stop/Discard) cancels or deletes it. So the
+ * driver never POSTs a cancel off the signal.
  */
 export function createServerJobExchangeDriver(
   config: ServerJobExchangeDriverConfig,
   client: JobApiClient = createFetchJobApiClient(),
 ): ExchangeDriver<RunOutputs> {
   return {
-    run: async ({
-      signal,
-      onStages,
-      onStage,
-      onResult,
-      onError,
-      onWarning,
-    }: ExchangeDriverEvents<RunOutputs>) => {
-      // Read the live abort state through a call so the re-checks across each
-      // `await` below are not narrowed to a constant by the first guard.
+    run: async (events: ExchangeDriverEvents<RunOutputs>) => {
+      const { signal } = events;
+      // Read the live abort state through a call so the re-check after the await
+      // is not narrowed to a constant by the first guard.
       const aborted = () => signal.aborted;
       if (aborted()) return;
 
@@ -474,101 +560,132 @@ export function createServerJobExchangeDriver(
         jobId = await client.createJob(intent, signal);
       } catch (error) {
         if (aborted()) return;
-        onError({ category: createJobFailureCategory(error), error });
+        events.onError({ category: createJobFailureCategory(error), error });
         return;
       }
 
-      // A caller-initiated abort is silent (no spurious error), matching the
-      // browser lifecycle; it best-effort cancels the server job and stops
-      // consuming the stream.
-      const onAbort = () => {
-        void client.cancelJob(jobId).catch((error) => {
-          log.error("server job cancel failed:", error);
-        });
-      };
-      if (aborted()) {
-        onAbort();
-        return;
-      }
-      signal.addEventListener("abort", onAbort, { once: true });
+      // The job now exists on the appliance; persist its id (the console's
+      // strand-recovery seam) before opening the stream, so a hard tab close
+      // between here and the terminal can still re-attach.
+      config.onJobCreated?.(jobId);
 
-      try {
-        for await (const event of client.openEventStream(jobId, signal)) {
-          if (aborted()) return;
-          switch (event.type) {
-            case "stages":
-              onStages(stagesOf(event));
-              break;
-            case "stage": {
-              const id = event.id;
-              if (typeof id === "string") onStage(id);
-              break;
-            }
-            case "warning": {
-              // Dev-gated like onError: event.message is server/CLI-controlled,
-              // so a production console carries none of it. The consumer's
-              // optional onWarning is the operator-facing slot; it renders
-              // through its own display-boundary sanitization.
-              whenDiagnostic(() =>
-                log.warn("server job warning:", event.message),
-              );
-              const message = event.message;
-              if (
-                onWarning !== undefined &&
-                typeof message === "string" &&
-                message.length > 0
-              )
-                onWarning(message);
-              break;
-            }
-            case "result": {
-              const outputs = baseResultOutputs(event, jobId);
-              const availability = await queryRecordAvailability(
-                client,
-                jobId,
-                signal,
-              );
-              // Re-check after the await: a caller-initiated abort mid-query
-              // stays silent, matching the browser lifecycle.
-              if (aborted()) return;
-              if (availability.available)
-                withRecordDownloads(outputs, jobId, availability.createdAt);
-              onResult(outputs);
-              return;
-            }
-            case "error":
-              onError({
-                category: errorCategoryOf(event),
-                error: new Error(errorMessageOf(event)),
-              });
-              return;
-            default:
-              // `stageEnd` and `metrics` are recognized progress/summary events
-              // (in RELAY_EVENT_TYPES so the relay does not degrade them) that the
-              // console does not yet surface; they carry no lifecycle mapping, so
-              // consume and ignore them rather than treating them as an error.
-              break;
-          }
-        }
-        // The job API reconciles a terminal event for every job before it closes
-        // the stream, so a terminal-less close is a truncated stream rather than
-        // a completed run. Surface it so the contract's exactly-one-terminal
-        // guarantee holds at the driver boundary instead of leaving the run hung.
-        if (!aborted())
-          onError({
-            category: "exchange",
-            error: new Error(
-              "the exchange event stream ended without a result",
-            ),
-          });
-      } catch (error) {
-        if (aborted()) return;
-        onError({ category: "exchange", error });
-      } finally {
-        signal.removeEventListener("abort", onAbort);
-      }
+      await consumeJobStream(client, jobId, events);
     },
   };
+}
+
+/**
+ * Re-attach to an already-created job by id: `run` skips creation and consumes
+ * `GET /api/jobs/:id/events` from offset 0. The SSE full-history replay
+ * reconstructs the whole lifecycle -- stages, warnings, and the terminal -- for a
+ * finished run in one request, and continues live for a running one, so the same
+ * event fold the hooks use drives the recovery surface unchanged. A 404 from the
+ * events route (the job was deleted, or a restart forgot it) surfaces as the
+ * existing terminal error the recovery panel maps to "stale". Carries no intent
+ * and no cancel: it only reads the stream.
+ */
+export function createServerJobReattachDriver(
+  jobId: string,
+  client: JobApiClient = createFetchJobApiClient(),
+): ExchangeDriver<RunOutputs> {
+  return {
+    run: async (events: ExchangeDriverEvents<RunOutputs>) => {
+      if (events.signal.aborted) return;
+      await consumeJobStream(client, jobId, events);
+    },
+  };
+}
+
+/**
+ * Consume a job's SSE event stream and fold each frame onto the typed lifecycle
+ * events, shared by the create-then-run and the re-attach drivers. An aborted
+ * signal stops consumption silently (no terminal, no cancel), matching the
+ * browser lifecycle's treatment of a caller-initiated abort.
+ */
+async function consumeJobStream(
+  client: JobApiClient,
+  jobId: string,
+  {
+    signal,
+    onStages,
+    onStage,
+    onResult,
+    onError,
+    onWarning,
+  }: ExchangeDriverEvents<RunOutputs>,
+): Promise<void> {
+  // Read the live abort state through a call so the re-checks across each
+  // `await` below are not narrowed to a constant by the first guard.
+  const aborted = () => signal.aborted;
+  try {
+    for await (const event of client.openEventStream(jobId, signal)) {
+      if (aborted()) return;
+      switch (event.type) {
+        case "stages":
+          onStages(stagesOf(event));
+          break;
+        case "stage": {
+          const id = event.id;
+          if (typeof id === "string") onStage(id);
+          break;
+        }
+        case "warning": {
+          // Dev-gated like onError: event.message is server/CLI-controlled,
+          // so a production console carries none of it. The consumer's
+          // optional onWarning is the operator-facing slot; it renders
+          // through its own display-boundary sanitization.
+          whenDiagnostic(() => log.warn("server job warning:", event.message));
+          const message = event.message;
+          if (
+            onWarning !== undefined &&
+            typeof message === "string" &&
+            message.length > 0
+          )
+            onWarning(message);
+          break;
+        }
+        case "result": {
+          const outputs = baseResultOutputs(event, jobId);
+          const availability = await queryRecordAvailability(
+            client,
+            jobId,
+            signal,
+          );
+          // Re-check after the await: a caller-initiated abort mid-query
+          // stays silent, matching the browser lifecycle.
+          if (aborted()) return;
+          if (availability.available)
+            withRecordDownloads(outputs, jobId, availability.createdAt);
+          onResult(outputs);
+          return;
+        }
+        case "error":
+          onError({
+            category: errorCategoryOf(event),
+            error: new Error(errorMessageOf(event)),
+          });
+          return;
+        default:
+          // `stageEnd` and `metrics` are recognized progress/summary events
+          // (in RELAY_EVENT_TYPES so the relay does not degrade them) that the
+          // console does not yet surface; they carry no lifecycle mapping, so
+          // consume and ignore them rather than treating them as an error.
+          break;
+      }
+    }
+    // The job API reconciles a terminal event for every job before it closes
+    // the stream, so a terminal-less close is a truncated stream rather than
+    // a completed run. Surface it so the contract's exactly-one-terminal
+    // guarantee holds at the driver boundary instead of leaving the run hung.
+    if (!aborted())
+      onError({
+        category: "exchange",
+        error: new Error("the exchange event stream ended without a result"),
+      });
+  } catch (error) {
+    if (aborted()) return;
+    onError({ category: "exchange", error });
+  }
 }
 
 /** Query the job's record availability as a graceful-degrade step: any failure

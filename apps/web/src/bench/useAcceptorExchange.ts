@@ -1,14 +1,18 @@
 import log from "loglevel";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
 import { deriveAcceptedLinkageTerms, loadPsiBackend } from "@psilink/core";
 
+import {
+  createFetchJobApiClient,
+  createServerJobExchangeDriver,
+} from "@psi/serverJobExchangeDriver";
+import { discardServerJob, writeAttachment } from "@psi/consoleJobAttachment";
 import { createBrowserExchangeDriver } from "@psi/exchangeDriver";
-import { createServerJobExchangeDriver } from "@psi/serverJobExchangeDriver";
 import { dialAsAcceptor } from "@psi/rendezvous";
 
 import { deploymentProfile } from "@utils/clientConfig";
@@ -205,10 +209,22 @@ export function useAcceptorExchange({
   outputs: RunOutputs | undefined;
   failure: RunFailure | undefined;
   tryAgain: () => void;
+  abandonRun: () => void;
 } {
   const [run, setRun] = useState<ExchangeRun>(() => initialRun("acceptor"));
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [failure, setFailure] = useState<RunFailure>();
+
+  // The job API client the deliberate-discard paths use (try again, start over via
+  // the run column's fresh-invitation link, back-to-columns), mirroring the
+  // inviter hook. The server-job driver keeps its own default client.
+  const jobApiClient = useMemo(() => createFetchJobApiClient(), []);
+
+  // The appliance job id of the current accept, stamped by the driver's
+  // `onJobCreated`. Read by `tryAgain` (DELETE the failed job before recreating,
+  // which reject-until-DELETE would otherwise 409) and `abandonRun` (discard on a
+  // deliberate leave). Undefined on a browser accept and before the job is created.
+  const currentJobIdRef = useRef<string | undefined>(undefined);
 
   // Drives the lifecycle's AbortSignal; the effect cleanup below aborts it so an
   // unmount (or a superseded launch) tears down any in-flight dial or exchange
@@ -332,14 +348,20 @@ export function useAcceptorExchange({
     let jobInputSource: JobInputSource | undefined;
     const serverJobDriver = async (): Promise<ExchangeDriver<RunOutputs>> => {
       jobInputSource = await resolveJobInputSource(inputSource);
-      return createServerJobExchangeDriver(
-        acceptorServerJobConfig({
+      return createServerJobExchangeDriver({
+        ...acceptorServerJobConfig({
           token,
           acceptorName,
           edits,
           inputSource: jobInputSource,
         }),
-      );
+        // Persist the created job's id so a reload or hard tab close can re-attach
+        // to the appliance's run, and track it for the deliberate-discard paths.
+        onJobCreated: (jobId) => {
+          currentJobIdRef.current = jobId;
+          writeAttachment({ jobId, seat: "acceptor", channel: "filedrop" });
+        },
+      });
     };
 
     // The launch reaches this hook only for an endpoint prepareAcceptedInvitation
@@ -348,8 +370,8 @@ export function useAcceptorExchange({
     // (a save-file, which the guard fails closed before a launch can exist) is
     // surfaced as the run's own failure alert rather than thrown out of the start
     // effect, which would crash the render.
-    // The remotes flag is the selector's sftp-only input; the accept guard
-    // admits no sftp endpoint (webrtc and console filedrop only), so it is
+    // The sftp-configured flag is the selector's sftp-only input; the accept
+    // guard admits no sftp endpoint (webrtc and console filedrop only), so it is
     // constant false here.
     const selection = selectExchangeDriver(channel, deploymentProfile(), false);
     if (selection.kind === "save-file") {
@@ -433,10 +455,42 @@ export function useAcceptorExchange({
     if (launch === undefined || failure?.category !== "exchange") return;
     const expires = launch.invitation.token.expires;
     if (expires !== undefined && !invitationUsable(expires, new Date())) return;
+    const retryLaunch = launch;
     abortRef.current?.abort();
     abortRef.current = undefined;
-    start(launch);
+    const channel = transportForEndpointChannel(
+      retryLaunch.invitation.endpoint.channel,
+    );
+    const runMode = selectExchangeDriver(
+      channel,
+      deploymentProfile(),
+      false,
+    ).kind;
+    const failedJobId = currentJobIdRef.current;
+    // A server-job retry DELETEs the failed (already-terminal) job before
+    // recreating: reject-until-DELETE 409s the create while the prior exchange
+    // still holds the appliance's single slot. A browser retry re-dials with no
+    // server job to discard.
+    if (runMode === "server-job" && failedJobId !== undefined) {
+      currentJobIdRef.current = undefined;
+      void discardServerJob(jobApiClient, failedJobId).then(() =>
+        start(retryLaunch),
+      );
+      return;
+    }
+    start(retryLaunch);
   }
 
-  return { run, outputs, failure, tryAgain };
+  // Discard the current server-job accept when the operator deliberately leaves
+  // (the run column's fresh-invitation link, back-to-columns): cancel-if-running,
+  // DELETE, clear the recovery record. Fire-and-forget, and a no-op on a browser
+  // accept or before any job exists. Frees the appliance's single slot.
+  function abandonRun() {
+    const jobId = currentJobIdRef.current;
+    if (jobId === undefined) return;
+    currentJobIdRef.current = undefined;
+    void discardServerJob(jobApiClient, jobId);
+  }
+
+  return { run, outputs, failure, tryAgain, abandonRun };
 }

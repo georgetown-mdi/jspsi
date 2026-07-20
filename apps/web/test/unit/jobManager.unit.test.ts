@@ -5,24 +5,18 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import * as cliDriver from "@jobs/cliDriver";
 import {
-  FiledropBusyError,
+  ExchangeBusyError,
   JobManager,
   JobRendezvousUnavailableError,
-  SftpRemoteBusyError,
-  UnknownSftpRemoteError,
+  SftpUnavailableError,
 } from "@jobs/jobManager";
-import {
-  createWorkdir,
-  generateJobId,
-  removeWorkdir,
-  writeJobFile,
-} from "@jobs/workdir";
+import { generateJobId, writeJobFile } from "@jobs/workdir";
 import { JobInputNotFoundError } from "@jobs/workInputs";
 
 import {
   STUB_CLI_PATH,
   tempDataRoot,
-  testSftpRemotesTable,
+  testSftpServerEntry,
   validInputFileIntent,
   validIntent,
   validSftpIntent,
@@ -31,7 +25,7 @@ import {
 import type { BufferedEvent, JobRecord } from "@jobs/jobManager";
 import type { CliDriverHandlers } from "@jobs/cliDriver";
 import type { JobInputFileReference } from "@jobs/intent";
-import type { JobSftpRemotesTable } from "@jobs/sftpRemotes";
+import type { JobSftpServerEntry } from "@jobs/sftpServer";
 
 vi.mock("@jobs/workdir", { spy: true });
 
@@ -59,7 +53,7 @@ function makeManager(options: {
   ignoreSigint?: boolean;
   ignoreSigterm?: boolean;
   eventBufferCap?: number;
-  sftpRemotes?: JobSftpRemotesTable;
+  sftpServer?: JobSftpServerEntry;
   jobInputDir?: string;
   jobRendezvousDir?: string;
   recordJson?: string;
@@ -98,21 +92,13 @@ function makeManager(options: {
     cancelSigtermGraceMs: 40,
     cancelSigkillGraceMs: 40,
     eventBufferCap: options.eventBufferCap,
-    sftpRemotes: options.sftpRemotes,
+    sftpServer: options.sftpServer,
     jobInputDir: options.jobInputDir,
     jobRendezvousDir: rendezvousDir,
     childEnv,
   });
   managers.push(manager);
   return manager;
-}
-
-/** A throwaway data-root path registered for cleanup, for building on-disk
- * fixtures without spawning a job. */
-function freshRoot(label: string): string {
-  const root = tempDataRoot(label);
-  roots.push(root);
-  return root;
 }
 
 /** A created, writable rendezvous directory a filedrop job needs, registered for
@@ -125,18 +111,34 @@ function rendezvousRoot(): string {
 }
 
 /**
- * A fresh manager over an existing data root -- the simulated restart: new
- * in-memory state, same disk. The stub CLI is wired but never spawned by these
- * tests (restore is read-only).
+ * A manager whose spawn is stubbed to a child that reports "still running", so a
+ * test can drive the terminal edge by hand -- the deterministic way to observe the
+ * slot's release timing without racing a real child. The captured handlers are
+ * exposed through the returned ref.
  */
-function restartManagerOverRoot(root: string): JobManager {
+function makeStubSpawnManager(
+  options: { sftpServer?: JobSftpServerEntry } = {},
+): {
+  manager: JobManager;
+  handlersRef: { current: CliDriverHandlers | null };
+} {
+  const handlersRef: { current: CliDriverHandlers | null } = { current: null };
+  vi.spyOn(cliDriver, "spawnExchangeJob").mockImplementation((args) => {
+    handlersRef.current = args.handlers;
+    return { signal: () => true, isRunning: () => true };
+  });
+  const root = tempDataRoot("slot-stub");
+  roots.push(root);
   const manager = new JobManager({
     dataRoot: root,
     binaryPath: STUB_CLI_PATH,
-    childEnv: { STUB_FD3_EVENTS: JSON.stringify([]) },
+    jobRendezvousDir: rendezvousRoot(),
+    ...(options.sftpServer !== undefined
+      ? { sftpServer: options.sftpServer }
+      : {}),
   });
   managers.push(manager);
-  return manager;
+  return { manager, handlersRef };
 }
 
 /** Resolve once the job has emitted its terminal event or the timeout elapses. */
@@ -436,19 +438,24 @@ test("the security error terminal is classified and closes the stream", async ()
 });
 
 describe("createJob failure cleanup", () => {
-  test("a failed workdir write removes the directory and rethrows", async () => {
-    const manager = makeManager({});
+  test("a failed workdir write removes the directory, rethrows, and frees the slot", async () => {
+    const manager = makeManager({ events: [RESULT_EVENT], exitCode: 0 });
     const root = roots[roots.length - 1];
     vi.mocked(writeJobFile).mockRejectedValueOnce(new Error("disk full"));
     await expect(manager.createJob(validIntent())).rejects.toThrow("disk full");
     expect(fs.readdirSync(root)).toEqual([]);
+    // The slot did not leak: a fresh job is immediately acceptable and runs.
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    expect(record.status).toBe("succeeded");
   });
 
-  test("a failed sftp job write releases the remote latch with the workdir", async () => {
+  test("a failed sftp job write frees the slot with the workdir", async () => {
     const manager = makeManager({
       events: [RESULT_EVENT],
       exitCode: 0,
-      sftpRemotes: testSftpRemotesTable(),
+      sftpServer: testSftpServerEntry(),
     });
     const root = roots[roots.length - 1];
     vi.mocked(writeJobFile).mockRejectedValueOnce(new Error("disk full"));
@@ -456,7 +463,7 @@ describe("createJob failure cleanup", () => {
       "disk full",
     );
     expect(fs.readdirSync(root)).toEqual([]);
-    // The latch did not leak: the same remote is immediately acquirable.
+    // The slot did not leak: a subsequent job is accepted and runs.
     const id = await manager.createJob(validSftpIntent());
     const record = manager.getJob(id)!;
     await waitForTerminal(record);
@@ -545,71 +552,23 @@ describe("mounted work input read in place at create", () => {
   });
 });
 
-describe("sftp remote resolution and the per-remote busy latch", () => {
-  test("an unknown remote is a typed error and creates NO workdir", async () => {
-    const manager = makeManager({ sftpRemotes: testSftpRemotesTable() });
-    const root = roots[roots.length - 1];
-    await expect(
-      manager.createJob(validSftpIntent({ remote: "not_provisioned" })),
-    ).rejects.toThrow(UnknownSftpRemoteError);
-    // The remote resolves BEFORE createWorkdir: nothing touched the disk, not
-    // even the data root.
-    expect(fs.existsSync(root)).toBe(false);
-  });
-
-  test("an absent table rejects every sftp intent the same way", async () => {
+describe("sftp server resolution", () => {
+  test("an absent server rejects every sftp intent and creates NO workdir", async () => {
     const manager = makeManager({});
     const root = roots[roots.length - 1];
     await expect(manager.createJob(validSftpIntent())).rejects.toThrow(
-      UnknownSftpRemoteError,
+      SftpUnavailableError,
     );
+    // The server resolves BEFORE the slot is claimed and BEFORE createWorkdir:
+    // nothing touched the disk, not even the data root.
     expect(fs.existsSync(root)).toBe(false);
-  });
-
-  test("a running job's remote is busy; terminal state releases it", async () => {
-    const manager = makeManager({
-      delayMs: 5000,
-      sftpRemotes: testSftpRemotesTable(),
-    });
-    const firstId = await manager.createJob(validSftpIntent());
-    const first = manager.getJob(firstId)!;
-
-    await expect(manager.createJob(validSftpIntent())).rejects.toThrow(
-      SftpRemoteBusyError,
-    );
-
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    manager.cancelJob(first);
-    await waitForTerminal(first);
-    await vi.waitFor(() => expect(first.terminal).not.toBeNull());
-
-    const secondId = await manager.createJob(validSftpIntent());
-    expect(secondId).not.toBe(firstId);
-  });
-
-  test("deleting the holding job releases the latch when its child exits", async () => {
-    const manager = makeManager({
-      delayMs: 5000,
-      sftpRemotes: testSftpRemotesTable(),
-    });
-    const firstId = await manager.createJob(validSftpIntent());
-    const first = manager.getJob(firstId)!;
-    await expect(manager.createJob(validSftpIntent())).rejects.toThrow(
-      SftpRemoteBusyError,
-    );
-    expect(await manager.deleteJob(firstId)).toBe(true);
-    // The latch releases when the SIGKILL'd child actually exits, not on the
-    // delete request, so a successor cannot rendezvous with the dying child.
-    await waitForTerminal(first);
-    const secondId = await manager.createJob(validSftpIntent());
-    expect(manager.getJob(secondId)).toBeDefined();
   });
 
   test("an sftp job completes end-to-end and writes an sftp config", async () => {
     const manager = makeManager({
       events: [RESULT_EVENT],
       exitCode: 0,
-      sftpRemotes: testSftpRemotesTable(),
+      sftpServer: testSftpServerEntry(),
     });
     const id = await manager.createJob(validSftpIntent());
     const record = manager.getJob(id)!;
@@ -621,10 +580,12 @@ describe("sftp remote resolution and the per-remote busy latch", () => {
     );
     expect(configYaml).toContain("channel: sftp");
     expect(configYaml).toContain("host: sftp.example.org");
-    expect(configYaml).not.toContain("prod_east");
+    // The provisioned server's @path credential reference lands verbatim; no
+    // secret byte reaches the composed config.
+    expect(configYaml).toContain("@/etc/psilink/prod-east-password");
   });
 
-  test("filedrop jobs are unaffected by an absent remotes table", async () => {
+  test("filedrop jobs are unaffected by an absent sftp server", async () => {
     const manager = makeManager({ events: [RESULT_EVENT], exitCode: 0 });
     const id = await manager.createJob(validIntent());
     const record = manager.getJob(id)!;
@@ -634,17 +595,15 @@ describe("sftp remote resolution and the per-remote busy latch", () => {
 });
 
 describe("sftp job driven by a mounted work input", () => {
-  test("an inputFile naming no file fails without latching the remote", async () => {
+  test("an inputFile naming no file fails and leaves the slot free", async () => {
     const { dir } = writeInputDir("sftp-input-missing");
     const manager = makeManager({
       events: [RESULT_EVENT],
       exitCode: 0,
-      sftpRemotes: testSftpRemotesTable(),
+      sftpServer: testSftpServerEntry(),
       jobInputDir: dir,
     });
     const root = roots[roots.length - 1];
-    // The remote latches BEFORE the input resolves; a vanished name is the only
-    // thing that can release the latch.
     await expect(
       manager.createJob(
         validSftpIntent({
@@ -653,10 +612,10 @@ describe("sftp job driven by a mounted work input", () => {
         }),
       ),
     ).rejects.toBeInstanceOf(JobInputNotFoundError);
-    // The resolve failed before createWorkdir: nothing on disk, not even the data root.
+    // The input resolves inside the try, before createWorkdir: nothing on disk,
+    // not even the data root, and the slot is freed by the catch.
     expect(fs.existsSync(root)).toBe(false);
-    // The latch did not leak: a subsequent valid job over the same remote is
-    // accepted (no SftpRemoteBusyError) and runs.
+    // The slot did not leak: a subsequent valid job is accepted and runs.
     const id = await manager.createJob(validSftpIntent());
     const record = manager.getJob(id)!;
     await waitForTerminal(record);
@@ -668,7 +627,7 @@ describe("sftp job driven by a mounted work input", () => {
     const manager = makeManager({
       events: [RESULT_EVENT],
       exitCode: 0,
-      sftpRemotes: testSftpRemotesTable(),
+      sftpServer: testSftpServerEntry(),
       jobInputDir: dir,
     });
     const id = await manager.createJob(
@@ -734,393 +693,181 @@ describe("filedrop rendezvous facilitation", () => {
   });
 });
 
-describe("filedrop single-holder busy latch", () => {
-  test("an unconfigured rendezvous is rejected before the latch is taken", () => {
-    const root = tempDataRoot("no-rvz-latch");
-    roots.push(root);
-    const manager = new JobManager({
-      dataRoot: root,
-      binaryPath: STUB_CLI_PATH,
-      childEnv: { STUB_FD3_EVENTS: "[]" },
-    });
-    managers.push(manager);
-    const internals = manager as unknown as {
-      acquireFiledrop: (jobId: string) => void;
-      filedropHolder: string | null;
-    };
-    // The rendezvous-configured check lives inside acquireFiledrop and precedes
-    // the latch, matching acquireSftpRemote: a rejected acquire never records a
-    // holder, so nothing has to be released to undo it.
-    expect(() => internals.acquireFiledrop("job-1")).toThrow(
-      JobRendezvousUnavailableError,
-    );
-    expect(internals.filedropHolder).toBeNull();
-  });
-
-  test("a running filedrop job is busy; a terminal state releases the latch", async () => {
-    const manager = makeManager({ delayMs: 5000 });
-    const firstId = await manager.createJob(validIntent());
-    const first = manager.getJob(firstId)!;
-
-    await expect(manager.createJob(validIntent())).rejects.toThrow(
-      FiledropBusyError,
-    );
-
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    manager.cancelJob(first);
-    await waitForTerminal(first);
-    await vi.waitFor(() => expect(first.terminal).not.toBeNull());
-
-    const secondId = await manager.createJob(validIntent());
-    expect(secondId).not.toBe(firstId);
-  });
-
-  test("a held filedrop latch leaves an sftp job free to acquire", async () => {
+describe("the single exchange slot", () => {
+  test("a running filedrop job rejects a second create of either channel", async () => {
     const manager = makeManager({
       delayMs: 5000,
-      sftpRemotes: testSftpRemotesTable(),
+      sftpServer: testSftpServerEntry(),
     });
-    await manager.createJob(validIntent());
-    // The two latches are independent: a held filedrop rendezvous does not gate
-    // the sftp remote.
-    const sftpId = await manager.createJob(validSftpIntent());
-    expect(manager.getJob(sftpId)).toBeDefined();
-  });
-
-  test("the holder-id guard keeps a stale record from freeing a successor's hold", async () => {
-    const manager = makeManager({ delayMs: 5000 });
     const firstId = await manager.createJob(validIntent());
     const first = manager.getJob(firstId)!;
-
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    manager.cancelJob(first);
-    await waitForTerminal(first);
-    await vi.waitFor(() => expect(first.terminal).not.toBeNull());
-
-    // A successor acquires the freed latch.
-    const secondId = await manager.createJob(validIntent());
-    const second = manager.getJob(secondId)!;
-
-    // A stale release from the already-terminal first record must not free the
-    // successor's hold: the guard frees the latch only for its recorded holder.
-    (
-      manager as unknown as {
-        releaseFiledropForRecord: (record: JobRecord) => void;
-      }
-    ).releaseFiledropForRecord(first);
 
     await expect(manager.createJob(validIntent())).rejects.toThrow(
-      FiledropBusyError,
+      ExchangeBusyError,
+    );
+    await expect(manager.createJob(validSftpIntent())).rejects.toThrow(
+      ExchangeBusyError,
     );
 
-    manager.cancelJob(second);
-    await waitForTerminal(second);
+    manager.cancelJob(first);
+    await waitForTerminal(first);
   });
 
-  test("overflow keeps the latch held; the child's exit is what releases it", async () => {
+  test("a running sftp job rejects a second create of either channel", async () => {
+    const manager = makeManager({
+      delayMs: 5000,
+      sftpServer: testSftpServerEntry(),
+    });
+    const firstId = await manager.createJob(validSftpIntent());
+    const first = manager.getJob(firstId)!;
+
+    await expect(manager.createJob(validSftpIntent())).rejects.toThrow(
+      ExchangeBusyError,
+    );
+    await expect(manager.createJob(validIntent())).rejects.toThrow(
+      ExchangeBusyError,
+    );
+
+    manager.cancelJob(first);
+    await waitForTerminal(first);
+  });
+
+  test("overflow-SIGKILL keeps the slot occupied until the exchange is deleted", async () => {
     const manager = makeManager({ delayMs: 5000 });
     const firstId = await manager.createJob(validIntent());
     const first = manager.getJob(firstId)!;
-    const holder = manager as unknown as { filedropHolder: string | null };
 
-    // The overflow path SIGKILLs and fails the job but must NOT release the latch:
-    // the SIGKILL is asynchronous, so the child may still be touching the
-    // rendezvous. Right after the synchronous overflow the latch is still held.
+    // The overflow path SIGKILLs and fails the job, but the exchange was never
+    // deleted, so the slot stays occupied: a create is still rejected.
     (
       manager as unknown as { failOnOverflow: (record: JobRecord) => void }
     ).failOnOverflow(first);
     expect(first.status).toBe("failed");
-    expect(holder.filedropHolder).toBe(firstId);
+    await expect(manager.createJob(validIntent())).rejects.toThrow(
+      ExchangeBusyError,
+    );
 
-    // The child's exit (reconcileTerminal on `close`) is what frees it.
+    // Even after the killed child's close is observed, the slot is held: only a
+    // DELETE frees a terminal exchange.
     await waitForTerminal(first);
-    await vi.waitFor(() => expect(holder.filedropHolder).toBeNull());
+    await vi.waitFor(() => expect(first.terminal).not.toBeNull());
+    await expect(manager.createJob(validIntent())).rejects.toThrow(
+      ExchangeBusyError,
+    );
+  });
+
+  test("DELETE of a running job holds the slot until the child's exit", async () => {
+    const { manager, handlersRef } = makeStubSpawnManager();
+    const firstId = await manager.createJob(validIntent());
+
+    expect(await manager.deleteJob(firstId)).toBe(true);
+    // Deleted, but the SIGKILLed child has not closed: the slot is still occupied,
+    // so a successor cannot rendezvous with the dying child.
+    await expect(manager.createJob(validIntent())).rejects.toThrow(
+      ExchangeBusyError,
+    );
+
+    // The child's close frees the slot; a successor create then succeeds.
+    handlersRef.current!.onTerminal({
+      outcome: "failed",
+      exitCode: null,
+      signal: "SIGKILL",
+    });
     const secondId = await manager.createJob(validIntent());
     expect(secondId).not.toBe(firstId);
   });
 
-  test("deleting the holding filedrop job releases the latch when its child exits", async () => {
-    const manager = makeManager({ delayMs: 5000 });
+  test("a terminal but undeleted exchange rejects a create; DELETE frees the slot", async () => {
+    const manager = makeManager({ events: [RESULT_EVENT], exitCode: 0 });
     const firstId = await manager.createJob(validIntent());
     const first = manager.getJob(firstId)!;
-    await expect(manager.createJob(validIntent())).rejects.toThrow(
-      FiledropBusyError,
-    );
-    expect(await manager.deleteJob(firstId)).toBe(true);
-    // The latch releases when the SIGKILL'd child actually exits, not on the
-    // delete request, so a successor cannot rendezvous with the dying child.
     await waitForTerminal(first);
+    await vi.waitFor(() => expect(first.terminal).not.toBeNull());
+
+    // Reject-until-DELETE: the settled exchange keeps the slot until it is deleted.
+    await expect(manager.createJob(validIntent())).rejects.toThrow(
+      ExchangeBusyError,
+    );
+
+    expect(await manager.deleteJob(firstId)).toBe(true);
+    expect(manager.getJob(firstId)).toBeUndefined();
     const secondId = await manager.createJob(validIntent());
-    expect(manager.getJob(secondId)).toBeDefined();
+    expect(secondId).not.toBe(firstId);
   });
 
-  test("a failed filedrop job write releases the latch with the workdir", async () => {
-    const manager = makeManager({ events: [RESULT_EVENT], exitCode: 0 });
-    const root = roots[roots.length - 1];
-    vi.mocked(writeJobFile).mockRejectedValueOnce(new Error("disk full"));
-    await expect(manager.createJob(validIntent())).rejects.toThrow("disk full");
-    expect(fs.readdirSync(root)).toEqual([]);
-    // The latch did not leak: a fresh filedrop job is immediately acquirable.
+  test("DELETE of a running job 404s the surface immediately", async () => {
+    const { manager } = makeStubSpawnManager();
     const id = await manager.createJob(validIntent());
-    const record = manager.getJob(id)!;
-    await waitForTerminal(record);
-    expect(record.status).toBe("succeeded");
+    expect(manager.getJob(id)).toBeDefined();
+    expect(await manager.deleteJob(id)).toBe(true);
+    // The slot is still occupied (child not yet closed), but the surface is gone.
+    expect(manager.getJob(id)).toBeUndefined();
+    expect(manager.getJobView(id)).toBeNull();
   });
 });
 
-const CREATED_AT = "2026-07-08T14:32:00.000Z";
-
-/** Run a job to a succeeded terminal (with result and record/keys on disk) and
- * return its id and the data root it lives under. */
-async function runSucceededJob(): Promise<{ id: string; root: string }> {
-  const manager = makeManager({
-    events: [RESULT_EVENT],
-    exitCode: 0,
-    outputFile: "id1,id2\n1,2\n",
-    recordJson: JSON.stringify({ createdAt: CREATED_AT, summary: "s" }),
-  });
-  const root = roots[roots.length - 1];
-  const id = await manager.createJob(validIntent());
-  await waitForTerminal(manager.getJob(id)!);
-  await vi.waitFor(() => expect(manager.getJob(id)!.terminal).not.toBeNull());
-  return { id, root };
-}
-
-describe("restore after a simulated restart", () => {
-  test("a succeeded job is re-discovered as a restored view and summary", async () => {
-    const { id, root } = await runSucceededJob();
-
-    const restarted = restartManagerOverRoot(root);
-    expect(restarted.getJob(id)).toBeUndefined();
-
-    const summaries = await restarted.listJobs();
-    const summary = summaries.find((entry) => entry.id === id);
-    expect(summary).toMatchObject({
-      id,
-      status: "succeeded",
-      restored: true,
-      resultAvailable: true,
-      recordAvailable: true,
-      recordCreatedAt: CREATED_AT,
+describe("the disk-only DELETE arm", () => {
+  /** A bare manager over an existing data root, wired to the stub but never
+   * spawning: it exercises only the disk-only DELETE arm. */
+  function bareManager(root: string): JobManager {
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      childEnv: { STUB_FD3_EVENTS: JSON.stringify([]) },
     });
+    managers.push(manager);
+    return manager;
+  }
 
-    const view = await restarted.getJobView(id);
-    expect(view).toMatchObject({
-      id,
-      status: "succeeded",
-      restored: true,
-      terminal: null,
-      terminalEmitted: true,
-      eventCount: 0,
-      resultAvailable: true,
-      recordAvailable: true,
-      recordCreatedAt: CREATED_AT,
-    });
-  });
-
-  test("an interrupted job (no result) restores as terminated/failed, never running", async () => {
-    const root = freshRoot("interrupted");
+  test("removes a restart-orphaned workdir named by a valid id", async () => {
+    const root = tempDataRoot("orphan");
+    roots.push(root);
     const id = generateJobId();
     const workdir = path.join(root, id);
-    await fs.promises.mkdir(workdir, { recursive: true });
-    // config/key/input written, but the CLI never produced output.csv.
-    await writeJobFile(workdir, "psilink.yaml", "channel: filedrop\n");
-    await writeJobFile(workdir, ".psilink.key", '{"sharedSecret":"x"}');
-    await writeJobFile(workdir, "input.csv", "id\n1\n");
+    fs.mkdirSync(workdir, { recursive: true });
+    fs.writeFileSync(path.join(workdir, "output.csv"), "id\n1\n");
 
-    const restarted = restartManagerOverRoot(root);
-    const view = await restarted.getJobView(id);
-    expect(view).toMatchObject({
-      id,
-      status: "failed",
-      restored: true,
-      resultAvailable: false,
-    });
-    expect(view!.status).not.toBe("running");
-  });
-
-  test("a restored view exposes only the three servable output paths", async () => {
-    const { id, root } = await runSucceededJob();
-    const restarted = restartManagerOverRoot(root);
-    const view = await restarted.getJobView(id);
-    expect(view).not.toBeNull();
-    const workdir = path.join(root, id);
-    // The only paths the view carries are result, record, and keys -- never the
-    // key file or the config.
-    expect(view!.outputPath).toBe(path.join(workdir, "output.csv"));
-    expect(view!.recordPath).toBe(path.join(workdir, "record.json"));
-    expect(view!.keysPath).toBe(path.join(workdir, "record.keys.json"));
-    const paths = [view!.outputPath, view!.recordPath, view!.keysPath];
-    for (const p of paths) {
-      expect(p).not.toContain(".psilink.key");
-      expect(p).not.toContain("psilink.yaml");
-    }
-  });
-
-  test("delete of a restored (disk-only) job removes the workdir; a second delete is false", async () => {
-    const { id, root } = await runSucceededJob();
-    const restarted = restartManagerOverRoot(root);
-    const workdir = path.join(root, id);
-    expect(fs.existsSync(workdir)).toBe(true);
-    expect(await restarted.deleteJob(id)).toBe(true);
+    const manager = bareManager(root);
+    expect(await manager.deleteJob(id)).toBe(true);
     expect(fs.existsSync(workdir)).toBe(false);
-    expect(await restarted.deleteJob(id)).toBe(false);
+    // A second delete finds nothing.
+    expect(await manager.deleteJob(id)).toBe(false);
   });
 
-  test("listJobs dedups a live job whose workdir is also on disk (in-memory wins)", async () => {
-    const manager = makeManager({
-      events: [RESULT_EVENT],
-      exitCode: 0,
-      outputFile: "id\n1\n",
-    });
-    const id = await manager.createJob(validIntent());
-    await waitForTerminal(manager.getJob(id)!);
-
-    const summaries = await manager.listJobs();
-    const matching = summaries.filter((entry) => entry.id === id);
-    expect(matching).toHaveLength(1);
-    expect(matching[0].restored).toBe(false);
-  });
-
-  test("discovery excludes a non-UUID directory and a stray file", async () => {
-    const root = freshRoot("hygiene");
-    await fs.promises.mkdir(root, { recursive: true });
-    await fs.promises.mkdir(path.join(root, "not-a-uuid"));
-    await fs.promises.writeFile(path.join(root, "stray.txt"), "x");
-    const validId = generateJobId();
-    await fs.promises.mkdir(path.join(root, validId));
-
-    const restarted = restartManagerOverRoot(root);
-    const ids = (await restarted.listJobs()).map((entry) => entry.id);
-    expect(ids).toContain(validId);
-    expect(ids).not.toContain("not-a-uuid");
-    expect(ids).not.toContain("stray.txt");
-  });
-
-  test("discovery does not follow a symlinked directory out of the root", async () => {
-    const root = freshRoot("symlink-root");
-    await fs.promises.mkdir(root, { recursive: true });
-    // A directory outside the data root, linked in under a valid UUID name.
-    const outside = freshRoot("outside-target");
-    await fs.promises.mkdir(outside, { recursive: true });
-    await fs.promises.writeFile(path.join(outside, "output.csv"), "id\n1\n");
+  test("rejects a symlinked leaf rather than following it", async () => {
+    const root = tempDataRoot("orphan-symlink");
+    roots.push(root);
+    fs.mkdirSync(root, { recursive: true });
+    const outside = tempDataRoot("orphan-outside");
+    roots.push(outside);
+    fs.mkdirSync(outside, { recursive: true });
+    fs.writeFileSync(path.join(outside, "output.csv"), "id\n1\n");
     const linkId = generateJobId();
-    await fs.promises.symlink(outside, path.join(root, linkId), "dir");
+    fs.symlinkSync(outside, path.join(root, linkId), "dir");
 
-    const restarted = restartManagerOverRoot(root);
-    const ids = (await restarted.listJobs()).map((entry) => entry.id);
-    // The symlink is not admitted: readdir reports it as a symlink, not a
-    // directory, so discovery never resolves through it to the outside target.
-    expect(ids).not.toContain(linkId);
-  });
-
-  test("listJobs is [] when the data root does not exist yet", async () => {
-    const root = freshRoot("absent");
-    const manager = restartManagerOverRoot(root);
-    expect(await manager.listJobs()).toEqual([]);
-    expect(fs.existsSync(root)).toBe(false);
-  });
-
-  test("a job mid-creation is not misclassified as a restored/failed job", async () => {
-    const id = generateJobId();
-    vi.mocked(generateJobId).mockReturnValueOnce(id);
-    let release!: () => void;
-    const paused = new Promise<void>((resolve) => (release = resolve));
-    // Pause createWorkdir after the workdir exists but before the record is set,
-    // so a concurrent read lands squarely in the creation window.
-    vi.mocked(createWorkdir).mockImplementationOnce(async (dataRoot, jobId) => {
-      const workdir = path.join(dataRoot, jobId);
-      await fs.promises.mkdir(workdir, { recursive: true });
-      await paused;
-      return { workdir };
-    });
-    const manager = makeManager({
-      events: [RESULT_EVENT],
-      exitCode: 0,
-      outputFile: "id\n1\n",
-    });
-    const root = roots[roots.length - 1];
-    const creating = manager.createJob(validIntent());
-    await vi.waitFor(() =>
-      expect(fs.existsSync(path.join(root, id))).toBe(true),
-    );
-    // The workdir is on disk with no record yet; the guard shadows the disk.
-    expect(await manager.getJobView(id)).toBeNull();
-    expect((await manager.listJobs()).map((entry) => entry.id)).not.toContain(
-      id,
-    );
-    release();
-    await creating;
-    const view = await manager.getJobView(id);
-    expect(view).not.toBeNull();
-    expect(view!.restored).toBe(false);
-  });
-
-  test("a job mid-deletion reports gone, not a transient restored view", async () => {
-    const { id, root } = await runSucceededJob();
-    const restarted = restartManagerOverRoot(root);
-    const workdir = path.join(root, id);
-    let release!: () => void;
-    let entered!: () => void;
-    const paused = new Promise<void>((resolve) => (release = resolve));
-    const removalEntered = new Promise<void>((resolve) => (entered = resolve));
-    vi.mocked(removeWorkdir).mockImplementationOnce(async (dir) => {
-      entered();
-      await paused;
-      await fs.promises.rm(dir, { recursive: true, force: true });
-    });
-    const deleting = restarted.deleteJob(id);
-    await removalEntered;
-    // The workdir is still on disk mid-removal; the guard reports it gone.
-    expect(fs.existsSync(workdir)).toBe(true);
-    expect(await restarted.getJobView(id)).toBeNull();
-    release();
-    expect(await deleting).toBe(true);
-    expect(fs.existsSync(workdir)).toBe(false);
-    expect(await restarted.getJobView(id)).toBeNull();
-  });
-
-  test("a no-result success (record but no output.csv) restores as succeeded", async () => {
-    const root = freshRoot("no-result-success");
-    const id = generateJobId();
-    const workdir = path.join(root, id);
-    await fs.promises.mkdir(workdir, { recursive: true });
-    // A party whose terms give it no result of its own writes the record pair on
-    // success but never an output.csv; live it is succeeded, so restore must be
-    // too rather than collapsing to failed.
-    await writeJobFile(
-      workdir,
-      "record.json",
-      JSON.stringify({ createdAt: CREATED_AT, summary: "s" }),
-    );
-    await writeJobFile(workdir, "record.keys.json", "{}");
-
-    const restarted = restartManagerOverRoot(root);
-    const view = await restarted.getJobView(id);
-    expect(view).toMatchObject({
-      id,
-      status: "succeeded",
-      restored: true,
-      resultAvailable: false,
-      recordAvailable: true,
-      recordCreatedAt: CREATED_AT,
-    });
-  });
-
-  test("a direct request for a symlinked leaf workdir is rejected, not followed", async () => {
-    const root = freshRoot("symlink-leaf");
-    await fs.promises.mkdir(root, { recursive: true });
-    const outside = freshRoot("outside-leaf");
-    await fs.promises.mkdir(outside, { recursive: true });
-    await fs.promises.writeFile(path.join(outside, "output.csv"), "id\n1\n");
-    const linkId = generateJobId();
-    await fs.promises.symlink(outside, path.join(root, linkId), "dir");
-
-    const restarted = restartManagerOverRoot(root);
-    // classifyRestoredJob lstats the leaf, so a direct id request neither serves
-    // nor deletes through the planted link.
-    expect(await restarted.getJobView(linkId)).toBeNull();
-    expect(await restarted.deleteJob(linkId)).toBe(false);
+    const manager = bareManager(root);
+    // lstat sees a symlink, not a directory, so the leaf is refused and its
+    // outside target is never removed.
+    expect(await manager.deleteJob(linkId)).toBe(false);
     expect(fs.existsSync(path.join(outside, "output.csv"))).toBe(true);
+  });
+
+  test("a malformed id resolves nothing and is false", async () => {
+    const root = tempDataRoot("orphan-malformed");
+    roots.push(root);
+    fs.mkdirSync(root, { recursive: true });
+    const manager = bareManager(root);
+    expect(await manager.deleteJob("../../etc/passwd")).toBe(false);
+  });
+
+  test("refuses the slot's own id", async () => {
+    // The active-matching arm owns the running exchange's id; a re-delete must not
+    // fall through to the disk arm and touch a workdir a live or dying child owns.
+    const { manager } = makeStubSpawnManager();
+    const id = await manager.createJob(validIntent());
+    expect(await manager.deleteJob(id)).toBe(true);
+    // The child is still "running", so the slot is held under this id; the disk
+    // arm refuses it.
+    expect(await manager.deleteJob(id)).toBe(false);
   });
 });

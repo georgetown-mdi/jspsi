@@ -16,13 +16,13 @@ import { Route as EventsRoute } from "../../src/routes/api/jobs/$jobId/events";
 import { Route as JobRoute } from "../../src/routes/api/jobs/$jobId/index";
 import { Route as KeysRoute } from "../../src/routes/api/jobs/$jobId/keys";
 import { Route as RecordRoute } from "../../src/routes/api/jobs/$jobId/record";
-import { Route as RemotesRoute } from "../../src/routes/api/jobs/remotes";
 import { Route as ResultRoute } from "../../src/routes/api/jobs/$jobId/result";
+import { Route as SftpRoute } from "../../src/routes/api/jobs/sftp";
 
 import {
   STUB_CLI_PATH,
   tempDataRoot,
-  testSftpRemotesTable,
+  testSftpServerEntry,
   validInputFileIntent,
   validIntent,
   validSftpIntent,
@@ -48,11 +48,10 @@ afterEach(() => {
   seeded?.shutdown();
   for (const root of roots.splice(0))
     fs.rmSync(root, { recursive: true, force: true });
-  // Reset the memoized manager and remotes table so each test starts clean.
+  // Reset the memoized manager and sftp server so each test starts clean.
   (globalThis as { jobManagerInstance?: unknown }).jobManagerInstance =
     undefined;
-  (globalThis as { jobSftpRemotesTable?: unknown }).jobSftpRemotesTable =
-    undefined;
+  (globalThis as { jobSftpServer?: unknown }).jobSftpServer = undefined;
   (globalThis as { jobInputDirConfig?: unknown }).jobInputDirConfig = undefined;
   (globalThis as { jobRendezvousDirConfig?: unknown }).jobRendezvousDirConfig =
     undefined;
@@ -106,7 +105,7 @@ function recordJson(createdAt: string): string {
  */
 async function createSucceededJob(stubEnv: NodeJS.ProcessEnv): Promise<string> {
   // Create the rendezvous dir first so the data root stays the last-pushed cleanup
-  // entry that restartAfterSucceededJob resolves.
+  // entry.
   const rendezvousDir = rvzRoot();
   const root = tempDataRoot("routes-succeed");
   roots.push(root);
@@ -128,34 +127,6 @@ async function createSucceededJob(stubEnv: NodeJS.ProcessEnv): Promise<string> {
       throw new Error("timed out waiting for the job to succeed");
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
-}
-
-/**
- * Run a job to success, then install a FRESH manager over the same data root as
- * the global -- a simulated restart: the in-memory record is gone, only the disk
- * survives. Returns the succeeded job's id and its data root. The API is left
- * enabled so the routes resolve the restarted manager.
- */
-async function restartAfterSucceededJob(): Promise<{
-  id: string;
-  root: string;
-}> {
-  const id = await createSucceededJob({
-    STUB_OUTPUT_FILE: "id1,id2\n1,2\n",
-    STUB_RECORD_JSON: recordJson("2026-07-08T14:32:00.000Z"),
-  });
-  const root = roots[roots.length - 1];
-  const previous = (globalThis as { jobManagerInstance?: JobManager })
-    .jobManagerInstance;
-  previous?.shutdown();
-  const restarted = new JobManager({
-    dataRoot: root,
-    binaryPath: STUB_CLI_PATH,
-    childEnv: { STUB_FD3_EVENTS: JSON.stringify([]) },
-  });
-  (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
-    restarted;
-  return { id, root };
 }
 
 describe("the feature gate keeps the API dark when disabled", () => {
@@ -459,20 +430,32 @@ describe("status route reports record availability", () => {
     const body = (await response.json()) as { recordAvailable: boolean };
     expect(body.recordAvailable).toBe(false);
   });
+
+  test("the status body carries no restored key", async () => {
+    const id = await createSucceededJob({ STUB_OUTPUT_FILE: "id\n1\n" });
+    const response = (await handlersOf(JobRoute).GET({
+      request: new Request(`http://localhost/api/jobs/${id}`),
+      params: { jobId: id },
+    })) as Response;
+    const body = (await response.json()) as Record<string, unknown>;
+    expect("restored" in body).toBe(false);
+  });
 });
 
 /**
- * Enable the API and seed the global manager with an sftp remotes table (the
- * startup-loaded table production wiring passes), pointed at the stub CLI.
+ * Enable the API and seed the global manager with a provisioned sftp server (the
+ * startup-loaded entry production wiring passes), pointed at the stub CLI.
  */
-function enableJobApiWithRemotes(stubEnv: NodeJS.ProcessEnv = {}): JobManager {
-  const root = tempDataRoot("routes-remotes");
+function enableJobApiWithSftpServer(
+  stubEnv: NodeJS.ProcessEnv = {},
+): JobManager {
+  const root = tempDataRoot("routes-sftp");
   roots.push(root);
   vi.stubEnv("JOB_DATA_ROOT", root);
   const manager = new JobManager({
     dataRoot: root,
     binaryPath: STUB_CLI_PATH,
-    sftpRemotes: testSftpRemotesTable(),
+    sftpServer: testSftpServerEntry(),
     jobRendezvousDir: rvzRoot(),
     childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), ...stubEnv },
   });
@@ -540,19 +523,9 @@ describe("POST /api/jobs drives a job from a mounted work input", () => {
   });
 });
 
-describe("POST /api/jobs maps the sftp remote rejections to empty bodies", () => {
-  test("an unknown remote is an empty-bodied 400", async () => {
-    enableJobApiWithRemotes();
-    const response = (await handlersOf(CreateRoute).POST({
-      request: createRequest(validSftpIntent({ remote: "not_provisioned" })),
-      params: {},
-    })) as Response;
-    expect(response.status).toBe(400);
-    expect(await response.text()).toBe("");
-  });
-
-  test("a busy remote is an empty-bodied 409 that never echoes the name", async () => {
-    enableJobApiWithRemotes({ STUB_DELAY_MS: "5000" });
+describe("POST /api/jobs and the provisioned sftp server", () => {
+  test("a second concurrent sftp create is an empty-bodied 409", async () => {
+    enableJobApiWithSftpServer({ STUB_DELAY_MS: "5000" });
     const first = (await handlersOf(CreateRoute).POST({
       request: createRequest(validSftpIntent()),
       params: {},
@@ -567,7 +540,7 @@ describe("POST /api/jobs maps the sftp remote rejections to empty bodies", () =>
     expect(await second.text()).toBe("");
   });
 
-  test("an sftp intent without a configured table is an empty-bodied 400", async () => {
+  test("an sftp intent without a provisioned server is an empty-bodied 400", async () => {
     enableJobApi();
     const response = (await handlersOf(CreateRoute).POST({
       request: createRequest(validSftpIntent()),
@@ -575,6 +548,33 @@ describe("POST /api/jobs maps the sftp remote rejections to empty bodies", () =>
     })) as Response;
     expect(response.status).toBe(400);
     expect(await response.text()).toBe("");
+  });
+
+  test("the create path composes the provisioned server into the job config", async () => {
+    // The connection material comes only from the provisioned entry: the composed
+    // psilink.yaml carries its host and @path credential ref, and nothing
+    // client-chosen.
+    const root = tempDataRoot("routes-sftp-compose");
+    roots.push(root);
+    vi.stubEnv("JOB_DATA_ROOT", root);
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      sftpServer: testSftpServerEntry(),
+      childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), STUB_DELAY_MS: "5000" },
+    });
+    (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
+      manager;
+
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validSftpIntent()),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(201);
+    const { id } = (await response.json()) as { id: string };
+    const composed = fs.readFileSync(`${root}/${id}/psilink.yaml`, "utf8");
+    expect(composed).toContain("sftp.example.org");
+    expect(composed).toContain("@/etc/psilink/prod-east-password");
   });
 });
 
@@ -607,31 +607,62 @@ describe("POST /api/jobs rejects a concurrent filedrop job", () => {
   });
 });
 
-describe("GET /api/jobs/remotes", () => {
+describe("DELETE frees the slot for a new POST", () => {
+  test("a terminal exchange is 409 until DELETE, then a POST succeeds", async () => {
+    const id = await createSucceededJob({ STUB_OUTPUT_FILE: "id\n1\n" });
+    const manager = (globalThis as { jobManagerInstance?: JobManagerType })
+      .jobManagerInstance!;
+    await vi.waitFor(() => expect(manager.getJob(id)?.terminal).not.toBeNull());
+
+    // Reject-until-DELETE: the settled exchange holds the slot.
+    const busy = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent()),
+      params: {},
+    })) as Response;
+    expect(busy.status).toBe(409);
+    expect(await busy.text()).toBe("");
+
+    const del = (await handlersOf(JobRoute).DELETE({
+      request: new Request(`http://localhost/api/jobs/${id}`, {
+        method: "DELETE",
+      }),
+      params: { jobId: id },
+    })) as Response;
+    expect(del.status).toBe(204);
+
+    const created = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent()),
+      params: {},
+    })) as Response;
+    expect(created.status).toBe(201);
+  });
+});
+
+describe("GET /api/jobs/sftp", () => {
   test("is 404 when the API is disabled", async () => {
     vi.stubEnv("JOB_DATA_ROOT", "");
-    const response = (await handlersOf(RemotesRoute).GET({
-      request: new Request("http://localhost/api/jobs/remotes"),
+    const response = (await handlersOf(SftpRoute).GET({
+      request: new Request("http://localhost/api/jobs/sftp"),
       params: {},
     })) as Response;
     expect(response.status).toBe(404);
   });
 
-  test("serves [] when the API is enabled but no remotes are configured", async () => {
+  test("reads configured:false when the API is enabled but no server is provisioned", async () => {
     enableJobApi();
-    const response = (await handlersOf(RemotesRoute).GET({
-      request: new Request("http://localhost/api/jobs/remotes"),
+    const response = (await handlersOf(SftpRoute).GET({
+      request: new Request("http://localhost/api/jobs/sftp"),
       params: {},
     })) as Response;
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual([]);
+    expect(await response.json()).toEqual({ configured: false });
   });
 
-  test("the projection carries only {name, host, port, path} and no @ ref", async () => {
-    enableJobApiWithRemotes();
-    const response = (await handlersOf(RemotesRoute).GET({
-      request: new Request("http://localhost/api/jobs/remotes"),
+  test("the projection carries only {host, port, path} and no @ ref or fingerprint", async () => {
+    enableJobApiWithSftpServer();
+    const response = (await handlersOf(SftpRoute).GET({
+      request: new Request("http://localhost/api/jobs/sftp"),
       params: {},
     })) as Response;
     expect(response.status).toBe(200);
@@ -641,28 +672,26 @@ describe("GET /api/jobs/remotes", () => {
     expect(body).not.toContain("@");
     expect(body).not.toContain("SHA256");
 
-    const items = JSON.parse(body) as Array<Record<string, unknown>>;
-    expect(items).toHaveLength(1);
-    for (const item of items)
-      for (const key of Object.keys(item))
-        expect(["name", "host", "port", "path"]).toContain(key);
-    expect(items[0]).toEqual({
-      name: "prod_east",
+    const item = JSON.parse(body) as Record<string, unknown>;
+    for (const key of Object.keys(item))
+      expect(["configured", "host", "port", "path"]).toContain(key);
+    expect(item).toEqual({
+      configured: true,
       host: "sftp.example.org",
       port: 2222,
       path: "/exchange",
     });
   });
 
-  test("'remotes' can never be captured as a job id", async () => {
+  test("'sftp' can never be captured as a job id", async () => {
     // The traversal guard every $jobId route applies rejects the static
     // segment outright, so even a router that mis-ranked the routes could not
-    // reach the filesystem with "remotes" as an id.
-    expect(validateJobIdParam("remotes")).toBeNull();
+    // reach the filesystem with "sftp" as an id.
+    expect(validateJobIdParam("sftp")).toBeNull();
     enableJobApi();
     const response = (await handlersOf(JobRoute).GET({
-      request: new Request("http://localhost/api/jobs/remotes"),
-      params: { jobId: "remotes" },
+      request: new Request("http://localhost/api/jobs/sftp"),
+      params: { jobId: "sftp" },
     })) as Response;
     expect(response.status).toBe(404);
   });
@@ -818,213 +847,5 @@ describe("POST /api/jobs bounds the body before schema parse", () => {
     })) as Response;
     // A 404 (not 413) proves the oversized body was never read: the gate ran first.
     expect(response.status).toBe(404);
-  });
-});
-
-describe("GET /api/jobs lists jobs and is gated", () => {
-  test("is 404 when the API is disabled", async () => {
-    vi.stubEnv("JOB_DATA_ROOT", "");
-    const response = (await handlersOf(CreateRoute).GET({
-      request: new Request("http://localhost/api/jobs"),
-      params: {},
-    })) as Response;
-    expect(response.status).toBe(404);
-  });
-
-  test("lists a live succeeded job with no-store", async () => {
-    const id = await createSucceededJob({ STUB_OUTPUT_FILE: "id\n1\n" });
-    const response = (await handlersOf(CreateRoute).GET({
-      request: new Request("http://localhost/api/jobs"),
-      params: {},
-    })) as Response;
-    expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe("no-store");
-    const body = (await response.json()) as {
-      jobs: Array<{ id: string; restored: boolean; resultAvailable: boolean }>;
-    };
-    const entry = body.jobs.find((job) => job.id === id);
-    expect(entry).toMatchObject({ restored: false, resultAvailable: true });
-  });
-});
-
-describe("restore after a restart surfaces completed jobs read-only", () => {
-  const CREATED_AT = "2026-07-08T14:32:00.000Z";
-
-  test("GET /api/jobs lists the restored job with resultAvailable", async () => {
-    const { id } = await restartAfterSucceededJob();
-    const response = (await handlersOf(CreateRoute).GET({
-      request: new Request("http://localhost/api/jobs"),
-      params: {},
-    })) as Response;
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      jobs: Array<{
-        id: string;
-        restored: boolean;
-        status: string;
-        resultAvailable: boolean;
-        recordAvailable: boolean;
-      }>;
-    };
-    const entry = body.jobs.find((job) => job.id === id);
-    expect(entry).toMatchObject({
-      id,
-      restored: true,
-      status: "succeeded",
-      resultAvailable: true,
-      recordAvailable: true,
-    });
-  });
-
-  test("the status body shape marks the job restored, terminal null, eventCount 0", async () => {
-    const { id } = await restartAfterSucceededJob();
-    const response = (await handlersOf(JobRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${id}`),
-      params: { jobId: id },
-    })) as Response;
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      restored: boolean;
-      terminal: unknown;
-      terminalEmitted: boolean;
-      eventCount: number;
-      status: string;
-      recordCreatedAt?: string;
-    };
-    expect(body.restored).toBe(true);
-    expect(body.terminal).toBeNull();
-    expect(body.terminalEmitted).toBe(true);
-    expect(body.eventCount).toBe(0);
-    expect(body.status).toBe("succeeded");
-    expect(body.recordCreatedAt).toBe(CREATED_AT);
-  });
-
-  test("the restored result/record/keys serve byte-identically through the gate", async () => {
-    const { id, root } = await restartAfterSucceededJob();
-
-    const resultResp = (await handlersOf(ResultRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${id}/result`),
-      params: { jobId: id },
-    })) as Response;
-    expect(resultResp.status).toBe(200);
-    expect(resultResp.headers.get("cache-control")).toBe("no-store");
-    expect(await resultResp.text()).toBe(
-      fs.readFileSync(`${root}/${id}/output.csv`, "utf8"),
-    );
-
-    const recordResp = (await handlersOf(RecordRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${id}/record`),
-      params: { jobId: id },
-    })) as Response;
-    expect(recordResp.status).toBe(200);
-    expect(await recordResp.text()).toBe(
-      fs.readFileSync(`${root}/${id}/record.json`, "utf8"),
-    );
-
-    const keysResp = (await handlersOf(KeysRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${id}/keys`),
-      params: { jobId: id },
-    })) as Response;
-    expect(keysResp.status).toBe(200);
-    expect(await keysResp.text()).toBe(
-      fs.readFileSync(`${root}/${id}/record.keys.json`, "utf8"),
-    );
-  });
-
-  test("the restored surfaces are 404 when the API is disabled", async () => {
-    const { id } = await restartAfterSucceededJob();
-    vi.stubEnv("JOB_DATA_ROOT", "");
-    const listResp = (await handlersOf(CreateRoute).GET({
-      request: new Request("http://localhost/api/jobs"),
-      params: {},
-    })) as Response;
-    expect(listResp.status).toBe(404);
-    for (const route of [ResultRoute, RecordRoute, KeysRoute]) {
-      const resp = (await handlersOf(route).GET({
-        request: new Request(`http://localhost/api/jobs/${id}/x`),
-        params: { jobId: id },
-      })) as Response;
-      expect(resp.status).toBe(404);
-    }
-  });
-
-  test("an interrupted restored job's result endpoint is 404 and status is failed", async () => {
-    // A workdir with config/key/input but no output.csv: a restart surfaces it
-    // as terminated/failed, and its result is unservable.
-    const root = tempDataRoot("routes-interrupted");
-    roots.push(root);
-    vi.stubEnv("JOB_DATA_ROOT", root);
-    const jobId = "00000000-0000-4000-8000-000000000000";
-    const workdir = `${root}/${jobId}`;
-    fs.mkdirSync(workdir, { recursive: true });
-    fs.writeFileSync(`${workdir}/psilink.yaml`, "channel: filedrop\n");
-    fs.writeFileSync(`${workdir}/.psilink.key`, '{"sharedSecret":"x"}');
-    fs.writeFileSync(`${workdir}/input.csv`, "id\n1\n");
-    const manager = new JobManager({
-      dataRoot: root,
-      binaryPath: STUB_CLI_PATH,
-      childEnv: { STUB_FD3_EVENTS: JSON.stringify([]) },
-    });
-    (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
-      manager;
-
-    const statusResp = (await handlersOf(JobRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${jobId}`),
-      params: { jobId },
-    })) as Response;
-    const statusBody = (await statusResp.json()) as {
-      status: string;
-      restored: boolean;
-      resultAvailable: boolean;
-    };
-    expect(statusBody.status).toBe("failed");
-    expect(statusBody.restored).toBe(true);
-    expect(statusBody.resultAvailable).toBe(false);
-
-    const resultResp = (await handlersOf(ResultRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${jobId}/result`),
-      params: { jobId },
-    })) as Response;
-    expect(resultResp.status).toBe(404);
-  });
-
-  test("DELETE of a restored disk-only job is 204, and a second delete is 404", async () => {
-    const { id, root } = await restartAfterSucceededJob();
-    const workdir = `${root}/${id}`;
-    expect(fs.existsSync(workdir)).toBe(true);
-    const first = (await handlersOf(JobRoute).DELETE({
-      request: new Request(`http://localhost/api/jobs/${id}`, {
-        method: "DELETE",
-      }),
-      params: { jobId: id },
-    })) as Response;
-    expect(first.status).toBe(204);
-    expect(fs.existsSync(workdir)).toBe(false);
-    const second = (await handlersOf(JobRoute).DELETE({
-      request: new Request(`http://localhost/api/jobs/${id}`, {
-        method: "DELETE",
-      }),
-      params: { jobId: id },
-    })) as Response;
-    expect(second.status).toBe(404);
-  });
-
-  test("no route serves the key file or the config for a restored job", async () => {
-    // The restore surfaces are exactly result/record/keys. There is no handler
-    // that serves .psilink.key or psilink.yaml, and the served bodies never equal
-    // the secret key file or the config on disk.
-    const { id, root } = await restartAfterSucceededJob();
-    const keyFile = fs.readFileSync(`${root}/${id}/.psilink.key`, "utf8");
-    const configFile = fs.readFileSync(`${root}/${id}/psilink.yaml`, "utf8");
-    for (const route of [ResultRoute, RecordRoute, KeysRoute]) {
-      const resp = (await handlersOf(route).GET({
-        request: new Request(`http://localhost/api/jobs/${id}/x`),
-        params: { jobId: id },
-      })) as Response;
-      const text = await resp.text();
-      expect(text).not.toBe(keyFile);
-      expect(text).not.toBe(configFile);
-      expect(text).not.toContain("sharedSecret");
-    }
   });
 });

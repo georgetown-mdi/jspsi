@@ -11,7 +11,7 @@ import {
   expiryLabel,
   transportChooserCopy,
 } from "./inviterModel";
-import { sftpRemoteOptionLabel } from "./sftpRemoteChoice";
+import { sftpConnectionLabel } from "./sftpConnectionChoice";
 import styles from "./bench.module.css";
 
 import type {
@@ -22,7 +22,7 @@ import type {
   Transport,
 } from "./inviterModel";
 import type { OutputDirection } from "@psi/advancedInvite";
-import type { SftpRemoteProjection } from "@jobs/jobManager";
+import type { SftpConnectionProjection } from "@jobs/jobManager";
 
 const DIRECTION_CHOICES: ReadonlyArray<{
   value: OutputDirection;
@@ -42,20 +42,18 @@ const DIRECTION_CHOICES: ReadonlyArray<{
  * {@link transportChooserCopy}, which reflects whether the deployment runs a
  * shared-directory or SFTP exchange here (the console appliance) or saves an
  * exchange file for the command-line tool. On a console build whose appliance
- * has provisioned SFTP remotes, choosing SFTP shows a remote picker under the
- * card instead of routing to free-text host authoring: the exchange runs here
- * through the picked remote, and the connection material stays on the
- * appliance.
+ * has a provisioned SFTP server, choosing SFTP shows the single connection's
+ * locator as static text under the card instead of routing to free-text host
+ * authoring: the exchange runs here through that server, and the connection
+ * material stays on the appliance.
  */
 export function ReviewCreateSection({
   editor,
   csv,
   problems,
   minting,
-  sftpRemotes,
-  sftpRemoteName,
+  sftpConnection,
   rendezvousConfigured,
-  onSftpRemote,
   onLifetime,
   onDirection,
   onTransport,
@@ -67,17 +65,15 @@ export function ReviewCreateSection({
   csv: AcquiredCsv;
   problems: ReadonlyArray<SpineProblem>;
   minting: boolean;
-  /** The appliance's provisioned SFTP remotes, fetched once the sftp channel
-   * is picked on a console build; undefined before the fetch resolves (or off
-   * a console), empty when the appliance has none -- both fall back to the
+  /** The appliance's provisioned SFTP connection, fetched once the sftp channel
+   * is picked on a console build; undefined before the fetch resolves (or off a
+   * console), null when the appliance has none -- both fall back to the
    * save-a-file flow. */
-  sftpRemotes: Array<SftpRemoteProjection> | undefined;
-  sftpRemoteName: string | undefined;
+  sftpConnection: SftpConnectionProjection | null | undefined;
   /** Whether the appliance has a rendezvous directory mounted (`JOB_RENDEZVOUS_DIR`
    * set). The filedrop card runs here when true and renders disabled with a config
    * hint when false. Off a console build it is unused (filedrop saves a file). */
   rendezvousConfigured: boolean;
-  onSftpRemote: (name: string) => void;
   onLifetime: (seconds: number) => void;
   onDirection: (direction: OutputDirection) => void;
   onTransport: (transport: Transport) => void;
@@ -85,10 +81,10 @@ export function ReviewCreateSection({
   onCreate: () => void;
   onNavigate: (target: SpineTarget) => void;
 }) {
-  const sftpServerJob = sftpRemotes !== undefined && sftpRemotes.length > 0;
+  const sftpConfigured = sftpConnection != null;
   const available = availableTransports(
     isConsoleBuild(),
-    sftpServerJob,
+    sftpConfigured,
     rendezvousConfigured,
   );
   const transport = editor.transport ?? available.defaultTransport;
@@ -107,7 +103,7 @@ export function ReviewCreateSection({
     capabilityNote,
   } = transportChooserCopy(
     isConsoleBuild(),
-    sftpServerJob,
+    sftpConfigured,
     rendezvousConfigured,
   );
   const canCreate = problems.length === 0 && !minting;
@@ -184,18 +180,16 @@ export function ReviewCreateSection({
             label={sftpLabel}
             description={sftpDescription}
           />
-          {transport === "sftp" && sftpServerJob && (
-            <NativeSelect
-              label="SFTP server"
-              description="Provisioned on this machine. Connection details and credentials stay on this machine; the invitation carries only where to meet."
-              value={sftpRemoteName ?? ""}
-              data={sftpRemotes.map((remote) => ({
-                value: remote.name,
-                label: sftpRemoteOptionLabel(remote),
-              }))}
-              onChange={(event) => onSftpRemote(event.currentTarget.value)}
-              mt="sm"
-            />
+          {transport === "sftp" && sftpConnection != null && (
+            <p className={`${styles.small} ${styles.sub}`}>
+              Runs through{" "}
+              <span className={styles.mono}>
+                {sftpConnectionLabel(sftpConnection)}
+              </span>
+              , provisioned on this appliance. Connection details and
+              credentials stay on this machine; the invitation carries only
+              where to meet.
+            </p>
           )}
         </div>
         <div

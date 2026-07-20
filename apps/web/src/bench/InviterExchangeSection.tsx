@@ -13,6 +13,7 @@ import {
   FailureAlert,
   RunWarningsAlert,
   SERVER_JOB_KEEP_OPEN_BODY,
+  SERVER_JOB_PEER_WINDOW_BODY,
   WithheldResultInset,
 } from "./BenchRunSurface";
 import { StatusPanel } from "./StatusPanel";
@@ -43,6 +44,7 @@ export function InviterExchangeSection({
   serverJob,
   onTryAgain,
   onStartOver,
+  onAbandon,
 }: {
   invitation: GeneratedInvitation;
   run: ExchangeRun;
@@ -65,6 +67,11 @@ export function InviterExchangeSection({
   serverJob: boolean;
   onTryAgain: () => void;
   onStartOver: () => void;
+  /** Discard the current server-job exchange (cancel-if-running + DELETE), fired
+   * as the operator leaves for a fresh exchange from the completion workfoot, so
+   * the appliance's single slot frees for the next one. A no-op on a browser run
+   * (no appliance job). */
+  onAbandon: () => void;
 }) {
   const phase =
     outputs !== undefined ? "done" : awaitingPartner(run) ? "share" : "running";
@@ -175,16 +182,13 @@ export function InviterExchangeSection({
           </p>
         </>
       )}
-      {/* The listening/running claim is false the moment any failure lands (the
-          lifecycle tore down), so the callout outlives no failure -- not even
-          a retryable one. On a server-job run the appliance's CLI child conducts
-          the exchange and this tab holds the only view of it: an in-app teardown
-          cancels the run, a hard close strands it unattended, and either way the
-          console cannot return to it -- so the copy claims abandonment, never
-          that leaving stops the run, and the callout persists through the active
-          protocol phase, the whole window the unload guard arms. The browser
-          listener's copy is share-only: once the partner connects, nothing it
-          says still holds. */}
+      {/* The keep-open callout drops the moment any failure lands: the run it
+          describes has torn down, so it outlives no failure, not even a retryable
+          one. On a server-job run the appliance conducts the exchange and this tab
+          only watches it, so the callout persists into the running phase -- leaving
+          does not stop the run, and the recovery panel is the way back. The browser
+          listener's copy is share-only: once the partner connects, nothing it says
+          still holds, so it does not extend past the share phase. */}
       {(phase === "share" || (phase === "running" && serverJob)) &&
         failure === undefined && (
           <div className={styles.callout}>
@@ -194,6 +198,9 @@ export function InviterExchangeSection({
                 ? SERVER_JOB_KEEP_OPEN_BODY
                 : "Your browser is listening for your partner. Closing the tab cancels the invitation; reloading starts over."}
             </p>
+            {serverJob && phase === "share" && (
+              <p className={styles.small}>{SERVER_JOB_PEER_WINDOW_BODY}</p>
+            )}
           </div>
         )}
       {phase === "done" && (
@@ -247,7 +254,10 @@ export function InviterExchangeSection({
         </>
       )}
       {(phase === "done" || failure?.category === "output") && (
-        <AnotherExchangeFoot />
+        <AnotherExchangeFoot
+          onNavigate={onAbandon}
+          confirmBeforeLeave={serverJob}
+        />
       )}
     </>
   );

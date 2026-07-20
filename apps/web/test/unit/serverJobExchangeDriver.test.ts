@@ -6,7 +6,8 @@ import {
   JobApiRequestError,
   createFetchJobApiClient,
   createServerJobExchangeDriver,
-  fetchSftpRemotes,
+  createServerJobReattachDriver,
+  fetchSftpConnection,
 } from "@psi/serverJobExchangeDriver";
 import { buildRunOutputs } from "@bench/runOutputs";
 
@@ -78,6 +79,7 @@ function scriptedClient(
 ) {
   const createdIntents: Array<unknown> = [];
   const cancelledIds: Array<string> = [];
+  const deletedIds: Array<string> = [];
   const client: JobApiClient = {
     createJob: (intent) => {
       createdIntents.push(intent);
@@ -88,12 +90,17 @@ function scriptedClient(
       cancelledIds.push(jobId);
       return Promise.resolve();
     },
+    deleteJob: (jobId) => {
+      deletedIds.push(jobId);
+      return Promise.resolve();
+    },
+    fetchJobStatus: () => Promise.resolve({ kind: "live", status: "running" }),
     fetchRecordAvailability: () =>
       typeof availability === "function"
         ? availability()
         : Promise.resolve(availability),
   };
-  return { client, createdIntents, cancelledIds };
+  return { client, createdIntents, cancelledIds, deletedIds };
 }
 
 function stages(...ids: Array<string>): RelayEvent {
@@ -536,11 +543,11 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
     });
   });
 
-  test("an sftp transport POSTs the sftp arm carrying ONLY the remote name", async () => {
+  test("an sftp transport POSTs the sftp arm carrying NO connection field", async () => {
     const { client, createdIntents } = scriptedClient([result(true)]);
     const config: ServerJobExchangeDriverConfig = {
       ...driverConfig(),
-      transport: { channel: "sftp", remote: "prod_east" },
+      transport: { channel: "sftp" },
     };
     await createServerJobExchangeDriver(config, client).run(
       driverEvents(new AbortController().signal),
@@ -548,15 +555,13 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
 
     const intent = createdIntents[0] as Record<string, unknown>;
     expect(intent.channel).toBe("sftp");
-    expect(intent.remote).toBe("prod_east");
-    // Exactly one field beyond the filedrop shape: no host, port, path, or any
-    // other connection material can ride the intent.
+    // Only the shared fields beyond the discriminant: no remote, host, port,
+    // path, or any other connection material can ride the intent.
     expect(Object.keys(intent).sort()).toEqual([
       "channel",
       "eventStream",
       "inputCsv",
       "linkageTerms",
-      "remote",
       "sharedSecret",
     ]);
   });
@@ -570,7 +575,7 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
     const driver = createServerJobExchangeDriver(
       {
         ...driverConfig(),
-        transport: { channel: "sftp", remote: "prod_east" },
+        transport: { channel: "sftp" },
       },
       client,
     );
@@ -658,10 +663,47 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
     expect(events.onError).not.toHaveBeenCalled();
   });
 
-  test("aborting mid-stream POSTs cancel and emits no spurious error", async () => {
+  test("onJobCreated fires with the created id before the stream opens", async () => {
+    const order: Array<string> = [];
+    const created: Array<string> = [];
+    const client: JobApiClient = {
+      createJob: () => {
+        order.push("create");
+        return Promise.resolve("job-77");
+      },
+      openEventStream: () => {
+        order.push("stream");
+        return scriptedStream([result(true)]);
+      },
+      cancelJob: () => Promise.resolve(),
+      deleteJob: () => Promise.resolve(),
+      fetchJobStatus: () =>
+        Promise.resolve({ kind: "live", status: "running" }),
+      fetchRecordAvailability: () => Promise.resolve({ available: false }),
+    };
+    const config: ServerJobExchangeDriverConfig = {
+      ...driverConfig(),
+      onJobCreated: (jobId) => {
+        order.push("onJobCreated");
+        created.push(jobId);
+      },
+    };
+
+    await createServerJobExchangeDriver(config, client).run(
+      driverEvents(new AbortController().signal),
+    );
+
+    expect(created).toEqual(["job-77"]);
+    // The seam fires after create resolves and before the event stream opens, so
+    // the recovery record is persisted the instant the job exists on the appliance.
+    expect(order).toEqual(["create", "onJobCreated", "stream"]);
+  });
+
+  test("aborting mid-stream does NOT POST cancel and emits no spurious error", async () => {
     const controller = new AbortController();
-    // The stream aborts itself after the first stage, standing in for the caller
-    // pressing cancel while the job is still running.
+    // The stream aborts itself after the first stage, standing in for an unmount /
+    // reload / tab close mid-run. An abort now carries NO cancel intent: it only
+    // stops consuming the stream silently, and the appliance's run keeps going.
     async function* abortingStream(): AsyncIterable<RelayEvent> {
       await Promise.resolve();
       yield stage("prepare");
@@ -676,6 +718,9 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
         cancelledIds.push(jobId);
         return Promise.resolve();
       },
+      deleteJob: () => Promise.resolve(),
+      fetchJobStatus: () =>
+        Promise.resolve({ kind: "live", status: "running" }),
       fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
     const driver = createServerJobExchangeDriver(driverConfig(), client);
@@ -683,9 +728,10 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
 
     await driver.run(events);
 
-    expect(cancelledIds).toEqual(["job-42"]);
-    // The abort is a deliberate user-leave: no error, and the post-abort stage
-    // is never mapped.
+    // No cancel is POSTed off the signal.
+    expect(cancelledIds).toEqual([]);
+    // The abort is a silent user-leave: no error, and the post-abort stage is
+    // never mapped.
     expect(events.onError).not.toHaveBeenCalled();
     expect(events.onResult).not.toHaveBeenCalled();
     expect(events.onStage.mock.calls.map((call) => call[0])).toEqual([
@@ -699,6 +745,8 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
         Promise.reject(new JobApiRequestError(400, "bad intent")),
       openEventStream: () => scriptedStream([]),
       cancelJob: () => Promise.resolve(),
+      deleteJob: () => Promise.resolve(),
+      fetchJobStatus: () => Promise.resolve({ kind: "gone" }),
       fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
     const driver = createServerJobExchangeDriver(driverConfig(), failingClient);
@@ -716,6 +764,8 @@ describe("createServerJobExchangeDriver intent and cancellation", () => {
         Promise.reject(new JobApiRequestError(500, "server error")),
       openEventStream: () => scriptedStream([]),
       cancelJob: () => Promise.resolve(),
+      deleteJob: () => Promise.resolve(),
+      fetchJobStatus: () => Promise.resolve({ kind: "gone" }),
       fetchRecordAvailability: () => Promise.resolve({ available: false }),
     };
     const driver = createServerJobExchangeDriver(driverConfig(), client);
@@ -929,7 +979,145 @@ describe("createFetchJobApiClient over an injected fetch", () => {
   });
 });
 
-describe("fetchSftpRemotes", () => {
+describe("createServerJobReattachDriver", () => {
+  test("replays a finished job's full history to onResult, creating no job", async () => {
+    const { client, createdIntents } = scriptedClient([
+      stages("prepare", "exchange"),
+      stage("prepare"),
+      stage("exchange"),
+      result(true),
+    ]);
+    const events = driverEvents(new AbortController().signal);
+
+    await createServerJobReattachDriver("job-1", client).run(events);
+
+    // Re-attach never creates a job; it only reads the id's stream.
+    expect(createdIntents).toHaveLength(0);
+    expect(events.onStages).toHaveBeenCalledTimes(1);
+    expect(events.onStage.mock.calls.map((call) => call[0])).toEqual([
+      "prepare",
+      "exchange",
+    ]);
+    expect(events.onResult).toHaveBeenCalledTimes(1);
+    const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
+    expect(outputs.resultsUrl).toBe("/api/jobs/job-1/result");
+    expect(events.onError).not.toHaveBeenCalled();
+  });
+
+  test("a stream 404 surfaces as the onError the recovery panel maps to stale", async () => {
+    const client: JobApiClient = {
+      createJob: () => Promise.reject(new Error("re-attach never creates")),
+      // Match the real stream: the non-ok status throws on the first pull.
+      openEventStream: () => ({
+        [Symbol.asyncIterator]: () => ({
+          next: () =>
+            Promise.reject(
+              new JobApiRequestError(
+                404,
+                "GET /api/jobs/job-x/events failed with status 404",
+              ),
+            ),
+        }),
+      }),
+      cancelJob: () => Promise.resolve(),
+      deleteJob: () => Promise.resolve(),
+      fetchJobStatus: () => Promise.resolve({ kind: "gone" }),
+      fetchRecordAvailability: () => Promise.resolve({ available: false }),
+    };
+    const events = driverEvents(new AbortController().signal);
+
+    await createServerJobReattachDriver("job-x", client).run(events);
+
+    expect(events.onResult).not.toHaveBeenCalled();
+    expect(events.onError).toHaveBeenCalledTimes(1);
+    const failure = events.onError.mock.calls[0][0] as {
+      category: string;
+      error: unknown;
+    };
+    expect(failure.category).toBe("exchange");
+    expect(failure.error).toBeInstanceOf(JobApiRequestError);
+    expect((failure.error as JobApiRequestError).status).toBe(404);
+  });
+
+  test("an already-aborted signal reads nothing", async () => {
+    const { client } = scriptedClient([result(true)]);
+    const controller = new AbortController();
+    controller.abort();
+    const events = driverEvents(controller.signal);
+
+    await createServerJobReattachDriver("job-1", client).run(events);
+
+    expect(events.onResult).not.toHaveBeenCalled();
+    expect(events.onError).not.toHaveBeenCalled();
+  });
+});
+
+describe("createFetchJobApiClient deleteJob and fetchJobStatus", () => {
+  function statusFetch(body: unknown, status = 200): typeof fetch {
+    return () =>
+      Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+  }
+
+  test("deleteJob issues a DELETE to the job endpoint", async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    const fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), method: init?.method ?? "GET" });
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }) as typeof fetch;
+
+    await createFetchJobApiClient(fetchImpl).deleteJob("job-5");
+
+    expect(calls).toEqual([{ url: "/api/jobs/job-5", method: "DELETE" }]);
+  });
+
+  test("fetchJobStatus reads a terminal status off a 200 as live", async () => {
+    const signal = new AbortController().signal;
+    await expect(
+      createFetchJobApiClient(
+        statusFetch({ status: "succeeded" }),
+      ).fetchJobStatus("job-1", signal),
+    ).resolves.toEqual({ kind: "live", status: "succeeded" });
+  });
+
+  test("a 200 with no recognizable status is live, defaulting to running (never gone)", async () => {
+    const signal = new AbortController().signal;
+    // A live in-memory job the status route answered 200 for must never read as
+    // gone, or the recovery panel would delete it; default to running.
+    await expect(
+      createFetchJobApiClient(statusFetch({})).fetchJobStatus("job-1", signal),
+    ).resolves.toEqual({ kind: "live", status: "running" });
+  });
+
+  test("only a confirmed 404 is gone; a 500 or a network error is unreachable", async () => {
+    const signal = new AbortController().signal;
+    const notFound: typeof fetch = () =>
+      Promise.resolve(new Response(null, { status: 404 }));
+    // A confirmed 404 is the only outcome that authorizes a destructive reclaim.
+    await expect(
+      createFetchJobApiClient(notFound).fetchJobStatus("job-1", signal),
+    ).resolves.toEqual({ kind: "gone" });
+    // A non-404 fault and a network error are transient, NOT a removal: the caller
+    // leaves the record intact rather than delete a live exchange over a blip.
+    await expect(
+      createFetchJobApiClient(statusFetch(null, 500)).fetchJobStatus(
+        "job-1",
+        signal,
+      ),
+    ).resolves.toEqual({ kind: "unreachable" });
+    await expect(
+      createFetchJobApiClient(() =>
+        Promise.reject(new Error("offline")),
+      ).fetchJobStatus("job-1", signal),
+    ).resolves.toEqual({ kind: "unreachable" });
+  });
+});
+
+describe("fetchSftpConnection", () => {
   function jsonResponse(body: unknown, status = 200): typeof fetch {
     return () =>
       Promise.resolve(
@@ -940,35 +1128,42 @@ describe("fetchSftpRemotes", () => {
       );
   }
 
-  test("returns the validated projection array, optional fields preserved", async () => {
-    const remotes = await fetchSftpRemotes(
-      jsonResponse([
-        { name: "prod_east", host: "sftp.example.gov", port: 2222, path: "/x" },
-        { name: "dr-west", host: "dr.example.gov" },
-      ]),
-    );
-    expect(remotes).toEqual([
-      { name: "prod_east", host: "sftp.example.gov", port: 2222, path: "/x" },
-      { name: "dr-west", host: "dr.example.gov" },
-    ]);
+  test("returns the validated projection, optional fields preserved", async () => {
+    await expect(
+      fetchSftpConnection(
+        jsonResponse({
+          configured: true,
+          host: "sftp.example.gov",
+          port: 2222,
+          path: "/x",
+        }),
+      ),
+    ).resolves.toEqual({ host: "sftp.example.gov", port: 2222, path: "/x" });
+    await expect(
+      fetchSftpConnection(
+        jsonResponse({ configured: true, host: "dr.example.gov" }),
+      ),
+    ).resolves.toEqual({ host: "dr.example.gov" });
   });
 
-  test("GETs the remotes route", async () => {
+  test("GETs the sftp route", async () => {
     const urls: Array<string> = [];
-    await fetchSftpRemotes((input: RequestInfo | URL) => {
+    await fetchSftpConnection((input: RequestInfo | URL) => {
       urls.push(String(input));
       return Promise.resolve(
-        new Response("[]", {
+        new Response(JSON.stringify({ configured: false }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
       );
     });
-    expect(urls).toEqual(["/api/jobs/remotes"]);
+    expect(urls).toEqual(["/api/jobs/sftp"]);
   });
 
-  test("an enabled API with no remotes reads as none configured", async () => {
-    await expect(fetchSftpRemotes(jsonResponse([]))).resolves.toEqual([]);
+  test("an enabled API with no server reads as none configured", async () => {
+    await expect(
+      fetchSftpConnection(jsonResponse({ configured: false })),
+    ).resolves.toBeNull();
   });
 
   test("a non-2xx reads as none configured (fail toward save-file)", async () => {
@@ -976,39 +1171,38 @@ describe("fetchSftpRemotes", () => {
     // server-job run can start here".
     for (const status of [404, 500])
       await expect(
-        fetchSftpRemotes(jsonResponse([{ name: "a", host: "h" }], status)),
-      ).resolves.toEqual([]);
+        fetchSftpConnection(
+          jsonResponse({ configured: true, host: "h" }, status),
+        ),
+      ).resolves.toBeNull();
   });
 
-  test("a malformed body reads as none configured, never a partial table", async () => {
+  test("a malformed body reads as none configured, never a partial connection", async () => {
     const malformed: Array<unknown> = [
-      { remotes: [] },
+      [],
       "prod_east",
-      [null],
-      ["prod_east"],
-      [{ host: "no-name.example.gov" }],
-      [{ name: "no_host" }],
-      [{ name: "", host: "h" }],
-      [{ name: "a", host: "" }],
-      [{ name: "a", host: "h", port: "2222" }],
-      [{ name: "a", host: "h", port: 0 }],
-      [{ name: "a", host: "h", port: 65536 }],
-      [{ name: "a", host: "h", path: "" }],
-      // One bad entry beside a good one fails the WHOLE listing closed.
-      [{ name: "good", host: "h" }, { name: "bad" }],
+      null,
+      { configured: true },
+      { configured: true, host: "" },
+      { host: "h" },
+      { configured: false, host: "h" },
+      { configured: true, host: "h", port: "2222" },
+      { configured: true, host: "h", port: 0 },
+      { configured: true, host: "h", port: 65536 },
+      { configured: true, host: "h", path: "" },
     ];
     for (const body of malformed)
-      await expect(fetchSftpRemotes(jsonResponse(body))).resolves.toEqual([]);
+      await expect(fetchSftpConnection(jsonResponse(body))).resolves.toBeNull();
   });
 
   test("a network error and a non-JSON body read as none configured", async () => {
     await expect(
-      fetchSftpRemotes(() => Promise.reject(new Error("offline"))),
-    ).resolves.toEqual([]);
+      fetchSftpConnection(() => Promise.reject(new Error("offline"))),
+    ).resolves.toBeNull();
     const htmlResponse: typeof fetch = () =>
       Promise.resolve(
         new Response("<html>gateway error</html>", { status: 200 }),
       );
-    await expect(fetchSftpRemotes(htmlResponse)).resolves.toEqual([]);
+    await expect(fetchSftpConnection(htmlResponse)).resolves.toBeNull();
   });
 });

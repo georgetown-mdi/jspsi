@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
-import { Alert, Button, CopyButton } from "@mantine/core";
+import { Alert, Button, CopyButton, Group, Modal } from "@mantine/core";
 import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
+
+import { DEFAULT_PEER_TIMEOUT_MS } from "@psilink/core";
 
 import { dateTimeLabel } from "./inviterModel";
 import styles from "./bench.module.css";
@@ -12,13 +14,46 @@ import type { RunFailure } from "./useInviterExchange";
 
 /**
  * The keep-open callout body for a run the console appliance conducts on the
- * operator's behalf (a server-job run): the tab holds the only view of it, so
- * leaving abandons the run rather than merely stopping a browser listener. Shared
- * by both seats' run columns so the two cannot drift.
+ * operator's behalf (a server-job run): the appliance runs the exchange, so
+ * leaving the page leaves it running -- the console re-attaches to it (or discards
+ * it) on return, rather than losing it. Shared by both seats' run columns so the
+ * two cannot drift.
  */
 export const SERVER_JOB_KEEP_OPEN_BODY =
-  "This appliance is running the exchange. If you leave this page, the console " +
-  "cannot return to the run or its results.";
+  "This appliance is running the exchange. If you leave this page the run " +
+  "continues here; return to this console to pick it up or discard it.";
+
+/**
+ * Format a peer-timeout duration as the human phrase the copy embeds ("an hour"
+ * at the one-hour default). Derived so {@link SERVER_JOB_PEER_WINDOW_BODY} tracks
+ * `DEFAULT_PEER_TIMEOUT_MS` rather than restating it, and a copy-pin test asserts
+ * the two agree. Exported for that test.
+ *
+ * @internal
+ */
+export function peerWindowDurationPhrase(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes >= 60 && minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return hours === 1 ? "an hour" : `${hours} hours`;
+  }
+  if (minutes === 1) return "a minute";
+  return `${minutes} minutes`;
+}
+
+/**
+ * The peer-coordination callout body for a server-job run: the exchange needs
+ * both consoles running their halves at once, and the appliance waits only about
+ * the peer-timeout window before it stops. Its duration is derived from core's
+ * `DEFAULT_PEER_TIMEOUT_MS` so the copy cannot drift from the CLI default. The
+ * console never sets `peerTimeoutMs`, so this is the window every console-composed
+ * exchange actually runs under.
+ */
+export const SERVER_JOB_PEER_WINDOW_BODY =
+  "Your partner's console must run its half while yours is running. This " +
+  `appliance waits about ${peerWindowDurationPhrase(DEFAULT_PEER_TIMEOUT_MS)} ` +
+  "for the partner before the exchange stops; if it stops, coordinate a time " +
+  "and run it again.";
 
 const PREVIEW_EDGE_CHARS = 8;
 const COPY_STATUS_CLEAR_MS = 2000;
@@ -306,13 +341,64 @@ export function RunWarningsAlert({
 }
 
 /** The workfoot link out to a fresh exchange, shown at completion and after an
- * output failure (whose exchange already succeeded). */
-export function AnotherExchangeFoot() {
+ * output failure (whose exchange already succeeded). `onNavigate` fires as the
+ * operator leaves for a new exchange -- the console seat passes its `abandonRun`
+ * here so a settled server-job exchange is discarded (cancel-if-needed + DELETE),
+ * freeing the appliance's single slot for the next one; the browser seat leaves
+ * it unset. It does not block the navigation.
+ *
+ * On a server-job completion the result/record/keys exist only as appliance
+ * endpoint hrefs -- there is no browser blob -- so the discard is an irreversible
+ * removal of data the operator may not have downloaded. `confirmBeforeLeave` gates
+ * the leave behind a confirm there; a browser run keeps its results in local blobs
+ * and needs none, so it stays false and navigates straight through. */
+export function AnotherExchangeFoot({
+  onNavigate,
+  confirmBeforeLeave = false,
+}: {
+  onNavigate?: () => void;
+  confirmBeforeLeave?: boolean;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  if (!confirmBeforeLeave)
+    return (
+      <div className={styles.workFoot}>
+        <Button component={Link} to="/quick" onClick={() => onNavigate?.()}>
+          Set up another exchange
+        </Button>
+      </div>
+    );
   return (
     <div className={styles.workFoot}>
-      <Button component={Link} to="/quick">
+      <Button onClick={() => setConfirming(true)}>
         Set up another exchange
       </Button>
+      <Modal
+        opened={confirming}
+        onClose={() => setConfirming(false)}
+        title="Start another exchange?"
+        centered
+        transitionProps={{ duration: 0 }}
+      >
+        <p>
+          Starting another exchange removes this one&apos;s results from this
+          appliance -- download anything you need first.
+        </p>
+        <Group mt="md">
+          <Button variant="default" onClick={() => setConfirming(false)}>
+            Cancel
+          </Button>
+          <Button
+            component={Link}
+            to="/quick"
+            color="red"
+            variant="light"
+            onClick={() => onNavigate?.()}
+          >
+            Set up another exchange
+          </Button>
+        </Group>
+      </Modal>
     </div>
   );
 }

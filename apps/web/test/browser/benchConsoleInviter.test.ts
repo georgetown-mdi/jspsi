@@ -85,7 +85,7 @@ interface StubOptions {
   profile?: unknown;
   profileStatus?: number;
   profileErrorCode?: string;
-  remotes?: unknown;
+  sftp?: unknown;
   rendezvous?: unknown;
   coverageStatus?: number;
 }
@@ -96,6 +96,7 @@ function stubJobApi(options: StubOptions = {}): {
   captured: Array<CapturedRequest>;
   setListing: (listing: unknown) => void;
   setProfile: (profile: unknown) => void;
+  setJobStatus: (status: string) => void;
   emitEvent: (event: object) => void;
   closeEvents: () => void;
 } {
@@ -108,6 +109,9 @@ function stubJobApi(options: StubOptions = {}): {
     files: [CLIENTS_FILE],
   };
   let profile: unknown = options.profile ?? CLIENTS_PROFILE;
+  // The run status the job's GET status endpoint reports (the discard poll reads
+  // it); a test flips it to a terminal value to let a discard complete promptly.
+  let jobStatus = "running";
 
   const jsonResponse = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), {
@@ -141,8 +145,10 @@ function stubJobApi(options: StubOptions = {}): {
             ? new Response(null, { status: options.coverageStatus })
             : jsonResponse({ rates: [] }),
         );
-      if (url === "/api/jobs/remotes")
-        return Promise.resolve(jsonResponse(options.remotes ?? []));
+      if (url === "/api/jobs/sftp")
+        return Promise.resolve(
+          jsonResponse(options.sftp ?? { configured: false }),
+        );
       if (url === "/api/jobs/rendezvous")
         return Promise.resolve(
           jsonResponse(options.rendezvous ?? { configured: false }),
@@ -160,8 +166,13 @@ function stubJobApi(options: StubOptions = {}): {
             { status: 200, headers: { "Content-Type": "text/event-stream" } },
           ),
         );
-      if (url === "/api/jobs/job-7")
-        return Promise.resolve(jsonResponse({ recordAvailable: false }));
+      if (url === "/api/jobs/job-7") {
+        if ((init?.method ?? "GET") === "DELETE")
+          return Promise.resolve(new Response(null, { status: 204 }));
+        return Promise.resolve(
+          jsonResponse({ status: jobStatus, recordAvailable: false }),
+        );
+      }
       if (url === "/api/jobs/job-7/cancel")
         return Promise.resolve(new Response(null, { status: 200 }));
       return Promise.resolve(new Response(null, { status: 404 }));
@@ -175,6 +186,9 @@ function stubJobApi(options: StubOptions = {}): {
     },
     setProfile: (next) => {
       profile = next;
+    },
+    setJobStatus: (next) => {
+      jobStatus = next;
     },
     emitEvent: (event) =>
       sse?.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`)),
@@ -202,6 +216,9 @@ afterEach(async () => {
   container?.remove();
   root = undefined;
   container = undefined;
+  // A server-job run persists a strand-recovery record; clear it so the next
+  // test's idle bench does not re-attach to a prior run's id.
+  window.localStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -349,22 +366,30 @@ describe("console inviter transports and sample data", () => {
       .toBeInTheDocument();
   });
 
-  test("with provisioned remotes the default transport is SFTP (run here)", async () => {
-    stubJobApi({ remotes: [{ name: "prod_east", host: "sftp.example.gov" }] });
+  test("with a provisioned server the default transport is SFTP (run here)", async () => {
+    stubJobApi({
+      sftp: { configured: true, host: "sftp.example.gov", port: 2222 },
+    });
     mount(createElement(InviterBench));
     await reachReviewCreate();
-    // SFTP is selected by default and shows the run-here copy plus the picker.
+    // SFTP is selected by default and shows the run-here copy plus the single
+    // connection's locator as static text (no picker).
     await expect
       .element(page.getByLabelText("Over SFTP, run here"))
       .toBeChecked();
     await expect
-      .element(page.getByLabelText("SFTP server"))
+      .element(page.getByText("Runs through", { exact: false }))
       .toBeInTheDocument();
+    await expect
+      .element(page.getByText("sftp.example.gov:2222", { exact: false }))
+      .toBeInTheDocument();
+    // No remote picker: the operator selects nothing.
+    expect(page.getByLabelText("SFTP server").query()).toBeNull();
   });
 
-  test("with a rendezvous mount and no remotes the filedrop card runs here by default", async () => {
+  test("with a rendezvous mount and no sftp server the filedrop card runs here by default", async () => {
     stubJobApi({
-      remotes: [],
+      sftp: { configured: false },
       rendezvous: { configured: true, path: "/mnt/rendezvous" },
     });
     mount(createElement(InviterBench));
@@ -375,7 +400,10 @@ describe("console inviter transports and sample data", () => {
   });
 
   test("with no rendezvous mount the filedrop card is disabled", async () => {
-    stubJobApi({ remotes: [], rendezvous: { configured: false } });
+    stubJobApi({
+      sftp: { configured: false },
+      rendezvous: { configured: false },
+    });
     mount(createElement(InviterBench));
     await reachReviewCreate();
     await expect
@@ -391,14 +419,12 @@ describe("console inviter transports and sample data", () => {
 describe("console inviter mint and run", () => {
   test("seeds from the profile and runs a job whose intent carries inputFile, not inputCsv", async () => {
     const api = stubJobApi({
-      remotes: [
-        {
-          name: "dr_west",
-          host: "dr.example.gov",
-          port: 2222,
-          path: "/drops/psilink",
-        },
-      ],
+      sftp: {
+        configured: true,
+        host: "dr.example.gov",
+        port: 2222,
+        path: "/drops/psilink",
+      },
     });
     mount(createElement(InviterBench));
     await reachReviewCreate();
@@ -414,14 +440,16 @@ describe("console inviter mint and run", () => {
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Your invitation is ready");
 
-    // A server-job run: the keep-open callout names the appliance running the exchange
-    // and that leaving abandons it, never a browser listener. The whole sentence is
-    // asserted -- a substring would also pass a false "closing stops the run" claim.
+    // A server-job run: the keep-open callout names the appliance running the
+    // exchange and that leaving leaves it running (the console re-attaches), never
+    // a browser listener. The whole sentence is asserted -- a substring would also
+    // pass a false "leaving abandons the run" claim.
     await expect
       .element(
         page.getByText(
-          "This appliance is running the exchange. If you leave this page, " +
-            "the console cannot return to the run or its results.",
+          "This appliance is running the exchange. If you leave this page the " +
+            "run continues here; return to this console to pick it up or discard " +
+            "it.",
         ),
       )
       .toBeInTheDocument();
@@ -429,7 +457,8 @@ describe("console inviter mint and run", () => {
       page.getByText("Your browser is listening for your partner").query(),
     ).toBeNull();
 
-    // The minted code carries the picked remote's locator, never inline content.
+    // The minted code carries the provisioned connection's locator, never inline
+    // content.
     await page.getByRole("button", { name: "Show full code" }).click();
     const encoded = (
       document.querySelector(`.${styles.revealArea}`) as HTMLTextAreaElement
@@ -442,7 +471,8 @@ describe("console inviter mint and run", () => {
       path: "/drops/psilink",
     });
 
-    // The run POSTs an intent carrying the mounted-file REFERENCE, not the content.
+    // The run POSTs an intent carrying the mounted-file REFERENCE, not the content,
+    // and no connection field (the appliance provisions the one server).
     await vi.waitFor(() => {
       expect(
         api.captured.some(
@@ -455,7 +485,7 @@ describe("console inviter mint and run", () => {
     );
     const intent = JSON.parse(post?.body ?? "{}") as Record<string, unknown>;
     expect(intent.channel).toBe("sftp");
-    expect(intent.remote).toBe("dr_west");
+    expect(intent.remote).toBeUndefined();
     expect(intent.inputCsv).toBeUndefined();
     expect(intent.inputFile).toEqual({ name: "clients.csv" });
 
@@ -467,7 +497,7 @@ describe("console inviter mint and run", () => {
       ).toBe(true),
     );
     // Advancing past the wait flips the phase to the active run; the keep-open
-    // callout persists through it -- the whole window the unload guard arms.
+    // callout persists through it.
     api.emitEvent({ v: 1, type: "stage", id: "confirming protocol" });
     await expect
       .element(page.getByRole("heading", { level: 1 }))
@@ -475,8 +505,9 @@ describe("console inviter mint and run", () => {
     await expect
       .element(
         page.getByText(
-          "This appliance is running the exchange. If you leave this page, " +
-            "the console cannot return to the run or its results.",
+          "This appliance is running the exchange. If you leave this page the " +
+            "run continues here; return to this console to pick it up or discard " +
+            "it.",
         ),
       )
       .toBeInTheDocument();
@@ -502,12 +533,12 @@ describe("console inviter mint and run", () => {
 
   test("a filedrop invitation carries only the rendezvous folder name, not its absolute path", async () => {
     stubJobApi({
-      remotes: [],
+      sftp: { configured: false },
       rendezvous: { configured: true, path: "/srv/exchanges/psilink" },
     });
     mount(createElement(InviterBench));
     await reachReviewCreate();
-    // Filedrop is the default (a rendezvous mount, no remotes) and runs here.
+    // Filedrop is the default (a rendezvous mount, no sftp server) and runs here.
     await expect
       .element(page.getByLabelText("Over a shared directory, run here"))
       .toBeChecked();
@@ -556,6 +587,130 @@ describe("console inviter mint and run", () => {
     expect(body.name).toBe("clients.csv");
     expect(body.sizeBytes).toBeUndefined();
     expect(body.modifiedAt).toBeUndefined();
+  });
+});
+
+describe("console inviter run teardown and abandonment", () => {
+  /** Reach a running server-job run: create the invitation (SFTP default), then
+   * advance past the wait so the appliance is conducting the exchange. */
+  async function reachRunningRun(
+    api: ReturnType<typeof stubJobApi>,
+  ): Promise<void> {
+    await reachReviewCreate();
+    await page.getByRole("button", { name: "Create the invitation" }).click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Your invitation is ready");
+    await vi.waitFor(() =>
+      expect(api.captured.some((r) => r.url === "/api/jobs/job-7/events")).toBe(
+        true,
+      ),
+    );
+    api.emitEvent({ v: 1, type: "stage", id: "confirming protocol" });
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange in progress");
+  }
+
+  test("leaving the page does not cancel the appliance run", async () => {
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+    });
+    mount(createElement(InviterBench));
+    await reachRunningRun(api);
+
+    // Unmount stands in for a navigation / reload / tab close. It must NOT POST a
+    // cancel: the appliance keeps running the exchange and the recovery panel is
+    // the way back. This is the whole point of the strand-recovery change.
+    root?.unmount();
+    root = undefined;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(api.captured.some((r) => r.url === "/api/jobs/job-7/cancel")).toBe(
+      false,
+    );
+  });
+
+  test("start over from a failed run discards it, freeing the slot", async () => {
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+    });
+    mount(createElement(InviterBench));
+    await reachRunningRun(api);
+
+    // A non-retryable (security) failure offers start-over; mark the job terminal
+    // on the appliance so the discard DELETEs it at once.
+    api.setJobStatus("failed");
+    api.emitEvent({
+      v: 1,
+      type: "error",
+      category: "security",
+      message: "could not verify the partner",
+    });
+    api.closeEvents();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: "Start over with a fresh invitation",
+        }),
+      )
+      .toBeInTheDocument();
+
+    await page
+      .getByRole("button", { name: "Start over with a fresh invitation" })
+      .click();
+
+    // Start over abandons the failed run: the terminal job is DELETEd (no cancel
+    // needed for an already-terminal job), freeing the appliance's single slot.
+    await vi.waitFor(() =>
+      expect(
+        api.captured.some(
+          (r) => r.url === "/api/jobs/job-7" && r.method === "DELETE",
+        ),
+      ).toBe(true),
+    );
+  });
+
+  test("try again DELETEs the failed job before re-creating so the recreate is not 409'd", async () => {
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+    });
+    mount(createElement(InviterBench));
+    await reachRunningRun(api);
+
+    // A retryable (exchange) failure offers Try again; mark the job terminal on the
+    // appliance so the discard goes straight to DELETE (no cancel/poll wait).
+    api.setJobStatus("failed");
+    api.emitEvent({
+      v: 1,
+      type: "error",
+      category: "exchange",
+      message: "temporary connection problem",
+    });
+    api.closeEvents();
+    await expect
+      .element(page.getByRole("button", { name: "Try again" }))
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Try again" }).click();
+
+    // The retry DELETEs the terminal job before POSTing the recreate: under
+    // reject-until-DELETE a create that raced the still-occupied single slot 409s,
+    // so the DELETE must land first.
+    await vi.waitFor(() =>
+      expect(
+        api.captured.filter((r) => r.url === "/api/jobs" && r.method === "POST")
+          .length,
+      ).toBeGreaterThanOrEqual(2),
+    );
+    const deleteIndex = api.captured.findIndex(
+      (r) => r.url === "/api/jobs/job-7" && r.method === "DELETE",
+    );
+    const secondPostIndex = api.captured
+      .map((r, index) => ({ r, index }))
+      .filter(({ r }) => r.url === "/api/jobs" && r.method === "POST")
+      .map(({ index }) => index)[1];
+    expect(deleteIndex).toBeGreaterThanOrEqual(0);
+    expect(deleteIndex).toBeLessThan(secondPostIndex);
   });
 });
 

@@ -12,6 +12,7 @@ import {
   DownloadRow,
   FailureAlert,
   SERVER_JOB_KEEP_OPEN_BODY,
+  SERVER_JOB_PEER_WINDOW_BODY,
   WithheldResultInset,
 } from "./BenchRunSurface";
 import { StatusPanel } from "./StatusPanel";
@@ -47,6 +48,7 @@ export function AcceptorExchangeSection({
   serverJob,
   onTryAgain,
   onFixColumns,
+  onAbandon,
 }: {
   invitation: AcceptableInvitation;
   run: ExchangeRun;
@@ -64,6 +66,11 @@ export function AcceptorExchangeSection({
   /** Return to the confirm-columns step with every setting intact -- a prepare-time
    * config failure's recovery, since the acceptor fixes its own settings there. */
   onFixColumns: () => void;
+  /** Discard the current server-job exchange (cancel-if-running + DELETE), fired as
+   * the operator leaves for a fresh invitation (the start-over link) or a new
+   * exchange (the completion workfoot), so the appliance's single slot frees. A
+   * no-op on a browser run. */
+  onAbandon: () => void;
 }) {
   const phase = outputs !== undefined ? "done" : "running";
 
@@ -135,6 +142,7 @@ export function AcceptorExchangeSection({
                 color="red"
                 variant="light"
                 mt="sm"
+                onClick={() => onAbandon()}
               >
                 Start over with a fresh invitation
               </Button>
@@ -162,15 +170,16 @@ export function AcceptorExchangeSection({
           {warning.message}
         </Alert>
       )}
-      {/* The appliance's CLI child conducts this accept and the tab holds the only
-          view of it: an in-app teardown cancels the run, a hard close strands it,
-          and either way the console cannot return to it. The claim is false the
-          moment a failure lands (the lifecycle tore down), so the callout outlives
-          no failure. Absent for the hosted in-browser accept, which owns no such run. */}
+      {/* The appliance conducts this accept and the tab only watches it: leaving
+          does not stop the run, and the recovery panel is the way back. The callout
+          drops the moment a failure lands (the run it describes has torn down), so
+          it outlives no failure. Absent for the hosted in-browser accept, which owns
+          no such run. */}
       {phase === "running" && failure === undefined && serverJob && (
         <div className={styles.callout}>
           <p className={styles.calloutLead}>Keep this tab open.</p>
           <p className={styles.small}>{SERVER_JOB_KEEP_OPEN_BODY}</p>
+          <p className={styles.small}>{SERVER_JOB_PEER_WINDOW_BODY}</p>
         </div>
       )}
       {phase === "done" && (
@@ -223,7 +232,10 @@ export function AcceptorExchangeSection({
         </>
       )}
       {(phase === "done" || failure?.category === "output") && (
-        <AnotherExchangeFoot />
+        <AnotherExchangeFoot
+          onNavigate={onAbandon}
+          confirmBeforeLeave={serverJob}
+        />
       )}
     </>
   );
