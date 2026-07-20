@@ -113,9 +113,9 @@ The job API is **off by default.** It does nothing -- serves no endpoint, spawns
 - `JOB_RENDEZVOUS_DIR` -- the mounted synced-folder rendezvous directory a shared-directory (`filedrop`) exchange runs over. Leave it unset and the filedrop transport is unavailable on the console.
 - `JOB_SFTP_SERVER` -- the path to a mounted file naming the one SFTP server the appliance may connect out to. Set it to let the appliance run SFTP exchanges through the job API; leave it unset and SFTP stays save-a-file. (The superseded `JOB_SFTP_REMOTES`, which named a multi-server table, is no longer supported: a deployment that still sets it refuses to start with a migration message.)
 
-**Loopback only, enforced at startup.** The API assumes a single operator, not multiple tenants, and it carries no authentication, so it must never sit on a shared interface. If you enable it (set `JOB_DATA_ROOT`) on a non-loopback bind, the server refuses to start. Bind it to loopback -- the appliance case, and the only supported configuration. Under Docker that means running on the host's network namespace with the app bound to the host loopback interface (see [Running the web console appliance](#running-the-web-console-appliance)).
+**Reachable only where you publish it.** The API assumes a single operator, not multiple tenants, and it carries no authentication, so it must reach only the operator's own machine. The app does not inspect its own bind interface; what the API is reachable from is governed by how you publish the container's port and by the host firewall. Publish it to the host loopback -- `-p 127.0.0.1:3000:3000` -- and the unauthenticated API is reachable only from the operator's own machine (see [Running the web console appliance](#running-the-web-console-appliance)). This works identically on Linux, macOS, and Windows, Docker Desktop included.
 
-That startup check reads the application's own bind host, so a loopback bind is genuinely loopback-only. There is no token, so a reverse proxy cannot make up the difference: a proxy that terminated a public connection and forwarded to the app on loopback would re-expose the unauthenticated API to everyone the proxy admits, which the startup check cannot see. A reverse-proxy-fronted appliance is therefore not a supported deployment -- keep the API on loopback and reach it only from the host itself. The bundled Elastic Beanstalk reference returns 404 for `/api/jobs` by default, since that hosted profile is not a single-party appliance; leave that denial in place -- the appliance is not deployed behind that load-balanced front.
+There is no token, so anything that widens that publish binding widens the unauthenticated API with it. Publishing without the `127.0.0.1:` prefix exposes the API on the host's other interfaces, and fronting the loopback port with a reverse proxy re-exposes it to everyone the proxy admits -- each is a deliberate choice to widen the reachable audience, not a supported appliance default. Keep the publish binding on host loopback and reach the API only from the host itself. The bundled Elastic Beanstalk reference returns 404 for `/api/jobs` by default, since that hosted profile is not a single-party appliance; leave that denial in place -- the appliance is not deployed behind that load-balanced front.
 
 **SFTP runs only against the one server you provision.** The browser never supplies a host or a credential: an SFTP job runs against the single server named in the `JOB_SFTP_SERVER` file, and everything about the connection -- host, port, account, credential file references, and the pinned host-key fingerprint -- comes from that file. The server must pin its host key (the appliance never prompts to trust one; stage a rotation by listing the old and new fingerprints together) and must reference its credentials as `@path` files mounted alongside, never inline, so the web server never holds a secret and job directories never contain one. The file is read once at startup, and an invalid file refuses to start; changing the host or fingerprint takes a restart, while a credential file's contents can be rotated in place. The appliance runs one exchange at a time. The container additionally needs network egress and DNS to the server's host and port -- shared-directory exchanges needed none. The file format and each validation rule are in [SERVER_JOB_API.md](spec/SERVER_JOB_API.md#the-provisioned-sftp-server); the trust posture is in [SECURITY_DESIGN.md](SECURITY_DESIGN.md#single-party-appliance-trust-boundary).
 
@@ -151,23 +151,21 @@ This is unchanged; existing CLI usage (`exchange`, `invite`, `accept`, and the r
 
 ### Running the web console appliance
 
-Pass `serve` as the first argument to run the single-party console appliance instead. The image bakes the `console` web build (see [Server job API](#server-job-api)), so no build-time configuration is needed; the Nitro server listens on port 3000:
+Pass `serve` as the first argument to run the single-party console appliance instead. The image bakes the `console` web build (see [Server job API](#server-job-api)), so no build-time configuration is needed; the Nitro server listens on port 3000. Publish that port to the host loopback so the appliance is reachable only from the operator's own machine:
 
 ```sh
-docker run -d -p 3000:3000 vdorie/psi-link serve
-```
-
-That starts the web UI and peer-coordination server only. The server job API stays off until you set `JOB_DATA_ROOT`. The API is unauthenticated and refuses to start unless it is bound to loopback, so enable it by running the container on the host's network namespace (`--network host`) and binding the app to the host loopback interface (`HOST=127.0.0.1`), plus a data volume for the per-job working files:
-
-```sh
-docker run -d --network host \
-  --env HOST=127.0.0.1 \
+docker run -d \
+  -p 127.0.0.1:3000:3000 \
   --env JOB_DATA_ROOT=/data/jobs \
+  --env JOB_INPUT_DIR=/data/input \
+  --env JOB_RENDEZVOUS_DIR=/data/rendezvous \
   -v /host/jobs:/data/jobs \
-  vdorie/psi-link serve
+  -v /host/input:/data/input \
+  -v /host/rendezvous:/data/rendezvous \
+  vdorie/psi-link:latest serve
 ```
 
-`JOB_CLI_BINARY` is pre-set in the image and needs no operator value. With `--network host` the container shares the host's network namespace, so the app's own `HOST=127.0.0.1` bind is the host's real loopback interface and nothing outside the host can reach `/api/jobs`. Bridge port-publishing (`-p 3000:3000`, even `-p 127.0.0.1:3000:3000`) cannot reach this outcome under either networking choice: left at the default (no `HOST` set), the app binds all interfaces inside the container, is not loopback-bound, and refuses to start; set `HOST=127.0.0.1` under bridge networking instead and the app starts, but binds only the container's own internal loopback, which Docker's bridge forwarding cannot reach -- the published port has no backend and every connection is refused. Either way the API is never both running and reachable through a published port. `HOST=127.0.0.1` is required under `--network host`, not optional -- left unset there the app would bind all of the host's real interfaces. The loopback-only rule and why the API cannot sit behind a reverse proxy are in [Server job API](#server-job-api).
+`JOB_CLI_BINARY` is pre-set in the image and needs no operator value. Setting `JOB_DATA_ROOT` turns the job API on; leave it unset and `serve` runs the web UI and peer-coordination server only. The `-p 127.0.0.1:3000:3000` publish binding is what keeps the unauthenticated API reachable only from the operator's own machine: the app binds all interfaces inside the container, and Docker forwards to it only from the host loopback address. This works identically on Linux, macOS, and Windows, Docker Desktop included -- the app does not inspect its own bind interface, so exposure is governed by this publish binding and the host firewall. An operator who deliberately wants LAN exposure publishes without the `127.0.0.1:` prefix; that is their explicit choice. The loopback-publish guidance and why the API cannot sit behind a reverse proxy are in [Server job API](#server-job-api).
 
 ### Key file permissions in containers
 

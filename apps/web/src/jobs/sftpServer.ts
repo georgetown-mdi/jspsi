@@ -87,10 +87,9 @@ const CREDENTIAL_REF_FIELDS = [
 /**
  * Load and validate the SFTP server file at `filePath`. Every failure is a
  * {@link JobApiConfigError} whose message names the offending field path (never
- * a field value), matching the fail-closed startup posture of
- * `assertJobApiStartupSafe`. `dataRoot` is the job data root the `@path`
- * credential references are checked against: a reference resolving under it
- * would let a job's own workdir feed the next job's credentials.
+ * a field value), fail-closed at startup. `dataRoot` is the job data root the
+ * `@path` credential references are checked against: a reference resolving under
+ * it would let a job's own workdir feed the next job's credentials.
  */
 export function loadSftpServer(
   filePath: string,

@@ -27,8 +27,8 @@ declare global {
  * on first use, or undefined when no server file is configured. The server
  * entry calls this at startup so a malformed block (or a server file without a
  * data root, or the superseded `JOB_SFTP_REMOTES` variable) refuses to boot --
- * the same fail-closed posture as `assertJobApiStartupSafe`; a
- * {@link JobApiConfigError} propagates to the caller either way.
+ * fail-closed at startup; a {@link JobApiConfigError} propagates to the caller
+ * either way.
  */
 export function useSftpServer(
   env: NodeJS.ProcessEnv = process.env,

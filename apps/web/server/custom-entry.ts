@@ -19,7 +19,6 @@ import logLibrary from "loglevel";
 
 import { getLogger } from "@psilink/core";
 
-import { assertJobApiStartupSafe, readJobApiConfig } from "../src/jobs/gate";
 import { shutdownJobManager, useSftpServer } from "../src/jobs/index";
 import { ConfigManager } from "../src/utils/serverConfig";
 import { registerServer } from "../src/httpServer";
@@ -57,19 +56,10 @@ const host = process.env.NITRO_HOST || process.env.HOST;
 
 const path = process.env.NITRO_UNIX_SOCKET;
 
-// Fail closed before binding: if the job API is enabled on a non-loopback bind,
-// refuse to start rather than expose the unauthenticated CLI driver on a public
-// interface. A unix-socket bind is appliance-local, so it is treated as loopback
-// for this check.
-assertJobApiStartupSafe(
-  readJobApiConfig(),
-  path !== undefined ? "localhost" : host,
-);
-
-// Same fail-closed posture for the provisioned SFTP server: a configured server
-// file that does not load (or one configured without a data root, or the
-// superseded JOB_SFTP_REMOTES variable) refuses to start rather than deferring
-// the error to the first sftp job request.
+// Fail closed on the provisioned SFTP server: a configured server file that does
+// not load (or one configured without a data root, or the superseded
+// JOB_SFTP_REMOTES variable) refuses to start rather than deferring the error to
+// the first sftp job request.
 useSftpServer();
 
 // @ts-ignore part of preset
