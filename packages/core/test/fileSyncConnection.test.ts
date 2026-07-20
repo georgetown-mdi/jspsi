@@ -39,6 +39,28 @@ import {
 import { withCapturedLogs } from "../src/testing";
 import logLibrary from "loglevel";
 
+// The poll/ack/seq counters live on the connection's composed FileSyncMessageLoop;
+// the white-box pokes that read or set them reach through it. conn.seq is a
+// delegating getter/setter on the connection, so it is read and written directly;
+// responsibleFiles/foreignFileSnapshot/abortController are connection-side.
+function messageLoopInternals(conn: FileSyncConnection): {
+  pollerActive: boolean;
+  lastSentFile?: string;
+  recvSeq: number;
+  lastAckedNNN: number;
+} {
+  return (
+    conn as unknown as {
+      messageLoop: {
+        pollerActive: boolean;
+        lastSentFile?: string;
+        recvSeq: number;
+        lastAckedNNN: number;
+      };
+    }
+  ).messageLoop;
+}
+
 // Reduce a put() src to the on-disk bytes a real transport writes: a chunk-list
 // is joined, a lone Buffer and a drained stream pass through. A string src is a
 // local file PATH to a real transport (never an in-memory body), so it throws
@@ -237,9 +259,7 @@ async function driveUntilError(
     if (opts?.settleMs !== undefined)
       await new Promise((resolve) => setTimeout(resolve, opts.settleMs));
   } finally {
-    pollerActiveBeforeDriverStop = (
-      conn as unknown as { pollerActive: boolean }
-    ).pollerActive;
+    pollerActiveBeforeDriverStop = messageLoopInternals(conn).pollerActive;
     conn.stop();
   }
   return { errors, pollerActiveBeforeDriverStop };
@@ -1741,7 +1761,7 @@ test("send waits for a previous unconsumed message before writing the next", asy
   const outName = `${conn.id}-99.json`;
   const outPath = `/test/${outName}`;
   files.set(outPath, Buffer.from(JSON.stringify({ stale: true })));
-  (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
+  messageLoopInternals(conn).lastSentFile = outName;
 
   // After 50 ms, simulate the peer consuming (deleting) the stale message.
   const consumed = new Promise<void>((resolve) => {
@@ -1769,7 +1789,7 @@ test("send times out when the previous message is never consumed", async () => {
   // lastSentFile at it (the drain waits for that exact name to disappear).
   const outName = `${conn.id}-99.json`;
   files.set(`/test/${outName}`, Buffer.from(JSON.stringify({ stale: true })));
-  (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
+  messageLoopInternals(conn).lastSentFile = outName;
 
   await expect(conn.send({ next: true })).rejects.toThrow("timed out");
 });
@@ -4186,7 +4206,7 @@ test("close() emits an info log at drain entry when the last sent file is still 
         const outName = `${conn.id}-99.json`;
         capturedOutName = outName;
         files.set(`/test/${outName}`, Buffer.from("{}"));
-        (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
+        messageLoopInternals(conn).lastSentFile = outName;
 
         // Remove the file after 30 ms so close() finishes well before the deadline.
         setTimeout(() => files.delete(`/test/${outName}`), 30);
@@ -4237,7 +4257,7 @@ test("close() emits an info log when the drain deadline fires", async () => {
         const outName = `${conn.id}-99.json`;
         capturedOutName = outName;
         files.set(`/test/${outName}`, Buffer.from("{}"));
-        (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
+        messageLoopInternals(conn).lastSentFile = outName;
 
         // Never delete the file; close() will time out and delete as fallback.
         await conn.close();
@@ -4297,7 +4317,7 @@ test("close() does not emit the deadline log when the final poll observes the fi
 
         const outName = `${conn.id}-99.json`;
         files.set(`/test/${outName}`, Buffer.from("{}"));
-        (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
+        messageLoopInternals(conn).lastSentFile = outName;
 
         // First list() (the entry filePresent at deadline-time 0) surfaces the
         // file; the second (first loop poll) jumps the clock past the 1000 ms
@@ -4361,7 +4381,7 @@ test("close() drain is bounded by the fixed terminal-frame budget, not the full 
 
         const outName = `${conn.id}-99.json`;
         files.set(`/test/${outName}`, Buffer.from("{}"));
-        (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
+        messageLoopInternals(conn).lastSentFile = outName;
 
         // Consume shortly after entry so the test never actually waits the bound.
         setTimeout(() => files.delete(`/test/${outName}`), 20);
@@ -4938,7 +4958,7 @@ test("send() message timeout throws UsageError", async () => {
   // lastSentFile at it (the drain waits for that exact name).
   const outName = `${conn.id}-99.json`;
   files.set(`${conn.path}/${outName}`, Buffer.from("stale"));
-  (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
+  messageLoopInternals(conn).lastSentFile = outName;
   await expect(conn.send({ next: true })).rejects.toBeInstanceOf(UsageError);
 });
 
@@ -6429,14 +6449,14 @@ test("close() resets seq, recvSeq, and lastAckedNNN to their initial values", as
   // seq is now 1 after a successful send.
   expect(conn.seq).toBe(1);
   // Manually set recvSeq and lastAckedNNN to non-zero/non-(-1) values.
-  (conn as unknown as { recvSeq: number }).recvSeq = 3;
-  (conn as unknown as { lastAckedNNN: number }).lastAckedNNN = 2;
+  messageLoopInternals(conn).recvSeq = 3;
+  messageLoopInternals(conn).lastAckedNNN = 2;
 
   await conn.close();
 
   expect(conn.seq).toBe(0);
-  expect((conn as unknown as { recvSeq: number }).recvSeq).toBe(0);
-  expect((conn as unknown as { lastAckedNNN: number }).lastAckedNNN).toBe(-1);
+  expect(messageLoopInternals(conn).recvSeq).toBe(0);
+  expect(messageLoopInternals(conn).lastAckedNNN).toBe(-1);
 });
 
 // --- terminal poll errors stop the poller ------------------------------------
@@ -6730,7 +6750,7 @@ test("I8: poll() list throws -- error reaches the error event, recvSeq unchanged
   conn.id = "receiver-me";
   conn.peerId = peerId;
 
-  const recvSeqBefore = (conn as unknown as { recvSeq: number }).recvSeq;
+  const recvSeqBefore = messageLoopInternals(conn).recvSeq;
 
   const { errors } = await driveUntilError(conn, { stopInHandler: true });
 
@@ -6739,7 +6759,7 @@ test("I8: poll() list throws -- error reaches the error event, recvSeq unchanged
   expect((errors[0] as Error).message).toContain("synthetic list failure");
 
   // recvSeq must not have advanced -- no message was processed.
-  const recvSeqAfter = (conn as unknown as { recvSeq: number }).recvSeq;
+  const recvSeqAfter = messageLoopInternals(conn).recvSeq;
   expect(recvSeqAfter).toBe(recvSeqBefore);
 });
 
@@ -6810,7 +6830,7 @@ test("I8: retain poll() ack-write failure -- recvSeq held, message reprocessed a
   expect(received).toHaveLength(1);
   // ...recvSeq advanced exactly once, only after the successful ack + emit
   // (so it was held across the failed attempt)...
-  expect((conn as unknown as { recvSeq: number }).recvSeq).toBe(1);
+  expect(messageLoopInternals(conn).recvSeq).toBe(1);
   // ...and exactly one ack persists on disk.
   expect(ackRenames).toHaveLength(1);
   const onDiskAcks = [...files.keys()].filter((p) => p.endsWith("-ack.json"));
@@ -7452,7 +7472,7 @@ test("poll() retryable: a transient list() failure reschedules and the message i
   expect(errors[0]).not.toBeInstanceOf(UsageError);
   // ...and the poller rescheduled and delivered the message exactly once.
   expect(received).toHaveLength(1);
-  expect((conn as unknown as { recvSeq: number }).recvSeq).toBe(1);
+  expect(messageLoopInternals(conn).recvSeq).toBe(1);
 });
 
 test("composed via fromEventConnection: the first transient poll() error is terminal -- receive() fails once naming the cause, and the poller does not reschedule", async () => {
@@ -7525,9 +7545,7 @@ test("composed via fromEventConnection: the first transient poll() error is term
   // The connection stopped: stop() (close()'s synchronous first statement,
   // reached via fail() -> close()) cleared pollerActive inside the emit, before
   // poll()'s finally could reschedule.
-  expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
-    false,
-  );
+  expect(messageLoopInternals(conn).pollerActive).toBe(false);
 
   // The poller did not reschedule: across several polling intervals the message
   // is never reprocessed -- list() ran exactly once (the failed call) and
@@ -7535,7 +7553,7 @@ test("composed via fromEventConnection: the first transient poll() error is term
   // isolation this same setup advances recvSeq to 1 and delivers the message.)
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(listCalls).toBe(1);
-  expect((conn as unknown as { recvSeq: number }).recvSeq).toBe(0);
+  expect(messageLoopInternals(conn).recvSeq).toBe(0);
 });
 
 test("poll() terminal: delete mode also stops the poller on a fully-synced corrupt message", async () => {
@@ -7792,7 +7810,7 @@ test("poll(): a message-ack with an all-digit embedded byte count is not routed 
   conn.stop();
 
   expect(received).toHaveLength(0);
-  expect((conn as unknown as { recvSeq: number }).recvSeq).toBe(0);
+  expect(messageLoopInternals(conn).recvSeq).toBe(0);
 });
 
 test("delete mode: hasOutstandingMessage ignores a `<id>-...-ack.json` file (numeric mid-name)", async () => {
@@ -8052,9 +8070,7 @@ test("poll(): an unrecognized file mid-loop is silently skipped under the ignore
       ),
     ]);
     // The poller is still running -- the foreign file did not stop it...
-    expect((conn as unknown as { pollerActive: boolean }).pollerActive).toBe(
-      true,
-    );
+    expect(messageLoopInternals(conn).pollerActive).toBe(true);
   } finally {
     conn.stop();
   }
@@ -8348,8 +8364,7 @@ test("close() cancels an in-flight retain ack-wait promptly (site 4)", async () 
   // seq>0 with a recorded lastSentFile drives send() into the ack-wait loop; the
   // peer never writes the ack, so it parks in this.wait (site 4).
   conn.seq = 1;
-  (conn as unknown as { lastSentFile: string }).lastSentFile =
-    "me-20260101T000000-000-10.json";
+  messageLoopInternals(conn).lastSentFile = "me-20260101T000000-000-10.json";
 
   // Barrier: resolve once the ack-wait has polled list() at least once, so we
   // close() with the loop committed to the wait rather than before it begins.
@@ -8390,7 +8405,7 @@ test("close() cancels an in-flight delete-mode consume-wait promptly (site 5)", 
   // The drain waits for the exact lastSentFile, so point it at the planted name.
   const outName = `${conn.id}-99.json`;
   files.set(`/test/${outName}`, Buffer.from(JSON.stringify({ stale: true })));
-  (conn as unknown as { lastSentFile?: string }).lastSentFile = outName;
+  messageLoopInternals(conn).lastSentFile = outName;
 
   let parked!: () => void;
   const reachedWait = new Promise<void>((r) => (parked = r));
@@ -8832,10 +8847,13 @@ test("poll(): a foreign file snapshotted at entry does not warn, but a new forei
     const conn = await makeConnectedConn(client, { pollingFrequency: 5 });
     conn.peerId = "peer-test";
     conn.options.unexpectedFiles = "warn";
-    // Simulate the entry snapshot: one foreign file was present at entry.
+    // Simulate the entry snapshot: one foreign file was present at entry. Mutate
+    // the shared snapshot Set in place (as rendezvous does at entry) rather than
+    // replacing it, so the message loop -- which holds the same Set by reference
+    // -- observes the entry.
     (
       conn as unknown as { foreignFileSnapshot: Set<string> }
-    ).foreignFileSnapshot = new Set(["preexisting.json"]);
+    ).foreignFileSnapshot.add("preexisting.json");
     files.set("/test/preexisting.json", Buffer.from("old"));
     files.set("/test/newcomer.json", Buffer.from("new"));
     conn.on("error", (err) => errors.push(err));
