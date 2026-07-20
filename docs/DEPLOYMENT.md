@@ -104,7 +104,7 @@ The derived rendezvous peer ids are redacted out of the PeerJS console output be
 
 The web application can run as a **console appliance** for a single party: a container that drives that party's own `psilink` exchange runs behind a server-side job API, so an operator creates, watches, and downloads the result of an exchange without invoking the CLI by hand. The appliance serves one party, inside that party's own trust boundary; it is never a shared meeting point between the two partners, who still rendezvous only over the exchange channel itself. The trust invariant and what would violate it are in [SECURITY_DESIGN.md](SECURITY_DESIGN.md#single-party-appliance-trust-boundary).
 
-**One image, the console profile baked in.** The published `vdorie/psi-link` image is the appliance: it is built with `VITE_DEPLOYMENT_PROFILE=console` so its web assets and its server-side job driver are the console halves, and it runs them with `docker run -d -p 3000:3000 vdorie/psi-link serve` (see [Docker deployment](#docker-deployment)). You do not build web assets yourself, set the profile, or publish a second image; the profile the image carries drives which transports run server-side. Under `console` the operator's input CSV is read in place from a mounted work-input directory (see [Mounted work-input directory](#mounted-work-input-directory) below), and the transport chooser offers to run a shared-directory (`filedrop`) exchange on the appliance over a mounted rendezvous directory -- and, when an SFTP server is provisioned (below), to run an SFTP exchange against it; it drops the browser-only file-handling assurance from the UI accordingly. The separate `hosted` web deployment (the continuously deployed `apps/web`, not this image) never offers to run an exchange server-side: a shared-directory or SFTP exchange there only saves an exchange file for the command-line tool, so the operator's file stays in the browser even if the API were reachable.
+**One image, the console profile baked in.** The published `vdorie/psi-link` image is the appliance: it is built with `VITE_DEPLOYMENT_PROFILE=console` so its web assets and its server-side job driver are the console halves, and it runs them with `docker run --rm -p 127.0.0.1:3000:3000 vdorie/psi-link serve` (see [Docker deployment](#docker-deployment)). You do not build web assets yourself, set the profile, or publish a second image; the profile the image carries drives which transports run server-side. Under `console` the operator's input CSV is read in place from a mounted work-input directory (see [Mounted work-input directory](#mounted-work-input-directory) below), and the transport chooser offers to run a shared-directory (`filedrop`) exchange on the appliance over a mounted rendezvous directory -- and, when an SFTP server is provisioned (below), to run an SFTP exchange against it; it drops the browser-only file-handling assurance from the UI accordingly. The separate `hosted` web deployment (the continuously deployed `apps/web`, not this image) never offers to run an exchange server-side: a shared-directory or SFTP exchange there only saves an exchange file for the command-line tool, so the operator's file stays in the browser even if the API were reachable.
 
 The job API is **off by default.** It does nothing -- serves no endpoint, spawns no CLI -- until you configure a data root on the console image; a hosted build never enables it whatever you configure (see the `JOB_DATA_ROOT` note below). These environment variables configure it:
 
@@ -151,10 +151,10 @@ This is unchanged; existing CLI usage (`exchange`, `invite`, `accept`, and the r
 
 ### Running the web console appliance
 
-Pass `serve` as the first argument to run the single-party console appliance instead. The image bakes the `console` web build (see [Server job API](#server-job-api)), so no build-time configuration is needed; the Nitro server listens on port 3000. Publish that port to the host loopback so the appliance is reachable only from the operator's own machine. The simplest console is a single mount and a single environment variable:
+Pass `serve` as the first argument to run the single-party console appliance instead. The image bakes the `console` web build (see [Server job API](#server-job-api)), so no build-time configuration is needed; the Nitro server listens on port 3000. Publish that port to the host loopback so the appliance is reachable only from the operator's own machine. The simplest console is a single mount and a single environment variable; run it in the foreground and stop it with Ctrl-C when the exchange is done, since nothing needs to persist between exchanges (results stay in the mounted directory):
 
 ```sh
-docker run -d -p 127.0.0.1:3000:3000 \
+docker run --rm -p 127.0.0.1:3000:3000 \
   --env JOB_DATA_ROOT=/data \
   -v /host/work:/data \
   vdorie/psi-link:latest serve
@@ -165,7 +165,7 @@ With only `JOB_DATA_ROOT` set, the input listing and the filedrop rendezvous bot
 You can split those directories into separate mounts by setting `JOB_INPUT_DIR` and `JOB_RENDEZVOUS_DIR`. Doing so is recommended for the rendezvous directory, because it is partner-synced (see [Mounted work-input directory](#mounted-work-input-directory)):
 
 ```sh
-docker run -d \
+docker run --rm \
   -p 127.0.0.1:3000:3000 \
   --env JOB_DATA_ROOT=/data/jobs \
   --env JOB_INPUT_DIR=/data/input \
