@@ -13,13 +13,39 @@ export type ExchangeDriverSelection =
   { kind: "browser" } | { kind: "server-job" } | { kind: "save-file" };
 
 /**
- * Map a chosen `channel`, the build's `profile`, and the appliance's sftp
- * server-job availability to how the exchange runs. A filedrop channel runs
- * server-side on the console appliance; an sftp channel runs server-side only
- * when the build is a console AND the appliance has a provisioned SFTP server
- * (`sftpConfigured`) -- with none, there is no server-side connection material,
- * so it saves a file for the command-line tool instead of arming a run that
- * cannot start. Browser always runs live.
+ * How the SFTP transport stands on a given build, distinct from today's binary
+ * "configured or not":
+ * - `runHere`: a boot-provisioned or authored-and-complete connection exists, so
+ *   the exchange runs here as a server job.
+ * - `authoringRequired`: a console build offers to run SFTP here but no connection
+ *   is authored yet -- the card reveals the authoring form rather than silently
+ *   degrading to save-a-file.
+ * - `saveFileOnly`: a hosted build never runs SFTP here; it only saves an exchange
+ *   file for the command-line tool.
+ */
+export type SftpConnectionAvailability =
+  "runHere" | "authoringRequired" | "saveFileOnly";
+
+/** The SFTP availability for a build: hosted always saves a file; a console runs
+ * it here when a connection is configured, else it needs one authored first. */
+export function sftpConnectionAvailability(
+  profile: DeploymentProfile,
+  sftpConfigured: boolean,
+): SftpConnectionAvailability {
+  if (profile !== "console") return "saveFileOnly";
+  return sftpConfigured ? "runHere" : "authoringRequired";
+}
+
+/**
+ * Map a chosen `channel`, the build's `profile`, the appliance's sftp connection
+ * availability, and the operator's explicit save-a-file choice to how the
+ * exchange runs. A filedrop channel runs server-side on the console appliance. An
+ * sftp channel on a console runs server-side when a connection is configured
+ * (`sftpConfigured`) -- and, when none is authored yet, STILL resolves to a
+ * server-job (it runs here once the operator authors one), unless the operator
+ * deliberately chose to save a file for their own command-line tool instead
+ * (`sftpSaveFilePreferred`). A hosted build always saves a file. Browser always
+ * runs live.
  *
  * The `channel` switch is exhaustive over {@link Transport} with no default: a
  * new channel makes this fail to compile rather than silently falling through
@@ -30,6 +56,7 @@ export function selectExchangeDriver(
   channel: Transport,
   profile: DeploymentProfile,
   sftpConfigured: boolean,
+  sftpSaveFilePreferred = false,
 ): ExchangeDriverSelection {
   switch (channel) {
     case "browser":
@@ -38,9 +65,12 @@ export function selectExchangeDriver(
       return profile === "console"
         ? { kind: "server-job" }
         : { kind: "save-file" };
-    case "sftp":
-      return profile === "console" && sftpConfigured
-        ? { kind: "server-job" }
-        : { kind: "save-file" };
+    case "sftp": {
+      if (profile !== "console") return { kind: "save-file" };
+      if (sftpConfigured) return { kind: "server-job" };
+      return sftpSaveFilePreferred
+        ? { kind: "save-file" }
+        : { kind: "server-job" };
+    }
   }
 }

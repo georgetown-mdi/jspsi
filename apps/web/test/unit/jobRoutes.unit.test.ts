@@ -63,6 +63,8 @@ afterEach(() => {
   (globalThis as { jobInputDirConfig?: unknown }).jobInputDirConfig = undefined;
   (globalThis as { jobRendezvousDirConfig?: unknown }).jobRendezvousDirConfig =
     undefined;
+  (globalThis as { jobSecretsDirConfig?: unknown }).jobSecretsDirConfig =
+    undefined;
 });
 
 type Handlers = Record<
@@ -664,7 +666,10 @@ describe("GET /api/jobs/sftp", () => {
     })) as Response;
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual({ configured: false });
+    expect(await response.json()).toEqual({
+      configured: false,
+      bootPinned: false,
+    });
   });
 
   test("the projection carries only {host, port, path} and no @ ref or fingerprint", async () => {
@@ -682,9 +687,13 @@ describe("GET /api/jobs/sftp", () => {
 
     const item = JSON.parse(body) as Record<string, unknown>;
     for (const key of Object.keys(item))
-      expect(["configured", "host", "port", "path"]).toContain(key);
+      expect(["configured", "bootPinned", "host", "port", "path"]).toContain(
+        key,
+      );
+    // A boot-provisioned server is bootPinned: the console shows it read-only.
     expect(item).toEqual({
       configured: true,
+      bootPinned: true,
       host: "sftp.example.org",
       port: 2222,
       path: "/exchange",
@@ -763,8 +772,10 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
     const ref = secretFileOutside();
     const put = await putSftp(authoredBody(ref, { port: 2022, path: "/drop" }));
     expect(put.status).toBe(200);
+    // An authored connection is never boot-pinned: the console offers edit/clear.
     expect(await put.json()).toEqual({
       configured: true,
+      bootPinned: false,
       host: "authored.partner.example",
       port: 2022,
       path: "/drop",
@@ -777,6 +788,7 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
     expect(body).not.toContain("SHA256");
     expect(JSON.parse(body)).toEqual({
       configured: true,
+      bootPinned: false,
       host: "authored.partner.example",
       port: 2022,
       path: "/drop",
@@ -803,14 +815,61 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
     expect(response.status).toBe(400);
   });
 
+  test("a mountRef locator resolves against JOB_SECRETS_DIR", async () => {
+    enableJobApi();
+    const secretsDir = tempDataRoot("routes-secrets");
+    roots.push(secretsDir);
+    fs.mkdirSync(secretsDir, { recursive: true });
+    fs.writeFileSync(`${secretsDir}/partner-password`, "s3cret\n");
+    vi.stubEnv("JOB_SECRETS_DIR", secretsDir);
+    const put = await putSftp({
+      host: "authored.partner.example",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      credential: {
+        kind: "mountRef",
+        mount: "secrets",
+        subPath: ["partner-password"],
+        credType: "password",
+      },
+    });
+    expect(put.status).toBe(200);
+    // The projection is credential-free; the resolved absolute path never rides it.
+    const body = await put.text();
+    expect(body).not.toContain(secretsDir);
+    expect(JSON.parse(body)).toEqual({
+      configured: true,
+      bootPinned: false,
+      host: "authored.partner.example",
+    });
+  });
+
+  test("a mountRef with no secrets mount configured is a 400 naming the field", async () => {
+    enableJobApi();
+    const response = await putSftp({
+      host: "authored.partner.example",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      credential: {
+        kind: "mountRef",
+        mount: "secrets",
+        subPath: ["partner-password"],
+        credType: "password",
+      },
+    });
+    expect(response.status).toBe(400);
+    const text = await response.text();
+    expect(text).toContain("connection.credential");
+    expect(text).toContain("secrets mount");
+  });
+
   test("a boot-provisioned server refuses authoring with a 409", async () => {
     enableJobApiWithSftpServer();
     const ref = secretFileOutside();
     const response = await putSftp(authoredBody(ref));
     expect(response.status).toBe(409);
-    // The boot server still projects, unchanged.
+    // The boot server still projects, unchanged and boot-pinned.
     expect(await (await getSftp()).json()).toEqual({
       configured: true,
+      bootPinned: true,
       host: "sftp.example.org",
       port: 2222,
       path: "/exchange",
@@ -824,7 +883,10 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
     const del = await deleteSftp();
     expect(del.status).toBe(204);
     expect(await del.text()).toBe("");
-    expect(await (await getSftp()).json()).toEqual({ configured: false });
+    expect(await (await getSftp()).json()).toEqual({
+      configured: false,
+      bootPinned: false,
+    });
     // Idempotent: a second DELETE is still 204.
     expect((await deleteSftp()).status).toBe(204);
   });

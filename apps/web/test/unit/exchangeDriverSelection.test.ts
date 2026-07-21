@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 
-import { selectExchangeDriver } from "@bench/exchangeDriverSelection";
+import {
+  selectExchangeDriver,
+  sftpConnectionAvailability,
+} from "@bench/exchangeDriverSelection";
 
 import type { DeploymentProfile } from "@utils/clientConfig";
 import type { ExchangeDriverSelection } from "@bench/exchangeDriverSelection";
@@ -11,12 +14,12 @@ const CHANNELS: ReadonlyArray<Transport> = ["browser", "sftp", "filedrop"];
 const SFTP_CONFIGURED: ReadonlyArray<boolean> = [false, true];
 
 // Every (channel x profile x sftp-configured) cell, asserting the fixed
-// scope-decision table:
+// scope-decision table (with no deliberate save-a-file preference):
 //   browser  (any profile, any sftp)         -> browser
 //   filedrop + console (any sftp)            -> server-job
 //   filedrop + hosted  (any sftp)            -> save-file
-//   sftp     + console + server provisioned  -> server-job
-//   sftp     + console + none provisioned    -> save-file
+//   sftp     + console + server configured   -> server-job
+//   sftp     + console + none configured     -> server-job (runs here once authored)
 //   sftp     + hosted  (any sftp)            -> save-file
 const EXPECTED: Record<
   Transport,
@@ -35,7 +38,7 @@ const EXPECTED: Record<
   },
   sftp: {
     hosted: { false: "save-file", true: "save-file" },
-    console: { false: "save-file", true: "server-job" },
+    console: { false: "server-job", true: "server-job" },
   },
 };
 
@@ -44,7 +47,7 @@ describe("selectExchangeDriver", () => {
     for (const profile of PROFILES) {
       for (const configured of SFTP_CONFIGURED) {
         const expected = EXPECTED[channel][profile][`${configured}`];
-        test(`${channel} on a ${profile} build (sftp ${configured ? "provisioned" : "absent"}) selects ${expected}`, () => {
+        test(`${channel} on a ${profile} build (sftp ${configured ? "configured" : "absent"}) selects ${expected}`, () => {
           expect(selectExchangeDriver(channel, profile, configured).kind).toBe(
             expected,
           );
@@ -61,19 +64,33 @@ describe("selectExchangeDriver", () => {
         );
   });
 
-  test("sftp runs server-side ONLY on a console with a provisioned server", () => {
-    expect(selectExchangeDriver("sftp", "console", true).kind).toBe(
+  test("unconfigured console sftp runs here (authoring pending), not save-file", () => {
+    // The silent configured:false -> save-file degrade is gone: the run mode is
+    // server-job (it runs here once the operator authors a connection), and the
+    // create gate blocks minting until there is one.
+    expect(selectExchangeDriver("sftp", "console", false).kind).toBe(
       "server-job",
     );
-    // Fail toward save-file: no provisioned server means no server-side
-    // connection material, and a non-console build has no job API at all.
-    expect(selectExchangeDriver("sftp", "console", false).kind).toBe(
+  });
+
+  test("the deliberate save-a-file preference flips unconfigured console sftp", () => {
+    // Only when the operator explicitly chooses to save a file for their own
+    // command-line tool does an unconfigured console sftp route to save-file.
+    expect(selectExchangeDriver("sftp", "console", false, true).kind).toBe(
       "save-file",
     );
+    // A configured connection ignores the preference -- it runs here.
+    expect(selectExchangeDriver("sftp", "console", true, true).kind).toBe(
+      "server-job",
+    );
+  });
+
+  test("sftp on a hosted build always saves a file", () => {
     for (const configured of SFTP_CONFIGURED)
-      expect(selectExchangeDriver("sftp", "hosted", configured).kind).toBe(
-        "save-file",
-      );
+      for (const preferred of [false, true])
+        expect(
+          selectExchangeDriver("sftp", "hosted", configured, preferred).kind,
+        ).toBe("save-file");
   });
 
   test("the sftp-configured flag never changes a non-sftp routing", () => {
@@ -82,5 +99,19 @@ describe("selectExchangeDriver", () => {
         expect(selectExchangeDriver(channel, profile, true).kind).toBe(
           selectExchangeDriver(channel, profile, false).kind,
         );
+  });
+});
+
+describe("sftpConnectionAvailability", () => {
+  test("hosted always saves a file", () => {
+    expect(sftpConnectionAvailability("hosted", false)).toBe("saveFileOnly");
+    expect(sftpConnectionAvailability("hosted", true)).toBe("saveFileOnly");
+  });
+
+  test("console runs here when configured, else needs authoring", () => {
+    expect(sftpConnectionAvailability("console", true)).toBe("runHere");
+    expect(sftpConnectionAvailability("console", false)).toBe(
+      "authoringRequired",
+    );
   });
 });

@@ -11,6 +11,7 @@ import {
 
 import { JOB_DATA_ROOT_ENV, JobApiConfigError } from "./gate";
 import { resolveJobRendezvousDir } from "./jobRendezvous";
+import { resolveMountFile } from "./mountBrowse";
 
 /**
  * The environment variable naming the operator-provisioned SFTP server file (a
@@ -85,25 +86,49 @@ const CREDENTIAL_REF_FIELDS = [
   "privateKeyPassphrase",
 ] as const;
 
+/** Which SFTP primary auth method a credential feeds. */
+export type SftpCredType = "password" | "private_key";
+
 /**
- * The file-reference credential an authoring request carries: an `@path`
- * reference (never an inline value) tagged with which SFTP primary auth method it
- * feeds. Only `kind: "ref"` is accepted on this slice's path -- raw-paste
- * materialization is a separate, later surface.
+ * A file-reference credential given as a typed `@path` (never an inline value):
+ * the escape hatch for a credential that lives outside any listable mount. Tagged
+ * with which primary auth method it feeds.
  */
 export interface AuthoredCredentialRef {
   kind: "ref";
   ref: string;
-  credType: "password" | "private_key";
+  credType: SftpCredType;
 }
+
+/**
+ * A file-reference credential given as a locator the operator picked in the
+ * secrets browser: the mount id and the path segments under it. The server -- not
+ * the browser -- resolves it against `JOB_SECRETS_DIR` to an absolute `@path`, so
+ * no container-absolute path ever transits the browser. Tagged with which primary
+ * auth method it feeds.
+ */
+export interface AuthoredMountRefCredential {
+  kind: "mountRef";
+  mount: "secrets";
+  subPath: Array<string>;
+  credType: SftpCredType;
+}
+
+/**
+ * The credential an authoring request carries: either a typed `@path` reference
+ * or a secrets-mount locator. Both resolve to an `@path` reference (never an
+ * inline value) validated by the same containment chain the boot loader uses.
+ */
+export type AuthoredCredential =
+  AuthoredCredentialRef | AuthoredMountRefCredential;
 
 /**
  * The `PUT /api/jobs/sftp` authoring body (file-reference credential path). It
  * carries the same connection material as a boot server block, but the credential
- * arrives as a tagged reference rather than a bare field, and the fingerprint is
- * mandatory and literal exactly as at boot. No inline credential value is
- * representable: the credential is an `@path` reference and `private_key_passphrase`
- * is likewise an `@path`.
+ * arrives as a tagged reference (typed `@path` or secrets-mount locator) rather
+ * than a bare field, and the fingerprint is mandatory and literal exactly as at
+ * boot. No inline credential value is representable: the credential is an `@path`
+ * reference and `private_key_passphrase` is likewise an `@path`.
  */
 export interface AuthoredSftpServerRequest {
   host: string;
@@ -111,25 +136,34 @@ export interface AuthoredSftpServerRequest {
   username?: string;
   path?: string;
   hostKeyFingerprint: string | Array<string>;
-  credential: AuthoredCredentialRef;
+  credential: AuthoredCredential;
   privateKeyPassphrase?: string;
   keyboardInteractive?: boolean;
 }
 
-// `kind` stays a plain string (not z.literal) so a non-"ref" kind reaches the
-// dedicated clear rejection below rather than a generic union error; the enum on
-// credType and the strict objects keep every other field closed.
-const authoredCredentialSchema = z.strictObject({
-  kind: z.string(),
+const credTypeSchema = z.enum(["password", "private_key"]);
+
+const refCredentialSchema = z.strictObject({
+  kind: z.literal("ref"),
   ref: z.string().min(1),
-  credType: z.enum(["password", "private_key"]),
+  credType: credTypeSchema,
 });
 
-// Not annotated z.ZodType<AuthoredSftpServerRequest>: the interface's `kind` is
-// the accepted literal "ref", while the schema keeps `kind` a plain string so a
-// non-"ref" value reaches the dedicated rejection rather than a generic union
-// error. The validator narrows to the interface's contract.
-const authoredSftpServerRequestSchema = z.strictObject({
+// A single secrets mount only; a cross-mount locator is out of scope, so `mount`
+// is the literal id and an unknown id fails the parse naming the field. Each
+// subPath segment must be a non-empty string; resolveMountFile re-admits every
+// segment's shape and re-confines the realpath to the mount.
+const mountRefCredentialSchema = z.strictObject({
+  kind: z.literal("mountRef"),
+  mount: z.literal("secrets"),
+  subPath: z.array(z.string().min(1)).min(1),
+  credType: credTypeSchema,
+});
+
+// The connection fields minus the credential. The credential is pulled aside and
+// validated per-kind (ref vs mountRef) after a kind branch, so an unaccepted kind
+// reaches a dedicated rejection rather than a generic union error.
+const authoredConnectionFieldsSchema = z.strictObject({
   host: z.string().min(1),
   port: z.int().min(0).max(65535).optional(),
   username: z.string().min(1).optional(),
@@ -140,7 +174,6 @@ const authoredSftpServerRequestSchema = z.strictObject({
       .array(z.string())
       .min(1, "host_key_fingerprint must list at least one fingerprint"),
   ]),
-  credential: authoredCredentialSchema,
   privateKeyPassphrase: z.string().optional(),
   keyboardInteractive: z.boolean().optional(),
 });
@@ -328,37 +361,45 @@ function validateServerEntry(
  * into a {@link JobSftpServerEntry}, applying the SAME rules the boot loader does
  * -- the strict field allowlist, mandatory literal fingerprint,
  * credential-must-be-an-`@path`-outside the data root and rendezvous mount, and
- * core-schema compose -- by folding the tagged credential into a server block and
- * running it through {@link validateServerEntry}. Only `credential.kind: "ref"`
- * is accepted; any other kind is refused (raw-paste materialization is a separate
- * surface). Every failure is a {@link JobApiConfigError} whose message names a
- * field path, never a submitted value.
+ * core-schema compose -- by folding the resolved credential into a server block
+ * and running it through {@link validateServerEntry}. The credential is either a
+ * typed `@path` reference or a secrets-mount locator resolved server-side against
+ * `secretsDir`; both land as an `@path` that runs the same containment chain, so
+ * a picker selection is held to identical rules and no browser-sent absolute path
+ * is trusted. Every failure is a {@link JobApiConfigError} whose message names a
+ * field path, never a submitted value or a resolved path.
  */
 export function validateAuthoredSftpServer(
   rawBody: unknown,
   dataRoot: string,
   rendezvousDir: string | undefined,
+  secretsDir?: string,
 ): JobSftpServerEntry {
-  const parsed = authoredSftpServerRequestSchema.safeParse(rawBody);
+  if (rawBody === null || typeof rawBody !== "object" || Array.isArray(rawBody))
+    throw new JobApiConfigError(
+      "connection must be a mapping of connection fields",
+    );
+  const { credential: rawCredential, ...rawConnection } = rawBody as Record<
+    string,
+    unknown
+  >;
+
+  const parsed = authoredConnectionFieldsSchema.safeParse(rawConnection);
   if (!parsed.success)
     throw new JobApiConfigError(
       formatIssues(parsed.error.issues, "connection"),
     );
   const body = parsed.data;
-  if (body.credential.kind !== "ref")
-    throw new JobApiConfigError(
-      'connection.credential.kind must be "ref"; only a file-reference ' +
-        "credential is accepted on this path",
-    );
 
+  const credential = resolveAuthoredCredential(rawCredential, secretsDir);
   const credentialField =
-    body.credential.credType === "password" ? "password" : "privateKey";
+    credential.credType === "password" ? "password" : "privateKey";
   const rawEntry: Record<string, unknown> = {
     host: body.host,
     ...(body.port !== undefined ? { port: body.port } : {}),
     ...(body.username !== undefined ? { username: body.username } : {}),
     ...(body.path !== undefined ? { path: body.path } : {}),
-    [credentialField]: body.credential.ref,
+    [credentialField]: credential.ref,
     ...(body.privateKeyPassphrase !== undefined
       ? { privateKeyPassphrase: body.privateKeyPassphrase }
       : {}),
@@ -371,6 +412,81 @@ export function validateAuthoredSftpServer(
     rawEntry,
     credentialRefExclusions(dataRoot, rendezvousDir),
   );
+}
+
+/**
+ * Resolve an authoring body's credential to an `@path` file reference, whichever
+ * form it arrived in:
+ * - `kind: "ref"` -- a typed `@path`, passed through verbatim (the escape hatch
+ *   for a credential outside any listable mount).
+ * - `kind: "mountRef"` -- a locator the operator picked in the secrets browser,
+ *   resolved server-side against `secretsDir` and rewritten to `@<realpath>`.
+ * The rewritten reference then runs the SAME `assertCredentialRef` containment the
+ * typed form does (outside-data-root/rendezvous plus realpath re-confinement).
+ * Every failure names the credential field only -- never a subPath value, a
+ * resolved absolute path, or a secret.
+ */
+function resolveAuthoredCredential(
+  rawCredential: unknown,
+  secretsDir: string | undefined,
+): AuthoredCredentialRef {
+  const kind =
+    rawCredential !== null &&
+    typeof rawCredential === "object" &&
+    !Array.isArray(rawCredential)
+      ? (rawCredential as { kind?: unknown }).kind
+      : undefined;
+
+  if (kind === "ref") {
+    const parsed = refCredentialSchema.safeParse(rawCredential);
+    if (!parsed.success)
+      throw new JobApiConfigError(
+        formatIssues(parsed.error.issues, "connection.credential"),
+      );
+    return parsed.data;
+  }
+  if (kind === "mountRef") {
+    const parsed = mountRefCredentialSchema.safeParse(rawCredential);
+    if (!parsed.success)
+      throw new JobApiConfigError(
+        formatIssues(parsed.error.issues, "connection.credential"),
+      );
+    return resolveMountRefCredential(parsed.data, secretsDir);
+  }
+  throw new JobApiConfigError(
+    'connection.credential.kind must be "ref" or "mountRef"; only a ' +
+      "file-reference credential is accepted on this path",
+  );
+}
+
+/**
+ * Turn a secrets-mount locator into an `@path` reference: resolve `subPath` under
+ * the configured secrets mount to a confined regular file's realpath (never
+ * reading its bytes) and tag it with the credential's auth method. The mount is
+ * server-side config (`JOB_SECRETS_DIR`) with no data-root fallback; an unset
+ * mount, or a subPath naming no readable regular file (or escaping the mount), is
+ * a {@link JobApiConfigError} naming the field only -- never a path.
+ */
+function resolveMountRefCredential(
+  credential: AuthoredMountRefCredential,
+  secretsDir: string | undefined,
+): AuthoredCredentialRef {
+  if (secretsDir === undefined)
+    throw new JobApiConfigError(
+      "connection.credential names the secrets mount, which is not " +
+        "configured on this appliance",
+    );
+  const resolved = resolveMountFile(secretsDir, credential.subPath);
+  if (resolved === null)
+    throw new JobApiConfigError(
+      "connection.credential.subPath does not name a readable file in the " +
+        "secrets mount",
+    );
+  return {
+    kind: "ref",
+    ref: `@${resolved.absolutePath}`,
+    credType: credential.credType,
+  };
 }
 
 /**

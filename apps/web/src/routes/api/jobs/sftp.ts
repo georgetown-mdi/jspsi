@@ -21,10 +21,13 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
  *
  * - `GET` reports the effective connection (a boot `JOB_SFTP_SERVER` if set, else
  *   the in-app authored connection) as the manager's explicitly mapped,
- *   credential-free projection: `{ configured: false }` or
- *   `{ configured: true, host, port?, path? }` -- no username, credential
- *   reference, or fingerprint. The console web build gates the run-SFTP-here
- *   behavior and authors an invitation endpoint from this locator.
+ *   credential-free projection: `{ configured: false, bootPinned }` or
+ *   `{ configured: true, bootPinned, host, port?, path? }` -- no username,
+ *   credential reference, or fingerprint. `bootPinned` is true only for a boot
+ *   `JOB_SFTP_SERVER` (a `PUT` would 409), so the console shows it read-only and
+ *   offers in-app authoring/clear only for an authored (or absent) connection.
+ *   The console web build gates the run-SFTP-here behavior and authors an
+ *   invitation endpoint from this locator.
  * - `PUT` authors the connection from a file-reference credential body, validated
  *   through the same chain the boot loader uses. A boot server wins: authoring
  *   over one is refused (`409`). A validation failure is a `400` naming a field
@@ -44,10 +47,11 @@ export const Route = createFileRoute("/api/jobs/sftp")({
         const gate = gateJobRoute();
         if (gate.kind === "response") return gate.response;
         const connection = gate.manager.sftpProjection();
+        const bootPinned = gate.manager.hasBootSftpServer();
         return jobJsonResponse(
           connection === null
-            ? { configured: false }
-            : { configured: true, ...connection },
+            ? { configured: false, bootPinned }
+            : { configured: true, bootPinned, ...connection },
         );
       },
       PUT: async ({ request }) => {
@@ -74,7 +78,13 @@ export const Route = createFileRoute("/api/jobs/sftp")({
             return jobJsonResponse({ error: error.message }, 400);
           return jobEmptyResponse(400);
         }
-        return jobJsonResponse({ configured: true, ...connection });
+        // A PUT succeeds only when no boot server is pinned (else 409 above), so
+        // the authored connection is never boot-pinned.
+        return jobJsonResponse({
+          configured: true,
+          bootPinned: false,
+          ...connection,
+        });
       },
       DELETE: () => {
         const gate = gateJobRoute();

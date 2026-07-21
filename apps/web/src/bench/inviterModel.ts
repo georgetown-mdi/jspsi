@@ -146,12 +146,18 @@ export function rendezvousLocatorName(dirPath: string): string {
 export type TransportRunMode = ExchangeDriverSelection["kind"];
 
 /** One transport card's placement in the chooser: whether it is offered (rendered
- * at all), whether it renders disabled, and how a pick would run. */
+ * at all), whether it renders disabled, how a pick would run, and -- for SFTP on a
+ * console -- whether a connection still needs authoring before it can run here. */
 export interface TransportOption {
   transport: Transport;
   offered: boolean;
   disabled: boolean;
   runMode: TransportRunMode;
+  /** The console SFTP third state: offered to run here, but no connection is
+   * authored yet, so the card reveals the authoring form. False for every other
+   * transport and once a connection is configured or the save-a-file alternative
+   * is chosen. */
+  authoringRequired: boolean;
 }
 
 /** The chooser's single source of truth for which transport cards are offered,
@@ -176,13 +182,21 @@ const TRANSPORT_ORDER: ReadonlyArray<Transport> = [
  * in-tab WebRTC exchange is out of scope on the appliance) and runs its filedrop
  * card here as a server job against the mounted rendezvous directory -- disabled
  * when `JOB_RENDEZVOUS_DIR` is unset. The console default is SFTP when the appliance
- * has a provisioned server, else the filedrop card when a rendezvous directory is
- * mounted, else SFTP.
+ * has a provisioned or authored connection, else the filedrop card when a
+ * rendezvous directory is mounted, else SFTP (where the card offers authoring).
+ *
+ * `sftpConfigured` is "boot-provisioned OR authored-and-complete"; an unconfigured
+ * console SFTP is offered to run here with `authoringRequired` set (the card
+ * reveals the authoring form) rather than silently degrading to save-a-file.
+ * `sftpSaveFilePreferred` is the operator's deliberate choice to run SFTP through
+ * their own command-line tool instead, which flips the SFTP run mode to
+ * save-a-file and clears `authoringRequired`.
  */
 export function availableTransports(
   consoleBuild: boolean,
   sftpConfigured: boolean,
   rendezvousConfigured: boolean,
+  sftpSaveFilePreferred = false,
 ): AvailableTransports {
   const profile: DeploymentProfile = consoleBuild ? "console" : "hosted";
   const options = TRANSPORT_ORDER.map((transport): TransportOption => {
@@ -194,8 +208,14 @@ export function availableTransports(
       transport,
       profile,
       sftpConfigured,
+      sftpSaveFilePreferred,
     ).kind;
-    return { transport, offered: true, disabled, runMode };
+    const authoringRequired =
+      transport === "sftp" &&
+      consoleBuild &&
+      !sftpConfigured &&
+      !sftpSaveFilePreferred;
+    return { transport, offered: true, disabled, runMode, authoringRequired };
   });
   const defaultTransport: Transport = consoleBuild
     ? sftpConfigured
@@ -270,10 +290,13 @@ function capabilityNoteFor(
  * exchanges for the CLI. On the console appliance (`consoleBuild`) the Browser card
  * is disabled as out of scope, the filedrop card runs here against the mounted
  * rendezvous directory when one is configured (`rendezvousConfigured`, else it is
- * disabled), and -- when the appliance has a provisioned SFTP server (`sftpConfigured`)
- * -- the SFTP card offers to run here and reads the file on the appliance. The
- * capability note is regenerated from {@link availableTransports} so it cannot drift
- * from behavior. */
+ * disabled), and the SFTP card offers to run here: with a configured connection
+ * (`sftpConfigured`) it reads the file on the appliance; with none it invites the
+ * operator to author one, unless they chose the save-a-file alternative
+ * (`sftpSaveFilePreferred`). The SFTP copy is derived from the
+ * {@link availableTransports} option so it tracks the run mode and the third
+ * (authoring-required) state, and the capability note is regenerated from the same
+ * matrix, so neither drifts from behavior. */
 export interface TransportChooserCopy {
   browserLabel: string;
   browserDescription: string;
@@ -288,13 +311,19 @@ export function transportChooserCopy(
   consoleBuild: boolean,
   sftpConfigured: boolean,
   rendezvousConfigured: boolean,
+  sftpSaveFilePreferred = false,
 ): TransportChooserCopy {
   const available = availableTransports(
     consoleBuild,
     sftpConfigured,
     rendezvousConfigured,
+    sftpSaveFilePreferred,
   );
-  const sftpRunsHere = consoleBuild && sftpConfigured;
+  const sftpOption = available.options.find(
+    (option) => option.transport === "sftp",
+  );
+  const sftpRunsHere = sftpOption?.runMode === "server-job";
+  const sftpAuthoringRequired = sftpOption?.authoringRequired === true;
   const filedropRunsHere = consoleBuild && rendezvousConfigured;
   return {
     browserLabel: "Live, in this browser",
@@ -313,7 +342,9 @@ export function transportChooserCopy(
       ? "Over SFTP, run here"
       : "Over SFTP, run by the psilink command-line tool",
     sftpDescription: sftpRunsHere
-      ? "Runs the exchange here through an SFTP server provisioned on this machine. Your file is read on this appliance, not uploaded from your browser. Your partner accepts with the same invitation code."
+      ? sftpAuthoringRequired
+        ? "Runs the exchange here over an SFTP connection you set up below. Your file is read on this appliance, not uploaded from your browser. Your partner accepts with the same invitation code."
+        : "Runs the exchange here through the SFTP connection set up on this machine. Your file is read on this appliance, not uploaded from your browser. Your partner accepts with the same invitation code."
       : "Saves an exchange file that runs the command-line tool over your SFTP server. Your partner accepts with the same invitation code.",
     capabilityNote: capabilityNoteFor(consoleBuild, available),
   };

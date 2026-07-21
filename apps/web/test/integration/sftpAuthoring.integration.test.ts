@@ -83,6 +83,7 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
     // No connection yet.
     expect(await (await fetch(`${base}/sftp`)).json()).toEqual({
       configured: false,
+      bootPinned: false,
     });
 
     // Browse the mount root: a loose file and a dot-prefixed key directory.
@@ -125,6 +126,7 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
     expect(projection).not.toContain("SHA256");
     expect(JSON.parse(projection)).toEqual({
       configured: true,
+      bootPinned: false,
       host: "authored.partner.example",
       port: 2022,
       path: "/drop",
@@ -136,7 +138,63 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
     );
     expect(await (await fetch(`${base}/sftp`)).json()).toEqual({
       configured: false,
+      bootPinned: false,
     });
+  });
+
+  test("author from a mountRef locator the operator picked in the browse", async () => {
+    const base = `http://127.0.0.1:${port}/api/jobs`;
+
+    // A mountRef carries only the picked path segments; the server resolves them
+    // against JOB_SECRETS_DIR to an absolute @path -- no absolute path from the
+    // browser.
+    const put = await fetch(`${base}/sftp`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        host: "picked.partner.example",
+        username: "linkage",
+        hostKeyFingerprint: FINGERPRINT,
+        credential: {
+          kind: "mountRef",
+          mount: "secrets",
+          subPath: [".ssh", "id_ed25519"],
+          credType: "private_key",
+        },
+      }),
+    });
+    expect(put.status).toBe(200);
+
+    const projection = await (await fetch(`${base}/sftp`)).text();
+    expect(projection).not.toContain("@");
+    expect(JSON.parse(projection)).toEqual({
+      configured: true,
+      bootPinned: false,
+      host: "picked.partner.example",
+    });
+
+    expect((await fetch(`${base}/sftp`, { method: "DELETE" })).status).toBe(
+      204,
+    );
+  });
+
+  test("a mountRef escaping the secrets mount is refused without echoing a path", async () => {
+    const response = await fetch(`http://127.0.0.1:${port}/api/jobs/sftp`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        host: "picked.partner.example",
+        hostKeyFingerprint: FINGERPRINT,
+        credential: {
+          kind: "mountRef",
+          mount: "secrets",
+          subPath: [".."],
+          credType: "password",
+        },
+      }),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("connection.credential");
   });
 
   test("a credential ref under the data root is refused without echoing it", async () => {

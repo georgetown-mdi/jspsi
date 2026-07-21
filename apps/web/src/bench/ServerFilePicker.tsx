@@ -12,12 +12,13 @@ import {
   Text,
   VisuallyHidden,
 } from "@mantine/core";
-import { IconAlertCircle, IconRefresh } from "@tabler/icons-react";
+import { IconAlertCircle } from "@tabler/icons-react";
 
 import { sanitizeForDisplay } from "@psilink/core";
 
 import { fetchJobInputProfile, fetchJobInputs } from "@psi/workInputClient";
 
+import { MountLoading, MountStateNotice, RefreshButton } from "./mountListing";
 import { byteSizeLabel, dateTimeLabel } from "./inviterModel";
 import styles from "./bench.module.css";
 
@@ -229,68 +230,46 @@ function ListingView({
   onRefresh: () => void;
   onSelect: (name: string) => void;
 }) {
-  const refreshButton = (
-    <Button
-      size="xs"
-      variant="default"
-      leftSection={<IconRefresh size={14} aria-hidden />}
-      onClick={onRefresh}
-    >
-      Refresh
-    </Button>
-  );
+  const refreshButton = <RefreshButton onRefresh={onRefresh} />;
 
   if (listing === "loading")
-    return (
-      <Group gap="xs">
-        <Loader size="sm" />
-        <Text size="sm" c="dimmed">
-          Loading files from the appliance...
-        </Text>
-      </Group>
-    );
+    return <MountLoading message="Loading files from the appliance..." />;
 
   // The job API is deliberately off (JOB_DATA_ROOT unset), a stable config state
   // -- so it reads as informational and names the variable to set, distinct from
   // the red transient fault below whose advice is to retry.
   if (listing.kind === "disabled")
     return (
-      <Stack gap="sm">
-        <Alert
-          color="blue"
-          icon={<IconAlertCircle />}
-          title="The job API is disabled on this appliance"
+      <MountStateNotice
+        color="blue"
+        title="The job API is disabled on this appliance"
+        action={refreshButton}
+      >
+        The job API is off because JOB_DATA_ROOT is not set, so this appliance
+        cannot list or run files. Set it to the mounted data root and restart
+        the appliance -- see the{" "}
+        <Anchor
+          inherit
+          href="https://github.com/georgetown-mdi/jspsi/blob/main/docs/DEPLOYMENT.md"
+          target="_blank"
+          rel="noreferrer"
         >
-          The job API is off because JOB_DATA_ROOT is not set, so this appliance
-          cannot list or run files. Set it to the mounted data root and restart
-          the appliance -- see the{" "}
-          <Anchor
-            inherit
-            href="https://github.com/georgetown-mdi/jspsi/blob/main/docs/DEPLOYMENT.md"
-            target="_blank"
-            rel="noreferrer"
-          >
-            deployment guide
-          </Anchor>
-          .
-        </Alert>
-        {refreshButton}
-      </Stack>
+          deployment guide
+        </Anchor>
+        .
+      </MountStateNotice>
     );
 
   if (listing.kind === "error")
     return (
-      <Stack gap="sm">
-        <Alert
-          color="red"
-          icon={<IconAlertCircle />}
-          title="Could not list the work directory"
-        >
-          The appliance did not return a file listing. Check that the job API is
-          reachable, then try again.
-        </Alert>
-        {refreshButton}
-      </Stack>
+      <MountStateNotice
+        color="red"
+        title="Could not list the work directory"
+        action={refreshButton}
+      >
+        The appliance did not return a file listing. Check that the job API is
+        reachable, then try again.
+      </MountStateNotice>
     );
 
   const { files, configured, readable } = listing.listing;
@@ -300,17 +279,14 @@ function ListingView({
   // rather than telling the operator to place a file in a directory that does not exist.
   if (!configured)
     return (
-      <Stack gap="sm">
-        <Alert
-          color="blue"
-          icon={<IconAlertCircle />}
-          title="No work directory configured"
-        >
-          No work directory is configured on this appliance. Set JOB_INPUT_DIR
-          to the mounted input directory.
-        </Alert>
-        {refreshButton}
-      </Stack>
+      <MountStateNotice
+        color="blue"
+        title="No work directory configured"
+        action={refreshButton}
+      >
+        No work directory is configured on this appliance. Set JOB_INPUT_DIR to
+        the mounted input directory.
+      </MountStateNotice>
     );
 
   // A configured-but-unreadable mount is distinct from an empty one: the directory is
@@ -318,32 +294,26 @@ function ListingView({
   // operator to check the mount rather than to place a file that may already be there.
   if (!readable)
     return (
-      <Stack gap="sm">
-        <Alert
-          color="red"
-          icon={<IconAlertCircle />}
-          title="Could not read the work directory"
-        >
-          The mounted work directory could not be read. Check that it is mounted
-          and readable on this appliance, then refresh.
-        </Alert>
-        {refreshButton}
-      </Stack>
+      <MountStateNotice
+        color="red"
+        title="Could not read the work directory"
+        action={refreshButton}
+      >
+        The mounted work directory could not be read. Check that it is mounted
+        and readable on this appliance, then refresh.
+      </MountStateNotice>
     );
 
   if (files.length === 0)
     return (
-      <Stack gap="sm">
-        <Alert
-          color="blue"
-          icon={<IconAlertCircle />}
-          title="No usable files in the work directory"
-        >
-          Place your input CSV in this appliance's mounted work directory, then
-          refresh. Directories and dot-prefixed files are not listed.
-        </Alert>
-        {refreshButton}
-      </Stack>
+      <MountStateNotice
+        color="blue"
+        title="No usable files in the work directory"
+        action={refreshButton}
+      >
+        Place your input CSV in this appliance's mounted work directory, then
+        refresh. Directories and dot-prefixed files are not listed.
+      </MountStateNotice>
     );
 
   return (

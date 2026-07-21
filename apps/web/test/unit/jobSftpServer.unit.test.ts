@@ -562,6 +562,171 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
   });
 });
 
+describe("validateAuthoredSftpServer mountRef credential path", () => {
+  /** A secrets mount holding a loose credential file and a nested dotfile key. */
+  function secretsMount(): string {
+    const dir = scratchDir();
+    fs.writeFileSync(path.join(dir, "partner-password"), "s3cret\n");
+    fs.mkdirSync(path.join(dir, ".ssh"));
+    fs.writeFileSync(path.join(dir, ".ssh", "id_ed25519"), "PRIVATE\n");
+    return dir;
+  }
+
+  function mountBody(
+    subPath: Array<string>,
+    credType: "password" | "private_key" = "password",
+  ) {
+    return {
+      host: "sftp.partner.example",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      credential: { kind: "mountRef", mount: "secrets", subPath, credType },
+    };
+  }
+
+  test("resolves a picked file to an @path and validates it", () => {
+    const dir = scratchDir();
+    const secretsDir = secretsMount();
+    const entry = validateAuthoredSftpServer(
+      mountBody(["partner-password"]),
+      path.join(dir, "data-root"),
+      undefined,
+      secretsDir,
+    );
+    expect(entry.password).toBe(
+      `@${fs.realpathSync(path.join(secretsDir, "partner-password"))}`,
+    );
+  });
+
+  test("resolves a nested dotfile key for a private_key credential", () => {
+    const dir = scratchDir();
+    const secretsDir = secretsMount();
+    const entry = validateAuthoredSftpServer(
+      mountBody([".ssh", "id_ed25519"], "private_key"),
+      path.join(dir, "data-root"),
+      undefined,
+      secretsDir,
+    );
+    expect(entry.privateKey).toBe(
+      `@${fs.realpathSync(path.join(secretsDir, ".ssh", "id_ed25519"))}`,
+    );
+    expect(entry.password).toBeUndefined();
+  });
+
+  test("a subPath that escapes the mount is refused, no path echoed", () => {
+    const dir = scratchDir();
+    const secretsDir = secretsMount();
+    let caught: Error | null = null;
+    try {
+      validateAuthoredSftpServer(
+        mountBody([".."]),
+        path.join(dir, "data-root"),
+        undefined,
+        secretsDir,
+      );
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(caught).toBeInstanceOf(JobApiConfigError);
+    expect(caught?.message).toContain("connection.credential");
+    expect(caught?.message).not.toContain(secretsDir);
+  });
+
+  test("a subPath naming no regular file is refused", () => {
+    const dir = scratchDir();
+    const secretsDir = secretsMount();
+    expect(() =>
+      validateAuthoredSftpServer(
+        mountBody(["absent"]),
+        path.join(dir, "data-root"),
+        undefined,
+        secretsDir,
+      ),
+    ).toThrow(JobApiConfigError);
+  });
+
+  test("a directory subPath is not a credential file", () => {
+    const dir = scratchDir();
+    const secretsDir = secretsMount();
+    expect(() =>
+      validateAuthoredSftpServer(
+        mountBody([".ssh"]),
+        path.join(dir, "data-root"),
+        undefined,
+        secretsDir,
+      ),
+    ).toThrow(JobApiConfigError);
+  });
+
+  test("an unset secrets mount refuses a mountRef, naming the field", () => {
+    const dir = scratchDir();
+    let caught: Error | null = null;
+    try {
+      validateAuthoredSftpServer(
+        mountBody(["partner-password"]),
+        path.join(dir, "data-root"),
+        undefined,
+        undefined,
+      );
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(caught).toBeInstanceOf(JobApiConfigError);
+    expect(caught?.message).toContain("connection.credential");
+    expect(caught?.message).toContain("secrets mount");
+  });
+
+  test("an unknown mount id is rejected naming the field", () => {
+    const dir = scratchDir();
+    const secretsDir = secretsMount();
+    let caught: Error | null = null;
+    try {
+      validateAuthoredSftpServer(
+        {
+          host: "sftp.partner.example",
+          hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+          credential: {
+            kind: "mountRef",
+            mount: "inputs",
+            subPath: ["partner-password"],
+            credType: "password",
+          },
+        },
+        path.join(dir, "data-root"),
+        undefined,
+        secretsDir,
+      );
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(caught).toBeInstanceOf(JobApiConfigError);
+    expect(caught?.message).toContain("connection.credential.mount");
+  });
+
+  test("a resolved mountRef still runs the data-root exclusion", () => {
+    // The secrets mount is (mis)configured INSIDE the data root: the resolved
+    // @path lands under the data root, so assertCredentialRef still rejects it --
+    // the picker path is held to the same containment as a typed ref.
+    const dir = scratchDir();
+    const dataRoot = path.join(dir, "data-root");
+    const secretsDir = path.join(dataRoot, "secrets");
+    fs.mkdirSync(secretsDir, { recursive: true });
+    fs.writeFileSync(path.join(secretsDir, "pw"), "x");
+    let caught: Error | null = null;
+    try {
+      validateAuthoredSftpServer(
+        mountBody(["pw"]),
+        dataRoot,
+        undefined,
+        secretsDir,
+      );
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(caught).toBeInstanceOf(JobApiConfigError);
+    expect(caught?.message).toContain("data root");
+  });
+});
+
 describe("loadSftpServer fingerprint rules", () => {
   test("a missing fingerprint is rejected", () => {
     expect(() => loadSingle(["host: sftp.example.org"])).toThrowError(

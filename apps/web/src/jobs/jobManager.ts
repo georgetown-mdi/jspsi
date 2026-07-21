@@ -199,6 +199,14 @@ export interface JobManagerOptions {
    */
   jobRendezvousDir?: string;
   /**
+   * The resolved secrets mount (from {@link useJobSecretsDir}) the operator browses
+   * for an authored connection's file-reference credential -- with NO data-root
+   * fallback, so absent when `JOB_SECRETS_DIR` is unset. Used only to resolve a
+   * `mountRef` credential locator to its `@path` during {@link authorSftpServer};
+   * an unset mount refuses a `mountRef` authoring. Never derived from a request.
+   */
+  jobSecretsDir?: string;
+  /**
    * Extra environment variables merged into every spawned child. Empty in
    * production; the manager tests use it to configure the stub CLI. Set only by
    * the server-side constructor, never derived from a request.
@@ -236,6 +244,7 @@ export class JobManager {
   private readonly sftpServer: JobSftpServerEntry | undefined;
   private readonly jobInputDir: string | undefined;
   private readonly jobRendezvousDir: string | undefined;
+  private readonly jobSecretsDir: string | undefined;
   /**
    * The in-app authored SFTP connection, held in memory for the single exchange
    * only (never persisted; a restart forgets it). Set by {@link authorSftpServer},
@@ -256,6 +265,7 @@ export class JobManager {
     this.sftpServer = options.sftpServer;
     this.jobInputDir = options.jobInputDir;
     this.jobRendezvousDir = options.jobRendezvousDir;
+    this.jobSecretsDir = options.jobSecretsDir;
     this.childEnv = options.childEnv;
   }
 
@@ -370,7 +380,9 @@ export class JobManager {
    * held to identical rules -- literal fingerprint, credential-`@path` outside the
    * data root and rendezvous mount, strict allowlist, core-schema compose. A
    * validation failure throws before the slot is touched, so a rejected body never
-   * replaces a previously authored connection. Returns the credential-free
+   * replaces a previously authored connection. A `mountRef` credential locator is
+   * resolved against the secrets mount here, so the browser sends only the picked
+   * segments and never a container-absolute path. Returns the credential-free
    * projection of the now-effective connection.
    */
   authorSftpServer(rawBody: unknown): SftpConnectionProjection {
@@ -379,6 +391,7 @@ export class JobManager {
       rawBody,
       this.dataRoot,
       this.jobRendezvousDir,
+      this.jobSecretsDir,
     );
     this.authoredSftpServer = entry;
     return this.sftpProjection()!;

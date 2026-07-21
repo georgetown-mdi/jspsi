@@ -58,6 +58,7 @@ function makeManager(options: {
   sftpServer?: JobSftpServerEntry;
   jobInputDir?: string;
   jobRendezvousDir?: string;
+  jobSecretsDir?: string;
   recordJson?: string;
 }): JobManager {
   // The stub reads its scenario from the child environment; the driver's
@@ -97,6 +98,7 @@ function makeManager(options: {
     sftpServer: options.sftpServer,
     jobInputDir: options.jobInputDir,
     jobRendezvousDir: rendezvousDir,
+    jobSecretsDir: options.jobSecretsDir,
     childEnv,
   });
   managers.push(manager);
@@ -651,6 +653,43 @@ describe("the in-app authored sftp connection", () => {
     // The @path reference lands verbatim; the secret bytes never reach the config.
     expect(configYaml).toContain(`@${secretPath}`);
     expect(configYaml).not.toContain("s3cret");
+  });
+
+  test("authoring resolves a mountRef against the manager's secrets mount", () => {
+    const secretsDir = tempDataRoot("author-secrets");
+    roots.push(secretsDir);
+    fs.mkdirSync(secretsDir, { recursive: true });
+    fs.writeFileSync(path.join(secretsDir, "partner-password"), "s3cret\n");
+    const manager = makeManager({ jobSecretsDir: secretsDir });
+    const projection = manager.authorSftpServer({
+      host: "authored.partner.example",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      credential: {
+        kind: "mountRef",
+        mount: "secrets",
+        subPath: ["partner-password"],
+        credType: "password",
+      },
+    });
+    expect(projection).toEqual({ host: "authored.partner.example" });
+    expect(manager.sftpProjection()).toEqual(projection);
+  });
+
+  test("a mountRef with no secrets mount configured is refused", () => {
+    const manager = makeManager({});
+    expect(() =>
+      manager.authorSftpServer({
+        host: "authored.partner.example",
+        hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+        credential: {
+          kind: "mountRef",
+          mount: "secrets",
+          subPath: ["partner-password"],
+          credType: "password",
+        },
+      }),
+    ).toThrow();
+    expect(manager.sftpProjection()).toBeNull();
   });
 
   test("a boot server WINS: authoring is refused and the boot server projects", () => {
