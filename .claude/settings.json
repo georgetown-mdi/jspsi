@@ -3,7 +3,6 @@
     "deny": [
       "Read(~/.ssh/**)",
       "Edit(~/.ssh/**)",
-      "Write(~/.ssh/**)",
       "Read(.env)",
       "Read(**/.env)",
       "Read(.env.*)",
@@ -12,12 +11,7 @@
       "Edit(**/.env)",
       "Edit(.env.*)",
       "Edit(**/.env.*)",
-      "Write(.env)",
-      "Write(**/.env)",
-      "Write(.env.*)",
-      "Write(**/.env.*)",
-      "Edit(/etc/**)",
-      "Write(/etc/**)"
+      "Edit(/etc/**)"
     ]
   },
   "hooks": {
