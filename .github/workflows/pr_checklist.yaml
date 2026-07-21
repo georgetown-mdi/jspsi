@@ -38,7 +38,7 @@ jobs:
       # The script is dependency-free, so a plain pinned Node suffices -- no npm
       # ci or @psilink/core build (the ./.github/actions/setup prologue) needed.
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: "26"
       - name: PR checklist
