@@ -36,6 +36,7 @@ import { Route as ApiJobsJobIdRecordRouteImport } from './routes/api/jobs/$jobId
 import { Route as ApiJobsJobIdKeysRouteImport } from './routes/api/jobs/$jobId/keys'
 import { Route as ApiJobsJobIdEventsRouteImport } from './routes/api/jobs/$jobId/events'
 import { Route as ApiJobsJobIdCancelRouteImport } from './routes/api/jobs/$jobId/cancel'
+import { Route as ApiJobsMountsSecretsEntriesRouteImport } from './routes/api/jobs/mounts/secrets/entries'
 
 const VerifyRoute = VerifyRouteImport.update({
   id: '/verify',
@@ -172,6 +173,12 @@ const ApiJobsJobIdCancelRoute = ApiJobsJobIdCancelRouteImport.update({
   path: '/api/jobs/$jobId/cancel',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiJobsMountsSecretsEntriesRoute =
+  ApiJobsMountsSecretsEntriesRouteImport.update({
+    id: '/api/jobs/mounts/secrets/entries',
+    path: '/api/jobs/mounts/secrets/entries',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -201,6 +208,7 @@ export interface FileRoutesByFullPath {
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
   '/api/jobs/$jobId/': typeof ApiJobsJobIdIndexRoute
   '/api/jobs/inputs/': typeof ApiJobsInputsIndexRoute
+  '/api/jobs/mounts/secrets/entries': typeof ApiJobsMountsSecretsEntriesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -229,6 +237,7 @@ export interface FileRoutesByTo {
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
   '/api/jobs/$jobId': typeof ApiJobsJobIdIndexRoute
   '/api/jobs/inputs': typeof ApiJobsInputsIndexRoute
+  '/api/jobs/mounts/secrets/entries': typeof ApiJobsMountsSecretsEntriesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -259,6 +268,7 @@ export interface FileRoutesById {
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
   '/api/jobs/$jobId/': typeof ApiJobsJobIdIndexRoute
   '/api/jobs/inputs/': typeof ApiJobsInputsIndexRoute
+  '/api/jobs/mounts/secrets/entries': typeof ApiJobsMountsSecretsEntriesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -290,6 +300,7 @@ export interface FileRouteTypes {
     | '/api/peerjs/$key/peers'
     | '/api/jobs/$jobId/'
     | '/api/jobs/inputs/'
+    | '/api/jobs/mounts/secrets/entries'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -318,6 +329,7 @@ export interface FileRouteTypes {
     | '/api/peerjs/$key/peers'
     | '/api/jobs/$jobId'
     | '/api/jobs/inputs'
+    | '/api/jobs/mounts/secrets/entries'
   id:
     | '__root__'
     | '/'
@@ -347,6 +359,7 @@ export interface FileRouteTypes {
     | '/api/peerjs/$key/peers'
     | '/api/jobs/$jobId/'
     | '/api/jobs/inputs/'
+    | '/api/jobs/mounts/secrets/entries'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -373,6 +386,7 @@ export interface RootRouteChildren {
   ApiPeerjsKeyPeersRoute: typeof ApiPeerjsKeyPeersRoute
   ApiJobsJobIdIndexRoute: typeof ApiJobsJobIdIndexRoute
   ApiJobsInputsIndexRoute: typeof ApiJobsInputsIndexRoute
+  ApiJobsMountsSecretsEntriesRoute: typeof ApiJobsMountsSecretsEntriesRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -566,6 +580,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiJobsJobIdCancelRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/jobs/mounts/secrets/entries': {
+      id: '/api/jobs/mounts/secrets/entries'
+      path: '/api/jobs/mounts/secrets/entries'
+      fullPath: '/api/jobs/mounts/secrets/entries'
+      preLoaderRoute: typeof ApiJobsMountsSecretsEntriesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -611,6 +632,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPeerjsKeyPeersRoute: ApiPeerjsKeyPeersRoute,
   ApiJobsJobIdIndexRoute: ApiJobsJobIdIndexRoute,
   ApiJobsInputsIndexRoute: ApiJobsInputsIndexRoute,
+  ApiJobsMountsSecretsEntriesRoute: ApiJobsMountsSecretsEntriesRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

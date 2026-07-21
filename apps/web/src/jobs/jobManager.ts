@@ -19,6 +19,7 @@ import {
 } from "./workdir";
 import { resolveCliBinaryPath, spawnExchangeJob } from "./cliDriver";
 import { rendezvousStartupWarnings } from "./jobRendezvous";
+import { validateAuthoredSftpServer } from "./sftpServer";
 
 import type {
   CliDriverHandle,
@@ -39,6 +40,19 @@ export class SftpUnavailableError extends Error {
   constructor() {
     super("an sftp intent arrived but no server is provisioned");
     this.name = "SftpUnavailableError";
+  }
+}
+
+/**
+ * Thrown by {@link JobManager.authorSftpServer} when a deploy-time
+ * `JOB_SFTP_SERVER` is provisioned. The boot entry wins: the operator cannot
+ * author a connection over one the deployment already pinned, so the route maps
+ * this to a 409. Authoring is available only when no boot server is set.
+ */
+export class SftpServerBootPinnedError extends Error {
+  constructor() {
+    super("a boot-provisioned sftp server is pinned; authoring is refused");
+    this.name = "SftpServerBootPinnedError";
   }
 }
 
@@ -222,6 +236,14 @@ export class JobManager {
   private readonly sftpServer: JobSftpServerEntry | undefined;
   private readonly jobInputDir: string | undefined;
   private readonly jobRendezvousDir: string | undefined;
+  /**
+   * The in-app authored SFTP connection, held in memory for the single exchange
+   * only (never persisted; a restart forgets it). Set by {@link authorSftpServer},
+   * cleared by {@link clearAuthoredSftpServer} and when the active exchange is
+   * deleted. Effective only when no boot {@link sftpServer} is provisioned -- the
+   * boot entry wins.
+   */
+  private authoredSftpServer: JobSftpServerEntry | undefined;
 
   constructor(options: JobManagerOptions) {
     this.dataRoot = options.dataRoot;
@@ -258,8 +280,9 @@ export class JobManager {
 
     let serverEntry: JobSftpServerEntry | undefined;
     if (intent.channel === "sftp") {
-      if (this.sftpServer === undefined) throw new SftpUnavailableError();
-      serverEntry = this.sftpServer;
+      const effective = this.effectiveSftpServer();
+      if (effective === undefined) throw new SftpUnavailableError();
+      serverEntry = effective;
     }
     if (intent.channel === "filedrop" && this.jobRendezvousDir === undefined)
       throw new JobRendezvousUnavailableError();
@@ -326,13 +349,55 @@ export class JobManager {
   }
 
   /**
-   * The credential-free projection of the provisioned SFTP server for
-   * `GET /api/jobs/sftp`, or null when none is provisioned. Explicitly mapped
+   * The SFTP connection an sftp job composes against: the boot-provisioned server
+   * when set (it wins), else the in-app authored connection, else undefined. Read
+   * by {@link createJob}'s sftp arm and {@link sftpProjection}.
+   */
+  private effectiveSftpServer(): JobSftpServerEntry | undefined {
+    return this.sftpServer ?? this.authoredSftpServer;
+  }
+
+  /** Whether a deploy-time boot server is provisioned, so authoring is refused. */
+  hasBootSftpServer(): boolean {
+    return this.sftpServer !== undefined;
+  }
+
+  /**
+   * Validate and hold an in-app authored SFTP connection for the single exchange.
+   * Refuses when a boot server is provisioned ({@link SftpServerBootPinnedError}):
+   * the deploy-time entry wins. Validation is the SAME chain the boot loader runs
+   * (via {@link validateAuthoredSftpServer}), so a request-sourced connection is
+   * held to identical rules -- literal fingerprint, credential-`@path` outside the
+   * data root and rendezvous mount, strict allowlist, core-schema compose. A
+   * validation failure throws before the slot is touched, so a rejected body never
+   * replaces a previously authored connection. Returns the credential-free
+   * projection of the now-effective connection.
+   */
+  authorSftpServer(rawBody: unknown): SftpConnectionProjection {
+    if (this.sftpServer !== undefined) throw new SftpServerBootPinnedError();
+    const entry = validateAuthoredSftpServer(
+      rawBody,
+      this.dataRoot,
+      this.jobRendezvousDir,
+    );
+    this.authoredSftpServer = entry;
+    return this.sftpProjection()!;
+  }
+
+  /** Forget the in-app authored SFTP connection. Idempotent; a no-op when a boot
+   * server is pinned (there is nothing authored to clear). */
+  clearAuthoredSftpServer(): void {
+    this.authoredSftpServer = undefined;
+  }
+
+  /**
+   * The credential-free projection of the effective SFTP server for
+   * `GET /api/jobs/sftp`, or null when none is effective. Explicitly mapped
    * field-by-field (never a spread) so only {host, port, path} can ever cross
    * the response boundary.
    */
   sftpProjection(): SftpConnectionProjection | null {
-    const entry = this.sftpServer;
+    const entry = this.effectiveSftpServer();
     if (entry === undefined) return null;
     const projection: SftpConnectionProjection = { host: entry.host };
     if (entry.port !== undefined) projection.port = entry.port;
@@ -699,6 +764,9 @@ export class JobManager {
       this.clearCancelTimers(record);
       if (record.handle?.isRunning()) record.handle.signal("SIGKILL");
       slot.deleted = true;
+      // The authored connection is scoped to this single exchange; deleting the
+      // exchange forgets it, so the next exchange starts from a clean slate.
+      this.authoredSftpServer = undefined;
       const workdir = resolveWorkdir(this.dataRoot, id);
       if (workdir !== null) await removeWorkdir(workdir);
       this.maybeFreeSlot(record);

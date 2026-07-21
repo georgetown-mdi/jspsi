@@ -21,6 +21,7 @@ import { Route as SftpRoute } from "../../src/routes/api/jobs/sftp";
 
 import {
   STUB_CLI_PATH,
+  TEST_HOST_KEY_FINGERPRINT,
   tempDataRoot,
   testSftpServerEntry,
   validInputFileIntent,
@@ -701,6 +702,162 @@ describe("GET /api/jobs/sftp", () => {
       params: { jobId: "sftp" },
     })) as Response;
     expect(response.status).toBe(404);
+  });
+});
+
+/** A secret file outside every data/rendezvous root, plus the ref it feeds. */
+function secretFileOutside(): string {
+  const dir = tempDataRoot("routes-secret");
+  roots.push(dir);
+  fs.mkdirSync(dir, { recursive: true });
+  const filePath = `${dir}/password`;
+  fs.writeFileSync(filePath, "s3cret\n");
+  return filePath;
+}
+
+function authoredBody(ref: string, overrides: Record<string, unknown> = {}) {
+  return {
+    host: "authored.partner.example",
+    hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+    credential: { kind: "ref", ref: `@${ref}`, credType: "password" },
+    ...overrides,
+  };
+}
+
+async function putSftp(body: unknown): Promise<Response> {
+  return (await handlersOf(SftpRoute).PUT({
+    request: new Request("http://localhost/api/jobs/sftp", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+    params: {},
+  })) as Response;
+}
+
+async function getSftp(): Promise<Response> {
+  return (await handlersOf(SftpRoute).GET({
+    request: new Request("http://localhost/api/jobs/sftp"),
+    params: {},
+  })) as Response;
+}
+
+async function deleteSftp(): Promise<Response> {
+  return (await handlersOf(SftpRoute).DELETE({
+    request: new Request("http://localhost/api/jobs/sftp", {
+      method: "DELETE",
+    }),
+    params: {},
+  })) as Response;
+}
+
+describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
+  test("is 404 when the API is disabled", async () => {
+    vi.stubEnv("JOB_DATA_ROOT", "");
+    const response = await putSftp(authoredBody("/tmp/pw"));
+    expect(response.status).toBe(404);
+  });
+
+  test("authors a connection GET then reports, credential-free", async () => {
+    enableJobApi();
+    const ref = secretFileOutside();
+    const put = await putSftp(authoredBody(ref, { port: 2022, path: "/drop" }));
+    expect(put.status).toBe(200);
+    expect(await put.json()).toEqual({
+      configured: true,
+      host: "authored.partner.example",
+      port: 2022,
+      path: "/drop",
+    });
+
+    const get = await getSftp();
+    const body = await get.text();
+    // No credential reference or fingerprint survives the projection.
+    expect(body).not.toContain("@");
+    expect(body).not.toContain("SHA256");
+    expect(JSON.parse(body)).toEqual({
+      configured: true,
+      host: "authored.partner.example",
+      port: 2022,
+      path: "/drop",
+    });
+  });
+
+  test("a credential ref under the data root is 400 and never echoes the ref", async () => {
+    const dataRoot = enableJobApi();
+    const ref = `${dataRoot}/planted/pw`;
+    const response = await putSftp(authoredBody(ref));
+    expect(response.status).toBe(400);
+    const text = await response.text();
+    expect(text).toContain("data root");
+    expect(text).not.toContain(ref);
+  });
+
+  test("a non-ref credential kind is a 400", async () => {
+    enableJobApi();
+    const response = await putSftp(
+      authoredBody("/tmp/pw", {
+        credential: { kind: "inline", ref: "hunter2", credType: "password" },
+      }),
+    );
+    expect(response.status).toBe(400);
+  });
+
+  test("a boot-provisioned server refuses authoring with a 409", async () => {
+    enableJobApiWithSftpServer();
+    const ref = secretFileOutside();
+    const response = await putSftp(authoredBody(ref));
+    expect(response.status).toBe(409);
+    // The boot server still projects, unchanged.
+    expect(await (await getSftp()).json()).toEqual({
+      configured: true,
+      host: "sftp.example.org",
+      port: 2222,
+      path: "/exchange",
+    });
+  });
+
+  test("DELETE forgets the authored connection (idempotent 204)", async () => {
+    enableJobApi();
+    const ref = secretFileOutside();
+    expect((await putSftp(authoredBody(ref))).status).toBe(200);
+    const del = await deleteSftp();
+    expect(del.status).toBe(204);
+    expect(await del.text()).toBe("");
+    expect(await (await getSftp()).json()).toEqual({ configured: false });
+    // Idempotent: a second DELETE is still 204.
+    expect((await deleteSftp()).status).toBe(204);
+  });
+
+  test("the authored connection composes into an sftp job's config", async () => {
+    const dataRoot = enableJobApi();
+    const ref = secretFileOutside();
+    expect((await putSftp(authoredBody(ref))).status).toBe(200);
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validSftpIntent()),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(201);
+    const { id } = (await response.json()) as { id: string };
+    const composed = fs.readFileSync(`${dataRoot}/${id}/psilink.yaml`, "utf8");
+    expect(composed).toContain("host: authored.partner.example");
+    expect(composed).toContain(`@${ref}`);
+    expect(composed).not.toContain("s3cret");
+  });
+});
+
+describe("POST /api/jobs stays injection-closed to connection material", () => {
+  test("a connection field on the sftp intent is rejected (strict schema)", async () => {
+    enableJobApiWithSftpServer();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest({
+        ...validSftpIntent(),
+        connection: { channel: "sftp", host: "attacker.example" },
+      }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(400);
+    expect(await response.text()).toBe("");
   });
 });
 

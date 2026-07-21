@@ -8,6 +8,7 @@ import {
   LEGACY_JOB_SFTP_REMOTES_ENV,
   loadSftpServer,
   loadSftpServerFromEnv,
+  validateAuthoredSftpServer,
 } from "@jobs/sftpServer";
 import { JobApiConfigError } from "@jobs/gate";
 import { useSftpServer } from "@jobs/index";
@@ -57,12 +58,13 @@ function loadSingle(
   entryLines: Array<string>,
   options?: {
     dataRoot?: string;
+    rendezvousDir?: string;
   },
 ) {
   const dir = scratchDir();
   const dataRoot = options?.dataRoot ?? path.join(dir, "data-root");
   const filePath = writeServerFile(dir, serverYaml(entryLines));
-  return loadSftpServer(filePath, dataRoot);
+  return loadSftpServer(filePath, dataRoot, options?.rendezvousDir);
 }
 
 describe("loadSftpServer happy path", () => {
@@ -312,6 +314,251 @@ describe("loadSftpServer credential reference rules", () => {
         ) as string,
       }) as Error,
     );
+  });
+
+  test("an @path under a distinct rendezvous dir is rejected", () => {
+    const dir = scratchDir();
+    const dataRoot = path.join(dir, "data-root");
+    const rendezvousDir = path.join(dir, "rendezvous");
+    fs.mkdirSync(path.join(rendezvousDir, "planted"), { recursive: true });
+    fs.writeFileSync(path.join(rendezvousDir, "planted", "pw"), "x");
+    expect(() =>
+      loadSingle(
+        [
+          "host: sftp.example.org",
+          `host_key_fingerprint: ${TEST_HOST_KEY_FINGERPRINT}`,
+          `password: "@${path.join(rendezvousDir, "planted", "pw")}"`,
+        ],
+        { dataRoot, rendezvousDir },
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "JobApiConfigError",
+        message: expect.stringContaining("rendezvous") as string,
+      }) as Error,
+    );
+  });
+
+  test("a symlink that resolves back under the data root is rejected", () => {
+    // The ref path is lexically OUTSIDE the data root, but a symlink in the chain
+    // resolves it back inside; the realpath re-confinement catches it.
+    const dir = scratchDir();
+    const dataRoot = path.join(dir, "data-root");
+    fs.mkdirSync(path.join(dataRoot, "planted"), { recursive: true });
+    fs.writeFileSync(path.join(dataRoot, "planted", "pw"), "x");
+    const outside = path.join(dir, "outside");
+    fs.mkdirSync(outside, { recursive: true });
+    // outside/link -> data-root/planted; outside/link/pw realpaths inside.
+    fs.symlinkSync(path.join(dataRoot, "planted"), path.join(outside, "link"));
+    expect(() =>
+      loadSingle(
+        [
+          "host: sftp.example.org",
+          `host_key_fingerprint: ${TEST_HOST_KEY_FINGERPRINT}`,
+          `password: "@${path.join(outside, "link", "pw")}"`,
+        ],
+        { dataRoot },
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "JobApiConfigError",
+        message: expect.stringContaining("data root") as string,
+      }) as Error,
+    );
+  });
+});
+
+describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
+  /** A minimal valid authoring body with a file-reference password credential. */
+  function authoredBody(
+    overrides: Record<string, unknown> = {},
+    credential?: unknown,
+  ) {
+    return {
+      host: "sftp.partner.example",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      credential: credential ?? {
+        kind: "ref",
+        ref: "@PLACEHOLDER",
+        credType: "password",
+      },
+      ...overrides,
+    };
+  }
+
+  test("validates a file-reference credential through the shared chain", () => {
+    const dir = scratchDir();
+    const secretPath = writeSecretFile(dir);
+    const dataRoot = path.join(dir, "data-root");
+    const entry = validateAuthoredSftpServer(
+      authoredBody(
+        { port: 2222, username: "linkage", path: "/exchange" },
+        { kind: "ref", ref: `@${secretPath}`, credType: "password" },
+      ),
+      dataRoot,
+      undefined,
+    );
+    expect(entry.host).toBe("sftp.partner.example");
+    expect(entry.password).toBe(`@${secretPath}`);
+    expect(entry.privateKey).toBeUndefined();
+    expect(entry.hostKeyFingerprint).toBe(TEST_HOST_KEY_FINGERPRINT);
+  });
+
+  test("credType private_key maps the ref to the privateKey field", () => {
+    const dir = scratchDir();
+    const keyPath = writeSecretFile(dir);
+    const dataRoot = path.join(dir, "data-root");
+    const entry = validateAuthoredSftpServer(
+      authoredBody(
+        {},
+        { kind: "ref", ref: `@${keyPath}`, credType: "private_key" },
+      ),
+      dataRoot,
+      undefined,
+    );
+    expect(entry.privateKey).toBe(`@${keyPath}`);
+    expect(entry.password).toBeUndefined();
+  });
+
+  test("a credential.kind other than ref is refused with a clear message", () => {
+    const dir = scratchDir();
+    expect(() =>
+      validateAuthoredSftpServer(
+        authoredBody(
+          {},
+          { kind: "inline", ref: "hunter2", credType: "password" },
+        ),
+        path.join(dir, "data-root"),
+        undefined,
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "JobApiConfigError",
+        message: expect.stringContaining('kind must be "ref"') as string,
+      }) as Error,
+    );
+  });
+
+  test("an unknown top-level field is rejected (strict body)", () => {
+    const dir = scratchDir();
+    expect(() =>
+      validateAuthoredSftpServer(
+        authoredBody({ remote: "prod_east" }),
+        path.join(dir, "data-root"),
+        undefined,
+      ),
+    ).toThrow(JobApiConfigError);
+  });
+
+  test("a missing fingerprint is rejected", () => {
+    const dir = scratchDir();
+    const secretPath = writeSecretFile(dir);
+    expect(() =>
+      validateAuthoredSftpServer(
+        {
+          host: "sftp.partner.example",
+          credential: {
+            kind: "ref",
+            ref: `@${secretPath}`,
+            credType: "password",
+          },
+        },
+        path.join(dir, "data-root"),
+        undefined,
+      ),
+    ).toThrow(JobApiConfigError);
+  });
+
+  test("an @-file fingerprint is rejected (literal pin required)", () => {
+    const dir = scratchDir();
+    const secretPath = writeSecretFile(dir);
+    expect(() =>
+      validateAuthoredSftpServer(
+        authoredBody(
+          { hostKeyFingerprint: "@/etc/psilink/fingerprint" },
+          { kind: "ref", ref: `@${secretPath}`, credType: "password" },
+        ),
+        path.join(dir, "data-root"),
+        undefined,
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "JobApiConfigError",
+        message: expect.stringContaining("literal") as string,
+      }) as Error,
+    );
+  });
+
+  test("a credential ref under the data root is rejected without echoing it", () => {
+    const dir = scratchDir();
+    const dataRoot = path.join(dir, "data-root");
+    const ref = path.join(dataRoot, "planted", "pw");
+    let caught: Error | null = null;
+    try {
+      validateAuthoredSftpServer(
+        authoredBody({}, { kind: "ref", ref: `@${ref}`, credType: "password" }),
+        dataRoot,
+        undefined,
+      );
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(caught).toBeInstanceOf(JobApiConfigError);
+    expect(caught?.message).toContain("data root");
+    expect(caught?.message).not.toContain(ref);
+  });
+
+  test("a credential ref under a distinct rendezvous dir is rejected", () => {
+    const dir = scratchDir();
+    const dataRoot = path.join(dir, "data-root");
+    const rendezvousDir = path.join(dir, "rendezvous");
+    fs.mkdirSync(path.join(rendezvousDir, "planted"), { recursive: true });
+    fs.writeFileSync(path.join(rendezvousDir, "planted", "pw"), "x");
+    expect(() =>
+      validateAuthoredSftpServer(
+        authoredBody(
+          {},
+          {
+            kind: "ref",
+            ref: `@${path.join(rendezvousDir, "planted", "pw")}`,
+            credType: "password",
+          },
+        ),
+        dataRoot,
+        rendezvousDir,
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "JobApiConfigError",
+        message: expect.stringContaining("rendezvous") as string,
+      }) as Error,
+    );
+  });
+
+  test("an inline (non-@) credential ref is rejected", () => {
+    const dir = scratchDir();
+    expect(() =>
+      validateAuthoredSftpServer(
+        authoredBody({}, { kind: "ref", ref: "hunter2", credType: "password" }),
+        path.join(dir, "data-root"),
+        undefined,
+      ),
+    ).toThrow(JobApiConfigError);
+  });
+
+  test("core's cross-field refine (keyboard_interactive needs password) holds", () => {
+    const dir = scratchDir();
+    const keyPath = writeSecretFile(dir);
+    expect(() =>
+      validateAuthoredSftpServer(
+        authoredBody(
+          { keyboardInteractive: true },
+          { kind: "ref", ref: `@${keyPath}`, credType: "private_key" },
+        ),
+        path.join(dir, "data-root"),
+        undefined,
+      ),
+    ).toThrow(JobApiConfigError);
   });
 });
 
