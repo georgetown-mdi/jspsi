@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 850" role="img" aria-label="psilink component diagram: core library, applications, and external systems">
+  <style>
+    text { font-family: -apple-system, "Segoe UI", ui-sans-serif, system-ui, sans-serif; }
+    .lane-label { font-size: 11px; font-weight: 600; letter-spacing: 0.14em; fill: #5a6472; }
+    .sec-label { font-size: 9.5px; font-weight: 600; letter-spacing: 0.12em; fill: #5a6472; }
+    .b-title { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 13px; font-weight: 600; fill: #1f2530; }
+    .b-sub { font-family: -apple-system, "Segoe UI", ui-sans-serif, system-ui, sans-serif; font-size: 11px; font-weight: 400; fill: #5a6472; }
+    .n-title { font-size: 12.5px; font-weight: 600; fill: #1f2530; }
+    .n-sub { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 10.5px; fill: #5a6472; }
+    .e-label { font-size: 10.5px; font-style: italic; fill: #5a6472; }
+    .l-text { font-size: 11.5px; fill: #5a6472; }
+    .box { fill: none; stroke-width: 1; }
+    .b-core { fill: rgba(37, 99, 235, 0.04); stroke: #2563eb; stroke-opacity: 0.45; }
+    .b-app { fill: rgba(13, 148, 136, 0.04); stroke: #0d9488; stroke-opacity: 0.45; }
+    .node { fill: #ffffff; }
+    .n-core { stroke: #2563eb; stroke-width: 1.5; }
+    .n-app { stroke: #0d9488; stroke-width: 1.5; }
+    .n-ext { stroke: #d97706; stroke-width: 1.5; stroke-dasharray: 5 3; fill: rgba(217, 119, 6, 0.05); }
+    .edge { stroke: #78828e; stroke-width: 1.4; fill: none; }
+    .dotted { stroke-dasharray: 2.5 3.5; }
+    .setup { stroke-dasharray: 2.5 3.5; stroke-opacity: 0.8; }
+    .mk { fill: #78828e; }
+    .cp-echo { fill: none; stroke: #d97706; stroke-opacity: 0.35; stroke-dasharray: 5 3; }
+    .chip { stroke-width: 2.5; fill: none; }
+  </style>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="mk" d="M 0 1 L 9 5 L 0 9 z"></path>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1180" height="850" fill="#fafbfc"></rect>
+
+  <!-- lane eyebrows -->
+  <text class="lane-label" x="28" y="48">CORE LIBRARY</text>
+  <text class="lane-label" x="440" y="48">APPLICATIONS - THIS MACHINE</text>
+  <text class="lane-label" x="840" y="48">EXTERNAL</text>
+
+  <!-- core box -->
+  <rect class="box b-core" x="28" y="62" width="332" height="618" rx="8"></rect>
+  <text class="b-title" x="60" y="94">packages/core</text>
+
+  <text class="sec-label" x="60" y="142">DATA PIPELINE</text>
+  <rect class="node n-core" x="60" y="150" width="280" height="46" rx="5"></rect>
+  <text class="n-title" x="74" y="169">Data standardization</text>
+  <text class="n-sub" x="74" y="185">re2js transforms + CSV intake</text>
+  <rect class="node n-core" x="60" y="216" width="280" height="46" rx="5"></rect>
+  <text class="n-title" x="74" y="235">Exchange orchestration</text>
+  <text class="n-sub" x="74" y="251">runExchange()</text>
+  <rect class="node n-core" x="60" y="282" width="280" height="46" rx="5"></rect>
+  <text class="n-title" x="74" y="301">Linkage engine</text>
+  <text class="n-sub" x="74" y="317">cascade / single-pass</text>
+  <rect class="node n-core" x="60" y="348" width="280" height="46" rx="5"></rect>
+  <text class="n-title" x="74" y="367">PSI base function</text>
+  <text class="n-sub" x="74" y="383">PsiEngine - @openmined/psi.js</text>
+
+  <text class="sec-label" x="60" y="438">SECURE CHANNEL</text>
+  <rect class="node n-core" x="60" y="446" width="280" height="46" rx="5"></rect>
+  <text class="n-title" x="74" y="465">Channel crypto</text>
+  <text class="n-sub" x="74" y="481">X25519 (noble) / AES-GCM (WebCrypto)</text>
+  <rect class="node n-core" x="60" y="512" width="280" height="46" rx="5"></rect>
+  <text class="n-title" x="74" y="531">Transport abstraction</text>
+  <text class="n-sub" x="74" y="547">MessageConnection</text>
+
+  <text class="sec-label" x="60" y="602">DISCLOSURE</text>
+  <rect class="node n-core" x="60" y="610" width="280" height="46" rx="5"></rect>
+  <text class="n-title" x="74" y="629">Exchange record</text>
+  <text class="n-sub" x="74" y="645">self-attested + signed receipt</text>
+
+  <!-- core internal flow -->
+  <line class="edge" x1="200" y1="196" x2="200" y2="212" marker-end="url(#arr)"></line>
+  <line class="edge" x1="200" y1="262" x2="200" y2="278" marker-end="url(#arr)"></line>
+  <line class="edge" x1="200" y1="328" x2="200" y2="344" marker-end="url(#arr)"></line>
+  <line class="edge" x1="200" y1="492" x2="200" y2="508" marker-end="url(#arr)"></line>
+  <polyline class="edge" points="60,248 48,248 48,469 56,469" marker-end="url(#arr)"></polyline>
+  <polyline class="edge" points="60,226 38,226 38,633 56,633" marker-end="url(#arr)"></polyline>
+
+  <!-- web box -->
+  <rect class="box b-app" x="440" y="62" width="320" height="412" rx="8"></rect>
+  <text class="b-title" x="460" y="94">apps/web <tspan class="b-sub">browser + TanStack Start server</tspan></text>
+  <rect class="node n-app" x="460" y="112" width="280" height="46" rx="5"></rect>
+  <text class="n-title" x="474" y="131">Invite / accept bench</text>
+  <text class="n-sub" x="474" y="147">React UI</text>
+  <rect class="node n-app" x="460" y="172" width="280" height="46" rx="5"></rect>
+  <text class="n-title" x="474" y="191">WebRTC connection</text>
+  <text class="n-sub" x="474" y="207">PeerJS data channel</text>
+  <rect class="node n-app" x="460" y="232" width="280" height="46" rx="5"></rect>
+  <text class="n-title" x="474" y="251">Signaling server</text>
+  <text class="n-sub" x="474" y="267">self-hosted</text>
+  <rect class="node n-app" x="460" y="292" width="280" height="46" rx="5"></rect>
+  <text class="n-title" x="474" y="311">PSI crypto worker</text>
+  <text class="n-sub" x="474" y="327">Web Worker / WASM</text>
+  <rect class="node n-app" x="460" y="352" width="280" height="46" rx="5"></rect>
+  <text class="n-title" x="474" y="371">Server job runner</text>
+  <text class="n-sub" x="474" y="387">jobs/</text>
+  <rect class="node n-app" x="460" y="412" width="280" height="46" rx="5"></rect>
+  <text class="n-title" x="474" y="431">Managed exchange store</text>
+  <text class="n-sub" x="474" y="447">recurring runs - IndexedDB</text>
+
+  <!-- cli box -->
+  <rect class="box b-app" x="440" y="510" width="320" height="230" rx="8"></rect>
+  <text class="b-title" x="460" y="542">apps/cli <tspan class="b-sub">terminal</tspan></text>
+  <rect class="node n-app" x="460" y="560" width="280" height="46" rx="5"></rect>
+  <text class="n-title" x="474" y="579">Commands</text>
+  <text class="n-sub" x="474" y="595">invite / accept / exchange</text>
+  <rect class="node n-app" x="460" y="620" width="280" height="46" rx="5"></rect>
+  <text class="n-title" x="474" y="639">Transport adapters</text>
+  <text class="n-sub" x="474" y="655">ssh2-sftp-client + local FS</text>
+  <rect class="node n-app" x="460" y="680" width="280" height="46" rx="5"></rect>
+  <text class="n-title" x="474" y="699">PSI worker</text>
+  <text class="n-sub" x="474" y="715">native N-API / WASM</text>
+
+  <!-- external -->
+  <rect class="node n-ext" x="840" y="112" width="160" height="46" rx="5"></rect>
+  <text class="n-title" x="920" y="140" text-anchor="middle">STUN servers</text>
+  <rect class="node n-ext" x="840" y="620" width="160" height="46" rx="5"></rect>
+  <text class="n-title" x="920" y="647" text-anchor="middle">SFTP server</text>
+  <rect class="node n-ext" x="840" y="686" width="160" height="46" rx="5"></rect>
+  <text class="n-title" x="920" y="713" text-anchor="middle">File-drop share</text>
+  <rect class="node n-ext" x="1050" y="62" width="110" height="678" rx="8"></rect>
+  <rect class="cp-echo" x="1058" y="70" width="94" height="662" rx="6"></rect>
+  <text class="n-title" x="1105" y="398" text-anchor="middle">Counterparty</text>
+  <text class="n-sub" x="1105" y="416" text-anchor="middle">same stack,</text>
+  <text class="n-sub" x="1105" y="430" text-anchor="middle">mirrored</text>
+
+  <!-- app -> core (call flow): both apps merge into runExchange -->
+  <polyline class="edge" points="440,135 372,135 372,239"></polyline>
+  <polyline class="edge" points="440,583 372,583 372,239"></polyline>
+  <line class="edge" x1="372" y1="239" x2="342" y2="239" marker-end="url(#arr)"></line>
+
+  <!-- spawns -->
+  <polyline class="edge" points="740,381 778,381 778,583 744,583" marker-end="url(#arr)"></polyline>
+  <text class="e-label" x="786" y="492">spawns</text>
+
+  <!-- implements (dotted arrows into core seams) -->
+  <polyline class="edge dotted" points="460,315 408,315 408,371 344,371" marker-end="url(#arr)"></polyline>
+  <polyline class="edge dotted" points="460,703 384,703 384,383 344,383" marker-end="url(#arr)"></polyline>
+  <polyline class="edge dotted" points="460,195 420,195 420,528 344,528" marker-end="url(#arr)"></polyline>
+  <polyline class="edge dotted" points="460,630 396,630 396,544 344,544" marker-end="url(#arr)"></polyline>
+
+  <!-- two-party channels -->
+  <line class="edge" x1="744" y1="195" x2="1046" y2="195" marker-start="url(#arr)" marker-end="url(#arr)"></line>
+  <line class="edge" x1="744" y1="643" x2="836" y2="643" marker-start="url(#arr)" marker-end="url(#arr)"></line>
+  <polyline class="edge" points="744,655 790,655 790,709 836,709" marker-start="url(#arr)" marker-end="url(#arr)"></polyline>
+  <line class="edge" x1="1004" y1="643" x2="1046" y2="643" marker-start="url(#arr)" marker-end="url(#arr)"></line>
+  <line class="edge" x1="1004" y1="709" x2="1046" y2="709" marker-start="url(#arr)" marker-end="url(#arr)"></line>
+
+  <text class="e-label" x="600" y="766" text-anchor="middle">both apps ship in one Docker image: vdorie/psi-link</text>
+
+  <!-- connection setup -->
+  <polyline class="edge setup" points="740,180 795,180 795,135 836,135"></polyline>
+  <polyline class="edge setup" points="740,210 768,210 768,250 744,250"></polyline>
+
+  <!-- legend -->
+  <line class="chip" x1="70" y1="820" x2="96" y2="820" stroke="#2563eb"></line>
+  <text class="l-text" x="104" y="824">core protocol</text>
+  <line class="chip" x1="225" y1="820" x2="251" y2="820" stroke="#0d9488"></line>
+  <text class="l-text" x="259" y="824">apps</text>
+  <line class="chip" x1="320" y1="820" x2="346" y2="820" stroke="#d97706" stroke-dasharray="5 3"></line>
+  <text class="l-text" x="354" y="824">external</text>
+  <line class="edge" x1="445" y1="820" x2="470" y2="820" marker-end="url(#arr)"></line>
+  <text class="l-text" x="483" y="824">call / data flow</text>
+  <line class="edge dotted" x1="620" y1="820" x2="645" y2="820" marker-end="url(#arr)"></line>
+  <text class="l-text" x="658" y="824">implements a core seam</text>
+  <line class="edge dotted" x1="850" y1="820" x2="880" y2="820"></line>
+  <text class="l-text" x="888" y="824">connection setup</text>
+</svg>
