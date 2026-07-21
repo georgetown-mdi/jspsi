@@ -348,6 +348,7 @@ function validateServerEntry(
     throw new JobApiConfigError(formatIssues(result.error.issues));
   const entry = result.data;
 
+  assertBareHost(entry.host);
   assertLiteralFingerprints(entry.hostKeyFingerprint);
   for (const field of CREDENTIAL_REF_FIELDS)
     assertCredentialRef(field, entry[field], exclusions);
@@ -524,6 +525,21 @@ function formatIssues(
       return `${fieldPath}: ${issue.message}`;
     })
     .join("; ");
+}
+
+/**
+ * The host must be a bare server address: no userinfo (`@`), no scheme or path
+ * (`/`, which also rules out `://`), and no ASCII whitespace. It backstops the
+ * client form so a crafted request cannot smuggle a userinfo- or path-bearing
+ * value into the partner-facing invitation endpoint, which mints the host
+ * verbatim. Names the field only, never the submitted value.
+ */
+function assertBareHost(host: string): void {
+  if (/[@/\t\n\v\f\r ]/.test(host))
+    throw new JobApiConfigError(
+      "server.host must be a bare server address, without a scheme, a path, " +
+        "an @, or whitespace",
+    );
 }
 
 /**

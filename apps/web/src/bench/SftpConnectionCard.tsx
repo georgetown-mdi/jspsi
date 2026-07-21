@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   Alert,
@@ -155,6 +155,7 @@ export function SftpConnectionCard({
   return (
     <SftpConnectionForm
       initial={initialFormFor(connection)}
+      isEdit={connection !== null}
       onAuthored={(authored) => {
         setFormOpen(false);
         onAuthored(authored);
@@ -184,10 +185,14 @@ function initialFormFor(
  * method and file reference, with the port under Advanced. */
 function SftpConnectionForm({
   initial,
+  isEdit,
   onAuthored,
   onCancel,
 }: {
   initial: SftpConnectionFormValues;
+  /** Editing an existing connection (its credential-free locator is prefilled),
+   * as opposed to authoring a fresh one. */
+  isEdit: boolean;
   onAuthored: (connection: SftpConnectionProjection) => void;
   onCancel: () => void;
 }) {
@@ -197,6 +202,14 @@ function SftpConnectionForm({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string>();
+
+  // Revealing the form leaves keyboard focus on document.body; send it to the
+  // first field so a keyboard or screen-reader user lands in the form, matching
+  // the bench's heading-focus discipline.
+  const firstFieldRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    firstFieldRef.current?.focus();
+  }, []);
 
   const error = sftpFormError(values);
   const fieldError = (field: SftpFormField): string | undefined =>
@@ -211,6 +224,9 @@ function SftpConnectionForm({
     const body = buildAuthoringRequest(values);
     if (body === undefined) {
       setAttempted(true);
+      // The port lives under a collapsed Advanced section; open it so a blocking
+      // port error is visible rather than silently no-opping Save.
+      if (error?.field === "port") setAdvancedOpen(true);
       return;
     }
     setSubmitting(true);
@@ -227,13 +243,22 @@ function SftpConnectionForm({
         ? result.message
         : result.kind === "conflict"
           ? "A connection is already provisioned on this appliance, so it cannot be changed here."
-          : "The connection could not be saved. Check that the appliance is reachable, then try again.",
+          : result.kind === "tooLarge"
+            ? "The connection details are too large."
+            : "The connection could not be saved. Check that the appliance is reachable, then try again.",
     );
   }
 
   return (
     <Stack gap="sm" mt="xs">
+      {isEdit && (
+        <Text size="sm" c="dimmed">
+          Re-enter the username, fingerprint, and credential -- they are never
+          stored in the browser.
+        </Text>
+      )}
       <TextInput
+        ref={firstFieldRef}
         label="SFTP server address"
         description="The host you connect to. You can paste an sftp://user@host/path address and it will be split for you."
         required
@@ -281,7 +306,6 @@ function SftpConnectionForm({
 
       <CredentialField
         values={values}
-        attempted={attempted}
         error={fieldError("credential")}
         passphraseError={fieldError("passphrase")}
         pickerOpen={pickerOpen}
@@ -340,7 +364,6 @@ function SftpConnectionForm({
  * escape hatch plus the optional passphrase reference. */
 function CredentialField({
   values,
-  attempted,
   error,
   passphraseError,
   pickerOpen,
@@ -349,7 +372,6 @@ function CredentialField({
   onChange,
 }: {
   values: SftpConnectionFormValues;
-  attempted: boolean;
   error: string | undefined;
   passphraseError: string | undefined;
   pickerOpen: boolean;
@@ -360,6 +382,14 @@ function CredentialField({
   const source = values.source;
   const typedRef = source?.kind === "path" ? source.ref : "";
   const picked = source?.kind === "mount" ? source.subPath : undefined;
+
+  // Opening the picker leaves focus on the trigger, which then unmounts; move it
+  // into the revealed picker. SecretsFilePicker deliberately skips focus on its
+  // own mount, so the open action is what moves focus here.
+  const pickerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (pickerOpen) pickerRef.current?.focus();
+  }, [pickerOpen]);
 
   return (
     <Stack gap="xs">
@@ -404,22 +434,24 @@ function CredentialField({
       )}
 
       {pickerOpen ? (
-        <Stack gap="xs">
-          <SecretsFilePicker
-            onSelect={(subPath) => {
-              onChange({ source: { kind: "mount", subPath } });
-              onPickerClose();
-            }}
-          />
-          <Button
-            size="xs"
-            variant="default"
-            style={{ alignSelf: "flex-start" }}
-            onClick={onPickerClose}
-          >
-            Cancel browsing
-          </Button>
-        </Stack>
+        <div ref={pickerRef} tabIndex={-1} style={{ outline: "none" }}>
+          <Stack gap="xs">
+            <SecretsFilePicker
+              onSelect={(subPath) => {
+                onChange({ source: { kind: "mount", subPath } });
+                onPickerClose();
+              }}
+            />
+            <Button
+              size="xs"
+              variant="default"
+              style={{ alignSelf: "flex-start" }}
+              onClick={onPickerClose}
+            >
+              Cancel browsing
+            </Button>
+          </Stack>
+        </div>
       ) : (
         <Button
           size="xs"
@@ -447,14 +479,6 @@ function CredentialField({
           onChange({ source: ref === "" ? undefined : { kind: "path", ref } });
         }}
       />
-      {attempted &&
-        error !== undefined &&
-        picked === undefined &&
-        typedRef === "" && (
-          <Text size="sm" c="red" role="alert">
-            {error}
-          </Text>
-        )}
 
       {values.method === "private_key" && (
         <TextInput

@@ -197,6 +197,28 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
     expect(await response.text()).toContain("connection.credential");
   });
 
+  test("a host carrying userinfo and a path is refused, naming the field only", async () => {
+    if (secretsDir === undefined) throw new Error("fixtures not initialized");
+    const response = await fetch(`http://127.0.0.1:${port}/api/jobs/sftp`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        host: "sftp://user:pw@partner.example/drop",
+        hostKeyFingerprint: FINGERPRINT,
+        credential: {
+          kind: "ref",
+          ref: `@${join(secretsDir, "partner-password")}`,
+          credType: "password",
+        },
+      }),
+    });
+    expect(response.status).toBe(400);
+    const text = await response.text();
+    expect(text).toContain("server.host");
+    // The rejection never echoes the smuggled userinfo.
+    expect(text).not.toContain("user:pw");
+  });
+
   test("a credential ref under the data root is refused without echoing it", async () => {
     if (dataRoot === undefined) throw new Error("fixtures not initialized");
     const ref = join(dataRoot, "planted", "pw");

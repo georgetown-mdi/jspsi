@@ -54,13 +54,15 @@ export type SecretsEntriesResult =
  *   field-path-only reason (no submitted value or secret), safe to surface.
  * - `conflict`: a `409` -- a boot `JOB_SFTP_SERVER` is pinned, so authoring is
  *   refused (it wins).
- * - `error`: a `413`, another non-2xx, a network fault, or a malformed success
- *   body.
+ * - `tooLarge`: a `413` -- the request body exceeded the appliance's size limit,
+ *   a distinct cause from an unreachable appliance.
+ * - `error`: another non-2xx, a network fault, or a malformed success body.
  */
 export type PutSftpConnectionResult =
   | { kind: "ok"; connection: SftpConnectionProjection }
   | { kind: "invalid"; message: string }
   | { kind: "conflict" }
+  | { kind: "tooLarge" }
   | { kind: "error" };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -166,6 +168,7 @@ export async function putSftpConnection(
     return connection === null ? { kind: "error" } : { kind: "ok", connection };
   }
   if (response.status === 409) return { kind: "conflict" };
+  if (response.status === 413) return { kind: "tooLarge" };
   if (response.status === 400)
     return {
       kind: "invalid",

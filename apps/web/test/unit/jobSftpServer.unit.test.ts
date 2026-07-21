@@ -439,6 +439,48 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
     );
   });
 
+  test("a host carrying userinfo, a scheme/path, or whitespace is rejected", () => {
+    const dir = scratchDir();
+    const secretPath = writeSecretFile(dir);
+    const dataRoot = path.join(dir, "data-root");
+    for (const host of ["sftp://user:pw@evil", "user:pw@evil", "sftp .evil"]) {
+      let caught: Error | null = null;
+      try {
+        validateAuthoredSftpServer(
+          authoredBody(
+            { host },
+            { kind: "ref", ref: `@${secretPath}`, credType: "password" },
+          ),
+          dataRoot,
+          undefined,
+        );
+      } catch (error) {
+        caught = error as Error;
+      }
+      expect(caught).toBeInstanceOf(JobApiConfigError);
+      expect(caught?.message).toContain("server.host");
+      // The rejection names the field, never the smuggled value.
+      expect(caught?.message).not.toContain(host);
+    }
+  });
+
+  test("a bare hostname, an IPv4, and a bracketed IPv6 host are accepted", () => {
+    const dir = scratchDir();
+    const secretPath = writeSecretFile(dir);
+    const dataRoot = path.join(dir, "data-root");
+    for (const host of ["sftp.partner.example", "10.0.0.5", "[2001:db8::1]"]) {
+      const entry = validateAuthoredSftpServer(
+        authoredBody(
+          { host },
+          { kind: "ref", ref: `@${secretPath}`, credType: "password" },
+        ),
+        dataRoot,
+        undefined,
+      );
+      expect(entry.host).toBe(host);
+    }
+  });
+
   test("an unknown top-level field is rejected (strict body)", () => {
     const dir = scratchDir();
     expect(() =>

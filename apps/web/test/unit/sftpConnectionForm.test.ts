@@ -79,6 +79,24 @@ describe("sftpFormError", () => {
     expect(sftpFormError(validForm({ username: "" }))?.field).toBe("username");
   });
 
+  test("rejects a host carrying a URL, userinfo, a path, or whitespace", () => {
+    for (const host of [
+      "sftp://user:pw@host",
+      "user:pw@host",
+      "sftp.example.org/drop",
+      "sftp .example.org",
+    ]) {
+      const error = sftpFormError(validForm({ host }));
+      expect(error?.field).toBe("host");
+    }
+  });
+
+  test("accepts a bare hostname, an IPv4, and a bracketed IPv6 literal", () => {
+    for (const host of ["sftp.example.org", "10.0.0.5", "[2001:db8::1]"]) {
+      expect(sftpFormError(validForm({ host }))).toBeUndefined();
+    }
+  });
+
   test("bounds an optional port", () => {
     expect(sftpFormError(validForm({ port: "70000" }))?.field).toBe("port");
     expect(sftpFormError(validForm({ port: "-1" }))?.field).toBe("port");

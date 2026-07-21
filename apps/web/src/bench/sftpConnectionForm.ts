@@ -77,6 +77,15 @@ export interface SftpFormError {
 // cannot drift), re-run server-side on every PUT.
 const SIGNING_FINGERPRINT_SHAPE = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
+/**
+ * A savable host is a bare server address: no userinfo (`@`), no scheme or path
+ * (`/`, which also rules out `://`), and no ASCII whitespace. A value carrying any
+ * of these is a URL fragment or login string and must never be minted verbatim
+ * into the partner-facing invitation endpoint; the server re-checks the same set.
+ * A bare hostname, an IPv4, and a bracketed IPv6 literal carry none of them.
+ */
+const HOST_DISALLOWED_CHAR = /[@/\t\n\v\f\r ]/;
+
 /** The connection fields a pasted `sftp://user@host:port/path` URL carries. */
 export interface ParsedSftpUrl {
   host: string;
@@ -145,6 +154,13 @@ export function sftpFormError(
 ): SftpFormError | undefined {
   if (values.host.trim() === "")
     return { field: "host", message: "Enter the SFTP server address." };
+  if (HOST_DISALLOWED_CHAR.test(values.host.trim()))
+    return {
+      field: "host",
+      message:
+        "Enter just the server address (like sftp.example.org) -- not a " +
+        "full URL or login details.",
+    };
   if (values.username.trim() === "")
     return {
       field: "username",
@@ -203,11 +219,11 @@ function fingerprintErrorFor(value: string): string | undefined {
   if (SIGNING_FINGERPRINT_SHAPE.test(fingerprint))
     return (
       "This looks like a signing fingerprint (43 characters, no prefix), not " +
-      "the server's host-key fingerprint. Host-key fingerprints start with " +
-      "SHA256: -- ask whoever runs the SFTP server for it."
+      "the server's identity fingerprint. A server identity fingerprint starts " +
+      "with SHA256: -- ask whoever runs the SFTP server for it."
     );
   return (
-    "Enter the server's host-key fingerprint in SHA256: form (SHA256: " +
+    "Enter the server's identity fingerprint in SHA256: form (SHA256: " +
     "followed by 43 characters)."
   );
 }

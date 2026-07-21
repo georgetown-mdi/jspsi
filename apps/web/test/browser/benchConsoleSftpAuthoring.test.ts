@@ -89,6 +89,9 @@ interface CapturedRequest {
 interface StubOptions {
   /** The initial sftp state the GET reports. */
   sftp?: unknown;
+  /** Force the PUT /api/jobs/sftp response status (e.g. 413) instead of
+   * authoring the connection. */
+  putStatus?: number;
 }
 
 /** The same-origin job API, stubbed at the global fetch seam. PUT /api/jobs/sftp
@@ -138,6 +141,10 @@ function stubJobApi(options: StubOptions = {}): {
       }
       if (url === "/api/jobs/sftp") {
         if (method === "PUT") {
+          if (options.putStatus !== undefined)
+            return Promise.resolve(
+              new Response(null, { status: options.putStatus }),
+            );
           const parsed = JSON.parse(
             typeof init?.body === "string" ? init.body : "{}",
           ) as { host?: string; port?: number; path?: string };
@@ -345,6 +352,68 @@ describe("console SFTP connection authoring", () => {
           request.url === "/api/jobs/sftp" && request.method === "PUT",
       ),
     ).toBe(false);
+  });
+
+  test("revealing the add form focuses the first field, with no edit note", async () => {
+    stubJobApi();
+    mount(createElement(InviterBench));
+    await reachReviewCreate();
+    await page.getByRole("button", { name: "Add connection" }).click();
+    await expect
+      .element(page.getByLabelText("SFTP server address"))
+      .toHaveFocus();
+    // The re-enter note is for the edit case only, not a fresh add.
+    expect(
+      page.getByText("never stored in the browser", { exact: false }).query(),
+    ).toBeNull();
+  });
+
+  test("editing an authored connection notes the re-entered fields", async () => {
+    stubJobApi({
+      sftp: {
+        configured: true,
+        bootPinned: false,
+        host: "sftp.example.gov",
+        port: 2222,
+      },
+    });
+    mount(createElement(InviterBench));
+    await reachReviewCreate();
+    await page.getByRole("button", { name: "Edit connection" }).click();
+    await expect
+      .element(page.getByText("never stored in the browser", { exact: false }))
+      .toBeInTheDocument();
+  });
+
+  test("an invalid port under collapsed Advanced surfaces on Save", async () => {
+    stubJobApi();
+    mount(createElement(InviterBench));
+    await reachReviewCreate();
+    await openAndFillForm();
+    // Open Advanced, enter an out-of-range port, then collapse it again.
+    await page.getByRole("button", { name: "Advanced" }).click();
+    await userEvent.fill(page.getByLabelText("Port"), "70000");
+    await page.getByRole("button", { name: "Hide advanced" }).click();
+    await page.getByRole("button", { name: "Save connection" }).click();
+    // Save reopens Advanced so the blocking port error is visible.
+    await expect
+      .element(page.getByText("Enter a port number between 0 and 65535"))
+      .toBeVisible();
+  });
+
+  test("a 413 shows the too-large message, not the reachability one", async () => {
+    stubJobApi({ putStatus: 413 });
+    mount(createElement(InviterBench));
+    await reachReviewCreate();
+    await openAndFillForm();
+    await userEvent.fill(
+      page.getByLabelText("File reference"),
+      "@/run/secrets/partner-key",
+    );
+    await page.getByRole("button", { name: "Save connection" }).click();
+    await expect
+      .element(page.getByText("The connection details are too large."))
+      .toBeInTheDocument();
   });
 
   test("the deliberate save-a-file alternative routes to the save surface", async () => {
