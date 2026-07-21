@@ -158,10 +158,10 @@ Authors the connection from a JSON body carrying the file-reference credential p
 | `port` | integer `0..65535` (optional) |
 | `username` | non-empty string (optional) |
 | `path` | non-empty string (optional) -- the remote shared directory |
-| `host_key_fingerprint` | a literal OpenSSH SHA256 fingerprint or a non-empty list of them (required); an `@path` reference is rejected, exactly as at boot |
-| `credential` | `{ "kind": "ref", "ref": "@/absolute/path", "cred_type": "password" \| "private_key" }` -- an `@path` reference tagged with which primary auth method it feeds. `kind` MUST be `"ref"`; any other kind is refused. `cred_type: "password"` maps the reference to the `password` field, `"private_key"` to `private_key`. |
-| `private_key_passphrase` | an `@path` reference (optional) |
-| `keyboard_interactive` | boolean (optional) |
+| `hostKeyFingerprint` | a literal OpenSSH SHA256 fingerprint or a non-empty list of them (required); an `@path` reference is rejected, exactly as at boot |
+| `credential` | `{ "kind": "ref", "ref": "@/absolute/path", "credType": "password" \| "private_key" }` -- an `@path` reference tagged with which primary auth method it feeds. `kind` MUST be `"ref"`; any other kind is refused. `credType: "password"` maps the reference to the `password` field, `"private_key"` to `private_key`. |
+| `privateKeyPassphrase` | an `@path` reference (optional) |
+| `keyboardInteractive` | boolean (optional) |
 
 The body is strict: an unknown key (a `provision`, `certificate`, `inbound_path`, or a bare inline credential field) fails validation. The tagged credential and the passphrase are folded into a server block and run through the SAME chain the boot loader uses -- the strict field allowlist, mandatory literal fingerprint, credential-`@path`-outside the data root and rendezvous directory (with realpath re-confinement), and the core-schema compose. A validation failure is a `400` whose body is `{ "error": "<field path>: <reason>" }` naming a field path only -- never a submitted value, credential reference, or secret. On success the response is the effective connection's credential-free projection (the same body `GET` returns).
 
