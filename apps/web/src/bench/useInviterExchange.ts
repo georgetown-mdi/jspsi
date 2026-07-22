@@ -244,6 +244,10 @@ export function useInviterExchange({
   outputs: RunOutputs | undefined;
   failure: RunFailure | undefined;
   warnings: ReadonlyArray<string>;
+  /** The appliance job id of the current server-job run, once created; undefined
+   * on a browser run and before the job exists. Drives the completed-run recurring
+   * hand-off panel. */
+  jobId: string | undefined;
   tryAgain: () => void;
   abandonRun: () => void;
 } {
@@ -251,6 +255,10 @@ export function useInviterExchange({
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [failure, setFailure] = useState<RunFailure>();
   const [warnings, setWarnings] = useState<Array<string>>([]);
+  // The current run's appliance job id as reactive state (the ref below drives the
+  // synchronous discard paths). Set on create, cleared when a run restarts or the
+  // invitation is discarded, so the recurring hand-off panel reads only the live run.
+  const [currentJobId, setCurrentJobId] = useState<string>();
 
   // The job API client used by the deliberate-discard paths (try again, start
   // over, run another): one instance per hook so the strand-recovery DELETEs ride
@@ -302,6 +310,7 @@ export function useInviterExchange({
     setOutputs(undefined);
     setFailure(undefined);
     setWarnings([]);
+    setCurrentJobId(undefined);
 
     // Output-generation half. The URLs the build creates are revoked when the
     // outputs are replaced or the bench unmounts (effect above); a throw
@@ -400,6 +409,7 @@ export function useInviterExchange({
         // to the appliance's run, and track it for the deliberate-discard paths.
         onJobCreated: (jobId) => {
           currentJobIdRef.current = jobId;
+          setCurrentJobId(jobId);
           writeAttachment({
             jobId,
             seat: "inviter",
@@ -471,6 +481,7 @@ export function useInviterExchange({
       setOutputs(undefined);
       setFailure(undefined);
       setWarnings([]);
+      setCurrentJobId(undefined);
       return;
     }
     startRef.current(invitation);
@@ -529,5 +540,13 @@ export function useInviterExchange({
     void discardServerJob(jobApiClient, jobId);
   }
 
-  return { run, outputs, failure, warnings, tryAgain, abandonRun };
+  return {
+    run,
+    outputs,
+    failure,
+    warnings,
+    jobId: currentJobId,
+    tryAgain,
+    abandonRun,
+  };
 }

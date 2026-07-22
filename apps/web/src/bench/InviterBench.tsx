@@ -310,7 +310,7 @@ export function InviterBench() {
   // for a saved exchange. A `server-job` run mode runs live too -- the console
   // appliance carries it out -- so it drives the hook exactly as `browser` does.
   const runsLive = chosenRunMode !== "save-file";
-  const { run, outputs, failure, warnings, tryAgain, abandonRun } =
+  const { run, outputs, failure, warnings, jobId, tryAgain, abandonRun } =
     useInviterExchange({
       invitation: runsLive ? invitation : undefined,
       inviterName: editor?.draft.identity ?? "",
@@ -1263,6 +1263,7 @@ export function InviterBench() {
               warnings={warnings}
               partnerAcceptsByCli={isCliTransport(transport)}
               serverJob={chosenRunMode === "server-job"}
+              jobId={jobId}
               onTryAgain={tryAgain}
               onStartOver={startOver}
               onAbandon={abandonRun}

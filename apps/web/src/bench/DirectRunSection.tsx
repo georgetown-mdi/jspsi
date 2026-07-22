@@ -12,6 +12,7 @@ import {
   SERVER_JOB_PEER_WINDOW_BODY,
   WithheldResultInset,
 } from "./BenchRunSurface";
+import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
 import { awaitingPartner } from "./exchangeRun";
 import styles from "./bench.module.css";
@@ -40,6 +41,7 @@ export function DirectRunSection({
   outputs,
   failure,
   warnings,
+  jobId,
   onTryAgain,
   onStartOver,
   onAbandon,
@@ -48,6 +50,9 @@ export function DirectRunSection({
   outputs: RunOutputs | undefined;
   failure: RunFailure | undefined;
   warnings: ReadonlyArray<string>;
+  /** The appliance job id of this run, once created. Threads the run's job to the
+   * recurring hand-off panel; undefined before the job exists. */
+  jobId: string | undefined;
   onTryAgain: () => void;
   onStartOver: () => void;
   /** Discard the current server-job exchange (cancel-if-running + DELETE), fired as
@@ -153,6 +158,7 @@ export function DirectRunSection({
           )}
         </>
       )}
+      {done && jobId !== undefined && <RecurringHandoff jobId={jobId} />}
       {(done || failure?.category === "output") && (
         <AnotherExchangeFoot onNavigate={onAbandon} confirmBeforeLeave />
       )}

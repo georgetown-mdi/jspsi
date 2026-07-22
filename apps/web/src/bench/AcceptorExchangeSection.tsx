@@ -15,6 +15,7 @@ import {
   SERVER_JOB_PEER_WINDOW_BODY,
   WithheldResultInset,
 } from "./BenchRunSurface";
+import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
 import styles from "./bench.module.css";
 
@@ -46,6 +47,7 @@ export function AcceptorExchangeSection({
   failure,
   warning,
   serverJob,
+  jobId,
   onTryAgain,
   onFixColumns,
   onAbandon,
@@ -62,6 +64,9 @@ export function AcceptorExchangeSection({
    * exchange while the tab stays open, so the keep-open callout names the running
    * exchange the tab is holding. */
   serverJob: boolean;
+  /** The appliance job id of a server-job accept, once created. Threads the run's
+   * job to the recurring hand-off panel; undefined on a browser accept. */
+  jobId: string | undefined;
   onTryAgain: () => void;
   /** Return to the confirm-columns step with every setting intact -- a prepare-time
    * config failure's recovery, since the acceptor fixes its own settings there. */
@@ -221,6 +226,9 @@ export function AcceptorExchangeSection({
             </>
           )}
         </>
+      )}
+      {phase === "done" && serverJob && jobId !== undefined && (
+        <RecurringHandoff jobId={jobId} />
       )}
       {(phase === "done" || failure?.category === "output") && (
         <AnotherExchangeFoot

@@ -16,6 +16,7 @@ import {
   SERVER_JOB_PEER_WINDOW_BODY,
   WithheldResultInset,
 } from "./BenchRunSurface";
+import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
 import styles from "./bench.module.css";
 
@@ -42,6 +43,7 @@ export function InviterExchangeSection({
   warnings,
   partnerAcceptsByCli,
   serverJob,
+  jobId,
   onTryAgain,
   onStartOver,
   onAbandon,
@@ -65,6 +67,9 @@ export function InviterExchangeSection({
    * while the tab stays open, so the keep-open callout names the running exchange
    * the tab is holding rather than a browser listener. */
   serverJob: boolean;
+  /** The appliance job id of a server-job run, once created. Threads the run's job
+   * to the recurring hand-off panel; undefined on a browser run. */
+  jobId: string | undefined;
   onTryAgain: () => void;
   onStartOver: () => void;
   /** Discard the current server-job exchange (cancel-if-running + DELETE), fired
@@ -243,6 +248,9 @@ export function InviterExchangeSection({
             </>
           )}
         </>
+      )}
+      {phase === "done" && serverJob && jobId !== undefined && (
+        <RecurringHandoff jobId={jobId} />
       )}
       {(phase === "done" || failure?.category === "output") && (
         <AnotherExchangeFoot

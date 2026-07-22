@@ -110,6 +110,7 @@ export function DirectExchangeBench() {
     failure,
     warnings,
     started,
+    jobId,
     start,
     tryAgain,
     reset,
@@ -283,6 +284,7 @@ export function DirectExchangeBench() {
             outputs={outputs}
             failure={failure}
             warnings={warnings}
+            jobId={jobId}
             onTryAgain={tryAgain}
             onStartOver={startOver}
             onAbandon={abandonRun}

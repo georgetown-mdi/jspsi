@@ -218,12 +218,20 @@ export function useAcceptorExchange({
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
   failure: RunFailure | undefined;
+  /** The appliance job id of the current server-job accept, once created; undefined
+   * on a browser accept and before the job exists. Drives the completed-run
+   * recurring hand-off panel. */
+  jobId: string | undefined;
   tryAgain: () => void;
   abandonRun: () => void;
 } {
   const [run, setRun] = useState<ExchangeRun>(() => initialRun("acceptor"));
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [failure, setFailure] = useState<RunFailure>();
+  // The current accept's appliance job id as reactive state (the ref below drives
+  // the synchronous discard paths). Set on create, cleared when the run restarts or
+  // the launch is discarded, so the recurring hand-off panel reads only the live run.
+  const [currentJobId, setCurrentJobId] = useState<string>();
 
   // The job API client the deliberate-discard paths use (try again, start over via
   // the run column's fresh-invitation link, back-to-columns), mirroring the
@@ -271,6 +279,7 @@ export function useAcceptorExchange({
     setRun(initialRun("acceptor"));
     setOutputs(undefined);
     setFailure(undefined);
+    setCurrentJobId(undefined);
 
     const { invitation, acceptorName, rawRows, columns, edits, inputSource } =
       current;
@@ -381,6 +390,7 @@ export function useAcceptorExchange({
         // to the appliance's run, and track it for the deliberate-discard paths.
         onJobCreated: (jobId) => {
           currentJobIdRef.current = jobId;
+          setCurrentJobId(jobId);
           writeAttachment({
             jobId,
             seat: "acceptor",
@@ -461,6 +471,7 @@ export function useAcceptorExchange({
       setRun(initialRun("acceptor"));
       setOutputs(undefined);
       setFailure(undefined);
+      setCurrentJobId(undefined);
       return;
     }
     startRef.current(launch);
@@ -518,5 +529,5 @@ export function useAcceptorExchange({
     void discardServerJob(jobApiClient, jobId);
   }
 
-  return { run, outputs, failure, tryAgain, abandonRun };
+  return { run, outputs, failure, jobId: currentJobId, tryAgain, abandonRun };
 }
