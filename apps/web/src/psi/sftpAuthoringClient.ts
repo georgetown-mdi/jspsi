@@ -12,13 +12,17 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
  * reaches them. Responses are validated defensively -- the appliance is trusted,
  * but a malformed body degrades to an honest error state rather than a crash.
  *
- * No credential VALUE ever rides these requests: an authoring body carries a
- * file-reference credential (a typed `@path` or a secrets-mount locator the server
- * resolves), never a secret, and the secrets browse reads no file bytes.
+ * The authoring body carries a credential source: a file-reference credential (a
+ * typed `@path` or a secrets-mount locator the server resolves) by default, or --
+ * as a de-emphasized fallback -- a pasted value the server materializes to a file
+ * on the appliance. Under the single-party-appliance trust model the value crosses
+ * only same-origin loopback on the operator's own machine. The secrets browse
+ * reads no file bytes.
  */
 
 /** The authoring request body a `PUT /api/jobs/sftp` carries. Mirrors the server's
- * wire contract; the credential is a file reference, never an inline value. */
+ * wire contract: a file-reference credential or a pasted value the server
+ * materializes to a file. */
 export type AuthoredSftpConnectionRequest = AuthoredSftpServerRequest;
 
 /** One entry in a secrets-mount listing: an admissible segment name and whether it

@@ -10,6 +10,10 @@ import {
 } from "@psilink/core";
 
 import { JOB_DATA_ROOT_ENV, JobApiConfigError } from "./gate";
+import {
+  materializeSftpCredential,
+  removeSftpCredentialFile,
+} from "./sftpScratch";
 import { resolveJobRendezvousDir } from "./jobRendezvous";
 import { resolveMountFile } from "./mountBrowse";
 
@@ -115,20 +119,38 @@ export interface AuthoredMountRefCredential {
 }
 
 /**
- * The credential an authoring request carries: either a typed `@path` reference
- * or a secrets-mount locator. Both resolve to an `@path` reference (never an
- * inline value) validated by the same containment chain the boot loader uses.
+ * A pasted credential value: the de-emphasized fallback for a credential that
+ * exists nowhere on the appliance as a file. Under the single-party-appliance
+ * trust model (a loopback-only browser on the operator's own machine) the value
+ * crossing loopback is on-host, so this is acceptable -- but the server never
+ * composes it as a value: it materializes it ONCE to a server-owned 0600 file at
+ * the container-internal scratch path, rewrites it to an `@path`, and runs the
+ * SAME containment chain the file-reference forms do. Tagged with which primary
+ * auth method it feeds.
  */
-export type AuthoredCredential =
-  AuthoredCredentialRef | AuthoredMountRefCredential;
+export interface AuthoredRawCredential {
+  kind: "raw";
+  value: string;
+  credType: SftpCredType;
+}
 
 /**
- * The `PUT /api/jobs/sftp` authoring body (file-reference credential path). It
- * carries the same connection material as a boot server block, but the credential
- * arrives as a tagged reference (typed `@path` or secrets-mount locator) rather
- * than a bare field, and the fingerprint is mandatory and literal exactly as at
- * boot. No inline credential value is representable: the credential is an `@path`
- * reference and `private_key_passphrase` is likewise an `@path`.
+ * The credential an authoring request carries: a typed `@path` reference, a
+ * secrets-mount locator, or a pasted value. All resolve to an `@path` reference
+ * (the pasted value only after materialization to a server-owned file) validated
+ * by the same containment chain the boot loader uses; no inline value ever
+ * reaches a composed job file.
+ */
+export type AuthoredCredential =
+  AuthoredCredentialRef | AuthoredMountRefCredential | AuthoredRawCredential;
+
+/**
+ * The `PUT /api/jobs/sftp` authoring body. It carries the same connection
+ * material as a boot server block, but the credential arrives tagged -- a typed
+ * `@path`, a secrets-mount locator, or a pasted value the server materializes to
+ * a file -- rather than as a bare field, and the fingerprint is mandatory and
+ * literal exactly as at boot. `private_key_passphrase` is always an `@path`
+ * reference, never a pasted value.
  */
 export interface AuthoredSftpServerRequest {
   host: string;
@@ -157,6 +179,15 @@ const mountRefCredentialSchema = z.strictObject({
   kind: z.literal("mountRef"),
   mount: z.literal("secrets"),
   subPath: z.array(z.string().min(1)).min(1),
+  credType: credTypeSchema,
+});
+
+// A pasted value. `value` is a non-empty string; a zod failure names the field
+// shape (never the submitted value), so a malformed raw credential 400 does not
+// echo the secret.
+const rawCredentialSchema = z.strictObject({
+  kind: z.literal("raw"),
+  value: z.string().min(1),
   credType: credTypeSchema,
 });
 
@@ -358,24 +389,41 @@ function validateServerEntry(
 }
 
 /**
+ * The outcome of validating a request-sourced authoring body: the resolved server
+ * entry and, when the credential was a PASTED value, the server-owned scratch file
+ * it was materialized to. The manager tracks that path to delete the file on
+ * clear, delete, or a re-author that replaces it -- a pasted secret must not
+ * outlive the connection it belongs to. Absent for a file-reference credential
+ * (`ref`/`mountRef`), whose file is the operator's own and is never touched.
+ */
+export interface ValidatedAuthoredSftpServer {
+  entry: JobSftpServerEntry;
+  materializedCredentialPath?: string;
+}
+
+/**
  * Validate a request-sourced authoring body ({@link AuthoredSftpServerRequest})
  * into a {@link JobSftpServerEntry}, applying the SAME rules the boot loader does
  * -- the strict field allowlist, mandatory literal fingerprint,
  * credential-must-be-an-`@path`-outside the data root and rendezvous mount, and
  * core-schema compose -- by folding the resolved credential into a server block
- * and running it through {@link validateServerEntry}. The credential is either a
- * typed `@path` reference or a secrets-mount locator resolved server-side against
- * `secretsDir`; both land as an `@path` that runs the same containment chain, so
- * a picker selection is held to identical rules and no browser-sent absolute path
- * is trusted. Every failure is a {@link JobApiConfigError} whose message names a
- * field path, never a submitted value or a resolved path.
+ * and running it through {@link validateServerEntry}. The credential is a typed
+ * `@path` reference, a secrets-mount locator resolved server-side against
+ * `secretsDir`, or a pasted value materialized to a server-owned 0600 file under
+ * `scratchDir`; all land as an `@path` that runs the same containment chain, so
+ * even a materialized secret is confirmed outside the data root and rendezvous
+ * mount on its realpath. A validation failure AFTER materialization deletes the
+ * just-written file before it throws, so a rejected paste leaves nothing at rest.
+ * Every failure is a {@link JobApiConfigError} whose message names a field path,
+ * never a submitted value, a resolved path, or a secret.
  */
 export function validateAuthoredSftpServer(
   rawBody: unknown,
   dataRoot: string,
   rendezvousDir: string | undefined,
   secretsDir?: string,
-): JobSftpServerEntry {
+  scratchDir?: string,
+): ValidatedAuthoredSftpServer {
   if (rawBody === null || typeof rawBody !== "object" || Array.isArray(rawBody))
     throw new JobApiConfigError(
       "connection must be a mapping of connection fields",
@@ -392,15 +440,19 @@ export function validateAuthoredSftpServer(
     );
   const body = parsed.data;
 
-  const credential = resolveAuthoredCredential(rawCredential, secretsDir);
+  const resolved = resolveAuthoredCredential(
+    rawCredential,
+    secretsDir,
+    scratchDir,
+  );
   const credentialField =
-    credential.credType === "password" ? "password" : "privateKey";
+    resolved.credential.credType === "password" ? "password" : "privateKey";
   const rawEntry: Record<string, unknown> = {
     host: body.host,
     ...(body.port !== undefined ? { port: body.port } : {}),
     ...(body.username !== undefined ? { username: body.username } : {}),
     ...(body.path !== undefined ? { path: body.path } : {}),
-    [credentialField]: credential.ref,
+    [credentialField]: resolved.credential.ref,
     ...(body.privateKeyPassphrase !== undefined
       ? { privateKeyPassphrase: body.privateKeyPassphrase }
       : {}),
@@ -409,10 +461,31 @@ export function validateAuthoredSftpServer(
       : {}),
     hostKeyFingerprint: body.hostKeyFingerprint,
   };
-  return validateServerEntry(
-    rawEntry,
-    credentialRefExclusions(dataRoot, rendezvousDir),
-  );
+  try {
+    const entry = validateServerEntry(
+      rawEntry,
+      credentialRefExclusions(dataRoot, rendezvousDir),
+    );
+    return resolved.materializedPath !== undefined
+      ? { entry, materializedCredentialPath: resolved.materializedPath }
+      : { entry };
+  } catch (error) {
+    if (resolved.materializedPath !== undefined)
+      removeSftpCredentialFile(resolved.materializedPath);
+    throw error;
+  }
+}
+
+/**
+ * A credential resolved to an `@path` reference, paired with the server-owned
+ * scratch file it was materialized to when (and only when) it arrived as a pasted
+ * value. The path lets the caller delete the file if a later validation step
+ * rejects the entry, and lets the manager delete it when the connection is
+ * cleared or replaced.
+ */
+interface ResolvedAuthoredCredential {
+  credential: AuthoredCredentialRef;
+  materializedPath?: string;
 }
 
 /**
@@ -422,15 +495,19 @@ export function validateAuthoredSftpServer(
  *   for a credential outside any listable mount).
  * - `kind: "mountRef"` -- a locator the operator picked in the secrets browser,
  *   resolved server-side against `secretsDir` and rewritten to `@<realpath>`.
+ * - `kind: "raw"` -- a pasted value, materialized ONCE to a server-owned 0600 file
+ *   under `scratchDir` and rewritten to `@<that file>`; the value is written and
+ *   dropped, never returned, logged, or placed in argv/env.
  * The rewritten reference then runs the SAME `assertCredentialRef` containment the
- * typed form does (outside-data-root/rendezvous plus realpath re-confinement).
- * Every failure names the credential field only -- never a subPath value, a
- * resolved absolute path, or a secret.
+ * typed form does (outside-data-root/rendezvous plus realpath re-confinement), so
+ * a materialized secret is confined identically. Every failure names the credential
+ * field only -- never a subPath value, a resolved absolute path, or a secret.
  */
 function resolveAuthoredCredential(
   rawCredential: unknown,
   secretsDir: string | undefined,
-): AuthoredCredentialRef {
+  scratchDir: string | undefined,
+): ResolvedAuthoredCredential {
   const kind =
     rawCredential !== null &&
     typeof rawCredential === "object" &&
@@ -444,7 +521,7 @@ function resolveAuthoredCredential(
       throw new JobApiConfigError(
         formatIssues(parsed.error.issues, "connection.credential"),
       );
-    return parsed.data;
+    return { credential: parsed.data };
   }
   if (kind === "mountRef") {
     const parsed = mountRefCredentialSchema.safeParse(rawCredential);
@@ -452,12 +529,53 @@ function resolveAuthoredCredential(
       throw new JobApiConfigError(
         formatIssues(parsed.error.issues, "connection.credential"),
       );
-    return resolveMountRefCredential(parsed.data, secretsDir);
+    return { credential: resolveMountRefCredential(parsed.data, secretsDir) };
+  }
+  if (kind === "raw") {
+    const parsed = rawCredentialSchema.safeParse(rawCredential);
+    if (!parsed.success)
+      throw new JobApiConfigError(
+        formatIssues(parsed.error.issues, "connection.credential"),
+      );
+    return materializeRawCredential(parsed.data, scratchDir);
   }
   throw new JobApiConfigError(
-    'connection.credential.kind must be "ref" or "mountRef"; only a ' +
-      "file-reference credential is accepted on this path",
+    'connection.credential.kind must be "ref", "mountRef", or "raw"',
   );
+}
+
+/**
+ * Materialize a pasted credential to a server-owned 0600 file under the scratch
+ * directory and rewrite it to an `@path`. The scratch directory is required: an
+ * appliance without it (the API disabled, or boot setup skipped) refuses a paste
+ * rather than composing an inline value. A write failure is swallowed into a
+ * generic error carrying neither the value nor the path.
+ */
+function materializeRawCredential(
+  credential: z.infer<typeof rawCredentialSchema>,
+  scratchDir: string | undefined,
+): ResolvedAuthoredCredential {
+  if (scratchDir === undefined)
+    throw new JobApiConfigError(
+      "connection.credential is a pasted value, which this appliance is not " +
+        "configured to accept",
+    );
+  let filePath: string;
+  try {
+    filePath = materializeSftpCredential(scratchDir, credential.value);
+  } catch {
+    throw new JobApiConfigError(
+      "connection.credential could not be written to the appliance",
+    );
+  }
+  return {
+    credential: {
+      kind: "ref",
+      ref: `@${filePath}`,
+      credType: credential.credType,
+    },
+    materializedPath: filePath,
+  };
 }
 
 /**

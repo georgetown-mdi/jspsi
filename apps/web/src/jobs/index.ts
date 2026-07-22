@@ -7,10 +7,14 @@ import {
   isJobApiEnabled,
   readJobApiConfig,
 } from "./gate";
+import { resolveJobRendezvousDir, useJobRendezvousDir } from "./jobRendezvous";
+import {
+  resolveSftpCredentialScratchDir,
+  setupSftpCredentialScratchDir,
+} from "./sftpScratch";
 import { JobManager } from "./jobManager";
 import { loadSftpServerFromEnv } from "./sftpServer";
 import { useJobInputDir } from "./workInputs";
-import { useJobRendezvousDir } from "./jobRendezvous";
 import { useJobSecretsDir } from "./jobSecrets";
 
 import type { JobApiConfig } from "./gate";
@@ -31,6 +35,7 @@ const log = getLogger("job-api");
 declare global {
   var jobManagerInstance: JobManager | undefined;
   var jobSftpServer: JobSftpServerEntry | undefined;
+  var jobSftpCredentialScratchDir: string | undefined;
 }
 
 /**
@@ -45,6 +50,32 @@ export function useSftpServer(
   env: NodeJS.ProcessEnv = process.env,
 ): JobSftpServerEntry | undefined {
   return (globalThis.jobSftpServer ??= loadSftpServerFromEnv(env));
+}
+
+/**
+ * Prepare the pasted-credential scratch directory at server startup when the job
+ * API is enabled, memoizing the resolved path for the lazy manager construction.
+ * Fail-closed: the setup asserts the directory resolves strictly outside every
+ * operator mount -- the data root, the rendezvous directory, the secrets mount,
+ * and the work-input directory (a misconfiguration refuses the boot) -- creates it
+ * owner-only, and sweeps any credential a prior run orphaned. A no-op when the API
+ * is disabled -- no manager is constructed, so no paste can be authored. The
+ * server entry calls this once at startup; a {@link JobApiConfigError} propagates
+ * and refuses startup.
+ */
+export function bootSftpCredentialScratchDir(
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  const config = readJobApiConfig(env);
+  if (!isJobApiEnabled(config)) return;
+  if (globalThis.jobSftpCredentialScratchDir !== undefined) return;
+  globalThis.jobSftpCredentialScratchDir = setupSftpCredentialScratchDir(
+    resolveSftpCredentialScratchDir(env),
+    config.dataRoot,
+    resolveJobRendezvousDir(env),
+    useJobSecretsDir(env),
+    useJobInputDir(env),
+  );
 }
 
 /**
@@ -85,12 +116,17 @@ export function useJobManager(
     const jobInputDir = useJobInputDir();
     const jobRendezvousDir = useJobRendezvousDir();
     const jobSecretsDir = useJobSecretsDir();
+    // The scratch dir is prepared at boot (bootSftpCredentialScratchDir); read the
+    // memoized path so a paste materializes there. Absent only if the boot setup
+    // did not run, in which case a paste is refused rather than composed inline.
+    const credentialScratchDir = globalThis.jobSftpCredentialScratchDir;
     globalThis.jobManagerInstance = new JobManager({
       dataRoot: config.dataRoot,
       ...(sftpServer !== undefined ? { sftpServer } : {}),
       ...(jobInputDir !== undefined ? { jobInputDir } : {}),
       ...(jobRendezvousDir !== undefined ? { jobRendezvousDir } : {}),
       ...(jobSecretsDir !== undefined ? { jobSecretsDir } : {}),
+      ...(credentialScratchDir !== undefined ? { credentialScratchDir } : {}),
     });
   }
   return globalThis.jobManagerInstance;

@@ -59,6 +59,7 @@ function makeManager(options: {
   jobInputDir?: string;
   jobRendezvousDir?: string;
   jobSecretsDir?: string;
+  credentialScratchDir?: string;
   recordJson?: string;
 }): JobManager {
   // The stub reads its scenario from the child environment; the driver's
@@ -99,6 +100,7 @@ function makeManager(options: {
     jobInputDir: options.jobInputDir,
     jobRendezvousDir: rendezvousDir,
     jobSecretsDir: options.jobSecretsDir,
+    credentialScratchDir: options.credentialScratchDir,
     childEnv,
   });
   managers.push(manager);
@@ -742,6 +744,117 @@ describe("the in-app authored sftp connection", () => {
       }),
     ).toThrow();
     expect(manager.sftpProjection()?.host).toBe("first.example");
+  });
+
+  /** A created scratch directory the manager materializes pasted credentials to. */
+  function scratchDir(): string {
+    const dir = tempDataRoot("cred-scratch");
+    roots.push(dir);
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  /** A raw-paste authoring body carrying a pasted credential value. */
+  function rawBody(value = "s3cret-password") {
+    return {
+      host: "authored.partner.example",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      credential: { kind: "raw", value, credType: "password" as const },
+    };
+  }
+
+  test("a pasted credential materializes to the scratch dir, projected credential-free", () => {
+    const scratch = scratchDir();
+    const manager = makeManager({ credentialScratchDir: scratch });
+    const projection = manager.authorSftpServer(rawBody());
+    // The projection carries only the locator -- never the value.
+    expect(projection).toEqual({ host: "authored.partner.example" });
+    // Exactly one materialized secret, owner-only, holding the pasted value.
+    const files = fs.readdirSync(scratch);
+    expect(files).toHaveLength(1);
+    const materialized = path.join(scratch, files[0]);
+    expect(fs.statSync(materialized).mode & 0o777).toBe(0o600);
+    expect(fs.readFileSync(materialized, "utf8")).toBe("s3cret-password");
+  });
+
+  test("clearing deletes the materialized pasted credential", () => {
+    const scratch = scratchDir();
+    const manager = makeManager({ credentialScratchDir: scratch });
+    manager.authorSftpServer(rawBody());
+    expect(fs.readdirSync(scratch)).toHaveLength(1);
+    manager.clearAuthoredSftpServer();
+    expect(fs.readdirSync(scratch)).toEqual([]);
+    expect(manager.sftpProjection()).toBeNull();
+  });
+
+  test("re-authoring deletes the prior pasted credential", () => {
+    const scratch = scratchDir();
+    const manager = makeManager({ credentialScratchDir: scratch });
+    manager.authorSftpServer(rawBody("first-secret"));
+    manager.authorSftpServer(rawBody("second-secret"));
+    // The prior scratch file is gone; only the new one remains.
+    const files = fs.readdirSync(scratch);
+    expect(files).toHaveLength(1);
+    expect(fs.readFileSync(path.join(scratch, files[0]), "utf8")).toBe(
+      "second-secret",
+    );
+  });
+
+  test("re-authoring with a file reference drops the prior pasted credential", () => {
+    const scratch = scratchDir();
+    const manager = makeManager({ credentialScratchDir: scratch });
+    manager.authorSftpServer(rawBody());
+    expect(fs.readdirSync(scratch)).toHaveLength(1);
+    // A file-reference re-author has no materialized secret; the prior one is swept.
+    manager.authorSftpServer(authoredBody("file.example"));
+    expect(fs.readdirSync(scratch)).toEqual([]);
+    expect(manager.sftpProjection()?.host).toBe("file.example");
+  });
+
+  test("deleting the exchange deletes the materialized pasted credential", async () => {
+    const scratch = scratchDir();
+    const manager = makeManager({
+      events: [RESULT_EVENT],
+      exitCode: 0,
+      credentialScratchDir: scratch,
+    });
+    manager.authorSftpServer(rawBody());
+    expect(fs.readdirSync(scratch)).toHaveLength(1);
+    const id = await manager.createJob(validSftpIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    await vi.waitFor(() => expect(record.terminal).not.toBeNull());
+    expect(await manager.deleteJob(id)).toBe(true);
+    expect(fs.readdirSync(scratch)).toEqual([]);
+    expect(manager.sftpProjection()).toBeNull();
+  });
+
+  test("a pasted credential composes into the sftp config as an @path, not a value", async () => {
+    const scratch = scratchDir();
+    const manager = makeManager({
+      events: [RESULT_EVENT],
+      exitCode: 0,
+      credentialScratchDir: scratch,
+    });
+    manager.authorSftpServer(rawBody("s3cret-in-config"));
+    const id = await manager.createJob(validSftpIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    expect(record.status).toBe("succeeded");
+    const configYaml = fs.readFileSync(
+      `${record.workdir}/psilink.yaml`,
+      "utf8",
+    );
+    // The composed config carries the @path reference, never the pasted value.
+    expect(configYaml).toContain("channel: sftp");
+    expect(configYaml).toContain(scratch);
+    expect(configYaml).not.toContain("s3cret-in-config");
+  });
+
+  test("a raw paste with no scratch dir configured is refused", () => {
+    const manager = makeManager({});
+    expect(() => manager.authorSftpServer(rawBody())).toThrow();
+    expect(manager.sftpProjection()).toBeNull();
   });
 });
 

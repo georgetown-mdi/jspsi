@@ -3,6 +3,8 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -43,12 +45,16 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
   let dataRoot: string | undefined;
   let rendezvousDir: string | undefined;
   let secretsDir: string | undefined;
+  let scratchDir: string | undefined;
   let port = 0;
 
   beforeAll(async () => {
     dataRoot = mkdtempSync(join(tmpdir(), "psilink-auth-data-"));
     rendezvousDir = mkdtempSync(join(tmpdir(), "psilink-auth-rdv-"));
     secretsDir = mkdtempSync(join(tmpdir(), "psilink-auth-secrets-"));
+    // The built server runs as an ordinary user here, so relocate the
+    // pasted-credential scratch dir off the root-owned default it uses in-image.
+    scratchDir = mkdtempSync(join(tmpdir(), "psilink-auth-cred-"));
     writeFileSync(join(secretsDir, "partner-password"), "s3cret\n");
     mkdirSync(join(secretsDir, ".ssh"));
     writeFileSync(join(secretsDir, ".ssh", "id_ed25519"), "PRIVATE\n");
@@ -63,6 +69,7 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
         JOB_DATA_ROOT: dataRoot,
         JOB_RENDEZVOUS_DIR: rendezvousDir,
         JOB_SECRETS_DIR: secretsDir,
+        JOB_SFTP_CREDENTIAL_DIR: scratchDir,
         JOB_CLI_BINARY: stubCli,
       },
     );
@@ -72,7 +79,7 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
 
   afterAll(async () => {
     await stopProdServer(child);
-    for (const dir of [dataRoot, rendezvousDir, secretsDir])
+    for (const dir of [dataRoot, rendezvousDir, secretsDir, scratchDir])
       if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
@@ -176,6 +183,48 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
     expect((await fetch(`${base}/sftp`, { method: "DELETE" })).status).toBe(
       204,
     );
+  });
+
+  test("a pasted value materializes to the scratch dir and projects credential-free", async () => {
+    if (scratchDir === undefined) throw new Error("fixtures not initialized");
+    const base = `http://127.0.0.1:${port}/api/jobs`;
+
+    const put = await fetch(`${base}/sftp`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        host: "pasted.partner.example",
+        hostKeyFingerprint: FINGERPRINT,
+        credential: {
+          kind: "raw",
+          value: "s3cret-pasted-password",
+          credType: "password",
+        },
+      }),
+    });
+    expect(put.status).toBe(200);
+    const projection = await put.text();
+    // Neither the pasted value nor an @path rides the response.
+    expect(projection).not.toContain("s3cret-pasted-password");
+    expect(projection).not.toContain("@");
+    expect(JSON.parse(projection)).toEqual({
+      configured: true,
+      bootPinned: false,
+      host: "pasted.partner.example",
+    });
+
+    // The value exists at rest ONLY as the scratch file, outside the data root.
+    const files = readdirSync(scratchDir);
+    expect(files).toHaveLength(1);
+    expect(readFileSync(join(scratchDir, files[0]), "utf8")).toBe(
+      "s3cret-pasted-password",
+    );
+
+    // DELETE forgets the connection and sweeps the materialized secret.
+    expect((await fetch(`${base}/sftp`, { method: "DELETE" })).status).toBe(
+      204,
+    );
+    expect(readdirSync(scratchDir)).toEqual([]);
   });
 
   test("a mountRef escaping the secrets mount is refused without echoing a path", async () => {

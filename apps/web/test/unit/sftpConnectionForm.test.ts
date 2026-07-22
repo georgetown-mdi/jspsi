@@ -149,6 +149,12 @@ describe("sftpFormError", () => {
     ).toBeUndefined();
   });
 
+  test("accepts a pasted value as the credential source", () => {
+    expect(
+      sftpFormError(validForm({ source: { kind: "raw", value: "hunter2" } })),
+    ).toBeUndefined();
+  });
+
   test("a private-key passphrase must be an @path when set", () => {
     expect(
       sftpFormError(
@@ -209,6 +215,17 @@ describe("buildAuthoringRequest", () => {
       credType: "private_key",
     });
     expect(body?.privateKeyPassphrase).toBe("@/run/secrets/id.pass");
+  });
+
+  test("builds a raw credential from a pasted value, untrimmed", () => {
+    const body = buildAuthoringRequest(
+      validForm({ source: { kind: "raw", value: "  spaced-secret  " } }),
+    );
+    expect(body?.credential).toEqual({
+      kind: "raw",
+      value: "  spaced-secret  ",
+      credType: "password",
+    });
   });
 
   test("omits an absent port, remote directory, and passphrase", () => {

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -65,6 +66,9 @@ afterEach(() => {
     undefined;
   (globalThis as { jobSecretsDirConfig?: unknown }).jobSecretsDirConfig =
     undefined;
+  (
+    globalThis as { jobSftpCredentialScratchDir?: unknown }
+  ).jobSftpCredentialScratchDir = undefined;
 });
 
 type Handlers = Record<
@@ -905,6 +909,82 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
     expect(composed).toContain("host: authored.partner.example");
     expect(composed).toContain(`@${ref}`);
     expect(composed).not.toContain("s3cret");
+  });
+
+  /** Boot the pasted-credential scratch directory the enabled API materializes to,
+   * registered for cleanup and reset by the suite afterEach. */
+  function scratchDir(): string {
+    const dir = tempDataRoot("routes-scratch");
+    roots.push(dir);
+    fs.mkdirSync(dir, { recursive: true });
+    (
+      globalThis as { jobSftpCredentialScratchDir?: string }
+    ).jobSftpCredentialScratchDir = dir;
+    return dir;
+  }
+
+  test("a pasted credential materializes and projects credential-free", async () => {
+    enableJobApi();
+    const scratch = scratchDir();
+    const put = await putSftp({
+      host: "authored.partner.example",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      credential: {
+        kind: "raw",
+        value: "s3cret-password",
+        credType: "password",
+      },
+    });
+    expect(put.status).toBe(200);
+    const body = await put.text();
+    // The pasted value never rides the response; the projection is locator-only.
+    expect(body).not.toContain("s3cret-password");
+    expect(body).not.toContain("@");
+    expect(JSON.parse(body)).toEqual({
+      configured: true,
+      bootPinned: false,
+      host: "authored.partner.example",
+    });
+    // The value exists at rest ONLY as the scratch file, owner-only.
+    const files = fs.readdirSync(scratch);
+    expect(files).toHaveLength(1);
+    expect(fs.readFileSync(path.join(scratch, files[0]), "utf8")).toBe(
+      "s3cret-password",
+    );
+  });
+
+  test("a malformed pasted credential is a 400 that never echoes the value", async () => {
+    enableJobApi();
+    scratchDir();
+    const response = await putSftp({
+      host: "authored.partner.example",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      credential: { kind: "raw", value: "", credType: "password" },
+    });
+    expect(response.status).toBe(400);
+    const text = await response.text();
+    expect(text).toContain("connection.credential");
+  });
+
+  test("DELETE of the connection sweeps the materialized pasted credential", async () => {
+    enableJobApi();
+    const scratch = scratchDir();
+    expect(
+      (
+        await putSftp({
+          host: "authored.partner.example",
+          hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+          credential: {
+            kind: "raw",
+            value: "s3cret",
+            credType: "password",
+          },
+        })
+      ).status,
+    ).toBe(200);
+    expect(fs.readdirSync(scratch)).toHaveLength(1);
+    expect((await deleteSftp()).status).toBe(204);
+    expect(fs.readdirSync(scratch)).toEqual([]);
   });
 });
 

@@ -20,6 +20,7 @@ import logLibrary from "loglevel";
 import { getLogger } from "@psilink/core";
 
 import {
+  bootSftpCredentialScratchDir,
   shutdownJobManager,
   useSftpServer,
   warnJobApiProfileMismatch,
@@ -65,6 +66,12 @@ const path = process.env.NITRO_UNIX_SOCKET;
 // JOB_SFTP_REMOTES variable) refuses to start rather than deferring the error to
 // the first sftp job request.
 useSftpServer();
+
+// Fail closed on the pasted-credential scratch directory: when the job API is
+// enabled, assert it resolves outside the data root and rendezvous mount, create
+// it owner-only, and sweep any credential a prior run orphaned. A no-op when the
+// API is disabled.
+bootSftpCredentialScratchDir();
 
 // Warn (non-fatal) when JOB_DATA_ROOT is set on a non-console build, so the job
 // API stays disabled: the app enables it only in a console build.

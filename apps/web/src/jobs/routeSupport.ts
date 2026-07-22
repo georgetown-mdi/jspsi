@@ -47,9 +47,10 @@ export const MAX_JOB_BODY_BYTES = 224 * 1024 ** 2;
 
 /**
  * The byte cap on a `PUT /api/jobs/sftp` authoring body: a small memory bound on
- * the streamed read. The body is a handful of connection fields plus an `@path`
- * credential reference -- no file content ever rides it -- so this stays tight;
- * an oversized body is a `413` before any parse.
+ * the streamed read. The body is a handful of connection fields plus a credential
+ * -- an `@path` reference, a mount locator, or a pasted value (a password or an
+ * SSH private key, both well under this cap) -- so this stays tight; an oversized
+ * body is a `413` before any parse.
  */
 export const MAX_SFTP_AUTHOR_BODY_BYTES = 64 * 1024;
 
