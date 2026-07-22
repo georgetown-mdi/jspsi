@@ -8,7 +8,6 @@ import {
   ExchangeBusyError,
   JobManager,
   JobRendezvousUnavailableError,
-  SftpServerBootPinnedError,
   SftpUnavailableError,
 } from "@jobs/jobManager";
 import { generateJobId, writeJobFile } from "@jobs/workdir";
@@ -18,7 +17,6 @@ import {
   STUB_CLI_PATH,
   TEST_HOST_KEY_FINGERPRINT,
   tempDataRoot,
-  testSftpServerEntry,
   validInputFileIntent,
   validIntent,
   validSftpIntent,
@@ -29,7 +27,6 @@ import {
 import type { BufferedEvent, JobRecord } from "@jobs/jobManager";
 import type { CliDriverHandlers } from "@jobs/cliDriver";
 import type { JobInputFileReference } from "@jobs/intent";
-import type { JobSftpServerEntry } from "@jobs/sftpServer";
 
 vi.mock("@jobs/workdir", { spy: true });
 
@@ -57,7 +54,6 @@ function makeManager(options: {
   ignoreSigint?: boolean;
   ignoreSigterm?: boolean;
   eventBufferCap?: number;
-  sftpServer?: JobSftpServerEntry;
   jobInputDir?: string;
   jobRendezvousDir?: string;
   jobSecretsDir?: string;
@@ -98,7 +94,6 @@ function makeManager(options: {
     cancelSigtermGraceMs: 40,
     cancelSigkillGraceMs: 40,
     eventBufferCap: options.eventBufferCap,
-    sftpServer: options.sftpServer,
     jobInputDir: options.jobInputDir,
     jobRendezvousDir: rendezvousDir,
     jobSecretsDir: options.jobSecretsDir,
@@ -118,15 +113,36 @@ function rendezvousRoot(): string {
   return dir;
 }
 
+/** Author a real file-reference SFTP connection on the manager so an sftp job can
+ * run, returning the credential's `@path`. The secret lives outside the data and
+ * rendezvous roots, so it composes cleanly. */
+function armSftpConnection(
+  manager: JobManager,
+  host = "sftp.example.org",
+): { credentialRef: string } {
+  const dir = tempDataRoot("armed-secret");
+  roots.push(dir);
+  fs.mkdirSync(dir, { recursive: true });
+  const secretPath = path.join(dir, "password");
+  fs.writeFileSync(secretPath, "s3cret\n");
+  manager.authorSftpServer({
+    host,
+    port: 2222,
+    username: "linkage",
+    path: "/exchange",
+    hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+    credential: { kind: "ref", ref: `@${secretPath}`, credType: "password" },
+  });
+  return { credentialRef: `@${secretPath}` };
+}
+
 /**
  * A manager whose spawn is stubbed to a child that reports "still running", so a
  * test can drive the terminal edge by hand -- the deterministic way to observe the
  * slot's release timing without racing a real child. The captured handlers are
  * exposed through the returned ref.
  */
-function makeStubSpawnManager(
-  options: { sftpServer?: JobSftpServerEntry } = {},
-): {
+function makeStubSpawnManager(): {
   manager: JobManager;
   handlersRef: { current: CliDriverHandlers | null };
 } {
@@ -141,9 +157,6 @@ function makeStubSpawnManager(
     dataRoot: root,
     binaryPath: STUB_CLI_PATH,
     jobRendezvousDir: rendezvousRoot(),
-    ...(options.sftpServer !== undefined
-      ? { sftpServer: options.sftpServer }
-      : {}),
   });
   managers.push(manager);
   return { manager, handlersRef };
@@ -463,9 +476,9 @@ describe("createJob failure cleanup", () => {
     const manager = makeManager({
       events: [RESULT_EVENT],
       exitCode: 0,
-      sftpServer: testSftpServerEntry(),
     });
     const root = roots[roots.length - 1];
+    armSftpConnection(manager);
     vi.mocked(writeJobFile).mockRejectedValueOnce(new Error("disk full"));
     await expect(manager.createJob(validSftpIntent())).rejects.toThrow(
       "disk full",
@@ -576,8 +589,8 @@ describe("sftp server resolution", () => {
     const manager = makeManager({
       events: [RESULT_EVENT],
       exitCode: 0,
-      sftpServer: testSftpServerEntry(),
     });
+    const { credentialRef } = armSftpConnection(manager);
     const id = await manager.createJob(validSftpIntent());
     const record = manager.getJob(id)!;
     await waitForTerminal(record);
@@ -588,9 +601,10 @@ describe("sftp server resolution", () => {
     );
     expect(configYaml).toContain("channel: sftp");
     expect(configYaml).toContain("host: sftp.example.org");
-    // The provisioned server's @path credential reference lands verbatim; no
+    // The authored connection's @path credential reference lands verbatim; no
     // secret byte reaches the composed config.
-    expect(configYaml).toContain("@/etc/psilink/prod-east-password");
+    expect(configYaml).toContain(credentialRef);
+    expect(configYaml).not.toContain("s3cret");
   });
 
   test("filedrop jobs are unaffected by an absent sftp server", async () => {
@@ -694,20 +708,6 @@ describe("the in-app authored sftp connection", () => {
       }),
     ).toThrow();
     expect(manager.sftpProjection()).toBeNull();
-  });
-
-  test("a boot server WINS: authoring is refused and the boot server projects", () => {
-    const manager = makeManager({ sftpServer: testSftpServerEntry() });
-    expect(manager.hasBootSftpServer()).toBe(true);
-    expect(() => manager.authorSftpServer(authoredBody())).toThrow(
-      SftpServerBootPinnedError,
-    );
-    // The projection is still the boot server, unchanged by the refused authoring.
-    expect(manager.sftpProjection()).toEqual({
-      host: "sftp.example.org",
-      port: 2222,
-      path: "/exchange",
-    });
   });
 
   test("clearing forgets the authored connection", () => {
@@ -866,10 +866,10 @@ describe("sftp job driven by a mounted work input", () => {
     const manager = makeManager({
       events: [RESULT_EVENT],
       exitCode: 0,
-      sftpServer: testSftpServerEntry(),
       jobInputDir: dir,
     });
     const root = roots[roots.length - 1];
+    armSftpConnection(manager);
     await expect(
       manager.createJob(
         validSftpIntent({
@@ -893,9 +893,9 @@ describe("sftp job driven by a mounted work input", () => {
     const manager = makeManager({
       events: [RESULT_EVENT],
       exitCode: 0,
-      sftpServer: testSftpServerEntry(),
       jobInputDir: dir,
     });
+    armSftpConnection(manager);
     const id = await manager.createJob(
       validSftpIntent({ inputCsv: undefined, inputFile: ref }),
     );
@@ -981,8 +981,8 @@ describe("zero-setup mode end-to-end via the stub CLI", () => {
     const manager = makeManager({
       events: [RESULT_EVENT],
       exitCode: 0,
-      sftpServer: testSftpServerEntry(),
     });
+    armSftpConnection(manager);
     const id = await manager.createJob(validZeroSetupSftpIntent());
     const record = manager.getJob(id)!;
     await waitForTerminal(record);
@@ -1006,7 +1006,8 @@ describe("zero-setup mode end-to-end via the stub CLI", () => {
       });
     const exSpy = vi.spyOn(cliDriver, "spawnExchangeJob");
 
-    const manager = makeManager({ sftpServer: testSftpServerEntry() });
+    const manager = makeManager({});
+    const { credentialRef } = armSftpConnection(manager);
     await manager.createJob(
       validZeroSetupSftpIntent({
         identity: "county-health",
@@ -1017,7 +1018,7 @@ describe("zero-setup mode end-to-end via the stub CLI", () => {
     expect(exSpy).not.toHaveBeenCalled();
     expect(captured).toHaveLength(1);
     const args = captured[0];
-    // The connection argv is the provisioned server's URL plus its @path
+    // The connection argv is the authored connection's URL plus its @path
     // credential and the mandatory pinned fingerprint -- no client contribution.
     expect(args.connectionArgs[0]).toBe(
       "sftp://sftp.example.org:2222/exchange",
@@ -1028,9 +1029,7 @@ describe("zero-setup mode end-to-end via the stub CLI", () => {
         token.startsWith("--server-host-key-fingerprint="),
       ),
     ).toBe(true);
-    expect(args.connectionArgs).toContain(
-      "--server-password=@/etc/psilink/prod-east-password",
-    );
+    expect(args.connectionArgs).toContain(`--server-password=${credentialRef}`);
     expect(args.identity).toBe("county-health");
     expect(args.linkageStrategy).toBe("single-pass");
 
@@ -1074,8 +1073,8 @@ describe("zero-setup mode end-to-end via the stub CLI", () => {
   test("a running zero-setup blocks an exchange create and vice versa", async () => {
     const manager = makeManager({
       delayMs: 5000,
-      sftpServer: testSftpServerEntry(),
     });
+    armSftpConnection(manager);
     const firstId = await manager.createJob(validZeroSetupIntent());
     const first = manager.getJob(firstId)!;
     await expect(manager.createJob(validIntent())).rejects.toThrow(
@@ -1093,8 +1092,8 @@ describe("the single exchange slot", () => {
   test("a running filedrop job rejects a second create of either channel", async () => {
     const manager = makeManager({
       delayMs: 5000,
-      sftpServer: testSftpServerEntry(),
     });
+    armSftpConnection(manager);
     const firstId = await manager.createJob(validIntent());
     const first = manager.getJob(firstId)!;
 
@@ -1112,8 +1111,8 @@ describe("the single exchange slot", () => {
   test("a running sftp job rejects a second create of either channel", async () => {
     const manager = makeManager({
       delayMs: 5000,
-      sftpServer: testSftpServerEntry(),
     });
+    armSftpConnection(manager);
     const firstId = await manager.createJob(validSftpIntent());
     const first = manager.getJob(firstId)!;
 

@@ -83,8 +83,8 @@ export function validSftpIntent(
   };
 }
 
-/** A boot-shape provisioned SFTP server entry: @path credential, pinned
- * fingerprint. */
+/** A sample SFTP server entry (an @path credential, a pinned fingerprint) for the
+ * compose/argv tests that take an entry directly. */
 export function testSftpServerEntry(): JobSftpServerEntry {
   return {
     host: "sftp.example.org",

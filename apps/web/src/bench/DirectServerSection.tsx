@@ -27,7 +27,6 @@ export function DirectServerSection({
   transport,
   onTransport,
   sftpConnection,
-  bootPinned,
   rendezvous,
   onAuthorConnection,
   onClearConnection,
@@ -36,10 +35,8 @@ export function DirectServerSection({
 }: {
   transport: DirectTransport;
   onTransport: (transport: DirectTransport) => void;
-  /** The appliance's effective SFTP connection (authored or boot-pinned), or null
-   * when none is set up yet. */
+  /** The appliance's authored SFTP connection, or null when none is set up yet. */
   sftpConnection: SftpConnectionProjection | null;
-  bootPinned: boolean;
   /** The appliance's rendezvous mount, or undefined before it resolves. */
   rendezvous: JobRendezvousConfig | undefined;
   onAuthorConnection: (connection: SftpConnectionProjection) => void;
@@ -85,7 +82,6 @@ export function DirectServerSection({
       {transport === "sftp" ? (
         <SftpConnectionCard
           connection={sftpConnection}
-          bootPinned={bootPinned}
           saveFilePreferred={false}
           offerSaveFile={false}
           onAuthored={onAuthorConnection}

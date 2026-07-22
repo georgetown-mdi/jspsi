@@ -6,43 +6,22 @@ import { z } from "zod";
 import {
   ConnectionConfigSchema,
   HOST_KEY_FINGERPRINT_REGEX,
-  parseSensitiveYaml,
 } from "@psilink/core";
 
 import { isBareSftpHost } from "@psi/sftpHost";
 
-import { JOB_DATA_ROOT_ENV, JobApiConfigError } from "./gate";
 import {
   materializeSftpCredential,
   removeSftpCredentialFile,
 } from "./sftpScratch";
-import { resolveJobRendezvousDir } from "./jobRendezvous";
+import { JobApiConfigError } from "./gate";
 import { resolveMountFile } from "./mountBrowse";
 
 /**
- * The environment variable naming the operator-provisioned SFTP server file (a
- * YAML document of shape `server: <server block>`). Loaded once at server
- * startup, fail-closed: a malformed block refuses to boot rather than surfacing
- * per-request.
- */
-export const JOB_SFTP_SERVER_ENV = "JOB_SFTP_SERVER";
-
-/**
- * The superseded environment variable that named a MULTI-remote table
- * (`remotes: { <name>: <server block> }`). The console conducts one exchange
- * and is not a store of named connections, so the table collapsed to the single
- * {@link JOB_SFTP_SERVER_ENV} block. A deployment that still sets this refuses
- * to boot with a migration message rather than silently ignoring it -- a
- * silently ignored variable would leave an operator believing SFTP is
- * provisioned.
- */
-export const LEGACY_JOB_SFTP_REMOTES_ENV = "JOB_SFTP_REMOTES";
-
-/**
- * The operator-provisioned SFTP server: the connection block the server -- never
+ * The operator-authored SFTP connection: the connection block the server -- never
  * the client -- contributes to a composed sftp job config. Credential fields
  * (`password`, `privateKey`, `privateKeyPassphrase`) hold only `@path` file
- * references; the loader rejects inline values, so no secret byte ever lives in
+ * references; validation rejects inline values, so no secret byte ever lives in
  * server memory -- the reference is resolved by the CLI child at exchange time.
  * `hostKeyFingerprint` is mandatory: an appliance-driven SFTP connection always
  * pins the server host key.
@@ -65,7 +44,7 @@ export interface JobSftpServerEntry {
  * blocks the appliance must never see: `provision` (whose auth block carries
  * inline HTTP credentials), the split `inbound_path`/`outbound_path` pair, and
  * the detected-but-rejected `certificate`/`known_hosts`. Any key outside this
- * list fails the boot with an error naming the key, so an operator cannot
+ * list fails validation with an error naming the key, so an operator cannot
  * smuggle -- or typo -- a field into the composed connection.
  */
 const jobSftpServerEntrySchema: z.ZodType<JobSftpServerEntry> = z.strictObject({
@@ -140,18 +119,17 @@ export interface AuthoredRawCredential {
  * The credential an authoring request carries: a typed `@path` reference, a
  * secrets-mount locator, or a pasted value. All resolve to an `@path` reference
  * (the pasted value only after materialization to a server-owned file) validated
- * by the same containment chain the boot loader uses; no inline value ever
- * reaches a composed job file.
+ * by the authoring containment chain; no inline value ever reaches a composed
+ * job file.
  */
 export type AuthoredCredential =
   AuthoredCredentialRef | AuthoredMountRefCredential | AuthoredRawCredential;
 
 /**
- * The `PUT /api/jobs/sftp` authoring body. It carries the same connection
- * material as a boot server block, but the credential arrives tagged -- a typed
- * `@path`, a secrets-mount locator, or a pasted value the server materializes to
- * a file -- rather than as a bare field, and the fingerprint is mandatory and
- * literal exactly as at boot. `private_key_passphrase` is always an `@path`
+ * The `PUT /api/jobs/sftp` authoring body. The credential arrives tagged -- a
+ * typed `@path`, a secrets-mount locator, or a pasted value the server
+ * materializes to a file -- rather than as a bare field, and the fingerprint is
+ * mandatory and literal. `private_key_passphrase` is always an `@path`
  * reference, never a pasted value.
  */
 export interface AuthoredSftpServerRequest {
@@ -212,107 +190,6 @@ const authoredConnectionFieldsSchema = z.strictObject({
 });
 
 /**
- * Load and validate the SFTP server file at `filePath`. Every failure is a
- * {@link JobApiConfigError} whose message names the offending field path (never
- * a field value), fail-closed at startup. `dataRoot` is the job data root the
- * `@path` credential references are checked against: a reference resolving under
- * it would let a job's own workdir feed the next job's credentials. `rendezvousDir`,
- * when supplied, is excluded the same way -- a partner with sync write access to
- * the rendezvous mount could otherwise plant a credential file there.
- */
-export function loadSftpServer(
-  filePath: string,
-  dataRoot: string,
-  rendezvousDir?: string,
-): JobSftpServerEntry {
-  let source: string;
-  try {
-    source = fs.readFileSync(filePath, "utf8");
-  } catch (error) {
-    const code =
-      error instanceof Error && "code" in error
-        ? String((error as NodeJS.ErrnoException).code)
-        : "unreadable";
-    throw new JobApiConfigError(
-      `${JOB_SFTP_SERVER_ENV} names an sftp server file that cannot be read ` +
-        `(${filePath}: ${code})`,
-    );
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = parseSensitiveYaml(
-      source,
-      `the ${JOB_SFTP_SERVER_ENV} sftp server file`,
-    );
-  } catch (error) {
-    throw new JobApiConfigError(
-      error instanceof Error
-        ? error.message
-        : `the ${JOB_SFTP_SERVER_ENV} sftp server file could not be parsed`,
-    );
-  }
-
-  const rawEntry = serverBlockOf(parsed);
-  return validateServerEntry(
-    rawEntry,
-    credentialRefExclusions(dataRoot, rendezvousDir),
-  );
-}
-
-/**
- * Read {@link JOB_SFTP_SERVER_ENV} and load the server block it names, or
- * undefined when it is unset. Setting it without {@link JOB_DATA_ROOT_ENV} is
- * itself a configuration error: the server block exists only for the job API,
- * which the data root enables, so a block on a disabled API is an operator
- * mistake to surface at boot, not silently ignore. The superseded multi-remote
- * variable {@link LEGACY_JOB_SFTP_REMOTES_ENV}, if set, refuses the boot with a
- * migration message rather than being ignored.
- */
-export function loadSftpServerFromEnv(
-  env: NodeJS.ProcessEnv = process.env,
-): JobSftpServerEntry | undefined {
-  if ((env[LEGACY_JOB_SFTP_REMOTES_ENV] ?? "").trim().length > 0)
-    throw new JobApiConfigError(
-      `${LEGACY_JOB_SFTP_REMOTES_ENV} is no longer supported; the console ` +
-        `provisions a single SFTP server. Set ${JOB_SFTP_SERVER_ENV} to a ` +
-        "YAML file of shape `server: <server block>` (one server, the same " +
-        "fields a table entry carried) instead.",
-    );
-  const serverPath = (env[JOB_SFTP_SERVER_ENV] ?? "").trim();
-  if (serverPath.length === 0) return undefined;
-  const dataRoot = (env[JOB_DATA_ROOT_ENV] ?? "").trim();
-  if (dataRoot.length === 0)
-    throw new JobApiConfigError(
-      `${JOB_SFTP_SERVER_ENV} is set but ${JOB_DATA_ROOT_ENV} is not; the ` +
-        "provisioned SFTP server serves only the job API, which the data " +
-        "root enables. Set both or neither.",
-    );
-  return loadSftpServer(serverPath, dataRoot, resolveJobRendezvousDir(env));
-}
-
-/** Extract the top-level `server` block, rejecting any other document shape. */
-function serverBlockOf(parsed: unknown): unknown {
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
-    throw new JobApiConfigError(
-      "the sftp server file must be a YAML mapping with a single top-level " +
-        "server key",
-    );
-  for (const key of Object.keys(parsed))
-    if (key !== "server")
-      throw new JobApiConfigError(
-        `the sftp server file carries an unrecognized top-level key "${key}"; ` +
-          "only server is accepted",
-      );
-  const server = (parsed as { server?: unknown }).server;
-  if (server === null || server === undefined)
-    throw new JobApiConfigError(
-      "the sftp server file must define a top-level server block",
-    );
-  return server;
-}
-
-/**
  * A resolved directory a credential `@path` reference must stay OUTSIDE, paired
  * with the human label the rejection names.
  */
@@ -360,9 +237,8 @@ function canonicalizeIfPresent(dir: string): string {
 /**
  * Validate a raw SFTP server block into a {@link JobSftpServerEntry} against the
  * appliance's rules -- strict field allowlist, mandatory literal fingerprint,
- * credential-must-be-an-`@path`-outside-`exclusions`, core-schema compose. Shared
- * by the boot-time file loader and the request-sourced authoring path so the two
- * cannot diverge.
+ * credential-must-be-an-`@path`-outside-`exclusions`, core-schema compose. Used
+ * by the request-sourced authoring path.
  */
 function validateServerEntry(
   rawEntry: unknown,
@@ -405,11 +281,11 @@ export interface ValidatedAuthoredSftpServer {
 
 /**
  * Validate a request-sourced authoring body ({@link AuthoredSftpServerRequest})
- * into a {@link JobSftpServerEntry}, applying the SAME rules the boot loader does
- * -- the strict field allowlist, mandatory literal fingerprint,
- * credential-must-be-an-`@path`-outside the data root and rendezvous mount, and
- * core-schema compose -- by folding the resolved credential into a server block
- * and running it through {@link validateServerEntry}. The credential is a typed
+ * into a {@link JobSftpServerEntry} -- the strict field allowlist, mandatory
+ * literal fingerprint, credential-must-be-an-`@path`-outside the data root and
+ * rendezvous mount, and core-schema compose -- by folding the resolved credential
+ * into a server block and running it through {@link validateServerEntry}. The
+ * credential is a typed
  * `@path` reference, a secrets-mount locator resolved server-side against
  * `secretsDir`, or a pasted value materialized to a server-owned 0600 file under
  * `scratchDir`; all land as an `@path` that runs the same containment chain, so
@@ -665,8 +541,8 @@ function assertBareHost(host: string): void {
 /**
  * Every fingerprint entry must be a LITERAL in canonical OpenSSH SHA256 form.
  * An `@path` reference -- which the CLI's own loader would accept and resolve
- * -- is rejected here: the appliance pins host keys with values audited at
- * boot, not indirected through a file a later process resolves.
+ * -- is rejected here: the appliance pins host keys with values audited when
+ * authored, not indirected through a file a later process resolves.
  */
 function assertLiteralFingerprints(fingerprint: string | Array<string>): void {
   const entries = Array.isArray(fingerprint) ? fingerprint : [fingerprint];
@@ -754,7 +630,8 @@ function assertOutsideExclusions(
  * Run the entry through core's connection schema as `{channel: "sftp", server}`
  * so core's cross-field refines (one primary auth method, passphrase requires
  * a key, keyboard-interactive requires a password, fingerprint canonical form)
- * hold at boot, not first at exchange time inside the CLI child.
+ * hold when the connection is authored, not first at exchange time inside the
+ * CLI child.
  */
 function assertComposesThroughCoreSchema(entry: JobSftpServerEntry): void {
   const composed = ConnectionConfigSchema.safeParse({

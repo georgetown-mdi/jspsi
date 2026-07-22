@@ -90,7 +90,6 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
     // No connection yet.
     expect(await (await fetch(`${base}/sftp`)).json()).toEqual({
       configured: false,
-      bootPinned: false,
     });
 
     // Browse the mount root: a loose file and a dot-prefixed key directory.
@@ -133,7 +132,6 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
     expect(projection).not.toContain("SHA256");
     expect(JSON.parse(projection)).toEqual({
       configured: true,
-      bootPinned: false,
       host: "authored.partner.example",
       port: 2022,
       path: "/drop",
@@ -145,7 +143,6 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
     );
     expect(await (await fetch(`${base}/sftp`)).json()).toEqual({
       configured: false,
-      bootPinned: false,
     });
   });
 
@@ -176,7 +173,6 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
     expect(projection).not.toContain("@");
     expect(JSON.parse(projection)).toEqual({
       configured: true,
-      bootPinned: false,
       host: "picked.partner.example",
     });
 
@@ -209,7 +205,6 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
     expect(projection).not.toContain("@");
     expect(JSON.parse(projection)).toEqual({
       configured: true,
-      bootPinned: false,
       host: "pasted.partner.example",
     });
 

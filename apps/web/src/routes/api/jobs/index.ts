@@ -24,8 +24,8 @@ import { jobCreateIntentSchema } from "@jobs/intent";
  * carries neither terms nor secret (both parties infer terms from their files),
  * only an input source and bounded tuning. The server generates the job id, and for
  * an exchange composes the CLI config and key file (every path a server-chosen name
- * in the workdir; sftp connection material drawn only from the operator-provisioned
- * server), while a zero-setup drives the literal positional CLI form with the
+ * in the workdir; sftp connection material drawn only from the operator-authored
+ * connection), while a zero-setup drives the literal positional CLI form with the
  * connection on argv (server URL plus `--server-*` flags) and no config, key, or
  * `--save`. Either way no client string reaches argv or a file path.
  *
@@ -38,7 +38,7 @@ import { jobCreateIntentSchema } from "@jobs/intent";
  * an unparseable one a 400) before schema validation runs.
  *
  * The busy and unavailable rejections are EMPTY-bodied: an sftp intent with no
- * server provisioned (or a filedrop intent with no rendezvous directory) is 400,
+ * connection authored (or a filedrop intent with no rendezvous directory) is 400,
  * and a second concurrent exchange is 409.
  */
 export const Route = createFileRoute("/api/jobs/")({
@@ -64,8 +64,8 @@ export const Route = createFileRoute("/api/jobs/")({
         } catch (error) {
           if (error instanceof ExchangeBusyError) return jobEmptyResponse(409);
           // A mounted input that names no regular file, a filedrop intent with no
-          // rendezvous directory configured, or an sftp intent with no server
-          // provisioned is a 400 (the manager left no workdir behind).
+          // rendezvous directory configured, or an sftp intent with no connection
+          // authored is a 400 (the manager left no workdir behind).
           if (
             error instanceof JobInputNotFoundError ||
             error instanceof JobRendezvousUnavailableError ||

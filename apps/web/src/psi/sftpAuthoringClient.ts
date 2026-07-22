@@ -56,8 +56,6 @@ export type SecretsEntriesResult =
  *   projection.
  * - `invalid`: a `400` -- the body failed validation; `message` is the server's
  *   field-path-only reason (no submitted value or secret), safe to surface.
- * - `conflict`: a `409` -- a boot `JOB_SFTP_SERVER` is pinned, so authoring is
- *   refused (it wins).
  * - `tooLarge`: a `413` -- the request body exceeded the appliance's size limit,
  *   a distinct cause from an unreachable appliance.
  * - `error`: another non-2xx, a network fault, or a malformed success body.
@@ -65,7 +63,6 @@ export type SecretsEntriesResult =
 export type PutSftpConnectionResult =
   | { kind: "ok"; connection: SftpConnectionProjection }
   | { kind: "invalid"; message: string }
-  | { kind: "conflict" }
   | { kind: "tooLarge" }
   | { kind: "error" };
 
@@ -149,8 +146,8 @@ export async function fetchSecretsEntries(
 }
 
 /** Author the SFTP connection through `PUT /api/jobs/sftp`. Distinguishes a
- * validation rejection (a surfaceable field message), a boot-pinned conflict, and
- * a transport/other error, so the form can name what to fix. */
+ * validation rejection (a surfaceable field message) from a transport/other
+ * error, so the form can name what to fix. */
 export async function putSftpConnection(
   body: AuthoredSftpConnectionRequest,
   fetchImpl: typeof fetch = fetch,
@@ -171,7 +168,6 @@ export async function putSftpConnection(
     );
     return connection === null ? { kind: "error" } : { kind: "ok", connection };
   }
-  if (response.status === 409) return { kind: "conflict" };
   if (response.status === 413) return { kind: "tooLarge" };
   if (response.status === 400)
     return {
@@ -182,8 +178,8 @@ export async function putSftpConnection(
 }
 
 /** Clear the in-app authored connection through `DELETE /api/jobs/sftp`. The
- * caller treats any resolution as done: a boot server is unaffected and a
- * re-fetch reconciles the effective connection. */
+ * caller treats any resolution as done: a re-fetch reconciles the effective
+ * connection. */
 export async function deleteSftpConnection(
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {

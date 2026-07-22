@@ -113,11 +113,9 @@ export function SftpAuthoringForm({
     setSubmitError(
       result.kind === "invalid"
         ? result.message
-        : result.kind === "conflict"
-          ? "A connection is already provisioned on this appliance, so it cannot be changed here."
-          : result.kind === "tooLarge"
-            ? "The connection details are too large."
-            : "The connection could not be saved. Check that the appliance is reachable, then try again.",
+        : result.kind === "tooLarge"
+          ? "The connection details are too large."
+          : "The connection could not be saved. Check that the appliance is reachable, then try again.",
     );
   }
 

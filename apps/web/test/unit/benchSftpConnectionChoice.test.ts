@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  sftpBootServerMismatch,
   sftpConnectionLabel,
   sftpEndpointForConnection,
 } from "@bench/sftpConnectionChoice";
@@ -53,52 +52,5 @@ describe("sftpConnectionLabel", () => {
     expect(sftpConnectionLabel({ host: "dr.example.gov" })).toBe(
       "dr.example.gov",
     );
-  });
-});
-
-describe("sftpBootServerMismatch", () => {
-  test("a different host is a mismatch", () => {
-    expect(
-      sftpBootServerMismatch(
-        { host: "sftp.partner.example", port: 2022, path: "/drop" },
-        { host: "boot.internal.example", port: 2022, path: "/drop" },
-      ),
-    ).toBe(true);
-  });
-
-  test("the same host (case-insensitive) with matching port and path does not warn", () => {
-    expect(
-      sftpBootServerMismatch(
-        { host: "SFTP.Partner.Example", port: 2022, path: "/drop" },
-        { host: "sftp.partner.example", port: 2022, path: "/drop" },
-      ),
-    ).toBe(false);
-  });
-
-  test("an omitted port matches the default 22 on either side", () => {
-    expect(sftpBootServerMismatch({ host: "h", port: 22 }, { host: "h" })).toBe(
-      false,
-    );
-    expect(sftpBootServerMismatch({ host: "h" }, { host: "h", port: 22 })).toBe(
-      false,
-    );
-  });
-
-  test("a different port or remote directory is a mismatch", () => {
-    expect(
-      sftpBootServerMismatch(
-        { host: "h", port: 22 },
-        { host: "h", port: 2222 },
-      ),
-    ).toBe(true);
-    expect(
-      sftpBootServerMismatch(
-        { host: "h", path: "/a" },
-        { host: "h", path: "/b" },
-      ),
-    ).toBe(true);
-    expect(
-      sftpBootServerMismatch({ host: "h", path: "/a" }, { host: "h" }),
-    ).toBe(true);
   });
 });

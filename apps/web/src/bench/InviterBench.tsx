@@ -233,10 +233,9 @@ export function InviterBench() {
   const [saveAlert, setSaveAlert] = useState<IntakeAlert>();
   // The console's effective SFTP connection, fetched once on a console build and
   // updated when the operator authors or clears one. Undefined before it resolves;
-  // its `connection` is null when none is effective, else the credential-free
-  // locator; `bootPinned` marks a deploy-time server (read-only). `sftpConfigured`
-  // (below) gates the SFTP transport, and the locator is authored into an sftp
-  // invitation's endpoint.
+  // its `connection` is null when none is authored, else the credential-free
+  // locator. `sftpConfigured` (below) gates the SFTP transport, and the locator is
+  // authored into an sftp invitation's endpoint.
   const [sftpInfo, setSftpInfo] = useState<SftpConnectionInfo>();
   // The operator's deliberate choice to run SFTP through their own command-line
   // tool (save-a-file) instead of authoring a connection here. Reset on a new file.
@@ -248,12 +247,12 @@ export function InviterBench() {
   const [demoActive, setDemoActive] = useState(false);
   const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
 
-  // Fetch the appliance's provisioned SFTP connection once on a console build; the
-  // server is boot-static, so one fetch per bench serves the session, and the
-  // default transport reads its presence (SFTP when provisioned, else the filedrop
-  // save-a-file card). The helper resolves to null on any failure or when none is
-  // provisioned, so Create then falls back to the save-file surface rather than
-  // arming a server-job run with no connection.
+  // Fetch the appliance's authored SFTP connection once on a console build; one
+  // fetch per bench serves the session, and the default transport reads its
+  // presence (SFTP when authored, else the filedrop save-a-file card). The helper
+  // resolves to null on any failure or when none is authored, so Create then falls
+  // back to the save-file surface rather than arming a server-job run with no
+  // connection.
   useEffect(() => {
     if (!isConsoleBuild() || sftpInfo !== undefined) return;
     let cancelled = false;
@@ -283,7 +282,6 @@ export function InviterBench() {
   const sftpConnection =
     sftpInfo === undefined ? undefined : sftpInfo.connection;
   const sftpConfigured = sftpConnection != null;
-  const bootPinned = sftpInfo?.bootPinned === true;
   const rendezvousConfigured = rendezvous?.configured === true;
   const available = availableTransports(
     isConsoleBuild(),
@@ -371,14 +369,14 @@ export function InviterBench() {
   // to server-job. The connection lives in appliance memory, scoped to the one
   // exchange; the browser holds only the locator.
   function authorSftpConnection(connection: SftpConnectionProjection) {
-    setSftpInfo({ connection, bootPinned: false });
+    setSftpInfo({ connection });
     setSftpSaveFilePreferred(false);
   }
 
   // Clear the authored connection: forget it on the appliance and locally, so the
   // card returns to the authoring empty state.
   function clearSftpConnection() {
-    setSftpInfo({ connection: null, bootPinned: false });
+    setSftpInfo({ connection: null });
     void deleteSftpConnection();
   }
 
@@ -784,7 +782,7 @@ export function InviterBench() {
       return;
     }
     // An sftp server-job run authors the invitation's endpoint from the
-    // provisioned connection's locator -- the same connectionEndpoint seam the
+    // authored connection's locator -- the same connectionEndpoint seam the
     // save surface's free-text fields feed -- so the partner's CLI meets the
     // appliance where it will actually connect. A missing connection here means
     // the fetch had not resolved or reported none; refuse rather than mint a
@@ -1130,7 +1128,6 @@ export function InviterBench() {
                 problems={openProblems}
                 minting={minting}
                 sftpConnection={sftpConnection}
-                bootPinned={bootPinned}
                 sftpSaveFilePreferred={sftpSaveFilePreferred}
                 rendezvousConfigured={rendezvousConfigured}
                 onLifetime={(seconds) =>

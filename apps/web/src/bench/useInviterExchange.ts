@@ -235,7 +235,7 @@ export function useInviterExchange({
    * on the browser path, which re-parses the retained rows off the minted invitation
    * and never reads this. */
   inputSource: JobInputSource | undefined;
-  /** Whether the appliance has a provisioned SFTP server -- the selector's third
+  /** Whether the appliance has an authored SFTP connection -- the selector's third
    * input, threaded from the owner's fetch so this hook and the owner route
    * identically. */
   sftpConfigured: boolean;

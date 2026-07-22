@@ -43,28 +43,15 @@ import type { JobSftpServerEntry } from "./sftpServer";
 
 /**
  * Thrown by {@link JobManager.createJob} when an sftp intent arrives but no
- * SFTP server is provisioned (`JOB_SFTP_SERVER` unset). The console UI falls
- * back to the save-a-file surface in that state, so this is the server-side
- * backstop for an intent that reached the API anyway; the route maps it to a
- * 400, mirroring {@link JobRendezvousUnavailableError}.
+ * SFTP connection is authored. The console UI falls back to the save-a-file
+ * surface in that state, so this is the server-side backstop for an intent that
+ * reached the API anyway; the route maps it to a 400, mirroring
+ * {@link JobRendezvousUnavailableError}.
  */
 export class SftpUnavailableError extends Error {
   constructor() {
-    super("an sftp intent arrived but no server is provisioned");
+    super("an sftp intent arrived but no connection is authored");
     this.name = "SftpUnavailableError";
-  }
-}
-
-/**
- * Thrown by {@link JobManager.authorSftpServer} when a deploy-time
- * `JOB_SFTP_SERVER` is provisioned. The boot entry wins: the operator cannot
- * author a connection over one the deployment already pinned, so the route maps
- * this to a 409. Authoring is available only when no boot server is set.
- */
-export class SftpServerBootPinnedError extends Error {
-  constructor() {
-    super("a boot-provisioned sftp server is pinned; authoring is refused");
-    this.name = "SftpServerBootPinnedError";
   }
 }
 
@@ -190,13 +177,6 @@ export interface JobManagerOptions {
   cancelSigtermGraceMs?: number;
   cancelSigkillGraceMs?: number;
   /**
-   * The operator-provisioned SFTP server (loaded fail-closed at server startup;
-   * tests inject one directly). Absent when no server is configured, in which
-   * case every sftp intent fails with {@link SftpUnavailableError}. Never
-   * derived from a request.
-   */
-  sftpServer?: JobSftpServerEntry;
-  /**
    * The resolved work-input directory (from {@link useJobInputDir}), which falls back
    * to the data root when `JOB_INPUT_DIR` is unset. Absent only when neither resolves;
    * an intent naming an `inputFile` then fails with {@link JobInputNotFoundError}.
@@ -235,7 +215,7 @@ export interface JobManagerOptions {
 }
 
 /**
- * The public, credential-free projection of the provisioned SFTP server served
+ * The public, credential-free projection of the authored SFTP connection served
  * by `GET /api/jobs/sftp`: the locator fields an operator needs to recognize it
  * and the client needs to author an invitation endpoint from. Constructed
  * field-by-field from the entry -- never by spreading it -- so no credential
@@ -261,7 +241,6 @@ export class JobManager {
   private readonly cancelSigtermGraceMs: number;
   private readonly cancelSigkillGraceMs: number;
   private readonly childEnv: NodeJS.ProcessEnv | undefined;
-  private readonly sftpServer: JobSftpServerEntry | undefined;
   private readonly jobInputDir: string | undefined;
   private readonly jobRendezvousDir: string | undefined;
   private readonly jobSecretsDir: string | undefined;
@@ -270,8 +249,7 @@ export class JobManager {
    * The in-app authored SFTP connection, held in memory for the single exchange
    * only (never persisted; a restart forgets it). Set by {@link authorSftpServer},
    * cleared by {@link clearAuthoredSftpServer} and when the active exchange is
-   * deleted. Effective only when no boot {@link sftpServer} is provisioned -- the
-   * boot entry wins.
+   * deleted.
    */
   private authoredSftpServer: JobSftpServerEntry | undefined;
   /**
@@ -291,7 +269,6 @@ export class JobManager {
       options.cancelSigtermGraceMs ?? CANCEL_SIGTERM_GRACE_MS;
     this.cancelSigkillGraceMs =
       options.cancelSigkillGraceMs ?? CANCEL_SIGKILL_GRACE_MS;
-    this.sftpServer = options.sftpServer;
     this.jobInputDir = options.jobInputDir;
     this.jobRendezvousDir = options.jobRendezvousDir;
     this.jobSecretsDir = options.jobSecretsDir;
@@ -304,8 +281,8 @@ export class JobManager {
    * builds the workdir, writes the composed config, key, and input CSV under
    * fixed names, and spawns the CLI. Returns the new job's id.
    *
-   * The channel's provisioned resource is resolved synchronously first -- an sftp
-   * intent the single provisioned server, a filedrop intent a configured
+   * The channel's connection resource is resolved synchronously first -- an sftp
+   * intent the authored connection, a filedrop intent a configured
    * rendezvous directory -- so an unconfigured target is rejected before
    * the slot is claimed and with nothing on disk. The single slot is then claimed
    * with no await between the null check and the assignment, so two concurrent
@@ -321,9 +298,9 @@ export class JobManager {
 
     let serverEntry: JobSftpServerEntry | undefined;
     if (intent.channel === "sftp") {
-      const effective = this.effectiveSftpServer();
-      if (effective === undefined) throw new SftpUnavailableError();
-      serverEntry = effective;
+      if (this.authoredSftpServer === undefined)
+        throw new SftpUnavailableError();
+      serverEntry = this.authoredSftpServer;
     }
     if (intent.channel === "filedrop" && this.jobRendezvousDir === undefined)
       throw new JobRendezvousUnavailableError();
@@ -390,35 +367,18 @@ export class JobManager {
   }
 
   /**
-   * The SFTP connection an sftp job composes against: the boot-provisioned server
-   * when set (it wins), else the in-app authored connection, else undefined. Read
-   * by {@link createJob}'s sftp arm and {@link sftpProjection}.
-   */
-  private effectiveSftpServer(): JobSftpServerEntry | undefined {
-    return this.sftpServer ?? this.authoredSftpServer;
-  }
-
-  /** Whether a deploy-time boot server is provisioned, so authoring is refused. */
-  hasBootSftpServer(): boolean {
-    return this.sftpServer !== undefined;
-  }
-
-  /**
    * Validate and hold an in-app authored SFTP connection for the single exchange.
-   * Refuses when a boot server is provisioned ({@link SftpServerBootPinnedError}):
-   * the deploy-time entry wins. Validation is the SAME chain the boot loader runs
-   * (via {@link validateAuthoredSftpServer}), so a request-sourced connection is
-   * held to identical rules -- literal fingerprint, credential-`@path` outside the
-   * data root and rendezvous mount, strict allowlist, core-schema compose. A
-   * validation failure throws before the slot is touched, so a rejected body never
-   * replaces a previously authored connection. A `mountRef` credential locator is
-   * resolved against the secrets mount here, and a `raw` (pasted) credential is
+   * Validation runs {@link validateAuthoredSftpServer}, so a request-sourced
+   * connection is held to strict rules -- literal fingerprint, credential-`@path`
+   * that resolves, strict allowlist, core-schema compose. A validation failure
+   * throws before the slot is touched, so a rejected body never replaces a
+   * previously authored connection. A `mountRef` credential locator is resolved
+   * against the secrets mount here, and a `raw` (pasted) credential is
    * materialized to the server-owned scratch file, so the browser sends only the
    * picked segments or the value and never a container-absolute path. Returns the
    * credential-free projection of the now-effective connection.
    */
   authorSftpServer(rawBody: unknown): SftpConnectionProjection {
-    if (this.sftpServer !== undefined) throw new SftpServerBootPinnedError();
     const result = validateAuthoredSftpServer(
       rawBody,
       this.dataRoot,
@@ -435,8 +395,7 @@ export class JobManager {
   }
 
   /** Forget the in-app authored SFTP connection, deleting any materialized pasted
-   * credential. Idempotent; a no-op when a boot server is pinned (there is nothing
-   * authored to clear). */
+   * credential. Idempotent. */
   clearAuthoredSftpServer(): void {
     this.discardMaterializedCredential();
     this.authoredSftpServer = undefined;
@@ -453,13 +412,13 @@ export class JobManager {
   }
 
   /**
-   * The credential-free projection of the effective SFTP server for
-   * `GET /api/jobs/sftp`, or null when none is effective. Explicitly mapped
+   * The credential-free projection of the authored SFTP connection for
+   * `GET /api/jobs/sftp`, or null when none is authored. Explicitly mapped
    * field-by-field (never a spread) so only {host, port, path} can ever cross
    * the response boundary.
    */
   sftpProjection(): SftpConnectionProjection | null {
-    const entry = this.effectiveSftpServer();
+    const entry = this.authoredSftpServer;
     if (entry === undefined) return null;
     const projection: SftpConnectionProjection = { host: entry.host };
     if (entry.port !== undefined) projection.port = entry.port;
@@ -578,7 +537,7 @@ export class JobManager {
    * `$0` form (URL plus, for sftp, `--server-*` flags), with no `--config-file`,
    * no `--key-file`, and never `--save`. The connection argv for a zero-setup run
    * is built here from the same server-side resources the exchange config draws on
-   * -- the provisioned SFTP server, or the configured rendezvous directory -- so a
+   * -- the authored SFTP connection, or the configured rendezvous directory -- so a
    * missing one is a caller bug surfaced as a hard error, not a silent fallback.
    */
   private spawnForMode(
@@ -630,7 +589,7 @@ export class JobManager {
 
   /**
    * The connection portion of a zero-setup CLI argv for the intent's channel: the
-   * `sftp://` URL and `--server-*` flags from the provisioned server, or the
+   * `sftp://` URL and `--server-*` flags from the authored connection, or the
    * `file://` rendezvous locator. Each arm requires the resource `createJob`
    * already resolved, so a missing one is a caller bug surfaced as a hard error.
    */
@@ -1012,7 +971,7 @@ function liveJobView(record: JobRecord): JobView {
 /**
  * Compose the CLI config document for the intent's channel: filedrop rendezvous in
  * the operator-configured rendezvous mount; sftp rendezvous at the
- * operator-provisioned server. Each arm requires the resource `createJob` already
+ * operator-authored connection. Each arm requires the resource `createJob` already
  * resolved -- the sftp server entry, the filedrop rendezvous directory -- so a
  * missing one here is a caller bug surfaced as a hard error, not a silent fallback.
  */

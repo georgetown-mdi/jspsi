@@ -1271,7 +1271,7 @@ describe("fetchSftpConnection", () => {
       );
   }
 
-  const none = { connection: null, bootPinned: false };
+  const none = { connection: null };
 
   test("returns the validated projection, optional fields preserved", async () => {
     await expect(
@@ -1285,7 +1285,6 @@ describe("fetchSftpConnection", () => {
       ),
     ).resolves.toEqual({
       connection: { host: "sftp.example.gov", port: 2222, path: "/x" },
-      bootPinned: false,
     });
     await expect(
       fetchSftpConnection(
@@ -1293,26 +1292,7 @@ describe("fetchSftpConnection", () => {
       ),
     ).resolves.toEqual({
       connection: { host: "dr.example.gov" },
-      bootPinned: false,
     });
-  });
-
-  test("a boot-provisioned connection carries bootPinned true", async () => {
-    await expect(
-      fetchSftpConnection(
-        jsonResponse({ configured: true, host: "h", bootPinned: true }),
-      ),
-    ).resolves.toEqual({ connection: { host: "h" }, bootPinned: true });
-  });
-
-  test("bootPinned is dropped when no connection is present", async () => {
-    // A contradictory { configured: false, bootPinned: true } (never emitted by
-    // the server) must not present as a read-only nothing.
-    await expect(
-      fetchSftpConnection(
-        jsonResponse({ configured: false, bootPinned: true }),
-      ),
-    ).resolves.toEqual(none);
   });
 
   test("GETs the sftp route", async () => {

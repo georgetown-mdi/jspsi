@@ -15,11 +15,10 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
  * whichever connection is effective and, when the operator may author one, drives
  * `PUT /api/jobs/sftp` from a credential source.
  *
- * Three states:
- * - boot-pinned: a deploy-time `JOB_SFTP_SERVER` -- shown read-only (a `PUT` would
- *   409), no authoring offered.
+ * Two states:
  * - authored: an in-app connection -- shown with edit/clear affordances and the
- *   honest "Ready to try" label (authored, not yet verified against a real run).
+ *   honest "Ready to try" label (authored, not yet verified against a real run),
+ *   plus any non-blocking credential warnings.
  * - authoring required: no connection yet -- the empty state invites authoring, or
  *   a deliberate switch to save-a-file for the operator's own command-line tool.
  *
@@ -31,7 +30,6 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
  */
 export function SftpConnectionCard({
   connection,
-  bootPinned,
   saveFilePreferred,
   offerSaveFile = true,
   onAuthored,
@@ -40,7 +38,6 @@ export function SftpConnectionCard({
   onRunHere,
 }: {
   connection: SftpConnectionProjection | null;
-  bootPinned: boolean;
   /** The operator chose to run SFTP through their own command-line tool
    * (save-a-file) instead of authoring a connection here. */
   saveFilePreferred: boolean;
@@ -60,16 +57,6 @@ export function SftpConnectionCard({
   onRunHere?: () => void;
 }) {
   const [formOpen, setFormOpen] = useState(false);
-
-  if (connection !== null && bootPinned)
-    return (
-      <p className={`${styles.small} ${styles.sub}`}>
-        Runs through{" "}
-        <span className={styles.mono}>{sftpConnectionLabel(connection)}</span>,
-        provisioned on this appliance. Connection details and credentials stay
-        on this machine; the invitation carries only where to meet.
-      </p>
-    );
 
   if (connection !== null && !formOpen)
     return (

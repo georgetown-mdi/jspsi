@@ -15,8 +15,8 @@ export type ExchangeDriverSelection =
 /**
  * How the SFTP transport stands on a given build, distinct from today's binary
  * "configured or not":
- * - `runHere`: a boot-provisioned or authored-and-complete connection exists, so
- *   the exchange runs here as a server job.
+ * - `runHere`: an authored-and-complete connection exists, so the exchange runs
+ *   here as a server job.
  * - `authoringRequired`: a console build offers to run SFTP here but no connection
  *   is authored yet -- the card reveals the authoring form rather than silently
  *   degrading to save-a-file.

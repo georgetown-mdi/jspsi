@@ -101,7 +101,7 @@ function stubJobApi(options: StubOptions = {}): {
 } {
   const captured: Array<CapturedRequest> = [];
   const realFetch = window.fetch.bind(window);
-  let sftp: unknown = options.sftp ?? { configured: false, bootPinned: false };
+  let sftp: unknown = options.sftp ?? { configured: false };
 
   const jsonResponse = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), {
@@ -150,7 +150,6 @@ function stubJobApi(options: StubOptions = {}): {
           ) as { host?: string; port?: number; path?: string };
           const projection: Record<string, unknown> = {
             configured: true,
-            bootPinned: false,
             host: parsed.host,
           };
           if (parsed.port !== undefined) projection.port = parsed.port;
@@ -159,7 +158,7 @@ function stubJobApi(options: StubOptions = {}): {
           return Promise.resolve(jsonResponse(projection));
         }
         if (method === "DELETE") {
-          sftp = { configured: false, bootPinned: false };
+          sftp = { configured: false };
           return Promise.resolve(new Response(null, { status: 204 }));
         }
         return Promise.resolve(jsonResponse(sftp));
@@ -492,7 +491,6 @@ describe("console SFTP connection authoring", () => {
     stubJobApi({
       sftp: {
         configured: true,
-        bootPinned: false,
         host: "sftp.example.gov",
         port: 2222,
       },
@@ -556,29 +554,5 @@ describe("console SFTP connection authoring", () => {
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Save your exchange file");
-  });
-
-  test("a boot-provisioned server is read-only, no authoring offered", async () => {
-    stubJobApi({
-      sftp: {
-        configured: true,
-        bootPinned: true,
-        host: "sftp.example.gov",
-        port: 2222,
-      },
-    });
-    mount(createElement(InviterBench));
-    await reachReviewCreate();
-    await expect
-      .element(
-        page.getByText("provisioned on this appliance", { exact: false }),
-      )
-      .toBeInTheDocument();
-    expect(
-      page.getByRole("button", { name: "Add connection" }).query(),
-    ).toBeNull();
-    expect(
-      page.getByRole("button", { name: "Edit connection" }).query(),
-    ).toBeNull();
   });
 });

@@ -17,7 +17,6 @@ import { columnSamplesFromRows } from "@psi/columnSamples";
 import { createManagedExchange } from "@psi/managedExchangeStore";
 import { deleteSftpConnection } from "@psi/sftpAuthoringClient";
 import { fetchJobRendezvous } from "@psi/workInputClient";
-import { fetchSftpConnection } from "@psi/serverJobExchangeDriver";
 import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
@@ -245,11 +244,11 @@ export function AcceptorBench() {
   // Undefined before it resolves; a console filedrop accept is runnable only when
   // `configured` is true (the exchange runs against the mounted directory).
   const [rendezvousConfigured, setRendezvousConfigured] = useState<boolean>();
-  // The console's effective SFTP connection for an accepted SFTP endpoint, fetched
-  // once and updated when the operator authors or clears one. Undefined before it
-  // resolves; `connection` is null when none is authored, else the credential-free
-  // locator; `bootPinned` marks a deploy-time server (read-only). An accepted SFTP
-  // exchange is blocked from launch until this holds a connection.
+  // The console's effective SFTP connection for an accepted SFTP endpoint, held
+  // and updated when the operator authors or clears one. Undefined before the
+  // accept SFTP endpoint is known; `connection` is null when none is authored, else
+  // the credential-free locator. An accepted SFTP exchange is blocked from launch
+  // until this holds a connection.
   const [sftpInfo, setSftpInfo] = useState<SftpConnectionInfo>();
   const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
   // The launched exchange (the assembled edits + optional advisory); rendering the
@@ -338,36 +337,22 @@ export function AcceptorBench() {
             : {}),
         };
 
-  // Fetch the appliance's effective SFTP connection once, for a console SFTP accept.
-  // A boot-provisioned server is kept as-is (the operator confirms it names the
-  // partner's server); a prior in-app connection is NOT assumed valid for this
-  // partner, so a non-boot fetch starts unauthored and the operator authors fresh,
-  // pre-filled from THIS invitation's locator. On any failure the connection stays
-  // unauthored, so launch fails closed rather than arming a run with no destination.
-  // Keyed on the stable endpoint (not the per-render locator object), so the fetch
-  // fires once rather than on every render before it resolves.
+  // Start unauthored for a console SFTP accept: a prior in-app connection is NOT
+  // assumed valid for this partner, so the operator authors fresh, pre-filled from
+  // THIS invitation's locator. Keyed on the stable endpoint (not the per-render
+  // locator object), so it fires once rather than on every render.
   useEffect(() => {
     if (acceptSftpEndpoint === undefined || sftpInfo !== undefined) return;
-    let cancelled = false;
-    void fetchSftpConnection().then((info) => {
-      if (cancelled) return;
-      setSftpInfo(
-        info.bootPinned ? info : { connection: null, bootPinned: false },
-      );
-    });
-    return () => {
-      cancelled = true;
-    };
+    setSftpInfo({ connection: null });
   }, [acceptSftpEndpoint, sftpInfo]);
 
-  // The effective SFTP connection and whether it is a boot-provisioned server.
-  // `sftpConnection` is undefined while the fetch is pending, null when unauthored.
+  // The effective SFTP connection. `sftpConnection` is undefined while the accept
+  // SFTP endpoint is still unknown, null when unauthored.
   const sftpConnection =
     sftpInfo === undefined ? undefined : sftpInfo.connection;
-  const sftpBootPinned = sftpInfo?.bootPinned === true;
   // An accepted SFTP exchange is blocked from launch until a connection (authored,
-  // carrying the required host-key fingerprint, or boot-provisioned) is effective.
-  // True while the fetch is pending too, so launch stays fail-closed until then.
+  // carrying the required host-key fingerprint) is effective. True while the accept
+  // endpoint resolves too, so launch stays fail-closed until then.
   const sftpConnectionMissing =
     acceptSftpLocator !== undefined && sftpConnection == null;
 
@@ -944,12 +929,12 @@ export function AcceptorBench() {
   // material -- credential and host-key fingerprint -- lives in appliance memory,
   // scoped to this one exchange; the browser holds only the locator.
   const authorSftpConnection = (connection: SftpConnectionProjection) =>
-    setSftpInfo({ connection, bootPinned: false });
+    setSftpInfo({ connection });
 
   // Clear the authored connection: forget it on the appliance and locally, so the
   // card returns to the authoring prompt and launch re-blocks.
   const clearSftpConnection = () => {
-    setSftpInfo({ connection: null, bootPinned: false });
+    setSftpInfo({ connection: null });
     void deleteSftpConnection();
   };
 
@@ -1304,7 +1289,6 @@ export function AcceptorBench() {
                   <AcceptorSftpConnectionCard
                     locator={acceptSftpLocator}
                     connection={sftpConnection ?? null}
-                    bootPinned={sftpBootPinned}
                     onAuthored={authorSftpConnection}
                     onCleared={clearSftpConnection}
                   />

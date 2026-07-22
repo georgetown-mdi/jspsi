@@ -366,7 +366,7 @@ describe("console inviter transports and sample data", () => {
       .toBeInTheDocument();
   });
 
-  test("with a provisioned server the default transport is SFTP (run here)", async () => {
+  test("with an authored connection the default transport is SFTP (run here)", async () => {
     stubJobApi({
       sftp: { configured: true, host: "sftp.example.gov", port: 2222 },
     });
@@ -457,7 +457,7 @@ describe("console inviter mint and run", () => {
       page.getByText("Your browser is listening for your partner").query(),
     ).toBeNull();
 
-    // The minted code carries the provisioned connection's locator, never inline
+    // The minted code carries the authored connection's locator, never inline
     // content.
     await page.getByRole("button", { name: "Show full code" }).click();
     const encoded = (
