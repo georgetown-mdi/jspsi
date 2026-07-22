@@ -92,6 +92,9 @@ interface StubOptions {
   /** Force the PUT /api/jobs/sftp response status (e.g. 413) instead of
    * authoring the connection. */
   putStatus?: number;
+  /** Non-blocking credential warnings the PUT /api/jobs/sftp projection carries,
+   * as the server returns when a credential resolves inside an excluded dir. */
+  putWarnings?: Array<string>;
 }
 
 /** The same-origin job API, stubbed at the global fetch seam. PUT /api/jobs/sftp
@@ -154,6 +157,8 @@ function stubJobApi(options: StubOptions = {}): {
           };
           if (parsed.port !== undefined) projection.port = parsed.port;
           if (parsed.path !== undefined) projection.path = parsed.path;
+          if (options.putWarnings !== undefined)
+            projection.credentialWarnings = options.putWarnings;
           sftp = projection;
           return Promise.resolve(jsonResponse(projection));
         }
@@ -517,6 +522,30 @@ describe("console SFTP connection authoring", () => {
     await expect
       .element(page.getByText("Enter a port number between 0 and 65535"))
       .toBeVisible();
+  });
+
+  test("a credential warning renders below the authored connection", async () => {
+    stubJobApi({
+      putWarnings: [
+        "The password credential file is inside the job data root, which " +
+          "psilink writes to during the exchange.",
+      ],
+    });
+    mount(createElement(InviterBench));
+    await reachReviewCreate();
+    await openAndFillForm();
+    await userEvent.fill(
+      page.getByLabelText("File reference"),
+      "@/data/partner-key",
+    );
+    await page.getByRole("button", { name: "Save connection" }).click();
+    // The connection is authored (it runs), and the non-blocking warning shows.
+    await expect
+      .element(page.getByText("Credential file location"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("inside the job data root", { exact: false }))
+      .toBeInTheDocument();
   });
 
   test("a 413 shows the too-large message, not the reachability one", async () => {

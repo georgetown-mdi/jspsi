@@ -135,6 +135,8 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
       host: "authored.partner.example",
       port: 2022,
       path: "/drop",
+      // The credential lives in the separate secrets mount, so no warning.
+      credentialWarnings: [],
     });
 
     // DELETE forgets it.
@@ -174,6 +176,7 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
     expect(JSON.parse(projection)).toEqual({
       configured: true,
       host: "picked.partner.example",
+      credentialWarnings: [],
     });
 
     expect((await fetch(`${base}/sftp`, { method: "DELETE" })).status).toBe(
@@ -206,6 +209,7 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
     expect(JSON.parse(projection)).toEqual({
       configured: true,
       host: "pasted.partner.example",
+      credentialWarnings: [],
     });
 
     // The value exists at rest ONLY as the scratch file, outside the data root.
@@ -263,9 +267,11 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
     expect(text).not.toContain("user:pw");
   });
 
-  test("a credential ref under the data root is refused without echoing it", async () => {
+  test("a credential ref inside the data root warns but authors, never echoing it", async () => {
     if (dataRoot === undefined) throw new Error("fixtures not initialized");
+    mkdirSync(join(dataRoot, "planted"), { recursive: true });
     const ref = join(dataRoot, "planted", "pw");
+    writeFileSync(ref, "s3cret\n");
     const response = await fetch(`http://127.0.0.1:${port}/api/jobs/sftp`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -275,9 +281,15 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
         credential: { kind: "ref", ref: `@${ref}`, credType: "password" },
       }),
     });
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(200);
     const text = await response.text();
-    expect(text).toContain("data root");
+    // The warning names the field and the directory only, never the reference.
+    expect(text).not.toContain("@");
     expect(text).not.toContain(ref);
+    const parsed = JSON.parse(text) as { credentialWarnings?: Array<string> };
+    expect(parsed.credentialWarnings).toHaveLength(1);
+    expect(parsed.credentialWarnings?.[0]).toContain("data root");
+    // Clean up so the connection does not leak into a later test.
+    await fetch(`http://127.0.0.1:${port}/api/jobs/sftp`, { method: "DELETE" });
   });
 });

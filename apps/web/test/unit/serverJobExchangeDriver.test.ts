@@ -1284,14 +1284,40 @@ describe("fetchSftpConnection", () => {
         }),
       ),
     ).resolves.toEqual({
-      connection: { host: "sftp.example.gov", port: 2222, path: "/x" },
+      connection: {
+        host: "sftp.example.gov",
+        port: 2222,
+        path: "/x",
+        credentialWarnings: [],
+      },
     });
     await expect(
       fetchSftpConnection(
         jsonResponse({ configured: true, host: "dr.example.gov" }),
       ),
     ).resolves.toEqual({
-      connection: { host: "dr.example.gov" },
+      connection: { host: "dr.example.gov", credentialWarnings: [] },
+    });
+  });
+
+  test("parses credentialWarnings, dropping non-string entries", async () => {
+    await expect(
+      fetchSftpConnection(
+        jsonResponse({
+          configured: true,
+          host: "sftp.example.gov",
+          credentialWarnings: [
+            "a credential is in the mounted folder",
+            7,
+            null,
+          ],
+        }),
+      ),
+    ).resolves.toEqual({
+      connection: {
+        host: "sftp.example.gov",
+        credentialWarnings: ["a credential is in the mounted folder"],
+      },
     });
   });
 

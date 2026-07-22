@@ -217,14 +217,16 @@ export interface JobManagerOptions {
 /**
  * The public, credential-free projection of the authored SFTP connection served
  * by `GET /api/jobs/sftp`: the locator fields an operator needs to recognize it
- * and the client needs to author an invitation endpoint from. Constructed
- * field-by-field from the entry -- never by spreading it -- so no credential
- * reference, fingerprint, or future field can ride along.
+ * and the client needs to author an invitation endpoint from, plus any non-blocking
+ * credential warnings (each naming a field and a directory only, never a secret).
+ * Constructed field-by-field from the entry -- never by spreading it -- so no
+ * credential reference, fingerprint, or future field can ride along.
  */
 export interface SftpConnectionProjection {
   host: string;
   port?: number;
   path?: string;
+  credentialWarnings?: Array<string>;
 }
 
 /**
@@ -252,6 +254,13 @@ export class JobManager {
    * deleted.
    */
   private authoredSftpServer: JobSftpServerEntry | undefined;
+  /**
+   * The non-blocking credential warnings for the authored connection (each naming a
+   * field and a directory only), held alongside it and surfaced in the projection so
+   * both the PUT response and a later GET (console reload) carry them. Empty when no
+   * connection is authored or every credential resolves safely.
+   */
+  private authoredCredentialWarnings: Array<string> = [];
   /**
    * The server-owned scratch file the authored connection's PASTED credential was
    * materialized to, when it arrived that way. Tracked so it is deleted with the
@@ -390,15 +399,17 @@ export class JobManager {
     // materialized secret (if any) so a re-author never orphans a scratch file.
     this.discardMaterializedCredential();
     this.authoredSftpServer = result.entry;
+    this.authoredCredentialWarnings = result.credentialWarnings;
     this.authoredMaterializedCredentialPath = result.materializedCredentialPath;
     return this.sftpProjection()!;
   }
 
-  /** Forget the in-app authored SFTP connection, deleting any materialized pasted
-   * credential. Idempotent. */
+  /** Forget the in-app authored SFTP connection and its warnings, deleting any
+   * materialized pasted credential. Idempotent. */
   clearAuthoredSftpServer(): void {
     this.discardMaterializedCredential();
     this.authoredSftpServer = undefined;
+    this.authoredCredentialWarnings = [];
   }
 
   /** Delete the authored connection's materialized pasted credential, if it holds
@@ -423,6 +434,7 @@ export class JobManager {
     const projection: SftpConnectionProjection = { host: entry.host };
     if (entry.port !== undefined) projection.port = entry.port;
     if (entry.path !== undefined) projection.path = entry.path;
+    projection.credentialWarnings = this.authoredCredentialWarnings;
     return projection;
   }
 
@@ -885,10 +897,11 @@ export class JobManager {
       if (record.handle?.isRunning()) record.handle.signal("SIGKILL");
       slot.deleted = true;
       // The authored connection is scoped to this single exchange; deleting the
-      // exchange forgets it (and deletes any materialized pasted credential), so
-      // the next exchange starts from a clean slate.
+      // exchange forgets it and its warnings (and deletes any materialized pasted
+      // credential), so the next exchange starts from a clean slate.
       this.discardMaterializedCredential();
       this.authoredSftpServer = undefined;
+      this.authoredCredentialWarnings = [];
       const workdir = resolveWorkdir(this.dataRoot, id);
       if (workdir !== null) await removeWorkdir(workdir);
       this.maybeFreeSlot(record);

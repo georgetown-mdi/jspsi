@@ -5,6 +5,7 @@ import { Badge, Button, Group, Stack, Text } from "@mantine/core";
 import { sanitizeForDisplay } from "@psilink/core";
 
 import { SftpAuthoringForm } from "./SftpAuthoringForm";
+import { SftpCredentialWarnings } from "./SftpCredentialWarnings";
 import { sftpConnectionLabel } from "./sftpConnectionChoice";
 import { sftpFormFromLocator } from "./sftpConnectionForm";
 import styles from "./bench.module.css";
@@ -71,6 +72,9 @@ export function AcceptorSftpConnectionCard({
           checks the server against the fingerprint you gave and signs in then.
           Credentials stay on this machine.
         </Text>
+        <SftpCredentialWarnings
+          warnings={connection.credentialWarnings ?? []}
+        />
         <Group gap="sm">
           <Button size="xs" variant="default" onClick={() => setFormOpen(true)}>
             Edit connection

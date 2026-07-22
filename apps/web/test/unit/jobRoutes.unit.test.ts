@@ -710,12 +710,20 @@ describe("GET /api/jobs/sftp", () => {
 
     const item = JSON.parse(body) as Record<string, unknown>;
     for (const key of Object.keys(item))
-      expect(["configured", "host", "port", "path"]).toContain(key);
+      expect([
+        "configured",
+        "host",
+        "port",
+        "path",
+        "credentialWarnings",
+      ]).toContain(key);
     expect(item).toEqual({
       configured: true,
       host: "sftp.example.org",
       port: 2222,
       path: "/exchange",
+      // The armed credential lives outside the data root, so no warning.
+      credentialWarnings: [],
     });
   });
 
@@ -796,6 +804,7 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
       host: "authored.partner.example",
       port: 2022,
       path: "/drop",
+      credentialWarnings: [],
     });
 
     const get = await getSftp();
@@ -808,17 +817,24 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
       host: "authored.partner.example",
       port: 2022,
       path: "/drop",
+      credentialWarnings: [],
     });
   });
 
-  test("a credential ref under the data root is 400 and never echoes the ref", async () => {
+  test("a credential ref inside the data root warns but authors, never echoing the ref", async () => {
     const dataRoot = enableJobApi();
     const ref = `${dataRoot}/planted/pw`;
+    fs.mkdirSync(`${dataRoot}/planted`, { recursive: true });
+    fs.writeFileSync(ref, "s3cret\n");
     const response = await putSftp(authoredBody(ref));
-    expect(response.status).toBe(400);
-    const text = await response.text();
-    expect(text).toContain("data root");
-    expect(text).not.toContain(ref);
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    // The warning names the field and the directory only, never the reference.
+    expect(body).not.toContain("@");
+    expect(body).not.toContain(ref);
+    const parsed = JSON.parse(body) as { credentialWarnings?: Array<string> };
+    expect(parsed.credentialWarnings).toHaveLength(1);
+    expect(parsed.credentialWarnings?.[0]).toContain("data root");
   });
 
   test("a non-ref credential kind is a 400", async () => {
@@ -855,6 +871,7 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
     expect(JSON.parse(body)).toEqual({
       configured: true,
       host: "authored.partner.example",
+      credentialWarnings: [],
     });
   });
 
@@ -886,6 +903,7 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
       configured: true,
       host: "authored.partner.example",
       port: 2099,
+      credentialWarnings: [],
     });
   });
 
@@ -951,6 +969,7 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
     expect(JSON.parse(body)).toEqual({
       configured: true,
       host: "authored.partner.example",
+      credentialWarnings: [],
     });
     // The value exists at rest ONLY as the scratch file, owner-only.
     const files = fs.readdirSync(scratch);

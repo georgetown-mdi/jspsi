@@ -324,7 +324,9 @@ export async function fetchSftpConnection(
  * Validate the sftp response body into the credential-free projection, or null
  * when it reports `configured: false` or is malformed -- a partial or ill-formed
  * body fails closed rather than arming a run against a connection the operator did
- * not provision.
+ * not provision. The non-blocking `credentialWarnings` default to an empty array:
+ * a missing or malformed field reads as "no warnings" rather than dropping the
+ * connection (a warning is advisory, not load-bearing).
  *
  * @internal exported for the authoring client, which parses the same projection
  * off a `PUT /api/jobs/sftp` success body.
@@ -334,7 +336,10 @@ export function sftpConnectionProjectionOf(
 ): SftpConnectionProjection | null {
   if (body === null || typeof body !== "object" || Array.isArray(body))
     return null;
-  const { configured, host, port, path } = body as Record<string, unknown>;
+  const { configured, host, port, path, credentialWarnings } = body as Record<
+    string,
+    unknown
+  >;
   if (configured !== true) return null;
   if (typeof host !== "string" || host.length === 0) return null;
   if (
@@ -350,6 +355,11 @@ export function sftpConnectionProjectionOf(
   const connection: SftpConnectionProjection = { host };
   if (port !== undefined) connection.port = port;
   if (path !== undefined) connection.path = path;
+  connection.credentialWarnings = Array.isArray(credentialWarnings)
+    ? credentialWarnings.filter(
+        (entry): entry is string => typeof entry === "string",
+      )
+    : [];
   return connection;
 }
 

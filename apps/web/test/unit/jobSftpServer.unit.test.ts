@@ -58,7 +58,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
     const dir = scratchDir();
     const secretPath = writeSecretFile(dir);
     const dataRoot = path.join(dir, "data-root");
-    const { entry } = validateAuthoredSftpServer(
+    const { entry, credentialWarnings } = validateAuthoredSftpServer(
       authoredBody(
         { port: 2222, username: "linkage", path: "/exchange" },
         { kind: "ref", ref: `@${secretPath}`, credType: "password" },
@@ -73,6 +73,8 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
     expect(entry.password).toBe(`@${secretPath}`);
     expect(entry.privateKey).toBeUndefined();
     expect(entry.hostKeyFingerprint).toBe(TEST_HOST_KEY_FINGERPRINT);
+    // A credential safely outside the excluded dirs raises no warning.
+    expect(credentialWarnings).toEqual([]);
   });
 
   test("credType private_key maps the ref to the privateKey field", () => {
@@ -257,50 +259,64 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
     expect(caught?.message).not.toContain(missing);
   });
 
-  test("a credential ref under the data root is rejected without echoing it", () => {
+  test("a credential ref under the data root warns without echoing it", () => {
     const dir = scratchDir();
     const dataRoot = path.join(dir, "data-root");
     const ref = path.join(dataRoot, "planted", "pw");
-    let caught: Error | null = null;
-    try {
-      validateAuthoredSftpServer(
-        authoredBody({}, { kind: "ref", ref: `@${ref}`, credType: "password" }),
-        dataRoot,
-        undefined,
-      );
-    } catch (error) {
-      caught = error as Error;
-    }
-    expect(caught).toBeInstanceOf(JobApiConfigError);
-    expect(caught?.message).toContain("data root");
-    expect(caught?.message).not.toContain(ref);
+    fs.mkdirSync(path.dirname(ref), { recursive: true });
+    fs.writeFileSync(ref, "x");
+    const { entry, credentialWarnings } = validateAuthoredSftpServer(
+      authoredBody({}, { kind: "ref", ref: `@${ref}`, credType: "password" }),
+      dataRoot,
+      undefined,
+    );
+    // Accepted (the connection is authored), with a single non-blocking warning
+    // that names the field and the directory only, never the reference.
+    expect(entry.password).toBe(`@${ref}`);
+    expect(credentialWarnings).toHaveLength(1);
+    expect(credentialWarnings[0]).toContain("password");
+    expect(credentialWarnings[0]).toContain("data root");
+    expect(credentialWarnings[0]).not.toContain(ref);
   });
 
-  test("a credential ref under a distinct rendezvous dir is rejected", () => {
+  test("a credential ref under a distinct rendezvous dir warns", () => {
     const dir = scratchDir();
     const dataRoot = path.join(dir, "data-root");
     const rendezvousDir = path.join(dir, "rendezvous");
     fs.mkdirSync(path.join(rendezvousDir, "planted"), { recursive: true });
-    fs.writeFileSync(path.join(rendezvousDir, "planted", "pw"), "x");
-    expect(() =>
-      validateAuthoredSftpServer(
-        authoredBody(
-          {},
-          {
-            kind: "ref",
-            ref: `@${path.join(rendezvousDir, "planted", "pw")}`,
-            credType: "password",
-          },
-        ),
-        dataRoot,
-        rendezvousDir,
-      ),
-    ).toThrowError(
-      expect.objectContaining({
-        name: "JobApiConfigError",
-        message: expect.stringContaining("rendezvous") as string,
-      }) as Error,
+    const ref = path.join(rendezvousDir, "planted", "pw");
+    fs.writeFileSync(ref, "x");
+    const { credentialWarnings } = validateAuthoredSftpServer(
+      authoredBody({}, { kind: "ref", ref: `@${ref}`, credType: "password" }),
+      dataRoot,
+      rendezvousDir,
     );
+    expect(credentialWarnings).toHaveLength(1);
+    expect(credentialWarnings[0]).toContain("rendezvous");
+    expect(credentialWarnings[0]).not.toContain(ref);
+  });
+
+  test("an encrypted-key passphrase inside the data root warns, not blocks", () => {
+    // The single-mount encrypted-key case: the private key lives outside, but its
+    // passphrase file is in the one mounted folder. It warns, not rejects.
+    const dir = scratchDir();
+    const keyPath = writeSecretFile(dir);
+    const dataRoot = path.join(dir, "data-root");
+    const passphrase = path.join(dataRoot, "passphrase");
+    fs.mkdirSync(dataRoot, { recursive: true });
+    fs.writeFileSync(passphrase, "x");
+    const { entry, credentialWarnings } = validateAuthoredSftpServer(
+      authoredBody(
+        { privateKeyPassphrase: `@${passphrase}` },
+        { kind: "ref", ref: `@${keyPath}`, credType: "private_key" },
+      ),
+      dataRoot,
+      undefined,
+    );
+    expect(entry.privateKeyPassphrase).toBe(`@${passphrase}`);
+    expect(credentialWarnings).toHaveLength(1);
+    expect(credentialWarnings[0]).toContain("private key passphrase");
+    expect(credentialWarnings[0]).not.toContain(passphrase);
   });
 
   test("an inline (non-@) credential ref is rejected", () => {
@@ -470,28 +486,23 @@ describe("validateAuthoredSftpServer mountRef credential path", () => {
     expect(caught?.message).toContain("connection.credential.mount");
   });
 
-  test("a resolved mountRef under the data root is rejected", () => {
+  test("a resolved mountRef under the data root warns", () => {
     // The secrets mount is (mis)configured INSIDE the data root: the resolved
-    // @path lands under the data root, so the containment check still rejects it --
-    // the picker path is held to the same containment as a typed ref.
+    // @path lands under the data root, so the containment check warns -- the picker
+    // path is held to the same warn-not-block posture as a typed ref.
     const dir = scratchDir();
     const dataRoot = path.join(dir, "data-root");
     const secretsDir = path.join(dataRoot, "secrets");
     fs.mkdirSync(secretsDir, { recursive: true });
     fs.writeFileSync(path.join(secretsDir, "pw"), "x");
-    let caught: Error | null = null;
-    try {
-      validateAuthoredSftpServer(
-        mountBody(["pw"]),
-        dataRoot,
-        undefined,
-        secretsDir,
-      );
-    } catch (error) {
-      caught = error as Error;
-    }
-    expect(caught).toBeInstanceOf(JobApiConfigError);
-    expect(caught?.message).toContain("data root");
+    const { credentialWarnings } = validateAuthoredSftpServer(
+      mountBody(["pw"]),
+      dataRoot,
+      undefined,
+      secretsDir,
+    );
+    expect(credentialWarnings).toHaveLength(1);
+    expect(credentialWarnings[0]).toContain("data root");
   });
 });
 

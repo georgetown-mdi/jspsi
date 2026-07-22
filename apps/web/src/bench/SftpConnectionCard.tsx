@@ -4,6 +4,7 @@ import { Badge, Button, Group, Stack, Text } from "@mantine/core";
 
 import { EMPTY_SFTP_FORM } from "./sftpConnectionForm";
 import { SftpAuthoringForm } from "./SftpAuthoringForm";
+import { SftpCredentialWarnings } from "./SftpCredentialWarnings";
 import { sftpConnectionLabel } from "./sftpConnectionChoice";
 import styles from "./bench.module.css";
 
@@ -78,6 +79,9 @@ export function SftpConnectionCard({
           checks the server's host key and signs in then. Credentials stay on
           this machine; the invitation carries only where to meet.
         </Text>
+        <SftpCredentialWarnings
+          warnings={connection.credentialWarnings ?? []}
+        />
         <Group gap="sm">
           <Button size="xs" variant="default" onClick={() => setFormOpen(true)}>
             Edit connection

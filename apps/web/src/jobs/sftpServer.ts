@@ -237,13 +237,16 @@ function canonicalizeIfPresent(dir: string): string {
 /**
  * Validate a raw SFTP server block into a {@link JobSftpServerEntry} against the
  * appliance's rules -- strict field allowlist, mandatory literal fingerprint,
- * credential-must-be-an-`@path`-outside-`exclusions`, core-schema compose. Used
- * by the request-sourced authoring path.
+ * credential-must-be-an-existing-`@path`, core-schema compose. Used by the
+ * request-sourced authoring path. A credential that resolves inside an excluded
+ * directory is a non-blocking warning, not a hard error, so the returned
+ * `credentialWarnings` carries one entry per offending credential field (empty
+ * when every credential resolves safely outside).
  */
 function validateServerEntry(
   rawEntry: unknown,
   exclusions: Array<CredentialRefExclusion>,
-): JobSftpServerEntry {
+): { entry: JobSftpServerEntry; credentialWarnings: Array<string> } {
   if (
     rawEntry === null ||
     typeof rawEntry !== "object" ||
@@ -259,38 +262,45 @@ function validateServerEntry(
 
   assertBareHost(entry.host);
   assertLiteralFingerprints(entry.hostKeyFingerprint);
+  const credentialWarnings: Array<string> = [];
   for (const field of CREDENTIAL_REF_FIELDS)
-    assertCredentialRef(field, entry[field], exclusions);
+    credentialWarnings.push(
+      ...collectCredentialRefWarnings(field, entry[field], exclusions),
+    );
   assertComposesThroughCoreSchema(entry);
 
-  return entry;
+  return { entry, credentialWarnings };
 }
 
 /**
  * The outcome of validating a request-sourced authoring body: the resolved server
- * entry and, when the credential was a PASTED value, the server-owned scratch file
- * it was materialized to. The manager tracks that path to delete the file on
- * clear, delete, or a re-author that replaces it -- a pasted secret must not
- * outlive the connection it belongs to. Absent for a file-reference credential
- * (`ref`/`mountRef`), whose file is the operator's own and is never touched.
+ * entry, the non-blocking credential warnings (empty when every credential
+ * resolves safely outside the excluded directories), and, when the credential was
+ * a PASTED value, the server-owned scratch file it was materialized to. The
+ * manager tracks that path to delete the file on clear, delete, or a re-author
+ * that replaces it -- a pasted secret must not outlive the connection it belongs
+ * to. Absent for a file-reference credential (`ref`/`mountRef`), whose file is the
+ * operator's own and is never touched.
  */
 export interface ValidatedAuthoredSftpServer {
   entry: JobSftpServerEntry;
+  credentialWarnings: Array<string>;
   materializedCredentialPath?: string;
 }
 
 /**
  * Validate a request-sourced authoring body ({@link AuthoredSftpServerRequest})
  * into a {@link JobSftpServerEntry} -- the strict field allowlist, mandatory
- * literal fingerprint, credential-must-be-an-`@path`-outside the data root and
- * rendezvous mount, and core-schema compose -- by folding the resolved credential
- * into a server block and running it through {@link validateServerEntry}. The
- * credential is a typed
+ * literal fingerprint, credential-must-be-an-existing-`@path`, and core-schema
+ * compose -- by folding the resolved credential into a server block and running it
+ * through {@link validateServerEntry}. The credential is a typed
  * `@path` reference, a secrets-mount locator resolved server-side against
  * `secretsDir`, or a pasted value materialized to a server-owned 0600 file under
- * `scratchDir`; all land as an `@path` that runs the same containment chain, so
- * even a materialized secret is confirmed outside the data root and rendezvous
- * mount on its realpath. A validation failure AFTER materialization deletes the
+ * `scratchDir`; all land as an `@path` that runs the same checks. A credential
+ * that resolves inside the data root or rendezvous mount is a non-blocking warning
+ * (returned in `credentialWarnings`, naming the field and the directory only), not
+ * a rejection: a single-mount prototyping operator may reference a credential in
+ * their one folder. A validation failure AFTER materialization deletes the
  * just-written file before it throws, so a rejected paste leaves nothing at rest.
  * Every failure is a {@link JobApiConfigError} whose message names a field path,
  * never a submitted value, a resolved path, or a secret.
@@ -340,13 +350,17 @@ export function validateAuthoredSftpServer(
     hostKeyFingerprint: body.hostKeyFingerprint,
   };
   try {
-    const entry = validateServerEntry(
+    const { entry, credentialWarnings } = validateServerEntry(
       rawEntry,
       credentialRefExclusions(dataRoot, rendezvousDir),
     );
     return resolved.materializedPath !== undefined
-      ? { entry, materializedCredentialPath: resolved.materializedPath }
-      : { entry };
+      ? {
+          entry,
+          credentialWarnings,
+          materializedCredentialPath: resolved.materializedPath,
+        }
+      : { entry, credentialWarnings };
   } catch (error) {
     if (resolved.materializedPath !== undefined)
       removeSftpCredentialFile(resolved.materializedPath);
@@ -563,24 +577,25 @@ function assertLiteralFingerprints(fingerprint: string | Array<string>): void {
 }
 
 /**
- * A credential field must be an `@path` reference to an ABSOLUTE path OUTSIDE
- * every {@link CredentialRefExclusion}, and the referenced file must exist at
- * validation time. Existence and canonicalization go through `realpathSync`
- * only -- the secret bytes are never read into the server; the CLI child resolves
- * the reference at exchange time. The exclusions (the client-written data root
- * and the partner-reachable rendezvous mount) close a laundering path: a
- * reference under one would let planted content become a transmitted credential.
- * The reference is checked BOTH lexically (so an absent file under an excluded
- * dir is still named as such) and by its realpath (so a symlink cannot resolve
- * out of an excluded dir undetected). Error messages name the field path only,
- * never the value.
+ * A credential field must be an `@path` reference to an ABSOLUTE path, and the
+ * referenced file must exist at validation time -- all three are hard errors.
+ * Existence and canonicalization go through `realpathSync` only -- the secret bytes
+ * are never read into the server; the CLI child resolves the reference at exchange
+ * time. A reference resolving inside an exclusion (the client-written data root or
+ * the partner-reachable rendezvous mount) is a NON-BLOCKING warning, not a
+ * rejection: the console is a single-owner prototyping tool, so a credential in the
+ * operator's one mounted folder is guided-against, not forbidden. The reference is
+ * checked BOTH lexically (so an absent-but-lexically-inside file still warns) and
+ * by its realpath (so a symlink cannot resolve into an excluded dir undetected);
+ * at most one warning per field. Messages name the field path and the directory
+ * label only, never the reference value.
  */
-function assertCredentialRef(
+function collectCredentialRefWarnings(
   field: (typeof CREDENTIAL_REF_FIELDS)[number],
   value: string | undefined,
   exclusions: Array<CredentialRefExclusion>,
-): void {
-  if (value === undefined) return;
+): Array<string> {
+  if (value === undefined) return [];
   const fieldPath = `server.${field}`;
   if (!value.startsWith("@"))
     throw new JobApiConfigError(
@@ -593,7 +608,6 @@ function assertCredentialRef(
       `${fieldPath} must reference an absolute path after the @`,
     );
   const resolvedRef = path.resolve(refPath);
-  assertOutsideExclusions(fieldPath, resolvedRef, exclusions);
   let realRef: string;
   try {
     realRef = fs.realpathSync(resolvedRef);
@@ -602,28 +616,56 @@ function assertCredentialRef(
       `${fieldPath} references a file that does not exist`,
     );
   }
-  assertOutsideExclusions(fieldPath, realRef, exclusions);
+  const label =
+    excludedDirLabel(resolvedRef, exclusions) ??
+    excludedDirLabel(realRef, exclusions);
+  return label !== undefined
+    ? [credentialContainmentWarning(field, label)]
+    : [];
 }
 
-/** Reject `candidate` when it is or is under any excluded directory (segment-aware
- * over resolved absolute paths, so a `..`-prefixed sibling is not confused as
- * inside). Names the offending directory's label, never the reference value. */
-function assertOutsideExclusions(
-  fieldPath: string,
+/** The label of the first excluded directory `candidate` is or is under, else
+ * undefined (segment-aware over resolved absolute paths, so a `..`-prefixed sibling
+ * is not confused as inside). */
+function excludedDirLabel(
   candidate: string,
   exclusions: Array<CredentialRefExclusion>,
-): void {
+): string | undefined {
   for (const { dir, label } of exclusions) {
     const relative = path.relative(dir, candidate);
     const outside =
       relative === ".." ||
       relative.startsWith(`..${path.sep}`) ||
       path.isAbsolute(relative);
-    if (!outside)
-      throw new JobApiConfigError(
-        `${fieldPath} must not reference a file under ${label}`,
-      );
+    if (!outside) return label;
   }
+  return undefined;
+}
+
+/** The operator-facing label for a credential field in a warning. */
+const CREDENTIAL_FIELD_LABELS: Record<
+  (typeof CREDENTIAL_REF_FIELDS)[number],
+  string
+> = {
+  password: "password",
+  privateKey: "private key",
+  privateKeyPassphrase: "private key passphrase",
+};
+
+/** Compose the non-blocking warning for a credential that resolves inside an
+ * excluded directory: it names the field and the directory only (never the
+ * reference, resolved path, or secret) and points to the better practice. */
+function credentialContainmentWarning(
+  field: (typeof CREDENTIAL_REF_FIELDS)[number],
+  label: string,
+): string {
+  return (
+    `The ${CREDENTIAL_FIELD_LABELS[field]} credential file is inside ${label}, ` +
+    "which psilink writes to during the exchange -- and if you sync that folder " +
+    "with your partner, they could read the credential. For better isolation, " +
+    "mount a separate read-only secrets directory (JOB_SECRETS_DIR) and " +
+    "reference the credential there instead."
+  );
 }
 
 /**

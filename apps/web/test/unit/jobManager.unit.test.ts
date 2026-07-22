@@ -642,8 +642,30 @@ describe("the in-app authored sftp connection", () => {
       host: "authored.partner.example",
       port: 2022,
       path: "/drop",
+      // The authored secret lives outside the data root, so no warning.
+      credentialWarnings: [],
     });
     expect(manager.sftpProjection()).toEqual(projection);
+  });
+
+  test("a credential inside the data root surfaces a non-blocking warning", () => {
+    const manager = makeManager({});
+    const dataRoot = roots[roots.length - 1];
+    fs.mkdirSync(dataRoot, { recursive: true });
+    const secretPath = path.join(dataRoot, "password");
+    fs.writeFileSync(secretPath, "s3cret\n");
+    const projection = manager.authorSftpServer({
+      host: "authored.partner.example",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      credential: { kind: "ref", ref: `@${secretPath}`, credType: "password" },
+    });
+    // Authored (not rejected), carrying a warning that persists to a later
+    // projection (a console reload) and clears with the connection.
+    expect(projection.credentialWarnings).toHaveLength(1);
+    expect(projection.credentialWarnings?.[0]).toContain("data root");
+    expect(manager.sftpProjection()?.credentialWarnings).toHaveLength(1);
+    manager.clearAuthoredSftpServer();
+    expect(manager.sftpProjection()).toBeNull();
   });
 
   test("an sftp job composes the authored connection into its config", async () => {
@@ -689,7 +711,10 @@ describe("the in-app authored sftp connection", () => {
         credType: "password",
       },
     });
-    expect(projection).toEqual({ host: "authored.partner.example" });
+    expect(projection).toEqual({
+      host: "authored.partner.example",
+      credentialWarnings: [],
+    });
     expect(manager.sftpProjection()).toEqual(projection);
   });
 
@@ -770,7 +795,10 @@ describe("the in-app authored sftp connection", () => {
     const manager = makeManager({ credentialScratchDir: scratch });
     const projection = manager.authorSftpServer(rawBody());
     // The projection carries only the locator -- never the value.
-    expect(projection).toEqual({ host: "authored.partner.example" });
+    expect(projection).toEqual({
+      host: "authored.partner.example",
+      credentialWarnings: [],
+    });
     // Exactly one materialized secret, owner-only, holding the pasted value.
     const files = fs.readdirSync(scratch);
     expect(files).toHaveLength(1);
