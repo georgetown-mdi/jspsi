@@ -537,8 +537,12 @@ function probeTargetOf(
       ? { host: reviewLocator.host, port: reviewLocator.port }
       : { host: reviewLocator.host };
   const host = values.host.trim();
-  if (host === "" || !isBareSftpHost(host))
-    return { disabledReason: "Enter the server address first." };
+  if (host === "") return { disabledReason: "Enter the server address first." };
+  if (!isBareSftpHost(host))
+    return {
+      disabledReason:
+        "Enter just the server address -- not a full URL or login details.",
+    };
   const portText = values.port.trim();
   if (portText === "") return { host };
   const port = Number(portText);
@@ -582,6 +586,12 @@ function HostKeyProbe({
   const [state, setState] = useState<ProbeState>({ phase: "idle" });
   const [outOfBandChecked, setOutOfBandChecked] = useState(false);
   const presentedRef = useRef<HTMLDivElement>(null);
+  // Dismissing the presented result unmounts its focused button, so focus is
+  // returned to the probe trigger (mirroring the fill path, which sends focus to
+  // the fingerprint field). The flag arms the restoration for the idle render the
+  // trigger mounts in; a target change that also resets to idle does not set it.
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const restoreTriggerFocusRef = useRef(false);
   // Bumped on every new probe AND on every target change, so a result that
   // resolves after its target changed (or after a newer probe started) is
   // discarded -- a stale observation must never fill a pin for a different target.
@@ -594,9 +604,14 @@ function HostKeyProbe({
   }, [host, port]);
 
   // Move focus to the presented result when it arrives so a keyboard user can act
-  // on it immediately; aria-live announces it for a screen reader.
+  // on it immediately; aria-live announces it for a screen reader. On a dismiss
+  // back to idle, return focus to the trigger the result panel replaced.
   useEffect(() => {
     if (state.phase === "presented") presentedRef.current?.focus();
+    else if (state.phase === "idle" && restoreTriggerFocusRef.current) {
+      restoreTriggerFocusRef.current = false;
+      triggerRef.current?.focus();
+    }
   }, [state.phase]);
 
   async function runProbe(): Promise<void> {
@@ -686,7 +701,10 @@ function HostKeyProbe({
             <Button
               size="xs"
               variant="default"
-              onClick={() => setState({ phase: "idle" })}
+              onClick={() => {
+                restoreTriggerFocusRef.current = true;
+                setState({ phase: "idle" });
+              }}
             >
               Dismiss
             </Button>
@@ -700,11 +718,11 @@ function HostKeyProbe({
     <Stack gap={4}>
       <div>
         <Button
+          ref={triggerRef}
           variant="subtle"
           size="compact-sm"
           loading={state.phase === "probing"}
           disabled={host === undefined || state.phase === "probing"}
-          aria-expanded={state.phase !== "idle"}
           onClick={() => void runProbe()}
         >
           Read the fingerprint from the server
