@@ -471,7 +471,7 @@ function CredentialField({
       {values.method === "private_key" && (
         <TextInput
           label="Key passphrase reference"
-          description="Optional. If your private key is encrypted, type an @-file reference to the passphrase file."
+          description="Optional. If your private key is encrypted, type an @-file reference to the passphrase file, which must sit outside the writable data folder (a separate JOB_SECRETS_DIR mount); there is no paste alternative for the passphrase."
           classNames={{ input: styles.mono }}
           value={values.passphrasePath}
           error={passphraseError}
