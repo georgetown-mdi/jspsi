@@ -190,12 +190,14 @@ const authoredConnectionFieldsSchema = z.strictObject({
 });
 
 /**
- * A resolved directory a credential `@path` reference must stay OUTSIDE, paired
- * with the human label the rejection names.
+ * A resolved directory a credential `@path` reference is warned against resolving
+ * inside, paired with the operator-facing label and the kind that shapes the
+ * warning's reason clause.
  */
 interface CredentialRefExclusion {
   dir: string;
   label: string;
+  kind: "dataRoot" | "rendezvous";
 }
 
 /**
@@ -211,16 +213,20 @@ function credentialRefExclusions(
 ): Array<CredentialRefExclusion> {
   const exclusions: Array<CredentialRefExclusion> = [];
   const seen = new Set<string>();
-  const add = (dir: string, label: string): void => {
+  const add = (
+    dir: string,
+    label: string,
+    kind: CredentialRefExclusion["kind"],
+  ): void => {
     for (const form of [dir, canonicalizeIfPresent(dir)]) {
       if (seen.has(form)) continue;
       seen.add(form);
-      exclusions.push({ dir: form, label });
+      exclusions.push({ dir: form, label, kind });
     }
   };
-  add(path.resolve(dataRoot), "the job data root");
+  add(path.resolve(dataRoot), "the job data root", "dataRoot");
   if (rendezvousDir !== undefined)
-    add(path.resolve(rendezvousDir), "the rendezvous directory");
+    add(path.resolve(rendezvousDir), "the rendezvous directory", "rendezvous");
   return exclusions;
 }
 
@@ -390,10 +396,12 @@ interface ResolvedAuthoredCredential {
  * - `kind: "raw"` -- a pasted value, materialized ONCE to a server-owned 0600 file
  *   under `scratchDir` and rewritten to `@<that file>`; the value is written and
  *   dropped, never returned, logged, or placed in argv/env.
- * The rewritten reference then runs the SAME `assertCredentialRef` containment the
- * typed form does (outside-data-root/rendezvous plus realpath re-confinement), so
- * a materialized secret is confined identically. Every failure names the credential
- * field only -- never a subPath value, a resolved absolute path, or a secret.
+ * The rewritten reference then runs the SAME `collectCredentialRefWarnings` checks
+ * the typed form does (the hard @path/absolute/existence errors, plus the
+ * non-blocking outside-data-root/rendezvous warning on the realpath). The scratch
+ * dir is asserted outside those dirs at boot, so a materialized paste never warns.
+ * Every failure names the credential field only -- never a subPath value, a
+ * resolved absolute path, or a secret.
  */
 function resolveAuthoredCredential(
   rawCredential: unknown,
@@ -616,28 +624,28 @@ function collectCredentialRefWarnings(
       `${fieldPath} references a file that does not exist`,
     );
   }
-  const label =
-    excludedDirLabel(resolvedRef, exclusions) ??
-    excludedDirLabel(realRef, exclusions);
-  return label !== undefined
-    ? [credentialContainmentWarning(field, label)]
+  const excluded =
+    matchedExclusion(resolvedRef, exclusions) ??
+    matchedExclusion(realRef, exclusions);
+  return excluded !== undefined
+    ? [credentialContainmentWarning(field, excluded)]
     : [];
 }
 
-/** The label of the first excluded directory `candidate` is or is under, else
- * undefined (segment-aware over resolved absolute paths, so a `..`-prefixed sibling
- * is not confused as inside). */
-function excludedDirLabel(
+/** The first excluded directory `candidate` is or is under, else undefined
+ * (segment-aware over resolved absolute paths, so a `..`-prefixed sibling is not
+ * confused as inside). */
+function matchedExclusion(
   candidate: string,
   exclusions: Array<CredentialRefExclusion>,
-): string | undefined {
-  for (const { dir, label } of exclusions) {
-    const relative = path.relative(dir, candidate);
+): CredentialRefExclusion | undefined {
+  for (const exclusion of exclusions) {
+    const relative = path.relative(exclusion.dir, candidate);
     const outside =
       relative === ".." ||
       relative.startsWith(`..${path.sep}`) ||
       path.isAbsolute(relative);
-    if (!outside) return label;
+    if (!outside) return exclusion;
   }
   return undefined;
 }
@@ -654,17 +662,27 @@ const CREDENTIAL_FIELD_LABELS: Record<
 
 /** Compose the non-blocking warning for a credential that resolves inside an
  * excluded directory: it names the field and the directory only (never the
- * reference, resolved path, or secret) and points to the better practice. */
+ * reference, resolved path, or secret), leads with the hazard that is always true
+ * for that directory, and points to the better practice. */
 function credentialContainmentWarning(
   field: (typeof CREDENTIAL_REF_FIELDS)[number],
-  label: string,
+  exclusion: CredentialRefExclusion,
 ): string {
+  const fieldLabel = CREDENTIAL_FIELD_LABELS[field];
+  const remediation =
+    "For better isolation, mount a separate read-only secrets directory " +
+    "(JOB_SECRETS_DIR) and reference the credential there instead.";
+  if (exclusion.kind === "rendezvous")
+    return (
+      `The ${fieldLabel} credential file is inside ${exclusion.label}, which you ` +
+      "sync with your partner -- so they could read it -- and which psilink also " +
+      `writes exchange files into. ${remediation}`
+    );
   return (
-    `The ${CREDENTIAL_FIELD_LABELS[field]} credential file is inside ${label}, ` +
-    "which psilink writes to during the exchange -- and if you sync that folder " +
-    "with your partner, they could read the credential. For better isolation, " +
-    "mount a separate read-only secrets directory (JOB_SECRETS_DIR) and " +
-    "reference the credential there instead."
+    `The ${fieldLabel} credential file is inside ${exclusion.label}, the folder ` +
+    "psilink writes the exchange's working files and results into. A credential " +
+    "kept there can be overwritten or shared out with the results, and if you " +
+    `sync that folder with your partner they could read it. ${remediation}`
   );
 }
 

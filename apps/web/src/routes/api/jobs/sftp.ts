@@ -20,9 +20,11 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
  *
  * - `GET` reports the in-app authored connection as the manager's explicitly
  *   mapped, credential-free projection: `{ configured: false }` or
- *   `{ configured: true, host, port?, path? }` -- no username, credential
- *   reference, or fingerprint. The console web build gates the run-SFTP-here
- *   behavior and authors an invitation endpoint from this locator.
+ *   `{ configured: true, host, port?, path?, credentialWarnings }` -- no username,
+ *   credential reference, or fingerprint; `credentialWarnings` names any credential
+ *   field that resolves inside the data root or rendezvous mount (field and
+ *   directory only). The console web build gates the run-SFTP-here behavior and
+ *   authors an invitation endpoint from this locator.
  * - `PUT` authors the connection from a file-reference credential body. A
  *   validation failure is a `400` naming a field path, never a value.
  * - `DELETE` forgets the authored connection (idempotent `204`).

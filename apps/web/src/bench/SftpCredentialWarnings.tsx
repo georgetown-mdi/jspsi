@@ -17,6 +17,7 @@ export function SftpCredentialWarnings({
   return (
     <Alert
       color="yellow"
+      role="status"
       icon={<IconAlertTriangle aria-hidden />}
       title="Credential file location"
     >

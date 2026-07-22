@@ -296,6 +296,29 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
     expect(credentialWarnings[0]).not.toContain(ref);
   });
 
+  test("a symlink that resolves back under the data root warns", () => {
+    // The ref path is lexically OUTSIDE the data root, but a symlink in the chain
+    // resolves back inside it -- the realpath arm must still catch it and warn, so
+    // this pins that arm against a future refactor dropping it.
+    const dir = scratchDir();
+    const dataRoot = path.join(dir, "data-root");
+    fs.mkdirSync(path.join(dataRoot, "planted"), { recursive: true });
+    const real = path.join(dataRoot, "planted", "pw");
+    fs.writeFileSync(real, "x");
+    const link = path.join(dir, "cred-link");
+    fs.symlinkSync(real, link);
+    const { entry, credentialWarnings } = validateAuthoredSftpServer(
+      authoredBody({}, { kind: "ref", ref: `@${link}`, credType: "password" }),
+      dataRoot,
+      undefined,
+    );
+    // Lexically outside, so only the realpath arm catches it -- and it warns.
+    expect(entry.password).toBe(`@${link}`);
+    expect(credentialWarnings).toHaveLength(1);
+    expect(credentialWarnings[0]).toContain("data root");
+    expect(credentialWarnings[0]).not.toContain(link);
+  });
+
   test("an encrypted-key passphrase inside the data root warns, not blocks", () => {
     // The single-mount encrypted-key case: the private key lives outside, but its
     // passphrase file is in the one mounted folder. It warns, not rejects.

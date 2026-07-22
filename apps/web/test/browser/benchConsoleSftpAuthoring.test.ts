@@ -527,8 +527,8 @@ describe("console SFTP connection authoring", () => {
   test("a credential warning renders below the authored connection", async () => {
     stubJobApi({
       putWarnings: [
-        "The password credential file is inside the job data root, which " +
-          "psilink writes to during the exchange.",
+        "The password credential file is inside the job data root, the folder " +
+          "psilink writes the exchange's working files and results into.",
       ],
     });
     mount(createElement(InviterBench));

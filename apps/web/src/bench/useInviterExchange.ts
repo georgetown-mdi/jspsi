@@ -369,7 +369,7 @@ export function useInviterExchange({
       });
 
     // The transport a server-job run rides: an sftp channel carries no
-    // connection field (the appliance provisions the one server), any other
+    // connection field (the appliance holds the authored server), any other
     // server-job channel is filedrop. Reached only for a server-job selection,
     // which the selector never produces for `browser`.
     const serverJobTransport = (): ServerJobExchangeTransport =>
