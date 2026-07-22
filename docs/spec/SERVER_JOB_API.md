@@ -26,6 +26,7 @@ Every job response carries `Cache-Control: no-store` and no CORS headers -- the 
 | `GET` | `/api/jobs/:jobId/result` | `200` `text/csv` | The matched-result CSV, only after the job succeeded. `404` otherwise. |
 | `GET` | `/api/jobs/:jobId/record` | `200` `application/json` | The self-attested exchange record, only after the job succeeded. `404` otherwise. |
 | `GET` | `/api/jobs/:jobId/keys` | `200` `application/json` | The private verification keys paired with the record, only after the job succeeded. `404` otherwise. |
+| `GET` | `/api/jobs/:jobId/handoff` | `200` hand-off JSON | The recurring-run hand-off: the portable, secret-free template plus its metadata (see [The recurring-run hand-off](#the-recurring-run-hand-off)). `404` on malformed, unknown, or already-deleted id. |
 | `GET` | `/api/jobs/sftp` | `200` `{ "configured": <bool>, ... }` | The authored SFTP connection as a credential-free projection: `{ "configured": false }` when none, else `{ "configured": true, "host", "port"?, "path"?, "credentialWarnings": [ ... ] }`. `credentialWarnings` is the non-blocking credential-containment warnings. See [The authored SFTP connection](#the-authored-sftp-connection). |
 | `PUT` | `/api/jobs/sftp` | `200` credential-free projection | Author the SFTP connection from a file-reference credential body (see [Authoring the SFTP connection](#authoring-the-sftp-connection)). `400` (body naming a field path, never a value) on a body that fails hard validation. `413` when the body exceeds its size cap. |
 | `DELETE` | `/api/jobs/sftp` | `204` | Forget the in-app authored connection (idempotent). |
@@ -61,6 +62,28 @@ Served only when `status === "succeeded"` and the output file exists and is read
 ### The `GET /api/jobs/:jobId/record` and `/api/jobs/:jobId/keys` responses
 
 Served under the same gate as the result response -- only when `status === "succeeded"` and the respective file (`record.json`, `record.keys.json`) exists and is readable, `404` otherwise. The bodies are the job's server-chosen record and keys files inside its workdir, never a client-named path. Headers: `Content-Type: application/json; charset=utf-8`, a fixed `Content-Disposition: attachment; filename="psilink-record.json"` / `"psilink-record.keys.json"` (a server-side fallback; the browser's save name is set by its download control and carries the record's timestamp), and `X-Content-Type-Options: nosniff`, plus the `no-store` discipline. A client offers these two downloads only when `recordAvailable` on the status route is true, so it never links a `404`. The verification keys are private material -- a salt plus the record's commitment can open a committed value -- so `/keys` is gated and `no-store` identically to `/record` and `/result`; see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md).
+
+### The recurring-run hand-off
+
+`GET /api/jobs/:jobId/handoff` returns the portable material an operator carries from a prototyped console exchange to a scheduled command-line `psilink` run. It is composed at job creation from that run's intent and resources and held on the in-memory record, so it is served for the whole lifetime of a live record (the panel reads it at completion, but the endpoint keys its `404` on job existence, not status -- a malformed, unknown, or already-deleted id is `404` identically to the other id-bearing routes). It is JSON with the `no-store` discipline. The body is:
+
+```json
+{
+  "mode": "exchange" | "zeroSetup",
+  "channel": "sftp" | "filedrop",
+  "usedKeyFile": <bool>,
+  "credentialPasted": <bool>,
+  "template": { "kind": "config", "yaml": "<psilink.yaml text>" }
+             | { "kind": "command", "argv": [ "<token>", ... ] }
+}
+```
+
+`usedKeyFile` is true for the exchange mode (a `.psilink.key` the operator must copy), false for the zero-setup mode (which carries no shared secret). `credentialPasted` is true only for an sftp run whose credential was a pasted, materialized value (the panel then tells the operator to save it to a file); it is always false on the filedrop channel. The `template` is discriminated on `kind`: an exchange run yields a `config` (the `psilink.yaml` document, recomposed through the same functions the live run used), a zero-setup run a `command` (the argv tokens of the `psilink URL INPUT OUTPUT` form).
+
+Two invariants hold by construction and are pinned by tests:
+
+- **No secret.** The response never carries the shared secret, the key-file body, or an inline credential value. The exchange config carries the credential only as an `@path` reference (the secret rides the key file, which never crosses this API), and the zero-setup command carries no secret at all.
+- **No container path.** The response never carries a container-internal path. The credential `@path` (sftp) is replaced with the fixed placeholder `@/path/to/your/credential-file` (a private-key passphrase with `@/path/to/your/passphrase-file`), and the filedrop rendezvous directory with `/path/to/your/shared-directory` in a config or `file:///path/to/your/shared-directory` in a command. The portable values -- host, port, username, the remote SFTP working directory, the host-key fingerprint pin, and the linkage terms -- are emitted verbatim as they ran; only the machine-specific local paths become placeholders.
 
 ## The job-create intent
 

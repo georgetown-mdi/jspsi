@@ -65,6 +65,9 @@ export function useDirectExchange({
   failure: RunFailure | undefined;
   warnings: ReadonlyArray<string>;
   started: boolean;
+  /** The appliance job id of the current run, once created; undefined before the
+   * job exists. Drives the completed-run recurring hand-off panel. */
+  jobId: string | undefined;
   start: () => void;
   tryAgain: () => void;
   reset: () => void;
@@ -75,6 +78,10 @@ export function useDirectExchange({
   const [failure, setFailure] = useState<RunFailure>();
   const [warnings, setWarnings] = useState<Array<string>>([]);
   const [started, setStarted] = useState(false);
+  // The current run's appliance job id as reactive state (the ref below drives the
+  // synchronous discard paths). Set on create, cleared when a run restarts or is
+  // reset, so the recurring hand-off panel reads only the live run.
+  const [currentJobId, setCurrentJobId] = useState<string>();
 
   // One job-API client for the deliberate-discard paths (try again, run another);
   // the driver keeps its own default client, both riding the same same-origin
@@ -114,6 +121,7 @@ export function useDirectExchange({
     setOutputs(undefined);
     setFailure(undefined);
     setWarnings([]);
+    setCurrentJobId(undefined);
 
     const transport = { channel } as const;
     const driver = createServerJobZeroSetupDriver({
@@ -128,6 +136,7 @@ export function useDirectExchange({
       // it, so it rides the inviter seat rather than widening the seat union.
       onJobCreated: (jobId) => {
         currentJobIdRef.current = jobId;
+        setCurrentJobId(jobId);
         writeAttachment({ jobId, seat: "inviter", channel });
       },
     });
@@ -193,6 +202,7 @@ export function useDirectExchange({
     setOutputs(undefined);
     setRun(initialRun());
     setWarnings([]);
+    setCurrentJobId(undefined);
   }
 
   // Discard the current server-job exchange when the operator deliberately leaves
@@ -212,6 +222,7 @@ export function useDirectExchange({
     failure,
     warnings,
     started,
+    jobId: currentJobId,
     start,
     tryAgain,
     reset,
