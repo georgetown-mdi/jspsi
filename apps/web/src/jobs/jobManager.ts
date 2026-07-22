@@ -24,6 +24,7 @@ import {
   spawnExchangeJob,
   spawnZeroSetupJob,
 } from "./cliDriver";
+import { buildJobHandoff } from "./handoff";
 import { removeSftpCredentialFile } from "./sftpScratch";
 import { rendezvousStartupWarnings } from "./jobRendezvous";
 import { validateAuthoredSftpServer } from "./sftpServer";
@@ -39,6 +40,7 @@ import type {
   JobExchangeIntent,
   JobInputFileReference,
 } from "./intent";
+import type { JobHandoff } from "./handoff";
 import type { JobSftpServerEntry } from "./sftpServer";
 
 /**
@@ -141,6 +143,10 @@ export interface JobRecord {
   listeners: Set<(entry: BufferedEvent) => void>;
   /** A cancellation escalation timer chain, cleared on exit. */
   cancelTimers: Array<NodeJS.Timeout>;
+  /** The recurring-run hand-off (the portable, secret-free template plus its
+   * metadata), composed at creation from this run's intent and resources. Served
+   * verbatim by `GET /api/jobs/:jobId/handoff`. */
+  handoff: JobHandoff;
 }
 
 /**
@@ -463,6 +469,15 @@ export class JobManager {
     const recordPath = path.join(workdir, JOB_FILE_NAMES.record);
     const keysPath = path.join(workdir, JOB_FILE_NAMES.recordKeys);
 
+    // The credential is a pasted (materialized) value only for an sftp run that
+    // authored one; buildJobHandoff forces this false on the credential-free
+    // filedrop channel.
+    const handoff = buildJobHandoff(
+      intent,
+      serverEntry,
+      this.authoredMaterializedCredentialPath !== undefined,
+    );
+
     const record: JobRecord = {
       id,
       workdir,
@@ -476,6 +491,7 @@ export class JobManager {
       handle: null,
       listeners: new Set(),
       cancelTimers: [],
+      handoff,
     };
     this.slot = { phase: "active", record, deleted: false };
 
@@ -660,6 +676,18 @@ export class JobManager {
   getJobView(id: string): JobView | null {
     const record = this.getJob(id);
     return record !== undefined ? liveJobView(record) : null;
+  }
+
+  /**
+   * The recurring-run hand-off for a job, or null when no live record matches the
+   * id (an unknown, deleted, or restart-forgotten job). Held on the record from
+   * creation, so it is available across the run's whole lifetime -- the panel reads
+   * it at completion, but the endpoint's 404 discipline keys on job existence, not
+   * status.
+   */
+  getJobHandoff(id: string): JobHandoff | null {
+    const record = this.getJob(id);
+    return record !== undefined ? record.handoff : null;
   }
 
   /**
