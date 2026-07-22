@@ -1,15 +1,12 @@
 import { useState } from "react";
 
-import { Alert, Badge, Button, Group, Stack, Text } from "@mantine/core";
-import { IconAlertTriangle } from "@tabler/icons-react";
+import { Badge, Button, Group, Stack, Text } from "@mantine/core";
 
 import { sanitizeForDisplay } from "@psilink/core";
 
-import {
-  sftpBootServerMismatch,
-  sftpConnectionLabel,
-} from "./sftpConnectionChoice";
 import { SftpAuthoringForm } from "./SftpAuthoringForm";
+import { SftpCredentialWarnings } from "./SftpCredentialWarnings";
+import { sftpConnectionLabel } from "./sftpConnectionChoice";
 import { sftpFormFromLocator } from "./sftpConnectionForm";
 import styles from "./bench.module.css";
 
@@ -33,61 +30,27 @@ import type { SftpEndpointLocator } from "./sftpConnectionForm";
  * the invitation.
  *
  * States mirror the invite card minus the save-a-file alternative (the accept
- * transport is fixed by the invitation): a boot-provisioned server shown read-only,
- * an authored connection with edit/clear affordances, and the authoring prompt when
- * none is set up yet.
+ * transport is fixed by the invitation): an authored connection with edit/clear
+ * affordances, and the authoring prompt when none is set up yet.
  */
 export function AcceptorSftpConnectionCard({
   locator,
   connection,
-  bootPinned,
   onAuthored,
   onCleared,
 }: {
   /** The partner-supplied SFTP locator from the accepted invitation's endpoint:
    * where to connect, and nothing more. */
   locator: SftpEndpointLocator;
-  /** The effective connection: the operator-authored (or boot-provisioned)
-   * credential-free locator, or null until the operator authors one. */
+  /** The effective connection: the operator-authored credential-free locator, or
+   * null until the operator authors one. */
   connection: SftpConnectionProjection | null;
-  /** Whether the effective connection is a deploy-time boot server (read-only, no
-   * authoring offered). Meaningful only when `connection` is set. */
-  bootPinned: boolean;
   /** An in-app authored connection landed (its credential-free projection). */
   onAuthored: (connection: SftpConnectionProjection) => void;
   /** The operator cleared the authored connection. */
   onCleared: () => void;
 }) {
   const [formOpen, setFormOpen] = useState(false);
-
-  if (connection !== null && bootPinned)
-    return (
-      <Stack gap="xs" mt="xs">
-        <Text size="sm" c="dimmed">
-          Your partner named{" "}
-          <span className={styles.mono}>
-            {sanitizeForDisplay(sftpConnectionLabel(locator))}
-          </span>
-          ; this appliance is provisioned with{" "}
-          <span className={styles.mono}>
-            {sanitizeForDisplay(sftpConnectionLabel(connection))}
-          </span>
-          . Confirm they are the same server. Credentials stay on this machine.
-        </Text>
-        {sftpBootServerMismatch(locator, connection) && (
-          <Alert
-            color="orange"
-            icon={<IconAlertTriangle aria-hidden />}
-            title="This appliance's server is not the one your partner named"
-          >
-            The server provisioned on this appliance does not match the one your
-            partner named. Unless both parties connect to the same server, the
-            exchange will not meet. Confirm this appliance&apos;s server is an
-            alias or address of your partner&apos;s before you start.
-          </Alert>
-        )}
-      </Stack>
-    );
 
   if (connection !== null && !formOpen)
     return (
@@ -109,6 +72,9 @@ export function AcceptorSftpConnectionCard({
           checks the server against the fingerprint you gave and signs in then.
           Credentials stay on this machine.
         </Text>
+        <SftpCredentialWarnings
+          warnings={connection.credentialWarnings ?? []}
+        />
         <Group gap="sm">
           <Button size="xs" variant="default" onClick={() => setFormOpen(true)}>
             Edit connection

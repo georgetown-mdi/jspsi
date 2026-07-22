@@ -182,12 +182,12 @@ const TRANSPORT_ORDER: ReadonlyArray<Transport> = [
  * in-tab WebRTC exchange is out of scope on the appliance) and runs its filedrop
  * card here as a server job against the mounted rendezvous directory -- disabled
  * when `JOB_RENDEZVOUS_DIR` is unset. The console default is SFTP when the appliance
- * has a provisioned or authored connection, else the filedrop card when a
- * rendezvous directory is mounted, else SFTP (where the card offers authoring).
+ * has an authored connection, else the filedrop card when a rendezvous directory is
+ * mounted, else SFTP (where the card offers authoring).
  *
- * `sftpConfigured` is "boot-provisioned OR authored-and-complete"; an unconfigured
- * console SFTP is offered to run here with `authoringRequired` set (the card
- * reveals the authoring form) rather than silently degrading to save-a-file.
+ * `sftpConfigured` is "authored-and-complete"; an unconfigured console SFTP is
+ * offered to run here with `authoringRequired` set (the card reveals the authoring
+ * form) rather than silently degrading to save-a-file.
  * `sftpSaveFilePreferred` is the operator's deliberate choice to run SFTP through
  * their own command-line tool instead, which flips the SFTP run mode to
  * save-a-file and clears `authoringRequired`.

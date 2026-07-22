@@ -24,7 +24,6 @@ import {
   STUB_CLI_PATH,
   TEST_HOST_KEY_FINGERPRINT,
   tempDataRoot,
-  testSftpServerEntry,
   validInputFileIntent,
   validIntent,
   validSftpIntent,
@@ -456,26 +455,46 @@ describe("status route reports record availability", () => {
   });
 });
 
+/** Write a secret outside the roots and author a file-reference SFTP connection on
+ * the manager, returning the credential `@path`. */
+function authorSftpOn(manager: JobManager, host = "sftp.example.org"): string {
+  const dir = tempDataRoot("routes-secret");
+  roots.push(dir);
+  fs.mkdirSync(dir, { recursive: true });
+  const secretPath = path.join(dir, "password");
+  fs.writeFileSync(secretPath, "s3cret\n");
+  manager.authorSftpServer({
+    host,
+    port: 2222,
+    username: "linkage",
+    path: "/exchange",
+    hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+    credential: { kind: "ref", ref: `@${secretPath}`, credType: "password" },
+  });
+  return `@${secretPath}`;
+}
+
 /**
- * Enable the API and seed the global manager with a provisioned sftp server (the
- * startup-loaded entry production wiring passes), pointed at the stub CLI.
+ * Enable the API and seed the global manager with an authored sftp connection,
+ * pointed at the stub CLI. Returns the manager and the credential `@path`.
  */
-function enableJobApiWithSftpServer(
-  stubEnv: NodeJS.ProcessEnv = {},
-): JobManager {
+function enableJobApiWithSftpServer(stubEnv: NodeJS.ProcessEnv = {}): {
+  manager: JobManager;
+  credentialRef: string;
+} {
   const root = tempDataRoot("routes-sftp");
   roots.push(root);
   vi.stubEnv("JOB_DATA_ROOT", root);
   const manager = new JobManager({
     dataRoot: root,
     binaryPath: STUB_CLI_PATH,
-    sftpServer: testSftpServerEntry(),
     jobRendezvousDir: rvzRoot(),
     childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), ...stubEnv },
   });
   (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
     manager;
-  return manager;
+  const credentialRef = authorSftpOn(manager);
+  return { manager, credentialRef };
 }
 
 /**
@@ -537,7 +556,7 @@ describe("POST /api/jobs drives a job from a mounted work input", () => {
   });
 });
 
-describe("POST /api/jobs and the provisioned sftp server", () => {
+describe("POST /api/jobs and the authored sftp connection", () => {
   test("a second concurrent sftp create is an empty-bodied 409", async () => {
     enableJobApiWithSftpServer({ STUB_DELAY_MS: "5000" });
     const first = (await handlersOf(CreateRoute).POST({
@@ -554,7 +573,7 @@ describe("POST /api/jobs and the provisioned sftp server", () => {
     expect(await second.text()).toBe("");
   });
 
-  test("an sftp intent without a provisioned server is an empty-bodied 400", async () => {
+  test("an sftp intent without an authored connection is an empty-bodied 400", async () => {
     enableJobApi();
     const response = (await handlersOf(CreateRoute).POST({
       request: createRequest(validSftpIntent()),
@@ -564,8 +583,8 @@ describe("POST /api/jobs and the provisioned sftp server", () => {
     expect(await response.text()).toBe("");
   });
 
-  test("the create path composes the provisioned server into the job config", async () => {
-    // The connection material comes only from the provisioned entry: the composed
+  test("the create path composes the authored connection into the job config", async () => {
+    // The connection material comes only from the authored entry: the composed
     // psilink.yaml carries its host and @path credential ref, and nothing
     // client-chosen.
     const root = tempDataRoot("routes-sftp-compose");
@@ -574,11 +593,11 @@ describe("POST /api/jobs and the provisioned sftp server", () => {
     const manager = new JobManager({
       dataRoot: root,
       binaryPath: STUB_CLI_PATH,
-      sftpServer: testSftpServerEntry(),
       childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), STUB_DELAY_MS: "5000" },
     });
     (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
       manager;
+    const credentialRef = authorSftpOn(manager);
 
     const response = (await handlersOf(CreateRoute).POST({
       request: createRequest(validSftpIntent()),
@@ -588,7 +607,8 @@ describe("POST /api/jobs and the provisioned sftp server", () => {
     const { id } = (await response.json()) as { id: string };
     const composed = fs.readFileSync(`${root}/${id}/psilink.yaml`, "utf8");
     expect(composed).toContain("sftp.example.org");
-    expect(composed).toContain("@/etc/psilink/prod-east-password");
+    expect(composed).toContain(credentialRef);
+    expect(composed).not.toContain("s3cret");
   });
 });
 
@@ -662,7 +682,7 @@ describe("GET /api/jobs/sftp", () => {
     expect(response.status).toBe(404);
   });
 
-  test("reads configured:false when the API is enabled but no server is provisioned", async () => {
+  test("reads configured:false when the API is enabled but no connection is authored", async () => {
     enableJobApi();
     const response = (await handlersOf(SftpRoute).GET({
       request: new Request("http://localhost/api/jobs/sftp"),
@@ -672,7 +692,6 @@ describe("GET /api/jobs/sftp", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({
       configured: false,
-      bootPinned: false,
     });
   });
 
@@ -691,16 +710,20 @@ describe("GET /api/jobs/sftp", () => {
 
     const item = JSON.parse(body) as Record<string, unknown>;
     for (const key of Object.keys(item))
-      expect(["configured", "bootPinned", "host", "port", "path"]).toContain(
-        key,
-      );
-    // A boot-provisioned server is bootPinned: the console shows it read-only.
+      expect([
+        "configured",
+        "host",
+        "port",
+        "path",
+        "credentialWarnings",
+      ]).toContain(key);
     expect(item).toEqual({
       configured: true,
-      bootPinned: true,
       host: "sftp.example.org",
       port: 2222,
       path: "/exchange",
+      // The armed credential lives outside the data root, so no warning.
+      credentialWarnings: [],
     });
   });
 
@@ -776,13 +799,12 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
     const ref = secretFileOutside();
     const put = await putSftp(authoredBody(ref, { port: 2022, path: "/drop" }));
     expect(put.status).toBe(200);
-    // An authored connection is never boot-pinned: the console offers edit/clear.
     expect(await put.json()).toEqual({
       configured: true,
-      bootPinned: false,
       host: "authored.partner.example",
       port: 2022,
       path: "/drop",
+      credentialWarnings: [],
     });
 
     const get = await getSftp();
@@ -792,21 +814,27 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
     expect(body).not.toContain("SHA256");
     expect(JSON.parse(body)).toEqual({
       configured: true,
-      bootPinned: false,
       host: "authored.partner.example",
       port: 2022,
       path: "/drop",
+      credentialWarnings: [],
     });
   });
 
-  test("a credential ref under the data root is 400 and never echoes the ref", async () => {
+  test("a credential ref inside the data root warns but authors, never echoing the ref", async () => {
     const dataRoot = enableJobApi();
     const ref = `${dataRoot}/planted/pw`;
+    fs.mkdirSync(`${dataRoot}/planted`, { recursive: true });
+    fs.writeFileSync(ref, "s3cret\n");
     const response = await putSftp(authoredBody(ref));
-    expect(response.status).toBe(400);
-    const text = await response.text();
-    expect(text).toContain("data root");
-    expect(text).not.toContain(ref);
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    // The warning names the field and the directory only, never the reference.
+    expect(body).not.toContain("@");
+    expect(body).not.toContain(ref);
+    const parsed = JSON.parse(body) as { credentialWarnings?: Array<string> };
+    expect(parsed.credentialWarnings).toHaveLength(1);
+    expect(parsed.credentialWarnings?.[0]).toContain("data root");
   });
 
   test("a non-ref credential kind is a 400", async () => {
@@ -842,8 +870,8 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
     expect(body).not.toContain(secretsDir);
     expect(JSON.parse(body)).toEqual({
       configured: true,
-      bootPinned: false,
       host: "authored.partner.example",
+      credentialWarnings: [],
     });
   });
 
@@ -865,18 +893,17 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
     expect(text).toContain("secrets mount");
   });
 
-  test("a boot-provisioned server refuses authoring with a 409", async () => {
+  test("re-authoring replaces the held connection", async () => {
     enableJobApiWithSftpServer();
     const ref = secretFileOutside();
-    const response = await putSftp(authoredBody(ref));
-    expect(response.status).toBe(409);
-    // The boot server still projects, unchanged and boot-pinned.
+    const response = await putSftp(authoredBody(ref, { port: 2099 }));
+    expect(response.status).toBe(200);
+    // The newly authored connection replaces the prior one.
     expect(await (await getSftp()).json()).toEqual({
       configured: true,
-      bootPinned: true,
-      host: "sftp.example.org",
-      port: 2222,
-      path: "/exchange",
+      host: "authored.partner.example",
+      port: 2099,
+      credentialWarnings: [],
     });
   });
 
@@ -889,7 +916,6 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
     expect(await del.text()).toBe("");
     expect(await (await getSftp()).json()).toEqual({
       configured: false,
-      bootPinned: false,
     });
     // Idempotent: a second DELETE is still 204.
     expect((await deleteSftp()).status).toBe(204);
@@ -942,8 +968,8 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
     expect(body).not.toContain("@");
     expect(JSON.parse(body)).toEqual({
       configured: true,
-      bootPinned: false,
       host: "authored.partner.example",
+      credentialWarnings: [],
     });
     // The value exists at rest ONLY as the scratch file, owner-only.
     const files = fs.readdirSync(scratch);

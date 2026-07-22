@@ -41,11 +41,9 @@ const DIRECTION_CHOICES: ReadonlyArray<{
  * command-line transports (SFTP and a shared directory); its copy comes from
  * {@link transportChooserCopy}, which reflects whether the deployment runs a
  * shared-directory or SFTP exchange here (the console appliance) or saves an
- * exchange file for the command-line tool. On a console build whose appliance
- * has a provisioned SFTP server, choosing SFTP shows the single connection's
- * locator as static text under the card instead of routing to free-text host
- * authoring: the exchange runs here through that server, and the connection
- * material stays on the appliance.
+ * exchange file for the command-line tool. On a console build, choosing SFTP
+ * shows the authored connection's locator under the card: the exchange runs here
+ * through that connection, and the connection material stays on the appliance.
  */
 export function ReviewCreateSection({
   editor,
@@ -53,7 +51,6 @@ export function ReviewCreateSection({
   problems,
   minting,
   sftpConnection,
-  bootPinned,
   sftpSaveFilePreferred,
   rendezvousConfigured,
   onLifetime,
@@ -75,9 +72,6 @@ export function ReviewCreateSection({
    * updated when the operator authors or clears one); undefined before the fetch
    * resolves (or off a console), null when none is effective. */
   sftpConnection: SftpConnectionProjection | null | undefined;
-  /** Whether the effective connection is a deploy-time boot server (read-only, no
-   * authoring offered). Meaningful only when `sftpConnection` is set. */
-  bootPinned: boolean;
   /** Whether the operator deliberately chose to run SFTP through their own
    * command-line tool (save-a-file) instead of authoring a connection here. */
   sftpSaveFilePreferred: boolean;
@@ -214,7 +208,6 @@ export function ReviewCreateSection({
           {transport === "sftp" && consoleBuild && (
             <SftpConnectionCard
               connection={sftpConnection ?? null}
-              bootPinned={bootPinned}
               saveFilePreferred={sftpSaveFilePreferred}
               onAuthored={onAuthorConnection}
               onCleared={onClearConnection}

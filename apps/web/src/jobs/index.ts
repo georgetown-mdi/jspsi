@@ -13,12 +13,10 @@ import {
   setupSftpCredentialScratchDir,
 } from "./sftpScratch";
 import { JobManager } from "./jobManager";
-import { loadSftpServerFromEnv } from "./sftpServer";
 import { useJobInputDir } from "./workInputs";
 import { useJobSecretsDir } from "./jobSecrets";
 
 import type { JobApiConfig } from "./gate";
-import type { JobSftpServerEntry } from "./sftpServer";
 
 const log = getLogger("job-api");
 
@@ -27,29 +25,10 @@ const log = getLogger("job-api");
  * the peer server, dev-mode HMR can re-evaluate this module; a global keeps it to
  * one manager per process, so the in-memory job table and its child processes are
  * not duplicated. Undefined until the job API is enabled and first used.
- *
- * The SFTP server entry is memoized the same way: loaded once (at startup by
- * the server entry, or lazily on first use), then shared by every manager
- * construction.
  */
 declare global {
   var jobManagerInstance: JobManager | undefined;
-  var jobSftpServer: JobSftpServerEntry | undefined;
   var jobSftpCredentialScratchDir: string | undefined;
-}
-
-/**
- * Return the operator-provisioned SFTP server, loading it from the environment
- * on first use, or undefined when no server file is configured. The server
- * entry calls this at startup so a malformed block (or a server file without a
- * data root, or the superseded `JOB_SFTP_REMOTES` variable) refuses to boot --
- * fail-closed at startup; a {@link JobApiConfigError} propagates to the caller
- * either way.
- */
-export function useSftpServer(
-  env: NodeJS.ProcessEnv = process.env,
-): JobSftpServerEntry | undefined {
-  return (globalThis.jobSftpServer ??= loadSftpServerFromEnv(env));
 }
 
 /**
@@ -104,15 +83,14 @@ export function warnJobApiProfileMismatch(
  * Return the shared {@link JobManager}, or null when the job API is disabled (no
  * data root configured). Constructs the manager lazily on first use with a data
  * root read from the environment, so a disabled deployment builds nothing and
- * spawns nothing. The manager carries the startup-loaded SFTP server and the
- * resolved work-input directory when configured; neither varies per request.
+ * spawns nothing. The manager carries the resolved work-input directory when
+ * configured; it does not vary per request.
  */
 export function useJobManager(
   config: JobApiConfig = readJobApiConfig(),
 ): JobManager | null {
   if (!isJobApiEnabled(config)) return null;
   if (globalThis.jobManagerInstance === undefined) {
-    const sftpServer = useSftpServer();
     const jobInputDir = useJobInputDir();
     const jobRendezvousDir = useJobRendezvousDir();
     const jobSecretsDir = useJobSecretsDir();
@@ -122,7 +100,6 @@ export function useJobManager(
     const credentialScratchDir = globalThis.jobSftpCredentialScratchDir;
     globalThis.jobManagerInstance = new JobManager({
       dataRoot: config.dataRoot,
-      ...(sftpServer !== undefined ? { sftpServer } : {}),
       ...(jobInputDir !== undefined ? { jobInputDir } : {}),
       ...(jobRendezvousDir !== undefined ? { jobRendezvousDir } : {}),
       ...(jobSecretsDir !== undefined ? { jobSecretsDir } : {}),

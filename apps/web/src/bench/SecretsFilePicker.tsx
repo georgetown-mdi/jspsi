@@ -165,20 +165,22 @@ function renderListing(
       </MountStateNotice>
     );
 
-  // An unset JOB_SECRETS_DIR is a deployment-config gap, distinct from an
-  // empty-but-mounted directory: name the env var rather than tell the operator to
-  // place a file in a directory that is not configured.
+  // An unset JOB_SECRETS_DIR means there is no separate secrets mount to browse.
+  // It is not a dead end: the operator can still reference a credential file in
+  // their mounted folder by typing an @-file reference. A separate read-only
+  // secrets directory is recommended hardening, not a requirement.
   if (!listing.configured)
     return (
       <MountStateNotice
         color="blue"
-        title="No secrets directory configured"
+        title="No separate secrets directory"
         action={refresh}
       >
-        No secrets directory is configured on this appliance. Set
-        JOB_SECRETS_DIR to the mounted directory that holds your SFTP credential
-        files (a password file or an SSH private key), then restart the
-        appliance. You can still type a file reference below instead.
+        This appliance has no separate secrets directory to browse, so type a
+        file reference below to a credential file (a password file or an SSH
+        private key) in your mounted folder. For better isolation, mount a
+        separate read-only directory as JOB_SECRETS_DIR and reference the file
+        there instead, then restart the appliance.
       </MountStateNotice>
     );
 

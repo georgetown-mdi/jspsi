@@ -1271,7 +1271,7 @@ describe("fetchSftpConnection", () => {
       );
   }
 
-  const none = { connection: null, bootPinned: false };
+  const none = { connection: null };
 
   test("returns the validated projection, optional fields preserved", async () => {
     await expect(
@@ -1284,35 +1284,41 @@ describe("fetchSftpConnection", () => {
         }),
       ),
     ).resolves.toEqual({
-      connection: { host: "sftp.example.gov", port: 2222, path: "/x" },
-      bootPinned: false,
+      connection: {
+        host: "sftp.example.gov",
+        port: 2222,
+        path: "/x",
+        credentialWarnings: [],
+      },
     });
     await expect(
       fetchSftpConnection(
         jsonResponse({ configured: true, host: "dr.example.gov" }),
       ),
     ).resolves.toEqual({
-      connection: { host: "dr.example.gov" },
-      bootPinned: false,
+      connection: { host: "dr.example.gov", credentialWarnings: [] },
     });
   });
 
-  test("a boot-provisioned connection carries bootPinned true", async () => {
+  test("parses credentialWarnings, dropping non-string entries", async () => {
     await expect(
       fetchSftpConnection(
-        jsonResponse({ configured: true, host: "h", bootPinned: true }),
+        jsonResponse({
+          configured: true,
+          host: "sftp.example.gov",
+          credentialWarnings: [
+            "a credential is in the mounted folder",
+            7,
+            null,
+          ],
+        }),
       ),
-    ).resolves.toEqual({ connection: { host: "h" }, bootPinned: true });
-  });
-
-  test("bootPinned is dropped when no connection is present", async () => {
-    // A contradictory { configured: false, bootPinned: true } (never emitted by
-    // the server) must not present as a read-only nothing.
-    await expect(
-      fetchSftpConnection(
-        jsonResponse({ configured: false, bootPinned: true }),
-      ),
-    ).resolves.toEqual(none);
+    ).resolves.toEqual({
+      connection: {
+        host: "sftp.example.gov",
+        credentialWarnings: ["a credential is in the mounted folder"],
+      },
+    });
   });
 
   test("GETs the sftp route", async () => {

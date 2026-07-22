@@ -65,10 +65,10 @@ export function DirectExchangeBench() {
   const [identity, setIdentity] = useState("");
   const [affirmed, setAffirmed] = useState(false);
 
-  // Fetch the appliance's provisioned SFTP connection once on a console build; the
-  // server is boot-static, so one fetch per bench serves the session. The helper
-  // resolves to a null connection on any failure or when none is provisioned, so the
-  // SFTP step then offers free-hand authoring.
+  // Fetch the appliance's authored SFTP connection once on a console build; one
+  // fetch per bench serves the session. The helper resolves to a null connection on
+  // any failure or when none is authored, so the SFTP step then offers free-hand
+  // authoring.
   useEffect(() => {
     if (!consoleBuild || sftpInfo !== undefined) return;
     let cancelled = false;
@@ -96,7 +96,6 @@ export function DirectExchangeBench() {
   }, [consoleBuild, rendezvous]);
 
   const sftpConnection = sftpInfo === undefined ? null : sftpInfo.connection;
-  const bootPinned = sftpInfo?.bootPinned === true;
 
   // The appliance reads the mounted file in place, so a run carries only a REFERENCE
   // (the opaque name), never the content.
@@ -152,13 +151,13 @@ export function DirectExchangeBench() {
   }
 
   function authorSftpConnection(connection: SftpConnectionProjection) {
-    setSftpInfo({ connection, bootPinned: false });
+    setSftpInfo({ connection });
     // Re-authoring the server changes the trust context, so re-affirm.
     setAffirmed(false);
   }
 
   function clearSftpConnection() {
-    setSftpInfo({ connection: null, bootPinned: false });
+    setSftpInfo({ connection: null });
     setAffirmed(false);
     void deleteSftpConnection();
   }
@@ -259,7 +258,6 @@ export function DirectExchangeBench() {
             transport={transport}
             onTransport={chooseTransport}
             sftpConnection={sftpConnection}
-            bootPinned={bootPinned}
             rendezvous={rendezvous}
             onAuthorConnection={authorSftpConnection}
             onClearConnection={clearSftpConnection}

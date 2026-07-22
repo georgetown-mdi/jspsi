@@ -92,6 +92,9 @@ interface StubOptions {
   /** Force the PUT /api/jobs/sftp response status (e.g. 413) instead of
    * authoring the connection. */
   putStatus?: number;
+  /** Non-blocking credential warnings the PUT /api/jobs/sftp projection carries,
+   * as the server returns when a credential resolves inside an excluded dir. */
+  putWarnings?: Array<string>;
 }
 
 /** The same-origin job API, stubbed at the global fetch seam. PUT /api/jobs/sftp
@@ -101,7 +104,7 @@ function stubJobApi(options: StubOptions = {}): {
 } {
   const captured: Array<CapturedRequest> = [];
   const realFetch = window.fetch.bind(window);
-  let sftp: unknown = options.sftp ?? { configured: false, bootPinned: false };
+  let sftp: unknown = options.sftp ?? { configured: false };
 
   const jsonResponse = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), {
@@ -150,16 +153,17 @@ function stubJobApi(options: StubOptions = {}): {
           ) as { host?: string; port?: number; path?: string };
           const projection: Record<string, unknown> = {
             configured: true,
-            bootPinned: false,
             host: parsed.host,
           };
           if (parsed.port !== undefined) projection.port = parsed.port;
           if (parsed.path !== undefined) projection.path = parsed.path;
+          if (options.putWarnings !== undefined)
+            projection.credentialWarnings = options.putWarnings;
           sftp = projection;
           return Promise.resolve(jsonResponse(projection));
         }
         if (method === "DELETE") {
-          sftp = { configured: false, bootPinned: false };
+          sftp = { configured: false };
           return Promise.resolve(new Response(null, { status: 204 }));
         }
         return Promise.resolve(jsonResponse(sftp));
@@ -492,7 +496,6 @@ describe("console SFTP connection authoring", () => {
     stubJobApi({
       sftp: {
         configured: true,
-        bootPinned: false,
         host: "sftp.example.gov",
         port: 2222,
       },
@@ -519,6 +522,30 @@ describe("console SFTP connection authoring", () => {
     await expect
       .element(page.getByText("Enter a port number between 0 and 65535"))
       .toBeVisible();
+  });
+
+  test("a credential warning renders below the authored connection", async () => {
+    stubJobApi({
+      putWarnings: [
+        "The password credential file is inside the job data root, the folder " +
+          "psilink writes the exchange's working files and results into.",
+      ],
+    });
+    mount(createElement(InviterBench));
+    await reachReviewCreate();
+    await openAndFillForm();
+    await userEvent.fill(
+      page.getByLabelText("File reference"),
+      "@/data/partner-key",
+    );
+    await page.getByRole("button", { name: "Save connection" }).click();
+    // The connection is authored (it runs), and the non-blocking warning shows.
+    await expect
+      .element(page.getByText("Credential file location"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("inside the job data root", { exact: false }))
+      .toBeInTheDocument();
   });
 
   test("a 413 shows the too-large message, not the reachability one", async () => {
@@ -556,29 +583,5 @@ describe("console SFTP connection authoring", () => {
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Save your exchange file");
-  });
-
-  test("a boot-provisioned server is read-only, no authoring offered", async () => {
-    stubJobApi({
-      sftp: {
-        configured: true,
-        bootPinned: true,
-        host: "sftp.example.gov",
-        port: 2222,
-      },
-    });
-    mount(createElement(InviterBench));
-    await reachReviewCreate();
-    await expect
-      .element(
-        page.getByText("provisioned on this appliance", { exact: false }),
-      )
-      .toBeInTheDocument();
-    expect(
-      page.getByRole("button", { name: "Add connection" }).query(),
-    ).toBeNull();
-    expect(
-      page.getByRole("button", { name: "Edit connection" }).query(),
-    ).toBeNull();
   });
 });

@@ -24,10 +24,10 @@ const log = getLogger("serverJobExchangeDriver");
 
 /** The channel a server job runs over, mirroring the {@link JobExchangeIntent}
  * discriminant so the driver stays transport-blind past intent construction.
- * The sftp variant carries no connection field at all: the appliance is
- * provisioned with exactly one SFTP server (`GET /api/jobs/sftp`), so every
- * host, port, path, and credential reference lives on the appliance, never in
- * the browser. */
+ * The sftp variant carries no connection field at all: the appliance runs the
+ * one authored SFTP connection (`GET /api/jobs/sftp`), so every host, port,
+ * path, and credential reference lives on the appliance, never in the
+ * browser. */
 export type ServerJobExchangeTransport =
   { channel: "filedrop" } | { channel: "sftp" };
 
@@ -293,57 +293,40 @@ function jobStatusViewOf(body: unknown): JobStatusView {
 
 /**
  * The effective SFTP connection as the browser reads it off `GET /api/jobs/sftp`:
- * the credential-free locator (or null when none is effective) plus whether that
- * connection is a deploy-time boot server. `bootPinned` distinguishes the two
- * configured sub-cases the console renders differently -- a boot server is
- * read-only (a `PUT` would 409), an authored connection offers edit/clear -- and
- * is meaningful only when a connection is present.
+ * the credential-free locator (or null when none is authored).
  */
 export interface SftpConnectionInfo {
   connection: SftpConnectionProjection | null;
-  bootPinned: boolean;
 }
 
 /**
- * Fetch the appliance's effective SFTP connection (`GET /api/jobs/sftp`) as the
- * validated locator plus its boot-pinned flag. Fail-safe toward "none
- * configured": a non-2xx, a network error, a `{ configured: false }` body, or a
- * malformed `{ configured: true, ... }` body all resolve to a null connection, so
- * the bench offers in-app authoring (or the save-a-file alternative) rather than
- * arming a server-job run it has no connection for.
+ * Fetch the appliance's authored SFTP connection (`GET /api/jobs/sftp`) as the
+ * validated locator. Fail-safe toward "none configured": a non-2xx, a network
+ * error, a `{ configured: false }` body, or a malformed `{ configured: true, ... }`
+ * body all resolve to a null connection, so the bench offers in-app authoring
+ * (or the save-a-file alternative) rather than arming a server-job run it has no
+ * connection for.
  */
 export async function fetchSftpConnection(
   fetchImpl: typeof fetch = fetch,
 ): Promise<SftpConnectionInfo> {
   try {
     const response = await fetchImpl("/api/jobs/sftp", { method: "GET" });
-    if (!response.ok) return { connection: null, bootPinned: false };
+    if (!response.ok) return { connection: null };
     const body: unknown = await response.json();
-    return sftpConnectionInfoOf(body);
+    return { connection: sftpConnectionProjectionOf(body) };
   } catch {
-    return { connection: null, bootPinned: false };
+    return { connection: null };
   }
-}
-
-/** Read the connection locator and the boot-pinned flag off an sftp response
- * body. `bootPinned` is honored only alongside a valid connection, so a
- * contradictory `{ configured: false, bootPinned: true }` (which the server never
- * emits) can never present as a read-only nothing. */
-function sftpConnectionInfoOf(body: unknown): SftpConnectionInfo {
-  const connection = sftpConnectionProjectionOf(body);
-  const bootPinned =
-    connection !== null &&
-    body !== null &&
-    typeof body === "object" &&
-    (body as { bootPinned?: unknown }).bootPinned === true;
-  return { connection, bootPinned };
 }
 
 /**
  * Validate the sftp response body into the credential-free projection, or null
  * when it reports `configured: false` or is malformed -- a partial or ill-formed
  * body fails closed rather than arming a run against a connection the operator did
- * not provision.
+ * not provision. The non-blocking `credentialWarnings` default to an empty array:
+ * a missing or malformed field reads as "no warnings" rather than dropping the
+ * connection (a warning is advisory, not load-bearing).
  *
  * @internal exported for the authoring client, which parses the same projection
  * off a `PUT /api/jobs/sftp` success body.
@@ -353,7 +336,10 @@ export function sftpConnectionProjectionOf(
 ): SftpConnectionProjection | null {
   if (body === null || typeof body !== "object" || Array.isArray(body))
     return null;
-  const { configured, host, port, path } = body as Record<string, unknown>;
+  const { configured, host, port, path, credentialWarnings } = body as Record<
+    string,
+    unknown
+  >;
   if (configured !== true) return null;
   if (typeof host !== "string" || host.length === 0) return null;
   if (
@@ -369,6 +355,11 @@ export function sftpConnectionProjectionOf(
   const connection: SftpConnectionProjection = { host };
   if (port !== undefined) connection.port = port;
   if (path !== undefined) connection.path = path;
+  connection.credentialWarnings = Array.isArray(credentialWarnings)
+    ? credentialWarnings.filter(
+        (entry): entry is string => typeof entry === "string",
+      )
+    : [];
   return connection;
 }
 
@@ -526,8 +517,8 @@ function errorMessageOf(event: RelayEvent): string {
 
 /** Build the {@link JobExchangeIntent} a run POSTs from the driver config: the
  * `transport` picks the arm (neither adds a connection field -- the sftp arm
- * carries no `remote`, the appliance provisions the one server), and everything
- * after the discriminant is channel-independent. */
+ * carries no `remote`, the appliance runs the one authored connection), and
+ * everything after the discriminant is channel-independent. */
 function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
   const {
     transport,
@@ -654,7 +645,7 @@ async function runCreatedJob(
 /**
  * Build a server-job {@link ExchangeDriver}: `run` POSTs a
  * {@link JobExchangeIntent} for the config's transport (filedrop, or sftp over
- * the operator-provisioned server) to the job API and maps the server's
+ * the operator-authored connection) to the job API and maps the server's
  * SSE event stream onto the typed lifecycle events, so it is a drop-in for the
  * in-browser WebRTC driver behind the same contract. It owns no peer
  * connection, PSI library, or exchange result -- the result is written on the

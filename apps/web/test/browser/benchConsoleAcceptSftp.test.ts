@@ -153,7 +153,7 @@ function stubSftpAccept(): {
   const realFetch = window.fetch.bind(window);
   const encoder = new TextEncoder();
   let sse: ReadableStreamDefaultController<Uint8Array> | undefined;
-  let sftp: unknown = { configured: false, bootPinned: false };
+  let sftp: unknown = { configured: false };
   const jsonResponse = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), {
       status,
@@ -187,7 +187,6 @@ function stubSftpAccept(): {
           ) as { host?: string; port?: number; path?: string };
           const projection: Record<string, unknown> = {
             configured: true,
-            bootPinned: false,
             host: parsed.host,
           };
           if (parsed.port !== undefined) projection.port = parsed.port;
@@ -196,7 +195,7 @@ function stubSftpAccept(): {
           return Promise.resolve(jsonResponse(projection));
         }
         if (method === "DELETE") {
-          sftp = { configured: false, bootPinned: false };
+          sftp = { configured: false };
           return Promise.resolve(new Response(null, { status: 204 }));
         }
         return Promise.resolve(jsonResponse(sftp));

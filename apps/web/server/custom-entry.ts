@@ -22,7 +22,6 @@ import { getLogger } from "@psilink/core";
 import {
   bootSftpCredentialScratchDir,
   shutdownJobManager,
-  useSftpServer,
   warnJobApiProfileMismatch,
 } from "../src/jobs/index";
 import { ConfigManager } from "../src/utils/serverConfig";
@@ -60,12 +59,6 @@ const port = (config.PORT || 3000) as number;
 const host = process.env.NITRO_HOST || process.env.HOST;
 
 const path = process.env.NITRO_UNIX_SOCKET;
-
-// Fail closed on the provisioned SFTP server: a configured server file that does
-// not load (or one configured without a data root, or the superseded
-// JOB_SFTP_REMOTES variable) refuses to start rather than deferring the error to
-// the first sftp job request.
-useSftpServer();
 
 // Fail closed on the pasted-credential scratch directory: when the job API is
 // enabled, assert it resolves outside the data root and rendezvous mount, create

@@ -235,7 +235,7 @@ export function useInviterExchange({
    * on the browser path, which re-parses the retained rows off the minted invitation
    * and never reads this. */
   inputSource: JobInputSource | undefined;
-  /** Whether the appliance has a provisioned SFTP server -- the selector's third
+  /** Whether the appliance has an authored SFTP connection -- the selector's third
    * input, threaded from the owner's fetch so this hook and the owner route
    * identically. */
   sftpConfigured: boolean;
@@ -369,7 +369,7 @@ export function useInviterExchange({
       });
 
     // The transport a server-job run rides: an sftp channel carries no
-    // connection field (the appliance provisions the one server), any other
+    // connection field (the appliance holds the authored server), any other
     // server-job channel is filedrop. Reached only for a server-job selection,
     // which the selector never produces for `browser`.
     const serverJobTransport = (): ServerJobExchangeTransport =>
