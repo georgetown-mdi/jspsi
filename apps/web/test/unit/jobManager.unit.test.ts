@@ -1022,8 +1022,15 @@ describe("zero-setup mode end-to-end via the stub CLI", () => {
     expect(args.connectionArgs[0]).toBe(
       "sftp://sftp.example.org:2222/exchange",
     );
-    expect(args.connectionArgs).toContain("--server-host-key-fingerprint");
-    expect(args.connectionArgs).toContain("@/etc/psilink/prod-east-password");
+    // Value-bearing connection flags ride single `--flag=value` tokens.
+    expect(
+      args.connectionArgs.some((token) =>
+        token.startsWith("--server-host-key-fingerprint="),
+      ),
+    ).toBe(true);
+    expect(args.connectionArgs).toContain(
+      "--server-password=@/etc/psilink/prod-east-password",
+    );
     expect(args.identity).toBe("county-health");
     expect(args.linkageStrategy).toBe("single-pass");
 

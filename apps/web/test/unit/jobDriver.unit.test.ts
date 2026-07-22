@@ -227,18 +227,17 @@ describe("spawnZeroSetupJob drives the literal $0 form", () => {
     const argv = await captureArgv({
       connectionArgs: [
         "sftp://sftp.example.org:2222/exchange",
-        "--server-username",
-        "linkage",
-        "--server-password",
-        "@/etc/psilink/pw",
-        "--server-host-key-fingerprint",
-        `SHA256:${"A".repeat(43)}`,
+        "--server-username=linkage",
+        "--server-password=@/etc/psilink/pw",
+        `--server-host-key-fingerprint=SHA256:${"A".repeat(43)}`,
       ],
       eventStream: true,
     });
     expect(argv[0]).toBe("sftp://sftp.example.org:2222/exchange");
     expect(argv).toContain("--event-stream");
-    expect(argv).toContain("--record-file");
+    // The record path rides a single `--flag=value` token, never a two-token pair.
+    expect(argv.some((token) => token.startsWith("--record-file="))).toBe(true);
+    expect(argv).not.toContain("--record-file");
     // The two trailing positionals are input then output.
     expect(argv[argv.length - 2].endsWith("input.csv")).toBe(true);
     expect(argv[argv.length - 1].endsWith("output.csv")).toBe(true);
@@ -258,14 +257,31 @@ describe("spawnZeroSetupJob drives the literal $0 form", () => {
     expect(argv).not.toContain("--event-stream");
   });
 
-  test("forwards --identity and --linkage-strategy when set", async () => {
+  test("forwards --identity and --linkage-strategy as single =value tokens", async () => {
     const argv = await captureArgv({
       connectionArgs: ["file:///srv/jobs/abc/rendezvous"],
       eventStream: false,
       identity: "county-health",
       linkageStrategy: "single-pass",
     });
-    expect(argv[argv.indexOf("--identity") + 1]).toBe("county-health");
-    expect(argv[argv.indexOf("--linkage-strategy") + 1]).toBe("single-pass");
+    expect(argv).toContain("--identity=county-health");
+    expect(argv).toContain("--linkage-strategy=single-pass");
+    // Never a two-token pair: a bare flag would let a value be parsed separately.
+    expect(argv).not.toContain("--identity");
+    expect(argv).not.toContain("--linkage-strategy");
+  });
+
+  test("a flag-shaped identity rides its =value token, never steering the run", async () => {
+    // Defense in depth over the schema's leading-dash refusal: even a `-`-leading
+    // identity reaching the driver is one `--identity=<value>` token, so yargs
+    // parses it verbatim and no standalone `--save` (or any lone flag) appears.
+    const argv = await captureArgv({
+      connectionArgs: ["file:///srv/jobs/abc/rendezvous"],
+      eventStream: false,
+      identity: "--save",
+    });
+    expect(argv).toContain("--identity=--save");
+    expect(argv).not.toContain("--save");
+    expect(argv).not.toContain("--identity");
   });
 });

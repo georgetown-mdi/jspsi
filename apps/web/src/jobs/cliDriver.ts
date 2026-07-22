@@ -177,7 +177,9 @@ export function spawnExchangeJob(args: {
  * {@link zeroSetupSftpArgv} / {@link zeroSetupFiledropArgv}; every credential in it
  * is an `@path` reference the CLI child resolves at live-use, so no secret byte is
  * on argv. `identity` and `linkageStrategy`, when set, are a bounded label and a
- * closed enum, forwarded as `--identity` / `--linkage-strategy`.
+ * closed enum, forwarded as single `--identity=<value>` / `--linkage-strategy=<value>`
+ * tokens (the `=` form so a `-`-leading value cannot be misparsed by yargs as its
+ * own flag).
  *
  * Shares the whole post-spawn tail (fd-3 reader, stderr tail, terminal
  * reconciliation) with {@link spawnExchangeJob} through {@link runCliChild}; the
@@ -202,17 +204,20 @@ export function spawnZeroSetupJob(args: {
   const { identity, linkageStrategy } = args;
 
   // The URL is the first positional (connectionArgs[0]); input and output are the
-  // trailing positionals. Every non-positional is a server constant or a
-  // server-built flag; no subcommand token, no --config-file/--key-file, no --save.
+  // trailing positionals. Every value-bearing flag is emitted as a single
+  // `--flag=value` token, never a two-token `["--flag", value]` pair: a value that
+  // begins with `-` (a crafted identity, say) would otherwise be misparsed by yargs
+  // as its own flag and could steer the run (synthesizing --save). Boolean flags
+  // carry no value and stay bare. No subcommand token, no --config-file/--key-file,
+  // no --save.
   const argv: Array<string> = [
     binaryPath,
     ...connectionArgs,
-    ...(identity !== undefined ? ["--identity", identity] : []),
+    ...(identity !== undefined ? [`--identity=${identity}`] : []),
     ...(linkageStrategy !== undefined
-      ? ["--linkage-strategy", linkageStrategy]
+      ? [`--linkage-strategy=${linkageStrategy}`]
       : []),
-    "--record-file",
-    recordPath,
+    `--record-file=${recordPath}`,
     ...(eventStream ? ["--event-stream"] : []),
     inputPath,
     outputPath,

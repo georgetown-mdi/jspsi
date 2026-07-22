@@ -51,10 +51,23 @@ if (process.env.STUB_OUTPUT_FILE !== undefined) {
   fs.writeFileSync(outputPath, process.env.STUB_OUTPUT_FILE);
 }
 
+// The driver passes --record-file as a two-token pair (the exchange form) or a
+// single --record-file=<value> token (the zero-setup form, which uses the =value
+// shape so a flag-shaped value cannot be misparsed); the real CLI's yargs accepts
+// both, so the stub resolves both.
+function recordFilePath(argv) {
+  const flagIndex = argv.indexOf("--record-file");
+  if (flagIndex !== -1 && flagIndex + 1 < argv.length)
+    return argv[flagIndex + 1];
+  const eqToken = argv.find((token) => token.startsWith("--record-file="));
+  return eqToken === undefined
+    ? undefined
+    : eqToken.slice("--record-file=".length);
+}
+
 if (process.env.STUB_RECORD_JSON !== undefined) {
-  const flagIndex = process.argv.indexOf("--record-file");
-  if (flagIndex !== -1 && flagIndex + 1 < process.argv.length) {
-    const recordPath = process.argv[flagIndex + 1];
+  const recordPath = recordFilePath(process.argv);
+  if (recordPath !== undefined) {
     const keysPath = recordPath.endsWith(".json")
       ? recordPath.slice(0, -".json".length) + ".keys.json"
       : recordPath + ".keys.json";

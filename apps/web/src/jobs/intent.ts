@@ -226,7 +226,11 @@ export type JobZeroSetupLinkageStrategy = "cascade" | "single-pass";
  *
  * - `linkageStrategy` is a closed enum forwarded to the CLI's `--linkage-strategy`.
  * - `identity` is a bounded operator label forwarded to the CLI's `--identity`
- *   (the party name/org/contact string). Bounded by {@link MAX_IDENTITY_LENGTH}.
+ *   (the party name/org/contact string). Bounded by {@link MAX_IDENTITY_LENGTH}
+ *   and, being free text rather than a closed enum, additionally forbidden a leading
+ *   `-` so a flag-shaped value cannot masquerade as a CLI flag; the driver also
+ *   emits it as a single `--identity=<value>` token, which parses a `-`-leading
+ *   value verbatim regardless.
  *
  * Neither is a path, host, or credential, so neither can escape into a file path
  * or a connection field. Exactly one of `inputCsv` or `inputFile` is set (enforced
@@ -489,7 +493,16 @@ const jobZeroSetupIntentCommonFields = {
   inputFile: jobInputFileReferenceSchema.optional(),
   eventStream: z.boolean().optional(),
   linkageStrategy: z.enum(["cascade", "single-pass"]).optional(),
-  identity: z.string().min(1).max(MAX_IDENTITY_LENGTH).optional(),
+  // Free text, unlike the closed strategy enum: forbid a leading `-` so a
+  // flag-shaped label (e.g. "--save") cannot be mistaken for a CLI flag. Defense
+  // in depth -- the driver already emits it as a single `--identity=<value>` token,
+  // which parses a `-`-leading value verbatim regardless.
+  identity: z
+    .string()
+    .min(1)
+    .max(MAX_IDENTITY_LENGTH)
+    .regex(/^[^-]/, "identity must not begin with '-'")
+    .optional(),
 };
 
 // Mode-carrying zero-setup arms, each `.strict()` and discriminated on channel.
@@ -682,27 +695,27 @@ export function composeKeyFileDocument(intent: JobExchangeIntent): string {
  * server entry's host, port, and path. The host, port, and path go through the
  * WHATWG {@link URL} object (never string concatenation) so each component is
  * encoded correctly; a bare IPv6 literal is bracketed first, since the hostname
- * setter silently rejects an unbracketed one. The set is then verified against a
- * sentinel: the WHATWG setter no-ops rather than throwing on a host it cannot
- * parse, which would leave the sentinel host in place and point the exchange at the
- * wrong server, so a host that fails to set is a compose-time error. (Checking
- * against the sentinel -- not against the input verbatim -- so a host the setter
- * legitimately transforms, e.g. an IDN name to punycode, still passes.) Credentials
- * never ride the URL -- they are `--server-*` flags built by
- * {@link zeroSetupSftpArgv} -- so no secret byte is ever URL-encoded here.
+ * setter silently rejects an unbracketed one. The set is then required to ROUND-TRIP
+ * exactly: the WHATWG setter no-ops on a host it cannot parse AND silently truncates
+ * at a URL-significant delimiter (`foo#bar` -> `foo`), either of which would point
+ * the exchange at the wrong server. Comparing the composed hostname against the
+ * input (the bracketed form is what the setter round-trips for an IPv6 literal) --
+ * not merely against a sentinel, which a truncation to a non-sentinel prefix slips
+ * past -- makes any alteration a compose-time error. Credentials never ride the URL
+ * -- they are `--server-*` flags built by {@link zeroSetupSftpArgv} -- so no secret
+ * byte is ever URL-encoded here.
  */
 function buildZeroSetupSftpUrl(serverEntry: JobSftpServerEntry): string {
   const hostForUrl =
     serverEntry.host.includes(":") && !serverEntry.host.startsWith("[")
       ? `[${serverEntry.host}]`
       : serverEntry.host;
-  const sentinelHost = "host.invalid";
-  const url = new URL(`sftp://${sentinelHost}`);
+  const url = new URL("sftp://host.invalid");
   url.hostname = hostForUrl;
-  if (hostForUrl !== sentinelHost && url.hostname === sentinelHost)
+  if (url.hostname !== hostForUrl)
     throw new Error(
       "could not encode the provisioned sftp host into a URL for a zero-setup " +
-        "exchange",
+        "exchange without altering it",
     );
   if (serverEntry.port !== undefined) url.port = String(serverEntry.port);
   if (serverEntry.path !== undefined) url.pathname = serverEntry.path;
@@ -715,9 +728,11 @@ function buildZeroSetupSftpUrl(serverEntry: JobSftpServerEntry): string {
  * The argv analog of {@link composeSftpConfigDocument} -- it draws every field from
  * the server entry, contributing nothing from the client.
  *
- * Credentials are emitted as `--server-<field> @path` with the `@path` string
- * VERBATIM (the same `@path` the entry carries), never a resolved secret: the CLI
- * child resolves the reference at live-use, so no secret byte is ever on argv. The
+ * Credentials are emitted as single `--server-<field>=@path` tokens with the `@path`
+ * string VERBATIM (the same `@path` the entry carries), never a resolved secret: the
+ * CLI child resolves the reference at live-use, so no secret byte is ever on argv.
+ * Every value-bearing flag uses the `=value` form (never a two-token pair) so a value
+ * that begins with `-` cannot be misparsed by yargs as its own flag. The
  * primary credential (`password` or `private_key`) is picked exactly as
  * {@link composeSftpConfigDocument} lets core pick it -- whichever the entry carries,
  * at most one -- with the optional passphrase (`@path`) and keyboard-interactive
@@ -734,15 +749,14 @@ export function zeroSetupSftpArgv(
 ): Array<string> {
   const argv: Array<string> = [buildZeroSetupSftpUrl(serverEntry)];
   if (serverEntry.username !== undefined)
-    argv.push("--server-username", serverEntry.username);
+    argv.push(`--server-username=${serverEntry.username}`);
   if (serverEntry.password !== undefined)
-    argv.push("--server-password", serverEntry.password);
+    argv.push(`--server-password=${serverEntry.password}`);
   else if (serverEntry.privateKey !== undefined)
-    argv.push("--server-private-key", serverEntry.privateKey);
+    argv.push(`--server-private-key=${serverEntry.privateKey}`);
   if (serverEntry.privateKeyPassphrase !== undefined)
     argv.push(
-      "--server-private-key-passphrase",
-      serverEntry.privateKeyPassphrase,
+      `--server-private-key-passphrase=${serverEntry.privateKeyPassphrase}`,
     );
   if (serverEntry.keyboardInteractive === true)
     argv.push("--server-keyboard-interactive");
@@ -751,7 +765,7 @@ export function zeroSetupSftpArgv(
       "a zero-setup exchange cannot pin more than one host-key fingerprint; " +
         "the CLI --server-host-key-fingerprint flag is single-valued",
     );
-  argv.push("--server-host-key-fingerprint", serverEntry.hostKeyFingerprint);
+  argv.push(`--server-host-key-fingerprint=${serverEntry.hostKeyFingerprint}`);
   return argv;
 }
 

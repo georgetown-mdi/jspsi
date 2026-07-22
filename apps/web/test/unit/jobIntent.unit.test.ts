@@ -751,6 +751,25 @@ describe("jobZeroSetupIntentSchema is injection-closed and strict", () => {
     expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(false);
   });
 
+  test("rejects a flag-shaped (leading-dash) identity label", () => {
+    // A `-`-leading identity such as "--save" could, absent this guard, be parsed
+    // by the CLI as its own flag. The schema refuses it on both channel arms; the
+    // driver's =value emission is the second layer.
+    for (const identity of ["--save", "-x", "-"]) {
+      for (const base of [validZeroSetupIntent(), validZeroSetupSftpIntent()]) {
+        const intent = { ...base, identity };
+        expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(false);
+        expect(jobCreateIntentSchema.safeParse(intent).success).toBe(false);
+      }
+    }
+    // A benign label that merely contains a dash later is still accepted.
+    expect(
+      jobZeroSetupIntentSchema.safeParse(
+        validZeroSetupIntent({ identity: "county-health" }),
+      ).success,
+    ).toBe(true);
+  });
+
   test("rejects an unknown channel", () => {
     const intent = { ...validZeroSetupIntent(), channel: "webrtc" };
     expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(false);
@@ -835,31 +854,32 @@ describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
     expect(argv[0]).toBe("sftp://[::1]");
   });
 
-  test("emits the username and the @path credential VERBATIM, never a value", () => {
+  test("emits the username and the @path credential VERBATIM as =value tokens", () => {
     const argv = zeroSetupSftpArgv(testSftpServerEntry());
-    expect(argv).toContain("--server-username");
-    expect(argv[argv.indexOf("--server-username") + 1]).toBe("linkage");
+    expect(argv).toContain("--server-username=linkage");
     // The @path is emitted as a filename reference, never resolved to a secret.
-    expect(argv).toContain("--server-password");
-    expect(argv[argv.indexOf("--server-password") + 1]).toBe(
-      "@/etc/psilink/prod-east-password",
+    expect(argv).toContain(
+      "--server-password=@/etc/psilink/prod-east-password",
     );
+    // Single tokens throughout: no bare value flag whose value could be misparsed.
+    expect(argv).not.toContain("--server-username");
+    expect(argv).not.toContain("--server-password");
   });
 
-  test("emits --server-private-key and its passphrase as @path refs", () => {
+  test("emits --server-private-key and its passphrase as @path =value refs", () => {
     const argv = zeroSetupSftpArgv({
       host: "sftp.example.org",
       hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
       privateKey: "@/etc/psilink/id_ed25519",
       privateKeyPassphrase: "@/etc/psilink/passphrase",
     });
-    expect(argv[argv.indexOf("--server-private-key") + 1]).toBe(
-      "@/etc/psilink/id_ed25519",
+    expect(argv).toContain("--server-private-key=@/etc/psilink/id_ed25519");
+    expect(argv).toContain(
+      "--server-private-key-passphrase=@/etc/psilink/passphrase",
     );
-    expect(argv[argv.indexOf("--server-private-key-passphrase") + 1]).toBe(
-      "@/etc/psilink/passphrase",
+    expect(argv.some((token) => token.startsWith("--server-password"))).toBe(
+      false,
     );
-    expect(argv).not.toContain("--server-password");
   });
 
   test("emits --server-keyboard-interactive only when enabled", () => {
@@ -875,9 +895,8 @@ describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
 
   test("ALWAYS emits the mandatory literal host-key fingerprint", () => {
     const argv = zeroSetupSftpArgv(testSftpServerEntry());
-    expect(argv).toContain("--server-host-key-fingerprint");
-    expect(argv[argv.indexOf("--server-host-key-fingerprint") + 1]).toBe(
-      TEST_HOST_KEY_FINGERPRINT,
+    expect(argv).toContain(
+      `--server-host-key-fingerprint=${TEST_HOST_KEY_FINGERPRINT}`,
     );
   });
 
@@ -887,9 +906,28 @@ describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
     expect(joined).not.toContain("--config-file");
     expect(joined).not.toContain("--key-file");
     expect(joined).not.toContain("--save");
-    // The only credential-bearing tokens are @path references, never values.
-    for (const token of argv)
-      if (token.includes("psilink")) expect(token.startsWith("@")).toBe(true);
+    // The only credential-bearing tokens are @path references, never values: the
+    // value portion (after the flag's `=`) always starts with `@`.
+    for (const token of argv) {
+      if (!token.includes("psilink")) continue;
+      expect(token.slice(token.indexOf("=") + 1).startsWith("@")).toBe(true);
+    }
+  });
+
+  test("throws when the host does not round-trip through the URL (truncation)", () => {
+    // A host carrying a URL-significant delimiter is truncated by the WHATWG
+    // hostname setter (`foo#bar` -> `foo`) or no-ops (`foo\bar`); compose must
+    // refuse it rather than silently point at the truncated prefix. isBareSftpHost
+    // rejects such a host upstream -- this is the compose-time backstop.
+    for (const host of ["foo#bar", "foo?bar", "foo\\bar"]) {
+      expect(() =>
+        zeroSetupSftpArgv({
+          host,
+          password: "@/etc/psilink/pw",
+          hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+        }),
+      ).toThrow(/without altering it/);
+    }
   });
 
   test("an array (multi) fingerprint fails compose -- single-pin only this slice", () => {
@@ -911,7 +949,9 @@ describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
       password: "@/etc/psilink/pw",
       hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
     });
-    expect(argv).not.toContain("--server-username");
+    expect(argv.some((token) => token.startsWith("--server-username"))).toBe(
+      false,
+    );
   });
 });
 
