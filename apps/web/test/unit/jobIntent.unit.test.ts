@@ -28,6 +28,8 @@ import {
   zeroSetupSftpArgv,
 } from "@jobs/intent";
 
+import { isBareSftpHost } from "@psi/sftpHost";
+
 import {
   SAMPLE_INPUT_FILE_REF,
   TEST_HOST_KEY_FINGERPRINT,
@@ -854,6 +856,35 @@ describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
     expect(argv[0]).toBe("sftp://[::1]");
   });
 
+  test("adopts the WHATWG-canonical form of a non-canonical IPv6 literal", () => {
+    // A legitimately-provisioned but non-canonical IPv6 (leading zeros) and an
+    // uppercase-hex one both compose to the single canonical bracketed form. The
+    // relaxed check adopts url.hostname rather than rejecting a host that does not
+    // equal the input verbatim, matching what exchange mode accepts.
+    for (const host of ["2001:0db8::0001", "2001:DB8::1", "2001:db8::1"]) {
+      const argv = zeroSetupSftpArgv({
+        host,
+        hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      });
+      expect(argv[0]).toBe("sftp://[2001:db8::1]");
+    }
+  });
+
+  test("composes a normal host and an IPv4 unchanged", () => {
+    expect(
+      zeroSetupSftpArgv({
+        host: "sftp.example.org",
+        hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      })[0],
+    ).toBe("sftp://sftp.example.org");
+    expect(
+      zeroSetupSftpArgv({
+        host: "192.0.2.1",
+        hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      })[0],
+    ).toBe("sftp://192.0.2.1");
+  });
+
   test("emits the username and the @path credential VERBATIM as =value tokens", () => {
     const argv = zeroSetupSftpArgv(testSftpServerEntry());
     expect(argv).toContain("--server-username=linkage");
@@ -914,19 +945,29 @@ describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
     }
   });
 
-  test("throws when the host does not round-trip through the URL (truncation)", () => {
-    // A host carrying a URL-significant delimiter is truncated by the WHATWG
-    // hostname setter (`foo#bar` -> `foo`) or no-ops (`foo\bar`); compose must
-    // refuse it rather than silently point at the truncated prefix. isBareSftpHost
-    // rejects such a host upstream -- this is the compose-time backstop.
-    for (const host of ["foo#bar", "foo?bar", "foo\\bar"]) {
+  test("throws when the host TOTAL-DROPS through the URL (no-op or empty)", () => {
+    // The relaxed check adopts the canonical hostname rather than requiring an exact
+    // round-trip, but still refuses a total drop: a setter no-op (a host it cannot
+    // parse, which leaves the sentinel `host.invalid` in place) or an empty hostname,
+    // either of which would otherwise point the exchange at the wrong server.
+    for (const host of ["foo\\bar", "foo bar", ""]) {
       expect(() =>
         zeroSetupSftpArgv({
           host,
           password: "@/etc/psilink/pw",
           hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
         }),
-      ).toThrow(/without altering it/);
+      ).toThrow(/could not encode/);
+    }
+  });
+
+  test("truncating delimiters are rejected upstream by isBareSftpHost", () => {
+    // Compose now adopts the canonical host, so a URL-significant delimiter would
+    // silently compose to its truncated prefix here (`foo#bar` -> `foo`). The
+    // upstream bare-host predicate is what keeps such a host from ever reaching
+    // compose, so the truncation hazard stays closed by the pair.
+    for (const host of ["foo#bar", "foo?bar", "foo\\bar", "foo%2fbar"]) {
+      expect(isBareSftpHost(host)).toBe(false);
     }
   });
 

@@ -16,6 +16,8 @@ import { Link } from "@tanstack/react-router";
 import { InvitationTerms } from "@components/InvitationTerms";
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 
+import { MAX_IDENTITY_LENGTH } from "@psi/identityLabel";
+
 import {
   DEFAULT_PREVIEW_IDENTITY,
   previewInferredTerms,
@@ -80,6 +82,21 @@ export function DirectConfirmSection({
   const linkable = preview.satisfiableKeyCount > 0;
   const unlinkable = unlinkableFileAlert(preview.unsatisfied);
 
+  // Client-side guard mirroring the intent schema's identity contract, validated on
+  // the value the run actually sends (the trimmed label; a blank field omits identity
+  // and runs as the appliance user, so it is not an error). Naming the fault at the
+  // field keeps a leading-dash or over-length label from reaching the server as an
+  // opaque 400 that failureFor would misattribute to the file or SFTP destination.
+  const trimmedIdentity = identity.trim();
+  const identityError =
+    trimmedIdentity.length === 0
+      ? undefined
+      : trimmedIdentity.startsWith("-")
+        ? "Identity cannot begin with a dash"
+        : trimmedIdentity.length > MAX_IDENTITY_LENGTH
+          ? `Identity cannot exceed ${MAX_IDENTITY_LENGTH} characters`
+          : undefined;
+
   return (
     <Stack gap="lg">
       <div>
@@ -102,6 +119,7 @@ export function DirectConfirmSection({
         description="Names you in the disclosure record and rides the exchange. Leave blank to run as this appliance's user."
         value={identity}
         onChange={(event) => onIdentity(event.currentTarget.value)}
+        error={identityError}
       />
 
       <section aria-label="Inferred terms">
@@ -110,6 +128,12 @@ export function DirectConfirmSection({
             linkageTerms={preview.linkageTerms}
             perspective="proposing"
             headingOrder={2}
+            framing={{
+              heading: "Terms your file produces",
+              intro:
+                "These are the terms psilink inferred from your own file. " +
+                "There is no invitation for your partner to review or consent to.",
+            }}
           />
         ) : (
           <Alert
@@ -157,14 +181,19 @@ export function DirectConfirmSection({
         <Text size="sm" c="dimmed" mt="sm">
           Want protection that does not depend on the server?{" "}
           <Anchor component={Link} to="/exchange" inherit>
-            Set up a recurring exchange with an invitation
+            Set up an exchange with an invitation
           </Anchor>{" "}
           instead.
         </Text>
       </div>
 
       <Group>
-        <Button onClick={onRun} disabled={!affirmed || !linkable || running}>
+        <Button
+          onClick={onRun}
+          disabled={
+            !affirmed || !linkable || running || identityError !== undefined
+          }
+        >
           Run the exchange
         </Button>
         <Button variant="default" onClick={onBack}>

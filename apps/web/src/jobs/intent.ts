@@ -17,6 +17,8 @@ import {
 
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 
+import { MAX_IDENTITY_LENGTH } from "@psi/identityLabel";
+
 import { isAdmissibleInputName } from "./workInputName";
 
 import type {
@@ -476,13 +478,10 @@ export const jobExchangeIntentSchema: z.ZodType<JobExchangeIntent> = z
     message: "exactly one of inputCsv or inputFile must be set",
   });
 
-/**
- * Upper bound on the `identity` label a zero-setup intent may carry (the CLI's
- * `--identity` value: the party's name/org/contact string). Generous for a real
- * label yet refuses an unbounded string; a non-secret operator value, never a path
- * or credential.
- */
-export const MAX_IDENTITY_LENGTH = 1024;
+// The identity-label contract (the cap and the leading-dash rule) lives in the
+// browser-safe @psi/identityLabel module so the confirm-screen guard shares one
+// authority with this schema; re-exported here to preserve its public entry point.
+export { MAX_IDENTITY_LENGTH };
 
 // The zero-setup common fields carry NONE of the exchange mode's credential or
 // terms material -- no sharedSecret, linkageTerms, metadata, standardization, or
@@ -690,32 +689,46 @@ export function composeKeyFileDocument(intent: JobExchangeIntent): string {
   return JSON.stringify({ sharedSecret: intent.sharedSecret });
 }
 
+// The placeholder host the URL is seeded with, distinguished from a real host so a
+// setter no-op (which leaves this value in place) is detectable. `.invalid` is a
+// reserved TLD (RFC 6761), so it is never a legitimately provisioned server.
+const ZERO_SETUP_URL_SENTINEL_HOST = "host.invalid";
+
 /**
  * Build the `sftp://` URL a zero-setup job's CLI drives, from the provisioned
  * server entry's host, port, and path. The host, port, and path go through the
  * WHATWG {@link URL} object (never string concatenation) so each component is
  * encoded correctly; a bare IPv6 literal is bracketed first, since the hostname
- * setter silently rejects an unbracketed one. The set is then required to ROUND-TRIP
- * exactly: the WHATWG setter no-ops on a host it cannot parse AND silently truncates
- * at a URL-significant delimiter (`foo#bar` -> `foo`), either of which would point
- * the exchange at the wrong server. Comparing the composed hostname against the
- * input (the bracketed form is what the setter round-trips for an IPv6 literal) --
- * not merely against a sentinel, which a truncation to a non-sentinel prefix slips
- * past -- makes any alteration a compose-time error. Credentials never ride the URL
- * -- they are `--server-*` flags built by {@link zeroSetupSftpArgv} -- so no secret
- * byte is ever URL-encoded here.
+ * setter silently rejects an unbracketed one.
+ *
+ * The composed `url.hostname` -- the WHATWG-canonical form -- is then adopted as the
+ * host, rather than requiring it to equal the input verbatim. Exact-equality
+ * over-rejected a legitimately-provisioned non-canonical host the setter safely
+ * canonicalizes (a non-canonical or uppercase-hex IPv6 literal like `2001:0db8::0001`
+ * -> `[2001:db8::1]`, or an IDN host it percent-encodes), while the exchange mode
+ * accepts the same host verbatim. The setter's other two behaviours are the real
+ * hazard: it silently TRUNCATES at a URL-significant delimiter (`foo#bar` -> `foo`)
+ * and NO-OPS on a host it cannot parse (leaving the sentinel) -- either could point
+ * the exchange at the wrong server. Truncation is closed off upstream: the
+ * `isBareSftpHost` predicate (`@psi/sftpHost`) rejects every truncating character
+ * (`#`, `?`, `\`, `%`) plus userinfo, path, and whitespace, so a host that reaches
+ * here can differ from the input ONLY by safe canonicalization. A total drop -- an
+ * empty hostname or the untouched sentinel (the no-op) -- is the one alteration still
+ * possible here, and it is a compose-time error. Credentials never ride the URL --
+ * they are `--server-*` flags built by {@link zeroSetupSftpArgv} -- so no secret byte
+ * is ever URL-encoded here.
  */
 function buildZeroSetupSftpUrl(serverEntry: JobSftpServerEntry): string {
   const hostForUrl =
     serverEntry.host.includes(":") && !serverEntry.host.startsWith("[")
       ? `[${serverEntry.host}]`
       : serverEntry.host;
-  const url = new URL("sftp://host.invalid");
+  const url = new URL(`sftp://${ZERO_SETUP_URL_SENTINEL_HOST}`);
   url.hostname = hostForUrl;
-  if (url.hostname !== hostForUrl)
+  if (url.hostname === "" || url.hostname === ZERO_SETUP_URL_SENTINEL_HOST)
     throw new Error(
       "could not encode the provisioned sftp host into a URL for a zero-setup " +
-        "exchange without altering it",
+        "exchange",
     );
   if (serverEntry.port !== undefined) url.port = String(serverEntry.port);
   if (serverEntry.path !== undefined) url.pathname = serverEntry.path;

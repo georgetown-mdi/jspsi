@@ -80,6 +80,10 @@ interface CapturedRequest {
 interface StubOptions {
   sftp?: unknown;
   rendezvous?: unknown;
+  /** The run status a `GET /api/jobs/job-7` reports. Defaults to `running`; a
+   * terminal value (`failed`) lets a discard skip the cancel-and-poll wait and DELETE
+   * at once, so a start-over test does not sit through the 15 s discard budget. */
+  jobStatus?: string;
 }
 
 /** The same-origin job API, stubbed at the global fetch seam. Unmatched URLs fall
@@ -141,9 +145,14 @@ function stubJobApi(options: StubOptions = {}): {
         if ((init?.method ?? "GET") === "DELETE")
           return Promise.resolve(new Response(null, { status: 204 }));
         return Promise.resolve(
-          jsonResponse({ status: "running", recordAvailable: false }),
+          jsonResponse({
+            status: options.jobStatus ?? "running",
+            recordAvailable: false,
+          }),
         );
       }
+      if (url === "/api/jobs/job-7/cancel")
+        return Promise.resolve(new Response(null, { status: 202 }));
       return Promise.resolve(new Response(null, { status: 404 }));
     },
   );
@@ -207,10 +216,21 @@ describe("direct exchange confirm and run", () => {
     mount(createElement(DirectExchangeBench));
     await reachConfirm();
 
-    // The browser-side terms preview renders (the self-terms "proposing" framing).
+    // The browser-side terms preview renders under the direct-exchange framing: the
+    // honest heading and intro, NOT the invitation flow's false "Exchange proposal"
+    // heading or its partner review-and-consent claim (there is no invitation here).
     await expect
-      .element(page.getByRole("heading", { name: "Exchange proposal" }))
+      .element(page.getByRole("heading", { name: "Terms your file produces" }))
       .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("no invitation for your partner to review", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    expect(container?.textContent).not.toContain("Exchange proposal");
+    expect(container?.textContent).not.toContain("must review and consent");
 
     // The two fixed symmetry notices frame the preview.
     await expect
@@ -305,6 +325,109 @@ describe("direct exchange confirm and run", () => {
     await expect
       .element(page.getByText("linkage terms do not match", { exact: false }))
       .toBeInTheDocument();
+  });
+
+  test("Start over after a terminal failure frees the slot and re-enables Run", async () => {
+    const api = stubJobApi({ sftp: CONFIGURED_SFTP, jobStatus: "failed" });
+    mount(createElement(DirectExchangeBench));
+    await reachConfirm();
+    await page.getByRole("checkbox").click();
+    await page.getByRole("button", { name: "Run the exchange" }).click();
+
+    await vi.waitFor(() =>
+      expect(api.captured.some((r) => r.url === "/api/jobs/job-7/events")).toBe(
+        true,
+      ),
+    );
+    // A terms mismatch is a terminal, non-retryable (config) failure: the alert
+    // offers Start over, not Try again.
+    api.emitEvent({
+      v: 1,
+      type: "error",
+      category: "config",
+      message: "linkage terms do not match the partner's inferred terms",
+    });
+    api.closeEvents();
+    await expect
+      .element(page.getByRole("button", { name: "Start over" }))
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Start over" }).click();
+
+    // Start over returns to the file step AND discards the failed job, freeing the
+    // appliance's single slot (a DELETE of the occupying job).
+    await expect
+      .element(page.getByRole("heading", { level: 1, name: "Your file" }))
+      .toBeInTheDocument();
+    await vi.waitFor(() =>
+      expect(
+        api.captured.some(
+          (r) => r.url === "/api/jobs/job-7" && r.method === "DELETE",
+        ),
+      ).toBe(true),
+    );
+
+    // The operator is no longer stranded: re-walk to confirm and Run is enabled again
+    // (before the fix `started` stayed true, leaving Run permanently disabled), and a
+    // fresh create is issued rather than blocked on the still-occupied slot.
+    const postsBefore = api.captured.filter(
+      (r) => r.url === "/api/jobs" && r.method === "POST",
+    ).length;
+    await page.getByRole("button", { name: "Re-profile clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await page
+      .getByRole("button", { name: "Continue to confirm and run" })
+      .click();
+    await expect
+      .element(page.getByRole("heading", { level: 1, name: "Confirm and run" }))
+      .toBeInTheDocument();
+    await page.getByRole("checkbox").click();
+    await expect
+      .element(page.getByRole("button", { name: "Run the exchange" }))
+      .toBeEnabled();
+    await page.getByRole("button", { name: "Run the exchange" }).click();
+    await vi.waitFor(() =>
+      expect(
+        api.captured.filter((r) => r.url === "/api/jobs" && r.method === "POST")
+          .length,
+      ).toBe(postsBefore + 1),
+    );
+  });
+
+  test("an invalid identity names the fault at the field and blocks Run", async () => {
+    stubJobApi({ sftp: CONFIGURED_SFTP });
+    mount(createElement(DirectExchangeBench));
+    await reachConfirm();
+    // Affirm first, so the identity guard is the only thing gating Run.
+    await page.getByRole("checkbox").click();
+    await expect
+      .element(page.getByRole("button", { name: "Run the exchange" }))
+      .toBeEnabled();
+
+    // A leading-dash label is refused inline (the intent schema would 400 it, which
+    // failureFor would misattribute to the file/SFTP destination) and Run is disabled.
+    await userEvent.fill(
+      page.getByLabelText("Your identity (optional)"),
+      "-county",
+    );
+    await expect
+      .element(page.getByText("Identity cannot begin with a dash"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Run the exchange" }))
+      .toBeDisabled();
+
+    // Correcting it clears the error and re-enables Run.
+    await userEvent.fill(
+      page.getByLabelText("Your identity (optional)"),
+      "county-health",
+    );
+    await expect
+      .element(page.getByRole("button", { name: "Run the exchange" }))
+      .toBeEnabled();
+    expect(container?.textContent).not.toContain(
+      "Identity cannot begin with a dash",
+    );
   });
 });
 

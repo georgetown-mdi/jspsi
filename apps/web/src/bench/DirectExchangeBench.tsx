@@ -113,6 +113,7 @@ export function DirectExchangeBench() {
     started,
     start,
     tryAgain,
+    reset,
     abandonRun,
   } = useDirectExchange({
     channel: transport,
@@ -171,6 +172,15 @@ export function DirectExchangeBench() {
   function runExchange() {
     start();
     goTo("run");
+  }
+
+  // Start over from a terminal failure: discard the occupying job and clear the run
+  // so the file step is fully usable again (Run re-enabled, the slot freed), then
+  // return to it. Without the reset the failed job would strand the single slot and
+  // Run would stay disabled.
+  function startOver() {
+    reset();
+    goTo("file");
   }
 
   if (!consoleBuild)
@@ -276,7 +286,7 @@ export function DirectExchangeBench() {
             failure={failure}
             warnings={warnings}
             onTryAgain={tryAgain}
-            onStartOver={() => goTo("file")}
+            onStartOver={startOver}
             onAbandon={abandonRun}
           />
         )}

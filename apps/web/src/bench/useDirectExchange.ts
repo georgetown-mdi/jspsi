@@ -67,6 +67,7 @@ export function useDirectExchange({
   started: boolean;
   start: () => void;
   tryAgain: () => void;
+  reset: () => void;
   abandonRun: () => void;
 } {
   const [run, setRun] = useState<ExchangeRun>(initialRun);
@@ -172,6 +173,28 @@ export function useDirectExchange({
     start();
   }
 
+  // Start over after a terminal, non-retryable failure (a terms mismatch or any
+  // other non-output stop). Unlike tryAgain it does NOT restart -- the operator
+  // returns to the file step to begin afresh -- so it clears started/failure/outputs
+  // (re-enabling Run and unlocking the stepper) AND discards the terminal job through
+  // the same seam tryAgain uses, freeing the appliance's single slot so the fresh run
+  // creates rather than 409ing. Clearing abortRef too is essential: start()'s
+  // re-entry guard bails while it holds the finished run's controller.
+  function reset() {
+    abortRef.current?.abort();
+    abortRef.current = undefined;
+    const jobId = currentJobIdRef.current;
+    if (jobId !== undefined) {
+      currentJobIdRef.current = undefined;
+      void discardServerJob(jobApiClient, jobId);
+    }
+    setStarted(false);
+    setFailure(undefined);
+    setOutputs(undefined);
+    setRun(initialRun());
+    setWarnings([]);
+  }
+
   // Discard the current server-job exchange when the operator deliberately leaves
   // (run another): cancel-if-running, DELETE, clear the recovery record. This is
   // what frees the appliance's single slot for the next exchange. Fire-and-forget
@@ -191,6 +214,7 @@ export function useDirectExchange({
     started,
     start,
     tryAgain,
+    reset,
     abandonRun,
   };
 }
