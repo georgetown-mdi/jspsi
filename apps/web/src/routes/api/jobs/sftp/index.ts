@@ -38,8 +38,8 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
 export const Route = createFileRoute("/api/jobs/sftp/")({
   server: {
     handlers: {
-      GET: () => {
-        const gate = gateJobRoute();
+      GET: ({ request }) => {
+        const gate = gateJobRoute(request);
         if (gate.kind === "response") return gate.response;
         const connection = gate.manager.sftpProjection();
         return jobJsonResponse(
@@ -49,7 +49,7 @@ export const Route = createFileRoute("/api/jobs/sftp/")({
         );
       },
       PUT: async ({ request }) => {
-        const gate = gateJobRoute();
+        const gate = gateJobRoute(request);
         if (gate.kind === "response") return gate.response;
 
         const body = await readJobRequestBody(
@@ -75,8 +75,8 @@ export const Route = createFileRoute("/api/jobs/sftp/")({
           ...connection,
         });
       },
-      DELETE: () => {
-        const gate = gateJobRoute();
+      DELETE: ({ request }) => {
+        const gate = gateJobRoute(request);
         if (gate.kind === "response") return gate.response;
         gate.manager.clearAuthoredSftpServer();
         return jobEmptyResponse(204);

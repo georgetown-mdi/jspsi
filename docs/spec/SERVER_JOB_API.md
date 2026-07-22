@@ -14,6 +14,12 @@ The API is dark by default. Enablement requires two conditions together: a `cons
 
 Every job response carries `Cache-Control: no-store` and no CORS headers -- the API is same-origin appliance-local, so a cross-origin caller is never granted access. These are additive to the defense-in-depth response headers the server entry already applies globally (see [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#channel-security)).
 
+### Browser-CSRF gate
+
+The shared route gate applies one browser-CSRF check to every route, after the feature gate's `404` (so a disabled API stays a uniform `404`, its presence unobservable) and before any filesystem access or spawn. The rule, in order: if `Sec-Fetch-Site` is present and is neither `same-origin` nor `none`, the request is refused `403`; else if `Origin` is present and its origin (scheme+host+port) does not equal the request's own origin -- derived from the `Host` header, since the console is served over http on loopback -- it is refused `403`; if neither header is present the request is allowed. The `403` body is empty, matching the gate's `404`.
+
+This closes the one browser-reachable gap the unauthenticated-loopback posture leaves: a page the operator visits while the console runs can issue a CORS "simple" request (no preflight) to a job route and drive a side effect -- e.g. make the appliance connect out to an attacker-chosen host via `POST /api/jobs/sftp/probe`. The response is not cross-origin-readable, so nothing exfiltrates, but the side effect would fire. Browsers send `Origin` on state-changing requests and `Sec-Fetch-Site` on every fetch, and page JavaScript cannot set either (both are forbidden header names), so a visited page cannot forge its way past the check; the console's own UI fetches relative same-origin URLs and passes unchanged; a non-browser client on loopback (curl, the operator's CLI) sends neither header and is allowed -- browser CSRF is the threat closed, a non-browser loopback client the already-accepted model. The check is on the request's origin metadata, not its body, so it is content-type-agnostic and covers every route uniformly regardless of body shape.
+
 ## Endpoints
 
 | Method | Path | Success | Notes |

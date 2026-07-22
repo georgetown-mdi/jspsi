@@ -29,7 +29,7 @@ export const Route = createFileRoute("/api/jobs/mounts/secrets/entries")({
   server: {
     handlers: {
       GET: ({ request }) => {
-        const gate = gateJobRoute();
+        const gate = gateJobRoute(request);
         if (gate.kind === "response") return gate.response;
         const mountRoot = useJobSecretsDir();
         if (mountRoot === undefined)

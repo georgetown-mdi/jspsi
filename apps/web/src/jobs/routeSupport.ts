@@ -16,19 +16,77 @@ export type GateOutcome =
   | { kind: "manager"; manager: JobManager };
 
 /**
- * Gate a job route: read config, enforce the feature gate, and resolve the
- * manager. Every job route calls this first, before any filesystem use or spawn.
- * The API is reached only from the operator's own machine (the deployment
- * publishes to host loopback), so there is no per-request auth beyond the
- * feature gate.
+ * The `Sec-Fetch-Site` values that mark a request as NOT initiated by another
+ * origin's page: `same-origin` is the console's own UI, `none` a user-initiated
+ * navigation (address bar, bookmark). Any other value (`cross-site`,
+ * `same-site`) is a different site's page.
  */
-export function gateJobRoute(): GateOutcome {
+const NON_CROSS_ORIGIN_FETCH_SITES: ReadonlySet<string> = new Set([
+  "same-origin",
+  "none",
+]);
+
+/** Parse a value to its origin (scheme+host+port, default-port-normalized), or
+ * null when it is not a parseable absolute URL -- an opaque `"null"` origin among
+ * them, so an opaque-origin request is treated as a mismatch. */
+function originOf(value: string): string | null {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reject a cross-origin browser request to the job API -- the browser-CSRF
+ * defense on the unauthenticated loopback API. A page the operator merely visits
+ * while the console runs must not be able to drive the API cross-origin (e.g.
+ * make the appliance connect out to an attacker-chosen host), so a request a
+ * browser marks as coming from another origin is refused before any side effect.
+ * Browsers reliably send `Origin` on state-changing requests and `Sec-Fetch-Site`
+ * on every fetch, and page JavaScript cannot forge either (both are forbidden
+ * header names), so a visited page cannot bypass this. The console's own UI is
+ * served same-origin (its clients fetch relative `/api/...` URLs), so it passes
+ * unchanged; a non-browser client on loopback (the operator's curl or CLI) sends
+ * neither header and is allowed -- browser CSRF is the threat closed here, a
+ * non-browser loopback client the already-accepted model.
+ *
+ * The expected origin is derived from the `Host` header (the console is served
+ * over http on loopback). Returns a `403` {@link Response} to short-circuit, or
+ * null to proceed.
+ */
+function rejectCrossOriginBrowserRequest(request: Request): Response | null {
+  const fetchSite = request.headers.get("sec-fetch-site");
+  if (fetchSite !== null && !NON_CROSS_ORIGIN_FETCH_SITES.has(fetchSite))
+    return jobEmptyResponse(403);
+  const origin = request.headers.get("origin");
+  if (origin === null) return null;
+  const host = request.headers.get("host");
+  const expected = host === null ? null : originOf(`http://${host}`);
+  if (expected === null || originOf(origin) !== expected)
+    return jobEmptyResponse(403);
+  return null;
+}
+
+/**
+ * Gate a job route: read config, enforce the feature gate, resolve the manager,
+ * and reject a cross-origin browser request. Every job route calls this first,
+ * before any filesystem use or spawn. The API is unauthenticated loopback-local
+ * (the deployment publishes to host loopback), so there is no per-request auth
+ * beyond the feature gate; the browser-CSRF check
+ * ({@link rejectCrossOriginBrowserRequest}) is the one active defense, stopping a
+ * page the operator visits from driving the API from their browser. It runs after
+ * the feature gate, so a disabled API stays a uniform 404.
+ */
+export function gateJobRoute(request: Request): GateOutcome {
   const config = readJobApiConfig();
   if (!isJobApiEnabled(config))
     return { kind: "response", response: jobEmptyResponse(404) };
   const manager = useJobManager(config);
   if (manager === null)
     return { kind: "response", response: jobEmptyResponse(404) };
+  const rejection = rejectCrossOriginBrowserRequest(request);
+  if (rejection !== null) return { kind: "response", response: rejection };
   return { kind: "manager", manager };
 }
 

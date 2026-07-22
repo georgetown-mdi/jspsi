@@ -181,13 +181,97 @@ describe("create validates and never CORS", () => {
     enableJobApi();
     const response = (await handlersOf(CreateRoute).POST({
       request: createRequest(validIntent(), {
-        origin: "https://evil.example",
+        host: "localhost",
+        origin: "http://localhost",
       }),
       params: {},
     })) as Response;
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
     expect(response.status).toBe(201);
     expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+});
+
+describe("the browser-CSRF gate rejects a cross-origin browser request", () => {
+  test("a same-origin Origin (matching Host) passes", async () => {
+    enableJobApi();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), {
+        host: "localhost",
+        origin: "http://localhost",
+      }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(201);
+  });
+
+  test("a Sec-Fetch-Site: same-origin request passes", async () => {
+    enableJobApi();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), {
+        "sec-fetch-site": "same-origin",
+      }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(201);
+  });
+
+  test("a request with neither Origin nor Sec-Fetch-Site passes (non-browser client)", async () => {
+    enableJobApi();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent()),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(201);
+  });
+
+  test("a Sec-Fetch-Site: cross-site request is 403", async () => {
+    enableJobApi();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), { "sec-fetch-site": "cross-site" }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(403);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  test("an Origin mismatching the Host is 403", async () => {
+    enableJobApi();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), {
+        host: "localhost",
+        origin: "https://evil.example",
+      }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(403);
+  });
+
+  test("the gate runs on the probe route too (shared gate)", async () => {
+    seedManagerWithProbe({ STUB_PROBE_STDOUT: okProbeLine() });
+    const rejected = (await handlersOf(SftpProbeRoute).POST({
+      request: new Request("http://localhost/api/jobs/sftp/probe", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "sec-fetch-site": "cross-site",
+        },
+        body: JSON.stringify({ host: "sftp.example.org" }),
+      }),
+      params: {},
+    })) as Response;
+    expect(rejected.status).toBe(403);
+  });
+
+  test("the disabled gate 404s before the CSRF 403 (feature gate first)", async () => {
+    vi.stubEnv("JOB_DATA_ROOT", "");
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), { "sec-fetch-site": "cross-site" }),
+      params: {},
+    })) as Response;
+    // A disabled API stays a uniform 404 even for a cross-origin request: the
+    // feature gate runs before the CSRF check, so presence is not observable.
+    expect(response.status).toBe(404);
   });
 });
 

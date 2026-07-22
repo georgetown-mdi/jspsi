@@ -19,8 +19,8 @@ import { jobJsonResponse } from "@jobs/gate";
 export const Route = createFileRoute("/api/jobs/inputs/")({
   server: {
     handlers: {
-      GET: () => {
-        const gate = gateJobRoute();
+      GET: ({ request }) => {
+        const gate = gateJobRoute(request);
         if (gate.kind === "response") return gate.response;
         return jobJsonResponse(listJobInputs(useJobInputDir()));
       },

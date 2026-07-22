@@ -81,7 +81,7 @@ export const Route = createFileRoute("/api/jobs/sftp/probe")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const gate = gateJobRoute();
+        const gate = gateJobRoute(request);
         if (gate.kind === "response") return gate.response;
 
         const body = await readJobRequestBody(

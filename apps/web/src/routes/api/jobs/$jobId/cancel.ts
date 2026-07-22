@@ -14,8 +14,8 @@ import { jobEmptyResponse } from "@jobs/gate";
 export const Route = createFileRoute("/api/jobs/$jobId/cancel")({
   server: {
     handlers: {
-      POST: ({ params }) => {
-        const gate = gateJobRoute();
+      POST: ({ request, params }) => {
+        const gate = gateJobRoute(request);
         if (gate.kind === "response") return gate.response;
         const jobId = validateJobIdParam(params.jobId);
         if (jobId === null) return jobEmptyResponse(404);

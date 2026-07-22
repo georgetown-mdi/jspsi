@@ -22,8 +22,8 @@ import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
 export const Route = createFileRoute("/api/jobs/$jobId/handoff")({
   server: {
     handlers: {
-      GET: ({ params }) => {
-        const gate = gateJobRoute();
+      GET: ({ request, params }) => {
+        const gate = gateJobRoute(request);
         if (gate.kind === "response") return gate.response;
         const jobId = validateJobIdParam(params.jobId);
         if (jobId === null) return jobEmptyResponse(404);
