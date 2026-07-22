@@ -7,6 +7,7 @@ import {
   createFetchJobApiClient,
   createServerJobExchangeDriver,
   createServerJobReattachDriver,
+  createServerJobZeroSetupDriver,
   fetchSftpConnection,
 } from "@psi/serverJobExchangeDriver";
 import { buildRunOutputs } from "@bench/runOutputs";
@@ -23,6 +24,7 @@ import type {
   JobApiClient,
   RecordAvailability,
   ServerJobExchangeDriverConfig,
+  ServerJobZeroSetupDriverConfig,
 } from "@psi/serverJobExchangeDriver";
 import type { ObjectUrls, RunOutputs } from "@bench/runOutputs";
 import type { RelayEvent } from "@jobs/cliDriver";
@@ -976,6 +978,147 @@ describe("createFetchJobApiClient over an injected fetch", () => {
         signal,
       ),
     ).resolves.toEqual({ available: false });
+  });
+});
+
+describe("createServerJobZeroSetupDriver intent", () => {
+  /** A base zero-setup config (filedrop transport, inline input) tests override. */
+  function zeroSetupConfig(): ServerJobZeroSetupDriverConfig {
+    return {
+      transport: { channel: "filedrop" },
+      inputSource: { kind: "inline", csv: CONFIG_INPUT_CSV },
+    };
+  }
+
+  test("POSTs a zero-setup intent: mode zeroSetup, filedrop, eventStream, no secret or terms", async () => {
+    const { client, createdIntents } = scriptedClient([result(true)]);
+    await createServerJobZeroSetupDriver(zeroSetupConfig(), client).run(
+      driverEvents(new AbortController().signal),
+    );
+
+    expect(createdIntents).toHaveLength(1);
+    const intent = createdIntents[0] as Record<string, unknown>;
+    expect(intent.mode).toBe("zeroSetup");
+    expect(intent.channel).toBe("filedrop");
+    expect(intent.eventStream).toBe(true);
+    expect(intent.inputCsv).toBe(CONFIG_INPUT_CSV);
+    // The zero-setup mode carries no exchange-mode credential or terms material.
+    expect(intent.sharedSecret).toBeUndefined();
+    expect(intent.linkageTerms).toBeUndefined();
+    expect(intent.metadata).toBeUndefined();
+  });
+
+  test("an sftp zero-setup intent carries NO connection field", async () => {
+    const { client, createdIntents } = scriptedClient([result(true)]);
+    await createServerJobZeroSetupDriver(
+      { ...zeroSetupConfig(), transport: { channel: "sftp" } },
+      client,
+    ).run(driverEvents(new AbortController().signal));
+
+    const intent = createdIntents[0] as Record<string, unknown>;
+    expect(intent.channel).toBe("sftp");
+    // Only the discriminants and the input source: no remote, host, port, path, or
+    // any other connection material can ride the intent (the appliance composes the
+    // connection from its own effective server).
+    expect(Object.keys(intent).sort()).toEqual([
+      "channel",
+      "eventStream",
+      "inputCsv",
+      "mode",
+    ]);
+  });
+
+  test("a workFile input source maps to the inputFile arm, not inputCsv", async () => {
+    const { client, createdIntents } = scriptedClient([result(true)]);
+    await createServerJobZeroSetupDriver(
+      {
+        ...zeroSetupConfig(),
+        inputSource: { kind: "workFile", name: "clients.csv" },
+      },
+      client,
+    ).run(driverEvents(new AbortController().signal));
+
+    const intent = createdIntents[0] as Record<string, unknown>;
+    expect(intent.inputCsv).toBeUndefined();
+    expect(intent.inputFile).toEqual({ name: "clients.csv" });
+  });
+
+  test("forwards the optional identity and linkageStrategy", async () => {
+    const { client, createdIntents } = scriptedClient([result(true)]);
+    await createServerJobZeroSetupDriver(
+      {
+        ...zeroSetupConfig(),
+        identity: "County Health",
+        linkageStrategy: "single-pass",
+      },
+      client,
+    ).run(driverEvents(new AbortController().signal));
+
+    expect(createdIntents[0]).toMatchObject({
+      identity: "County Health",
+      linkageStrategy: "single-pass",
+    });
+  });
+
+  test("omits identity and linkageStrategy when the config sets neither", async () => {
+    const { client, createdIntents } = scriptedClient([result(true)]);
+    await createServerJobZeroSetupDriver(zeroSetupConfig(), client).run(
+      driverEvents(new AbortController().signal),
+    );
+
+    const intent = createdIntents[0] as Record<string, unknown>;
+    expect(intent.identity).toBeUndefined();
+    expect(intent.linkageStrategy).toBeUndefined();
+  });
+
+  test("maps the appliance event stream onto the lifecycle (shared run body)", async () => {
+    const { client } = scriptedClient([
+      stages("prepare"),
+      stage("prepare"),
+      result(true),
+    ]);
+    const events = driverEvents(new AbortController().signal);
+    await createServerJobZeroSetupDriver(zeroSetupConfig(), client).run(events);
+
+    expect(events.onStages).toHaveBeenCalledTimes(1);
+    expect(events.onStage).toHaveBeenCalledWith("prepare");
+    const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
+    expect(outputs.resultsUrl).toBe("/api/jobs/job-1/result");
+    expect(events.onError).not.toHaveBeenCalled();
+  });
+
+  test("onJobCreated fires with the created id", async () => {
+    const created: Array<string> = [];
+    const { client } = scriptedClient([result(true)]);
+    await createServerJobZeroSetupDriver(
+      { ...zeroSetupConfig(), onJobCreated: (jobId) => created.push(jobId) },
+      client,
+    ).run(driverEvents(new AbortController().signal));
+
+    expect(created).toEqual(["job-1"]);
+  });
+
+  test("a terms-mismatch error (category config) passes through verbatim", async () => {
+    // The zero-setup terms mismatch reaches the browser as a category-config error
+    // event; the driver must preserve the category and message so the run surface
+    // renders it clearly.
+    const { client } = scriptedClient([
+      errorEvent(
+        "config",
+        "linkage terms do not match the partner's inferred terms",
+      ),
+    ]);
+    const events = driverEvents(new AbortController().signal);
+    await createServerJobZeroSetupDriver(zeroSetupConfig(), client).run(events);
+
+    const failure = events.onError.mock.calls[0][0] as {
+      category: string;
+      error: unknown;
+    };
+    expect(failure.category).toBe("config");
+    expect((failure.error as Error).message).toBe(
+      "linkage terms do not match the partner's inferred terms",
+    );
   });
 });
 

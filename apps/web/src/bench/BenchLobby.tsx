@@ -10,6 +10,8 @@ import {
 import { listManagedLocalState } from "@psi/managedLocalState";
 import { tokenFromInput } from "@psi/invitation";
 
+import { isConsoleBuild } from "@utils/clientConfig";
+
 import { BenchPage } from "./BenchPage";
 import { FILE_ASSURANCE_LINE } from "./fileAssurance";
 import { downloadSampleCsvs } from "./sampleData";
@@ -138,6 +140,24 @@ export function BenchLobby() {
               </Button>
             </p>
           </div>
+          {/* The console's third path: a direct exchange the two parties arranged
+              out of band (a shared server, no invitation). Console-only -- it drives
+              the appliance's job API, which a hosted deployment does not run. */}
+          {isConsoleBuild() && (
+            <div className={styles.actionCard}>
+              <h3>Run an exchange you have already arranged</h3>
+              <p className={`${styles.small} ${styles.sub}`}>
+                You and your partner agreed on a server out of band. Choose a
+                file, confirm the terms your file produces, and run - no
+                invitation needed.
+              </p>
+              <p>
+                <Button component={Link} to="/direct" variant="outline">
+                  Run a direct exchange
+                </Button>
+              </p>
+            </div>
+          )}
         </div>
         <p className={`${styles.sub} ${styles.small}`}>
           First time here?{" "}

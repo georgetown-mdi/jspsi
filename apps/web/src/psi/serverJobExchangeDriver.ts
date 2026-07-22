@@ -8,7 +8,13 @@ import type {
   ExchangeErrorCategory,
   StageDefinition,
 } from "./exchangeLifecycle";
-import type { JobExchangeIntent, JobExchangeOptions } from "@jobs/intent";
+import type {
+  JobCreateIntent,
+  JobExchangeIntent,
+  JobExchangeOptions,
+  JobZeroSetupIntent,
+  JobZeroSetupLinkageStrategy,
+} from "@jobs/intent";
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 import type { RelayEvent, RelayEventType } from "@jobs/cliDriver";
 import type { RunOutputs } from "@bench/runOutputs";
@@ -91,11 +97,12 @@ export type RecordAvailability =
  * defaults hit the real same-origin endpoints. */
 export interface JobApiClient {
   /** `POST /api/jobs` with the intent body; resolves the created job's id, or
-   * throws {@link JobApiRequestError} on a non-2xx, or a network error as-is. */
-  createJob: (
-    intent: JobExchangeIntent,
-    signal: AbortSignal,
-  ) => Promise<string>;
+   * throws {@link JobApiRequestError} on a non-2xx, or a network error as-is.
+   * Accepts either mode's intent -- an exchange intent from
+   * {@link createServerJobExchangeDriver} or a zero-setup intent from
+   * {@link createServerJobZeroSetupDriver} -- since the create route parses the
+   * mode-discriminated union. */
+  createJob: (intent: JobCreateIntent, signal: AbortSignal) => Promise<string>;
   /** `GET /api/jobs/:id/events` as an async iterable of already-validated
    * {@link RelayEvent}s; the iterator completes when the server closes the
    * stream after the terminal event (or when `signal` aborts). */
@@ -549,6 +556,101 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
     : { channel: "filedrop", ...shared };
 }
 
+/** The construction-time inputs a zero-setup server-job driver needs. The
+ * analog of {@link ServerJobExchangeDriverConfig} for the CLI's positional
+ * `$0`/zero-setup command: it carries NONE of the exchange mode's credential or
+ * terms material (no `sharedSecret`, `linkageTerms`, `metadata`,
+ * `standardization`, or `expectedPayloadColumns`), because both parties infer
+ * terms from their own files and there is no application-layer encryption to
+ * key. It supplies only the channel, the input source, the tuning subset, and
+ * the two optional bounded selectors the zero-setup intent carries. */
+export interface ServerJobZeroSetupDriverConfig {
+  transport: ServerJobExchangeTransport;
+  /** Where the appliance reads this party's input from ({@link JobInputSource}):
+   * inline CSV content, or a reference to a file in the operator-mounted
+   * work-input directory. Mapped to the intent's `inputCsv` / `inputFile` arm. */
+  inputSource: JobInputSource;
+  options?: JobExchangeOptions;
+  /** The optional operator label forwarded to the CLI's `--identity`, so the
+   * previewed identity and the disclosure record's attribution match the run.
+   * Omitted when blank -- the CLI then defaults to the appliance user. */
+  identity?: string;
+  /** The optional linkage strategy forwarded to the CLI's `--linkage-strategy`
+   * (a closed enum); omitted for the cascade default. */
+  linkageStrategy?: JobZeroSetupLinkageStrategy;
+  /** Invoked with the created job's id the moment `POST /api/jobs` resolves,
+   * before the event stream opens -- the same strand-recovery seam the exchange
+   * driver exposes. */
+  onJobCreated?: (jobId: string) => void;
+}
+
+/** Build the {@link JobZeroSetupIntent} a zero-setup run POSTs from the driver
+ * config: the `transport` picks the arm (neither adds a connection field -- the
+ * sftp arm carries none, the appliance composes the connection from its own
+ * effective server; the filedrop arm from the rendezvous mount), and everything
+ * after the discriminant is channel-independent. Mirrors {@link intentFor} but
+ * carries no shared secret or linkage terms -- the zero-setup mode's whole
+ * point. */
+function zeroSetupIntentFor(
+  config: ServerJobZeroSetupDriverConfig,
+): JobZeroSetupIntent {
+  const { transport, inputSource, options, identity, linkageStrategy } = config;
+  const shared = {
+    mode: "zeroSetup" as const,
+    ...(inputSource.kind === "inline"
+      ? { inputCsv: inputSource.csv }
+      : { inputFile: { name: inputSource.name } }),
+    ...(options !== undefined ? { options } : {}),
+    ...(identity !== undefined ? { identity } : {}),
+    ...(linkageStrategy !== undefined ? { linkageStrategy } : {}),
+    eventStream: true,
+  };
+  return transport.channel === "sftp"
+    ? { channel: "sftp", ...shared }
+    : { channel: "filedrop", ...shared };
+}
+
+/**
+ * Create the job, fire `onJobCreated`, then fold its SSE event stream onto the
+ * lifecycle events -- the run body shared by both server-job drivers, differing
+ * only in the {@link JobCreateIntent} the caller composed.
+ *
+ * Cancellation stays on the run's signal: an already-aborted signal starts
+ * nothing, and an abort mid-run stops consuming the stream silently. It carries
+ * NO cancel intent -- an unmount, reload, or tab close leaves the appliance's
+ * exchange running, and only an explicit discard (start over, try again, run
+ * another, or the recovery panel's Stop/Discard) cancels or deletes it. So the
+ * driver never POSTs a cancel off the signal.
+ */
+async function runCreatedJob(
+  intent: JobCreateIntent,
+  onJobCreated: ((jobId: string) => void) | undefined,
+  client: JobApiClient,
+  events: ExchangeDriverEvents<RunOutputs>,
+): Promise<void> {
+  const { signal } = events;
+  // Read the live abort state through a call so the re-check after the await
+  // is not narrowed to a constant by the first guard.
+  const aborted = () => signal.aborted;
+  if (aborted()) return;
+
+  let jobId: string;
+  try {
+    jobId = await client.createJob(intent, signal);
+  } catch (error) {
+    if (aborted()) return;
+    events.onError({ category: createJobFailureCategory(error), error });
+    return;
+  }
+
+  // The job now exists on the appliance; persist its id (the console's
+  // strand-recovery seam) before opening the stream, so a hard tab close
+  // between here and the terminal can still re-attach.
+  onJobCreated?.(jobId);
+
+  await consumeJobStream(client, jobId, events);
+}
+
 /**
  * Build a server-job {@link ExchangeDriver}: `run` POSTs a
  * {@link JobExchangeIntent} for the config's transport (filedrop, or sftp over
@@ -565,44 +667,39 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
  * terminal fires per run. A `warning` event's message forwards to the optional
  * `onWarning` (and keeps its dev-gated log either way); with no `onWarning`
  * it is logged and dropped.
- *
- * Cancellation stays on the run's signal: an already-aborted signal starts
- * nothing, and an abort mid-run stops consuming the stream silently. It carries
- * NO cancel intent -- an unmount, reload, or tab close leaves the appliance's
- * exchange running, and only an explicit discard (start over, try again, run
- * another, or the recovery panel's Stop/Discard) cancels or deletes it. So the
- * driver never POSTs a cancel off the signal.
  */
 export function createServerJobExchangeDriver(
   config: ServerJobExchangeDriverConfig,
   client: JobApiClient = createFetchJobApiClient(),
 ): ExchangeDriver<RunOutputs> {
   return {
-    run: async (events: ExchangeDriverEvents<RunOutputs>) => {
-      const { signal } = events;
-      // Read the live abort state through a call so the re-check after the await
-      // is not narrowed to a constant by the first guard.
-      const aborted = () => signal.aborted;
-      if (aborted()) return;
+    run: (events: ExchangeDriverEvents<RunOutputs>) =>
+      runCreatedJob(intentFor(config), config.onJobCreated, client, events),
+  };
+}
 
-      const intent = intentFor(config);
-
-      let jobId: string;
-      try {
-        jobId = await client.createJob(intent, signal);
-      } catch (error) {
-        if (aborted()) return;
-        events.onError({ category: createJobFailureCategory(error), error });
-        return;
-      }
-
-      // The job now exists on the appliance; persist its id (the console's
-      // strand-recovery seam) before opening the stream, so a hard tab close
-      // between here and the terminal can still re-attach.
-      config.onJobCreated?.(jobId);
-
-      await consumeJobStream(client, jobId, events);
-    },
+/**
+ * Build a zero-setup server-job {@link ExchangeDriver}: `run` POSTs a
+ * {@link JobZeroSetupIntent} (the console "Direct exchange" flow) to the job API
+ * and folds its event stream onto the same lifecycle events the exchange driver
+ * does. It carries no shared secret and no linkage terms -- both parties run the
+ * CLI's positional `$0` form against the same server, terms inferred from each
+ * file -- only the input source, the tuning subset, and the optional identity /
+ * linkage-strategy selectors. The event mapping and cancellation posture are the
+ * exchange driver's exactly, since both share {@link runCreatedJob}.
+ */
+export function createServerJobZeroSetupDriver(
+  config: ServerJobZeroSetupDriverConfig,
+  client: JobApiClient = createFetchJobApiClient(),
+): ExchangeDriver<RunOutputs> {
+  return {
+    run: (events: ExchangeDriverEvents<RunOutputs>) =>
+      runCreatedJob(
+        zeroSetupIntentFor(config),
+        config.onJobCreated,
+        client,
+        events,
+      ),
   };
 }
 

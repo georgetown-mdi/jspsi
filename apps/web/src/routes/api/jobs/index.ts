@@ -12,18 +12,22 @@ import {
 } from "@jobs/routeSupport";
 import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
 import { JobInputNotFoundError } from "@jobs/workInputs";
-import { jobExchangeIntentSchema } from "@jobs/intent";
+import { jobCreateIntentSchema } from "@jobs/intent";
 
 /**
  * `POST /api/jobs` -- create and start an exchange job from a typed intent.
  *
- * Feature-gated. The request body is a JSON {@link JobExchangeIntent}: a filedrop
- * or sftp exchange with validated linkage terms, a shared secret, and exactly one
- * input source -- inline CSV content or a reference to an operator-mounted file the
- * CLI reads in place. The server generates the job id, composes the CLI config from
- * the intent (every path a server-chosen name in the workdir; sftp connection
- * material drawn only from the operator-provisioned server), writes the inputs,
- * and spawns the CLI. No client string reaches argv or a file path.
+ * Feature-gated. The request body is a JSON {@link JobCreateIntent}, discriminated
+ * on `mode` (a missing `mode` defaults to `exchange` for the merged client), then
+ * on `channel` (filedrop | sftp): an `exchange` intent carries validated linkage
+ * terms, a shared secret, and exactly one input source; a `zeroSetup` intent
+ * carries neither terms nor secret (both parties infer terms from their files),
+ * only an input source and bounded tuning. The server generates the job id, and for
+ * an exchange composes the CLI config and key file (every path a server-chosen name
+ * in the workdir; sftp connection material drawn only from the operator-provisioned
+ * server), while a zero-setup drives the literal positional CLI form with the
+ * connection on argv (server URL plus `--server-*` flags) and no config, key, or
+ * `--save`. Either way no client string reaches argv or a file path.
  *
  * The console facilitates one exchange at a time: while an exchange occupies the
  * single slot, a second create is an empty-bodied 409 until the current exchange
@@ -51,7 +55,7 @@ export const Route = createFileRoute("/api/jobs/")({
         if (bodyResult.kind === "too-large") return jobEmptyResponse(413);
         if (bodyResult.kind === "invalid") return jobEmptyResponse(400);
 
-        const parsed = jobExchangeIntentSchema.safeParse(bodyResult.value);
+        const parsed = jobCreateIntentSchema.safeParse(bodyResult.value);
         if (!parsed.success) return jobEmptyResponse(400);
 
         let id: string;

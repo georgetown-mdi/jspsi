@@ -24,8 +24,14 @@
 //                     the wait the process is interruptible.
 //   STUB_IGNORE_SIGINT  When "1", SIGINT is ignored (to test SIGTERM escalation).
 //   STUB_IGNORE_SIGTERM When "1", SIGTERM is ignored (to test SIGKILL).
+//   STUB_ARGV_FILE    When set, the process argv (JSON array) is written to this
+//                     path, so a test can assert exactly how the driver invoked
+//                     the CLI (subcommand, flags, and positional order).
 
 import fs from "node:fs";
+
+if (process.env.STUB_ARGV_FILE !== undefined)
+  fs.writeFileSync(process.env.STUB_ARGV_FILE, JSON.stringify(process.argv));
 
 function writeFd3(line) {
   try {
@@ -45,10 +51,23 @@ if (process.env.STUB_OUTPUT_FILE !== undefined) {
   fs.writeFileSync(outputPath, process.env.STUB_OUTPUT_FILE);
 }
 
+// The driver passes --record-file as a two-token pair (the exchange form) or a
+// single --record-file=<value> token (the zero-setup form, which uses the =value
+// shape so a flag-shaped value cannot be misparsed); the real CLI's yargs accepts
+// both, so the stub resolves both.
+function recordFilePath(argv) {
+  const flagIndex = argv.indexOf("--record-file");
+  if (flagIndex !== -1 && flagIndex + 1 < argv.length)
+    return argv[flagIndex + 1];
+  const eqToken = argv.find((token) => token.startsWith("--record-file="));
+  return eqToken === undefined
+    ? undefined
+    : eqToken.slice("--record-file=".length);
+}
+
 if (process.env.STUB_RECORD_JSON !== undefined) {
-  const flagIndex = process.argv.indexOf("--record-file");
-  if (flagIndex !== -1 && flagIndex + 1 < process.argv.length) {
-    const recordPath = process.argv[flagIndex + 1];
+  const recordPath = recordFilePath(process.argv);
+  if (recordPath !== undefined) {
     const keysPath = recordPath.endsWith(".json")
       ? recordPath.slice(0, -".json".length) + ".keys.json"
       : recordPath + ".keys.json";

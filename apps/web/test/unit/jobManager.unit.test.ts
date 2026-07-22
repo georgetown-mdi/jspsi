@@ -22,6 +22,8 @@ import {
   validInputFileIntent,
   validIntent,
   validSftpIntent,
+  validZeroSetupIntent,
+  validZeroSetupSftpIntent,
 } from "../utils/jobFixtures";
 
 import type { BufferedEvent, JobRecord } from "@jobs/jobManager";
@@ -954,6 +956,136 @@ describe("filedrop rendezvous facilitation", () => {
       (entry) => entry.event.type === "warning",
     );
     expect(warnings.length).toBeGreaterThan(0);
+  });
+});
+
+describe("zero-setup mode end-to-end via the stub CLI", () => {
+  test("a filedrop zero-setup job runs and writes NO config or key file", async () => {
+    const manager = makeManager({ events: [RESULT_EVENT], exitCode: 0 });
+    const id = await manager.createJob(validZeroSetupIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    expect(record.status).toBe("succeeded");
+    // The zero-setup workdir holds only input (inline), output, and the record
+    // pair -- never a composed config document or a key file.
+    expect(fs.existsSync(path.join(record.workdir, "psilink.yaml"))).toBe(
+      false,
+    );
+    expect(fs.existsSync(path.join(record.workdir, ".psilink.key"))).toBe(
+      false,
+    );
+    expect(fs.existsSync(path.join(record.workdir, "input.csv"))).toBe(true);
+  });
+
+  test("an sftp zero-setup job runs and writes NO config or key file", async () => {
+    const manager = makeManager({
+      events: [RESULT_EVENT],
+      exitCode: 0,
+      sftpServer: testSftpServerEntry(),
+    });
+    const id = await manager.createJob(validZeroSetupSftpIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    expect(record.status).toBe("succeeded");
+    expect(fs.existsSync(path.join(record.workdir, "psilink.yaml"))).toBe(
+      false,
+    );
+    expect(fs.existsSync(path.join(record.workdir, ".psilink.key"))).toBe(
+      false,
+    );
+  });
+
+  test("routes to spawnZeroSetupJob with the connection argv and selectors", async () => {
+    const captured: Array<Parameters<typeof cliDriver.spawnZeroSetupJob>[0]> =
+      [];
+    const zsSpy = vi
+      .spyOn(cliDriver, "spawnZeroSetupJob")
+      .mockImplementation((args) => {
+        captured.push(args);
+        return { signal: () => true, isRunning: () => true };
+      });
+    const exSpy = vi.spyOn(cliDriver, "spawnExchangeJob");
+
+    const manager = makeManager({ sftpServer: testSftpServerEntry() });
+    await manager.createJob(
+      validZeroSetupSftpIntent({
+        identity: "county-health",
+        linkageStrategy: "single-pass",
+      }),
+    );
+
+    expect(exSpy).not.toHaveBeenCalled();
+    expect(captured).toHaveLength(1);
+    const args = captured[0];
+    // The connection argv is the provisioned server's URL plus its @path
+    // credential and the mandatory pinned fingerprint -- no client contribution.
+    expect(args.connectionArgs[0]).toBe(
+      "sftp://sftp.example.org:2222/exchange",
+    );
+    // Value-bearing connection flags ride single `--flag=value` tokens.
+    expect(
+      args.connectionArgs.some((token) =>
+        token.startsWith("--server-host-key-fingerprint="),
+      ),
+    ).toBe(true);
+    expect(args.connectionArgs).toContain(
+      "--server-password=@/etc/psilink/prod-east-password",
+    );
+    expect(args.identity).toBe("county-health");
+    expect(args.linkageStrategy).toBe("single-pass");
+
+    zsSpy.mockRestore();
+    exSpy.mockRestore();
+  });
+
+  test("a terms mismatch surfaces as a failed job with the CLI error", async () => {
+    // Zero-setup infers terms from each party's file; a mismatch aborts the
+    // exchange. The stub emits the CLI's terminal error event and exits non-zero,
+    // which the manager must surface as a failed job carrying that error.
+    const manager = makeManager({
+      events: [
+        {
+          v: 1,
+          type: "error",
+          category: "config",
+          message: "linkage terms do not match the partner's inferred terms",
+        },
+      ],
+      exitCode: 69,
+    });
+    const id = await manager.createJob(validZeroSetupIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    expect(record.status).toBe("failed");
+    const terminal = record.events[record.events.length - 1].event;
+    expect(terminal.type).toBe("error");
+    expect(String(terminal.message)).toContain("do not match");
+  });
+
+  test("an sftp zero-setup intent with no server is SftpUnavailableError, no workdir", async () => {
+    const manager = makeManager({});
+    const root = roots[roots.length - 1];
+    await expect(manager.createJob(validZeroSetupSftpIntent())).rejects.toThrow(
+      SftpUnavailableError,
+    );
+    expect(fs.existsSync(root)).toBe(false);
+  });
+
+  test("a running zero-setup blocks an exchange create and vice versa", async () => {
+    const manager = makeManager({
+      delayMs: 5000,
+      sftpServer: testSftpServerEntry(),
+    });
+    const firstId = await manager.createJob(validZeroSetupIntent());
+    const first = manager.getJob(firstId)!;
+    await expect(manager.createJob(validIntent())).rejects.toThrow(
+      ExchangeBusyError,
+    );
+    await expect(manager.createJob(validZeroSetupSftpIntent())).rejects.toThrow(
+      ExchangeBusyError,
+    );
+    manager.cancelJob(first);
+    await waitForTerminal(first);
   });
 });
 

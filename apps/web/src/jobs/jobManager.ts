@@ -5,6 +5,8 @@ import {
   composeConfigDocument,
   composeKeyFileDocument,
   composeSftpConfigDocument,
+  zeroSetupFiledropArgv,
+  zeroSetupSftpArgv,
 } from "./intent";
 import { JobInputNotFoundError, jobInputFilePath } from "./workInputs";
 import {
@@ -17,17 +19,26 @@ import {
   workdirDirectoryExists,
   writeJobFile,
 } from "./workdir";
-import { resolveCliBinaryPath, spawnExchangeJob } from "./cliDriver";
+import {
+  resolveCliBinaryPath,
+  spawnExchangeJob,
+  spawnZeroSetupJob,
+} from "./cliDriver";
 import { removeSftpCredentialFile } from "./sftpScratch";
 import { rendezvousStartupWarnings } from "./jobRendezvous";
 import { validateAuthoredSftpServer } from "./sftpServer";
 
 import type {
   CliDriverHandle,
+  CliDriverHandlers,
   JobTerminalState,
   RelayEvent,
 } from "./cliDriver";
-import type { JobExchangeIntent, JobInputFileReference } from "./intent";
+import type {
+  JobCreateIntent,
+  JobExchangeIntent,
+  JobInputFileReference,
+} from "./intent";
 import type { JobSftpServerEntry } from "./sftpServer";
 
 /**
@@ -299,12 +310,13 @@ export class JobManager {
    * the slot is claimed and with nothing on disk. The single slot is then claimed
    * with no await between the null check and the assignment, so two concurrent
    * POSTs cannot both pass: a second create while an exchange occupies the slot is
-   * {@link ExchangeBusyError}. An `inputFile` intent resolves its mounted path
+   * {@link ExchangeBusyError} -- regardless of mode, so a zero-setup create blocks a
+   * running exchange and vice versa. An `inputFile` intent resolves its mounted path
    * inside the try (mirroring the unknown-remote flow): a name that resolves to no
    * regular file is rejected and the slot freed with nothing on disk. The CLI reads
    * the mounted file in place, so nothing is copied into the workdir.
    */
-  async createJob(intent: JobExchangeIntent): Promise<string> {
+  async createJob(intent: JobCreateIntent): Promise<string> {
     const id = generateJobId();
 
     let serverEntry: JobSftpServerEntry | undefined;
@@ -456,29 +468,21 @@ export class JobManager {
   }
 
   private async startJobInWorkdir(
-    intent: JobExchangeIntent,
+    intent: JobCreateIntent,
     id: string,
     workdir: string,
     serverEntry: JobSftpServerEntry | undefined,
     mountedInputPath: string | undefined,
   ): Promise<string> {
-    const configDocument = composeDocumentByChannel(
-      intent,
-      this.jobRendezvousDir,
-      serverEntry,
-    );
-    const keyDocument = composeKeyFileDocument(intent);
+    // Exchange composes a config document and a key file into the workdir;
+    // zero-setup writes NEITHER -- its connection rides argv and it carries no
+    // shared secret, so the workdir holds only input (when inline), output, and
+    // the record pair.
+    const exchangeDocuments =
+      intent.mode === "zeroSetup"
+        ? undefined
+        : await this.writeExchangeDocuments(intent, workdir, serverEntry);
 
-    const configPath = await writeJobFile(
-      workdir,
-      JOB_FILE_NAMES.config,
-      configDocument,
-    );
-    const keyPath = await writeJobFile(
-      workdir,
-      JOB_FILE_NAMES.key,
-      keyDocument,
-    );
     const inputPath = await this.writeJobInput(
       intent,
       workdir,
@@ -512,31 +516,138 @@ export class JobManager {
       ))
         this.appendEvent(record, { v: 1, type: "warning", message });
 
-    const eventStream = intent.eventStream ?? true;
-    record.handle = spawnExchangeJob({
-      binaryPath: this.binaryPath,
-      configPath,
-      keyPath,
+    const handlers: CliDriverHandlers = {
+      onEvent: (event) => this.appendEvent(record, event),
+      onDegraded: (message) =>
+        this.appendEvent(record, {
+          v: 1,
+          type: "warning",
+          message,
+          degraded: true,
+        }),
+      onTerminal: (state) => this.reconcileTerminal(record, state),
+    };
+
+    record.handle = this.spawnForMode(intent, {
+      exchangeDocuments,
+      serverEntry,
       inputPath,
       outputPath,
       recordPath,
       workdir,
-      eventStream,
-      ...(this.childEnv !== undefined ? { extraEnv: this.childEnv } : {}),
-      handlers: {
-        onEvent: (event) => this.appendEvent(record, event),
-        onDegraded: (message) =>
-          this.appendEvent(record, {
-            v: 1,
-            type: "warning",
-            message,
-            degraded: true,
-          }),
-        onTerminal: (state) => this.reconcileTerminal(record, state),
-      },
+      eventStream: intent.eventStream ?? true,
+      handlers,
     });
 
     return id;
+  }
+
+  /**
+   * Compose and write the exchange mode's config and key files into the workdir,
+   * returning their paths. The connection block is drawn only from the server-side
+   * resources ({@link composeDocumentByChannel}); the key file carries the shared
+   * secret. Not reached on the zero-setup path, which writes neither.
+   */
+  private async writeExchangeDocuments(
+    intent: JobExchangeIntent,
+    workdir: string,
+    serverEntry: JobSftpServerEntry | undefined,
+  ): Promise<{ configPath: string; keyPath: string }> {
+    const configDocument = composeDocumentByChannel(
+      intent,
+      this.jobRendezvousDir,
+      serverEntry,
+    );
+    const keyDocument = composeKeyFileDocument(intent);
+    const configPath = await writeJobFile(
+      workdir,
+      JOB_FILE_NAMES.config,
+      configDocument,
+    );
+    const keyPath = await writeJobFile(
+      workdir,
+      JOB_FILE_NAMES.key,
+      keyDocument,
+    );
+    return { configPath, keyPath };
+  }
+
+  /**
+   * Spawn the CLI for the intent's mode: an exchange run driven by the composed
+   * config and key files, or a zero-setup run driven by the literal positional
+   * `$0` form (URL plus, for sftp, `--server-*` flags), with no `--config-file`,
+   * no `--key-file`, and never `--save`. The connection argv for a zero-setup run
+   * is built here from the same server-side resources the exchange config draws on
+   * -- the provisioned SFTP server, or the configured rendezvous directory -- so a
+   * missing one is a caller bug surfaced as a hard error, not a silent fallback.
+   */
+  private spawnForMode(
+    intent: JobCreateIntent,
+    args: {
+      exchangeDocuments: { configPath: string; keyPath: string } | undefined;
+      serverEntry: JobSftpServerEntry | undefined;
+      inputPath: string;
+      outputPath: string;
+      recordPath: string;
+      workdir: string;
+      eventStream: boolean;
+      handlers: CliDriverHandlers;
+    },
+  ): CliDriverHandle {
+    const extraEnv = this.childEnv;
+    if (intent.mode === "zeroSetup")
+      return spawnZeroSetupJob({
+        binaryPath: this.binaryPath,
+        connectionArgs: this.zeroSetupConnectionArgs(intent, args.serverEntry),
+        inputPath: args.inputPath,
+        outputPath: args.outputPath,
+        recordPath: args.recordPath,
+        workdir: args.workdir,
+        eventStream: args.eventStream,
+        ...(intent.identity !== undefined ? { identity: intent.identity } : {}),
+        ...(intent.linkageStrategy !== undefined
+          ? { linkageStrategy: intent.linkageStrategy }
+          : {}),
+        ...(extraEnv !== undefined ? { extraEnv } : {}),
+        handlers: args.handlers,
+      });
+
+    if (args.exchangeDocuments === undefined)
+      throw new Error("exchange job reached spawn with no composed documents");
+    return spawnExchangeJob({
+      binaryPath: this.binaryPath,
+      configPath: args.exchangeDocuments.configPath,
+      keyPath: args.exchangeDocuments.keyPath,
+      inputPath: args.inputPath,
+      outputPath: args.outputPath,
+      recordPath: args.recordPath,
+      workdir: args.workdir,
+      eventStream: args.eventStream,
+      ...(extraEnv !== undefined ? { extraEnv } : {}),
+      handlers: args.handlers,
+    });
+  }
+
+  /**
+   * The connection portion of a zero-setup CLI argv for the intent's channel: the
+   * `sftp://` URL and `--server-*` flags from the provisioned server, or the
+   * `file://` rendezvous locator. Each arm requires the resource `createJob`
+   * already resolved, so a missing one is a caller bug surfaced as a hard error.
+   */
+  private zeroSetupConnectionArgs(
+    intent: JobCreateIntent,
+    serverEntry: JobSftpServerEntry | undefined,
+  ): Array<string> {
+    if (intent.channel === "sftp") {
+      if (serverEntry === undefined)
+        throw new Error("sftp zero-setup job reached spawn without a server");
+      return zeroSetupSftpArgv(serverEntry);
+    }
+    if (this.jobRendezvousDir === undefined)
+      throw new Error(
+        "filedrop zero-setup job reached spawn without a rendezvous directory",
+      );
+    return zeroSetupFiledropArgv(this.jobRendezvousDir);
   }
 
   /**
@@ -545,7 +656,7 @@ export class JobManager {
    * otherwise the inline `inputCsv` content is written to the fixed workdir name.
    */
   private async writeJobInput(
-    intent: JobExchangeIntent,
+    intent: JobCreateIntent,
     workdir: string,
     mountedInputPath: string | undefined,
   ): Promise<string> {

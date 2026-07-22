@@ -118,17 +118,13 @@ export const STDERR_TAIL_CAP = 8192;
 const FD3_LINE_CAP = 1_048_576;
 
 /**
- * Spawn the CLI to run a filedrop `exchange`, wiring fd 3 for the event stream.
- * argv is assembled from fixed templates plus server-generated absolute paths, and
- * `shell` is never used. The one path carrying a client value is `inputPath`: the
- * mounted `inputFile.name`, admitted to a single safe segment and joined under the
- * server-anchored input mount, so the argv element is always an absolute path passed
- * positionally -- no client string is ever an interpretable token or flag.
- *
- * `spawn` (not `execFile`) is used deliberately: the caller passes an argv ARRAY
- * with `shell: false`, which gives identical allowlisted-argv, no-shell safety,
- * and unlike `execFile` it exposes the fd-3 pipe the event stream requires
- * (execFile caps stdio at three pipes and cannot carry fd 3).
+ * Spawn the CLI to run an `exchange` (config-and-key driven), wiring fd 3 for the
+ * event stream. argv is assembled from a fixed template plus server-generated
+ * absolute paths. The one path carrying a client value is `inputPath`: the mounted
+ * `inputFile.name`, admitted to a single safe segment and joined under the
+ * server-anchored input mount, so the argv element is always an absolute path
+ * passed positionally -- no client string is ever an interpretable token or flag.
+ * The spawn itself (and the no-shell / fd-3 rationale) is {@link runCliChild}.
  */
 export function spawnExchangeJob(args: {
   binaryPath: string;
@@ -168,6 +164,88 @@ export function spawnExchangeJob(args: {
     outputPath,
   ];
 
+  return runCliChild(argv, workdir, handlers, extraEnv);
+}
+
+/**
+ * Spawn the CLI to run a zero-setup exchange -- the positional `$0` form
+ * (`psilink URL INPUT OUTPUT`), no subcommand token. There is no `--config-file`,
+ * no `--key-file`, and never `--save`: a zero-setup run infers its terms from the
+ * input file, carries no shared secret, and persists nothing beyond the single
+ * job's record. `connectionArgs` is the connection portion of the argv -- the URL
+ * positional and, for sftp, the `--server-*` flags -- built server-side by
+ * {@link zeroSetupSftpArgv} / {@link zeroSetupFiledropArgv}; every credential in it
+ * is an `@path` reference the CLI child resolves at live-use, so no secret byte is
+ * on argv. `identity` and `linkageStrategy`, when set, are a bounded label and a
+ * closed enum, forwarded as single `--identity=<value>` / `--linkage-strategy=<value>`
+ * tokens (the `=` form so a `-`-leading value cannot be misparsed by yargs as its
+ * own flag).
+ *
+ * Shares the whole post-spawn tail (fd-3 reader, stderr tail, terminal
+ * reconciliation) with {@link spawnExchangeJob} through {@link runCliChild}; the
+ * two differ only in the argv they build.
+ */
+export function spawnZeroSetupJob(args: {
+  binaryPath: string;
+  connectionArgs: Array<string>;
+  inputPath: string;
+  outputPath: string;
+  recordPath: string;
+  workdir: string;
+  eventStream: boolean;
+  identity?: string;
+  linkageStrategy?: "cascade" | "single-pass";
+  /** See {@link spawnExchangeJob}'s `extraEnv`; identical server-only channel. */
+  extraEnv?: NodeJS.ProcessEnv;
+  handlers: CliDriverHandlers;
+}): CliDriverHandle {
+  const { binaryPath, connectionArgs, inputPath, outputPath } = args;
+  const { recordPath, workdir, handlers, eventStream, extraEnv } = args;
+  const { identity, linkageStrategy } = args;
+
+  // The URL is the first positional (connectionArgs[0]); input and output are the
+  // trailing positionals. Every value-bearing flag is emitted as a single
+  // `--flag=value` token, never a two-token `["--flag", value]` pair: a value that
+  // begins with `-` (a crafted identity, say) would otherwise be misparsed by yargs
+  // as its own flag and could steer the run (synthesizing --save). Boolean flags
+  // carry no value and stay bare. No subcommand token, no --config-file/--key-file,
+  // no --save.
+  const argv: Array<string> = [
+    binaryPath,
+    ...connectionArgs,
+    ...(identity !== undefined ? [`--identity=${identity}`] : []),
+    ...(linkageStrategy !== undefined
+      ? [`--linkage-strategy=${linkageStrategy}`]
+      : []),
+    `--record-file=${recordPath}`,
+    ...(eventStream ? ["--event-stream"] : []),
+    inputPath,
+    outputPath,
+  ];
+
+  return runCliChild(argv, workdir, handlers, extraEnv);
+}
+
+/**
+ * Spawn `node argv` for a driven CLI run and attach the shared readers: the fd-3
+ * event stream, the bounded stderr tail, and the terminal-state reconciliation.
+ * `argv[0]` is the CLI binary path; `shell` is never used, so every element is an
+ * allowlisted argv token, not an interpretable shell string. The one path carrying
+ * a client-derived segment (the input file's final name) is always passed
+ * positionally, never as a flag. Shared by {@link spawnExchangeJob} and
+ * {@link spawnZeroSetupJob}, which each contribute only their argv builder.
+ *
+ * `spawn` (not `execFile`) is used deliberately: the caller passes an argv ARRAY
+ * with `shell: false`, which gives identical allowlisted-argv, no-shell safety,
+ * and unlike `execFile` it exposes the fd-3 pipe the event stream requires
+ * (execFile caps stdio at three pipes and cannot carry fd 3).
+ */
+function runCliChild(
+  argv: Array<string>,
+  workdir: string,
+  handlers: CliDriverHandlers,
+  extraEnv: NodeJS.ProcessEnv | undefined,
+): CliDriverHandle {
   const child = spawn(process.execPath, argv, {
     cwd: workdir,
     stdio: ["ignore", "pipe", "pipe", "pipe"],

@@ -402,7 +402,12 @@ function CondensableDetails({
  * -- plus the viewer-centric blocks whose framing depends on who is reading: Result
  * sharing and the payload send/receive copy read first-person for each party, so the
  * direction tiers place each fact by the viewer's own direction. The matching keys
- * and the rest of the body are identical across all three. `headingOrder` sets only
+ * and the rest of the body are identical across all three. The optional `framing`
+ * override replaces ONLY the heading and intro strings (for the console direct
+ * exchange, which pairs it with `proposing` to render the operator's own inferred
+ * terms honestly, with no false partner-consent claim); it leaves every
+ * perspective-driven block untouched, so an invitation/accept caller that omits it
+ * renders exactly as before. `headingOrder` sets only
  * the heading's semantic level (its visual size is fixed), so the outline nests
  * correctly under the page's `h1` (acceptor) or section `h2` (inviter).
  *
@@ -421,6 +426,7 @@ export function InvitationTerms({
   headingOrder = 2,
   headingRef,
   condensed = false,
+  framing,
 }: {
   linkageTerms: LinkageTerms;
   /** The invitation's expiry instant (ISO 8601), if it carries one. */
@@ -465,6 +471,16 @@ export function InvitationTerms({
    * pre-consent "review" screen, whose every tier must stay always-visible for
    * informed consent. See {@link CondensableDetails}. */
   condensed?: boolean;
+  /** A direct-exchange framing override: replaces ONLY the perspective-derived
+   * heading and intro copy with wording honest for a no-invitation direct exchange
+   * (the operator's own inferred terms, no partner review/consent). Passed only by
+   * the console direct flow, which pairs it with `perspective="proposing"` (the
+   * self-terms framing) so every viewer-centric block still renders exactly as the
+   * proposing preview does -- the override touches nothing but the two strings.
+   * Omitted by every invitation/accept caller, which then renders the
+   * perspective-derived heading and intro unchanged. Both strings are fixed,
+   * caller-supplied copy, never partner text. */
+  framing?: { heading: string; intro: string };
 }) {
   const summary = summarizeInvitation({
     linkageTerms,
@@ -651,9 +667,10 @@ export function InvitationTerms({
         // at it under "proposing"/"accepted" would dangle at an absent element.
         aria-describedby={perspective === "review" ? identityNoteId : undefined}
       >
-        {perspective === "proposing"
-          ? "Exchange proposal"
-          : `Invitation from ${summary.invitingParty}`}
+        {framing?.heading ??
+          (perspective === "proposing"
+            ? "Exchange proposal"
+            : `Invitation from ${summary.invitingParty}`)}
       </Title>
       {/* The heading name is summary.invitingParty -- sanitizeForDisplay(
           terms.identity) -- a free-text field the sender typed, carried in an
@@ -680,11 +697,12 @@ export function InvitationTerms({
         </Text>
       )}
       <Text size="sm" c="dimmed">
-        {perspective === "proposing"
-          ? "Your partner must review and consent to these details before any data is exchanged."
-          : perspective === "accepted"
-            ? "These are the exchange details."
-            : "These are the details your partner proposes for linking your records."}
+        {framing?.intro ??
+          (perspective === "proposing"
+            ? "Your partner must review and consent to these details before any data is exchanged."
+            : perspective === "accepted"
+              ? "These are the exchange details."
+              : "These are the details your partner proposes for linking your records.")}
       </Text>
 
       {/* Direction tier -- WHAT YOU DISCLOSE: the viewer's own data leaving. Led

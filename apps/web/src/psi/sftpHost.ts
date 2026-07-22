@@ -8,17 +8,19 @@
 
 /**
  * The characters a bare SFTP host must not contain: userinfo (`@`), a scheme or
- * path separator (`/`, which also rules out `://`), and any ASCII whitespace. A
- * value carrying any of these is a URL fragment or login string, never a bare
- * address a partner-facing invitation endpoint may mint verbatim.
+ * path separator (`/`, which also rules out `://`), the URL-significant delimiters
+ * a WHATWG hostname setter silently truncates at or rejects (`#`, `?`, `\`) plus
+ * the percent-encoding introducer (`%`), and any ASCII whitespace. A value carrying
+ * any of these is a URL fragment or login string, never a bare address a
+ * partner-facing invitation endpoint may mint verbatim.
  */
-const SFTP_HOST_DISALLOWED_CHAR = /[@/\t\n\v\f\r ]/;
+const SFTP_HOST_DISALLOWED_CHAR = /[@/\\#?%\t\n\v\f\r ]/;
 
 /**
  * Whether `host` is a bare server address -- a hostname, an IPv4, or a bracketed
- * IPv6 literal -- carrying no userinfo, scheme, path, or whitespace. The single
- * predicate the form validation, the server PUT check, and the accept-side
- * refusal all consult, so the rule stays one authority.
+ * IPv6 literal -- carrying no userinfo, scheme, path, URL-significant delimiter, or
+ * whitespace. The single predicate the form validation, the server PUT check, and
+ * the accept-side refusal all consult, so the rule stays one authority.
  */
 export function isBareSftpHost(host: string): boolean {
   return !SFTP_HOST_DISALLOWED_CHAR.test(host);
