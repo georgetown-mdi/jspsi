@@ -373,6 +373,80 @@ function ListingView({
   );
 }
 
+/**
+ * A committed file's identity and shape: the name/rows/size/modified/columns
+ * table and the per-column sample peek. Extracted so the direct-exchange confirm
+ * screen renders the same file-shape material the picker's confirm panel does,
+ * rather than duplicating it. Purely presentational over an already-profiled file.
+ */
+export function FileProfileSummary({ profile }: { profile: ProfiledJobInput }) {
+  const sampleRows = useMemo(
+    () =>
+      profile.columns.map((column) => ({
+        column,
+        values: profile.columnSamples.get(column) ?? [],
+      })),
+    [profile],
+  );
+  return (
+    <>
+      <Table withRowBorders={false} aria-label="File profile">
+        <Table.Tbody>
+          <Table.Tr>
+            <Table.Th scope="row">File</Table.Th>
+            <Table.Td className={styles.mono}>
+              {sanitizeForDisplay(profile.name)}
+            </Table.Td>
+          </Table.Tr>
+          <Table.Tr>
+            <Table.Th scope="row">Rows</Table.Th>
+            <Table.Td>
+              {new Intl.NumberFormat("en-US").format(profile.rowCount)}
+            </Table.Td>
+          </Table.Tr>
+          <Table.Tr>
+            <Table.Th scope="row">Size</Table.Th>
+            <Table.Td className={styles.mono}>
+              {byteSizeLabel(profile.sizeBytes)}
+            </Table.Td>
+          </Table.Tr>
+          <Table.Tr>
+            <Table.Th scope="row">Modified</Table.Th>
+            <Table.Td>{dateTimeLabel(new Date(profile.modifiedAt))}</Table.Td>
+          </Table.Tr>
+          <Table.Tr>
+            <Table.Th scope="row">Columns</Table.Th>
+            <Table.Td className={styles.mono}>
+              {profile.columns
+                .map((column) => sanitizeForDisplay(column))
+                .join(", ")}
+            </Table.Td>
+          </Table.Tr>
+        </Table.Tbody>
+      </Table>
+      <Text fw={600} size="sm">
+        Sample values
+      </Text>
+      <Table withRowBorders={false} aria-label="Column samples">
+        <Table.Tbody>
+          {sampleRows.map(({ column, values }) => (
+            <Table.Tr key={column}>
+              <Table.Th scope="row" className={styles.mono}>
+                {sanitizeForDisplay(column)}
+              </Table.Th>
+              <Table.Td className={styles.mono}>
+                {values.length === 0
+                  ? "(no sample values)"
+                  : values.map((value) => sanitizeForDisplay(value)).join(", ")}
+              </Table.Td>
+            </Table.Tr>
+          ))}
+        </Table.Tbody>
+      </Table>
+    </>
+  );
+}
+
 /** The second-stage confirm panel: the profile with its explicit loading state, the
  * per-column sample peek, and the "Use this file" commit. */
 function ConfirmPanel({
@@ -388,15 +462,6 @@ function ConfirmPanel({
   onCancel: () => void;
   onRetry: () => void;
 }) {
-  const sampleRows = useMemo(() => {
-    if (profile === undefined || profile === "loading") return [];
-    if (profile.kind !== "profile") return [];
-    return profile.profile.columns.map((column) => ({
-      column,
-      values: profile.profile.columnSamples.get(column) ?? [],
-    }));
-  }, [profile]);
-
   if (profile === undefined || profile === "loading")
     return (
       <Stack gap="sm">
@@ -442,59 +507,7 @@ function ConfirmPanel({
   return (
     <Stack gap="sm">
       <h2 style={{ margin: 0 }}>Confirm this file</h2>
-      <Table withRowBorders={false} aria-label="File profile">
-        <Table.Tbody>
-          <Table.Tr>
-            <Table.Th scope="row">File</Table.Th>
-            <Table.Td className={styles.mono}>
-              {sanitizeForDisplay(profiled.name)}
-            </Table.Td>
-          </Table.Tr>
-          <Table.Tr>
-            <Table.Th scope="row">Rows</Table.Th>
-            <Table.Td>
-              {new Intl.NumberFormat("en-US").format(profiled.rowCount)}
-            </Table.Td>
-          </Table.Tr>
-          <Table.Tr>
-            <Table.Th scope="row">Size</Table.Th>
-            <Table.Td className={styles.mono}>
-              {byteSizeLabel(profiled.sizeBytes)}
-            </Table.Td>
-          </Table.Tr>
-          <Table.Tr>
-            <Table.Th scope="row">Modified</Table.Th>
-            <Table.Td>{dateTimeLabel(new Date(profiled.modifiedAt))}</Table.Td>
-          </Table.Tr>
-          <Table.Tr>
-            <Table.Th scope="row">Columns</Table.Th>
-            <Table.Td className={styles.mono}>
-              {profiled.columns
-                .map((column) => sanitizeForDisplay(column))
-                .join(", ")}
-            </Table.Td>
-          </Table.Tr>
-        </Table.Tbody>
-      </Table>
-      <Text fw={600} size="sm">
-        Sample values
-      </Text>
-      <Table withRowBorders={false} aria-label="Column samples">
-        <Table.Tbody>
-          {sampleRows.map(({ column, values }) => (
-            <Table.Tr key={column}>
-              <Table.Th scope="row" className={styles.mono}>
-                {sanitizeForDisplay(column)}
-              </Table.Th>
-              <Table.Td className={styles.mono}>
-                {values.length === 0
-                  ? "(no sample values)"
-                  : values.map((value) => sanitizeForDisplay(value)).join(", ")}
-              </Table.Td>
-            </Table.Tr>
-          ))}
-        </Table.Tbody>
-      </Table>
+      <FileProfileSummary profile={profiled} />
       <Group>
         <Button onClick={() => onUse(profiled)}>Use this file</Button>
         <Button variant="default" onClick={onCancel}>

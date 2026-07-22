@@ -33,6 +33,7 @@ export function SftpConnectionCard({
   connection,
   bootPinned,
   saveFilePreferred,
+  offerSaveFile = true,
   onAuthored,
   onCleared,
   onUseCli,
@@ -43,12 +44,20 @@ export function SftpConnectionCard({
   /** The operator chose to run SFTP through their own command-line tool
    * (save-a-file) instead of authoring a connection here. */
   saveFilePreferred: boolean;
+  /** Whether to offer the save-a-file alternative at all. True (the default) on the
+   * inviter path, which can mint an exchange file for the command-line tool. False
+   * on the direct-exchange path, which always runs here on the appliance -- there
+   * the empty state offers only authoring, and the save-a-file state is never
+   * reachable. */
+  offerSaveFile?: boolean;
   onAuthored: (connection: SftpConnectionProjection) => void;
   onCleared: () => void;
-  /** The operator chose the save-a-file alternative. */
-  onUseCli: () => void;
-  /** The operator undid the save-a-file choice to set up a connection here. */
-  onRunHere: () => void;
+  /** The operator chose the save-a-file alternative. Unused when
+   * {@link offerSaveFile} is false. */
+  onUseCli?: () => void;
+  /** The operator undid the save-a-file choice to set up a connection here. Unused
+   * when {@link offerSaveFile} is false. */
+  onRunHere?: () => void;
 }) {
   const [formOpen, setFormOpen] = useState(false);
 
@@ -93,7 +102,7 @@ export function SftpConnectionCard({
       </Stack>
     );
 
-  if (!formOpen && saveFilePreferred)
+  if (!formOpen && offerSaveFile && saveFilePreferred)
     return (
       <Stack gap="xs" mt="xs">
         <Text size="sm">
@@ -105,7 +114,7 @@ export function SftpConnectionCard({
           variant="subtle"
           style={{ alignSelf: "flex-start" }}
           onClick={() => {
-            onRunHere();
+            onRunHere?.();
             setFormOpen(true);
           }}
         >
@@ -122,9 +131,11 @@ export function SftpConnectionCard({
           <Button size="xs" onClick={() => setFormOpen(true)}>
             Add connection
           </Button>
-          <Button size="xs" variant="subtle" onClick={onUseCli}>
-            Run it in my own command-line tool instead
-          </Button>
+          {offerSaveFile && (
+            <Button size="xs" variant="subtle" onClick={onUseCli}>
+              Run it in my own command-line tool instead
+            </Button>
+          )}
         </Group>
       </Stack>
     );
