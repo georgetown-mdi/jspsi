@@ -270,9 +270,10 @@ function runCliChild(
  * A minimal child environment: PATH and locale only, so the driven CLI inherits
  * no ambient secrets from the server process and behaves deterministically. The
  * job's own inputs reach the child through files in its workdir, not the
- * environment.
+ * environment. Shared with the host-key probe driver ({@link ../jobs/sftpProbe}),
+ * which spawns the same CLI binary under the same minimal environment.
  */
-function sanitizedChildEnv(): NodeJS.ProcessEnv {
+export function sanitizedChildEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const name of ["PATH", "HOME", "LANG", "LC_ALL", "TZ"]) {
     const value = process.env[name];

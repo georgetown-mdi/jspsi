@@ -226,6 +226,46 @@ describe.skipIf(!hasBuild)("SFTP connection authoring (server side)", () => {
     expect(readdirSync(scratchDir)).toEqual([]);
   });
 
+  test("probe the host key over the route, statelessly (round-trip against the stub CLI)", async () => {
+    const base = `http://127.0.0.1:${port}/api/jobs`;
+    // No connection authored before the probe.
+    expect(await (await fetch(`${base}/sftp`)).json()).toEqual({
+      configured: false,
+    });
+
+    // The route spawns the CLI probe subcommand, discards its stderr, and
+    // reconciles the outcome to the typed envelope. The stub CLI emits its default
+    // valid line, so the round-trip lands `ok` deterministically.
+    const probe = await fetch(`${base}/sftp/probe`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ host: "sftp.partner.example", port: 2222 }),
+    });
+    expect(probe.status).toBe(200);
+    expect(await probe.json()).toEqual({
+      status: "ok",
+      fingerprint: FINGERPRINT,
+      keyType: "ssh-ed25519",
+    });
+
+    // The probe authored nothing: the connection state is unchanged.
+    expect(await (await fetch(`${base}/sftp`)).json()).toEqual({
+      configured: false,
+    });
+
+    // A credential-shaped field is rejected by the strict body (no such field).
+    const bad = await fetch(`${base}/sftp/probe`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        host: "sftp.partner.example",
+        password: "@/etc/shadow",
+      }),
+    });
+    expect(bad.status).toBe(400);
+    expect(await bad.text()).not.toContain("shadow");
+  });
+
   test("a mountRef escaping the secrets mount is refused without echoing a path", async () => {
     const response = await fetch(`http://127.0.0.1:${port}/api/jobs/sftp`, {
       method: "PUT",

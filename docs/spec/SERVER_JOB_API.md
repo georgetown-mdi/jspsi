@@ -30,6 +30,7 @@ Every job response carries `Cache-Control: no-store` and no CORS headers -- the 
 | `GET` | `/api/jobs/sftp` | `200` `{ "configured": <bool>, ... }` | The authored SFTP connection as a credential-free projection: `{ "configured": false }` when none, else `{ "configured": true, "host", "port"?, "path"?, "credentialWarnings": [ ... ] }`. `credentialWarnings` is the non-blocking credential-containment warnings. See [The authored SFTP connection](#the-authored-sftp-connection). |
 | `PUT` | `/api/jobs/sftp` | `200` credential-free projection | Author the SFTP connection from a file-reference credential body (see [Authoring the SFTP connection](#authoring-the-sftp-connection)). `400` (body naming a field path, never a value) on a body that fails hard validation. `413` when the body exceeds its size cap. |
 | `DELETE` | `/api/jobs/sftp` | `204` | Forget the in-app authored connection (idempotent). |
+| `POST` | `/api/jobs/sftp/probe` | `200` typed envelope | Read the host-key fingerprint a server at `{ "host", "port"? }` presents, for the operator to compare against the published value (see [Probing the server host key](#probing-the-server-host-key)). `400` (field-path body) on a bad body, `409` (empty body) when a probe is already running. |
 | `GET` | `/api/jobs/mounts/secrets/entries` | `200` `{ "configured", "readable", "entries" }` | List the mounted secrets directory the operator browses for a credential file (see [The secrets mount and browsing](#the-secrets-mount-and-browsing)). |
 
 The feature gate applies to every endpoint uniformly: a disabled API is `404` on all of them, resolved before the id is even parsed.
@@ -206,6 +207,18 @@ If any validation step AFTER the write rejects the entry (a bad host or fingerpr
 ### `DELETE /api/jobs/sftp`
 
 Forgets the in-app authored connection (and its credential warnings) and returns `204` (idempotent). The authored connection is ALSO cleared when the exchange it was authored for is deleted (`DELETE /api/jobs/:jobId` of the active exchange), so it is scoped to that single exchange and never lingers into the next.
+
+## Probing the server host key
+
+`POST /api/jobs/sftp/probe` reads the host-key fingerprint an SFTP server presents, so the console can offer it beside the paste field for the operator to compare against the value the server operator published. It authors nothing: it never touches the authored connection, records nothing, and returns the observation for the caller to forget. The manager spawns the CLI's `probe-host-key --json` subcommand (the same binary the exchange runs; the server cannot probe SSH in-process -- see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#sftp-host-key-verification)) under the shared no-shell spawn discipline, caps and parses its stdout, and DISCARDS its stderr.
+
+The SSRF bounds are the module contract, pinned by tests:
+
+- **Request carries host + port only.** The body is `.strictObject({ host, port? })` -- `host` a non-empty string, `port` a `0..65535` int -- so no username, path, or credential field is representable; an unmodeled key is a `400`. `host` additionally passes the shared bare-host predicate (no scheme, userinfo, path, or whitespace), the same rule `PUT /api/jobs/sftp` applies, so it cannot smuggle a URL. The body is read under a tight cap (4 KiB, `413` above it).
+- **Response carries fingerprint + key type only.** A completed attempt is always a `200` with a discriminated body: `{ "status": "ok", "fingerprint": "SHA256:...", "keyType": "..." }` on success, or `{ "status": "unreachable" | "timeout" | "error" }` for a probe that ran but yielded no key. The fingerprint is re-validated against `HOST_KEY_FINGERPRINT_REGEX`, and the key type is length- and charset-capped (server-controlled bytes). No banner, stderr, latency-beyond-category, saved-hosts list, or re-probe-on-change is exposed, and there is no credentialed "test connection".
+- **Single-flight and stateless.** One probe child runs at a time; a concurrent request is a `409` (empty body). The flag is claimed synchronously, independent of the exchange slot. The probe reconciles the child's exit -- CLI exit `69` to `unreachable`, a watchdog kill (SIGTERM at ~15 s, SIGKILL after a grace) to `timeout`, any other non-zero or malformed line to `error` -- and forgets it.
+
+Non-2xx is reserved for HTTP-level conditions only: `400` for a bad body (field-path message, never a value), `409` for a probe in flight, `404` when the feature gate is off, and `500` for an unexpected internal fault. A probe that ran and failed is a `200` category, never a `502`.
 
 ## The secrets mount and browsing
 

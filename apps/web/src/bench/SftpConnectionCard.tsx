@@ -8,6 +8,7 @@ import { SftpCredentialWarnings } from "./SftpCredentialWarnings";
 import { sftpConnectionLabel } from "./sftpConnectionChoice";
 import styles from "./bench.module.css";
 
+import type { ProbeCeremony } from "./SftpAuthoringForm";
 import type { SftpConnectionFormValues } from "./sftpConnectionForm";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
@@ -33,6 +34,7 @@ export function SftpConnectionCard({
   connection,
   saveFilePreferred,
   offerSaveFile = true,
+  probeCeremony = "exchange",
   onAuthored,
   onCleared,
   onUseCli,
@@ -42,6 +44,10 @@ export function SftpConnectionCard({
   /** The operator chose to run SFTP through their own command-line tool
    * (save-a-file) instead of authoring a connection here. */
   saveFilePreferred: boolean;
+  /** The host-key confirmation ceremony the authoring form's probe presents,
+   * forwarded to {@link SftpAuthoringForm} (default `exchange`; `direct` on the
+   * direct-exchange path). */
+  probeCeremony?: ProbeCeremony;
   /** Whether to offer the save-a-file alternative at all. True (the default) on the
    * inviter path, which can mint an exchange file for the command-line tool. False
    * on the direct-exchange path, which always runs here on the appliance -- there
@@ -135,6 +141,7 @@ export function SftpConnectionCard({
     <SftpAuthoringForm
       initial={initialFormFor(connection)}
       isEdit={connection !== null}
+      probeCeremony={probeCeremony}
       onAuthored={(authored) => {
         setFormOpen(false);
         onAuthored(authored);

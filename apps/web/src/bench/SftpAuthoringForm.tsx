@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Button,
+  Checkbox,
   Collapse,
   Divider,
   Group,
@@ -16,7 +17,8 @@ import { IconAlertCircle } from "@tabler/icons-react";
 
 import { sanitizeForDisplay } from "@psilink/core";
 
-import { putSftpConnection } from "@psi/sftpAuthoringClient";
+import { probeSftpHostKey, putSftpConnection } from "@psi/sftpAuthoringClient";
+import { isBareSftpHost } from "@psi/sftpHost";
 
 import {
   applyHostInput,
@@ -31,7 +33,18 @@ import type {
   SftpEndpointLocator,
   SftpFormField,
 } from "./sftpConnectionForm";
+import type { ProbeSftpHostKeyResult } from "@psi/sftpAuthoringClient";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
+
+/**
+ * Which host-key confirmation ceremony the probe presents. Both paths pin the
+ * fingerprint identically; only the warning weight differs. `direct` (the
+ * direct-exchange path, where the host key is the ONLY protection) gets an
+ * alert-weight interstitial and an explicit out-of-band-checked affirmation gating
+ * fill; `exchange` (invitation and accept) gets the lighter comparison question
+ * plus the reconciliation note.
+ */
+export type ProbeCeremony = "exchange" | "direct";
 
 /**
  * The console's SFTP connection authoring form, shared by both the invite side
@@ -53,6 +66,7 @@ export function SftpAuthoringForm({
   initial,
   isEdit,
   reviewLocator,
+  probeCeremony = "exchange",
   onAuthored,
   onCancel,
 }: {
@@ -64,6 +78,8 @@ export function SftpAuthoringForm({
    * shown read-only and the operator authors only username, fingerprint, and
    * credential. Undefined on the invite side, where every field is editable. */
   reviewLocator?: SftpEndpointLocator;
+  /** The host-key confirmation ceremony the probe presents (default `exchange`). */
+  probeCeremony?: ProbeCeremony;
   onAuthored: (connection: SftpConnectionProjection) => void;
   onCancel: () => void;
 }) {
@@ -82,6 +98,16 @@ export function SftpAuthoringForm({
   useEffect(() => {
     firstFieldRef.current?.focus();
   }, []);
+
+  // Focus returns here after a probed fingerprint fills the field, so a keyboard
+  // or screen-reader user lands back on the pin they just set.
+  const fingerprintRef = useRef<HTMLInputElement>(null);
+
+  // Where the probe reads from: the partner-named locator on the accept side (so
+  // the probe is enabled immediately), otherwise the operator's own host/port
+  // fields once they are a bare host and a valid port. A stale target must never
+  // fill a pin, so the probe clears a presented result when this changes.
+  const probeTarget = probeTargetOf(values, reviewLocator);
 
   const error = sftpFormError(values);
   const fieldError = (field: SftpFormField): string | undefined =>
@@ -169,6 +195,7 @@ export function SftpAuthoringForm({
         />
       )}
       <TextInput
+        ref={fingerprintRef}
         label="Server identity fingerprint"
         description="The server's identity fingerprint -- ask whoever runs the SFTP server. It starts with SHA256:."
         required
@@ -179,6 +206,17 @@ export function SftpAuthoringForm({
         onChange={(event) =>
           update({ hostKeyFingerprint: event.currentTarget.value })
         }
+      />
+
+      <HostKeyProbe
+        host={probeTarget.host}
+        port={probeTarget.port}
+        disabledReason={probeTarget.disabledReason}
+        ceremony={probeCeremony}
+        onUse={(fingerprint) => {
+          update({ hostKeyFingerprint: fingerprint });
+          fingerprintRef.current?.focus();
+        }}
       />
 
       <CredentialField
@@ -481,4 +519,238 @@ function CredentialField({
       )}
     </Stack>
   );
+}
+
+/**
+ * Where the host-key probe reads from, and whether it is ready. On the accept side
+ * the partner-named locator is used verbatim (always ready). On the invite/direct
+ * side the operator's own fields are used, enabled only once the host is a bare
+ * address and the port (if any) parses -- with a reason otherwise, so the operator
+ * knows what to fill first.
+ */
+function probeTargetOf(
+  values: SftpConnectionFormValues,
+  reviewLocator: SftpEndpointLocator | undefined,
+): { host?: string; port?: number; disabledReason?: string } {
+  if (reviewLocator !== undefined)
+    return reviewLocator.port !== undefined
+      ? { host: reviewLocator.host, port: reviewLocator.port }
+      : { host: reviewLocator.host };
+  const host = values.host.trim();
+  if (host === "" || !isBareSftpHost(host))
+    return { disabledReason: "Enter the server address first." };
+  const portText = values.port.trim();
+  if (portText === "") return { host };
+  const port = Number(portText);
+  if (!Number.isInteger(port) || port < 0 || port > 65535)
+    return { disabledReason: "Enter a valid port first." };
+  return { host, port };
+}
+
+type ProbeState =
+  | { phase: "idle" }
+  | { phase: "probing" }
+  | { phase: "presented"; fingerprint: string; keyType: string }
+  | { phase: "error"; message: string };
+
+/**
+ * The probe-to-fill control BESIDE the fingerprint field: it reads the server's
+ * presented host key and offers it for a COMPARISON against the value the server
+ * operator published -- never as a trust judgement, and never replacing the paste
+ * field. It only ever fills the same field a paste would (through the caller's
+ * `onUse`), so no new submit path exists. The confirm is framed as matching, and
+ * the copy states the console observed the value over the same untrusted network
+ * the exchange will use, so it cannot vouch for it. The Direct ceremony is
+ * heavier: an alert-weight interstitial and an out-of-band-checked affirmation
+ * gate the fill.
+ */
+function HostKeyProbe({
+  host,
+  port,
+  disabledReason,
+  ceremony,
+  onUse,
+}: {
+  /** The bare host to probe, or undefined when the target is not yet ready. */
+  host: string | undefined;
+  port: number | undefined;
+  /** Why the probe is disabled (shown when `host` is undefined). */
+  disabledReason: string | undefined;
+  ceremony: ProbeCeremony;
+  onUse: (fingerprint: string) => void;
+}) {
+  const [state, setState] = useState<ProbeState>({ phase: "idle" });
+  const [outOfBandChecked, setOutOfBandChecked] = useState(false);
+  const presentedRef = useRef<HTMLDivElement>(null);
+  // Bumped on every new probe AND on every target change, so a result that
+  // resolves after its target changed (or after a newer probe started) is
+  // discarded -- a stale observation must never fill a pin for a different target.
+  const seqRef = useRef(0);
+
+  useEffect(() => {
+    seqRef.current += 1;
+    setState({ phase: "idle" });
+    setOutOfBandChecked(false);
+  }, [host, port]);
+
+  // Move focus to the presented result when it arrives so a keyboard user can act
+  // on it immediately; aria-live announces it for a screen reader.
+  useEffect(() => {
+    if (state.phase === "presented") presentedRef.current?.focus();
+  }, [state.phase]);
+
+  async function runProbe(): Promise<void> {
+    if (host === undefined) return;
+    const seq = (seqRef.current += 1);
+    setOutOfBandChecked(false);
+    setState({ phase: "probing" });
+    const result = await probeSftpHostKey(host, port);
+    // Discard a superseded result (the target changed, or a newer probe started).
+    if (seqRef.current !== seq) return;
+    setState(
+      result.kind === "ok"
+        ? {
+            phase: "presented",
+            fingerprint: result.fingerprint,
+            keyType: result.keyType,
+          }
+        : { phase: "error", message: probeErrorMessage(result) },
+    );
+  }
+
+  if (state.phase === "presented") {
+    const useDisabled = ceremony === "direct" && !outOfBandChecked;
+    return (
+      <div
+        ref={presentedRef}
+        tabIndex={-1}
+        aria-live="polite"
+        className={styles.callout}
+        style={{ outline: "none" }}
+      >
+        <Stack gap="xs">
+          <div>
+            <Text size="sm" fw={500}>
+              The server presented this fingerprint:
+            </Text>
+            <Text size="sm" className={styles.mono}>
+              {state.fingerprint}
+            </Text>
+            <Text size="sm" c="dimmed">
+              Key type: {sanitizeForDisplay(state.keyType)}
+            </Text>
+          </div>
+          <Text size="sm">
+            Does this match the fingerprint whoever runs the server published?
+            This console read it over the same connection the exchange will use
+            -- it cannot vouch for it.
+          </Text>
+          {ceremony === "direct" ? (
+            <>
+              <Alert
+                color="orange"
+                icon={<IconAlertCircle aria-hidden />}
+                title="This host key is the only thing protecting your records"
+              >
+                On this path the server&apos;s host key is the only thing
+                protecting your records -- there is no shared secret and no
+                separate encryption. Verify this fingerprint against a value
+                published somewhere other than this connection.
+              </Alert>
+              <Checkbox
+                checked={outOfBandChecked}
+                onChange={(event) =>
+                  setOutOfBandChecked(event.currentTarget.checked)
+                }
+                label="I checked this fingerprint against a source other than this connection"
+              />
+            </>
+          ) : (
+            <Text size="xs" c="dimmed">
+              When the exchange runs, both parties&apos; consoles also compare
+              the fingerprint each observed and warn on a mismatch.
+            </Text>
+          )}
+          <Group gap="sm">
+            <Button
+              size="xs"
+              disabled={useDisabled}
+              onClick={() => {
+                onUse(state.fingerprint);
+                setState({ phase: "idle" });
+                setOutOfBandChecked(false);
+              }}
+            >
+              Use this fingerprint
+            </Button>
+            <Button
+              size="xs"
+              variant="default"
+              onClick={() => setState({ phase: "idle" })}
+            >
+              Dismiss
+            </Button>
+          </Group>
+        </Stack>
+      </div>
+    );
+  }
+
+  return (
+    <Stack gap={4}>
+      <div>
+        <Button
+          variant="subtle"
+          size="compact-sm"
+          loading={state.phase === "probing"}
+          disabled={host === undefined || state.phase === "probing"}
+          aria-expanded={state.phase !== "idle"}
+          onClick={() => void runProbe()}
+        >
+          Read the fingerprint from the server
+        </Button>
+        {host === undefined &&
+          disabledReason !== undefined &&
+          state.phase === "idle" && (
+            <Text size="xs" c="dimmed">
+              {disabledReason}
+            </Text>
+          )}
+      </div>
+      {state.phase === "error" && (
+        <Alert
+          color="red"
+          role="alert"
+          icon={<IconAlertCircle aria-hidden />}
+          title="Could not read the fingerprint"
+        >
+          {state.message} You can still paste it above.
+        </Alert>
+      )}
+    </Stack>
+  );
+}
+
+/** The operator-facing message for a probe that did not yield a fingerprint. Each
+ * kind names its own cause; paste stays available throughout (the caller appends
+ * that reminder). */
+function probeErrorMessage(result: ProbeSftpHostKeyResult): string {
+  switch (result.kind) {
+    case "invalid":
+      return result.message;
+    case "busy":
+      return "Another read is already running; wait a moment and try again.";
+    case "unreachable":
+      return (
+        "Could not reach the server to read its fingerprint. Check the " +
+        "address and that the server is reachable."
+      );
+    case "timeout":
+      return "Reading the fingerprint took too long. Try again.";
+    case "disabled":
+      return "Reading the fingerprint from the server is not available here.";
+    case "ok":
+    case "error":
+      return "Could not read the fingerprint from the server. Try again.";
+  }
 }

@@ -31,6 +31,10 @@ import {
   handler as initHandler,
 } from "./commands/init";
 import {
+  builder as probeHostKeyBuilder,
+  handler as probeHostKeyHandler,
+} from "./commands/probeHostKey";
+import {
   builder as verifyReceiptBuilder,
   handler as verifyReceiptHandler,
 } from "./commands/verifyReceipt";
@@ -105,6 +109,12 @@ export function buildCli(argv: string[]): Argv {
         "Show (and lazily create) this party's signing certificate fingerprint",
         fingerprintBuilder,
         fingerprintHandler,
+      )
+      .command(
+        "probe-host-key <sftp-url>",
+        "Read and print an SFTP server's host-key fingerprint (no credential sent)",
+        probeHostKeyBuilder,
+        probeHostKeyHandler,
       )
       .command(
         "verify-receipt <record> [input-file] [result-file]",

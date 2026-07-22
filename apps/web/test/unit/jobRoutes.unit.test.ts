@@ -18,7 +18,8 @@ import { Route as JobRoute } from "../../src/routes/api/jobs/$jobId/index";
 import { Route as KeysRoute } from "../../src/routes/api/jobs/$jobId/keys";
 import { Route as RecordRoute } from "../../src/routes/api/jobs/$jobId/record";
 import { Route as ResultRoute } from "../../src/routes/api/jobs/$jobId/result";
-import { Route as SftpRoute } from "../../src/routes/api/jobs/sftp";
+import { Route as SftpProbeRoute } from "../../src/routes/api/jobs/sftp/probe";
+import { Route as SftpRoute } from "../../src/routes/api/jobs/sftp/index";
 
 import {
   STUB_CLI_PATH,
@@ -1011,6 +1012,154 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
     expect(fs.readdirSync(scratch)).toHaveLength(1);
     expect((await deleteSftp()).status).toBe(204);
     expect(fs.readdirSync(scratch)).toEqual([]);
+  });
+});
+
+/** One valid probe stdout line for the stub CLI's `probe-host-key` branch. */
+function okProbeLine(keyType = "ssh-ed25519"): string {
+  return (
+    JSON.stringify({
+      fingerprint: TEST_HOST_KEY_FINGERPRINT,
+      key_type: keyType,
+    }) + "\n"
+  );
+}
+
+/** Seed the global manager with the stub CLI and a probe scenario in its childEnv
+ * (the route's sanitized child env drops ambient STUB_* vars, so the scenario must
+ * ride childEnv). Returns the manager. */
+function seedManagerWithProbe(stubEnv: NodeJS.ProcessEnv): JobManager {
+  const root = tempDataRoot("routes-probe");
+  roots.push(root);
+  vi.stubEnv("JOB_DATA_ROOT", root);
+  const manager = new JobManager({
+    dataRoot: root,
+    binaryPath: STUB_CLI_PATH,
+    jobRendezvousDir: rvzRoot(),
+    childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), ...stubEnv },
+  });
+  (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
+    manager;
+  return manager;
+}
+
+async function postProbe(body: unknown): Promise<Response> {
+  return (await handlersOf(SftpProbeRoute).POST({
+    request: new Request("http://localhost/api/jobs/sftp/probe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+    params: {},
+  })) as Response;
+}
+
+describe("POST /api/jobs/sftp/probe reads a host key without authoring", () => {
+  test("is 404 when the API is disabled", async () => {
+    vi.stubEnv("JOB_DATA_ROOT", "");
+    const response = await postProbe({ host: "sftp.example.org" });
+    expect(response.status).toBe(404);
+  });
+
+  test("a successful probe returns exactly the ok envelope", async () => {
+    seedManagerWithProbe({ STUB_PROBE_STDOUT: okProbeLine() });
+    const response = await postProbe({ host: "sftp.example.org", port: 2222 });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = (await response.json()) as Record<string, unknown>;
+    // Only the fingerprint and key type cross the boundary -- no banner, latency,
+    // or host list.
+    for (const key of Object.keys(body))
+      expect(["status", "fingerprint", "keyType"]).toContain(key);
+    expect(body).toEqual({
+      status: "ok",
+      fingerprint: TEST_HOST_KEY_FINGERPRINT,
+      keyType: "ssh-ed25519",
+    });
+  });
+
+  test("exit 69 is a 200 unreachable envelope (a probe that ran but read no key)", async () => {
+    seedManagerWithProbe({ STUB_EXIT_CODE: "69" });
+    const response = await postProbe({ host: "sftp.example.org" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "unreachable" });
+  });
+
+  test("a body carrying a credential-shaped field is a 400 (strict, no such field)", async () => {
+    seedManagerWithProbe({ STUB_PROBE_STDOUT: okProbeLine() });
+    const response = await postProbe({
+      host: "sftp.example.org",
+      username: "linkage",
+      password: "@/etc/shadow",
+    });
+    expect(response.status).toBe(400);
+    // The value is never echoed; the message names a field shape only.
+    expect(await response.text()).not.toContain("shadow");
+  });
+
+  test("a non-bare host is a 400 naming the field", async () => {
+    seedManagerWithProbe({ STUB_PROBE_STDOUT: okProbeLine() });
+    const response = await postProbe({ host: "sftp://user@evil/path" });
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("host");
+  });
+
+  test("a concurrent probe is a 409 (single-flight)", async () => {
+    // A slow first probe holds the single slot; the concurrent second is refused.
+    seedManagerWithProbe({
+      STUB_PROBE_STDOUT: okProbeLine(),
+      STUB_DELAY_MS: "500",
+    });
+    const first = postProbe({ host: "sftp.example.org" });
+    // Give the first request time to claim the in-flight flag (spawn the child).
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const second = await postProbe({ host: "sftp.example.org" });
+    expect(second.status).toBe(409);
+    expect(await second.text()).toBe("");
+    // Drain the first so no child outlives the test.
+    expect((await first).status).toBe(200);
+  });
+
+  test("a probe never authors: GET /api/jobs/sftp is unchanged after it (invariant)", async () => {
+    const manager = seedManagerWithProbe({ STUB_PROBE_STDOUT: okProbeLine() });
+    authorSftpOn(manager);
+    const before = await (await getSftp()).json();
+    // A successful probe of a DIFFERENT host must not touch the authored entry.
+    const probe = await postProbe({ host: "other.example" });
+    expect((await probe.json()) as { status: string }).toMatchObject({
+      status: "ok",
+    });
+    expect(await (await getSftp()).json()).toEqual(before);
+  });
+
+  test("a probe with no connection authored leaves GET at configured:false", async () => {
+    seedManagerWithProbe({ STUB_EXIT_CODE: "69" });
+    expect((await postProbe({ host: "sftp.example.org" })).status).toBe(200);
+    expect(await (await getSftp()).json()).toEqual({ configured: false });
+  });
+});
+
+describe("PUT /api/jobs/sftp keeps the mandatory-pin backstop (invariant)", () => {
+  test.each([
+    ["an empty string", ""],
+    ["an @-file reference", "@/x"],
+    ["an empty list", [] as Array<string>],
+  ])("a %s fingerprint is a 400", async (_label, value) => {
+    enableJobApi();
+    const ref = secretFileOutside();
+    const response = await putSftp(
+      authoredBody(ref, { hostKeyFingerprint: value }),
+    );
+    expect(response.status).toBe(400);
+  });
+
+  test("a missing fingerprint is a 400", async () => {
+    enableJobApi();
+    const ref = secretFileOutside();
+    const body = authoredBody(ref) as Record<string, unknown>;
+    delete body.hostKeyFingerprint;
+    const response = await putSftp(body);
+    expect(response.status).toBe(400);
   });
 });
 

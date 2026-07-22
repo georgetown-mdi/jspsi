@@ -55,6 +55,13 @@ export const MAX_JOB_BODY_BYTES = 224 * 1024 ** 2;
 export const MAX_SFTP_AUTHOR_BODY_BYTES = 64 * 1024;
 
 /**
+ * The byte cap on a `POST /api/jobs/sftp/probe` body: a host and an optional port,
+ * nothing else. Far tighter than the authoring cap -- no credential is
+ * representable -- so an oversized body is a `413` before any parse.
+ */
+export const MAX_SFTP_PROBE_BODY_BYTES = 4 * 1024;
+
+/**
  * The outcome of reading a job request body under a byte cap:
  * - `too-large`: the body exceeded the cap (mapped to 413).
  * - `invalid`: the body was absent or was not valid JSON (mapped to 400).

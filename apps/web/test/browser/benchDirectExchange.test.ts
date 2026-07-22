@@ -71,6 +71,9 @@ const CLIENTS_PROFILE = {
   ],
 };
 
+// A valid literal OpenSSH SHA256 fingerprint the host-key probe returns.
+const PROBE_FINGERPRINT = `SHA256:${"B".repeat(42)}A`;
+
 interface CapturedRequest {
   url: string;
   method: string;
@@ -84,6 +87,9 @@ interface StubOptions {
    * terminal value (`failed`) lets a discard skip the cancel-and-poll wait and DELETE
    * at once, so a start-over test does not sit through the 15 s discard budget. */
   jobStatus?: string;
+  /** The POST /api/jobs/sftp/probe response. Defaults to a 200 ok envelope
+   * carrying {@link PROBE_FINGERPRINT}. */
+  probe?: { status?: number; body?: unknown };
 }
 
 /** The same-origin job API, stubbed at the global fetch seam. Unmatched URLs fall
@@ -120,6 +126,19 @@ function stubJobApi(options: StubOptions = {}): {
         );
       if (url.startsWith("/api/jobs/inputs/profile"))
         return Promise.resolve(jsonResponse(CLIENTS_PROFILE));
+      if (url === "/api/jobs/sftp/probe") {
+        const probe = options.probe ?? {
+          status: 200,
+          body: {
+            status: "ok",
+            fingerprint: PROBE_FINGERPRINT,
+            keyType: "ssh-ed25519",
+          },
+        };
+        return Promise.resolve(
+          jsonResponse(probe.body ?? {}, probe.status ?? 200),
+        );
+      }
       if (url === "/api/jobs/sftp")
         return Promise.resolve(
           jsonResponse(options.sftp ?? { configured: false }),
@@ -448,6 +467,65 @@ describe("direct exchange transport step", () => {
     await expect
       .element(page.getByLabelText("A shared directory", { exact: false }))
       .toBeDisabled();
+  });
+});
+
+describe("direct exchange host-key probe (direct ceremony)", () => {
+  /** Reach the agreed-server step with SFTP unconfigured, then open the authoring
+   * form and fill host + username so the probe can run. */
+  async function openDirectServerForm() {
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(
+        page.getByRole("heading", { level: 1, name: "The agreed server" }),
+      )
+      .toBeInTheDocument();
+    await page.getByRole("button", { name: "Add connection" }).click();
+    await userEvent.fill(
+      page.getByLabelText("SFTP server address"),
+      "sftp.agreed.example",
+    );
+    await userEvent.fill(page.getByLabelText("Username"), "linkage");
+  }
+
+  test("the interstitial and out-of-band affirmation gate the fill", async () => {
+    // SFTP unconfigured so the authoring form (with its probe) is reachable.
+    stubJobApi({ sftp: { configured: false } });
+    mount(createElement(DirectExchangeBench));
+    await openDirectServerForm();
+
+    await page
+      .getByRole("button", { name: "Read the fingerprint from the server" })
+      .click();
+    await expect
+      .element(page.getByText("The server presented this fingerprint"))
+      .toBeInTheDocument();
+    // The heavier Direct ceremony: an alert-weight interstitial naming the host key
+    // as the only protection (a body phrase unique to the interstitial).
+    await expect
+      .element(
+        page.getByText("no shared secret and no separate encryption", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+
+    // Fill is gated behind the out-of-band affirmation checkbox.
+    const useButton = page.getByRole("button", {
+      name: "Use this fingerprint",
+    });
+    await expect.element(useButton).toBeDisabled();
+    await page
+      .getByRole("checkbox", {
+        name: "I checked this fingerprint against a source other than this connection",
+      })
+      .click();
+    await expect.element(useButton).toBeEnabled();
+    await useButton.click();
+    await expect
+      .element(page.getByLabelText("Server identity fingerprint"))
+      .toHaveValue(PROBE_FINGERPRINT);
   });
 });
 

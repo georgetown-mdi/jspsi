@@ -210,6 +210,16 @@ Every command that opens an SFTP connection -- `psilink exchange`, an online `ps
 
 The command-line spelling of the same pin is `--server-host-key-fingerprint` (accepted by every command above): it sets `host_key_fingerprint` for that run, overriding any value in the configuration, so a supervised or scripted run that already knows the fingerprint connects with no prompt while a server presenting a different key still fails closed with a mismatch error.
 
+### Reading a host key with `probe-host-key`
+
+```sh
+psilink probe-host-key SFTP_URL [--json] [--connect-timeout <duration>]
+```
+
+`probe-host-key` reads and prints the host-key fingerprint an SFTP server presents, without authenticating: it connects only far enough to observe the key, then refuses before any credential is sent (the `ssh-keyscan` analogue). Use it to obtain a fingerprint to pin -- compare the printed value against the one the server's operator published, then set it as `host_key_fingerprint` (or pass `--server-host-key-fingerprint`). It establishes no trust on its own: it reads the key over the same network the exchange will use, so a value it prints is a candidate to verify out-of-band, not a vouched-for key.
+
+`SFTP_URL` is an `sftp://host[:port]` address; you supply no username, path, or credential, and none is sent to the server (the probe refuses before authenticating). A non-sftp scheme is a usage error. `--connect-timeout` bounds the connection attempt (e.g. `10s`), enforced as the SSH ready timeout. By default the command prints a human-readable summary; `--json` instead prints one line of machine-readable JSON -- `{"fingerprint":"SHA256:...","key_type":"..."}` -- on stdout for a script to consume. A transport failure (unreachable, refused, or timed out) exits 69; a usage error exits 64. The console's "read the fingerprint from the server" affordance runs this command for the operator.
+
 ## Verifying a receipt
 
 ```sh
@@ -262,7 +272,7 @@ See [Compromise response](SECURITY_DESIGN.md#compromise-response) for the full p
 
 ## Logging
 
-Every command that produces diagnostic output - `init`, `invite`, `accept`, `exchange`, the zero-setup form, `fingerprint`, and `verify-receipt` - accepts `--log-level` and `--log-file`.
+Every command that produces diagnostic output - `init`, `invite`, `accept`, `exchange`, the zero-setup form, `fingerprint`, `probe-host-key`, and `verify-receipt` - accepts `--log-level` and `--log-file`.
 
 psilink follows the standard stream convention: a command's result data goes to `stdout`, and all diagnostic output - every log line, `info` and `debug` included, together with the interactive confirmation prompt - goes to `stderr`. This keeps a piped or redirected result clean. `psilink accept URL INVITATION 2>/dev/null > matched.csv` writes only the matched-records CSV to `matched.csv`, with the invitation-terms display, the "wrote key file" line, the runtime banner, and every other diagnostic sent to `stderr`, where the same run without the redirect still shows them on the terminal. The result on `stdout` is an exchange's CSV output (when no `OUTPUT_FILE` positional is given), the invitation token printed by `invite`, the fingerprint value printed by `fingerprint` -- whose action banner, bound identity, `--force` regeneration warning, and out-of-band sharing instructions are diagnostics on `stderr`, so `FP=$(psilink fingerprint)` captures just the value -- and the verification verdict printed by `verify-receipt` (its exit code, nonzero only on a definite failure, carries the same result for scripts).
 

@@ -239,6 +239,25 @@ describe("buildAuthoringRequest", () => {
   test("returns undefined for an invalid form", () => {
     expect(buildAuthoringRequest(validForm({ host: "" }))).toBeUndefined();
   });
+
+  test("a probe-filled fingerprint flows through identically to a typed one", () => {
+    // Probe-to-fill sets hostKeyFingerprint via the SAME update() path typing uses,
+    // so the required-pin check and the request build are untouched: a form left
+    // without a pin is unsavable, and filling it (as the probe does) produces the
+    // exact request a typed pin would -- no separate submit path exists.
+    const withoutPin = validForm({ hostKeyFingerprint: "" });
+    expect(sftpFormError(withoutPin)?.field).toBe("hostKeyFingerprint");
+    expect(buildAuthoringRequest(withoutPin)).toBeUndefined();
+
+    const probeFilled = { ...withoutPin, hostKeyFingerprint: FINGERPRINT };
+    expect(sftpFormError(probeFilled)).toBeUndefined();
+    expect(buildAuthoringRequest(probeFilled)).toEqual(
+      buildAuthoringRequest(validForm()),
+    );
+    expect(buildAuthoringRequest(probeFilled)?.hostKeyFingerprint).toBe(
+      FINGERPRINT,
+    );
+  });
 });
 
 describe("sftpFormFromLocator (accept-side pre-fill)", () => {

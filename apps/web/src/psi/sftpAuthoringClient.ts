@@ -1,3 +1,5 @@
+import { HOST_KEY_FINGERPRINT_REGEX } from "@psilink/core";
+
 import { sftpConnectionProjectionOf } from "./serverJobExchangeDriver";
 
 import type { AuthoredSftpServerRequest } from "@jobs/sftpServer";
@@ -188,4 +190,91 @@ export async function deleteSftpConnection(
   } catch {
     // Best-effort: the caller re-fetches the effective connection afterward.
   }
+}
+
+/**
+ * The outcome of a `POST /api/jobs/sftp/probe` host-key read:
+ * - `ok`: the appliance read a host key; carries the observed fingerprint and key
+ *   type (both re-validated client-side, defense in depth over the server check).
+ * - `invalid`: a `400` -- the host was malformed; `message` is the server's
+ *   field-path-only reason, safe to surface.
+ * - `busy`: a `409` -- a probe is already running; the operator can retry.
+ * - `unreachable` / `timeout`: the probe ran but read no key (the server could not
+ *   be reached, or the attempt exceeded the appliance's budget).
+ * - `disabled`: a `404` -- the job API is off (a hosted build).
+ * - `error`: another non-2xx, a network fault, or a malformed/`error` body.
+ */
+export type ProbeSftpHostKeyResult =
+  | { kind: "ok"; fingerprint: string; keyType: string }
+  | { kind: "invalid"; message: string }
+  | { kind: "busy" }
+  | { kind: "unreachable" }
+  | { kind: "timeout" }
+  | { kind: "disabled" }
+  | { kind: "error" };
+
+/** Read the probe-outcome body defensively: re-check the fingerprint against the
+ * canonical regex client-side (the appliance is trusted, but a malformed body
+ * degrades to an honest error rather than filling a pin with a bad value) and
+ * require a non-empty key type. An unexpected shape is the error state. */
+function probeOutcomeOf(body: unknown): ProbeSftpHostKeyResult {
+  if (!isRecord(body)) return { kind: "error" };
+  const status = body.status;
+  if (status === "unreachable" || status === "timeout") return { kind: status };
+  if (status === "ok") {
+    const { fingerprint, keyType } = body;
+    if (
+      typeof fingerprint !== "string" ||
+      !HOST_KEY_FINGERPRINT_REGEX.test(fingerprint)
+    )
+      return { kind: "error" };
+    if (typeof keyType !== "string" || keyType.length === 0)
+      return { kind: "error" };
+    return { kind: "ok", fingerprint, keyType };
+  }
+  // A `status: "error"` category, or anything unmodeled, is the error state.
+  return { kind: "error" };
+}
+
+/** Read the field-path-only message off a probe `400` body, or a fixed fallback.
+ * The message is generated from field paths and fixed reasons (never a value), so
+ * it is safe to display. */
+function probeValidationMessage(body: unknown): string {
+  if (isRecord(body) && typeof body.error === "string" && body.error.length > 0)
+    return body.error;
+  return "The server address could not be read. Check it and try again.";
+}
+
+/**
+ * Read the host-key fingerprint an SFTP server presents through
+ * `POST /api/jobs/sftp/probe`, so the form can offer it beside the paste field for
+ * a comparison. Carries the host and optional port ONLY; the response is validated
+ * defensively (the fingerprint re-checked client-side). Distinguishes an
+ * unreachable/timed-out server, a busy appliance, a disabled API, and a bad host
+ * from a generic error so the form can name each.
+ */
+export async function probeSftpHostKey(
+  host: string,
+  port?: number,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ProbeSftpHostKeyResult> {
+  let response: Response;
+  try {
+    response = await fetchImpl("/api/jobs/sftp/probe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(port !== undefined ? { host, port } : { host }),
+    });
+  } catch {
+    return { kind: "error" };
+  }
+  if (response.status === 404) return { kind: "disabled" };
+  if (response.status === 409) return { kind: "busy" };
+  if (response.status === 400)
+    return {
+      kind: "invalid",
+      message: probeValidationMessage(await readJsonOrNull(response)),
+    };
+  if (!response.ok) return { kind: "error" };
+  return probeOutcomeOf(await readJsonOrNull(response));
 }

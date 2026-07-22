@@ -14,9 +14,10 @@ import {
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
 /**
- * `/api/jobs/sftp` -- the SFTP connection an sftp job runs against. Shares
+ * `/api/jobs/sftp/` -- the SFTP connection an sftp job runs against. Shares
  * `gateJobRoute` (404 when the API is disabled, no-store, no CORS), the same
- * shape family as `/api/jobs/rendezvous`.
+ * shape family as `/api/jobs/rendezvous`. The host-key probe lives at the sibling
+ * `/api/jobs/sftp/probe`.
  *
  * - `GET` reports the in-app authored connection as the manager's explicitly
  *   mapped, credential-free projection: `{ configured: false }` or
@@ -34,7 +35,7 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
  * closed on `/api/jobs` -- all authored connection material flows through this
  * endpoint, so the job-create intent gains no connection field.
  */
-export const Route = createFileRoute("/api/jobs/sftp")({
+export const Route = createFileRoute("/api/jobs/sftp/")({
   server: {
     handlers: {
       GET: () => {
