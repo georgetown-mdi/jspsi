@@ -92,6 +92,22 @@ const CREDENTIAL_REF_FIELDS = [
   "privateKeyPassphrase",
 ] as const;
 
+/**
+ * The operator-facing next step appended to a credential-exclusion rejection on
+ * the AUTHORING path only. The base message already names which directory the
+ * `@path` resolved under; this says why that directory is refused and points at
+ * the two working fixes -- a separate secrets mount, or the paste fallback. Paste
+ * is scoped to "a password or private key" so the one string stays truthful for
+ * `privateKeyPassphrase`, which has no paste form. The boot loader passes no
+ * remediation, so a deploy-time file editor's fail-closed startup message is
+ * unchanged.
+ */
+const AUTHORING_CREDENTIAL_REMEDIATION =
+  "That directory is writable during the exchange, so a credential file there " +
+  "could be replaced. Set JOB_SECRETS_DIR to a separate mounted secrets " +
+  "directory and reference the file there, or paste the value directly for a " +
+  "password or private key.";
+
 /** Which SFTP primary auth method a credential feeds. */
 export type SftpCredType = "password" | "private_key";
 
@@ -362,11 +378,14 @@ function canonicalizeIfPresent(dir: string): string {
  * appliance's rules -- strict field allowlist, mandatory literal fingerprint,
  * credential-must-be-an-`@path`-outside-`exclusions`, core-schema compose. Shared
  * by the boot-time file loader and the request-sourced authoring path so the two
- * cannot diverge.
+ * cannot diverge. An optional `credentialRemediation` is appended to a
+ * credential-exclusion rejection: the authoring path supplies an operator next
+ * step, the boot loader passes none so its startup message stays unchanged.
  */
 function validateServerEntry(
   rawEntry: unknown,
   exclusions: Array<CredentialRefExclusion>,
+  credentialRemediation?: string,
 ): JobSftpServerEntry {
   if (
     rawEntry === null ||
@@ -384,7 +403,7 @@ function validateServerEntry(
   assertBareHost(entry.host);
   assertLiteralFingerprints(entry.hostKeyFingerprint);
   for (const field of CREDENTIAL_REF_FIELDS)
-    assertCredentialRef(field, entry[field], exclusions);
+    assertCredentialRef(field, entry[field], exclusions, credentialRemediation);
   assertComposesThroughCoreSchema(entry);
 
   return entry;
@@ -467,6 +486,7 @@ export function validateAuthoredSftpServer(
     const entry = validateServerEntry(
       rawEntry,
       credentialRefExclusions(dataRoot, rendezvousDir),
+      AUTHORING_CREDENTIAL_REMEDIATION,
     );
     return resolved.materializedPath !== undefined
       ? { entry, materializedCredentialPath: resolved.materializedPath }
@@ -697,12 +717,14 @@ function assertLiteralFingerprints(fingerprint: string | Array<string>): void {
  * The reference is checked BOTH lexically (so an absent file under an excluded
  * dir is still named as such) and by its realpath (so a symlink cannot resolve
  * out of an excluded dir undetected). Error messages name the field path only,
- * never the value.
+ * never the value; an optional `credentialRemediation` is threaded to the
+ * exclusion rejection so the authoring path can append an operator next step.
  */
 function assertCredentialRef(
   field: (typeof CREDENTIAL_REF_FIELDS)[number],
   value: string | undefined,
   exclusions: Array<CredentialRefExclusion>,
+  credentialRemediation?: string,
 ): void {
   if (value === undefined) return;
   const fieldPath = `server.${field}`;
@@ -717,7 +739,12 @@ function assertCredentialRef(
       `${fieldPath} must reference an absolute path after the @`,
     );
   const resolvedRef = path.resolve(refPath);
-  assertOutsideExclusions(fieldPath, resolvedRef, exclusions);
+  assertOutsideExclusions(
+    fieldPath,
+    resolvedRef,
+    exclusions,
+    credentialRemediation,
+  );
   let realRef: string;
   try {
     realRef = fs.realpathSync(resolvedRef);
@@ -726,16 +753,24 @@ function assertCredentialRef(
       `${fieldPath} references a file that does not exist`,
     );
   }
-  assertOutsideExclusions(fieldPath, realRef, exclusions);
+  assertOutsideExclusions(
+    fieldPath,
+    realRef,
+    exclusions,
+    credentialRemediation,
+  );
 }
 
 /** Reject `candidate` when it is or is under any excluded directory (segment-aware
  * over resolved absolute paths, so a `..`-prefixed sibling is not confused as
- * inside). Names the offending directory's label, never the reference value. */
+ * inside). Names the offending directory's label, never the reference value; an
+ * optional `credentialRemediation` is appended as an operator next step (the
+ * authoring path supplies one, the boot path does not). */
 function assertOutsideExclusions(
   fieldPath: string,
   candidate: string,
   exclusions: Array<CredentialRefExclusion>,
+  credentialRemediation?: string,
 ): void {
   for (const { dir, label } of exclusions) {
     const relative = path.relative(dir, candidate);
@@ -745,7 +780,10 @@ function assertOutsideExclusions(
       path.isAbsolute(relative);
     if (!outside)
       throw new JobApiConfigError(
-        `${fieldPath} must not reference a file under ${label}`,
+        credentialRemediation === undefined
+          ? `${fieldPath} must not reference a file under ${label}`
+          : `${fieldPath} must not reference a file under ${label}. ` +
+              credentialRemediation,
       );
   }
 }

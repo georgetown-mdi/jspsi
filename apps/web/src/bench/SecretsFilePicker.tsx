@@ -178,7 +178,9 @@ function renderListing(
         No secrets directory is configured on this appliance. Set
         JOB_SECRETS_DIR to the mounted directory that holds your SFTP credential
         files (a password file or an SSH private key), then restart the
-        appliance. You can still type a file reference below instead.
+        appliance. Until then, paste the value below for a password or private
+        key; typing a file reference works only if the file sits on a mount
+        outside the writable data folder.
       </MountStateNotice>
     );
 

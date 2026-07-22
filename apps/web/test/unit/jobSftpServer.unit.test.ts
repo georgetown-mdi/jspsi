@@ -217,7 +217,8 @@ describe("loadSftpServer credential reference rules", () => {
   test("an @path under the data root is rejected", () => {
     const dir = scratchDir();
     const dataRoot = path.join(dir, "data-root");
-    expect(() =>
+    let caught: Error | null = null;
+    try {
       loadSingle(
         [
           "host: sftp.example.org",
@@ -225,13 +226,15 @@ describe("loadSftpServer credential reference rules", () => {
           `password: "@${path.join(dataRoot, "planted", "pw")}"`,
         ],
         { dataRoot },
-      ),
-    ).toThrowError(
-      expect.objectContaining({
-        name: "JobApiConfigError",
-        message: expect.stringContaining("data root") as string,
-      }) as Error,
-    );
+      );
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(caught).toBeInstanceOf(JobApiConfigError);
+    expect(caught?.message).toContain("data root");
+    // The boot path carries no authoring remediation: a deploy-time file editor
+    // does not paste and cannot set JOB_SECRETS_DIR from the console.
+    expect(caught?.message).not.toContain("JOB_SECRETS_DIR");
   });
 
   test("a dot-dot @path that normalizes back under the data root is rejected", () => {
@@ -531,7 +534,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
     );
   });
 
-  test("a credential ref under the data root is rejected without echoing it", () => {
+  test("a credential ref under the data root is rejected with an authoring next step", () => {
     const dir = scratchDir();
     const dataRoot = path.join(dir, "data-root");
     const ref = path.join(dataRoot, "planted", "pw");
@@ -546,7 +549,12 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
       caught = error as Error;
     }
     expect(caught).toBeInstanceOf(JobApiConfigError);
+    // Names the credential field, keeps the base "data root" phrase the boot and
+    // integration tests key on, and appends the operator's next step.
+    expect(caught?.message).toContain("server.password");
     expect(caught?.message).toContain("data root");
+    expect(caught?.message).toContain("JOB_SECRETS_DIR");
+    // Never echoes the submitted @path or the secret it points at.
     expect(caught?.message).not.toContain(ref);
   });
 

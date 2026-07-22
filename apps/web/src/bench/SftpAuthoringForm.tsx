@@ -408,7 +408,7 @@ function CredentialField({
 
       <TextInput
         label="File reference"
-        description="For a credential outside the secrets mount, type an @-file reference to its absolute path, e.g. @/run/secrets/key."
+        description="For a credential outside the secrets mount, type an @-file reference to its absolute path (which must be outside the writable data folder), e.g. @/run/secrets/key."
         classNames={{ input: styles.mono }}
         value={typedRef}
         error={picked === undefined && !pasteActive ? error : undefined}
