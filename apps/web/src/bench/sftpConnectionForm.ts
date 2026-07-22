@@ -62,6 +62,37 @@ export const EMPTY_SFTP_FORM: SftpConnectionFormValues = {
   passphrasePath: "",
 };
 
+/** A partner-supplied SFTP locator: the credential-free host/port/path an accepted
+ * invitation's endpoint carries. It names WHERE to connect and nothing else -- an
+ * {@link SFTPEndpoint} structurally cannot carry a credential or a host-key
+ * fingerprint. */
+export interface SftpEndpointLocator {
+  host: string;
+  port?: number;
+  path?: string;
+}
+
+/**
+ * Seed the authoring form from a partner-supplied SFTP locator (an accepted
+ * invitation's endpoint). ONLY the host, port, and remote directory pre-fill; the
+ * fingerprint, credential, method, and passphrase stay EMPTY -- the operator
+ * supplies every one of those. This is the accept-side pre-fill boundary: no
+ * invitation field can populate a credential or the host-key fingerprint, because
+ * the locator carries neither and this reads only its host/port/path. A form built
+ * from this alone is unsubmittable ({@link buildAuthoringRequest} returns undefined)
+ * until the operator adds the fingerprint and a credential.
+ */
+export function sftpFormFromLocator(
+  locator: SftpEndpointLocator,
+): SftpConnectionFormValues {
+  return {
+    ...EMPTY_SFTP_FORM,
+    host: locator.host,
+    port: locator.port !== undefined ? String(locator.port) : "",
+    remoteDirectory: locator.path ?? "",
+  };
+}
+
 /** The form fields an error can attach to. */
 export type SftpFormField =
   | "host"

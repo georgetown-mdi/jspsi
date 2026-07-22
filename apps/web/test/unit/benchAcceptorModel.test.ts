@@ -14,6 +14,7 @@ import {
   acceptorLedgerTag,
   acceptorLegalAgreementDisplay,
   acceptorRailFacts,
+  acceptorRunsAsServerJob,
   acceptorSpine,
   invitingPartyName,
 } from "@bench/acceptorModel";
@@ -23,6 +24,7 @@ import type {
   InvitationToken,
   LinkageTerms,
   Metadata,
+  SFTPEndpoint,
   WebRTCEndpoint,
 } from "@psilink/core";
 
@@ -484,6 +486,22 @@ const SPLIT_FILEDROP: FileDropEndpoint = {
   inboundPath: "/mnt/in",
   outboundPath: "/mnt/out",
 };
+const SINGLE_DIR_SFTP: SFTPEndpoint = {
+  channel: "sftp",
+  host: "sftp.partner.example",
+  port: 2022,
+  path: "/drop",
+};
+const SFTP_NO_PATH: SFTPEndpoint = {
+  channel: "sftp",
+  host: "sftp.partner.example",
+};
+const SPLIT_SFTP: SFTPEndpoint = {
+  channel: "sftp",
+  host: "sftp.partner.example",
+  inboundPath: "/in",
+  outboundPath: "/out",
+};
 
 describe("acceptUnsupported (runnability by endpoint shape)", () => {
   test("a WebRTC endpoint is out of scope on the appliance, pointing at the web app", () => {
@@ -505,6 +523,18 @@ describe("acceptUnsupported (runnability by endpoint shape)", () => {
   test("a single-directory filedrop with a rendezvous mount is runnable", () => {
     expect(acceptUnsupported(SINGLE_DIR_FILEDROP, true)).toBeUndefined();
   });
+
+  test("a single-directory SFTP endpoint is runnable, needing no rendezvous mount", () => {
+    // The SFTP accept connects to the partner-named server, so it needs no
+    // JOB_RENDEZVOUS_DIR -- runnable whether or not a rendezvous mount is set.
+    expect(acceptUnsupported(SINGLE_DIR_SFTP, false)).toBeUndefined();
+    expect(acceptUnsupported(SFTP_NO_PATH, false)).toBeUndefined();
+  });
+
+  test("a split-directory SFTP endpoint points at the command-line tool", () => {
+    const unsupported = acceptUnsupported(SPLIT_SFTP, true);
+    expect(unsupported?.message).toContain("command-line tool");
+  });
 });
 
 describe("acceptorHowItRunsLabel", () => {
@@ -514,9 +544,27 @@ describe("acceptorHowItRunsLabel", () => {
     );
   });
 
+  test("a console SFTP accept runs over SFTP on the command-line tool", () => {
+    expect(acceptorHowItRunsLabel(SINGLE_DIR_SFTP, true)).toContain("SFTP");
+  });
+
   test("a WebRTC accept, or any hosted accept, runs in the browser", () => {
     expect(acceptorHowItRunsLabel(WEBRTC_ENDPOINT, true)).toBe("Browser");
     expect(acceptorHowItRunsLabel(SINGLE_DIR_FILEDROP, false)).toBe("Browser");
+    expect(acceptorHowItRunsLabel(SINGLE_DIR_SFTP, false)).toBe("Browser");
+  });
+});
+
+describe("acceptorRunsAsServerJob", () => {
+  test("a console file-drop or SFTP accept runs as a server job on the appliance", () => {
+    expect(acceptorRunsAsServerJob(SINGLE_DIR_FILEDROP, true)).toBe(true);
+    expect(acceptorRunsAsServerJob(SINGLE_DIR_SFTP, true)).toBe(true);
+  });
+
+  test("a WebRTC accept, or any hosted accept, runs in the browser", () => {
+    expect(acceptorRunsAsServerJob(WEBRTC_ENDPOINT, true)).toBe(false);
+    expect(acceptorRunsAsServerJob(SINGLE_DIR_SFTP, false)).toBe(false);
+    expect(acceptorRunsAsServerJob(SINGLE_DIR_FILEDROP, false)).toBe(false);
   });
 });
 

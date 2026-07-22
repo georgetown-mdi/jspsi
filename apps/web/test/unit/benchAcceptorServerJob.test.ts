@@ -78,6 +78,7 @@ function configFor() {
     acceptorName: "Accepting Org",
     edits,
     inputSource: { kind: "inline", csv: inputCsv },
+    transport: { channel: "filedrop" },
   });
 }
 
@@ -134,12 +135,33 @@ describe("acceptorServerJobConfig", () => {
       acceptorName: "Accepting Org",
       edits,
       inputSource: workFile,
+      transport: { channel: "filedrop" },
     });
     expect(config.inputSource).toEqual(workFile);
   });
 
-  test("rides the filedrop transport: the accept guard admits no sftp endpoint", () => {
+  test("rides the transport it is given (filedrop)", () => {
     expect(configFor().transport).toEqual({ channel: "filedrop" });
+  });
+
+  test("rides the sftp transport for an accepted SFTP endpoint", () => {
+    // The console SFTP accept runs the same server job on the sftp intent arm; the
+    // arm carries no connection field (the appliance reads the operator-authored
+    // connection off GET /api/jobs/sftp), so only the channel changes here.
+    const config = acceptorServerJobConfig({
+      token,
+      acceptorName: "Accepting Org",
+      edits,
+      inputSource: { kind: "inline", csv: inputCsv },
+      transport: { channel: "sftp" },
+    });
+    expect(config.transport).toEqual({ channel: "sftp" });
+    // Everything below the transport discriminant is channel-independent: the
+    // derived own-perspective terms and the received-payload lock-in are identical.
+    expect(config.linkageTerms.identity).toBe("Accepting Org");
+    expect(config.expectedPayloadColumns).toEqual(
+      token.disclosedPayloadColumns,
+    );
   });
 
   test("carries the operator's authored metadata and standardization edits", () => {
@@ -202,6 +224,7 @@ describe("acceptorServerJobConfig received-payload lock-in", () => {
       acceptorName: "Accepting Org",
       edits,
       inputSource: { kind: "inline", csv: inputCsv },
+      transport: { channel: "filedrop" },
     });
   }
 

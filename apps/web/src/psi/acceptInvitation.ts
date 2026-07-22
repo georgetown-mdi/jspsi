@@ -7,11 +7,13 @@ import {
 import type { DeploymentProfile } from "@utils/clientConfig";
 
 import type {
+  ConnectionEndpoint,
   ExchangeDataSpec,
   FileDropEndpoint,
   InvitationToken,
   LinkageTerms,
   Metadata,
+  SFTPEndpoint,
   Standardization,
   WebRTCEndpoint,
 } from "@psilink/core";
@@ -33,10 +35,13 @@ export interface AcceptableInvitation {
   token: InvitationToken;
   /** The connection endpoint, narrowed from the token's `connectionEndpoint` to
    * the subset this build can drive: a WebRTC signaling endpoint the acceptor
-   * dials in this browser, or a file-drop endpoint the console appliance runs
-   * through the job API. Never an SFTP endpoint, which is not browser- or
-   * appliance-drivable. */
-  endpoint: WebRTCEndpoint | FileDropEndpoint;
+   * dials in this browser, or -- on a console build -- a file-drop or SFTP
+   * endpoint the console appliance runs through the job API. A hosted build never
+   * admits file-drop or SFTP (neither is browser-drivable). An SFTP endpoint
+   * carries only its credential-free locator (host/port/path) by construction;
+   * the operator supplies the username, credential, and host-key fingerprint when
+   * authoring the connection the appliance runs. */
+  endpoint: WebRTCEndpoint | FileDropEndpoint | SFTPEndpoint;
 }
 
 /**
@@ -48,14 +53,18 @@ export interface AcceptableInvitation {
  * the boundary and on an unparseable `expires`) and rejects an expired token
  * here. It also requires a `connectionEndpoint` this build can drive: a WebRTC
  * endpoint always (the acceptor reaches the inviter through the PeerJS signaling
- * endpoint the invitation carries), or a file-drop endpoint on a console build
- * (the appliance runs the exchange through its job API). Every other channel --
- * SFTP, or a file-drop endpoint on a non-console build -- is rejected, and so is
- * a token with no endpoint. The admitted channels are exactly what {@link selectExchangeDriver}
- * drives (webrtc -> browser, filedrop on console -> server-job); the allowlist is
- * of what THIS build can drive, never a loosening to arbitrary endpoints. Because
- * every failure throws, a caller that only proceeds on success cannot dial or
- * launch on an expired, malformed, or undrivable invitation.
+ * endpoint the invitation carries), or a file-drop or SFTP endpoint on a console
+ * build (the appliance runs the exchange through its job API). A file-drop or
+ * SFTP endpoint on a non-console build is rejected, and so is a token with no
+ * endpoint. The admitted channels are exactly what {@link selectExchangeDriver}
+ * drives (webrtc -> browser, filedrop/sftp on console -> server-job); the
+ * allowlist is of what THIS build can drive, a narrow per-channel widening, never
+ * a loosening to arbitrary endpoints. An admitted SFTP endpoint carries only its
+ * credential-free locator; the review step still refuses a console SFTP accept
+ * whose shape the appliance cannot run (a split inbound/outbound pair), the
+ * file-sync sibling of the file-drop shape gate. Because every failure throws, a
+ * caller that only proceeds on success cannot dial or launch on an expired,
+ * malformed, or undrivable invitation.
  *
  * @param encoded  The encoded invitation string (bare code or deep-link
  *                 fragment).
@@ -88,13 +97,7 @@ export async function prepareAcceptedInvitation(
   }
 
   const endpoint = token.connectionEndpoint;
-  if (
-    endpoint === undefined ||
-    !(
-      endpoint.channel === "webrtc" ||
-      (endpoint.channel === "filedrop" && profile === "console")
-    )
-  ) {
+  if (endpoint === undefined || !endpointDrivableHere(endpoint, profile)) {
     throw new Error(
       "This invitation does not carry a connection endpoint this build can " +
         "accept, so it cannot be run here.",
@@ -102,6 +105,28 @@ export async function prepareAcceptedInvitation(
   }
 
   return { token, endpoint };
+}
+
+/**
+ * Whether THIS build can drive an accepted invitation's connection endpoint: a
+ * WebRTC endpoint always (the acceptor reaches the inviter through the PeerJS
+ * signaling endpoint), or a file-drop or SFTP endpoint on a console build (the
+ * appliance runs the exchange through its job API). The switch is exhaustive over
+ * the channel union with no default, so a newly added channel fails to compile
+ * here until it is deliberately classified -- the allowlist discipline, never a
+ * blocklist that admits an unvetted channel.
+ */
+function endpointDrivableHere(
+  endpoint: ConnectionEndpoint,
+  profile: DeploymentProfile,
+): boolean {
+  switch (endpoint.channel) {
+    case "webrtc":
+      return true;
+    case "filedrop":
+    case "sftp":
+      return profile === "console";
+  }
 }
 
 /**

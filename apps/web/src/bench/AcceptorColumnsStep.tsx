@@ -9,6 +9,7 @@ import {
   Text,
   VisuallyHidden,
 } from "@mantine/core";
+
 import {
   IconAlertCircle,
   IconAlertTriangle,
@@ -39,6 +40,7 @@ import type {
   SemanticType,
   Standardization,
 } from "@psilink/core";
+import type { ReactNode } from "react";
 
 /**
  * The acceptor's "Confirm your columns" work surface (step 3 of 3): a port of the
@@ -59,6 +61,8 @@ export function AcceptorColumnsStep({
   columnsState,
   editorState,
   verdict,
+  connectionSection,
+  connectionBlocked = false,
   onMetadataChange,
   onRemap,
   onReset,
@@ -72,6 +76,15 @@ export function AcceptorColumnsStep({
   /** The effective `{ metadata, standardization }` the verdict and launch consume. */
   editorState: { metadata: Metadata; standardization: Standardization };
   verdict: AcceptorVerdictViewModel;
+  /** The transport-connection surface an accepted SFTP invitation needs authored
+   * before launch (the {@link AcceptorSftpConnectionCard}), rendered below the
+   * column surface and above the launch action. Absent for a browser or file-drop
+   * accept, which need no per-exchange connection. */
+  connectionSection?: ReactNode;
+  /** Whether launch is blocked pending the transport connection (an SFTP accept
+   * with no connection authored yet). ORs into the column-verdict gate so "Start
+   * the exchange" cannot mint a run with nowhere to connect. */
+  connectionBlocked?: boolean;
   onMetadataChange: (next: Metadata) => void;
   /** Bind a missing field type to a chosen column, forcing role linkage. */
   onRemap: (type: SemanticType, columnName: string) => void;
@@ -107,7 +120,8 @@ export function AcceptorColumnsStep({
   const standardizationValid = acceptorStandardizationValid(
     editorState.standardization,
   );
-  const launchDisabled = acceptorLaunchDisabled(verdict, editorState);
+  const launchDisabled =
+    acceptorLaunchDisabled(verdict, editorState) || connectionBlocked;
 
   const remap = (type: LinkageField["type"], columnName: string) => {
     // Move focus to the verdict before the chosen Select unmounts (it does as soon
@@ -289,6 +303,15 @@ export function AcceptorColumnsStep({
             Finish or fix the highlighted cleaning steps before continuing.
           </Text>
         )}
+
+        {connectionSection !== undefined && (
+          <Paper withBorder p="md">
+            <Text size="sm" fw={600} mb="xs">
+              Connect to your partner&apos;s SFTP server
+            </Text>
+            {connectionSection}
+          </Paper>
+        )}
       </Stack>
 
       <div className={styles.workFoot}>
@@ -298,6 +321,11 @@ export function AcceptorColumnsStep({
         <Button variant="subtle" onClick={onReset}>
           Reset to defaults
         </Button>
+        {connectionBlocked && (
+          <p className={`${styles.small} ${styles.sub}`} role="status">
+            Set up the SFTP connection above before you can start.
+          </p>
+        )}
       </div>
     </>
   );

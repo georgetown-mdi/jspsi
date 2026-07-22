@@ -118,13 +118,21 @@ describe("prepareAcceptedInvitation", () => {
     ).rejects.toThrow(/cannot/i);
   });
 
-  test("always rejects an SFTP endpoint, on either profile", async () => {
+  test("admits an SFTP endpoint on a console build (its credential-free locator)", async () => {
     const encoded = await encode({ connectionEndpoint: sftpEndpoint });
 
-    for (const profile of ["hosted", "console"] as const)
-      await expect(
-        prepareAcceptedInvitation(encoded, { profile }),
-      ).rejects.toThrow(/cannot/i);
+    const { endpoint } = await prepareAcceptedInvitation(encoded, {
+      profile: "console",
+    });
+    expect(endpoint).toEqual(sftpEndpoint);
+  });
+
+  test("rejects an SFTP endpoint off a console build (fails closed)", async () => {
+    const encoded = await encode({ connectionEndpoint: sftpEndpoint });
+
+    await expect(
+      prepareAcceptedInvitation(encoded, { profile: "hosted" }),
+    ).rejects.toThrow(/cannot/i);
   });
 
   test("rejects a malformed invitation string", async () => {
@@ -144,6 +152,7 @@ describe("prepareAcceptedInvitation", () => {
   const ENDPOINT_TRANSPORT = {
     webrtc: "browser",
     filedrop: "filedrop",
+    sftp: "sftp",
   } as const;
   const CASES = [
     { channel: "webrtc" as const, endpoint: webrtcEndpoint },
@@ -159,12 +168,13 @@ describe("prepareAcceptedInvitation", () => {
           .then(() => true)
           .catch(() => false);
 
-        // sftp has no accept-drivable transport at all; webrtc and filedrop map
-        // to a Transport whose selection kind decides drivability. The remotes
-        // flag is false as the accept path passes it: it gates only the sftp
-        // channel, which never reaches the selector from an accept.
+        // Each channel maps to a Transport whose selection kind decides
+        // drivability: an admitted endpoint runs live (browser or server-job), a
+        // rejected one maps to the save-file kind that cannot run in the accept
+        // flow. The sftp-configured flag is false as the accept path passes it: an
+        // accepted sftp endpoint still resolves to server-job (the connection is
+        // authored before launch), so this stays in lockstep with the guard.
         const drivenLive =
-          channel !== "sftp" &&
           selectExchangeDriver(ENDPOINT_TRANSPORT[channel], profile, false)
             .kind !== "save-file";
         expect(admitted).toBe(drivenLive);
