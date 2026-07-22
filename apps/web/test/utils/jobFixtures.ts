@@ -7,6 +7,8 @@ import type {
   JobFiledropExchangeIntent,
   JobInputFileReference,
   JobSftpExchangeIntent,
+  JobZeroSetupFiledropIntent,
+  JobZeroSetupSftpIntent,
 } from "@jobs/intent";
 import type { JobSftpServerEntry } from "@jobs/sftpServer";
 import type { LinkageTerms } from "@psilink/core";
@@ -91,6 +93,32 @@ export function testSftpServerEntry(): JobSftpServerEntry {
     path: "/exchange",
     password: "@/etc/psilink/prod-east-password",
     hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+  };
+}
+
+/** A valid filedrop zero-setup intent (no shared secret, no linkage terms);
+ * overrides merge over the base. */
+export function validZeroSetupIntent(
+  overrides: Partial<JobZeroSetupFiledropIntent> = {},
+): JobZeroSetupFiledropIntent {
+  return {
+    mode: "zeroSetup",
+    channel: "filedrop",
+    inputCsv: "ssn,last_name,date_of_birth\n111223333,smith,1990-01-01\n",
+    ...overrides,
+  };
+}
+
+/** A valid sftp zero-setup intent (no connection field, no secret/terms);
+ * overrides merge over it. */
+export function validZeroSetupSftpIntent(
+  overrides: Partial<JobZeroSetupSftpIntent> = {},
+): JobZeroSetupSftpIntent {
+  return {
+    mode: "zeroSetup",
+    channel: "sftp",
+    inputCsv: "ssn,last_name,date_of_birth\n111223333,smith,1990-01-01\n",
+    ...overrides,
   };
 }
 

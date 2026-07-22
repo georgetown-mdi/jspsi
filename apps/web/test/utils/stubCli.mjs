@@ -24,8 +24,14 @@
 //                     the wait the process is interruptible.
 //   STUB_IGNORE_SIGINT  When "1", SIGINT is ignored (to test SIGTERM escalation).
 //   STUB_IGNORE_SIGTERM When "1", SIGTERM is ignored (to test SIGKILL).
+//   STUB_ARGV_FILE    When set, the process argv (JSON array) is written to this
+//                     path, so a test can assert exactly how the driver invoked
+//                     the CLI (subcommand, flags, and positional order).
 
 import fs from "node:fs";
+
+if (process.env.STUB_ARGV_FILE !== undefined)
+  fs.writeFileSync(process.env.STUB_ARGV_FILE, JSON.stringify(process.argv));
 
 function writeFd3(line) {
   try {

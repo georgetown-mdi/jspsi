@@ -1,3 +1,5 @@
+import { pathToFileURL } from "node:url";
+
 import { z } from "zod";
 
 import { stringify as stringifyYaml } from "yaml";
@@ -135,6 +137,13 @@ export interface JobInputFileReference {
  *   the empty-vs-absent semantics.
  */
 interface JobExchangeIntentBase {
+  /**
+   * The mode discriminant, `"exchange"`. Optional on the wire: the merged
+   * exchange client predates the discriminant and sends none, so the create route
+   * defaults a missing `mode` to `"exchange"` (see {@link jobCreateIntentSchema}).
+   * A zero-setup intent ({@link JobZeroSetupIntent}) names itself explicitly.
+   */
+  mode?: "exchange";
   linkageTerms: LinkageTerms;
   sharedSecret: string;
   inputCsv?: string;
@@ -195,6 +204,81 @@ export interface JobSftpExchangeIntent extends JobExchangeIntentBase {
  */
 export type JobExchangeIntent =
   JobFiledropExchangeIntent | JobSftpExchangeIntent;
+
+/**
+ * The linkage-run strategy a zero-setup exchange may select, the CLI's
+ * `--linkage-strategy` value: `cascade` (the default: one dependent PSI round per
+ * key) or `single-pass` (batch every key into one exchange, disclosing the full
+ * per-key value structure to the receiver). A closed two-value enum -- never a
+ * path, host, or credential -- so it reaches the CLI as a bounded flag value.
+ */
+export type JobZeroSetupLinkageStrategy = "cascade" | "single-pass";
+
+/**
+ * The fields shared by every {@link JobZeroSetupIntent} arm. A zero-setup exchange
+ * carries NO shared secret and NO linkage terms: both parties run the CLI's
+ * positional `$0` form against the same server, terms inferred from each party's
+ * input file, and there is no application-layer encryption to key. It therefore
+ * carries none of the exchange mode's `sharedSecret`, `linkageTerms`, `metadata`,
+ * `standardization`, or `expectedPayloadColumns` -- only an input source, the
+ * tuning `options` subset, the `eventStream` toggle, and two optional, bounded
+ * selectors:
+ *
+ * - `linkageStrategy` is a closed enum forwarded to the CLI's `--linkage-strategy`.
+ * - `identity` is a bounded operator label forwarded to the CLI's `--identity`
+ *   (the party name/org/contact string). Bounded by {@link MAX_IDENTITY_LENGTH}.
+ *
+ * Neither is a path, host, or credential, so neither can escape into a file path
+ * or a connection field. Exactly one of `inputCsv` or `inputFile` is set (enforced
+ * by {@link jobZeroSetupIntentSchema}), identically to the exchange mode.
+ */
+interface JobZeroSetupIntentBase {
+  mode: "zeroSetup";
+  inputCsv?: string;
+  inputFile?: JobInputFileReference;
+  options?: JobExchangeOptions;
+  eventStream?: boolean;
+  linkageStrategy?: JobZeroSetupLinkageStrategy;
+  identity?: string;
+}
+
+/**
+ * A filedrop zero-setup intent. Like the filedrop exchange arm it has no host and
+ * no credentials: the connection is a `file://` locator the server builds from the
+ * operator-configured rendezvous directory, so the intent contributes no injectable
+ * connection field.
+ */
+export interface JobZeroSetupFiledropIntent extends JobZeroSetupIntentBase {
+  channel: "filedrop";
+}
+
+/**
+ * An sftp zero-setup intent. It carries no connection field at all: the appliance
+ * provisions exactly one SFTP server, so host, port, path, credential references,
+ * and the host-key fingerprint all come from the server-side entry (turned into a
+ * `sftp://` URL and `--server-*` flags by {@link zeroSetupSftpArgv}), never from
+ * the intent.
+ */
+export interface JobZeroSetupSftpIntent extends JobZeroSetupIntentBase {
+  channel: "sftp";
+}
+
+/**
+ * The typed, schema-validated intent a client submits to create a zero-setup job,
+ * discriminated on `channel`. Injection-closed by construction exactly as the
+ * exchange intent is: every field is a bounded input source, a numeric/boolean/enum
+ * tuning knob, a closed strategy enum, or a bounded identity label. No field becomes
+ * a path, host, credential reference, or argv string; the connection is drawn only
+ * from the server (the provisioned SFTP server, or the configured rendezvous mount).
+ */
+export type JobZeroSetupIntent =
+  JobZeroSetupFiledropIntent | JobZeroSetupSftpIntent;
+
+/**
+ * The union the create route accepts: an exchange intent or a zero-setup intent,
+ * discriminated on `mode`, each in turn discriminated on `channel`.
+ */
+export type JobCreateIntent = JobExchangeIntent | JobZeroSetupIntent;
 
 /**
  * Upper bound on the `inputCsv` string length, anchored to the browser intake's
@@ -310,9 +394,13 @@ const jobExchangeIntentCommonFields = {
 
 // Intentionally NOT annotated z.ZodType: z.discriminatedUnion requires concrete
 // ZodObject members (the same reason core's connection schemas leave their
-// intermediate objects unannotated); type safety is enforced on the union below.
+// intermediate objects unannotated); type safety is enforced on the unions below.
+// Each arm carries the `mode: "exchange"` literal so it can be a member of the
+// mode-discriminated union the create route parses; a body that omits `mode`
+// still parses as exchange via the route schema's default (see below).
 const jobFiledropExchangeIntentSchema = z
   .object({
+    mode: z.literal("exchange"),
     channel: z.literal("filedrop"),
     ...jobExchangeIntentCommonFields,
     options: jobExchangeOptionsSchema.optional(),
@@ -321,14 +409,21 @@ const jobFiledropExchangeIntentSchema = z
 
 const jobSftpExchangeIntentSchema = z
   .object({
+    mode: z.literal("exchange"),
     channel: z.literal("sftp"),
     ...jobExchangeIntentCommonFields,
     options: jobSftpExchangeOptionsSchema.optional(),
   })
   .strict();
 
+const jobExchangeChannelUnion = z.discriminatedUnion("channel", [
+  jobFiledropExchangeIntentSchema,
+  jobSftpExchangeIntentSchema,
+]);
+
 /** Whether exactly one input source is present -- inline `inputCsv` XOR the mounted
- * `inputFile` reference. Neither (no input) and both (an ambiguous intent) fail. */
+ * `inputFile` reference. Neither (no input) and both (an ambiguous intent) fail.
+ * Shared by every arm of every mode; the inputs are identical across them. */
 function hasExactlyOneInputSource(intent: {
   inputCsv?: unknown;
   inputFile?: unknown;
@@ -337,14 +432,34 @@ function hasExactlyOneInputSource(intent: {
 }
 
 /**
- * Zod schema for {@link JobExchangeIntent}. Both arms are `.strict()`, so a
- * client cannot smuggle an unmodeled field (a `path`, a `host`, a `server`
- * block, an `@path` credential, or a connection-selecting `remote`) past
- * validation, and each arm admits only its own fields. The sftp arm carries no
- * connection field at all (the appliance provisions one server), and its
- * options variant floors `pollIntervalMs` at 1000 ms because its poll lists a
- * remote operator-provisioned server, not a job-local directory. The `channel`
- * discriminant is a closed two-value set; any other channel is rejected.
+ * The `mode` discriminant defaults to `"exchange"` when absent: the merged
+ * exchange client (`serverJobExchangeDriver`) sends an intent with no `mode`, so
+ * a body missing it is the exchange mode. A zero-setup body names itself. Applied
+ * as a preprocess (only when `mode` is not already an own key, and only to a plain
+ * object) so the mode-discriminated union below always sees a present discriminant;
+ * it injects a single constant and mutates nothing else, so it opens no field.
+ */
+function withDefaultExchangeMode(raw: unknown): unknown {
+  if (
+    raw !== null &&
+    typeof raw === "object" &&
+    !Array.isArray(raw) &&
+    !("mode" in raw)
+  )
+    return { ...(raw as Record<string, unknown>), mode: "exchange" };
+  return raw;
+}
+
+/**
+ * Zod schema for a single {@link JobExchangeIntent} (the exchange mode alone).
+ * Both arms are `.strict()`, so a client cannot smuggle an unmodeled field (a
+ * `path`, a `host`, a `server` block, an `@path` credential, or a
+ * connection-selecting `remote`) past validation, and each arm admits only its own
+ * fields. The sftp arm carries no connection field at all (the appliance provisions
+ * one server), and its options variant floors `pollIntervalMs` at 1000 ms because
+ * its poll lists a remote operator-provisioned server, not a job-local directory.
+ * A missing `mode` defaults to `"exchange"`, so a merged exchange client parses
+ * unchanged.
  *
  * A union-level refine enforces exactly one input source -- inline `inputCsv` or
  * the mounted `inputFile` reference -- on both arms: the arm's strict parse runs
@@ -352,10 +467,86 @@ function hasExactlyOneInputSource(intent: {
  * then the cross-field XOR rejects an intent that names neither or both.
  */
 export const jobExchangeIntentSchema: z.ZodType<JobExchangeIntent> = z
-  .discriminatedUnion("channel", [
-    jobFiledropExchangeIntentSchema,
-    jobSftpExchangeIntentSchema,
-  ])
+  .preprocess(withDefaultExchangeMode, jobExchangeChannelUnion)
+  .refine(hasExactlyOneInputSource, {
+    message: "exactly one of inputCsv or inputFile must be set",
+  });
+
+/**
+ * Upper bound on the `identity` label a zero-setup intent may carry (the CLI's
+ * `--identity` value: the party's name/org/contact string). Generous for a real
+ * label yet refuses an unbounded string; a non-secret operator value, never a path
+ * or credential.
+ */
+export const MAX_IDENTITY_LENGTH = 1024;
+
+// The zero-setup common fields carry NONE of the exchange mode's credential or
+// terms material -- no sharedSecret, linkageTerms, metadata, standardization, or
+// expectedPayloadColumns -- only an input source, the tuning options, the event
+// toggle, and the two bounded selectors. `inputCsv` reuses the exchange mode's cap.
+const jobZeroSetupIntentCommonFields = {
+  inputCsv: z.string().min(1).max(MAX_INPUT_CSV_LENGTH).optional(),
+  inputFile: jobInputFileReferenceSchema.optional(),
+  eventStream: z.boolean().optional(),
+  linkageStrategy: z.enum(["cascade", "single-pass"]).optional(),
+  identity: z.string().min(1).max(MAX_IDENTITY_LENGTH).optional(),
+};
+
+// Mode-carrying zero-setup arms, each `.strict()` and discriminated on channel.
+// Not annotated z.ZodType for the same reason the exchange arms are not.
+const jobZeroSetupFiledropIntentSchema = z
+  .object({
+    mode: z.literal("zeroSetup"),
+    channel: z.literal("filedrop"),
+    ...jobZeroSetupIntentCommonFields,
+    options: jobExchangeOptionsSchema.optional(),
+  })
+  .strict();
+
+const jobZeroSetupSftpIntentSchema = z
+  .object({
+    mode: z.literal("zeroSetup"),
+    channel: z.literal("sftp"),
+    ...jobZeroSetupIntentCommonFields,
+    options: jobSftpExchangeOptionsSchema.optional(),
+  })
+  .strict();
+
+const jobZeroSetupChannelUnion = z.discriminatedUnion("channel", [
+  jobZeroSetupFiledropIntentSchema,
+  jobZeroSetupSftpIntentSchema,
+]);
+
+/**
+ * Zod schema for a single {@link JobZeroSetupIntent}. `mode: "zeroSetup"` is
+ * required and literal -- a zero-setup intent names itself, so a body that omits
+ * `mode` is never admitted here (the create route routes a missing `mode` to the
+ * exchange arm). Both channel arms are `.strict()`, so no `sharedSecret`,
+ * `linkageTerms`, connection field, or any unmodeled key survives, and the
+ * exactly-one-input-source rule holds exactly as in the exchange mode.
+ */
+export const jobZeroSetupIntentSchema: z.ZodType<JobZeroSetupIntent> =
+  jobZeroSetupChannelUnion.refine(hasExactlyOneInputSource, {
+    message: "exactly one of inputCsv or inputFile must be set",
+  });
+
+/**
+ * The schema `POST /api/jobs` parses: a discriminated union on `mode`
+ * (`exchange` | `zeroSetup`), each in turn discriminated on `channel`. A body that
+ * omits `mode` defaults to the exchange arm (the merged client sends none). Every
+ * leaf arm is `.strict()`, so a `connection`/`server`/`remote` key -- or any other
+ * unmodeled field -- fails the parse on either mode, keeping the create surface
+ * injection-closed. The exactly-one-input-source rule is enforced once at the
+ * union level over the shared `inputCsv`/`inputFile` fields.
+ */
+export const jobCreateIntentSchema: z.ZodType<JobCreateIntent> = z
+  .preprocess(
+    withDefaultExchangeMode,
+    z.discriminatedUnion("mode", [
+      jobExchangeChannelUnion,
+      jobZeroSetupChannelUnion,
+    ]),
+  )
   .refine(hasExactlyOneInputSource, {
     message: "exactly one of inputCsv or inputFile must be set",
   });
@@ -484,6 +675,95 @@ export function composeSftpConfigDocument(
  */
 export function composeKeyFileDocument(intent: JobExchangeIntent): string {
   return JSON.stringify({ sharedSecret: intent.sharedSecret });
+}
+
+/**
+ * Build the `sftp://` URL a zero-setup job's CLI drives, from the provisioned
+ * server entry's host, port, and path. The host, port, and path go through the
+ * WHATWG {@link URL} object (never string concatenation) so each component is
+ * encoded correctly; a bare IPv6 literal is bracketed first, since the hostname
+ * setter silently rejects an unbracketed one. The set is then verified against a
+ * sentinel: the WHATWG setter no-ops rather than throwing on a host it cannot
+ * parse, which would leave the sentinel host in place and point the exchange at the
+ * wrong server, so a host that fails to set is a compose-time error. (Checking
+ * against the sentinel -- not against the input verbatim -- so a host the setter
+ * legitimately transforms, e.g. an IDN name to punycode, still passes.) Credentials
+ * never ride the URL -- they are `--server-*` flags built by
+ * {@link zeroSetupSftpArgv} -- so no secret byte is ever URL-encoded here.
+ */
+function buildZeroSetupSftpUrl(serverEntry: JobSftpServerEntry): string {
+  const hostForUrl =
+    serverEntry.host.includes(":") && !serverEntry.host.startsWith("[")
+      ? `[${serverEntry.host}]`
+      : serverEntry.host;
+  const sentinelHost = "host.invalid";
+  const url = new URL(`sftp://${sentinelHost}`);
+  url.hostname = hostForUrl;
+  if (hostForUrl !== sentinelHost && url.hostname === sentinelHost)
+    throw new Error(
+      "could not encode the provisioned sftp host into a URL for a zero-setup " +
+        "exchange",
+    );
+  if (serverEntry.port !== undefined) url.port = String(serverEntry.port);
+  if (serverEntry.path !== undefined) url.pathname = serverEntry.path;
+  return url.href;
+}
+
+/**
+ * Map the operator-provisioned SFTP server entry to the connection portion of a
+ * zero-setup CLI argv: the `sftp://` URL positional plus the `--server-*` flags.
+ * The argv analog of {@link composeSftpConfigDocument} -- it draws every field from
+ * the server entry, contributing nothing from the client.
+ *
+ * Credentials are emitted as `--server-<field> @path` with the `@path` string
+ * VERBATIM (the same `@path` the entry carries), never a resolved secret: the CLI
+ * child resolves the reference at live-use, so no secret byte is ever on argv. The
+ * primary credential (`password` or `private_key`) is picked exactly as
+ * {@link composeSftpConfigDocument} lets core pick it -- whichever the entry carries,
+ * at most one -- with the optional passphrase (`@path`) and keyboard-interactive
+ * toggle alongside.
+ *
+ * The host-key fingerprint is MANDATORY and always emitted: a zero-setup run has no
+ * TTY, so trust-on-first-use is impossible and the pin is the only host-key defense.
+ * The CLI flag is single-valued, so a multi-fingerprint entry (an `Array`) is a
+ * compose-time error rather than a silently dropped pin -- a repeatable/multi-pin
+ * flag is out of scope for this slice.
+ */
+export function zeroSetupSftpArgv(
+  serverEntry: JobSftpServerEntry,
+): Array<string> {
+  const argv: Array<string> = [buildZeroSetupSftpUrl(serverEntry)];
+  if (serverEntry.username !== undefined)
+    argv.push("--server-username", serverEntry.username);
+  if (serverEntry.password !== undefined)
+    argv.push("--server-password", serverEntry.password);
+  else if (serverEntry.privateKey !== undefined)
+    argv.push("--server-private-key", serverEntry.privateKey);
+  if (serverEntry.privateKeyPassphrase !== undefined)
+    argv.push(
+      "--server-private-key-passphrase",
+      serverEntry.privateKeyPassphrase,
+    );
+  if (serverEntry.keyboardInteractive === true)
+    argv.push("--server-keyboard-interactive");
+  if (Array.isArray(serverEntry.hostKeyFingerprint))
+    throw new Error(
+      "a zero-setup exchange cannot pin more than one host-key fingerprint; " +
+        "the CLI --server-host-key-fingerprint flag is single-valued",
+    );
+  argv.push("--server-host-key-fingerprint", serverEntry.hostKeyFingerprint);
+  return argv;
+}
+
+/**
+ * Map the operator-configured rendezvous directory to the connection portion of a
+ * filedrop zero-setup CLI argv: a single `file://` URL positional. Built through
+ * {@link pathToFileURL} from the server-side directory, so no client string is ever
+ * a path and the URL is always well formed. The filedrop channel has no host or
+ * credential, so this is the whole connection.
+ */
+export function zeroSetupFiledropArgv(rendezvousDir: string): Array<string> {
+  return [pathToFileURL(rendezvousDir).href];
 }
 
 /**

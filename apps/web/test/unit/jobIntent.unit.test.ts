@@ -12,6 +12,7 @@ import {
 import {
   JOB_FILE_NAMES,
   MAX_EXPECTED_PAYLOAD_COLUMNS,
+  MAX_IDENTITY_LENGTH,
   MAX_INPUT_CSV_LENGTH,
   MAX_METADATA_COLUMNS,
   MAX_METADATA_DESCRIPTION_LENGTH,
@@ -20,7 +21,11 @@ import {
   composeConfigDocument,
   composeKeyFileDocument,
   composeSftpConfigDocument,
+  jobCreateIntentSchema,
   jobExchangeIntentSchema,
+  jobZeroSetupIntentSchema,
+  zeroSetupFiledropArgv,
+  zeroSetupSftpArgv,
 } from "@jobs/intent";
 
 import {
@@ -32,6 +37,8 @@ import {
   validIntent,
   validLinkageTerms,
   validSftpIntent,
+  validZeroSetupIntent,
+  validZeroSetupSftpIntent,
 } from "../utils/jobFixtures";
 
 import type { Metadata, Standardization } from "@psilink/core";
@@ -646,5 +653,276 @@ describe("JOB_FILE_NAMES record/keys pairing", () => {
       ? `${JOB_FILE_NAMES.record.slice(0, -".json".length)}.keys.json`
       : `${JOB_FILE_NAMES.record}.keys.json`;
     expect(JOB_FILE_NAMES.recordKeys).toBe(derivedKeysName);
+  });
+});
+
+// The zero-setup intent is the ONLY channel from the client into a zero-setup CLI
+// invocation. These pin its injection-closure: it carries no secret/terms/
+// connection material, only a bounded input source and closed-vocabulary tuning.
+describe("jobZeroSetupIntentSchema accepts the allowed fields", () => {
+  test("accepts a well-formed filedrop zero-setup intent", () => {
+    expect(
+      jobZeroSetupIntentSchema.safeParse(validZeroSetupIntent()).success,
+    ).toBe(true);
+  });
+
+  test("accepts a well-formed sftp zero-setup intent with no connection field", () => {
+    expect(
+      jobZeroSetupIntentSchema.safeParse(validZeroSetupSftpIntent()).success,
+    ).toBe(true);
+  });
+
+  test("accepts the optional linkageStrategy enum and identity label", () => {
+    for (const linkageStrategy of ["cascade", "single-pass"] as const)
+      expect(
+        jobZeroSetupIntentSchema.safeParse(
+          validZeroSetupIntent({ linkageStrategy, identity: "county-health" }),
+        ).success,
+      ).toBe(true);
+  });
+
+  test("accepts a mounted inputFile reference in place of inputCsv", () => {
+    const intent = {
+      mode: "zeroSetup",
+      channel: "filedrop",
+      inputFile: SAMPLE_INPUT_FILE_REF,
+    };
+    expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(true);
+  });
+
+  test("accepts the sftp poll floor and the event-stream toggle", () => {
+    expect(
+      jobZeroSetupIntentSchema.safeParse(
+        validZeroSetupSftpIntent({
+          options: { pollIntervalMs: 1000 },
+          eventStream: true,
+        }),
+      ).success,
+    ).toBe(true);
+  });
+});
+
+describe("jobZeroSetupIntentSchema is injection-closed and strict", () => {
+  test("rejects a body that omits mode (a zero-setup intent must name itself)", () => {
+    const noMode: Record<string, unknown> = { ...validZeroSetupIntent() };
+    delete noMode.mode;
+    expect(jobZeroSetupIntentSchema.safeParse(noMode).success).toBe(false);
+  });
+
+  test("rejects a sharedSecret on either arm", () => {
+    for (const base of [validZeroSetupIntent(), validZeroSetupSftpIntent()]) {
+      const intent = { ...base, sharedSecret: "A".repeat(43) };
+      expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(false);
+    }
+  });
+
+  test("rejects linkageTerms, metadata, standardization, expectedPayloadColumns", () => {
+    for (const smuggled of [
+      { linkageTerms: validLinkageTerms() },
+      { metadata: editedMetadata },
+      { standardization: editedStandardization },
+      { expectedPayloadColumns: ["program_code"] },
+    ]) {
+      const intent = { ...validZeroSetupIntent(), ...smuggled };
+      expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(false);
+    }
+  });
+
+  test("rejects a smuggled connection field (server / remote / path)", () => {
+    for (const smuggled of [
+      { server: { host: "evil.example", password: "@/etc/shadow" } },
+      { remote: TEST_SFTP_REMOTE_NAME },
+      { path: "/etc/passwd" },
+    ]) {
+      const intent = { ...validZeroSetupSftpIntent(), ...smuggled };
+      expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(false);
+    }
+  });
+
+  test("rejects an unknown linkageStrategy value (closed enum)", () => {
+    const intent = { ...validZeroSetupIntent(), linkageStrategy: "turbo" };
+    expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
+  test("rejects an over-length identity label", () => {
+    const intent = validZeroSetupIntent({
+      identity: "i".repeat(MAX_IDENTITY_LENGTH + 1),
+    });
+    expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
+  test("rejects an unknown channel", () => {
+    const intent = { ...validZeroSetupIntent(), channel: "webrtc" };
+    expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
+  test("enforces exactly one input source (neither and both fail)", () => {
+    const neither: Record<string, unknown> = { ...validZeroSetupIntent() };
+    delete neither.inputCsv;
+    expect(jobZeroSetupIntentSchema.safeParse(neither).success).toBe(false);
+    const both = {
+      ...validZeroSetupIntent(),
+      inputFile: SAMPLE_INPUT_FILE_REF,
+    };
+    expect(jobZeroSetupIntentSchema.safeParse(both).success).toBe(false);
+  });
+
+  test("floors the sftp poll interval at 1000ms, as the exchange arm does", () => {
+    expect(
+      jobZeroSetupIntentSchema.safeParse(
+        validZeroSetupSftpIntent({ options: { pollIntervalMs: 999 } }),
+      ).success,
+    ).toBe(false);
+  });
+});
+
+describe("jobCreateIntentSchema discriminates on mode", () => {
+  test("a body with no mode defaults to the exchange arm (merged client)", () => {
+    const parsed = jobCreateIntentSchema.safeParse(validIntent());
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.mode).toBe("exchange");
+  });
+
+  test("an explicit mode: exchange parses as exchange", () => {
+    const parsed = jobCreateIntentSchema.safeParse({
+      ...validIntent(),
+      mode: "exchange",
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  test("a zeroSetup body routes to the zero-setup arm", () => {
+    const parsed = jobCreateIntentSchema.safeParse(validZeroSetupIntent());
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.mode).toBe("zeroSetup");
+  });
+
+  test("a zeroSetup body carrying a sharedSecret fails the strict parse", () => {
+    const intent = { ...validZeroSetupIntent(), sharedSecret: "A".repeat(43) };
+    expect(jobCreateIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
+  test("an exchange body missing its sharedSecret fails (not silently zeroSetup)", () => {
+    const noSecret: Record<string, unknown> = { ...validIntent() };
+    delete noSecret.sharedSecret;
+    expect(jobCreateIntentSchema.safeParse(noSecret).success).toBe(false);
+  });
+
+  test("an unknown mode is rejected", () => {
+    const intent = { ...validZeroSetupIntent(), mode: "bootstrap" };
+    expect(jobCreateIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
+  test("a connection key on either mode fails the strict parse", () => {
+    for (const base of [validIntent(), validZeroSetupIntent()]) {
+      const intent = { ...base, connection: { host: "evil.example" } };
+      expect(jobCreateIntentSchema.safeParse(intent).success).toBe(false);
+    }
+  });
+});
+
+describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
+  test("builds the sftp URL from host, port, and path", () => {
+    const argv = zeroSetupSftpArgv(testSftpServerEntry());
+    expect(argv[0]).toBe("sftp://sftp.example.org:2222/exchange");
+  });
+
+  test("brackets a bare IPv6 host into a valid URL", () => {
+    const argv = zeroSetupSftpArgv({
+      host: "::1",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+    });
+    expect(argv[0]).toBe("sftp://[::1]");
+  });
+
+  test("emits the username and the @path credential VERBATIM, never a value", () => {
+    const argv = zeroSetupSftpArgv(testSftpServerEntry());
+    expect(argv).toContain("--server-username");
+    expect(argv[argv.indexOf("--server-username") + 1]).toBe("linkage");
+    // The @path is emitted as a filename reference, never resolved to a secret.
+    expect(argv).toContain("--server-password");
+    expect(argv[argv.indexOf("--server-password") + 1]).toBe(
+      "@/etc/psilink/prod-east-password",
+    );
+  });
+
+  test("emits --server-private-key and its passphrase as @path refs", () => {
+    const argv = zeroSetupSftpArgv({
+      host: "sftp.example.org",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      privateKey: "@/etc/psilink/id_ed25519",
+      privateKeyPassphrase: "@/etc/psilink/passphrase",
+    });
+    expect(argv[argv.indexOf("--server-private-key") + 1]).toBe(
+      "@/etc/psilink/id_ed25519",
+    );
+    expect(argv[argv.indexOf("--server-private-key-passphrase") + 1]).toBe(
+      "@/etc/psilink/passphrase",
+    );
+    expect(argv).not.toContain("--server-password");
+  });
+
+  test("emits --server-keyboard-interactive only when enabled", () => {
+    expect(zeroSetupSftpArgv(testSftpServerEntry())).not.toContain(
+      "--server-keyboard-interactive",
+    );
+    const argv = zeroSetupSftpArgv({
+      ...testSftpServerEntry(),
+      keyboardInteractive: true,
+    });
+    expect(argv).toContain("--server-keyboard-interactive");
+  });
+
+  test("ALWAYS emits the mandatory literal host-key fingerprint", () => {
+    const argv = zeroSetupSftpArgv(testSftpServerEntry());
+    expect(argv).toContain("--server-host-key-fingerprint");
+    expect(argv[argv.indexOf("--server-host-key-fingerprint") + 1]).toBe(
+      TEST_HOST_KEY_FINGERPRINT,
+    );
+  });
+
+  test("carries no secret byte and no config/key/save token on argv", () => {
+    const argv = zeroSetupSftpArgv(testSftpServerEntry());
+    const joined = argv.join(" ");
+    expect(joined).not.toContain("--config-file");
+    expect(joined).not.toContain("--key-file");
+    expect(joined).not.toContain("--save");
+    // The only credential-bearing tokens are @path references, never values.
+    for (const token of argv)
+      if (token.includes("psilink")) expect(token.startsWith("@")).toBe(true);
+  });
+
+  test("an array (multi) fingerprint fails compose -- single-pin only this slice", () => {
+    expect(() =>
+      zeroSetupSftpArgv({
+        host: "sftp.example.org",
+        password: "@/etc/psilink/pw",
+        hostKeyFingerprint: [
+          TEST_HOST_KEY_FINGERPRINT,
+          `SHA256:${"B".repeat(43)}`,
+        ],
+      }),
+    ).toThrow(/single-valued/);
+  });
+
+  test("omits --server-username when the entry carries none", () => {
+    const argv = zeroSetupSftpArgv({
+      host: "sftp.example.org",
+      password: "@/etc/psilink/pw",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+    });
+    expect(argv).not.toContain("--server-username");
+  });
+});
+
+describe("zeroSetupFiledropArgv builds the file:// locator", () => {
+  test("builds a file:// URL via pathToFileURL from the server-side directory", () => {
+    const argv = zeroSetupFiledropArgv("/srv/jobs/abc/rendezvous");
+    expect(argv).toEqual(["file:///srv/jobs/abc/rendezvous"]);
+  });
+
+  test("carries no host or credential (filedrop has neither)", () => {
+    const argv = zeroSetupFiledropArgv("/srv/jobs/abc/rendezvous");
+    expect(argv.join(" ")).not.toContain("--server-");
   });
 });

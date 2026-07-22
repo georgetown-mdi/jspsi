@@ -1,13 +1,19 @@
-import { describe, expect, test } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+
+import { afterEach, describe, expect, test } from "vitest";
 
 import {
   JOB_CLI_BINARY_ENV,
   classifyExit,
   resolveCliBinaryPath,
+  spawnZeroSetupJob,
   validateAndSanitizeEvent,
 } from "@jobs/cliDriver";
 
-import { STUB_CLI_PATH } from "../utils/jobFixtures";
+import { STUB_CLI_PATH, tempDataRoot } from "../utils/jobFixtures";
+
+import type { JobTerminalState } from "@jobs/cliDriver";
 
 describe("classifyExit maps CLI exit codes to terminal states", () => {
   test("0 -> succeeded", () => {
@@ -159,5 +165,107 @@ describe("resolveCliBinaryPath", () => {
   test("falls back to the workspace-relative built entry when unset", () => {
     const resolved = resolveCliBinaryPath({});
     expect(resolved.endsWith("apps/cli/dist/index.js")).toBe(true);
+  });
+});
+
+describe("spawnZeroSetupJob drives the literal $0 form", () => {
+  const dirs: Array<string> = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0))
+      fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** Spawn the stub through spawnZeroSetupJob, capturing the exact argv it was
+   * invoked with (via the stub's STUB_ARGV_FILE), and resolve once it exits. */
+  async function captureArgv(args: {
+    connectionArgs: Array<string>;
+    eventStream: boolean;
+    identity?: string;
+    linkageStrategy?: "cascade" | "single-pass";
+  }): Promise<Array<string>> {
+    const workdir = tempDataRoot("zs-driver");
+    fs.mkdirSync(workdir, { recursive: true });
+    dirs.push(workdir);
+    const argvFile = path.join(workdir, "argv.json");
+    // A wrapper object, not a bare local: the terminal is set from the driver's
+    // callback, which TypeScript's control-flow analysis would otherwise narrow a
+    // local `null` past, making the poll condition read as always-true.
+    const terminalRef: { current: JobTerminalState | null } = { current: null };
+    spawnZeroSetupJob({
+      binaryPath: STUB_CLI_PATH,
+      connectionArgs: args.connectionArgs,
+      inputPath: path.join(workdir, "input.csv"),
+      outputPath: path.join(workdir, "output.csv"),
+      recordPath: path.join(workdir, "record.json"),
+      workdir,
+      eventStream: args.eventStream,
+      ...(args.identity !== undefined ? { identity: args.identity } : {}),
+      ...(args.linkageStrategy !== undefined
+        ? { linkageStrategy: args.linkageStrategy }
+        : {}),
+      extraEnv: { STUB_ARGV_FILE: argvFile, STUB_EXIT_CODE: "0" },
+      handlers: {
+        onEvent: () => undefined,
+        onDegraded: () => undefined,
+        onTerminal: (state) => {
+          terminalRef.current = state;
+        },
+      },
+    });
+    const deadline = Date.now() + 5000;
+    while (terminalRef.current === null) {
+      if (Date.now() > deadline) throw new Error("stub did not exit");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    // argv[0] is node, argv[1] the CLI entry; the driven arguments follow.
+    return (
+      JSON.parse(fs.readFileSync(argvFile, "utf8")) as Array<string>
+    ).slice(2);
+  }
+
+  test("sftp: URL first positional, --server-* flags, record, input, output", async () => {
+    const argv = await captureArgv({
+      connectionArgs: [
+        "sftp://sftp.example.org:2222/exchange",
+        "--server-username",
+        "linkage",
+        "--server-password",
+        "@/etc/psilink/pw",
+        "--server-host-key-fingerprint",
+        `SHA256:${"A".repeat(43)}`,
+      ],
+      eventStream: true,
+    });
+    expect(argv[0]).toBe("sftp://sftp.example.org:2222/exchange");
+    expect(argv).toContain("--event-stream");
+    expect(argv).toContain("--record-file");
+    // The two trailing positionals are input then output.
+    expect(argv[argv.length - 2].endsWith("input.csv")).toBe(true);
+    expect(argv[argv.length - 1].endsWith("output.csv")).toBe(true);
+  });
+
+  test("never a subcommand token, --config-file, --key-file, or --save", async () => {
+    const argv = await captureArgv({
+      connectionArgs: ["file:///srv/jobs/abc/rendezvous"],
+      eventStream: false,
+    });
+    expect(argv[0]).toBe("file:///srv/jobs/abc/rendezvous");
+    expect(argv).not.toContain("exchange");
+    expect(argv).not.toContain("--config-file");
+    expect(argv).not.toContain("--key-file");
+    expect(argv).not.toContain("--save");
+    // --event-stream is omitted when not requested.
+    expect(argv).not.toContain("--event-stream");
+  });
+
+  test("forwards --identity and --linkage-strategy when set", async () => {
+    const argv = await captureArgv({
+      connectionArgs: ["file:///srv/jobs/abc/rendezvous"],
+      eventStream: false,
+      identity: "county-health",
+      linkageStrategy: "single-pass",
+    });
+    expect(argv[argv.indexOf("--identity") + 1]).toBe("county-health");
+    expect(argv[argv.indexOf("--linkage-strategy") + 1]).toBe("single-pass");
   });
 });
