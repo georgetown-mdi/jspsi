@@ -24,7 +24,8 @@ import styles from "./bench.module.css";
  * explanation. It has its own route at `/quick` and is also the home route's
  * first-run landing (an empty or unavailable managed store at `/` renders it
  * directly, with no redirect); the recurring-exchange list lives at `/saved`,
- * which this screen links to.
+ * which this screen links to on a hosted build. A console build has no recurring
+ * surface, so it omits that pointer.
  */
 export function BenchLobby() {
   const navigate = useNavigate();
@@ -41,6 +42,9 @@ export function BenchLobby() {
   // exchanges (the /quick path reaches this screen with a populated store).
   const [hasSavedExchanges, setHasSavedExchanges] = useState<boolean>();
   useEffect(() => {
+    // The managed store is not a console concept, and a console build renders no
+    // pointer to it, so it reads nothing.
+    if (isConsoleBuild()) return;
     let live = true;
     void loadSavedExchanges({
       openStore: openManagedExchangeDatabase,
@@ -180,25 +184,26 @@ export function BenchLobby() {
           seeds an exchange with synthetic records and downloads the two CSVs so
           you can run both sides.
         </p>
-        {hasSavedExchanges === undefined ? null : hasSavedExchanges ? (
-          <p className={`${styles.sub} ${styles.small}`}>
-            Saved an exchange to run again?{" "}
-            <Anchor inherit component={Link} to="/saved">
-              Recurring exchanges
-            </Anchor>{" "}
-            lists the ones stored in this browser so you can run one without a
-            new invitation, and is where you restore one from a backup file if
-            this browser was cleared.
-          </p>
-        ) : (
-          <p className={`${styles.sub} ${styles.small}`}>
-            Cleared this browser, or moving to a new device?{" "}
-            <Anchor inherit component={Link} to="/saved">
-              Recurring exchanges
-            </Anchor>{" "}
-            is where you restore a saved exchange from a backup file.
-          </p>
-        )}
+        {!isConsoleBuild() &&
+          (hasSavedExchanges === undefined ? null : hasSavedExchanges ? (
+            <p className={`${styles.sub} ${styles.small}`}>
+              Saved an exchange to run again?{" "}
+              <Anchor inherit component={Link} to="/saved">
+                Recurring exchanges
+              </Anchor>{" "}
+              lists the ones stored in this browser so you can run one without a
+              new invitation, and is where you restore one from a backup file if
+              this browser was cleared.
+            </p>
+          ) : (
+            <p className={`${styles.sub} ${styles.small}`}>
+              Cleared this browser, or moving to a new device?{" "}
+              <Anchor inherit component={Link} to="/saved">
+                Recurring exchanges
+              </Anchor>{" "}
+              is where you restore a saved exchange from a backup file.
+            </p>
+          ))}
         <div className={styles.howItWorks}>
           <p>
             <strong>How it works.</strong> Each of you keeps your file on your
