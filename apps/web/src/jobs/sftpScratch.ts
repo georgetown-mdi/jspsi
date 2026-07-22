@@ -50,7 +50,10 @@ export function resolveSftpCredentialScratchDir(
  * destroyed by the boot sweep, so it refuses the boot. The containment check runs
  * on the realpath BEFORE any directory is created or re-moded, so a symlinked
  * scratch path resolving into an excluded mount cannot cause a side effect on that
- * mount before the refusal. Returns the resolved directory. Called once at boot; a
+ * mount before the refusal. After creation and before the destructive sweep it
+ * re-asserts containment on the realpath of the now-existing directory, so a
+ * symlink swapped into the scratch path in that window cannot lead the sweep into
+ * an operator mount. Returns the resolved directory. Called once at boot; a
  * failure propagates as a {@link JobApiConfigError} that refuses startup, matching
  * the appliance's posture.
  */
@@ -76,6 +79,7 @@ export function setupSftpCredentialScratchDir(
   } catch (error) {
     throw scratchFsError(resolved, "created", error);
   }
+  assertScratchOutside(realpathIfPresent(resolved), exclusions);
   try {
     sweepScratchDir(resolved);
   } catch (error) {
@@ -91,8 +95,9 @@ export function setupSftpCredentialScratchDir(
  * without a following `chmod`, since a permissive umask is not guaranteed). The
  * value is written and then dropped: the caller holds it only between request
  * parse and this write. Any failure after the file is created (a partial write on
- * a full filesystem, a chmod that cannot set the mode) removes the file before
- * rethrowing, so a failed materialization leaves nothing at rest.
+ * a full filesystem, a chmod that cannot set the mode) best-effort removes the file
+ * before rethrowing the ORIGINAL error; a cleanup that itself fails is swallowed so
+ * it cannot mask that error, and the boot sweep backstops any residue it leaves.
  */
 export function materializeSftpCredential(
   scratchDir: string,
@@ -103,7 +108,13 @@ export function materializeSftpCredential(
     fs.writeFileSync(filePath, value, { mode: JOB_FILE_MODE });
     fs.chmodSync(filePath, JOB_FILE_MODE);
   } catch (error) {
-    fs.rmSync(filePath, { force: true });
+    try {
+      fs.rmSync(filePath, { force: true });
+    } catch {
+      // Cleanup is best-effort: a delete that itself fails (EROFS/EIO) must not
+      // mask the original write/chmod error, and the boot sweep backstops the
+      // residue it leaves.
+    }
     throw error;
   }
   return filePath;
@@ -188,11 +199,15 @@ export function isWithin(parent: string, child: string): boolean {
 }
 
 /**
- * Resolve where a `mkdir -p` of `target` would land, following any symlinked
+ * Resolve where a `mkdir -p` of `target` would land, following any LIVE symlinked
  * ancestor, WITHOUT creating anything: the realpath of `target` if it exists,
  * otherwise the realpath of its nearest existing ancestor with the non-existent
- * tail re-appended. Lets the boot containment check run on the true resolved path
- * before any directory is created or re-moded.
+ * tail re-appended. Only live (resolvable) symlinks are followed -- a dangling
+ * symlink component throws in `realpathSync`, so reconstruction falls back to
+ * re-appending it as a plain tail segment, and the subsequent `mkdirSync` of
+ * `target` then fails closed on that dangling component, creating nothing. Lets the
+ * boot containment check run on the true resolved path before any directory is
+ * created or re-moded.
  */
 function intendedRealpath(target: string): string {
   const tail: Array<string> = [];

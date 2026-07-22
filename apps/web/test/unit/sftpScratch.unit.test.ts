@@ -128,6 +128,43 @@ describe("setupSftpCredentialScratchDir containment", () => {
     expect(fs.readdirSync(inside)).toEqual([]);
   });
 
+  test("re-asserts containment before the sweep when a symlink is swapped in", () => {
+    // A symlink swapped into the scratch path AFTER the pre-creation asserts but
+    // BEFORE the destructive sweep must be caught by the post-mkdir re-assert, so
+    // the sweep never recurses through the link into the data root and deletes it.
+    const base = sandbox("scratch-swap-before-sweep");
+    const dataRoot = path.join(base, "data-root");
+    const inside = path.join(dataRoot, "inside");
+    fs.mkdirSync(inside, { recursive: true });
+    const survivor = path.join(inside, "operator-file");
+    fs.writeFileSync(survivor, "do-not-delete\n");
+    // A mode distinct from WORKDIR_MODE, so a stray chmod-through-symlink shows.
+    fs.chmodSync(inside, 0o755);
+    const scratchDir = path.join(base, "scratch");
+    // Simulate the TOCTOU race: the chmod that follows mkdir is the injection
+    // point, replacing the freshly created scratch dir with a symlink into the
+    // data root before the sweep runs.
+    const chmodSpy = vi.spyOn(fs, "chmodSync").mockImplementationOnce(() => {
+      fs.rmSync(scratchDir, { recursive: true, force: true });
+      fs.symlinkSync(inside, scratchDir);
+    });
+    try {
+      expect(() =>
+        setupSftpCredentialScratchDir(scratchDir, dataRoot, undefined),
+      ).toThrowError(
+        expect.objectContaining({
+          name: "JobApiConfigError",
+          message: expect.stringContaining("data root") as string,
+        }) as Error,
+      );
+    } finally {
+      chmodSpy.mockRestore();
+    }
+    // The re-assert refused before the sweep ran: the mount keeps its file and mode.
+    expect(fs.readFileSync(survivor, "utf8")).toBe("do-not-delete\n");
+    expect(fs.statSync(inside).mode & 0o777).toBe(0o755);
+  });
+
   test("refuses to boot when the scratch dir equals the secrets mount", () => {
     const base = sandbox("scratch-eq-secrets");
     const dataRoot = path.join(base, "data-root");
