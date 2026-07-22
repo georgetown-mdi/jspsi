@@ -19,7 +19,7 @@
     "check:command-inventory": "node scripts/check-command-inventory.mjs",
     "typecheck": "tsc -p packages/core/tsconfig.json --noEmit && tsc -p apps/cli/tsconfig.test.json && tsc -p apps/web/tsconfig.json",
     "test": "npm run test -w packages/core -w apps/cli -w apps/web",
-    "test:scripts": "vitest run --project scripts --project repo-scripts",
+    "test:scripts": "vitest run --project scripts --project repo-scripts --project hooks",
     "coverage": "npm run coverage -w packages/core -w apps/cli -w apps/web"
   },
   "keywords": [
