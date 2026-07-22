@@ -1,9 +1,11 @@
 import { disclosedColumnNames, sanitizeForDisplay } from "@psilink/core";
 
 import { commitAcceptance } from "@psi/acceptConsent";
+import { isBareSftpHost } from "@psi/sftpHost";
 import { summarizeInvitation } from "@psi/invitationSummary";
 
 import { TRANSPORT_LEDGER_LABELS, dateTimeLabel } from "./inviterModel";
+import { saveRailNote } from "./saveExchangeModel";
 
 import type { InvitationToken, LinkageTerms, Metadata } from "@psilink/core";
 import type { RailFact, RailStepState } from "./inviterModel";
@@ -478,8 +480,9 @@ export function acceptUnsupported(
         "your browser instead.",
     };
   // An SFTP accept connects to the partner-named server (no rendezvous mount), so
-  // it needs no `JOB_RENDEZVOUS_DIR`; only the split-directory shape is refused,
-  // the file-sync sibling of the file-drop split gate below.
+  // it needs no `JOB_RENDEZVOUS_DIR`; only the split-directory shape and a
+  // non-bare host are refused, the file-sync siblings of the file-drop split gate
+  // below.
   if (endpoint.channel === "sftp") {
     if (isSplitDirectorySftp(endpoint))
       return {
@@ -488,6 +491,18 @@ export function acceptUnsupported(
           "This invitation uses separate inbound and outbound directories, which " +
           "this appliance does not run. Accept it with the psilink command-line " +
           "tool instead.",
+      };
+    // The partner authored the host; the accept form shows it read-only, so a host
+    // that is not a bare address (a URL, a path, or whitespace) could never be
+    // corrected here and would silently fail the Save-time host check. Refuse it at
+    // review, where the operator meets a clear block, rather than at a dead Save.
+    if (!isBareSftpHost(endpoint.host))
+      return {
+        title: ACCEPT_UNSUPPORTED_TITLE,
+        message:
+          "This invitation names an SFTP host that is not a plain address (it " +
+          "contains a URL, path, or whitespace). Accept it with the psilink " +
+          "command-line tool instead.",
       };
     return undefined;
   }
@@ -541,4 +556,21 @@ export function acceptorHowItRunsLabel(
   return endpoint.channel === "sftp"
     ? TRANSPORT_LEDGER_LABELS.sftp
     : TRANSPORT_LEDGER_LABELS.filedrop;
+}
+
+/**
+ * The launched run's top-bar transport note for an accepted endpoint: the short
+ * label naming where the exchange runs, reusing the inviter's share/save top-bar
+ * terminology so the two seats read alike. A console server-job accept names its
+ * transport through {@link saveRailNote} ("SFTP" or "Shared directory"); every
+ * browser-run accept reads "Browser".
+ */
+export function acceptorTransportNote(
+  endpoint: AcceptEndpoint,
+  consoleBuild: boolean,
+): string {
+  if (!acceptorRunsAsServerJob(endpoint, consoleBuild)) return "Browser";
+  return endpoint.channel === "sftp"
+    ? saveRailNote("sftp")
+    : saveRailNote("filedrop");
 }

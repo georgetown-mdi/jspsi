@@ -248,10 +248,11 @@ function PartnerLocatorReview({ locator }: { locator: SftpEndpointLocator }) {
   const port = locator.port !== undefined ? `:${locator.port}` : "";
   const address = sanitizeForDisplay(`${locator.host}${port}`);
   return (
-    <div>
-      <Text size="sm" fw={500}>
-        Your partner&apos;s SFTP server
-      </Text>
+    <Alert
+      color="blue"
+      icon={<IconAlertCircle aria-hidden />}
+      title="Your partner's SFTP server"
+    >
       <Text size="sm" c="dimmed">
         Your partner named this server in the invitation. Confirm it is where
         you expect to connect; sign in with your own account below.
@@ -267,7 +268,7 @@ function PartnerLocatorReview({ locator }: { locator: SftpEndpointLocator }) {
           </span>
         </Text>
       )}
-    </div>
+    </Alert>
   );
 }
 

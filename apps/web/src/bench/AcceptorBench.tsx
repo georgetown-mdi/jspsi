@@ -50,6 +50,7 @@ import {
   acceptorRailFacts,
   acceptorRunsAsServerJob,
   acceptorSpine,
+  acceptorTransportNote,
   invitingPartyName,
 } from "./acceptorModel";
 import { APPLIANCE_FILE_ASSURANCE, FILE_ASSURANCE_LINE } from "./fileAssurance";
@@ -796,7 +797,11 @@ export function AcceptorBench() {
       <TopBar
         navLabel="Exchange progress"
         steps={acceptorTimelineSteps(run)}
-        transportNote="Browser"
+        transportNote={
+          decode.status === "ready"
+            ? acceptorTransportNote(decode.invitation.endpoint, consoleBuild)
+            : "Browser"
+        }
       />
     ) : (
       <TopBar navLabel="Accept an invitation" steps={spineSteps} />

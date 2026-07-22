@@ -16,6 +16,7 @@ import {
   acceptorRailFacts,
   acceptorRunsAsServerJob,
   acceptorSpine,
+  acceptorTransportNote,
   invitingPartyName,
 } from "@bench/acceptorModel";
 
@@ -535,6 +536,29 @@ describe("acceptUnsupported (runnability by endpoint shape)", () => {
     const unsupported = acceptUnsupported(SPLIT_SFTP, true);
     expect(unsupported?.message).toContain("command-line tool");
   });
+
+  test("an SFTP host that is not a bare address is refused at review", () => {
+    // The partner authored the host and the accept form shows it read-only, so a
+    // host carrying a URL, a path, or whitespace could never be corrected there;
+    // it is refused up front rather than silently no-opping a Save later.
+    for (const host of [
+      "user@evil.example",
+      "sftp.evil.example/drop",
+      "sftp evil.example",
+    ]) {
+      const unsupported = acceptUnsupported({ channel: "sftp", host }, false);
+      expect(unsupported?.message).toContain("not a plain address");
+      expect(unsupported?.message).toContain("command-line tool");
+    }
+  });
+
+  test("a bare host, an IPv4, and a bracketed IPv6 literal are admitted", () => {
+    for (const host of ["sftp.partner.example", "10.0.0.5", "[2001:db8::1]"]) {
+      expect(
+        acceptUnsupported({ channel: "sftp", host }, false),
+      ).toBeUndefined();
+    }
+  });
 });
 
 describe("acceptorHowItRunsLabel", () => {
@@ -552,6 +576,21 @@ describe("acceptorHowItRunsLabel", () => {
     expect(acceptorHowItRunsLabel(WEBRTC_ENDPOINT, true)).toBe("Browser");
     expect(acceptorHowItRunsLabel(SINGLE_DIR_FILEDROP, false)).toBe("Browser");
     expect(acceptorHowItRunsLabel(SINGLE_DIR_SFTP, false)).toBe("Browser");
+  });
+});
+
+describe("acceptorTransportNote", () => {
+  test("a console SFTP accept notes SFTP; a filedrop accept notes the shared directory", () => {
+    expect(acceptorTransportNote(SINGLE_DIR_SFTP, true)).toBe("SFTP");
+    expect(acceptorTransportNote(SINGLE_DIR_FILEDROP, true)).toBe(
+      "Shared directory",
+    );
+  });
+
+  test("a WebRTC accept, or any hosted accept, notes the browser", () => {
+    expect(acceptorTransportNote(WEBRTC_ENDPOINT, true)).toBe("Browser");
+    expect(acceptorTransportNote(SINGLE_DIR_SFTP, false)).toBe("Browser");
+    expect(acceptorTransportNote(SINGLE_DIR_FILEDROP, false)).toBe("Browser");
   });
 });
 

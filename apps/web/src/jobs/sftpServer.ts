@@ -9,6 +9,8 @@ import {
   parseSensitiveYaml,
 } from "@psilink/core";
 
+import { isBareSftpHost } from "@psi/sftpHost";
+
 import { JOB_DATA_ROOT_ENV, JobApiConfigError } from "./gate";
 import {
   materializeSftpCredential,
@@ -653,7 +655,7 @@ function formatIssues(
  * verbatim. Names the field only, never the submitted value.
  */
 function assertBareHost(host: string): void {
-  if (/[@/\t\n\v\f\r ]/.test(host))
+  if (!isBareSftpHost(host))
     throw new JobApiConfigError(
       "server.host must be a bare server address, without a scheme, a path, " +
         "an @, or whitespace",

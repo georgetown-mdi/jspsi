@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 
 import {
   Alert,
@@ -122,6 +122,10 @@ export function AcceptorColumnsStep({
   );
   const launchDisabled =
     acceptorLaunchDisabled(verdict, editorState) || connectionBlocked;
+  // Ties the disabled launch button to the connection-blocked reason line so a
+  // keyboard/screen-reader user at the button hears why it is disabled and what to
+  // do -- the reason renders at mount, so its own live region never announces it.
+  const launchBlockedReasonId = useId();
 
   const remap = (type: LinkageField["type"], columnName: string) => {
     // Move focus to the verdict before the chosen Select unmounts (it does as soon
@@ -315,14 +319,24 @@ export function AcceptorColumnsStep({
       </Stack>
 
       <div className={styles.workFoot}>
-        <Button onClick={onLaunch} disabled={launchDisabled}>
+        <Button
+          onClick={onLaunch}
+          disabled={launchDisabled}
+          aria-describedby={
+            connectionBlocked ? launchBlockedReasonId : undefined
+          }
+        >
           Start the exchange
         </Button>
         <Button variant="subtle" onClick={onReset}>
           Reset to defaults
         </Button>
         {connectionBlocked && (
-          <p className={`${styles.small} ${styles.sub}`} role="status">
+          <p
+            id={launchBlockedReasonId}
+            className={`${styles.small} ${styles.sub}`}
+            role="status"
+          >
             Set up the SFTP connection above before you can start.
           </p>
         )}

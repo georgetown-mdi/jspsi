@@ -1,5 +1,7 @@
 import { HOST_KEY_FINGERPRINT_REGEX } from "@psilink/core";
 
+import { isBareSftpHost } from "@psi/sftpHost";
+
 import type { AuthoredSftpConnectionRequest } from "@psi/sftpAuthoringClient";
 
 /**
@@ -115,15 +117,6 @@ export interface SftpFormError {
 // cannot drift), re-run server-side on every PUT.
 const SIGNING_FINGERPRINT_SHAPE = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
-/**
- * A savable host is a bare server address: no userinfo (`@`), no scheme or path
- * (`/`, which also rules out `://`), and no ASCII whitespace. A value carrying any
- * of these is a URL fragment or login string and must never be minted verbatim
- * into the partner-facing invitation endpoint; the server re-checks the same set.
- * A bare hostname, an IPv4, and a bracketed IPv6 literal carry none of them.
- */
-const HOST_DISALLOWED_CHAR = /[@/\t\n\v\f\r ]/;
-
 /** The connection fields a pasted `sftp://user@host:port/path` URL carries. */
 export interface ParsedSftpUrl {
   host: string;
@@ -192,7 +185,7 @@ export function sftpFormError(
 ): SftpFormError | undefined {
   if (values.host.trim() === "")
     return { field: "host", message: "Enter the SFTP server address." };
-  if (HOST_DISALLOWED_CHAR.test(values.host.trim()))
+  if (!isBareSftpHost(values.host.trim()))
     return {
       field: "host",
       message:

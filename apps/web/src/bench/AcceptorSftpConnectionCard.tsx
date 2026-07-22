@@ -1,11 +1,15 @@
 import { useState } from "react";
 
-import { Badge, Button, Group, Stack, Text } from "@mantine/core";
+import { Alert, Badge, Button, Group, Stack, Text } from "@mantine/core";
+import { IconAlertTriangle } from "@tabler/icons-react";
 
 import { sanitizeForDisplay } from "@psilink/core";
 
+import {
+  sftpBootServerMismatch,
+  sftpConnectionLabel,
+} from "./sftpConnectionChoice";
 import { SftpAuthoringForm } from "./SftpAuthoringForm";
-import { sftpConnectionLabel } from "./sftpConnectionChoice";
 import { sftpFormFromLocator } from "./sftpConnectionForm";
 import styles from "./bench.module.css";
 
@@ -58,14 +62,31 @@ export function AcceptorSftpConnectionCard({
 
   if (connection !== null && bootPinned)
     return (
-      <p className={`${styles.small} ${styles.sub}`}>
-        Runs through{" "}
-        <span className={styles.mono}>
-          {sanitizeForDisplay(sftpConnectionLabel(connection))}
-        </span>
-        , provisioned on this appliance. Confirm it is the server your partner
-        named. Credentials stay on this machine.
-      </p>
+      <Stack gap="xs" mt="xs">
+        <Text size="sm" c="dimmed">
+          Your partner named{" "}
+          <span className={styles.mono}>
+            {sanitizeForDisplay(sftpConnectionLabel(locator))}
+          </span>
+          ; this appliance is provisioned with{" "}
+          <span className={styles.mono}>
+            {sanitizeForDisplay(sftpConnectionLabel(connection))}
+          </span>
+          . Confirm they are the same server. Credentials stay on this machine.
+        </Text>
+        {sftpBootServerMismatch(locator, connection) && (
+          <Alert
+            color="orange"
+            icon={<IconAlertTriangle aria-hidden />}
+            title="This appliance's server is not the one your partner named"
+          >
+            The server provisioned on this appliance does not match the one your
+            partner named. Unless both parties connect to the same server, the
+            exchange will not meet. Confirm this appliance&apos;s server is an
+            alias or address of your partner&apos;s before you start.
+          </Alert>
+        )}
+      </Stack>
     );
 
   if (connection !== null && !formOpen)
