@@ -346,6 +346,85 @@ describe("console SFTP connection authoring", () => {
     }
   });
 
+  test("a collapsed paste keeps an armed value visible with a Clear control", async () => {
+    stubJobApi();
+    mount(createElement(InviterBench));
+    await reachReviewCreate();
+    await openAndFillForm();
+
+    await page
+      .getByRole("button", { name: "Or paste the value instead" })
+      .click();
+    await userEvent.fill(page.getByLabelText("Paste value"), "armed-secret");
+    // Collapse the fallback: the armed value must stay visible, not read as empty.
+    await page
+      .getByRole("button", { name: "Hide paste-the-value fallback" })
+      .click();
+    await expect
+      .element(page.getByText("A pasted value is set."))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Edit the pasted value" }))
+      .toBeInTheDocument();
+
+    // Clear removes the armed value; the indicator and edit affordance go away.
+    await page.getByRole("button", { name: "Clear" }).click();
+    expect(page.getByText("A pasted value is set.").query()).toBeNull();
+    await expect
+      .element(page.getByRole("button", { name: "Or paste the value instead" }))
+      .toBeInTheDocument();
+  });
+
+  test("an emptied paste surfaces its own message at the paste field", async () => {
+    const api = stubJobApi();
+    mount(createElement(InviterBench));
+    await reachReviewCreate();
+    await openAndFillForm();
+
+    await page
+      .getByRole("button", { name: "Or paste the value instead" })
+      .click();
+    // Type then empty the paste field: an opened-but-empty paste is the active
+    // source, so its dedicated message is reachable rather than one on the file field.
+    await userEvent.fill(page.getByLabelText("Paste value"), "temp");
+    await userEvent.clear(page.getByLabelText("Paste value"));
+    await page.getByRole("button", { name: "Save connection" }).click();
+    await expect
+      .element(
+        page.getByText(
+          "Enter the pasted credential value, or choose a file instead.",
+        ),
+      )
+      .toBeInTheDocument();
+    // The blocking error kept the request from being sent.
+    expect(
+      api.captured.some(
+        (request) =>
+          request.url === "/api/jobs/sftp" && request.method === "PUT",
+      ),
+    ).toBe(false);
+  });
+
+  test("scopes the never-uploaded note to the file reference, not the paste", async () => {
+    stubJobApi();
+    mount(createElement(InviterBench));
+    await reachReviewCreate();
+    await openAndFillForm();
+    // The file-reference note scopes the never-uploaded claim to the file itself.
+    await expect
+      .element(page.getByText("the file itself is never uploaded"))
+      .toBeInTheDocument();
+    // The paste fallback openly states it writes to a file on the appliance.
+    await page
+      .getByRole("button", { name: "Or paste the value instead" })
+      .click();
+    await expect
+      .element(
+        page.getByText("written to a file on this appliance", { exact: false }),
+      )
+      .toBeInTheDocument();
+  });
+
   test("authors from a typed @path escape hatch", async () => {
     const api = stubJobApi();
     mount(createElement(InviterBench));

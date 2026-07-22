@@ -209,8 +209,9 @@ export function sftpFormError(
         "e.g. @/run/secrets/key.",
     };
   // A pasted value must be non-empty; whitespace is significant in a secret, so
-  // it is not trimmed. An empty paste is modeled as an absent source, so this is
-  // a defensive backstop rather than the primary empty check.
+  // it is not trimmed. An opened paste with an empty value is a raw source with an
+  // empty string (not an absent source), so this dedicated message is reachable
+  // and renders at the paste field.
   if (source.kind === "raw" && source.value === "")
     return {
       field: "credential",

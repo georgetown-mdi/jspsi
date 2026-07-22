@@ -55,8 +55,9 @@ export function useSftpServer(
 /**
  * Prepare the pasted-credential scratch directory at server startup when the job
  * API is enabled, memoizing the resolved path for the lazy manager construction.
- * Fail-closed: the setup asserts the directory resolves strictly outside the data
- * root and rendezvous mount (a misconfiguration refuses the boot), creates it
+ * Fail-closed: the setup asserts the directory resolves strictly outside every
+ * operator mount -- the data root, the rendezvous directory, the secrets mount,
+ * and the work-input directory (a misconfiguration refuses the boot) -- creates it
  * owner-only, and sweeps any credential a prior run orphaned. A no-op when the API
  * is disabled -- no manager is constructed, so no paste can be authored. The
  * server entry calls this once at startup; a {@link JobApiConfigError} propagates
@@ -72,6 +73,8 @@ export function bootSftpCredentialScratchDir(
     resolveSftpCredentialScratchDir(env),
     config.dataRoot,
     resolveJobRendezvousDir(env),
+    useJobSecretsDir(env),
+    useJobInputDir(env),
   );
 }
 

@@ -42,28 +42,45 @@ export function resolveSftpCredentialScratchDir(
 
 /**
  * Prepare the pasted-credential scratch directory at server start, fail-closed:
- * assert it resolves strictly OUTSIDE the data root and the rendezvous directory
- * (a misconfiguration that placed it inside either would make a pasted secret
- * partner-syncable or client-reachable, so it refuses the boot), create it
- * owner-only, and SWEEP any credential a prior run orphaned. Returns the resolved
- * directory. Called once at boot; a failure propagates as a {@link
- * JobApiConfigError} that refuses startup, matching the appliance's posture.
+ * assert it resolves strictly OUTSIDE every operator mount -- the data root, the
+ * rendezvous directory, the secrets mount, and the work-input directory, each in
+ * both nesting directions -- create it owner-only, and SWEEP any credential a
+ * prior run orphaned. A scratch dir that coincides with, nests under, or contains
+ * any of those mounts would either expose a pasted secret through it or be
+ * destroyed by the boot sweep, so it refuses the boot. The containment check runs
+ * on the realpath BEFORE any directory is created or re-moded, so a symlinked
+ * scratch path resolving into an excluded mount cannot cause a side effect on that
+ * mount before the refusal. Returns the resolved directory. Called once at boot; a
+ * failure propagates as a {@link JobApiConfigError} that refuses startup, matching
+ * the appliance's posture.
  */
 export function setupSftpCredentialScratchDir(
   scratchDir: string,
   dataRoot: string,
   rendezvousDir: string | undefined,
+  secretsDir?: string,
+  inputDir?: string,
 ): string {
   const resolved = path.resolve(scratchDir);
-  assertScratchOutside(resolved, dataRoot, rendezvousDir);
-  fs.mkdirSync(resolved, { recursive: true, mode: WORKDIR_MODE });
-  fs.chmodSync(resolved, WORKDIR_MODE);
-  // Re-assert on the realpath once the directory exists, so a symlinked scratch
-  // path that lexically looked outside but resolves into an excluded mount is
-  // caught before it is swept (a sweep of an excluded dir would delete operator
-  // or partner data).
-  assertScratchOutside(resolved, dataRoot, rendezvousDir);
-  sweepScratchDir(resolved);
+  const exclusions = scratchExclusions(
+    dataRoot,
+    rendezvousDir,
+    secretsDir,
+    inputDir,
+  );
+  assertScratchOutside(resolved, exclusions);
+  assertScratchOutside(intendedRealpath(resolved), exclusions);
+  try {
+    fs.mkdirSync(resolved, { recursive: true, mode: WORKDIR_MODE });
+    fs.chmodSync(resolved, WORKDIR_MODE);
+  } catch (error) {
+    throw scratchFsError(resolved, "created", error);
+  }
+  try {
+    sweepScratchDir(resolved);
+  } catch (error) {
+    throw scratchFsError(resolved, "swept", error);
+  }
   return resolved;
 }
 
@@ -73,15 +90,22 @@ export function setupSftpCredentialScratchDir(
  * the workdir chmod-after-write discipline (the mode argument is not trusted
  * without a following `chmod`, since a permissive umask is not guaranteed). The
  * value is written and then dropped: the caller holds it only between request
- * parse and this write.
+ * parse and this write. Any failure after the file is created (a partial write on
+ * a full filesystem, a chmod that cannot set the mode) removes the file before
+ * rethrowing, so a failed materialization leaves nothing at rest.
  */
 export function materializeSftpCredential(
   scratchDir: string,
   value: string,
 ): string {
   const filePath = path.join(scratchDir, crypto.randomUUID());
-  fs.writeFileSync(filePath, value, { mode: JOB_FILE_MODE });
-  fs.chmodSync(filePath, JOB_FILE_MODE);
+  try {
+    fs.writeFileSync(filePath, value, { mode: JOB_FILE_MODE });
+    fs.chmodSync(filePath, JOB_FILE_MODE);
+  } catch (error) {
+    fs.rmSync(filePath, { force: true });
+    throw error;
+  }
   return filePath;
 }
 
@@ -93,20 +117,28 @@ export function removeSftpCredentialFile(filePath: string): void {
 }
 
 /**
- * Refuse a scratch directory that is, contains, or is contained by the data root
- * or the rendezvous directory. Both nesting directions are rejected: a scratch
- * inside an excluded dir would expose the pasted secret through it, and an
- * excluded dir inside the scratch would be destroyed by the boot sweep. Checked
- * on both the lexical resolve and the realpath (when present) of each, so a
- * symlink cannot slip an excluded dir past the test. Names the excluded
- * directory's label only, never a path.
+ * A resolved directory the scratch dir must stay OUTSIDE, paired with the human
+ * label a rejection names.
  */
-function assertScratchOutside(
-  scratchResolved: string,
+interface ScratchExclusion {
+  dir: string;
+  label: string;
+}
+
+/**
+ * The operator mounts the scratch directory must resolve strictly outside: the
+ * data root, and -- when configured -- the rendezvous directory, the secrets
+ * mount, and the work-input directory. Each is added both as its lexical resolve
+ * and, when it exists, its realpath, so a symlinked mount is caught too.
+ * Duplicates are dropped.
+ */
+function scratchExclusions(
   dataRoot: string,
   rendezvousDir: string | undefined,
-): void {
-  const exclusions: Array<{ dir: string; label: string }> = [];
+  secretsDir: string | undefined,
+  inputDir: string | undefined,
+): Array<ScratchExclusion> {
+  const exclusions: Array<ScratchExclusion> = [];
   const add = (dir: string, label: string): void => {
     for (const form of new Set([path.resolve(dir), realpathIfPresent(dir)]))
       exclusions.push({ dir: form, label });
@@ -114,27 +146,85 @@ function assertScratchOutside(
   add(dataRoot, "the job data root");
   if (rendezvousDir !== undefined)
     add(rendezvousDir, "the rendezvous directory");
-
-  const scratchForms = new Set([
-    scratchResolved,
-    realpathIfPresent(scratchResolved),
-  ]);
-  for (const { dir, label } of exclusions)
-    for (const scratch of scratchForms)
-      if (isWithin(dir, scratch) || isWithin(scratch, dir))
-        throw new JobApiConfigError(
-          "the pasted-credential scratch directory must resolve strictly " +
-            `outside ${label}`,
-        );
+  if (secretsDir !== undefined) add(secretsDir, "the secrets mount");
+  if (inputDir !== undefined) add(inputDir, "the work-input directory");
+  return exclusions;
 }
 
-/** Whether `child` is `parent` itself or nested under it, over resolved absolute
- * paths (segment-aware, so a `..`-prefixed sibling is not read as inside). */
-function isWithin(parent: string, child: string): boolean {
-  if (parent === child) return true;
+/**
+ * Refuse a scratch path that is, contains, or is contained by any excluded mount.
+ * Both nesting directions are rejected: a scratch inside an excluded dir would
+ * expose the pasted secret through it, and an excluded dir inside the scratch would
+ * be destroyed by the boot sweep. Names the excluded directory's label only, never
+ * a path.
+ */
+function assertScratchOutside(
+  scratch: string,
+  exclusions: Array<ScratchExclusion>,
+): void {
+  for (const { dir, label } of exclusions)
+    if (isWithin(dir, scratch) || isWithin(scratch, dir))
+      throw new JobApiConfigError(
+        "the pasted-credential scratch directory must resolve strictly " +
+          `outside ${label}`,
+      );
+}
+
+/**
+ * Whether `child` is `parent` itself or nested under it, over resolved absolute
+ * paths. Segment-aware in both directions: a sibling whose basename merely starts
+ * with `..` (`/x/..data` under `/x`, relative `"..data"`) is correctly within,
+ * while a genuine `../` escape (`/x/../y`) is not.
+ *
+ * @internal exported for unit tests; production code calls it through {@link setupSftpCredentialScratchDir}.
+ */
+export function isWithin(parent: string, child: string): boolean {
   const relative = path.relative(parent, child);
-  return (
-    relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative)
+  return !(
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  );
+}
+
+/**
+ * Resolve where a `mkdir -p` of `target` would land, following any symlinked
+ * ancestor, WITHOUT creating anything: the realpath of `target` if it exists,
+ * otherwise the realpath of its nearest existing ancestor with the non-existent
+ * tail re-appended. Lets the boot containment check run on the true resolved path
+ * before any directory is created or re-moded.
+ */
+function intendedRealpath(target: string): string {
+  const tail: Array<string> = [];
+  let current = target;
+  for (;;) {
+    try {
+      const real = fs.realpathSync(current);
+      return tail.length === 0 ? real : path.join(real, ...tail);
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return path.join(current, ...tail);
+      tail.unshift(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+/** Wrap a scratch-directory filesystem failure as the typed {@link
+ * JobApiConfigError} the boot expects, naming the (server-side, non-secret)
+ * scratch path and the errno. */
+function scratchFsError(
+  scratchPath: string,
+  action: string,
+  error: unknown,
+): JobApiConfigError {
+  const code =
+    error instanceof Error && "code" in error
+      ? String((error as NodeJS.ErrnoException).code)
+      : "unknown";
+  return new JobApiConfigError(
+    `the pasted-credential scratch directory ${scratchPath} could not be ` +
+      `${action} (${code})`,
   );
 }
 

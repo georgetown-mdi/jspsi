@@ -1,12 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { JOB_FILE_MODE, WORKDIR_MODE } from "@jobs/workdir";
 import {
   JOB_SFTP_CREDENTIAL_DIR_ENV,
   SFTP_CREDENTIAL_SCRATCH_DIR,
+  isWithin,
   materializeSftpCredential,
   removeSftpCredentialFile,
   resolveSftpCredentialScratchDir,
@@ -108,6 +109,114 @@ describe("setupSftpCredentialScratchDir containment", () => {
       }) as Error,
     );
   });
+
+  test("refuses a symlinked scratch before re-moding or filling the data root", () => {
+    const base = sandbox("scratch-symlink-noop");
+    const dataRoot = path.join(base, "data-root");
+    const inside = path.join(dataRoot, "inside");
+    fs.mkdirSync(inside, { recursive: true });
+    // A mode distinct from WORKDIR_MODE, so a stray chmod-through-symlink shows.
+    fs.chmodSync(inside, 0o755);
+    const scratchDir = path.join(base, "scratch-link");
+    fs.symlinkSync(inside, scratchDir);
+    expect(() =>
+      setupSftpCredentialScratchDir(scratchDir, dataRoot, undefined),
+    ).toThrow(JobApiConfigError);
+    // The realpath check ran before any side effect: the target keeps its mode
+    // and nothing was created inside it.
+    expect(fs.statSync(inside).mode & 0o777).toBe(0o755);
+    expect(fs.readdirSync(inside)).toEqual([]);
+  });
+
+  test("refuses to boot when the scratch dir equals the secrets mount", () => {
+    const base = sandbox("scratch-eq-secrets");
+    const dataRoot = path.join(base, "data-root");
+    const secretsDir = path.join(base, "secrets");
+    fs.mkdirSync(secretsDir, { recursive: true });
+    expect(() =>
+      setupSftpCredentialScratchDir(
+        secretsDir,
+        dataRoot,
+        undefined,
+        secretsDir,
+        undefined,
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "JobApiConfigError",
+        message: expect.stringContaining("secrets") as string,
+      }) as Error,
+    );
+  });
+
+  test("refuses to boot when the scratch dir is a parent of the secrets mount", () => {
+    const base = sandbox("scratch-parent-secrets");
+    const dataRoot = path.join(base, "data-root");
+    const scratchDir = path.join(base, "scratch");
+    const secretsDir = path.join(scratchDir, "secrets");
+    expect(() =>
+      setupSftpCredentialScratchDir(
+        scratchDir,
+        dataRoot,
+        undefined,
+        secretsDir,
+        undefined,
+      ),
+    ).toThrow(JobApiConfigError);
+  });
+
+  test("refuses to boot when the scratch dir is inside the work-input mount", () => {
+    const base = sandbox("scratch-in-input");
+    const dataRoot = path.join(base, "data-root");
+    const inputDir = path.join(base, "input");
+    fs.mkdirSync(inputDir, { recursive: true });
+    const scratchDir = path.join(inputDir, "sftp-credentials");
+    expect(() =>
+      setupSftpCredentialScratchDir(
+        scratchDir,
+        dataRoot,
+        undefined,
+        undefined,
+        inputDir,
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "JobApiConfigError",
+        message: expect.stringContaining("work-input") as string,
+      }) as Error,
+    );
+  });
+
+  test("refuses to boot when the scratch basename starts with .. inside the data root", () => {
+    // A genuine child whose basename starts with ".." (relative "..creds") must
+    // read as WITHIN the data root, not misclassified as an outside sibling.
+    const base = sandbox("scratch-dotdot-child");
+    const dataRoot = path.join(base, "data-root");
+    fs.mkdirSync(dataRoot, { recursive: true });
+    const scratchDir = path.join(dataRoot, "..creds");
+    expect(() =>
+      setupSftpCredentialScratchDir(scratchDir, dataRoot, undefined),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "JobApiConfigError",
+        message: expect.stringContaining("data root") as string,
+      }) as Error,
+    );
+  });
+});
+
+describe("isWithin", () => {
+  test("a child whose basename starts with .. is within", () => {
+    expect(isWithin("/x", "/x/..data")).toBe(true);
+  });
+
+  test("a ../ escape is outside", () => {
+    expect(isWithin("/x", "/x/../y")).toBe(false);
+  });
+
+  test("the parent itself is within", () => {
+    expect(isWithin("/x", "/x")).toBe(true);
+  });
 });
 
 describe("setupSftpCredentialScratchDir sweep", () => {
@@ -148,6 +257,22 @@ describe("materializeSftpCredential", () => {
     expect(first).not.toBe(second);
     expect(fs.readdirSync(scratchDir)).toHaveLength(2);
   });
+
+  test("removes the file and rethrows when chmod fails after the write", () => {
+    const scratchDir = sandbox("materialize-fail");
+    const chmodSpy = vi.spyOn(fs, "chmodSync").mockImplementation(() => {
+      throw new Error("chmod refused");
+    });
+    try {
+      expect(() =>
+        materializeSftpCredential(scratchDir, "unwritable-secret"),
+      ).toThrow("chmod refused");
+    } finally {
+      chmodSpy.mockRestore();
+    }
+    // The partial file was cleaned up: a post-create failure leaves nothing at rest.
+    expect(fs.readdirSync(scratchDir)).toEqual([]);
+  });
 });
 
 describe("removeSftpCredentialFile", () => {
@@ -182,9 +307,16 @@ describe("resolveSftpCredentialScratchDir", () => {
 
 describe("bootSftpCredentialScratchDir", () => {
   afterEach(() => {
-    (
-      globalThis as { jobSftpCredentialScratchDir?: unknown }
-    ).jobSftpCredentialScratchDir = undefined;
+    const globals = globalThis as {
+      jobSftpCredentialScratchDir?: unknown;
+      jobSecretsDirConfig?: unknown;
+      jobInputDirConfig?: unknown;
+    };
+    // The scratch memo and the secrets/input dir memos are read once per boot;
+    // clear all three so each test re-reads its own env.
+    globals.jobSftpCredentialScratchDir = undefined;
+    globals.jobSecretsDirConfig = undefined;
+    globals.jobInputDirConfig = undefined;
   });
 
   test("is a no-op when the job API is disabled (no directory prepared)", () => {
@@ -227,5 +359,28 @@ describe("bootSftpCredentialScratchDir", () => {
         [JOB_SFTP_CREDENTIAL_DIR_ENV]: path.join(dataRoot, "creds"),
       }),
     ).toThrow(JobApiConfigError);
+  });
+
+  test("refuses the boot when the override coincides with the secrets mount", () => {
+    // JOB_SECRETS_DIR is threaded into the boot exclusion set: a scratch dir that
+    // equals the secrets mount refuses, so the sweep can never delete the operator's
+    // credential files.
+    const base = sandbox("boot-secrets");
+    const dataRoot = path.join(base, "data-root");
+    const secrets = path.join(base, "secrets");
+    fs.mkdirSync(secrets, { recursive: true });
+    expect(() =>
+      bootSftpCredentialScratchDir({
+        VITE_DEPLOYMENT_PROFILE: "console",
+        JOB_DATA_ROOT: dataRoot,
+        JOB_SECRETS_DIR: secrets,
+        [JOB_SFTP_CREDENTIAL_DIR_ENV]: secrets,
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        name: "JobApiConfigError",
+        message: expect.stringContaining("secrets") as string,
+      }) as Error,
+    );
   });
 });
