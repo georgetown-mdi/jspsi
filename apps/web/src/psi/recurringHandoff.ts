@@ -95,3 +95,22 @@ function shellQuoteToken(token: string): string {
   if (token.length > 0 && SHELL_SAFE_TOKEN.test(token)) return token;
   return `'${token.replace(/'/g, "'\\''")}'`;
 }
+
+/**
+ * Join a command's argv tokens into one line quoted for cmd.exe, for the Windows
+ * Task Scheduler example. cmd.exe does not honor the POSIX single quotes {@link
+ * shellJoinCommand} emits, so a token carrying a space or a cmd metacharacter is
+ * wrapped in double quotes (any internal `"` doubled) and a token with none is
+ * emitted bare. Display shaping for the same server-composed, secret-free tokens,
+ * not a security boundary.
+ */
+export function windowsJoinCommand(argv: ReadonlyArray<string>): string {
+  return argv.map(windowsQuoteToken).join(" ");
+}
+
+const CMD_NEEDS_QUOTING = /[\s"&|<>^()%!]/;
+
+function windowsQuoteToken(token: string): string {
+  if (token.length > 0 && !CMD_NEEDS_QUOTING.test(token)) return token;
+  return `"${token.replace(/"/g, '""')}"`;
+}

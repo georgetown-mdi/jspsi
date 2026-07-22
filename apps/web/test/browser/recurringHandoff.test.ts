@@ -40,6 +40,25 @@ const COMMAND_HANDOFF = {
   },
 };
 
+/** A zero-setup filedrop hand-off whose `--identity` label carries a space, to
+ * exercise the cron (POSIX) vs Windows (cmd) quoting divergence. */
+const SPACED_COMMAND_HANDOFF = {
+  mode: "zeroSetup",
+  channel: "filedrop",
+  usedKeyFile: false,
+  credentialPasted: false,
+  template: {
+    kind: "command",
+    argv: [
+      "psilink",
+      "file:///path/to/your/shared-directory",
+      "--identity=Agency A",
+      "input.csv",
+      "results.csv",
+    ],
+  },
+};
+
 /** An invitation (exchange) sftp hand-off: a config template plus the key-file
  * copy step. */
 const CONFIG_HANDOFF = {
@@ -124,6 +143,21 @@ describe("RecurringHandoff panel", () => {
     // A Direct run carries no key file to copy.
     expect(text()).toContain("no shared secret");
     expect(text()).not.toContain(".psilink.key");
+  });
+
+  test("quotes a spaced Direct label POSIX for cron and cmd-style for Windows", async () => {
+    stubHandoff(SPACED_COMMAND_HANDOFF);
+    mount(createElement(RecurringHandoff, { jobId: JOB_ID }));
+
+    await expect
+      .element(page.getByRole("heading", { name: HANDOFF_HEADING }))
+      .toBeInTheDocument();
+
+    const text = () => container?.textContent ?? "";
+    // The cron line honors POSIX single quotes; the Windows /TR example escapes
+    // the cmd-honored double quotes so schtasks preserves them.
+    expect(text()).toContain("'--identity=Agency A'");
+    expect(text()).toContain('\\"--identity=Agency A\\"');
   });
 
   test("shows the config template and the key-file copy step for an invitation run", async () => {

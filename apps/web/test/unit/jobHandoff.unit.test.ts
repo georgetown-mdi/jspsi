@@ -10,7 +10,11 @@ import {
   HANDOFF_SHARED_DIRECTORY_URL_PLACEHOLDER,
   buildJobHandoff,
 } from "@jobs/handoff";
-import { parseHandoff, shellJoinCommand } from "@psi/recurringHandoff";
+import {
+  parseHandoff,
+  shellJoinCommand,
+  windowsJoinCommand,
+} from "@psi/recurringHandoff";
 import { JobManager } from "@jobs/jobManager";
 
 import { Route as CreateRoute } from "../../src/routes/api/jobs/index";
@@ -189,6 +193,14 @@ describe("parseHandoff and shellJoinCommand (browser reader)", () => {
         "input.csv",
       ]),
     ).toBe("psilink '--identity=Sample County Health' input.csv");
+  });
+
+  test("windowsJoinCommand double-quotes a spaced token for cmd and leaves safe tokens bare", () => {
+    expect(
+      windowsJoinCommand(["psilink", "--identity=Agency A", "input.csv"]),
+    ).toBe('psilink "--identity=Agency A" input.csv');
+    // A token bearing a literal double quote is wrapped with the inner quote doubled.
+    expect(windowsJoinCommand(['a"b'])).toBe('"a""b"');
   });
 });
 

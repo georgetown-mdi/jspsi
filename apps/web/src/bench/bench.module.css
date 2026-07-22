@@ -780,7 +780,22 @@
   white-space: pre;
 }
 
-.handoffStep {
+.handoffSteps {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+
+.handoffSteps > li {
+  margin: 0.75rem 0;
+}
+
+.handoffStepLabel {
+  font-weight: 650;
+  margin: 0 0 0.25rem 0;
+}
+
+.handoffHeading {
+  font-size: 1em;
   font-weight: 650;
   margin: 1rem 0 0.25rem 0;
 }
