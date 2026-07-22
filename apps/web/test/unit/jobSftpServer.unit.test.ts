@@ -390,7 +390,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
     const dir = scratchDir();
     const secretPath = writeSecretFile(dir);
     const dataRoot = path.join(dir, "data-root");
-    const entry = validateAuthoredSftpServer(
+    const { entry } = validateAuthoredSftpServer(
       authoredBody(
         { port: 2222, username: "linkage", path: "/exchange" },
         { kind: "ref", ref: `@${secretPath}`, credType: "password" },
@@ -408,7 +408,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
     const dir = scratchDir();
     const keyPath = writeSecretFile(dir);
     const dataRoot = path.join(dir, "data-root");
-    const entry = validateAuthoredSftpServer(
+    const { entry } = validateAuthoredSftpServer(
       authoredBody(
         {},
         { kind: "ref", ref: `@${keyPath}`, credType: "private_key" },
@@ -469,7 +469,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
     const secretPath = writeSecretFile(dir);
     const dataRoot = path.join(dir, "data-root");
     for (const host of ["sftp.partner.example", "10.0.0.5", "[2001:db8::1]"]) {
-      const entry = validateAuthoredSftpServer(
+      const { entry } = validateAuthoredSftpServer(
         authoredBody(
           { host },
           { kind: "ref", ref: `@${secretPath}`, credType: "password" },
@@ -628,7 +628,7 @@ describe("validateAuthoredSftpServer mountRef credential path", () => {
   test("resolves a picked file to an @path and validates it", () => {
     const dir = scratchDir();
     const secretsDir = secretsMount();
-    const entry = validateAuthoredSftpServer(
+    const { entry } = validateAuthoredSftpServer(
       mountBody(["partner-password"]),
       path.join(dir, "data-root"),
       undefined,
@@ -642,7 +642,7 @@ describe("validateAuthoredSftpServer mountRef credential path", () => {
   test("resolves a nested dotfile key for a private_key credential", () => {
     const dir = scratchDir();
     const secretsDir = secretsMount();
-    const entry = validateAuthoredSftpServer(
+    const { entry } = validateAuthoredSftpServer(
       mountBody([".ssh", "id_ed25519"], "private_key"),
       path.join(dir, "data-root"),
       undefined,
@@ -766,6 +766,165 @@ describe("validateAuthoredSftpServer mountRef credential path", () => {
     }
     expect(caught).toBeInstanceOf(JobApiConfigError);
     expect(caught?.message).toContain("data root");
+  });
+});
+
+describe("validateAuthoredSftpServer raw (pasted) credential path", () => {
+  /** A created scratch directory the materialization writes into. */
+  function credentialScratchDir(): string {
+    const dir = tempDataRoot("sftp-scratch");
+    fs.mkdirSync(dir, { recursive: true });
+    dirs.push(dir);
+    return dir;
+  }
+
+  function rawBody(
+    value: unknown,
+    credType: "password" | "private_key" = "password",
+  ) {
+    return {
+      host: "sftp.partner.example",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      credential: { kind: "raw", value, credType },
+    };
+  }
+
+  test("materializes a pasted value to a 0600 @path and validates it", () => {
+    const dir = scratchDir();
+    const scratch = credentialScratchDir();
+    const result = validateAuthoredSftpServer(
+      rawBody("s3cret-password"),
+      path.join(dir, "data-root"),
+      undefined,
+      undefined,
+      scratch,
+    );
+    const materialized = result.materializedCredentialPath!;
+    expect(materialized).toBeDefined();
+    expect(path.dirname(materialized)).toBe(scratch);
+    // The entry carries the @path, never the value.
+    expect(result.entry.password).toBe(`@${materialized}`);
+    expect(result.entry.password).not.toContain("s3cret");
+    expect(fs.statSync(materialized).mode & 0o777).toBe(0o600);
+    expect(fs.readFileSync(materialized, "utf8")).toBe("s3cret-password");
+  });
+
+  test("a pasted private_key maps to the privateKey field", () => {
+    const dir = scratchDir();
+    const scratch = credentialScratchDir();
+    const result = validateAuthoredSftpServer(
+      rawBody("-----BEGIN KEY-----", "private_key"),
+      path.join(dir, "data-root"),
+      undefined,
+      undefined,
+      scratch,
+    );
+    expect(result.entry.privateKey).toBe(
+      `@${result.materializedCredentialPath!}`,
+    );
+    expect(result.entry.password).toBeUndefined();
+  });
+
+  test("a raw credential with no scratch dir configured is refused", () => {
+    const dir = scratchDir();
+    let caught: Error | null = null;
+    try {
+      validateAuthoredSftpServer(
+        rawBody("s3cret"),
+        path.join(dir, "data-root"),
+        undefined,
+        undefined,
+        undefined,
+      );
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(caught).toBeInstanceOf(JobApiConfigError);
+    expect(caught?.message).toContain("connection.credential");
+    // The rejection never echoes the pasted value.
+    expect(caught?.message).not.toContain("s3cret");
+  });
+
+  test("an empty pasted value is rejected without echoing it", () => {
+    const dir = scratchDir();
+    const scratch = credentialScratchDir();
+    let caught: Error | null = null;
+    try {
+      validateAuthoredSftpServer(
+        rawBody(""),
+        path.join(dir, "data-root"),
+        undefined,
+        undefined,
+        scratch,
+      );
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(caught).toBeInstanceOf(JobApiConfigError);
+    expect(caught?.message).toContain("connection.credential");
+    // Nothing was materialized for a shape-invalid credential.
+    expect(fs.readdirSync(scratch)).toEqual([]);
+  });
+
+  test("a non-string pasted value is rejected without echoing it", () => {
+    const dir = scratchDir();
+    const scratch = credentialScratchDir();
+    let caught: Error | null = null;
+    try {
+      validateAuthoredSftpServer(
+        rawBody({ nested: "leak-me" }),
+        path.join(dir, "data-root"),
+        undefined,
+        undefined,
+        scratch,
+      );
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(caught).toBeInstanceOf(JobApiConfigError);
+    expect(caught?.message).not.toContain("leak-me");
+    expect(fs.readdirSync(scratch)).toEqual([]);
+  });
+
+  test("a validation failure after materialization deletes the scratch file", () => {
+    // The value materializes, then the (bad) fingerprint fails validateServerEntry;
+    // the just-written secret must not linger at rest.
+    const dir = scratchDir();
+    const scratch = credentialScratchDir();
+    let caught: Error | null = null;
+    try {
+      validateAuthoredSftpServer(
+        {
+          host: "sftp.partner.example",
+          hostKeyFingerprint: "not-a-fingerprint",
+          credential: { kind: "raw", value: "s3cret", credType: "password" },
+        },
+        path.join(dir, "data-root"),
+        undefined,
+        undefined,
+        scratch,
+      );
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(caught).toBeInstanceOf(JobApiConfigError);
+    expect(fs.readdirSync(scratch)).toEqual([]);
+  });
+
+  test("a materialized value never lands under the data root", () => {
+    const dir = scratchDir();
+    const dataRoot = path.join(dir, "data-root");
+    const scratch = credentialScratchDir();
+    const result = validateAuthoredSftpServer(
+      rawBody("s3cret"),
+      dataRoot,
+      undefined,
+      undefined,
+      scratch,
+    );
+    const materialized = result.materializedCredentialPath!;
+    const relative = path.relative(path.resolve(dataRoot), materialized);
+    expect(relative.startsWith("..") || path.isAbsolute(relative)).toBe(true);
   });
 });
 

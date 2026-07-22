@@ -305,6 +305,47 @@ describe("console SFTP connection authoring", () => {
     });
   });
 
+  test("authors from the de-emphasized paste-the-value fallback", async () => {
+    const api = stubJobApi();
+    mount(createElement(InviterBench));
+    await reachReviewCreate();
+    await openAndFillForm();
+
+    // The paste field is a de-emphasized fallback, revealed on demand.
+    await page
+      .getByRole("button", { name: "Or paste the value instead" })
+      .click();
+    await userEvent.fill(
+      page.getByLabelText("Paste value"),
+      "s3cret-pasted-password",
+    );
+    await page.getByRole("button", { name: "Save connection" }).click();
+
+    // The PUT carried a raw credential -- the value, tagged with the auth method.
+    const put = api.captured.find(
+      (request) => request.url === "/api/jobs/sftp" && request.method === "PUT",
+    );
+    expect(put).toBeDefined();
+    const body = JSON.parse(put?.body ?? "{}") as Record<string, unknown>;
+    expect(body.credential).toEqual({
+      kind: "raw",
+      value: "s3cret-pasted-password",
+      credType: "password",
+    });
+
+    // The card flips to the authored state (the form, and its paste field, unmount).
+    await expect.element(page.getByText("Ready to try")).toBeInTheDocument();
+    expect(page.getByLabelText("Paste value").query()).toBeNull();
+
+    // The pasted value is never written to browser storage.
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i)!;
+      expect(window.localStorage.getItem(key)).not.toContain(
+        "s3cret-pasted-password",
+      );
+    }
+  });
+
   test("authors from a typed @path escape hatch", async () => {
     const api = stubJobApi();
     mount(createElement(InviterBench));

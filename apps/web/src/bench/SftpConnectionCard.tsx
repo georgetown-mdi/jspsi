@@ -7,6 +7,7 @@ import {
   Collapse,
   Divider,
   Group,
+  PasswordInput,
   Radio,
   Stack,
   Text,
@@ -37,7 +38,7 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
 /**
  * The console's SFTP connection surface under the SFTP transport card: it shows
  * whichever connection is effective and, when the operator may author one, drives
- * `PUT /api/jobs/sftp` from a file-reference credential.
+ * `PUT /api/jobs/sftp` from a credential source.
  *
  * Three states:
  * - boot-pinned: a deploy-time `JOB_SFTP_SERVER` -- shown read-only (a `PUT` would
@@ -47,10 +48,11 @@ import type { SftpConnectionProjection } from "@jobs/jobManager";
  * - authoring required: no connection yet -- the empty state invites authoring, or
  *   a deliberate switch to save-a-file for the operator's own command-line tool.
  *
- * No credential VALUE ever leaves the browser: the credential is a file the
- * operator picks from the secrets mount (a locator the server resolves) or a typed
- * `@path`. No absolute container path is shown for a picker selection -- only
- * `secrets / <relative subPath>`.
+ * The credential is a FILE by default -- one the operator picks from the secrets
+ * mount (a locator the server resolves) or a typed `@path`; no absolute container
+ * path is shown for a picker selection, only `secrets / <relative subPath>`. A
+ * de-emphasized fallback pastes the value, held in component state only (never
+ * persisted) and the server materializes it to a file on the appliance.
  */
 export function SftpConnectionCard({
   connection,
@@ -382,6 +384,12 @@ function CredentialField({
   const source = values.source;
   const typedRef = source?.kind === "path" ? source.ref : "";
   const picked = source?.kind === "mount" ? source.subPath : undefined;
+  const pastedValue = source?.kind === "raw" ? source.value : "";
+
+  // The paste fallback stays collapsed unless the operator is already using it, so
+  // the file-reference path is visually primary. Password auth discloses the
+  // password in full to a redirected host, so references stay encouraged.
+  const [pasteOpen, setPasteOpen] = useState(source?.kind === "raw");
 
   // Opening the picker leaves focus on the trigger, which then unmounts; move it
   // into the revealed picker. SecretsFilePicker deliberately skips focus on its
@@ -472,13 +480,42 @@ function CredentialField({
         description="For a credential outside the secrets mount, type an @-file reference to its absolute path, e.g. @/run/secrets/key."
         classNames={{ input: styles.mono }}
         value={typedRef}
-        error={picked === undefined ? error : undefined}
+        error={picked === undefined && pastedValue === "" ? error : undefined}
         errorProps={{ role: "alert" }}
         onChange={(event) => {
           const ref = event.currentTarget.value;
           onChange({ source: ref === "" ? undefined : { kind: "path", ref } });
         }}
       />
+
+      <div>
+        <Button
+          variant="subtle"
+          size="compact-sm"
+          onClick={() => setPasteOpen((open) => !open)}
+          aria-expanded={pasteOpen}
+        >
+          {pasteOpen
+            ? "Hide paste-the-value fallback"
+            : "Or paste the value instead"}
+        </Button>
+        <Collapse expanded={pasteOpen}>
+          <PasswordInput
+            label="Paste value"
+            description="Discouraged. A pasted secret is written to a file on this appliance to run the exchange. Prefer a file reference above."
+            classNames={{ input: styles.mono }}
+            autoComplete="new-password"
+            value={pastedValue}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              onChange({
+                source: value === "" ? undefined : { kind: "raw", value },
+              });
+            }}
+            mt="xs"
+          />
+        </Collapse>
+      </div>
 
       {values.method === "private_key" && (
         <TextInput

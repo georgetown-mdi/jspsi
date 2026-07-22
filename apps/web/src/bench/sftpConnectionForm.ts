@@ -5,14 +5,16 @@ import type { AuthoredSftpConnectionRequest } from "@psi/sftpAuthoringClient";
 /**
  * The pure model behind the console's SFTP connection authoring form: the field
  * set, its validation (a required host and username, an optional port, a required
- * literal host-key fingerprint, and exactly one file-reference credential), the
+ * literal host-key fingerprint, and exactly one credential source), the
  * pasted-`sftp://`-URL split, and the single derivation that turns valid fields
  * into the `PUT /api/jobs/sftp` body. No React, no I/O -- the tested boundary for
- * "the form only submits a valid, credential-value-free authoring request".
+ * "the form only submits a valid authoring request".
  *
- * No credential VALUE is representable here: the credential is a file the operator
- * picked from the secrets mount (a locator the server resolves) or a typed `@path`
- * reference, and the optional passphrase is likewise an `@path`.
+ * The credential is a FILE by default -- one the operator picked from the secrets
+ * mount (a locator the server resolves) or a typed `@path` reference -- with a
+ * de-emphasized fallback to paste the value, which the server materializes to a
+ * file on the appliance. The optional passphrase is always an `@path`, never a
+ * pasted value.
  */
 
 /** Which primary auth method the credential feeds; the radio enforces at-most-one
@@ -20,13 +22,18 @@ import type { AuthoredSftpConnectionRequest } from "@psi/sftpAuthoringClient";
 export type SftpCredentialMethod = "password" | "private_key";
 
 /**
- * Where the primary credential file comes from:
+ * Where the primary credential comes from:
  * - `mount`: a file the operator picked in the secrets browser (its path segments
  *   under the mount; the server resolves them to an absolute path).
  * - `path`: a typed `@path` for a credential outside any listable mount.
+ * - `raw`: a pasted value (the de-emphasized fallback); the server materializes it
+ *   to a file on the appliance. It is held in component state only, never
+ *   persisted to browser storage or the query cache.
  */
 export type SftpCredentialSource =
-  { kind: "mount"; subPath: Array<string> } | { kind: "path"; ref: string };
+  | { kind: "mount"; subPath: Array<string> }
+  | { kind: "path"; ref: string }
+  | { kind: "raw"; value: string };
 
 /** The authoring form's field values. */
 export interface SftpConnectionFormValues {
@@ -183,12 +190,16 @@ export function sftpFormError(
   if (source === undefined)
     return {
       field: "credential",
-      message: "Choose the credential file, or type a file reference.",
+      message:
+        "Choose the credential file, type a file reference, or paste " +
+        "the value.",
     };
   if (source.kind === "mount" && source.subPath.length === 0)
     return {
       field: "credential",
-      message: "Choose the credential file, or type a file reference.",
+      message:
+        "Choose the credential file, type a file reference, or paste " +
+        "the value.",
     };
   if (source.kind === "path" && !isAtPath(source.ref.trim()))
     return {
@@ -196,6 +207,14 @@ export function sftpFormError(
       message:
         "Enter the credential as an @-file reference to an absolute path, " +
         "e.g. @/run/secrets/key.",
+    };
+  // A pasted value must be non-empty; whitespace is significant in a secret, so
+  // it is not trimmed. An empty paste is modeled as an absent source, so this is
+  // a defensive backstop rather than the primary empty check.
+  if (source.kind === "raw" && source.value === "")
+    return {
+      field: "credential",
+      message: "Enter the pasted credential value, or choose a file instead.",
     };
 
   if (values.method === "private_key" && values.passphrasePath.trim() !== "") {
@@ -231,8 +250,10 @@ function fingerprintErrorFor(value: string): string | undefined {
 /**
  * Build the `PUT /api/jobs/sftp` body from valid form values, or undefined when
  * the form still has a blocking error (so the caller never submits an invalid
- * request). The credential is a file reference -- a secrets-mount locator or a
- * typed `@path` -- never an inline value.
+ * request). The credential is a secrets-mount locator, a typed `@path`, or a
+ * pasted value (`kind: "raw"`), the last of which the server materializes to a
+ * file. A pasted value is sent verbatim (whitespace is significant in a secret),
+ * never trimmed.
  */
 export function buildAuthoringRequest(
   values: SftpConnectionFormValues,
@@ -258,7 +279,9 @@ export function buildAuthoringRequest(
             subPath: source.subPath,
             credType: values.method,
           }
-        : { kind: "ref", ref: source.ref.trim(), credType: values.method },
+        : source.kind === "path"
+          ? { kind: "ref", ref: source.ref.trim(), credType: values.method }
+          : { kind: "raw", value: source.value, credType: values.method },
     ...(values.method === "private_key" && passphrase !== ""
       ? { privateKeyPassphrase: passphrase }
       : {}),

@@ -18,6 +18,7 @@ import {
   writeJobFile,
 } from "./workdir";
 import { resolveCliBinaryPath, spawnExchangeJob } from "./cliDriver";
+import { removeSftpCredentialFile } from "./sftpScratch";
 import { rendezvousStartupWarnings } from "./jobRendezvous";
 import { validateAuthoredSftpServer } from "./sftpServer";
 
@@ -207,6 +208,14 @@ export interface JobManagerOptions {
    */
   jobSecretsDir?: string;
   /**
+   * The container-internal scratch directory a PASTED credential is materialized
+   * to (from {@link setupSftpCredentialScratchDir} at boot). Absent when the boot
+   * setup did not run (a disabled API, or a test that authors only file-reference
+   * credentials); a raw-paste authoring then fails rather than composing an
+   * inline value. Never a request value or the data root.
+   */
+  credentialScratchDir?: string;
+  /**
    * Extra environment variables merged into every spawned child. Empty in
    * production; the manager tests use it to configure the stub CLI. Set only by
    * the server-side constructor, never derived from a request.
@@ -245,6 +254,7 @@ export class JobManager {
   private readonly jobInputDir: string | undefined;
   private readonly jobRendezvousDir: string | undefined;
   private readonly jobSecretsDir: string | undefined;
+  private readonly credentialScratchDir: string | undefined;
   /**
    * The in-app authored SFTP connection, held in memory for the single exchange
    * only (never persisted; a restart forgets it). Set by {@link authorSftpServer},
@@ -253,6 +263,14 @@ export class JobManager {
    * boot entry wins.
    */
   private authoredSftpServer: JobSftpServerEntry | undefined;
+  /**
+   * The server-owned scratch file the authored connection's PASTED credential was
+   * materialized to, when it arrived that way. Tracked so it is deleted with the
+   * connection (clear, exchange delete, or a re-author that replaces it); absent
+   * when the authored credential is a file reference the operator owns. A pasted
+   * secret must not outlive the connection it belongs to.
+   */
+  private authoredMaterializedCredentialPath: string | undefined;
 
   constructor(options: JobManagerOptions) {
     this.dataRoot = options.dataRoot;
@@ -266,6 +284,7 @@ export class JobManager {
     this.jobInputDir = options.jobInputDir;
     this.jobRendezvousDir = options.jobRendezvousDir;
     this.jobSecretsDir = options.jobSecretsDir;
+    this.credentialScratchDir = options.credentialScratchDir;
     this.childEnv = options.childEnv;
   }
 
@@ -381,26 +400,44 @@ export class JobManager {
    * data root and rendezvous mount, strict allowlist, core-schema compose. A
    * validation failure throws before the slot is touched, so a rejected body never
    * replaces a previously authored connection. A `mountRef` credential locator is
-   * resolved against the secrets mount here, so the browser sends only the picked
-   * segments and never a container-absolute path. Returns the credential-free
-   * projection of the now-effective connection.
+   * resolved against the secrets mount here, and a `raw` (pasted) credential is
+   * materialized to the server-owned scratch file, so the browser sends only the
+   * picked segments or the value and never a container-absolute path. Returns the
+   * credential-free projection of the now-effective connection.
    */
   authorSftpServer(rawBody: unknown): SftpConnectionProjection {
     if (this.sftpServer !== undefined) throw new SftpServerBootPinnedError();
-    const entry = validateAuthoredSftpServer(
+    const result = validateAuthoredSftpServer(
       rawBody,
       this.dataRoot,
       this.jobRendezvousDir,
       this.jobSecretsDir,
+      this.credentialScratchDir,
     );
-    this.authoredSftpServer = entry;
+    // Adopt only after validation succeeds: drop the prior connection's
+    // materialized secret (if any) so a re-author never orphans a scratch file.
+    this.discardMaterializedCredential();
+    this.authoredSftpServer = result.entry;
+    this.authoredMaterializedCredentialPath = result.materializedCredentialPath;
     return this.sftpProjection()!;
   }
 
-  /** Forget the in-app authored SFTP connection. Idempotent; a no-op when a boot
-   * server is pinned (there is nothing authored to clear). */
+  /** Forget the in-app authored SFTP connection, deleting any materialized pasted
+   * credential. Idempotent; a no-op when a boot server is pinned (there is nothing
+   * authored to clear). */
   clearAuthoredSftpServer(): void {
+    this.discardMaterializedCredential();
     this.authoredSftpServer = undefined;
+  }
+
+  /** Delete the authored connection's materialized pasted credential, if it holds
+   * one. A no-op for a file-reference credential (the operator's own file is never
+   * touched). */
+  private discardMaterializedCredential(): void {
+    if (this.authoredMaterializedCredentialPath !== undefined) {
+      removeSftpCredentialFile(this.authoredMaterializedCredentialPath);
+      this.authoredMaterializedCredentialPath = undefined;
+    }
   }
 
   /**
@@ -778,7 +815,9 @@ export class JobManager {
       if (record.handle?.isRunning()) record.handle.signal("SIGKILL");
       slot.deleted = true;
       // The authored connection is scoped to this single exchange; deleting the
-      // exchange forgets it, so the next exchange starts from a clean slate.
+      // exchange forgets it (and deletes any materialized pasted credential), so
+      // the next exchange starts from a clean slate.
+      this.discardMaterializedCredential();
       this.authoredSftpServer = undefined;
       const workdir = resolveWorkdir(this.dataRoot, id);
       if (workdir !== null) await removeWorkdir(workdir);

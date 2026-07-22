@@ -47,12 +47,16 @@ describe.skipIf(!hasBuild)(
     let dataRoot: string | undefined;
     let inputDir: string | undefined;
     let rendezvousDir: string | undefined;
+    let scratchDir: string | undefined;
     let port = 0;
 
     beforeAll(async () => {
       dataRoot = mkdtempSync(join(tmpdir(), "psilink-wp2-data-"));
       inputDir = mkdtempSync(join(tmpdir(), "psilink-wp2-input-"));
       rendezvousDir = mkdtempSync(join(tmpdir(), "psilink-wp2-rdv-"));
+      // The built server runs as an ordinary user here, so relocate the
+      // pasted-credential scratch dir off the root-owned default it uses in-image.
+      scratchDir = mkdtempSync(join(tmpdir(), "psilink-wp2-cred-"));
       writeFileSync(join(inputDir, "mounted.csv"), SOURCE_CSV);
 
       port = await getFreePort();
@@ -65,6 +69,7 @@ describe.skipIf(!hasBuild)(
           JOB_DATA_ROOT: dataRoot,
           JOB_INPUT_DIR: inputDir,
           JOB_RENDEZVOUS_DIR: rendezvousDir,
+          JOB_SFTP_CREDENTIAL_DIR: scratchDir,
           JOB_CLI_BINARY: stubCli,
         },
       );
@@ -78,6 +83,7 @@ describe.skipIf(!hasBuild)(
       if (inputDir) rmSync(inputDir, { recursive: true, force: true });
       if (rendezvousDir)
         rmSync(rendezvousDir, { recursive: true, force: true });
+      if (scratchDir) rmSync(scratchDir, { recursive: true, force: true });
     });
 
     test("POST /api/jobs with an inputFile reference reads the mount in place", async () => {
