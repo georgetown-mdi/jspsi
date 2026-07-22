@@ -1,5 +1,7 @@
 import { HOST_KEY_FINGERPRINT_REGEX } from "@psilink/core";
 
+import { isBareSftpHost } from "@psi/sftpHost";
+
 import type { AuthoredSftpConnectionRequest } from "@psi/sftpAuthoringClient";
 
 /**
@@ -62,6 +64,37 @@ export const EMPTY_SFTP_FORM: SftpConnectionFormValues = {
   passphrasePath: "",
 };
 
+/** A partner-supplied SFTP locator: the credential-free host/port/path an accepted
+ * invitation's endpoint carries. It names WHERE to connect and nothing else -- an
+ * {@link SFTPEndpoint} structurally cannot carry a credential or a host-key
+ * fingerprint. */
+export interface SftpEndpointLocator {
+  host: string;
+  port?: number;
+  path?: string;
+}
+
+/**
+ * Seed the authoring form from a partner-supplied SFTP locator (an accepted
+ * invitation's endpoint). ONLY the host, port, and remote directory pre-fill; the
+ * fingerprint, credential, method, and passphrase stay EMPTY -- the operator
+ * supplies every one of those. This is the accept-side pre-fill boundary: no
+ * invitation field can populate a credential or the host-key fingerprint, because
+ * the locator carries neither and this reads only its host/port/path. A form built
+ * from this alone is unsubmittable ({@link buildAuthoringRequest} returns undefined)
+ * until the operator adds the fingerprint and a credential.
+ */
+export function sftpFormFromLocator(
+  locator: SftpEndpointLocator,
+): SftpConnectionFormValues {
+  return {
+    ...EMPTY_SFTP_FORM,
+    host: locator.host,
+    port: locator.port !== undefined ? String(locator.port) : "",
+    remoteDirectory: locator.path ?? "",
+  };
+}
+
 /** The form fields an error can attach to. */
 export type SftpFormField =
   | "host"
@@ -83,15 +116,6 @@ export interface SftpFormError {
 // host-key format check is HOST_KEY_FINGERPRINT_REGEX (imported from core, so it
 // cannot drift), re-run server-side on every PUT.
 const SIGNING_FINGERPRINT_SHAPE = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
-
-/**
- * A savable host is a bare server address: no userinfo (`@`), no scheme or path
- * (`/`, which also rules out `://`), and no ASCII whitespace. A value carrying any
- * of these is a URL fragment or login string and must never be minted verbatim
- * into the partner-facing invitation endpoint; the server re-checks the same set.
- * A bare hostname, an IPv4, and a bracketed IPv6 literal carry none of them.
- */
-const HOST_DISALLOWED_CHAR = /[@/\t\n\v\f\r ]/;
 
 /** The connection fields a pasted `sftp://user@host:port/path` URL carries. */
 export interface ParsedSftpUrl {
@@ -161,7 +185,7 @@ export function sftpFormError(
 ): SftpFormError | undefined {
   if (values.host.trim() === "")
     return { field: "host", message: "Enter the SFTP server address." };
-  if (HOST_DISALLOWED_CHAR.test(values.host.trim()))
+  if (!isBareSftpHost(values.host.trim()))
     return {
       field: "host",
       message:

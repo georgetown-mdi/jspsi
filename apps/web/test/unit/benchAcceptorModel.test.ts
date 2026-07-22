@@ -14,7 +14,9 @@ import {
   acceptorLedgerTag,
   acceptorLegalAgreementDisplay,
   acceptorRailFacts,
+  acceptorRunsAsServerJob,
   acceptorSpine,
+  acceptorTransportNote,
   invitingPartyName,
 } from "@bench/acceptorModel";
 
@@ -23,6 +25,7 @@ import type {
   InvitationToken,
   LinkageTerms,
   Metadata,
+  SFTPEndpoint,
   WebRTCEndpoint,
 } from "@psilink/core";
 
@@ -484,6 +487,22 @@ const SPLIT_FILEDROP: FileDropEndpoint = {
   inboundPath: "/mnt/in",
   outboundPath: "/mnt/out",
 };
+const SINGLE_DIR_SFTP: SFTPEndpoint = {
+  channel: "sftp",
+  host: "sftp.partner.example",
+  port: 2022,
+  path: "/drop",
+};
+const SFTP_NO_PATH: SFTPEndpoint = {
+  channel: "sftp",
+  host: "sftp.partner.example",
+};
+const SPLIT_SFTP: SFTPEndpoint = {
+  channel: "sftp",
+  host: "sftp.partner.example",
+  inboundPath: "/in",
+  outboundPath: "/out",
+};
 
 describe("acceptUnsupported (runnability by endpoint shape)", () => {
   test("a WebRTC endpoint is out of scope on the appliance, pointing at the web app", () => {
@@ -505,6 +524,41 @@ describe("acceptUnsupported (runnability by endpoint shape)", () => {
   test("a single-directory filedrop with a rendezvous mount is runnable", () => {
     expect(acceptUnsupported(SINGLE_DIR_FILEDROP, true)).toBeUndefined();
   });
+
+  test("a single-directory SFTP endpoint is runnable, needing no rendezvous mount", () => {
+    // The SFTP accept connects to the partner-named server, so it needs no
+    // JOB_RENDEZVOUS_DIR -- runnable whether or not a rendezvous mount is set.
+    expect(acceptUnsupported(SINGLE_DIR_SFTP, false)).toBeUndefined();
+    expect(acceptUnsupported(SFTP_NO_PATH, false)).toBeUndefined();
+  });
+
+  test("a split-directory SFTP endpoint points at the command-line tool", () => {
+    const unsupported = acceptUnsupported(SPLIT_SFTP, true);
+    expect(unsupported?.message).toContain("command-line tool");
+  });
+
+  test("an SFTP host that is not a bare address is refused at review", () => {
+    // The partner authored the host and the accept form shows it read-only, so a
+    // host carrying a URL, a path, or whitespace could never be corrected there;
+    // it is refused up front rather than silently no-opping a Save later.
+    for (const host of [
+      "user@evil.example",
+      "sftp.evil.example/drop",
+      "sftp evil.example",
+    ]) {
+      const unsupported = acceptUnsupported({ channel: "sftp", host }, false);
+      expect(unsupported?.message).toContain("not a plain address");
+      expect(unsupported?.message).toContain("command-line tool");
+    }
+  });
+
+  test("a bare host, an IPv4, and a bracketed IPv6 literal are admitted", () => {
+    for (const host of ["sftp.partner.example", "10.0.0.5", "[2001:db8::1]"]) {
+      expect(
+        acceptUnsupported({ channel: "sftp", host }, false),
+      ).toBeUndefined();
+    }
+  });
 });
 
 describe("acceptorHowItRunsLabel", () => {
@@ -514,9 +568,42 @@ describe("acceptorHowItRunsLabel", () => {
     );
   });
 
+  test("a console SFTP accept runs over SFTP on the command-line tool", () => {
+    expect(acceptorHowItRunsLabel(SINGLE_DIR_SFTP, true)).toContain("SFTP");
+  });
+
   test("a WebRTC accept, or any hosted accept, runs in the browser", () => {
     expect(acceptorHowItRunsLabel(WEBRTC_ENDPOINT, true)).toBe("Browser");
     expect(acceptorHowItRunsLabel(SINGLE_DIR_FILEDROP, false)).toBe("Browser");
+    expect(acceptorHowItRunsLabel(SINGLE_DIR_SFTP, false)).toBe("Browser");
+  });
+});
+
+describe("acceptorTransportNote", () => {
+  test("a console SFTP accept notes SFTP; a filedrop accept notes the shared directory", () => {
+    expect(acceptorTransportNote(SINGLE_DIR_SFTP, true)).toBe("SFTP");
+    expect(acceptorTransportNote(SINGLE_DIR_FILEDROP, true)).toBe(
+      "Shared directory",
+    );
+  });
+
+  test("a WebRTC accept, or any hosted accept, notes the browser", () => {
+    expect(acceptorTransportNote(WEBRTC_ENDPOINT, true)).toBe("Browser");
+    expect(acceptorTransportNote(SINGLE_DIR_SFTP, false)).toBe("Browser");
+    expect(acceptorTransportNote(SINGLE_DIR_FILEDROP, false)).toBe("Browser");
+  });
+});
+
+describe("acceptorRunsAsServerJob", () => {
+  test("a console file-drop or SFTP accept runs as a server job on the appliance", () => {
+    expect(acceptorRunsAsServerJob(SINGLE_DIR_FILEDROP, true)).toBe(true);
+    expect(acceptorRunsAsServerJob(SINGLE_DIR_SFTP, true)).toBe(true);
+  });
+
+  test("a WebRTC accept, or any hosted accept, runs in the browser", () => {
+    expect(acceptorRunsAsServerJob(WEBRTC_ENDPOINT, true)).toBe(false);
+    expect(acceptorRunsAsServerJob(SINGLE_DIR_SFTP, false)).toBe(false);
+    expect(acceptorRunsAsServerJob(SINGLE_DIR_FILEDROP, false)).toBe(false);
   });
 });
 

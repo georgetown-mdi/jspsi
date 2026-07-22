@@ -1,9 +1,11 @@
 import { disclosedColumnNames, sanitizeForDisplay } from "@psilink/core";
 
 import { commitAcceptance } from "@psi/acceptConsent";
+import { isBareSftpHost } from "@psi/sftpHost";
 import { summarizeInvitation } from "@psi/invitationSummary";
 
 import { TRANSPORT_LEDGER_LABELS, dateTimeLabel } from "./inviterModel";
+import { saveRailNote } from "./saveExchangeModel";
 
 import type { InvitationToken, LinkageTerms, Metadata } from "@psilink/core";
 import type { RailFact, RailStepState } from "./inviterModel";
@@ -422,7 +424,7 @@ export function acceptorLegalAgreementDisplay(
 
 /** The connection endpoint an accepted invitation carries, narrowed from the token
  * by {@link prepareAcceptedInvitation}: a WebRTC signaling endpoint, or a file-drop
- * endpoint on a console build. */
+ * or SFTP endpoint on a console build. */
 type AcceptEndpoint = AcceptableInvitation["endpoint"];
 
 /** The honest title for a console accept whose endpoint the appliance cannot run,
@@ -448,13 +450,22 @@ function isSingleDirectoryFiledrop(endpoint: AcceptEndpoint): boolean {
   return endpoint.channel === "filedrop" && endpoint.path !== undefined;
 }
 
+/** Whether an SFTP endpoint carries the inbound/outbound split the console does not
+ * run: the authored connection form composes a single remote directory, so a
+ * split-directory SFTP accept belongs on the command-line tool. A single-directory
+ * SFTP endpoint (host plus an optional shared `path`) is runnable here. */
+function isSplitDirectorySftp(endpoint: AcceptEndpoint): boolean {
+  return endpoint.channel === "sftp" && endpoint.inboundPath !== undefined;
+}
+
 /**
  * The unsupported-accept state for a console build, or undefined when the appliance
  * can run the accepted endpoint. Determined by the endpoint SHAPE and whether the
  * rendezvous mount is configured, not a static kill-switch: a runnable console accept
- * is a single-directory file-drop with `JOB_RENDEZVOUS_DIR` set. The caller consults
- * this only on a console build; off the console every admitted endpoint runs in the
- * browser.
+ * is a single-directory file-drop with `JOB_RENDEZVOUS_DIR` set, or a
+ * single-directory SFTP endpoint (the operator authors the connection to the
+ * partner-named server before launch). The caller consults this only on a console
+ * build; off the console every admitted endpoint runs in the browser.
  */
 export function acceptUnsupported(
   endpoint: AcceptEndpoint,
@@ -468,6 +479,33 @@ export function acceptUnsupported(
         "scope on this appliance. Accept it from a standard psilink web app in " +
         "your browser instead.",
     };
+  // An SFTP accept connects to the partner-named server (no rendezvous mount), so
+  // it needs no `JOB_RENDEZVOUS_DIR`; only the split-directory shape and a
+  // non-bare host are refused, the file-sync siblings of the file-drop split gate
+  // below.
+  if (endpoint.channel === "sftp") {
+    if (isSplitDirectorySftp(endpoint))
+      return {
+        title: ACCEPT_UNSUPPORTED_TITLE,
+        message:
+          "This invitation uses separate inbound and outbound directories, which " +
+          "this appliance does not run. Accept it with the psilink command-line " +
+          "tool instead.",
+      };
+    // The partner authored the host; the accept form shows it read-only, so a host
+    // that is not a bare address (a URL, a path, or whitespace) could never be
+    // corrected here and would silently fail the Save-time host check. Refuse it at
+    // review, where the operator meets a clear block, rather than at a dead Save.
+    if (!isBareSftpHost(endpoint.host))
+      return {
+        title: ACCEPT_UNSUPPORTED_TITLE,
+        message:
+          "This invitation names an SFTP host that is not a plain address (it " +
+          "contains a URL, path, or whitespace). Accept it with the psilink " +
+          "command-line tool instead.",
+      };
+    return undefined;
+  }
   if (!isSingleDirectoryFiledrop(endpoint))
     return {
       title: ACCEPT_UNSUPPORTED_TITLE,
@@ -488,27 +526,51 @@ export function acceptUnsupported(
 }
 
 /** Whether a console accept runs as a server job on the appliance: a console build
- * accepting a file-drop endpoint runs the exchange against the mounted shared
- * directory (the command-line tool), not in the browser. Every other admitted accept
- * runs the live exchange in this browser. This one signal drives both the "How it
- * runs" ledger row and the settled footer's "never left this browser" claim, so the
- * two cannot disagree. */
+ * accepting a file-drop endpoint (against the mounted shared directory) or an SFTP
+ * endpoint (against the operator-authored server) runs the exchange through the
+ * command-line tool, not in the browser. Every other admitted accept runs the live
+ * exchange in this browser. This one signal drives both the "How it runs" ledger row
+ * and the settled footer's "never left this browser" claim, so the two cannot
+ * disagree. */
 export function acceptorRunsAsServerJob(
   endpoint: AcceptEndpoint,
   consoleBuild: boolean,
 ): boolean {
-  return consoleBuild && endpoint.channel === "filedrop";
+  return (
+    consoleBuild &&
+    (endpoint.channel === "filedrop" || endpoint.channel === "sftp")
+  );
 }
 
 /** The ledger's "How it runs" phrasing for an accepted endpoint. A console
- * single-directory file-drop accept runs the exchange on the appliance against the
- * shared directory (the command-line tool), not in the browser; every other admitted
- * accept runs the live exchange in this browser. */
+ * single-directory file-drop accept runs on the appliance against the shared
+ * directory, and a console SFTP accept against the partner-named server (both the
+ * command-line tool), not in the browser; every other admitted accept runs the live
+ * exchange in this browser. */
 export function acceptorHowItRunsLabel(
   endpoint: AcceptEndpoint,
   consoleBuild: boolean,
 ): string {
-  return acceptorRunsAsServerJob(endpoint, consoleBuild)
-    ? TRANSPORT_LEDGER_LABELS.filedrop
-    : TRANSPORT_LEDGER_LABELS.browser;
+  if (!acceptorRunsAsServerJob(endpoint, consoleBuild))
+    return TRANSPORT_LEDGER_LABELS.browser;
+  return endpoint.channel === "sftp"
+    ? TRANSPORT_LEDGER_LABELS.sftp
+    : TRANSPORT_LEDGER_LABELS.filedrop;
+}
+
+/**
+ * The launched run's top-bar transport note for an accepted endpoint: the short
+ * label naming where the exchange runs, reusing the inviter's share/save top-bar
+ * terminology so the two seats read alike. A console server-job accept names its
+ * transport through {@link saveRailNote} ("SFTP" or "Shared directory"); every
+ * browser-run accept reads "Browser".
+ */
+export function acceptorTransportNote(
+  endpoint: AcceptEndpoint,
+  consoleBuild: boolean,
+): string {
+  if (!acceptorRunsAsServerJob(endpoint, consoleBuild)) return "Browser";
+  return endpoint.channel === "sftp"
+    ? saveRailNote("sftp")
+    : saveRailNote("filedrop");
 }

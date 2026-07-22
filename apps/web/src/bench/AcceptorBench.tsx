@@ -15,7 +15,9 @@ import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
 import { capturedInputHandle } from "@psi/managedInputHandle";
 import { columnSamplesFromRows } from "@psi/columnSamples";
 import { createManagedExchange } from "@psi/managedExchangeStore";
+import { deleteSftpConnection } from "@psi/sftpAuthoringClient";
 import { fetchJobRendezvous } from "@psi/workInputClient";
+import { fetchSftpConnection } from "@psi/serverJobExchangeDriver";
 import { loadCSVFileOffMainThread } from "@psi/csvParseController";
 import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
@@ -48,6 +50,7 @@ import {
   acceptorRailFacts,
   acceptorRunsAsServerJob,
   acceptorSpine,
+  acceptorTransportNote,
   invitingPartyName,
 } from "./acceptorModel";
 import { APPLIANCE_FILE_ASSURANCE, FILE_ASSURANCE_LINE } from "./fileAssurance";
@@ -66,6 +69,7 @@ import {
 import { AcceptorCleaningStep } from "./AcceptorCleaningStep";
 import { AcceptorColumnsStep } from "./AcceptorColumnsStep";
 import { AcceptorExchangeSection } from "./AcceptorExchangeSection";
+import { AcceptorSftpConnectionCard } from "./AcceptorSftpConnectionCard";
 import { BenchShell } from "./BenchShell";
 import { Ledger } from "./Ledger";
 import { ManageExchangeOffer } from "./ManageExchangeOffer";
@@ -109,6 +113,9 @@ import type { ManageOfferChoices } from "./manageOfferModel";
 import type { ManageOfferStatus } from "./ManageExchangeOffer";
 import type { ProfiledJobInput } from "@psi/workInputClient";
 import type { RailStep } from "./inviterModel";
+import type { SftpConnectionInfo } from "@psi/serverJobExchangeDriver";
+import type { SftpConnectionProjection } from "@jobs/jobManager";
+import type { SftpEndpointLocator } from "./sftpConnectionForm";
 
 /** Stable empty inputs for {@link useNonEmptyRates} before a file is acquired, so the
  * hook's controller is not rebuilt every render on a fresh `[]` identity. */
@@ -238,6 +245,12 @@ export function AcceptorBench() {
   // Undefined before it resolves; a console filedrop accept is runnable only when
   // `configured` is true (the exchange runs against the mounted directory).
   const [rendezvousConfigured, setRendezvousConfigured] = useState<boolean>();
+  // The console's effective SFTP connection for an accepted SFTP endpoint, fetched
+  // once and updated when the operator authors or clears one. Undefined before it
+  // resolves; `connection` is null when none is authored, else the credential-free
+  // locator; `bootPinned` marks a deploy-time server (read-only). An accepted SFTP
+  // exchange is blocked from launch until this holds a connection.
+  const [sftpInfo, setSftpInfo] = useState<SftpConnectionInfo>();
   const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
   // The launched exchange (the assembled edits + optional advisory); rendering the
   // minimal run stub the next package replaces.
@@ -299,6 +312,64 @@ export function AcceptorBench() {
           rendezvousConfigured === true,
         )
       : undefined;
+
+  // The accepted SFTP endpoint (stable across renders once decode is ready), or
+  // undefined for every other accept. The partner-supplied locator narrows to ONLY
+  // the credential-free host/port/path, so nothing but the locator reaches the
+  // connection surface. Built regardless of `unsupported` (a split-directory SFTP
+  // endpoint never advances past the review-step block, so the columns step never
+  // renders its connection surface).
+  const acceptSftpEndpoint =
+    consoleBuild &&
+    decode.status === "ready" &&
+    decode.invitation.endpoint.channel === "sftp"
+      ? decode.invitation.endpoint
+      : undefined;
+  const acceptSftpLocator: SftpEndpointLocator | undefined =
+    acceptSftpEndpoint === undefined
+      ? undefined
+      : {
+          host: acceptSftpEndpoint.host,
+          ...(acceptSftpEndpoint.port !== undefined
+            ? { port: acceptSftpEndpoint.port }
+            : {}),
+          ...(acceptSftpEndpoint.path !== undefined
+            ? { path: acceptSftpEndpoint.path }
+            : {}),
+        };
+
+  // Fetch the appliance's effective SFTP connection once, for a console SFTP accept.
+  // A boot-provisioned server is kept as-is (the operator confirms it names the
+  // partner's server); a prior in-app connection is NOT assumed valid for this
+  // partner, so a non-boot fetch starts unauthored and the operator authors fresh,
+  // pre-filled from THIS invitation's locator. On any failure the connection stays
+  // unauthored, so launch fails closed rather than arming a run with no destination.
+  // Keyed on the stable endpoint (not the per-render locator object), so the fetch
+  // fires once rather than on every render before it resolves.
+  useEffect(() => {
+    if (acceptSftpEndpoint === undefined || sftpInfo !== undefined) return;
+    let cancelled = false;
+    void fetchSftpConnection().then((info) => {
+      if (cancelled) return;
+      setSftpInfo(
+        info.bootPinned ? info : { connection: null, bootPinned: false },
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [acceptSftpEndpoint, sftpInfo]);
+
+  // The effective SFTP connection and whether it is a boot-provisioned server.
+  // `sftpConnection` is undefined while the fetch is pending, null when unauthored.
+  const sftpConnection =
+    sftpInfo === undefined ? undefined : sftpInfo.connection;
+  const sftpBootPinned = sftpInfo?.bootPinned === true;
+  // An accepted SFTP exchange is blocked from launch until a connection (authored,
+  // carrying the required host-key fingerprint, or boot-provisioned) is effective.
+  // True while the fetch is pending too, so launch stays fail-closed until then.
+  const sftpConnectionMissing =
+    acceptSftpLocator !== undefined && sftpConnection == null;
 
   // On the review step, move focus to the terms heading once the decode resolves
   // to ready, to the unsupported notice when the appliance cannot run this accept,
@@ -726,7 +797,11 @@ export function AcceptorBench() {
       <TopBar
         navLabel="Exchange progress"
         steps={acceptorTimelineSteps(run)}
-        transportNote="Browser"
+        transportNote={
+          decode.status === "ready"
+            ? acceptorTransportNote(decode.invitation.endpoint, consoleBuild)
+            : "Browser"
+        }
       />
     ) : (
       <TopBar navLabel="Accept an invitation" steps={spineSteps} />
@@ -856,8 +931,26 @@ export function AcceptorBench() {
     );
   const launchExchange = () => {
     if (verdict === undefined || editorState === undefined) return;
+    // Defense in depth behind the disabled launch button: an accepted SFTP
+    // exchange must not start until the operator has authored a connection (with
+    // the required host-key fingerprint) to the partner-named server.
+    if (sftpConnectionMissing) return;
     setLaunched(acceptorLaunchPayload(verdict, editorState));
     goToStep("launched");
+  };
+
+  // The operator authored an in-console SFTP connection to the partner's server
+  // (its credential-free projection): hold it so launch unblocks. The connection
+  // material -- credential and host-key fingerprint -- lives in appliance memory,
+  // scoped to this one exchange; the browser holds only the locator.
+  const authorSftpConnection = (connection: SftpConnectionProjection) =>
+    setSftpInfo({ connection, bootPinned: false });
+
+  // Clear the authored connection: forget it on the appliance and locally, so the
+  // card returns to the authoring prompt and launch re-blocks.
+  const clearSftpConnection = () => {
+    setSftpInfo({ connection: null, bootPinned: false });
+    void deleteSftpConnection();
   };
 
   // The config-failure recovery: discard the launch (which aborts the run via the
@@ -1206,6 +1299,18 @@ export function AcceptorBench() {
               columnsState={columnsState}
               editorState={editorState}
               verdict={verdict}
+              connectionSection={
+                acceptSftpLocator !== undefined ? (
+                  <AcceptorSftpConnectionCard
+                    locator={acceptSftpLocator}
+                    connection={sftpConnection ?? null}
+                    bootPinned={sftpBootPinned}
+                    onAuthored={authorSftpConnection}
+                    onCleared={clearSftpConnection}
+                  />
+                ) : undefined
+              }
+              connectionBlocked={sftpConnectionMissing}
               onMetadataChange={changeMetadata}
               onRemap={remapColumn}
               onReset={resetColumns}

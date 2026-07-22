@@ -6,6 +6,7 @@ import {
   buildAuthoringRequest,
   parseSftpUrl,
   sftpFormError,
+  sftpFormFromLocator,
 } from "@bench/sftpConnectionForm";
 
 import type { SftpConnectionFormValues } from "@bench/sftpConnectionForm";
@@ -237,5 +238,81 @@ describe("buildAuthoringRequest", () => {
 
   test("returns undefined for an invalid form", () => {
     expect(buildAuthoringRequest(validForm({ host: "" }))).toBeUndefined();
+  });
+});
+
+describe("sftpFormFromLocator (accept-side pre-fill)", () => {
+  test("pre-fills ONLY host/port/path; credential and fingerprint stay empty", () => {
+    const seeded = sftpFormFromLocator({
+      host: "sftp.partner.example",
+      port: 2022,
+      path: "/drop",
+    });
+    // The partner-supplied locator pre-fills the three locator fields...
+    expect(seeded.host).toBe("sftp.partner.example");
+    expect(seeded.port).toBe("2022");
+    expect(seeded.remoteDirectory).toBe("/drop");
+    // ...and NOTHING else: the operator supplies the username, fingerprint, and
+    // credential. No invitation field can populate a credential or the fingerprint.
+    expect(seeded.username).toBe("");
+    expect(seeded.hostKeyFingerprint).toBe("");
+    expect(seeded.source).toBeUndefined();
+    expect(seeded.passphrasePath).toBe("");
+    expect(seeded.method).toBe("password");
+  });
+
+  test("omits an absent port and path", () => {
+    const seeded = sftpFormFromLocator({ host: "sftp.partner.example" });
+    expect(seeded.port).toBe("");
+    expect(seeded.remoteDirectory).toBe("");
+  });
+
+  test("a form built from the locator alone is unsubmittable", () => {
+    // The partner locator carries no credential or fingerprint, so an authoring
+    // request cannot be built from it: the accept guard rejects a launch until the
+    // operator adds their own credential and fingerprint.
+    const seeded = sftpFormFromLocator({ host: "sftp.partner.example" });
+    expect(buildAuthoringRequest(seeded)).toBeUndefined();
+  });
+
+  test("still rejects a submit that lacks the operator's fingerprint", () => {
+    // With the operator's username and credential filled but NO fingerprint, the
+    // request is still unbuildable and the blocking error names the fingerprint --
+    // the pin-before-credential control is operator-supplied and required.
+    const seeded = {
+      ...sftpFormFromLocator({ host: "sftp.partner.example" }),
+      username: "linkage",
+      source: { kind: "raw" as const, value: "hunter2" },
+    };
+    expect(buildAuthoringRequest(seeded)).toBeUndefined();
+    expect(sftpFormError(seeded)?.field).toBe("hostKeyFingerprint");
+  });
+
+  test("the operator's fields, added on top, produce a submittable request", () => {
+    const body = buildAuthoringRequest({
+      ...sftpFormFromLocator({
+        host: "sftp.partner.example",
+        port: 2022,
+        path: "/drop",
+      }),
+      username: "linkage",
+      hostKeyFingerprint: FINGERPRINT,
+      source: { kind: "mount", subPath: ["partner-password"] },
+    });
+    // The locator rides through as the connection's host/port/path; the operator's
+    // username, fingerprint, and credential are the only source of those fields.
+    expect(body).toEqual({
+      host: "sftp.partner.example",
+      port: 2022,
+      username: "linkage",
+      path: "/drop",
+      hostKeyFingerprint: FINGERPRINT,
+      credential: {
+        kind: "mountRef",
+        mount: "secrets",
+        subPath: ["partner-password"],
+        credType: "password",
+      },
+    });
   });
 });

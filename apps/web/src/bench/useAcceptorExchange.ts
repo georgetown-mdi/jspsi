@@ -45,6 +45,7 @@ import type { CSVRow, InvitationToken } from "@psilink/core";
 import type {
   JobInputSource,
   ServerJobExchangeDriverConfig,
+  ServerJobExchangeTransport,
 } from "@psi/serverJobExchangeDriver";
 import type { ExchangeDriver } from "@psi/exchangeDriver";
 import type { ExchangeRun } from "./exchangeRun";
@@ -53,13 +54,14 @@ import type { RunOutputs } from "./runOutputs";
 import type { Transport } from "./inviterModel";
 
 /** The connection-endpoint channels the acceptor can drive, narrowed from the
- * token by {@link prepareAcceptedInvitation}: WebRTC always, file-drop on a
- * console build. */
+ * token by {@link prepareAcceptedInvitation}: WebRTC always, file-drop or SFTP on
+ * a console build. */
 type AcceptEndpointChannel = AcceptableInvitation["endpoint"]["channel"];
 
 const ENDPOINT_CHANNEL_TRANSPORT: Record<AcceptEndpointChannel, Transport> = {
   webrtc: "browser",
   filedrop: "filedrop",
+  sftp: "sftp",
 };
 
 /** Map an accepted invitation's connection-endpoint channel to the bench
@@ -72,8 +74,12 @@ function transportForEndpointChannel(
 }
 
 /**
- * Assemble the {@link ServerJobExchangeDriverConfig} for a console filedrop
- * accept: the exchange the console appliance runs on this party's behalf. The
+ * Assemble the {@link ServerJobExchangeDriverConfig} for a console server-job
+ * accept -- a file-drop or an SFTP exchange the console appliance runs on this
+ * party's behalf. The `transport` picks the intent arm (the SFTP arm carries no
+ * connection field: the appliance reads the operator-authored connection off
+ * `GET /api/jobs/sftp`, so no host, credential, or fingerprint transits the
+ * browser); everything below the discriminant is channel-independent. The
  * `linkageTerms` are the acceptor's OWN-PERSPECTIVE terms
  * ({@link deriveAcceptedLinkageTerms}: the acceptor's identity replaces the
  * inviter's, output/payload mirrored) -- the SAME derivation
@@ -107,14 +113,16 @@ export function acceptorServerJobConfig({
   acceptorName,
   edits,
   inputSource,
+  transport,
 }: {
   token: InvitationToken;
   acceptorName: string;
   edits: AcceptorDataEdits;
   inputSource: JobInputSource;
+  transport: ServerJobExchangeTransport;
 }): ServerJobExchangeDriverConfig {
   return {
-    transport: { channel: "filedrop" },
+    transport,
     linkageTerms: deriveAcceptedLinkageTerms(token.linkageTerms, acceptorName),
     sharedSecret: token.sharedSecret,
     inputSource,
@@ -190,12 +198,14 @@ async function resolveJobInputSource(
  *    and the confirm-columns edits, and locks in the received-payload columns to
  *    the invitation's disclosed set ({@link prepareAcceptorExchange}).
  *
- * On a console build accepting a filedrop invitation the appliance runs the
- * exchange through the job API instead ({@link acceptorServerJobConfig} ->
+ * On a console build accepting a filedrop or SFTP invitation the appliance runs
+ * the exchange through the job API instead ({@link acceptorServerJobConfig} ->
  * {@link createServerJobExchangeDriver}), mirroring the inviter's server-job
  * path: no dial, no PSI library here, and the acceptor's own-perspective terms go
  * to the appliance alongside its mounted-file reference (no file content transits
- * the browser).
+ * the browser). An SFTP accept additionally reads the operator-authored
+ * connection off the appliance, so no host, credential, or fingerprint transits
+ * the browser either.
  *
  * Try again (the retryable "exchange" category only) re-dials the same invitation
  * while it is still usable, exactly like the inviter's re-listen.
@@ -267,8 +277,9 @@ export function useAcceptorExchange({
     const { token, endpoint } = invitation;
     // The bench transport this endpoint runs over, threaded to failureFor so a
     // console mounted-file create rejection (a workFile 400) names the file cause
-    // and routes recovery to the file step. The accept guard admits no sftp
-    // endpoint, so this is `filedrop` (-> server-job) or `browser` (-> WebRTC).
+    // and routes recovery to the file step. On a console build this is `filedrop`
+    // or `sftp` (both -> server-job); every other admitted endpoint is `browser`
+    // (-> WebRTC).
     const channel = transportForEndpointChannel(endpoint.channel);
 
     // Output-generation half. The URLs the build creates are revoked when the
@@ -335,7 +346,17 @@ export function useAcceptorExchange({
         generateOutput,
       });
 
-    // The console appliance carries out the filedrop exchange: the driver POSTs
+    // The intent arm the console appliance runs this accept over: an SFTP endpoint
+    // rides the sftp arm (the appliance connects to the operator-authored server),
+    // every other server-job endpoint the filedrop arm. Neither carries connection
+    // material -- the SFTP host/credential/fingerprint live on the appliance, read
+    // off the operator-authored connection, never the browser.
+    const serverJobTransport: ServerJobExchangeTransport =
+      endpoint.channel === "sftp"
+        ? { channel: "sftp" }
+        : { channel: "filedrop" };
+
+    // The console appliance carries out the server-job exchange: the driver POSTs
     // the acceptor's OWN-PERSPECTIVE terms, the shared secret, and the input source
     // to the job API and maps the server's event stream onto the same lifecycle
     // events. It owns no peer connection or PSI library, so `acquire`/`generateOutput`
@@ -354,25 +375,30 @@ export function useAcceptorExchange({
           acceptorName,
           edits,
           inputSource: jobInputSource,
+          transport: serverJobTransport,
         }),
         // Persist the created job's id so a reload or hard tab close can re-attach
         // to the appliance's run, and track it for the deliberate-discard paths.
         onJobCreated: (jobId) => {
           currentJobIdRef.current = jobId;
-          writeAttachment({ jobId, seat: "acceptor", channel: "filedrop" });
+          writeAttachment({
+            jobId,
+            seat: "acceptor",
+            channel: serverJobTransport.channel,
+          });
         },
       });
     };
 
     // The launch reaches this hook only for an endpoint prepareAcceptedInvitation
-    // admitted -- WebRTC (-> browser) or a console filedrop (-> server-job) -- so
-    // the selection is one of those two live kinds. A residual non-drivable kind
+    // admitted -- WebRTC (-> browser) or a console filedrop/sftp (-> server-job) --
+    // so the selection is one of those two live kinds. A residual non-drivable kind
     // (a save-file, which the guard fails closed before a launch can exist) is
     // surfaced as the run's own failure alert rather than thrown out of the start
     // effect, which would crash the render.
-    // The sftp-configured flag is the selector's sftp-only input; the accept
-    // guard admits no sftp endpoint (webrtc and console filedrop only), so it is
-    // constant false here.
+    // The sftp-configured flag is the selector's sftp-only input; an accepted sftp
+    // endpoint still resolves to server-job with it false (the connection is
+    // authored before launch), so it is passed constant false here.
     const selection = selectExchangeDriver(channel, deploymentProfile(), false);
     if (selection.kind === "save-file") {
       setFailure(
