@@ -460,3 +460,31 @@ describe("console lobby direct-exchange card", () => {
     await expect.element(link).toHaveAttribute("href", "/direct");
   });
 });
+
+describe("console lobby recurring-exchange surface", () => {
+  test("offers no /saved recurring-exchange pointer", async () => {
+    stubJobApi();
+    mount(createElement(BenchLobby));
+    // The lobby is fully rendered once its heading is present; the recurring
+    // pointer is not a console concept, so neither framing nor the /saved link
+    // stands.
+    await expect
+      .element(
+        page.getByRole("heading", {
+          name: "psilink - private record linkage",
+        }),
+      )
+      .toBeInTheDocument();
+    expect(
+      page.getByRole("link", { name: "Recurring exchanges" }).query(),
+    ).toBeNull();
+    expect(
+      page
+        .getByText("Saved an exchange to run again?", { exact: false })
+        .query(),
+    ).toBeNull();
+    expect(
+      page.getByText("Cleared this browser", { exact: false }).query(),
+    ).toBeNull();
+  });
+});

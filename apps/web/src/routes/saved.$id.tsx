@@ -1,11 +1,17 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 import { ManagedRunSurface } from "@bench/ManagedRunSurface";
+import { isConsoleBuild } from "@utils/clientConfig";
 
 export const Route = createFileRoute("/saved/$id")({
   // The managed-exchange store is IndexedDB, origin-isolated and browser-only, so
   // the run surface must render client-side.
   ssr: false,
+  // The recurring run surface belongs only to the hosted browser build; a console
+  // build has no managed store, so it never reaches a saved exchange.
+  beforeLoad: () => {
+    if (isConsoleBuild()) throw redirect({ to: "/" });
+  },
   component: RunRoute,
 });
 
