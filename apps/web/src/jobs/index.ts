@@ -11,6 +11,7 @@ import { JobManager } from "./jobManager";
 import { loadSftpServerFromEnv } from "./sftpServer";
 import { useJobInputDir } from "./workInputs";
 import { useJobRendezvousDir } from "./jobRendezvous";
+import { useJobSecretsDir } from "./jobSecrets";
 
 import type { JobApiConfig } from "./gate";
 import type { JobSftpServerEntry } from "./sftpServer";
@@ -83,11 +84,13 @@ export function useJobManager(
     const sftpServer = useSftpServer();
     const jobInputDir = useJobInputDir();
     const jobRendezvousDir = useJobRendezvousDir();
+    const jobSecretsDir = useJobSecretsDir();
     globalThis.jobManagerInstance = new JobManager({
       dataRoot: config.dataRoot,
       ...(sftpServer !== undefined ? { sftpServer } : {}),
       ...(jobInputDir !== undefined ? { jobInputDir } : {}),
       ...(jobRendezvousDir !== undefined ? { jobRendezvousDir } : {}),
+      ...(jobSecretsDir !== undefined ? { jobSecretsDir } : {}),
     });
   }
   return globalThis.jobManagerInstance;

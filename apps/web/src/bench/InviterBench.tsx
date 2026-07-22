@@ -18,6 +18,7 @@ import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
 import { capturedInputHandle } from "@psi/managedInputHandle";
 import { columnSamplesFromRows } from "@psi/columnSamples";
 import { createManagedExchange } from "@psi/managedExchangeStore";
+import { deleteSftpConnection } from "@psi/sftpAuthoringClient";
 import { fetchJobRendezvous } from "@psi/workInputClient";
 import { fetchSftpConnection } from "@psi/serverJobExchangeDriver";
 import { invitationLocation } from "@psi/invitationLocation";
@@ -115,6 +116,10 @@ import type {
   GeneratedInvitation,
 } from "@psi/invitation";
 import type {
+  JobInputSource,
+  SftpConnectionInfo,
+} from "@psi/serverJobExchangeDriver";
+import type {
   JobRendezvousConfig,
   ProfiledJobInput,
 } from "@psi/workInputClient";
@@ -122,7 +127,6 @@ import type { BenchCoverageInput } from "@components/useNonEmptyRates";
 import type { ColumnSamples } from "@psi/columnSamples";
 import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { IntakeAlert } from "./YourFileSection";
-import type { JobInputSource } from "@psi/serverJobExchangeDriver";
 import type { ManageOfferChoices } from "./manageOfferModel";
 import type { ManageOfferStatus } from "./ManageExchangeOffer";
 import type { SavedExchange } from "./SaveExchangeSection";
@@ -227,12 +231,16 @@ export function InviterBench() {
   const [savedExchange, setSavedExchange] = useState<SavedExchange>();
   const [saving, setSaving] = useState(false);
   const [saveAlert, setSaveAlert] = useState<IntakeAlert>();
-  // The console's provisioned SFTP connection, fetched once on a console build.
-  // Undefined before it resolves; null when the appliance provisions none; the
-  // projection when one is provisioned. `sftpConfigured` (below) gates the SFTP
-  // transport, and its locator is authored into an sftp invitation's endpoint.
-  const [sftpConnection, setSftpConnection] =
-    useState<SftpConnectionProjection | null>();
+  // The console's effective SFTP connection, fetched once on a console build and
+  // updated when the operator authors or clears one. Undefined before it resolves;
+  // its `connection` is null when none is effective, else the credential-free
+  // locator; `bootPinned` marks a deploy-time server (read-only). `sftpConfigured`
+  // (below) gates the SFTP transport, and the locator is authored into an sftp
+  // invitation's endpoint.
+  const [sftpInfo, setSftpInfo] = useState<SftpConnectionInfo>();
+  // The operator's deliberate choice to run SFTP through their own command-line
+  // tool (save-a-file) instead of authoring a connection here. Reset on a new file.
+  const [sftpSaveFilePreferred, setSftpSaveFilePreferred] = useState(false);
   // The console's rendezvous mount, fetched once on a console build. Undefined before
   // it resolves; `configured` gates the filedrop transport (offered iff a directory is
   // mounted) and `path` is the advisory locator minted into a filedrop invitation.
@@ -247,15 +255,15 @@ export function InviterBench() {
   // provisioned, so Create then falls back to the save-file surface rather than
   // arming a server-job run with no connection.
   useEffect(() => {
-    if (!isConsoleBuild() || sftpConnection !== undefined) return;
+    if (!isConsoleBuild() || sftpInfo !== undefined) return;
     let cancelled = false;
-    void fetchSftpConnection().then((connection) => {
-      if (!cancelled) setSftpConnection(connection);
+    void fetchSftpConnection().then((info) => {
+      if (!cancelled) setSftpInfo(info);
     });
     return () => {
       cancelled = true;
     };
-  }, [sftpConnection]);
+  }, [sftpInfo]);
 
   // Fetch the appliance's rendezvous mount once on a console build; the mount is
   // boot-static on the server, so one fetch per bench serves the session. The helper
@@ -272,12 +280,16 @@ export function InviterBench() {
     };
   }, [rendezvous]);
 
+  const sftpConnection =
+    sftpInfo === undefined ? undefined : sftpInfo.connection;
   const sftpConfigured = sftpConnection != null;
+  const bootPinned = sftpInfo?.bootPinned === true;
   const rendezvousConfigured = rendezvous?.configured === true;
   const available = availableTransports(
     isConsoleBuild(),
     sftpConfigured,
     rendezvousConfigured,
+    sftpSaveFilePreferred,
   );
   const transport = editor?.transport ?? available.defaultTransport;
   // How the chosen transport runs, from the chooser's own policy (which offers a
@@ -353,6 +365,22 @@ export function InviterBench() {
     ratesUnavailable,
   );
   const coverageProblems = cleaningCoverageProblems(editor, rates);
+
+  // The operator authored an SFTP connection in-console (its credential-free
+  // projection): hold it and drop any save-a-file preference so the run mode flips
+  // to server-job. The connection lives in appliance memory, scoped to the one
+  // exchange; the browser holds only the locator.
+  function authorSftpConnection(connection: SftpConnectionProjection) {
+    setSftpInfo({ connection, bootPinned: false });
+    setSftpSaveFilePreferred(false);
+  }
+
+  // Clear the authored connection: forget it on the appliance and locally, so the
+  // card returns to the authoring empty state.
+  function clearSftpConnection() {
+    setSftpInfo({ connection: null, bootPinned: false });
+    void deleteSftpConnection();
+  }
 
   // The failure alerts' "start over with a fresh invitation": the seal lifts
   // with every input intact, the failed invitation is discarded (its run has
@@ -1102,6 +1130,8 @@ export function InviterBench() {
                 problems={openProblems}
                 minting={minting}
                 sftpConnection={sftpConnection}
+                bootPinned={bootPinned}
+                sftpSaveFilePreferred={sftpSaveFilePreferred}
                 rendezvousConfigured={rendezvousConfigured}
                 onLifetime={(seconds) =>
                   applyEditor(editorWithLifetime(editor, seconds))
@@ -1112,6 +1142,10 @@ export function InviterBench() {
                 onTransport={(next) =>
                   applyEditor(editorWithTransport(editor, next))
                 }
+                onAuthorConnection={authorSftpConnection}
+                onClearConnection={clearSftpConnection}
+                onUseCliForSftp={() => setSftpSaveFilePreferred(true)}
+                onRunHereForSftp={() => setSftpSaveFilePreferred(false)}
                 onReset={() => {
                   setEditor(resetToRecommended(editor, acquired));
                   setEditorAnnouncement("Reset to the default settings.");

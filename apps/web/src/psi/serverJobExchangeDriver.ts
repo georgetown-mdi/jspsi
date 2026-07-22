@@ -285,31 +285,63 @@ function jobStatusViewOf(body: unknown): JobStatusView {
 }
 
 /**
- * Fetch the appliance's operator-provisioned SFTP server
- * (`GET /api/jobs/sftp`) as the validated projection, or null when none is
- * provisioned. Fail-safe toward "none configured": a non-2xx, a network error,
- * a `{ configured: false }` body, or a malformed `{ configured: true, ... }`
- * body all resolve to null, so the bench falls back to the save-a-file surface
- * rather than arming a server-job run it has no connection for.
+ * The effective SFTP connection as the browser reads it off `GET /api/jobs/sftp`:
+ * the credential-free locator (or null when none is effective) plus whether that
+ * connection is a deploy-time boot server. `bootPinned` distinguishes the two
+ * configured sub-cases the console renders differently -- a boot server is
+ * read-only (a `PUT` would 409), an authored connection offers edit/clear -- and
+ * is meaningful only when a connection is present.
+ */
+export interface SftpConnectionInfo {
+  connection: SftpConnectionProjection | null;
+  bootPinned: boolean;
+}
+
+/**
+ * Fetch the appliance's effective SFTP connection (`GET /api/jobs/sftp`) as the
+ * validated locator plus its boot-pinned flag. Fail-safe toward "none
+ * configured": a non-2xx, a network error, a `{ configured: false }` body, or a
+ * malformed `{ configured: true, ... }` body all resolve to a null connection, so
+ * the bench offers in-app authoring (or the save-a-file alternative) rather than
+ * arming a server-job run it has no connection for.
  */
 export async function fetchSftpConnection(
   fetchImpl: typeof fetch = fetch,
-): Promise<SftpConnectionProjection | null> {
+): Promise<SftpConnectionInfo> {
   try {
     const response = await fetchImpl("/api/jobs/sftp", { method: "GET" });
-    if (!response.ok) return null;
+    if (!response.ok) return { connection: null, bootPinned: false };
     const body: unknown = await response.json();
-    return sftpConnectionProjectionOf(body);
+    return sftpConnectionInfoOf(body);
   } catch {
-    return null;
+    return { connection: null, bootPinned: false };
   }
 }
 
-/** Validate the sftp response body into the projection, or null when it reports
- * `configured: false` or is malformed -- a partial or ill-formed body fails
- * closed to save-a-file rather than arming a run against a connection the
- * operator did not provision. */
-function sftpConnectionProjectionOf(
+/** Read the connection locator and the boot-pinned flag off an sftp response
+ * body. `bootPinned` is honored only alongside a valid connection, so a
+ * contradictory `{ configured: false, bootPinned: true }` (which the server never
+ * emits) can never present as a read-only nothing. */
+function sftpConnectionInfoOf(body: unknown): SftpConnectionInfo {
+  const connection = sftpConnectionProjectionOf(body);
+  const bootPinned =
+    connection !== null &&
+    body !== null &&
+    typeof body === "object" &&
+    (body as { bootPinned?: unknown }).bootPinned === true;
+  return { connection, bootPinned };
+}
+
+/**
+ * Validate the sftp response body into the credential-free projection, or null
+ * when it reports `configured: false` or is malformed -- a partial or ill-formed
+ * body fails closed rather than arming a run against a connection the operator did
+ * not provision.
+ *
+ * @internal exported for the authoring client, which parses the same projection
+ * off a `PUT /api/jobs/sftp` success body.
+ */
+export function sftpConnectionProjectionOf(
   body: unknown,
 ): SftpConnectionProjection | null {
   if (body === null || typeof body !== "object" || Array.isArray(body))

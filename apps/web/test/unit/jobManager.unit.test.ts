@@ -8,6 +8,7 @@ import {
   ExchangeBusyError,
   JobManager,
   JobRendezvousUnavailableError,
+  SftpServerBootPinnedError,
   SftpUnavailableError,
 } from "@jobs/jobManager";
 import { generateJobId, writeJobFile } from "@jobs/workdir";
@@ -15,6 +16,7 @@ import { JobInputNotFoundError } from "@jobs/workInputs";
 
 import {
   STUB_CLI_PATH,
+  TEST_HOST_KEY_FINGERPRINT,
   tempDataRoot,
   testSftpServerEntry,
   validInputFileIntent,
@@ -56,6 +58,7 @@ function makeManager(options: {
   sftpServer?: JobSftpServerEntry;
   jobInputDir?: string;
   jobRendezvousDir?: string;
+  jobSecretsDir?: string;
   recordJson?: string;
 }): JobManager {
   // The stub reads its scenario from the child environment; the driver's
@@ -95,6 +98,7 @@ function makeManager(options: {
     sftpServer: options.sftpServer,
     jobInputDir: options.jobInputDir,
     jobRendezvousDir: rendezvousDir,
+    jobSecretsDir: options.jobSecretsDir,
     childEnv,
   });
   managers.push(manager);
@@ -591,6 +595,153 @@ describe("sftp server resolution", () => {
     const record = manager.getJob(id)!;
     await waitForTerminal(record);
     expect(record.status).toBe("succeeded");
+  });
+});
+
+describe("the in-app authored sftp connection", () => {
+  /** A secret file outside any data/rendezvous root, plus an authoring body that
+   * references it. */
+  function authoredBody(host = "authored.partner.example") {
+    const dir = tempDataRoot("secrets");
+    roots.push(dir);
+    fs.mkdirSync(dir, { recursive: true });
+    const secretPath = path.join(dir, "password");
+    fs.writeFileSync(secretPath, "s3cret\n");
+    return {
+      host,
+      port: 2022,
+      path: "/drop",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      credential: { kind: "ref", ref: `@${secretPath}`, credType: "password" },
+    };
+  }
+
+  test("authoring holds the connection and projects it credential-free", () => {
+    const manager = makeManager({});
+    expect(manager.sftpProjection()).toBeNull();
+    const projection = manager.authorSftpServer(authoredBody());
+    expect(projection).toEqual({
+      host: "authored.partner.example",
+      port: 2022,
+      path: "/drop",
+    });
+    expect(manager.sftpProjection()).toEqual(projection);
+  });
+
+  test("an sftp job composes the authored connection into its config", async () => {
+    const manager = makeManager({ events: [RESULT_EVENT], exitCode: 0 });
+    const dir = tempDataRoot("secrets-compose");
+    roots.push(dir);
+    fs.mkdirSync(dir, { recursive: true });
+    const secretPath = path.join(dir, "password");
+    fs.writeFileSync(secretPath, "s3cret\n");
+    manager.authorSftpServer({
+      host: "authored.partner.example",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      credential: { kind: "ref", ref: `@${secretPath}`, credType: "password" },
+    });
+    const id = await manager.createJob(validSftpIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    expect(record.status).toBe("succeeded");
+    const configYaml = fs.readFileSync(
+      `${record.workdir}/psilink.yaml`,
+      "utf8",
+    );
+    expect(configYaml).toContain("channel: sftp");
+    expect(configYaml).toContain("host: authored.partner.example");
+    // The @path reference lands verbatim; the secret bytes never reach the config.
+    expect(configYaml).toContain(`@${secretPath}`);
+    expect(configYaml).not.toContain("s3cret");
+  });
+
+  test("authoring resolves a mountRef against the manager's secrets mount", () => {
+    const secretsDir = tempDataRoot("author-secrets");
+    roots.push(secretsDir);
+    fs.mkdirSync(secretsDir, { recursive: true });
+    fs.writeFileSync(path.join(secretsDir, "partner-password"), "s3cret\n");
+    const manager = makeManager({ jobSecretsDir: secretsDir });
+    const projection = manager.authorSftpServer({
+      host: "authored.partner.example",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      credential: {
+        kind: "mountRef",
+        mount: "secrets",
+        subPath: ["partner-password"],
+        credType: "password",
+      },
+    });
+    expect(projection).toEqual({ host: "authored.partner.example" });
+    expect(manager.sftpProjection()).toEqual(projection);
+  });
+
+  test("a mountRef with no secrets mount configured is refused", () => {
+    const manager = makeManager({});
+    expect(() =>
+      manager.authorSftpServer({
+        host: "authored.partner.example",
+        hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+        credential: {
+          kind: "mountRef",
+          mount: "secrets",
+          subPath: ["partner-password"],
+          credType: "password",
+        },
+      }),
+    ).toThrow();
+    expect(manager.sftpProjection()).toBeNull();
+  });
+
+  test("a boot server WINS: authoring is refused and the boot server projects", () => {
+    const manager = makeManager({ sftpServer: testSftpServerEntry() });
+    expect(manager.hasBootSftpServer()).toBe(true);
+    expect(() => manager.authorSftpServer(authoredBody())).toThrow(
+      SftpServerBootPinnedError,
+    );
+    // The projection is still the boot server, unchanged by the refused authoring.
+    expect(manager.sftpProjection()).toEqual({
+      host: "sftp.example.org",
+      port: 2222,
+      path: "/exchange",
+    });
+  });
+
+  test("clearing forgets the authored connection", () => {
+    const manager = makeManager({});
+    manager.authorSftpServer(authoredBody());
+    expect(manager.sftpProjection()).not.toBeNull();
+    manager.clearAuthoredSftpServer();
+    expect(manager.sftpProjection()).toBeNull();
+  });
+
+  test("deleting the exchange forgets the authored connection", async () => {
+    const manager = makeManager({ events: [RESULT_EVENT], exitCode: 0 });
+    manager.authorSftpServer(authoredBody());
+    const id = await manager.createJob(validSftpIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    await vi.waitFor(() => expect(record.terminal).not.toBeNull());
+    expect(await manager.deleteJob(id)).toBe(true);
+    // Scoped to the single exchange: deleting it clears the authored connection.
+    expect(manager.sftpProjection()).toBeNull();
+  });
+
+  test("a rejected authoring body never replaces a held connection", () => {
+    const manager = makeManager({});
+    manager.authorSftpServer(authoredBody("first.example"));
+    // An invalid body (inline credential) is refused; the prior connection stands.
+    expect(() =>
+      manager.authorSftpServer({
+        host: "second.example",
+        hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+        credential: {
+          kind: "ref",
+          ref: "inline-not-a-path",
+          credType: "password",
+        },
+      }),
+    ).toThrow();
+    expect(manager.sftpProjection()?.host).toBe("first.example");
   });
 });
 

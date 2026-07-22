@@ -1128,6 +1128,8 @@ describe("fetchSftpConnection", () => {
       );
   }
 
+  const none = { connection: null, bootPinned: false };
+
   test("returns the validated projection, optional fields preserved", async () => {
     await expect(
       fetchSftpConnection(
@@ -1138,12 +1140,36 @@ describe("fetchSftpConnection", () => {
           path: "/x",
         }),
       ),
-    ).resolves.toEqual({ host: "sftp.example.gov", port: 2222, path: "/x" });
+    ).resolves.toEqual({
+      connection: { host: "sftp.example.gov", port: 2222, path: "/x" },
+      bootPinned: false,
+    });
     await expect(
       fetchSftpConnection(
         jsonResponse({ configured: true, host: "dr.example.gov" }),
       ),
-    ).resolves.toEqual({ host: "dr.example.gov" });
+    ).resolves.toEqual({
+      connection: { host: "dr.example.gov" },
+      bootPinned: false,
+    });
+  });
+
+  test("a boot-provisioned connection carries bootPinned true", async () => {
+    await expect(
+      fetchSftpConnection(
+        jsonResponse({ configured: true, host: "h", bootPinned: true }),
+      ),
+    ).resolves.toEqual({ connection: { host: "h" }, bootPinned: true });
+  });
+
+  test("bootPinned is dropped when no connection is present", async () => {
+    // A contradictory { configured: false, bootPinned: true } (never emitted by
+    // the server) must not present as a read-only nothing.
+    await expect(
+      fetchSftpConnection(
+        jsonResponse({ configured: false, bootPinned: true }),
+      ),
+    ).resolves.toEqual(none);
   });
 
   test("GETs the sftp route", async () => {
@@ -1163,10 +1189,10 @@ describe("fetchSftpConnection", () => {
   test("an enabled API with no server reads as none configured", async () => {
     await expect(
       fetchSftpConnection(jsonResponse({ configured: false })),
-    ).resolves.toBeNull();
+    ).resolves.toEqual(none);
   });
 
-  test("a non-2xx reads as none configured (fail toward save-file)", async () => {
+  test("a non-2xx reads as none configured (fail toward authoring)", async () => {
     // 404 is also the gate's disabled-API response; any non-2xx means "no
     // server-job run can start here".
     for (const status of [404, 500])
@@ -1174,7 +1200,7 @@ describe("fetchSftpConnection", () => {
         fetchSftpConnection(
           jsonResponse({ configured: true, host: "h" }, status),
         ),
-      ).resolves.toBeNull();
+      ).resolves.toEqual(none);
   });
 
   test("a malformed body reads as none configured, never a partial connection", async () => {
@@ -1192,17 +1218,19 @@ describe("fetchSftpConnection", () => {
       { configured: true, host: "h", path: "" },
     ];
     for (const body of malformed)
-      await expect(fetchSftpConnection(jsonResponse(body))).resolves.toBeNull();
+      await expect(fetchSftpConnection(jsonResponse(body))).resolves.toEqual(
+        none,
+      );
   });
 
   test("a network error and a non-JSON body read as none configured", async () => {
     await expect(
       fetchSftpConnection(() => Promise.reject(new Error("offline"))),
-    ).resolves.toBeNull();
+    ).resolves.toEqual(none);
     const htmlResponse: typeof fetch = () =>
       Promise.resolve(
         new Response("<html>gateway error</html>", { status: 200 }),
       );
-    await expect(fetchSftpConnection(htmlResponse)).resolves.toBeNull();
+    await expect(fetchSftpConnection(htmlResponse)).resolves.toEqual(none);
   });
 });

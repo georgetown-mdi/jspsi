@@ -46,6 +46,14 @@ export function gateJobRoute(): GateOutcome {
 export const MAX_JOB_BODY_BYTES = 224 * 1024 ** 2;
 
 /**
+ * The byte cap on a `PUT /api/jobs/sftp` authoring body: a small memory bound on
+ * the streamed read. The body is a handful of connection fields plus an `@path`
+ * credential reference -- no file content ever rides it -- so this stays tight;
+ * an oversized body is a `413` before any parse.
+ */
+export const MAX_SFTP_AUTHOR_BODY_BYTES = 64 * 1024;
+
+/**
  * The outcome of reading a job request body under a byte cap:
  * - `too-large`: the body exceeded the cap (mapped to 413).
  * - `invalid`: the body was absent or was not valid JSON (mapped to 400).

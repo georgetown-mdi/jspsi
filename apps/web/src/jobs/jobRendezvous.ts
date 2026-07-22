@@ -23,8 +23,12 @@ declare global {
  * {@link JOB_RENDEZVOUS_DIR_ENV}, falling back to {@link JOB_DATA_ROOT_ENV} when it is
  * unset so one mount runs a full console, or undefined when both are unset. A plain
  * resolve -- the rendezvous mount is the operator's own directory; the preflight
- * below warns rather than fails on anything wrong. */
-function loadJobRendezvousDir(env: NodeJS.ProcessEnv): string | undefined {
+ * below warns rather than fails on anything wrong. Exported so the SFTP credential
+ * validator can exclude this resolved directory (as it excludes the data root) from
+ * a credential `@path` reference. */
+export function resolveJobRendezvousDir(
+  env: NodeJS.ProcessEnv,
+): string | undefined {
   const configured = (env[JOB_RENDEZVOUS_DIR_ENV] ?? "").trim();
   const resolved =
     configured.length > 0 ? configured : (env[JOB_DATA_ROOT_ENV] ?? "").trim();
@@ -40,7 +44,7 @@ export function useJobRendezvousDir(
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
   globalThis.jobRendezvousDirConfig ??= {
-    resolvedDir: loadJobRendezvousDir(env),
+    resolvedDir: resolveJobRendezvousDir(env),
   };
   return globalThis.jobRendezvousDirConfig.resolvedDir;
 }

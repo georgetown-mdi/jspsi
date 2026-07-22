@@ -11,7 +11,7 @@ import {
   expiryLabel,
   transportChooserCopy,
 } from "./inviterModel";
-import { sftpConnectionLabel } from "./sftpConnectionChoice";
+import { SftpConnectionCard } from "./SftpConnectionCard";
 import styles from "./bench.module.css";
 
 import type {
@@ -53,10 +53,16 @@ export function ReviewCreateSection({
   problems,
   minting,
   sftpConnection,
+  bootPinned,
+  sftpSaveFilePreferred,
   rendezvousConfigured,
   onLifetime,
   onDirection,
   onTransport,
+  onAuthorConnection,
+  onClearConnection,
+  onUseCliForSftp,
+  onRunHereForSftp,
   onReset,
   onCreate,
   onNavigate,
@@ -65,11 +71,16 @@ export function ReviewCreateSection({
   csv: AcquiredCsv;
   problems: ReadonlyArray<SpineProblem>;
   minting: boolean;
-  /** The appliance's provisioned SFTP connection, fetched once the sftp channel
-   * is picked on a console build; undefined before the fetch resolves (or off a
-   * console), null when the appliance has none -- both fall back to the
-   * save-a-file flow. */
+  /** The effective SFTP connection locator, fetched once on a console build (and
+   * updated when the operator authors or clears one); undefined before the fetch
+   * resolves (or off a console), null when none is effective. */
   sftpConnection: SftpConnectionProjection | null | undefined;
+  /** Whether the effective connection is a deploy-time boot server (read-only, no
+   * authoring offered). Meaningful only when `sftpConnection` is set. */
+  bootPinned: boolean;
+  /** Whether the operator deliberately chose to run SFTP through their own
+   * command-line tool (save-a-file) instead of authoring a connection here. */
+  sftpSaveFilePreferred: boolean;
   /** Whether the appliance has a rendezvous directory mounted (`JOB_RENDEZVOUS_DIR`
    * set). The filedrop card runs here when true and renders disabled with a config
    * hint when false. Off a console build it is unused (filedrop saves a file). */
@@ -77,15 +88,25 @@ export function ReviewCreateSection({
   onLifetime: (seconds: number) => void;
   onDirection: (direction: OutputDirection) => void;
   onTransport: (transport: Transport) => void;
+  /** An in-app authored connection landed (its credential-free projection). */
+  onAuthorConnection: (connection: SftpConnectionProjection) => void;
+  /** The operator cleared the authored connection. */
+  onClearConnection: () => void;
+  /** The operator chose the save-a-file alternative for SFTP. */
+  onUseCliForSftp: () => void;
+  /** The operator undid the save-a-file choice to author a connection here. */
+  onRunHereForSftp: () => void;
   onReset: () => void;
   onCreate: () => void;
   onNavigate: (target: SpineTarget) => void;
 }) {
+  const consoleBuild = isConsoleBuild();
   const sftpConfigured = sftpConnection != null;
   const available = availableTransports(
-    isConsoleBuild(),
+    consoleBuild,
     sftpConfigured,
     rendezvousConfigured,
+    sftpSaveFilePreferred,
   );
   const transport = editor.transport ?? available.defaultTransport;
   const disabledFor = (candidate: Transport): boolean =>
@@ -93,6 +114,9 @@ export function ReviewCreateSection({
       ?.disabled === true;
   const browserDisabled = disabledFor("browser");
   const filedropDisabled = disabledFor("filedrop");
+  const sftpAuthoringRequired =
+    available.options.find((option) => option.transport === "sftp")
+      ?.authoringRequired === true;
   const {
     browserLabel,
     browserDescription,
@@ -102,17 +126,24 @@ export function ReviewCreateSection({
     sftpDescription,
     capabilityNote,
   } = transportChooserCopy(
-    isConsoleBuild(),
+    consoleBuild,
     sftpConfigured,
     rendezvousConfigured,
+    sftpSaveFilePreferred,
   );
-  const canCreate = problems.length === 0 && !minting;
+  // An sftp exchange chosen to run here cannot be created until a connection is
+  // set up: block the seal and say so, rather than minting a code with no
+  // rendezvous.
+  const connectionIncomplete = transport === "sftp" && sftpAuthoringRequired;
+  const canCreate = problems.length === 0 && !minting && !connectionIncomplete;
   // Voiced when the create gate flips either way; deferred so a blocked state
   // present when the section mounts still announces.
   const readiness = useDeferredAnnouncement(
-    problems.length === 0
-      ? "Ready to create the invitation."
-      : `${problems.length === 1 ? "A problem" : `${problems.length} problems`} above must be resolved before you can create.`,
+    connectionIncomplete
+      ? "Set up the SFTP connection above before you can create."
+      : problems.length === 0
+        ? "Ready to create the invitation."
+        : `${problems.length === 1 ? "A problem" : `${problems.length} problems`} above must be resolved before you can create.`,
   );
   return (
     <>
@@ -180,16 +211,16 @@ export function ReviewCreateSection({
             label={sftpLabel}
             description={sftpDescription}
           />
-          {transport === "sftp" && sftpConnection != null && (
-            <p className={`${styles.small} ${styles.sub}`}>
-              Runs through{" "}
-              <span className={styles.mono}>
-                {sftpConnectionLabel(sftpConnection)}
-              </span>
-              , provisioned on this appliance. Connection details and
-              credentials stay on this machine; the invitation carries only
-              where to meet.
-            </p>
+          {transport === "sftp" && consoleBuild && (
+            <SftpConnectionCard
+              connection={sftpConnection ?? null}
+              bootPinned={bootPinned}
+              saveFilePreferred={sftpSaveFilePreferred}
+              onAuthored={onAuthorConnection}
+              onCleared={onClearConnection}
+              onUseCli={onUseCliForSftp}
+              onRunHere={onRunHereForSftp}
+            />
           )}
         </div>
         <div
@@ -267,14 +298,16 @@ export function ReviewCreateSection({
         </Button>
         <p
           className={
-            problems.length === 0
+            canCreate
               ? `${styles.statusLine} ${styles.statusLineOk}`
               : `${styles.statusLine} ${styles.statusLineDanger}`
           }
         >
-          {problems.length === 0
-            ? "Ready to create."
-            : `Resolve ${problems.length === 1 ? "the problem" : `the ${problems.length} problems`} above to continue.`}
+          {connectionIncomplete
+            ? "Set up the SFTP connection above to continue."
+            : problems.length === 0
+              ? "Ready to create."
+              : `Resolve ${problems.length === 1 ? "the problem" : `the ${problems.length} problems`} above to continue.`}
         </p>
       </div>
     </>

@@ -633,9 +633,11 @@ describe("availableTransports matrix", () => {
       offered: true,
       disabled: true,
     });
+    // A configured connection runs here with no authoring pending.
     expect(byTransport.get("sftp")).toMatchObject({
       disabled: false,
       runMode: "server-job",
+      authoringRequired: false,
     });
     // With a rendezvous mount the console filedrop card runs here as a server job.
     expect(byTransport.get("filedrop")).toMatchObject({
@@ -649,13 +651,41 @@ describe("availableTransports matrix", () => {
     expect(byTransport.get("filedrop")).toMatchObject({ disabled: true });
   });
 
+  test("console with an unconfigured sftp offers authoring, still runs here", () => {
+    // The silent save-a-file degrade is gone: the card is offered to run here with
+    // authoringRequired set, not disabled and not routed to save-a-file.
+    const byTransport = optionByTransport(true, false, false);
+    expect(byTransport.get("sftp")).toMatchObject({
+      offered: true,
+      disabled: false,
+      runMode: "server-job",
+      authoringRequired: true,
+    });
+  });
+
+  test("the deliberate save-a-file preference flips the sftp card", () => {
+    const byTransport = new Map(
+      availableTransports(true, false, false, true).options.map((option) => [
+        option.transport,
+        option,
+      ]),
+    );
+    expect(byTransport.get("sftp")).toMatchObject({
+      runMode: "save-file",
+      authoringRequired: false,
+    });
+  });
+
   test("console with a rendezvous mount and no sftp server defaults to filedrop", () => {
     const available = availableTransports(true, false, true);
     expect(available.defaultTransport).toBe("filedrop");
     const byTransport = optionByTransport(true, false, true);
     expect(byTransport.get("browser")).toMatchObject({ disabled: true });
-    // With no provisioned server, SFTP falls back to save-a-file.
-    expect(byTransport.get("sftp")).toMatchObject({ runMode: "save-file" });
+    // With no connection yet, SFTP offers authoring (runs here once set up).
+    expect(byTransport.get("sftp")).toMatchObject({
+      runMode: "server-job",
+      authoringRequired: true,
+    });
     expect(byTransport.get("filedrop")).toMatchObject({
       disabled: false,
       runMode: "server-job",
@@ -692,21 +722,34 @@ describe("transport chooser copy by deployment", () => {
     expect(copy.filedropDescription).toContain("JOB_RENDEZVOUS_DIR");
   });
 
-  test("SFTP stays a command-line save everywhere without a provisioned server", () => {
-    for (const consoleBuild of [false, true]) {
-      const copy = transportChooserCopy(consoleBuild, false, false);
-      expect(copy.sftpLabel).toBe(
-        "Over SFTP, run by the psilink command-line tool",
-      );
-      expect(copy.sftpDescription).toContain("Saves an exchange file");
-    }
+  test("a hosted build keeps SFTP a command-line save", () => {
+    const copy = transportChooserCopy(false, false, false);
+    expect(copy.sftpLabel).toBe(
+      "Over SFTP, run by the psilink command-line tool",
+    );
+    expect(copy.sftpDescription).toContain("Saves an exchange file");
   });
 
-  test("a console build with a provisioned server offers to run SFTP here", () => {
+  test("an unconfigured console SFTP invites authoring, run here", () => {
+    const copy = transportChooserCopy(true, false, false);
+    expect(copy.sftpLabel).toBe("Over SFTP, run here");
+    expect(copy.sftpDescription).toContain("set up below");
+    expect(copy.sftpDescription).toContain("read on this appliance");
+  });
+
+  test("the deliberate save-a-file choice returns SFTP to the CLI copy", () => {
+    const copy = transportChooserCopy(true, false, false, true);
+    expect(copy.sftpLabel).toBe(
+      "Over SFTP, run by the psilink command-line tool",
+    );
+    expect(copy.sftpDescription).toContain("Saves an exchange file");
+  });
+
+  test("a console build with a configured connection runs SFTP here", () => {
     const copy = transportChooserCopy(true, true, true);
     expect(copy.sftpLabel).toBe("Over SFTP, run here");
     expect(copy.sftpDescription).toContain(
-      "SFTP server provisioned on this machine",
+      "SFTP connection set up on this machine",
     );
     // The console SFTP card states the file is read on the appliance.
     expect(copy.sftpDescription).toContain("read on this appliance");
