@@ -190,6 +190,31 @@ describe("console acceptor unsupported-shape gate", () => {
   });
 });
 
+describe("console acceptor never renders the recurring-save offer", () => {
+  // The offer's only acceptor render site is gated on a webrtc endpoint reaching the
+  // launched step (AcceptorBench: `endpoint.channel === "webrtc" && launched`). A
+  // console build classifies a webrtc accept as unsupported and stops it at the review
+  // step, so the offer -- whose /saved link is gated out of the console build -- never
+  // mounts. Pin the webrtc accept blocked at review, before the launched step, with no
+  // offer panel.
+  test("a webrtc invitation is blocked at review with no offer", async () => {
+    window.location.hash = await encodeToken(WEBRTC_ENDPOINT);
+    mount(createElement(AcceptorBench));
+
+    // The unsupported block replaces the Continue action, so the flow never reaches the
+    // launched step the offer needs.
+    await expect
+      .element(page.getByText(ACCEPT_UNSUPPORTED_TITLE))
+      .toBeInTheDocument();
+    expect(
+      page
+        .getByRole("button", { name: "Continue: consent & your file" })
+        .query(),
+    ).toBeNull();
+    expect(page.getByText("Save as a recurring exchange").query()).toBeNull();
+  });
+});
+
 // The appliance HERE reports a configured rendezvous mount, so a single-directory
 // filedrop accept is runnable and reaches the consent step.
 function stubRendezvousMounted(): void {
