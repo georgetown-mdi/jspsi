@@ -30,6 +30,7 @@ import {
   WithheldResultInset,
   recoveredExchangeHeading,
 } from "./BenchRunSurface";
+import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
 import styles from "./bench.module.css";
 
@@ -116,9 +117,10 @@ function recoveryLead(
  * exchange. A live id renders the panel: one of three headings -- still running,
  * finished, or stopped (failed/cancelled) -- the re-attached run's timeline
  * (replayed through the same run-state fold the hooks use), the appliance download
- * hrefs on a finished run only, "Stop this exchange" while running, and "Discard"
- * (behind a confirm, since it is an irreversible removal of appliance-only data)
- * always.
+ * hrefs on a finished run only, the collapsed "run this on a schedule" graduation
+ * hand-off on a finished run only (self-gated away when the hand-off is
+ * unavailable), "Stop this exchange" while running, and "Discard" (behind a
+ * confirm, since it is an irreversible removal of appliance-only data) always.
  *
  * Unmounting the panel aborts only its own stream consumption -- it carries no
  * cancel intent, so the appliance's run keeps going and the panel is the way back
@@ -306,6 +308,7 @@ export function RecoveredExchangePanel() {
           )}
         </>
       )}
+      {finished && <RecurringHandoff jobId={attachment.jobId} collapsible />}
       <Group mt="md">
         {running && (
           <Button variant="default" onClick={stop}>
