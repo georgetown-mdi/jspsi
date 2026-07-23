@@ -847,9 +847,14 @@ describe("createExclusive", () => {
 
   test("rejects with a diagnostic error when the SFTP session is not open", async () => {
     injectSftpSession(false);
-    await expect(adapter.createExclusive("/remote/new.txt")).rejects.toThrow(
-      "SFTP session is not open",
-    );
+    const err = await adapter
+      .createExclusive("/remote/new.txt")
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    const message = (err as Error).message;
+    expect(message).toContain("SFTP session is not open");
+    expect(message).toMatch(/closed or dropped/);
+    expect(message).not.toMatch(/API/i);
     expect(mockOpen).not.toHaveBeenCalled();
   });
 
@@ -1770,9 +1775,12 @@ describe("bounded list", () => {
     const adapter = new SSH2SFTPClientAdapter();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (adapter as any).client = { sftp: null };
-    await expect(adapter.list("/remote/dir")).rejects.toThrow(
-      "SFTP session is not open",
-    );
+    const err = await adapter.list("/remote/dir").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    const message = (err as Error).message;
+    expect(message).toContain("SFTP session is not open");
+    expect(message).toMatch(/closed or dropped/);
+    expect(message).not.toMatch(/API/i);
   });
 
   test("bounds a server that returns empty non-EOF batches forever and closes the handle", async () => {
