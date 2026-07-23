@@ -165,11 +165,16 @@ export type JobStatusProbe =
 
 /** A non-2xx response from the job API, carrying the status so the driver can
  * pick the failure category (a 400 is a rejected/invalid intent -> `config`;
- * any other non-2xx is a transport/server fault -> `exchange`). */
+ * any other non-2xx is a transport/server fault -> `exchange`). A busy (409)
+ * create carries {@link activeJobId}, the id of the exchange occupying the
+ * appliance's single slot, parsed from the response body -- the browser
+ * re-attaches to it rather than surfacing the "already running" alert (see
+ * `bench/reattachOnBusy`). Present only on a 409 whose body carried one. */
 export class JobApiRequestError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly activeJobId?: string,
   ) {
     super(message);
     this.name = "JobApiRequestError";
@@ -213,6 +218,10 @@ export function createFetchJobApiClient(
         throw new JobApiRequestError(
           response.status,
           `POST /api/jobs failed with status ${response.status}`,
+          // A busy (409) body carries `{ id }` -- the exchange occupying the
+          // single slot -- so the caller can re-attach to it. Absent on every
+          // other status (an empty-bodied 400/413/500 reads as no id).
+          response.status === 409 ? await readBodyJobId(response) : undefined,
         );
       const body: unknown = await response.json();
       const id = (body as { id?: unknown }).id;
@@ -272,6 +281,21 @@ export function createFetchJobApiClient(
       return { available: true, createdAt };
     },
   };
+}
+
+/** Read a `{ id }` string off a job-API response body, or undefined when the
+ * body is absent, unparseable, or carries no non-empty string id. Used to pull
+ * the occupying exchange's id off a busy (409) create so the caller can
+ * re-attach; a body without one (an older server, or an empty 409) is undefined,
+ * and the caller falls back to its persisted id. */
+async function readBodyJobId(response: Response): Promise<string | undefined> {
+  try {
+    const body: unknown = await response.json();
+    const id = (body as { id?: unknown }).id;
+    return typeof id === "string" && id.length > 0 ? id : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Read the run status off a `GET /api/jobs/:id` body, defaulting a missing or

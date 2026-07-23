@@ -30,16 +30,18 @@ import { jobCreateIntentSchema } from "@jobs/intent";
  * `--save`. Either way no client string reaches argv or a file path.
  *
  * The console facilitates one exchange at a time: while an exchange occupies the
- * single slot, a second create is an empty-bodied 409 until the current exchange
- * is deleted.
+ * single slot, a second create is a 409 carrying `{ id }` -- the occupying
+ * exchange's id -- until the current exchange is deleted. The browser re-attaches
+ * to that id rather than dead-ending on the "already running" alert.
  *
  * The body is read under a byte cap ({@link MAX_JOB_BODY_BYTES}) streamed off the
  * request without trusting `Content-Length`, so an oversized body is a 413 (and
  * an unparseable one a 400) before schema validation runs.
  *
- * The busy and unavailable rejections are EMPTY-bodied: an sftp intent with no
- * connection authored (or a filedrop intent with no rendezvous directory) is 400,
- * and a second concurrent exchange is 409.
+ * The unavailable rejection is EMPTY-bodied: an sftp intent with no connection
+ * authored (or a filedrop intent with no rendezvous directory) is 400. The busy
+ * rejection is a 409 carrying only the occupying exchange's id (nothing else about
+ * it), disclosed to the same-origin operator on their own loopback appliance.
  */
 export const Route = createFileRoute("/api/jobs/")({
   server: {
@@ -62,7 +64,10 @@ export const Route = createFileRoute("/api/jobs/")({
         try {
           id = await gate.manager.createJob(parsed.data);
         } catch (error) {
-          if (error instanceof ExchangeBusyError) return jobEmptyResponse(409);
+          // The single slot is occupied: return its occupant's id (only) so the
+          // browser can re-attach to the running exchange.
+          if (error instanceof ExchangeBusyError)
+            return jobJsonResponse({ id: error.activeJobId }, 409);
           // A mounted input that names no regular file, a filedrop intent with no
           // rendezvous directory configured, or an sftp intent with no connection
           // authored is a 400 (the manager left no workdir behind).

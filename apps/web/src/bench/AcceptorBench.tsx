@@ -694,7 +694,7 @@ export function AcceptorBench() {
     // decode, so keying the memo on it alone cannot go stale.
   }, [launched]);
 
-  const { run, outputs, failure, jobId, tryAgain, abandonRun } =
+  const { run, outputs, failure, jobId, reattached, tryAgain, abandonRun } =
     useAcceptorExchange({
       launch,
     });
@@ -1339,6 +1339,7 @@ export function AcceptorBench() {
               warning={launched?.warning}
               serverJob={acceptServerJob}
               jobId={jobId}
+              reattached={reattached}
               onTryAgain={tryAgain}
               onFixColumns={backToColumns}
               onAbandon={abandonRun}

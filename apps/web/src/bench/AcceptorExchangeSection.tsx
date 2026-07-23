@@ -11,17 +11,21 @@ import {
   DonePanel,
   DownloadRow,
   FailureAlert,
+  ReattachedRunNotice,
   SERVER_JOB_KEEP_OPEN_BODY,
   SERVER_JOB_PEER_WINDOW_BODY,
   WithheldResultInset,
+  recoveredExchangeHeading,
 } from "./BenchRunSurface";
 import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
+import { reattachedRunState } from "./reattachedRunState";
 import styles from "./bench.module.css";
 
 import type { AcceptableInvitation } from "@psi/acceptInvitation";
 import type { AlertContent } from "@components/csvIntake";
 import type { ExchangeRun } from "./exchangeRun";
+import type { JobRunStatus } from "@psi/serverJobExchangeDriver";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "./runOutputs";
 
@@ -48,6 +52,7 @@ export function AcceptorExchangeSection({
   warning,
   serverJob,
   jobId,
+  reattached,
   onTryAgain,
   onFixColumns,
   onAbandon,
@@ -67,6 +72,11 @@ export function AcceptorExchangeSection({
   /** The appliance job id of a server-job accept, once created. Threads the run's
    * job to the recurring hand-off panel; undefined on a browser accept. */
   jobId: string | undefined;
+  /** The live status of the exchange this accept re-attached to on a busy (409)
+   * create, or undefined on a fresh run. When set, the surface heads with
+   * recovery-style copy (it is watching an exchange the appliance already held,
+   * not a fresh one) and drops the fresh-run keep-open / completion framing. */
+  reattached: JobRunStatus | undefined;
   onTryAgain: () => void;
   /** Return to the confirm-columns step with every setting intact -- a prepare-time
    * config failure's recovery, since the acceptor fixes its own settings there. */
@@ -78,6 +88,17 @@ export function AcceptorExchangeSection({
   onAbandon: () => void;
 }) {
   const phase = outputs !== undefined ? "done" : "running";
+
+  // A busy (409) create at start re-attached this surface to an exchange the
+  // appliance already held (a second tab, a navigate-away-and-back, or an
+  // orphaned job). It then heads with recovery-style copy and drops the fresh-run
+  // keep-open / completion framing, so it never reads as a fresh success.
+  const reattachedRun = reattached !== undefined;
+  const reattachState = reattachedRunState({
+    failed: failure !== undefined,
+    hasOutputs: outputs !== undefined,
+    status: reattached ?? "running",
+  });
 
   // A retry is genuine only while the invitation can still be accepted:
   // re-dialing a lapsed credential cannot succeed, so an expired exchange failure
@@ -118,13 +139,18 @@ export function AcceptorExchangeSection({
     if (!active || active === document.body) headingRef.current?.focus();
   }, [phase, failure]);
 
-  const title = phase === "done" ? "Exchange complete" : "Exchange in progress";
+  const title = reattachedRun
+    ? recoveredExchangeHeading(reattachState)
+    : phase === "done"
+      ? "Exchange complete"
+      : "Exchange in progress";
 
   return (
     <>
       <h1 tabIndex={-1} ref={headingRef}>
         {title}
       </h1>
+      {reattachedRun && <ReattachedRunNotice state={reattachState} />}
       {failure !== undefined && (
         <FailureAlert failure={failure}>
           {retryable && (
@@ -180,14 +206,17 @@ export function AcceptorExchangeSection({
           drops the moment a failure lands (the run it describes has torn down), so
           it outlives no failure. Absent for the hosted in-browser accept, which owns
           no such run. */}
-      {phase === "running" && failure === undefined && serverJob && (
-        <div className={styles.callout}>
-          <p className={styles.calloutLead}>Keep this tab open.</p>
-          <p className={styles.small}>{SERVER_JOB_KEEP_OPEN_BODY}</p>
-          <p className={styles.small}>{SERVER_JOB_PEER_WINDOW_BODY}</p>
-        </div>
-      )}
-      {phase === "done" && (
+      {phase === "running" &&
+        failure === undefined &&
+        serverJob &&
+        !reattachedRun && (
+          <div className={styles.callout}>
+            <p className={styles.calloutLead}>Keep this tab open.</p>
+            <p className={styles.small}>{SERVER_JOB_KEEP_OPEN_BODY}</p>
+            <p className={styles.small}>{SERVER_JOB_PEER_WINDOW_BODY}</p>
+          </div>
+        )}
+      {phase === "done" && !reattachedRun && (
         <DonePanel
           matchedRecordCount={outputs?.matchedRecordCount}
           finishedAt={run.finishedAt}
@@ -227,9 +256,10 @@ export function AcceptorExchangeSection({
           )}
         </>
       )}
-      {phase === "done" && serverJob && jobId !== undefined && (
-        <RecurringHandoff jobId={jobId} />
-      )}
+      {phase === "done" &&
+        serverJob &&
+        jobId !== undefined &&
+        !reattachedRun && <RecurringHandoff jobId={jobId} />}
       {(phase === "done" || failure?.category === "output") && (
         <AnotherExchangeFoot
           onNavigate={onAbandon}

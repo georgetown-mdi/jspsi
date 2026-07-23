@@ -88,6 +88,10 @@ interface StubOptions {
   sftp?: unknown;
   rendezvous?: unknown;
   coverageStatus?: number;
+  /** When set, `POST /api/jobs` returns a busy (409) carrying this id (the slot is
+   * occupied), and the id's status/events routes are served so the client can
+   * re-attach to it. */
+  conflict?: { jobId: string; status?: string };
 }
 
 /** The same-origin job API, stubbed at the global fetch seam. Unmatched URLs fall
@@ -154,7 +158,32 @@ function stubJobApi(options: StubOptions = {}): {
           jsonResponse(options.rendezvous ?? { configured: false }),
         );
       if (url === "/api/jobs")
-        return Promise.resolve(jsonResponse({ id: "job-7" }, 201));
+        return Promise.resolve(
+          options.conflict !== undefined
+            ? jsonResponse({ id: options.conflict.jobId }, 409)
+            : jsonResponse({ id: "job-7" }, 201),
+        );
+      if (options.conflict !== undefined) {
+        const cid = options.conflict.jobId;
+        if (url === `/api/jobs/${cid}/events`)
+          return Promise.resolve(
+            new Response(
+              new ReadableStream<Uint8Array>({
+                start(controller) {
+                  sse = controller;
+                },
+              }),
+              { status: 200, headers: { "Content-Type": "text/event-stream" } },
+            ),
+          );
+        if (url === `/api/jobs/${cid}`)
+          return Promise.resolve(
+            jsonResponse({
+              status: options.conflict.status ?? "running",
+              recordAvailable: false,
+            }),
+          );
+      }
       if (url === "/api/jobs/job-7/events")
         return Promise.resolve(
           new Response(
@@ -908,5 +937,67 @@ describe("console inviter sample-data copy", () => {
         "href",
         "https://github.com/georgetown-mdi/jspsi/blob/main/docs/DEPLOYMENT.md",
       );
+  });
+});
+
+describe("console inviter re-attaches on a busy create", () => {
+  test("a 409 at create re-attaches with recovery-style copy, not the busy alert", async () => {
+    // The slot is occupied: the create 409s carrying the live occupant's id.
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+      conflict: { jobId: "job-live", status: "running" },
+    });
+    mount(createElement(InviterBench));
+    await reachReviewCreate();
+    await page.getByRole("button", { name: "Create the invitation" }).click();
+
+    // The busy create re-attaches to the occupying exchange under recovery-style
+    // copy instead of dead-ending on the "already running an exchange" alert.
+    await expect
+      .element(
+        page.getByRole("heading", {
+          level: 1,
+          name: "An exchange started from this console is still running",
+        }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText(
+          "You are back on an exchange this appliance already holds.",
+        ),
+      )
+      .toBeInTheDocument();
+    expect(
+      page.getByText("This appliance is already running an exchange").query(),
+    ).toBeNull();
+
+    // The resolved id was probed live and its event stream re-attached to, and the
+    // strand-recovery record now names it (a server-created orphan becomes
+    // recoverable).
+    await vi.waitFor(() =>
+      expect(
+        api.captured.some((r) => r.url === "/api/jobs/job-live/events"),
+      ).toBe(true),
+    );
+    expect(
+      JSON.parse(
+        window.localStorage.getItem("psilink-console-last-job") ?? "null",
+      ),
+    ).toMatchObject({ jobId: "job-live", seat: "inviter" });
+
+    // The replay's terminal result heads the surface finished (still recovery
+    // copy, never "Exchange complete") and offers the appliance downloads.
+    api.emitEvent({ v: 1, type: "result", resultWritten: true });
+    api.closeEvents();
+    await expect
+      .element(
+        page.getByRole("heading", {
+          level: 1,
+          name: "An exchange started from this console has finished",
+        }),
+      )
+      .toBeInTheDocument();
+    expect(page.getByText("Exchange complete").query()).toBeNull();
   });
 });

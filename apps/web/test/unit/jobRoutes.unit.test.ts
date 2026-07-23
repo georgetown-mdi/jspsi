@@ -787,20 +787,23 @@ describe("POST /api/jobs drives a job from a mounted work input", () => {
 });
 
 describe("POST /api/jobs and the authored sftp connection", () => {
-  test("a second concurrent sftp create is an empty-bodied 409", async () => {
+  test("a second concurrent sftp create is a 409 carrying the occupying job id", async () => {
     enableJobApiWithSftpServer({ STUB_DELAY_MS: "5000" });
     const first = (await handlersOf(CreateRoute).POST({
       request: createRequest(validSftpIntent()),
       params: {},
     })) as Response;
     expect(first.status).toBe(201);
+    const { id: firstId } = (await first.json()) as { id: string };
 
     const second = (await handlersOf(CreateRoute).POST({
       request: createRequest(validSftpIntent()),
       params: {},
     })) as Response;
     expect(second.status).toBe(409);
-    expect(await second.text()).toBe("");
+    // The busy body carries only the occupying exchange's id so the browser can
+    // re-attach to it -- nothing else about the running exchange.
+    expect(await second.json()).toEqual({ id: firstId });
   });
 
   test("an sftp intent without an authored connection is an empty-bodied 400", async () => {
@@ -843,7 +846,7 @@ describe("POST /api/jobs and the authored sftp connection", () => {
 });
 
 describe("POST /api/jobs rejects a concurrent filedrop job", () => {
-  test("a second concurrent filedrop create is an empty-bodied 409", async () => {
+  test("a second concurrent filedrop create is a 409 carrying the occupying job id", async () => {
     const root = tempDataRoot("routes-filedrop");
     roots.push(root);
     vi.stubEnv("JOB_DATA_ROOT", root);
@@ -861,13 +864,14 @@ describe("POST /api/jobs rejects a concurrent filedrop job", () => {
       params: {},
     })) as Response;
     expect(first.status).toBe(201);
+    const { id: firstId } = (await first.json()) as { id: string };
 
     const second = (await handlersOf(CreateRoute).POST({
       request: createRequest(validIntent()),
       params: {},
     })) as Response;
     expect(second.status).toBe(409);
-    expect(await second.text()).toBe("");
+    expect(await second.json()).toEqual({ id: firstId });
   });
 });
 
@@ -878,13 +882,14 @@ describe("DELETE frees the slot for a new POST", () => {
       .jobManagerInstance!;
     await vi.waitFor(() => expect(manager.getJob(id)?.terminal).not.toBeNull());
 
-    // Reject-until-DELETE: the settled exchange holds the slot.
+    // Reject-until-DELETE: the settled exchange holds the slot, and the busy body
+    // still names it so the browser can re-attach.
     const busy = (await handlersOf(CreateRoute).POST({
       request: createRequest(validIntent()),
       params: {},
     })) as Response;
     expect(busy.status).toBe(409);
-    expect(await busy.text()).toBe("");
+    expect(await busy.json()).toEqual({ id });
 
     const del = (await handlersOf(JobRoute).DELETE({
       request: jobRequest(`http://localhost/api/jobs/${id}`, {

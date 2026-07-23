@@ -62,14 +62,20 @@ export class SftpUnavailableError extends Error {
 /**
  * Thrown by {@link JobManager.createJob} when an exchange is already occupying
  * the single slot. The console facilitates one exchange at a time, so a second
- * create -- of either channel -- is refused with an empty-bodied 409 until the
- * running exchange is deleted. Channel is irrelevant: a running filedrop job
- * blocks an sftp create and vice versa. The slot frees only when the exchange
- * was deleted AND its child's exit was observed (or no child was ever spawned),
- * so a successor can never rendezvous with a still-dying child.
+ * create -- of either channel -- is refused with a 409 until the running exchange
+ * is deleted. Channel is irrelevant: a running filedrop job blocks an sftp create
+ * and vice versa. The slot frees only when the exchange was deleted AND its
+ * child's exit was observed (or no child was ever spawned), so a successor can
+ * never rendezvous with a still-dying child.
+ *
+ * Carries {@link activeJobId}, the id of the exchange occupying the slot, so the
+ * route can emit it in the 409 body and the browser can re-attach to the running
+ * exchange rather than dead-end on the "already running" alert. The id is not a
+ * secret (access rides the loopback-only origin), so returning it widens no
+ * exposure.
  */
 export class ExchangeBusyError extends Error {
-  constructor() {
+  constructor(readonly activeJobId: string) {
     super("an exchange is already active");
     this.name = "ExchangeBusyError";
   }
@@ -344,8 +350,9 @@ export class JobManager {
       throw new JobRendezvousUnavailableError();
 
     // Claim the slot with no await between the null check and the assignment, so
-    // two concurrent POSTs cannot both observe a free slot.
-    if (this.slot !== null) throw new ExchangeBusyError();
+    // two concurrent POSTs cannot both observe a free slot. The busy rejection
+    // carries the occupying exchange's id so the caller can re-attach to it.
+    if (this.slot !== null) throw new ExchangeBusyError(this.slotId()!);
     this.slot = { phase: "starting", id };
 
     let workdir: string | null = null;

@@ -340,6 +340,52 @@ export function RunWarningsAlert({
   );
 }
 
+/** The three states a re-attached run can be in, and the control-neutral
+ * recovery heading each shows -- shared with the strand-recovery panel
+ * ({@link ./RecoveredExchangePanel}) so the copy an operator sees when
+ * re-attaching to an exchange the appliance already holds cannot drift between
+ * the two surfaces. */
+export type ReattachedRunState = "running" | "finished" | "stopped";
+
+/**
+ * The heading a re-attached run shows in place of the fresh-run title. A busy
+ * (409) create at start -- a second tab, a navigate-away-and-back, or a job the
+ * server created whose recovery record was lost -- means this tab did not open
+ * the exchange it is now watching, so the surface names it as an exchange already
+ * started from this console rather than a fresh success.
+ */
+export function recoveredExchangeHeading(state: ReattachedRunState): string {
+  return state === "running"
+    ? "An exchange started from this console is still running"
+    : state === "finished"
+      ? "An exchange started from this console has finished"
+      : "An exchange started from this console stopped";
+}
+
+/**
+ * The recovery-style lead a re-attached bench run shows under its heading, in
+ * place of the fresh-run share / keep-open framing: it names why the operator is
+ * on an exchange they did not just start. Unlike the strand-recovery panel's
+ * body, it references no Stop/Discard controls -- the bench run column carries its
+ * own (Try again, Set up another exchange) -- so it stays control-neutral.
+ */
+export function ReattachedRunNotice({ state }: { state: ReattachedRunState }) {
+  return (
+    <div className={styles.callout}>
+      <p className={styles.calloutLead}>
+        You are back on an exchange this appliance already holds.
+      </p>
+      <p className={styles.small}>
+        {state === "finished"
+          ? "This exchange was already running here -- from another tab or an earlier visit -- and has finished. Its results are below."
+          : state === "stopped"
+            ? "This exchange was already running here -- from another tab or an earlier visit -- and has stopped. The reason is below."
+            : "This exchange was already running here -- from another tab or an earlier visit -- so you are watching it rather than starting a new one."}
+      </p>
+    </div>
+  );
+}
+
 /** The workfoot link out to a fresh exchange, shown at completion and after an
  * output failure (whose exchange already succeeded). `onNavigate` fires as the
  * operator leaves for a new exchange -- the console seat passes its `abandonRun`
