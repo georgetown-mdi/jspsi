@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { Anchor, Button, Collapse, CopyButton } from "@mantine/core";
+import { Anchor, Button, CopyButton } from "@mantine/core";
 
 import {
   fetchRecurringHandoff,
@@ -8,6 +8,7 @@ import {
   windowsJoinCommand,
 } from "@psi/recurringHandoff";
 
+import { DisclosureSection } from "../components/DisclosureSection";
 import styles from "./bench.module.css";
 
 import type { JobHandoff } from "@jobs/handoff";
@@ -59,19 +60,13 @@ export function RecurringHandoff({
 
   if (collapsible)
     return (
-      <div className={styles.callout}>
-        <Button
-          variant="subtle"
-          size="compact-sm"
-          onClick={() => setOpen((value) => !value)}
-          aria-expanded={open}
-        >
-          Run this on a schedule
-        </Button>
-        <Collapse expanded={open}>
-          <HandoffBody handoff={handoff} />
-        </Collapse>
-      </div>
+      <DisclosureSection
+        label="Run this on a schedule"
+        open={open}
+        onToggle={setOpen}
+      >
+        <HandoffBody handoff={handoff} />
+      </DisclosureSection>
     );
 
   return (

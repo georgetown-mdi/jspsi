@@ -504,7 +504,7 @@ describe("console strand recovery panel", () => {
 
   test("a finished re-attach offers the collapsed graduation disclosure, revealed on click", async () => {
     persistAttachment("job-done");
-    stubRecoveryApi({
+    const api = stubRecoveryApi({
       jobId: "job-done",
       status: "succeeded",
       handoff: RECOVERY_HANDOFF,
@@ -515,6 +515,21 @@ describe("console strand recovery panel", () => {
       .element(
         page.getByText("An exchange started from this console has finished"),
       )
+      .toBeInTheDocument();
+
+    // Deliver the result frame so outputs are defined -- the steady state in which
+    // the graduation disclosure accompanies the delivered results.
+    await vi.waitFor(() =>
+      expect(
+        api.captured.some((r) => r.url === "/api/jobs/job-done/events"),
+      ).toBe(true),
+    );
+    api.emit({ v: 1, type: "result", resultWritten: true });
+    api.close();
+
+    // Downloads and the graduation toggle coexist.
+    await expect
+      .element(page.getByRole("heading", { level: 3, name: "Downloads" }))
       .toBeInTheDocument();
 
     // The disclosure is present but starts collapsed -- aria-expanded is the
@@ -579,13 +594,28 @@ describe("console strand recovery panel", () => {
 
   test("a finished run with no hand-off shows no dangling graduation toggle", async () => {
     persistAttachment("job-done");
-    stubRecoveryApi({ jobId: "job-done", status: "succeeded" });
+    const api = stubRecoveryApi({ jobId: "job-done", status: "succeeded" });
     mount(createElement(InviterBench));
 
     await expect
       .element(
         page.getByText("An exchange started from this console has finished"),
       )
+      .toBeInTheDocument();
+
+    // Deliver the result so outputs are defined -- the state in which the toggle
+    // COULD show, so its absence here proves the intrinsic gate rather than a
+    // not-yet-delivered result.
+    await vi.waitFor(() =>
+      expect(
+        api.captured.some((r) => r.url === "/api/jobs/job-done/events"),
+      ).toBe(true),
+    );
+    api.emit({ v: 1, type: "result", resultWritten: true });
+    api.close();
+
+    await expect
+      .element(page.getByRole("heading", { level: 3, name: "Downloads" }))
       .toBeInTheDocument();
 
     // The hand-off route 404s: RecurringHandoff self-gates to null, so the
