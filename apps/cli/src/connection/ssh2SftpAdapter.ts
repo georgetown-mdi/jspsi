@@ -145,6 +145,17 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // teardown has begun (a re-dial's readyTimeout would slow a clean close, and a
   // freshly-dialed session would outlive the teardown).
   private closing = false;
+  // The in-flight recovery re-dial's connect() (settled either way), or undefined
+  // when none is running. end() awaits it before tearing down the shared
+  // Ssh2SftpClient so a re-dial's connect() -- a fresh handshake -- and end()'s
+  // client.end() never run concurrently on the one client (ssh2-sftp-client shares
+  // connection-level listeners, so two ops in flight on one client is unsafe). The
+  // op that owns the re-dial can be abandoned before it completes: core's per-op
+  // peerTimeoutMs budget (a Promise.race) rejects a stalled op to the caller while
+  // the adapter op keeps running, so the caller can reach close() -> end() while
+  // the abandoned op is still mid-re-dial. Bounded: connect() is finite (its own
+  // retry budget and readyTimeout), so the await cannot hang teardown.
+  private redialInFlight: Promise<void> | undefined;
   private log: ReturnType<typeof getLoggerForVerbosity>;
   // The raw SFTPWrapper this adapter has already attached its fatal-'error'
   // listener to, so connect() attaches exactly once per wrapper instance (see
@@ -234,9 +245,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   /**
-   * Connection re-establishment attempts over this adapter's life: the number of
-   * connect-retry re-attempts past the first. A plain operational counter, never
-   * a partner-controlled value.
+   * Connection re-establishment attempts over this adapter's life: connect-retry
+   * re-attempts past the first, plus each successful mid-exchange session-recovery
+   * re-dial (a re-dial that survived a server-side drop is itself a reconnection,
+   * and connect()'s own counter does not see one that succeeds on its first
+   * attempt). A plain operational counter, never a partner-controlled value.
    */
   get reconnectCount(): number {
     return this.reconnectAttempts;
@@ -533,6 +546,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         await this.end().catch(() => {});
         throw error;
       }
+      // The re-dial re-established the dropped session: count it as a reconnection
+      // so the operator's metrics show the exchange survived a server-side drop.
+      // connect()'s own counter only bumps on an internal retry past the first, so
+      // a re-dial that succeeds on its first attempt registers zero without this.
+      this.reconnectAttempts += 1;
       return reissue(op);
     });
   }
@@ -588,7 +606,25 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         "SFTP session recovery reached the re-dial with no retained connect " +
           "options; a server-driven operation ran before connect()",
       );
-    return this.connect(this.originalConnectOptions);
+    // Stop the heartbeat left armed by the dropped session before re-dialing: a
+    // clean drop (unlike a fatal error) does not stop it, so its old timer could
+    // otherwise tick mid-handshake and post a realPath keepalive on the client
+    // while connect() re-establishes it -- a concurrent op. connect() re-arms a
+    // fresh heartbeat via start() at the end of its sequence.
+    this.heartbeat.stop();
+    const redial = this.connect(this.originalConnectOptions);
+    // Publish the re-dial (settled either way) so a concurrent end() serializes
+    // its client.end() behind it; clear the handle once this same re-dial settles
+    // so a later end() is never held by a stale one.
+    const tracked = redial.then(
+      () => {},
+      () => {},
+    );
+    this.redialInFlight = tracked;
+    void tracked.finally(() => {
+      if (this.redialInFlight === tracked) this.redialInFlight = undefined;
+    });
+    return redial;
   }
 
   // SSH_FX_NO_SUCH_FILE: the source-absent status ssh2-sftp-client surfaces as the
@@ -734,14 +770,20 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     this.heartbeat.start();
   }
 
-  end(): Promise<void> {
-    // Mark teardown so an op racing this close cannot trigger a mid-exchange
+  async end(): Promise<void> {
+    // Mark teardown so an op racing this close cannot trigger a NEW mid-exchange
     // re-dial (see withSessionRecovery).
     this.closing = true;
+    // A recovery re-dial may already be mid-handshake on the shared client. Its
+    // connect() and this teardown's client.end() must not overlap on the one
+    // Ssh2SftpClient, so wait the re-dial out first (bounded by connect()'s own
+    // retry/readyTimeout). withSessionRecovery's post-re-dial `closing` check then
+    // tears down whatever session it dialed, so none outlives this close.
+    await this.redialInFlight;
     // Stop the keepalive before tearing the client down so no beat races the
     // teardown, and so the unref'd timer never lingers past the session.
     this.heartbeat.stop();
-    return this.client.end().then(() => {});
+    await this.client.end();
   }
 
   /**
@@ -1045,12 +1087,19 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // ReadableStream is one-shot: a first attempt half-drains it, so re-issuing
     // would re-pipe an already-consumed stream and silently upload nothing. Do NOT
     // wrap that case in recovery; a dropped session fails it terminally rather
-    // than half-re-issuing it. flags:"w" makes the re-issue effect-idempotent (a
-    // truncate-overwrite), and the peer never observes a partial because every
+    // than half-re-issuing it. The peer never observes a partial because every
     // message/ack/sentinel/abort write targets a temp-*.tmp then atomic-renames,
     // and the direct hello put is tolerated by the reader's partial-sync gate.
+    //
+    // Only a truncate-overwrite put is re-issue-idempotent: append mode ("a")
+    // would double-write the payload on a recovery re-issue, so it is never
+    // recovery-wrapped even from a re-runnable source. Every caller passes "w"
+    // today; this is a check standing in for that (per the project convention),
+    // not a live guard against an existing append caller.
+    const truncateOverwrite = options?.flags !== "a";
     const reRunnable =
-      Buffer.isBuffer(src) || Array.isArray(src) || typeof src === "string";
+      truncateOverwrite &&
+      (Buffer.isBuffer(src) || Array.isArray(src) || typeof src === "string");
     if (!reRunnable) return this.putOnce(src, dest, options);
     return this.withSessionRecovery(() => this.putOnce(src, dest, options));
   }
@@ -1258,11 +1307,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       (run) =>
         run().catch(async (error: unknown) => {
           const code = (error as Ssh2SftpError | null | undefined)?.code;
-          if (
-            (this.isNoSuchFileError(error) || code === SSH_FX_FAILURE) &&
-            (await this.client.exists(toPath))
-          )
-            return;
+          if (this.isNoSuchFileError(error) || code === SSH_FX_FAILURE) {
+            // Confirm a landed pre-drop rename via a raw existence check, but if
+            // the probe itself rejects the ambiguity cannot be resolved: fall back
+            // to the ORIGINAL rename error rather than letting the probe's own
+            // failure replace it (mirrors createExclusiveOnce's SFTPv3 fallback,
+            // which keeps the original openErr when its exists() check rejects).
+            const landed = await this.client.exists(toPath).catch(() => false);
+            if (landed) return;
+          }
           throw error;
         }),
     );
