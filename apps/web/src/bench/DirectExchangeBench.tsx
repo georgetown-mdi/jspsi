@@ -111,6 +111,8 @@ export function DirectExchangeBench() {
     warnings,
     started,
     jobId,
+    reattached,
+    reattaching,
     start,
     tryAgain,
     reset,
@@ -285,6 +287,8 @@ export function DirectExchangeBench() {
             failure={failure}
             warnings={warnings}
             jobId={jobId}
+            reattached={reattached}
+            reattaching={reattaching}
             onTryAgain={tryAgain}
             onStartOver={startOver}
             onAbandon={abandonRun}

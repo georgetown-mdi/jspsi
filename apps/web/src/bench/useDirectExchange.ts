@@ -17,11 +17,17 @@ import {
   runWithStage,
   runWithStages,
 } from "./exchangeRun";
+import { isExchangeBusyError, reattachOnBusy } from "./reattachOnBusy";
 import { failureFor } from "./useInviterExchange";
 
+import type {
+  JobInputSource,
+  JobRunStatus,
+} from "@psi/serverJobExchangeDriver";
 import type { DirectTransport } from "./directExchangeModel";
+import type { ExchangeDriverEvents } from "@psi/exchangeDriver";
+import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
 import type { ExchangeRun } from "./exchangeRun";
-import type { JobInputSource } from "@psi/serverJobExchangeDriver";
 import type { JobZeroSetupLinkageStrategy } from "@jobs/intent";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "./runOutputs";
@@ -68,6 +74,16 @@ export function useDirectExchange({
   /** The appliance job id of the current run, once created; undefined before the
    * job exists. Drives the completed-run recurring hand-off panel. */
   jobId: string | undefined;
+  /** The live status of the exchange this run re-attached to on a busy (409)
+   * create, or undefined on a fresh run. Set when a start-time 409 re-attaches to
+   * the exchange holding the appliance's single slot -- the run surface then heads
+   * with recovery-style copy rather than fresh-success copy. */
+  reattached: JobRunStatus | undefined;
+  /** True from the moment a busy (409) create is detected until the liveness probe
+   * settles: the interim during which the run surface suppresses the fresh-run
+   * framing and shows a brief reconnecting notice, before it either resolves to the
+   * recovery view (`reattached`) or falls back to the run's alert. */
+  reattaching: boolean;
   start: () => void;
   tryAgain: () => void;
   reset: () => void;
@@ -78,6 +94,14 @@ export function useDirectExchange({
   const [failure, setFailure] = useState<RunFailure>();
   const [warnings, setWarnings] = useState<Array<string>>([]);
   const [started, setStarted] = useState(false);
+  // The status of an exchange this run re-attached to on a busy (409) create, else
+  // undefined. Drives the run surface's recovery-style copy; reset when a run
+  // restarts or is reset.
+  const [reattached, setReattached] = useState<JobRunStatus>();
+  // True while a detected busy (409) create is being resolved to a re-attachment,
+  // before the liveness probe settles. Drives the interim reconnecting notice and
+  // the fresh-run framing suppression; reset when a run restarts or is reset.
+  const [reattaching, setReattaching] = useState(false);
   // The current run's appliance job id as reactive state (the ref below drives the
   // synchronous discard paths). Set on create, cleared when a run restarts or is
   // reset, so the recurring hand-off panel reads only the live run.
@@ -122,6 +146,8 @@ export function useDirectExchange({
     setFailure(undefined);
     setWarnings([]);
     setCurrentJobId(undefined);
+    setReattached(undefined);
+    setReattaching(false);
 
     const transport = { channel } as const;
     const driver = createServerJobZeroSetupDriver({
@@ -141,7 +167,19 @@ export function useDirectExchange({
       },
     });
 
-    void driver.run({
+    // Raise a failure's alert and freeze the run: the terminal path for every
+    // error except a busy (409) create, which re-attaches below instead.
+    const raiseFailure = (category: ExchangeErrorCategory, error: unknown) => {
+      setFailure(failureFor(category, error, inputSource, channel));
+      setRun((current) => runWithFailure(current));
+    };
+
+    // The run's lifecycle callbacks, built once so a busy (409) re-attach folds
+    // the already-running exchange's stream onto the SAME surface. A busy create
+    // at start re-attaches to the exchange holding the appliance's single slot
+    // (recovery-style copy, `reattached`) rather than dead-ending on the "already
+    // running" alert; every other failure raises its alert.
+    const runEvents: ExchangeDriverEvents<RunOutputs> = {
       signal: controller.signal,
       onStages: (stages) => setRun((current) => runWithStages(current, stages)),
       onStage: (stageId) =>
@@ -159,10 +197,36 @@ export function useDirectExchange({
         // production console carries none of it; the user-facing alert is
         // separately sanitized in failureFor.
         whenDiagnostic(() => console.error(error));
-        setFailure(failureFor(category, error, inputSource, channel));
-        setRun((current) => runWithFailure(current));
+        if (isExchangeBusyError(error)) {
+          // Enter the reconnecting interim the instant the 409 is known, before
+          // the liveness probe round trip -- this suppresses the fresh-run framing
+          // (which would otherwise flash) and announces the reconnect.
+          setReattaching(true);
+          void reattachOnBusy({
+            error,
+            client: jobApiClient,
+            seat: "inviter",
+            channel,
+            events: runEvents,
+            onReattaching: (id, status) => {
+              currentJobIdRef.current = id;
+              setCurrentJobId(id);
+              setReattaching(false);
+              setReattached(status);
+            },
+          }).then((didReattach) => {
+            if (!didReattach) {
+              setReattaching(false);
+              raiseFailure(category, error);
+            }
+          });
+          return;
+        }
+        raiseFailure(category, error);
       },
-    });
+    };
+
+    void driver.run(runEvents);
   }
 
   // Offered by the retryable-failure alert alone: the run is over (the appliance
@@ -203,6 +267,8 @@ export function useDirectExchange({
     setRun(initialRun());
     setWarnings([]);
     setCurrentJobId(undefined);
+    setReattached(undefined);
+    setReattaching(false);
   }
 
   // Discard the current server-job exchange when the operator deliberately leaves
@@ -223,6 +289,8 @@ export function useDirectExchange({
     warnings,
     started,
     jobId: currentJobId,
+    reattached,
+    reattaching,
     start,
     tryAgain,
     reset,
