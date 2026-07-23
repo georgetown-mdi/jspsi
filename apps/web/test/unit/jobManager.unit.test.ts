@@ -1246,6 +1246,47 @@ describe("the single exchange slot", () => {
   });
 });
 
+describe("occupiedSlotId reports the slot occupant", () => {
+  test("is null when the slot is free", () => {
+    const manager = makeManager({});
+    expect(manager.occupiedSlotId()).toBeNull();
+  });
+
+  test("is the occupant id while an exchange is active, then null once it frees", async () => {
+    const manager = makeManager({ events: [RESULT_EVENT], exitCode: 0 });
+    const id = await manager.createJob(validIntent());
+    // Occupied the instant the exchange holds the slot -- exactly when a create
+    // would 409 -- and it stays occupied through the settled-but-undeleted state.
+    expect(manager.occupiedSlotId()).toBe(id);
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    await vi.waitFor(() => expect(record.terminal).not.toBeNull());
+    expect(manager.occupiedSlotId()).toBe(id);
+    // DELETE frees the slot once the child's exit is observed.
+    expect(await manager.deleteJob(id)).toBe(true);
+    expect(manager.occupiedSlotId()).toBeNull();
+  });
+
+  test("stays the occupant id while deleted but the child is still dying", async () => {
+    const { manager, handlersRef } = makeStubSpawnManager();
+    const id = await manager.createJob(validIntent());
+    expect(manager.occupiedSlotId()).toBe(id);
+
+    // Deleted, but the SIGKILLed child has not closed: the slot is held under the
+    // same id, so the probe agrees with the create that still 409s here.
+    expect(await manager.deleteJob(id)).toBe(true);
+    expect(manager.occupiedSlotId()).toBe(id);
+
+    // The child's close frees the slot; the probe then reads free.
+    handlersRef.current!.onTerminal({
+      outcome: "failed",
+      exitCode: null,
+      signal: "SIGKILL",
+    });
+    expect(manager.occupiedSlotId()).toBeNull();
+  });
+});
+
 describe("the disk-only DELETE arm", () => {
   /** A bare manager over an existing data root, wired to the stub but never
    * spawning: it exercises only the disk-only DELETE arm. */

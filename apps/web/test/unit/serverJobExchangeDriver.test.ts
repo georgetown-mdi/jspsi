@@ -9,6 +9,7 @@ import {
   createServerJobReattachDriver,
   createServerJobZeroSetupDriver,
   fetchSftpConnection,
+  fetchSlotOccupancy,
 } from "@psi/serverJobExchangeDriver";
 import { buildRunOutputs } from "@bench/runOutputs";
 
@@ -1434,5 +1435,96 @@ describe("fetchSftpConnection", () => {
         new Response("<html>gateway error</html>", { status: 200 }),
       );
     await expect(fetchSftpConnection(htmlResponse)).resolves.toEqual(none);
+  });
+});
+
+describe("fetchSlotOccupancy", () => {
+  const signal = new AbortController().signal;
+
+  function jsonResponse(body: unknown, status = 200): typeof fetch {
+    return () =>
+      Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+  }
+
+  const free = { occupied: false };
+
+  test("reads occupied plus the occupant id off an occupied slot", async () => {
+    await expect(
+      fetchSlotOccupancy(
+        signal,
+        jsonResponse({
+          occupied: true,
+          id: "11111111-2222-4333-8444-555555555555",
+        }),
+      ),
+    ).resolves.toEqual({
+      occupied: true,
+      id: "11111111-2222-4333-8444-555555555555",
+    });
+  });
+
+  test("reads occupied:false off a free slot", async () => {
+    await expect(
+      fetchSlotOccupancy(signal, jsonResponse({ occupied: false })),
+    ).resolves.toEqual(free);
+  });
+
+  test("GETs the slot route", async () => {
+    const urls: Array<string> = [];
+    await fetchSlotOccupancy(signal, (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return Promise.resolve(
+        new Response(JSON.stringify({ occupied: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    });
+    expect(urls).toEqual(["/api/jobs/slot"]);
+  });
+
+  test("a non-2xx reads as free (a disabled API's 404 among them)", async () => {
+    for (const status of [404, 500])
+      await expect(
+        fetchSlotOccupancy(
+          signal,
+          jsonResponse({ occupied: true, id: "x" }, status),
+        ),
+      ).resolves.toEqual(free);
+  });
+
+  test("a malformed body reads as free, never a partial occupancy", async () => {
+    const malformed: Array<unknown> = [
+      [],
+      "occupied",
+      null,
+      { occupied: true },
+      { occupied: true, id: "" },
+      { occupied: true, id: 7 },
+      { occupied: "true", id: "x" },
+      { id: "x" },
+    ];
+    for (const body of malformed)
+      await expect(
+        fetchSlotOccupancy(signal, jsonResponse(body)),
+      ).resolves.toEqual(free);
+  });
+
+  test("a network error and a non-JSON body read as free", async () => {
+    await expect(
+      fetchSlotOccupancy(signal, () => Promise.reject(new Error("offline"))),
+    ).resolves.toEqual(free);
+    const htmlResponse: typeof fetch = () =>
+      Promise.resolve(
+        new Response("<html>gateway error</html>", { status: 200 }),
+      );
+    await expect(fetchSlotOccupancy(signal, htmlResponse)).resolves.toEqual(
+      free,
+    );
   });
 });

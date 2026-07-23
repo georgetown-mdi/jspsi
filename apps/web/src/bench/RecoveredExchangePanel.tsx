@@ -13,6 +13,7 @@ import {
 import {
   createFetchJobApiClient,
   createServerJobReattachDriver,
+  fetchSlotOccupancy,
 } from "@psi/serverJobExchangeDriver";
 
 import {
@@ -32,23 +33,84 @@ import {
 import { StatusPanel } from "./StatusPanel";
 import styles from "./bench.module.css";
 
-import type { ConsoleJobAttachment } from "@psi/consoleJobAttachment";
+import type { ConsoleJobSeat } from "@psi/consoleJobAttachment";
 import type { ExchangeRun } from "./exchangeRun";
 import type { JobRunStatus } from "@psi/serverJobExchangeDriver";
+import type { ReattachedRunState } from "./BenchRunSurface";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "./runOutputs";
 
 /**
+ * The exchange the panel recovers: the job id to re-attach to and the seat that
+ * heads its initial run. Read from the persisted attachment, or -- when this
+ * browser holds none -- adopted from the slot-occupancy probe.
+ */
+interface RecoveryTarget {
+  jobId: string;
+  seat: ConsoleJobSeat;
+}
+
+/**
+ * Resolve the exchange to recover: the persisted attachment when this browser has
+ * one, else an occupancy probe of the appliance's single slot so a browser that
+ * never started the exchange still sees it. A probe-adopted target is held in
+ * component state only -- never written to storage -- until the operator acts
+ * (re-attach or discard). Returns null when there is nothing to recover; the probe
+ * fails safe to unoccupied, so a probe fault reads as nothing to recover.
+ */
+async function resolveRecoveryTarget(
+  signal: AbortSignal,
+): Promise<{ target: RecoveryTarget; adoptedFromProbe: boolean } | null> {
+  const stored = readAttachment();
+  if (stored !== null)
+    return {
+      target: { jobId: stored.jobId, seat: stored.seat },
+      adoptedFromProbe: false,
+    };
+  const occupancy = await fetchSlotOccupancy(signal);
+  if (!occupancy.occupied) return null;
+  return {
+    target: { jobId: occupancy.id, seat: "inviter" },
+    adoptedFromProbe: true,
+  };
+}
+
+/**
+ * The panel's lead paragraph. The default names the exchange as one the operator
+ * started in this browser; the probe-adopted variant does not claim that -- the id
+ * came from the slot probe, so another browser (or this one before its attachment
+ * was lost) may have started it -- and says "started on it" instead.
+ */
+function recoveryLead(
+  state: ReattachedRunState,
+  adoptedFromProbe: boolean,
+): string {
+  const origin = adoptedFromProbe
+    ? "an exchange started on it"
+    : "an exchange you started here";
+  return state === "running"
+    ? `This appliance is still running ${origin}. Watch it finish, stop it, or discard it and its files.`
+    : state === "finished"
+      ? `This appliance finished ${origin}. Download its results below, or discard it to remove its files from this appliance.`
+      : `This appliance stopped ${origin} before it finished, so there are no results to download. The reason is shown below; discard it to remove its files from this appliance.`;
+}
+
+/**
  * The console's strand-recovery surface: a self-contained way back to the one
- * exchange this browser last started on the appliance, mounted on an idle bench
- * entry and the console lobby. It is NOT a job list and NOT accept-later -- there
- * is exactly one exchange, named by the persisted attachment record.
+ * exchange the appliance holds, mounted on an idle bench entry and the console
+ * lobby. It is NOT a job list and NOT accept-later -- there is exactly one
+ * exchange, named by this browser's stored attachment or, failing that, by the
+ * appliance's single-slot occupancy.
  *
- * On mount it reads the attachment and probes `GET /api/jobs/:id`. Nothing
- * persisted renders nothing. A CONFIRMED-gone id (an HTTP 404: deleted, or a
- * restart forgot it) renders nothing too -- and is best-effort DELETEd first, so a
- * restart-orphaned workdir's at-rest exposure is bounded, then the record cleared.
- * A transient/unreachable probe (a network error or non-404 fault) renders nothing
+ * On mount it resolves the exchange to recover -- the persisted attachment when
+ * this browser holds one, else an occupancy probe of the appliance's single slot
+ * (`GET /api/jobs/slot`) so a browser that never started it still finds it -- then
+ * probes `GET /api/jobs/:id`. Nothing to recover renders nothing. A probe-adopted
+ * id is held in state only, never persisted, until the operator acts (re-attach or
+ * discard). A CONFIRMED-gone id (an HTTP 404: deleted, or a restart forgot it)
+ * renders nothing too -- and is best-effort DELETEd first, so a restart-orphaned
+ * workdir's at-rest exposure is bounded, then any stored record cleared. A
+ * transient/unreachable probe (a network error or non-404 fault) renders nothing
  * but LEAVES the record intact, so a blip never destroys the way back to a live
  * exchange. A live id renders the panel: one of three headings -- still running,
  * finished, or stopped (failed/cancelled) -- the re-attached run's timeline
@@ -65,8 +127,11 @@ import type { RunOutputs } from "./runOutputs";
  */
 export function RecoveredExchangePanel() {
   // undefined = probing (render nothing); null = nothing to recover (render
-  // nothing); a record = a live re-attachment to render.
-  const [attachment, setAttachment] = useState<ConsoleJobAttachment | null>();
+  // nothing); a target = a live re-attachment to render.
+  const [attachment, setAttachment] = useState<RecoveryTarget | null>();
+  // True when the target's id came from the slot-occupancy probe rather than this
+  // browser's own stored attachment, which selects the neutral lead copy.
+  const [adoptedFromProbe, setAdoptedFromProbe] = useState(false);
   const [run, setRun] = useState<ExchangeRun>();
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [failure, setFailure] = useState<RunFailure>();
@@ -81,27 +146,29 @@ export function RecoveredExchangePanel() {
   const abortRef = useRef<AbortController | undefined>(undefined);
 
   useEffect(() => {
-    const stored = readAttachment();
-    if (stored === null) {
-      setAttachment(null);
-      return;
-    }
     const controller = new AbortController();
     abortRef.current = controller;
     const aborted = () => controller.signal.aborted;
     void (async () => {
+      const resolved = await resolveRecoveryTarget(controller.signal);
+      if (aborted()) return;
+      if (resolved === null) {
+        setAttachment(null);
+        return;
+      }
+      const { target, adoptedFromProbe: fromProbe } = resolved;
       const status = await client.fetchJobStatus(
-        stored.jobId,
+        target.jobId,
         controller.signal,
       );
       if (aborted()) return;
       if (status.kind === "gone") {
         // A CONFIRMED 404: the exchange is not on the appliance (deleted, or a
-        // restart forgot it). The persisted id's last duty is to bound a
-        // restart-orphaned workdir's at-rest exposure through the disk-only DELETE
-        // arm; then clear the record and render nothing.
+        // restart forgot it). The id's last duty is to bound a restart-orphaned
+        // workdir's at-rest exposure through the disk-only DELETE arm; then clear
+        // any stored record and render nothing.
         try {
-          await client.deleteJob(stored.jobId);
+          await client.deleteJob(target.jobId);
         } catch (error) {
           whenDiagnostic(() => console.error(error));
         }
@@ -111,15 +178,16 @@ export function RecoveredExchangePanel() {
       }
       if (status.kind === "unreachable") {
         // A transient unreachability, NOT a confirmed removal: render nothing but
-        // LEAVE the record intact so the next mount can recover a still-live
+        // LEAVE any record intact so the next mount can recover a still-live
         // exchange rather than the blip destroying the way back to it.
         setAttachment(null);
         return;
       }
       setInitialStatus(status.status);
-      setRun(initialRun(stored.seat));
-      setAttachment(stored);
-      const driver = createServerJobReattachDriver(stored.jobId, client);
+      setRun(initialRun(target.seat));
+      setAdoptedFromProbe(fromProbe);
+      setAttachment(target);
+      const driver = createServerJobReattachDriver(target.jobId, client);
       await driver.run({
         signal: controller.signal,
         onStages: (stages) =>
@@ -183,21 +251,16 @@ export function RecoveredExchangePanel() {
   const finished =
     !stopped && (outputs !== undefined || initialStatus === "succeeded");
   const running = !stopped && !finished;
+  const runState: ReattachedRunState = running
+    ? "running"
+    : finished
+      ? "finished"
+      : "stopped";
 
   return (
     <section className={styles.callout} aria-label="Recovered exchange">
-      <h2 style={{ marginTop: 0 }}>
-        {recoveredExchangeHeading(
-          running ? "running" : finished ? "finished" : "stopped",
-        )}
-      </h2>
-      <p className={styles.small}>
-        {running
-          ? "This appliance is still running an exchange you started here. Watch it finish, stop it, or discard it and its files."
-          : finished
-            ? "This appliance finished an exchange you started here. Download its results below, or discard it to remove its files from this appliance."
-            : "This appliance stopped an exchange you started here before it finished, so there are no results to download. The reason is shown below; discard it to remove its files from this appliance."}
-      </p>
+      <h2 style={{ marginTop: 0 }}>{recoveredExchangeHeading(runState)}</h2>
+      <p className={styles.small}>{recoveryLead(runState, adoptedFromProbe)}</p>
       {failure !== undefined && (
         <Alert
           color="red"
