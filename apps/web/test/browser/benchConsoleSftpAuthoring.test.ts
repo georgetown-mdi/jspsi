@@ -52,6 +52,9 @@ vi.mock("@psi/rendezvous", () => ({
 }));
 
 const FINGERPRINT = `SHA256:${"A".repeat(43)}`;
+// A distinct valid fingerprint the probe returns, so a test can tell a
+// probe-filled pin apart from a typed one.
+const PROBE_FINGERPRINT = `SHA256:${"B".repeat(42)}A`;
 
 const CLIENTS_FILE = {
   name: "clients.csv",
@@ -95,6 +98,10 @@ interface StubOptions {
   /** Non-blocking credential warnings the PUT /api/jobs/sftp projection carries,
    * as the server returns when a credential resolves inside an excluded dir. */
   putWarnings?: Array<string>;
+  /** The POST /api/jobs/sftp/probe response. Defaults to a 200 ok envelope
+   * carrying {@link PROBE_FINGERPRINT}; a `{status, body}` lets a test drive an
+   * unreachable/error outcome. */
+  probe?: { status?: number; body?: unknown };
 }
 
 /** The same-origin job API, stubbed at the global fetch seam. PUT /api/jobs/sftp
@@ -140,6 +147,21 @@ function stubJobApi(options: StubOptions = {}): {
           subPath.join("/") === ".ssh" ? SECRETS_SSH : SECRETS_ROOT;
         return Promise.resolve(
           jsonResponse({ configured: true, readable: true, entries }),
+        );
+      }
+      if (url === "/api/jobs/sftp/probe") {
+        const probe = options.probe ?? {
+          status: 200,
+          body: {
+            status: "ok",
+            fingerprint: PROBE_FINGERPRINT,
+            keyType: "ssh-ed25519",
+          },
+        };
+        return Promise.resolve(
+          probe.body !== undefined
+            ? jsonResponse(probe.body, probe.status ?? 200)
+            : new Response(null, { status: probe.status ?? 200 }),
         );
       }
       if (url === "/api/jobs/sftp") {
@@ -233,6 +255,17 @@ async function openAndFillForm() {
     page.getByLabelText("Server identity fingerprint"),
     FINGERPRINT,
   );
+}
+
+/** Open the form and fill host + username only, leaving the fingerprint EMPTY so
+ * the host-key probe can fill it. */
+async function openFormForProbe() {
+  await page.getByRole("button", { name: "Add connection" }).click();
+  await userEvent.fill(
+    page.getByLabelText("SFTP server address"),
+    "sftp.partner.example",
+  );
+  await userEvent.fill(page.getByLabelText("Username"), "linkage");
 }
 
 describe("console SFTP connection authoring", () => {
@@ -561,6 +594,100 @@ describe("console SFTP connection authoring", () => {
     await expect
       .element(page.getByText("The connection details are too large."))
       .toBeInTheDocument();
+  });
+
+  test("probe-to-fill reads the fingerprint, fills the field, and Save PUTs it", async () => {
+    const api = stubJobApi();
+    mount(createElement(InviterBench));
+    await reachReviewCreate();
+    await openFormForProbe();
+
+    // Read the fingerprint from the server; the presented result appears with the
+    // comparison framing and, on the exchange path, the reconciliation note (no
+    // out-of-band checkbox).
+    await page
+      .getByRole("button", { name: "Read the fingerprint from the server" })
+      .click();
+    await expect
+      .element(page.getByText("The server presented this fingerprint"))
+      .toBeInTheDocument();
+    await expect.element(page.getByText(PROBE_FINGERPRINT)).toBeInTheDocument();
+    await expect
+      .element(page.getByText("warn on a mismatch", { exact: false }))
+      .toBeInTheDocument();
+    // The exchange ceremony has NO out-of-band affirmation checkbox.
+    expect(page.getByRole("checkbox").query()).toBeNull();
+
+    await page.getByRole("button", { name: "Use this fingerprint" }).click();
+    // The field now holds the probed value (comparison, then fill).
+    await expect
+      .element(page.getByLabelText("Server identity fingerprint"))
+      .toHaveValue(PROBE_FINGERPRINT);
+
+    await userEvent.fill(
+      page.getByLabelText("File reference"),
+      "@/run/secrets/partner-key",
+    );
+    await page.getByRole("button", { name: "Save connection" }).click();
+    const put = api.captured.find(
+      (request) => request.url === "/api/jobs/sftp" && request.method === "PUT",
+    );
+    const body = JSON.parse(put?.body ?? "{}") as Record<string, unknown>;
+    expect(body.hostKeyFingerprint).toBe(PROBE_FINGERPRINT);
+  });
+
+  test("a probe error keeps paste usable", async () => {
+    const api = stubJobApi({
+      probe: { status: 200, body: { status: "unreachable" } },
+    });
+    mount(createElement(InviterBench));
+    await reachReviewCreate();
+    await openFormForProbe();
+
+    await page
+      .getByRole("button", { name: "Read the fingerprint from the server" })
+      .click();
+    await expect
+      .element(page.getByText("Could not read the fingerprint"))
+      .toBeInTheDocument();
+    // Paste stays first-class: the operator types the fingerprint and saves.
+    await userEvent.fill(
+      page.getByLabelText("Server identity fingerprint"),
+      FINGERPRINT,
+    );
+    await userEvent.fill(
+      page.getByLabelText("File reference"),
+      "@/run/secrets/partner-key",
+    );
+    await page.getByRole("button", { name: "Save connection" }).click();
+    const put = api.captured.find(
+      (request) => request.url === "/api/jobs/sftp" && request.method === "PUT",
+    );
+    const body = JSON.parse(put?.body ?? "{}") as Record<string, unknown>;
+    expect(body.hostKeyFingerprint).toBe(FINGERPRINT);
+  });
+
+  test("editing the host clears a presented probe result (no stale fill)", async () => {
+    stubJobApi();
+    mount(createElement(InviterBench));
+    await reachReviewCreate();
+    await openFormForProbe();
+
+    await page
+      .getByRole("button", { name: "Read the fingerprint from the server" })
+      .click();
+    await expect
+      .element(page.getByText("The server presented this fingerprint"))
+      .toBeInTheDocument();
+
+    // Editing the host retargets the probe: a stale observation must not linger.
+    await userEvent.fill(
+      page.getByLabelText("SFTP server address"),
+      "sftp.other.example",
+    );
+    expect(
+      page.getByText("The server presented this fingerprint").query(),
+    ).toBeNull();
   });
 
   test("the deliberate save-a-file alternative routes to the save surface", async () => {

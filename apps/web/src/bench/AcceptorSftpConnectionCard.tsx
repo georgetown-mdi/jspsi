@@ -112,6 +112,7 @@ export function AcceptorSftpConnectionCard({
       initial={sftpFormFromLocator(locator)}
       isEdit={connection !== null}
       reviewLocator={locator}
+      probeCeremony="exchange"
       onAuthored={(authored) => {
         setFormOpen(false);
         onAuthored(authored);

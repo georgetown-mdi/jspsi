@@ -209,6 +209,7 @@ export function ReviewCreateSection({
             <SftpConnectionCard
               connection={sftpConnection ?? null}
               saveFilePreferred={sftpSaveFilePreferred}
+              probeCeremony="exchange"
               onAuthored={onAuthorConnection}
               onCleared={onClearConnection}
               onUseCli={onUseCliForSftp}

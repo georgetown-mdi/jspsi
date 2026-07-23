@@ -85,13 +85,19 @@ function enable(options: { inputDir?: string } = {}): string {
 function profileRequest(name: string): Request {
   return new Request(
     `http://localhost/api/jobs/inputs/profile?name=${encodeURIComponent(name)}`,
+    // A synthetic Request sets no Host; the gate's loopback allowlist needs one.
+    { headers: { host: "localhost" } },
   );
 }
 
 function coverageRequest(body: unknown, headers: Record<string, string> = {}) {
   return new Request("http://localhost/api/jobs/inputs/coverage", {
     method: "POST",
-    headers: { "content-type": "application/json", ...headers },
+    headers: {
+      "content-type": "application/json",
+      host: "localhost",
+      ...headers,
+    },
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
 }
@@ -102,7 +108,9 @@ function coverageBody(name: string, standardization = STANDARDIZATION) {
 
 async function listing(): Promise<Response> {
   return (await handlersOf(InputsRoute).GET({
-    request: new Request("http://localhost/api/jobs/inputs"),
+    request: new Request("http://localhost/api/jobs/inputs", {
+      headers: { host: "localhost" },
+    }),
     params: {},
   })) as Response;
 }
@@ -316,7 +324,7 @@ describe("POST /api/jobs/inputs/coverage", () => {
     const controller = new AbortController();
     const request = new Request("http://localhost/api/jobs/inputs/coverage", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", host: "localhost" },
       body: JSON.stringify(coverageBody(name)),
       signal: controller.signal,
     });

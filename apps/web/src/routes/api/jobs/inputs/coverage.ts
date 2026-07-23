@@ -33,7 +33,7 @@ export const Route = createFileRoute("/api/jobs/inputs/coverage")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const gate = gateJobRoute();
+        const gate = gateJobRoute(request);
         if (gate.kind === "response") return gate.response;
         const resolvedDir = useJobInputDir();
         if (resolvedDir === undefined) return jobEmptyResponse(404);

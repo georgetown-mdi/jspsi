@@ -13,11 +13,20 @@ export interface JobApiConfig {
    * `VITE_DEPLOYMENT_PROFILE` is `console`). The job API is enabled only in a
    * console build. */
   consoleProfile: boolean;
+  /** Extra request `Host` hostnames the gate accepts beyond the loopback literals
+   * -- an operator's escape hatch for a deliberate reverse-proxy or LAN-name
+   * front. Lowercased, empties dropped; empty by default. */
+  allowedHosts: ReadonlySet<string>;
 }
 
 /** The environment variable naming the data root the job API creates workdirs
  * under. */
 export const JOB_DATA_ROOT_ENV = "JOB_DATA_ROOT";
+
+/** The environment variable listing extra `Host` hostnames (comma-separated) the
+ * job API accepts beyond the loopback literals, for an operator who deliberately
+ * fronts the console behind a reverse proxy or reaches it by a LAN name. */
+export const JOB_ALLOWED_HOSTS_ENV = "JOB_ALLOWED_HOSTS";
 
 /**
  * The build-time deployment-profile variable, read server-side the same way the
@@ -32,6 +41,17 @@ export const DEPLOYMENT_PROFILE_ENV = "VITE_DEPLOYMENT_PROFILE";
 /** The deployment-profile value that identifies the console appliance build. */
 export const CONSOLE_PROFILE = "console";
 
+/** Parse a comma-separated `JOB_ALLOWED_HOSTS` value into a lowercased hostname
+ * set, trimming each entry and dropping empties. */
+function parseAllowedHosts(value: string): ReadonlySet<string> {
+  return new Set(
+    value
+      .split(",")
+      .map((host) => host.trim().toLowerCase())
+      .filter((host) => host.length > 0),
+  );
+}
+
 /** Read the job-API configuration from an environment map. */
 export function readJobApiConfig(
   env: NodeJS.ProcessEnv = process.env,
@@ -40,6 +60,7 @@ export function readJobApiConfig(
     dataRoot: (env[JOB_DATA_ROOT_ENV] ?? "").trim(),
     consoleProfile:
       (env[DEPLOYMENT_PROFILE_ENV] ?? "").trim() === CONSOLE_PROFILE,
+    allowedHosts: parseAllowedHosts(env[JOB_ALLOWED_HOSTS_ENV] ?? ""),
   };
 }
 

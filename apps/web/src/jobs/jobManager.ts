@@ -25,6 +25,7 @@ import {
   spawnZeroSetupJob,
 } from "./cliDriver";
 import { buildJobHandoff } from "./handoff";
+import { probeSftpHostKey } from "./sftpProbe";
 import { removeSftpCredentialFile } from "./sftpScratch";
 import { rendezvousStartupWarnings } from "./jobRendezvous";
 import { validateAuthoredSftpServer } from "./sftpServer";
@@ -42,6 +43,7 @@ import type {
 } from "./intent";
 import type { JobHandoff } from "./handoff";
 import type { JobSftpServerEntry } from "./sftpServer";
+import type { SftpProbeResult } from "./sftpProbe";
 
 /**
  * Thrown by {@link JobManager.createJob} when an sftp intent arrives but no
@@ -70,6 +72,20 @@ export class ExchangeBusyError extends Error {
   constructor() {
     super("an exchange is already active");
     this.name = "ExchangeBusyError";
+  }
+}
+
+/**
+ * Thrown by {@link JobManager.probeSftpHostKey} when a probe child is already
+ * running. The probe is single-flight -- one child at a time -- so a concurrent
+ * request is refused with a 409, the busy convention `POST /api/jobs` uses. It is
+ * independent of the exchange slot: a probe is a read-only host-key observation
+ * that authors nothing.
+ */
+export class SftpProbeBusyError extends Error {
+  constructor() {
+    super("a host-key probe is already running");
+    this.name = "SftpProbeBusyError";
   }
 }
 
@@ -275,6 +291,13 @@ export class JobManager {
    * secret must not outlive the connection it belongs to.
    */
   private authoredMaterializedCredentialPath: string | undefined;
+  /**
+   * Whether a host-key probe child is running. The probe is single-flight, so a
+   * concurrent {@link probeSftpHostKey} is refused with {@link SftpProbeBusyError}.
+   * Set synchronously at entry (before any await) so two concurrent calls cannot
+   * both pass; cleared when the child settles. Independent of the exchange slot.
+   */
+  private probeInFlight = false;
 
   constructor(options: JobManagerOptions) {
     this.dataRoot = options.dataRoot;
@@ -442,6 +465,34 @@ export class JobManager {
     if (entry.path !== undefined) projection.path = entry.path;
     projection.credentialWarnings = this.authoredCredentialWarnings;
     return projection;
+  }
+
+  /**
+   * Read the host-key fingerprint an SFTP server at `host[:port]` presents, by
+   * spawning the CLI's `probe-host-key` subcommand. STATELESS by construction: it
+   * touches no authored connection, records nothing, and returns the observation
+   * for the caller to forget -- the console offers it beside the paste field for a
+   * comparison, never trusting it. SINGLE-FLIGHT: the flag is claimed
+   * synchronously (no await before the assignment), so a concurrent probe is
+   * {@link SftpProbeBusyError} (a 409) rather than a second child. The manager owns
+   * the binary path and child env, so a test can point the probe at the stub CLI.
+   */
+  async probeSftpHostKey(args: {
+    host: string;
+    port?: number;
+  }): Promise<SftpProbeResult> {
+    if (this.probeInFlight) throw new SftpProbeBusyError();
+    this.probeInFlight = true;
+    try {
+      return await probeSftpHostKey({
+        host: args.host,
+        ...(args.port !== undefined ? { port: args.port } : {}),
+        binaryPath: this.binaryPath,
+        ...(this.childEnv !== undefined ? { childEnv: this.childEnv } : {}),
+      });
+    } finally {
+      this.probeInFlight = false;
+    }
   }
 
   private async startJobInWorkdir(

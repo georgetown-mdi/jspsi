@@ -267,7 +267,10 @@ function armSftp(manager: JobManager): string {
 
 async function getHandoff(jobId: string): Promise<Response> {
   return (await handlersOf(HandoffRoute).GET({
-    request: new Request(`http://localhost/api/jobs/${jobId}/handoff`),
+    // A synthetic Request sets no Host; the gate's loopback allowlist needs one.
+    request: new Request(`http://localhost/api/jobs/${jobId}/handoff`, {
+      headers: { host: "localhost" },
+    }),
     params: { jobId },
   })) as Response;
 }
@@ -276,7 +279,7 @@ async function createJob(body: unknown): Promise<string> {
   const created = (await handlersOf(CreateRoute).POST({
     request: new Request("http://localhost/api/jobs", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", host: "localhost" },
       body: JSON.stringify(body),
     }),
     params: {},

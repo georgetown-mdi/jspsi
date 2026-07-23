@@ -21,8 +21,8 @@ import { useJobRendezvousDir } from "@jobs/jobRendezvous";
 export const Route = createFileRoute("/api/jobs/rendezvous")({
   server: {
     handlers: {
-      GET: () => {
-        const gate = gateJobRoute();
+      GET: ({ request }) => {
+        const gate = gateJobRoute(request);
         if (gate.kind === "response") return gate.response;
         const path = useJobRendezvousDir();
         return jobJsonResponse(

@@ -17,7 +17,7 @@ export const Route = createFileRoute("/api/jobs/$jobId/events")({
   server: {
     handlers: {
       GET: ({ request, params }) => {
-        const gate = gateJobRoute();
+        const gate = gateJobRoute(request);
         if (gate.kind === "response") return gate.response;
         const jobId = validateJobIdParam(params.jobId);
         if (jobId === null) return jobEmptyResponse(404);

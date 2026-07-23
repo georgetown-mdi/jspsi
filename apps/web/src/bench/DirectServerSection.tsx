@@ -84,6 +84,7 @@ export function DirectServerSection({
           connection={sftpConnection}
           saveFilePreferred={false}
           offerSaveFile={false}
+          probeCeremony="direct"
           onAuthored={onAuthorConnection}
           onCleared={onClearConnection}
         />

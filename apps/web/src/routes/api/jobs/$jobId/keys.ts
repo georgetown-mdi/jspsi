@@ -21,8 +21,8 @@ import { jobFileExists } from "@jobs/workdir";
 export const Route = createFileRoute("/api/jobs/$jobId/keys")({
   server: {
     handlers: {
-      GET: async ({ params }) => {
-        const gate = gateJobRoute();
+      GET: async ({ request, params }) => {
+        const gate = gateJobRoute(request);
         if (gate.kind === "response") return gate.response;
         const jobId = validateJobIdParam(params.jobId);
         if (jobId === null) return jobEmptyResponse(404);

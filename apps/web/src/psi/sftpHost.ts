@@ -1,8 +1,10 @@
 /**
  * The one bare-host rule for an SFTP locator, shared by the authoring form
  * ({@link ../bench/sftpConnectionForm}), the server's `PUT /api/jobs/sftp`
- * backstop ({@link ../jobs/sftpServer}), and the accept-side admission check
- * ({@link ../bench/acceptorModel}). Extracted so the three cannot drift: a value
+ * backstop ({@link ../jobs/sftpServer}), the accept-side admission check
+ * ({@link ../bench/acceptorModel}), the host-key probe form control
+ * ({@link ../bench/SftpAuthoringForm}), and the probe route's body check
+ * ({@link ../routes/api/jobs/sftp/probe}). Extracted so they cannot drift: a value
  * one accepts as bare, the others must too.
  */
 

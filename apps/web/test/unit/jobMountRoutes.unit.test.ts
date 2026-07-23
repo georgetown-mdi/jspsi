@@ -62,7 +62,8 @@ function secretsMount(): string {
 function entriesRequest(segments: Array<string>): Request {
   const url = new URL("http://localhost/api/jobs/mounts/secrets/entries");
   for (const segment of segments) url.searchParams.append("subPath", segment);
-  return new Request(url);
+  // A synthetic Request sets no Host; the gate's loopback allowlist needs one.
+  return new Request(url, { headers: { host: "localhost" } });
 }
 
 async function entries(segments: Array<string> = []): Promise<Response> {

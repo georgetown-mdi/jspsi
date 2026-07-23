@@ -14,6 +14,17 @@ The API is dark by default. Enablement requires two conditions together: a `cons
 
 Every job response carries `Cache-Control: no-store` and no CORS headers -- the API is same-origin appliance-local, so a cross-origin caller is never granted access. These are additive to the defense-in-depth response headers the server entry already applies globally (see [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#channel-security)).
 
+### Browser-CSRF gate
+
+The shared route gate applies two complementary browser defenses to every route, after the feature gate's `404` (so a disabled API stays a uniform `404`, its presence unobservable) and before any filesystem access or spawn. Each refuses with an empty-bodied `403`, matching the gate's `404`.
+
+- **Loopback Host-allowlist.** The request's `Host` hostname -- port-stripped, IPv6 brackets removed, lowercased -- must be a loopback literal (`127.0.0.1`, `localhost`, or `::1`) or an entry in the `JOB_ALLOWED_HOSTS` environment variable (comma-separated hostnames, each trimmed and lowercased, empties dropped); any other value is refused, as is an absent or unparseable `Host` (fail closed). The match is on the hostname only, so any published-port remapping (`-p 127.0.0.1:8080:3000`) passes. `0.0.0.0` is never a loopback literal. A rejection is logged server-side naming the `Host` and pointing at `JOB_ALLOWED_HOSTS`, so a misconfigured operator gets a self-service diagnosis rather than a silent break. The check keys on the `Host` header, never the socket peer address (under Docker Desktop the peer is the gateway, not loopback).
+- **Origin / `Sec-Fetch-Site` check.** In order: if `Sec-Fetch-Site` is present and is neither `same-origin` nor `none`, the request is refused; else if `Origin` is present and its origin (scheme+host+port) does not equal the request's own origin -- derived from the `Host` header, since the console is served over http on loopback -- it is refused; if neither header is present the request is allowed.
+
+The Origin/`Sec-Fetch-Site` check closes plain cross-origin CSRF: a page the operator visits while the console runs can issue a CORS "simple" request (no preflight) to a job route and drive a side effect -- e.g. make the appliance connect out to an attacker-chosen host via `POST /api/jobs/sftp/probe`. Browsers send `Origin` on state-changing requests and `Sec-Fetch-Site` on every fetch, and page JavaScript cannot set either (both are forbidden header names), so a visited page cannot forge its way past the check; the console's own UI fetches relative same-origin URLs and passes unchanged; a non-browser client on loopback (curl, the operator's CLI) sends neither header and is allowed. The check is on the request's origin metadata, not its body, so it is content-type-agnostic and covers every route uniformly regardless of body shape.
+
+The loopback Host-allowlist closes DNS rebinding, a standard technique the Origin/`Sec-Fetch-Site` check alone does not stop. A page at `http://attacker.example` whose name the attacker rebinds to `127.0.0.1` reaches the API with `Host` and `Origin` both naming `attacker.example` -- genuinely same-origin, so the Origin check passes -- and, being same-origin, the page can then _read_ the response (job results, keys, the SFTP projection), not merely drive a side effect. Requiring the `Host` to be a loopback name refuses it. This is what makes the no-CORS "cross-origin caller is never granted access" posture above actually hold: without the loopback-`Host` requirement, rebinding would render an attacker page same-origin and CORS-exempt. `JOB_ALLOWED_HOSTS` is the deliberate-exposure escape hatch for an operator who fronts the console behind a reverse proxy or reaches it by a LAN name -- deployment paths marked unsupported / an explicit choice in [DEPLOYMENT.md](../DEPLOYMENT.md#server-job-api).
+
 ## Endpoints
 
 | Method | Path | Success | Notes |
@@ -30,6 +41,7 @@ Every job response carries `Cache-Control: no-store` and no CORS headers -- the 
 | `GET` | `/api/jobs/sftp` | `200` `{ "configured": <bool>, ... }` | The authored SFTP connection as a credential-free projection: `{ "configured": false }` when none, else `{ "configured": true, "host", "port"?, "path"?, "credentialWarnings": [ ... ] }`. `credentialWarnings` is the non-blocking credential-containment warnings. See [The authored SFTP connection](#the-authored-sftp-connection). |
 | `PUT` | `/api/jobs/sftp` | `200` credential-free projection | Author the SFTP connection from a file-reference credential body (see [Authoring the SFTP connection](#authoring-the-sftp-connection)). `400` (body naming a field path, never a value) on a body that fails hard validation. `413` when the body exceeds its size cap. |
 | `DELETE` | `/api/jobs/sftp` | `204` | Forget the in-app authored connection (idempotent). |
+| `POST` | `/api/jobs/sftp/probe` | `200` typed envelope | Read the host-key fingerprint a server at `{ "host", "port"? }` presents, for the operator to compare against the published value (see [Probing the server host key](#probing-the-server-host-key)). `400` (field-path body) on a bad body, `409` (empty body) when a probe is already running. |
 | `GET` | `/api/jobs/mounts/secrets/entries` | `200` `{ "configured", "readable", "entries" }` | List the mounted secrets directory the operator browses for a credential file (see [The secrets mount and browsing](#the-secrets-mount-and-browsing)). |
 
 The feature gate applies to every endpoint uniformly: a disabled API is `404` on all of them, resolved before the id is even parsed.
@@ -206,6 +218,18 @@ If any validation step AFTER the write rejects the entry (a bad host or fingerpr
 ### `DELETE /api/jobs/sftp`
 
 Forgets the in-app authored connection (and its credential warnings) and returns `204` (idempotent). The authored connection is ALSO cleared when the exchange it was authored for is deleted (`DELETE /api/jobs/:jobId` of the active exchange), so it is scoped to that single exchange and never lingers into the next.
+
+## Probing the server host key
+
+`POST /api/jobs/sftp/probe` reads the host-key fingerprint an SFTP server presents, so the console can offer it beside the paste field for the operator to compare against the value the server operator published. It authors nothing: it never touches the authored connection, records nothing, and returns the observation for the caller to forget. The manager spawns the CLI's `probe-host-key --json` subcommand (the same binary the exchange runs; the server cannot probe SSH in-process -- see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#sftp-host-key-verification)) under the shared no-shell spawn discipline, caps and parses its stdout, and DISCARDS its stderr.
+
+The SSRF bounds are the module contract, pinned by tests:
+
+- **Request carries host + port only.** The body is `.strictObject({ host, port? })` -- `host` a non-empty string, `port` a `0..65535` int -- so no username, path, or credential field is representable; an unmodeled key is a `400`. `host` additionally passes the shared bare-host predicate (no scheme, userinfo, path, or whitespace), the same rule `PUT /api/jobs/sftp` applies, so it cannot smuggle a URL. The body is read under a tight cap (4 KiB, `413` above it).
+- **Response carries fingerprint + key type only.** A completed attempt is always a `200` with a discriminated body: `{ "status": "ok", "fingerprint": "SHA256:...", "keyType": "..." }` on success, or `{ "status": "unreachable" | "timeout" | "error" }` for a probe that ran but yielded no key. The fingerprint is re-validated against `HOST_KEY_FINGERPRINT_REGEX`, and the key type is length- and charset-capped (server-controlled bytes). No banner, stderr, latency-beyond-category, saved-hosts list, or re-probe-on-change is exposed, and there is no credentialed "test connection".
+- **Single-flight and stateless.** One probe child runs at a time; a concurrent request is a `409` (empty body). The flag is claimed synchronously, independent of the exchange slot. The probe reconciles the child's exit -- CLI exit `69` to `unreachable`, a watchdog kill (SIGTERM at ~15 s, SIGKILL after a grace) to `timeout`, any other non-zero or malformed line to `error` -- and forgets it.
+
+Non-2xx is reserved for HTTP-level conditions only: `400` for a bad body (field-path message, never a value), `409` for a probe in flight, `404` when the feature gate is off, and `500` for an unexpected internal fault. A probe that ran and failed is a `200` category, never a `502`.
 
 ## The secrets mount and browsing
 

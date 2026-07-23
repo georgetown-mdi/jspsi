@@ -18,7 +18,8 @@ import { Route as JobRoute } from "../../src/routes/api/jobs/$jobId/index";
 import { Route as KeysRoute } from "../../src/routes/api/jobs/$jobId/keys";
 import { Route as RecordRoute } from "../../src/routes/api/jobs/$jobId/record";
 import { Route as ResultRoute } from "../../src/routes/api/jobs/$jobId/result";
-import { Route as SftpRoute } from "../../src/routes/api/jobs/sftp";
+import { Route as SftpProbeRoute } from "../../src/routes/api/jobs/sftp/probe";
+import { Route as SftpRoute } from "../../src/routes/api/jobs/sftp/index";
 
 import {
   STUB_CLI_PATH,
@@ -96,8 +97,26 @@ function enableJobApi(): string {
   return root;
 }
 
+/**
+ * Construct a job-API Request that carries a loopback `Host` by default. A
+ * synthetic Request sets no `Host` (a real HTTP server always does), so without
+ * this the gate's loopback Host-allowlist would 403 every route-driven test. An
+ * explicit `host` header wins (the rebinding and mismatch cases), and passing
+ * `defaultHost: null` omits it (the absent-Host case).
+ */
+function jobRequest(
+  url: string,
+  init: RequestInit = {},
+  defaultHost: string | null = "localhost",
+): Request {
+  const headers = new Headers(init.headers);
+  if (defaultHost !== null && !headers.has("host"))
+    headers.set("host", defaultHost);
+  return new Request(url, { ...init, headers });
+}
+
 function createRequest(body: unknown, headers: Record<string, string> = {}) {
-  return new Request("http://localhost/api/jobs", {
+  return jobRequest("http://localhost/api/jobs", {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
@@ -155,7 +174,7 @@ describe("the feature gate keeps the API dark when disabled", () => {
   test("GET /api/jobs/:id is 404 when disabled", async () => {
     vi.stubEnv("JOB_DATA_ROOT", "");
     const response = (await handlersOf(JobRoute).GET({
-      request: new Request("http://localhost/api/jobs/x"),
+      request: jobRequest("http://localhost/api/jobs/x"),
       params: { jobId: "00000000-0000-4000-8000-000000000000" },
     })) as Response;
     expect(response.status).toBe(404);
@@ -180,13 +199,224 @@ describe("create validates and never CORS", () => {
     enableJobApi();
     const response = (await handlersOf(CreateRoute).POST({
       request: createRequest(validIntent(), {
-        origin: "https://evil.example",
+        host: "localhost",
+        origin: "http://localhost",
       }),
       params: {},
     })) as Response;
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
     expect(response.status).toBe(201);
     expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+});
+
+describe("the browser-CSRF gate rejects a cross-origin browser request", () => {
+  test("a same-origin Origin (matching Host) passes", async () => {
+    enableJobApi();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), {
+        host: "localhost",
+        origin: "http://localhost",
+      }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(201);
+  });
+
+  test("a Sec-Fetch-Site: same-origin request passes", async () => {
+    enableJobApi();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), {
+        "sec-fetch-site": "same-origin",
+      }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(201);
+  });
+
+  test("a request with neither Origin nor Sec-Fetch-Site passes (non-browser client)", async () => {
+    enableJobApi();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent()),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(201);
+  });
+
+  test("a Sec-Fetch-Site: cross-site request is 403", async () => {
+    enableJobApi();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), { "sec-fetch-site": "cross-site" }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(403);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  test("an Origin mismatching the Host is 403", async () => {
+    enableJobApi();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), {
+        host: "localhost",
+        origin: "https://evil.example",
+      }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(403);
+  });
+
+  test("the gate runs on the probe route too (shared gate)", async () => {
+    seedManagerWithProbe({ STUB_PROBE_STDOUT: okProbeLine() });
+    const rejected = (await handlersOf(SftpProbeRoute).POST({
+      request: jobRequest("http://localhost/api/jobs/sftp/probe", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "sec-fetch-site": "cross-site",
+        },
+        body: JSON.stringify({ host: "sftp.example.org" }),
+      }),
+      params: {},
+    })) as Response;
+    expect(rejected.status).toBe(403);
+  });
+
+  test("the disabled gate 404s before the CSRF 403 (feature gate first)", async () => {
+    vi.stubEnv("JOB_DATA_ROOT", "");
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), { "sec-fetch-site": "cross-site" }),
+      params: {},
+    })) as Response;
+    // A disabled API stays a uniform 404 even for a cross-origin request: the
+    // feature gate runs before the CSRF check, so presence is not observable.
+    expect(response.status).toBe(404);
+  });
+});
+
+describe("the loopback Host-allowlist closes DNS rebinding", () => {
+  test.each([
+    ["127.0.0.1:3000"],
+    ["localhost:3000"],
+    ["localhost"],
+    ["[::1]:3000"],
+  ])("a loopback Host (%s) passes, port-agnostic", async (host) => {
+    enableJobApi();
+    // No Origin or Sec-Fetch-Site, so only the Host rule is under test.
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), { host }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(201);
+  });
+
+  test("a rebound attacker Host is 403 though the request is same-origin", async () => {
+    enableJobApi();
+    // The DNS-rebinding shape: Host and Origin both name the attacker and
+    // Sec-Fetch-Site is same-origin -- internally consistent, so the pre-existing
+    // browser-CSRF check passes it (the next test proves this by admitting the
+    // very same shape once the Host is allowlisted). The Host-allowlist is what
+    // rejects it here.
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), {
+        host: "attacker.example:3000",
+        origin: "http://attacker.example:3000",
+        "sec-fetch-site": "same-origin",
+      }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(403);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  test("JOB_ALLOWED_HOSTS admits the same rebinding shape (so CSRF passed it)", async () => {
+    enableJobApi();
+    vi.stubEnv("JOB_ALLOWED_HOSTS", "attacker.example");
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), {
+        host: "attacker.example:3000",
+        origin: "http://attacker.example:3000",
+        "sec-fetch-site": "same-origin",
+      }),
+      params: {},
+    })) as Response;
+    // Only the allowlist entry changed from the 403 above, so that 403 was the
+    // Host-allowlist and not the CSRF check.
+    expect(response.status).toBe(201);
+  });
+
+  test("a 0.0.0.0 Host is 403 (never allowlisted)", async () => {
+    enableJobApi();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), { host: "0.0.0.0:3000" }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(403);
+  });
+
+  test("an absent Host is 403 (fail closed)", async () => {
+    enableJobApi();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: jobRequest(
+        "http://localhost/api/jobs",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(validIntent()),
+        },
+        null,
+      ),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(403);
+  });
+
+  test("JOB_ALLOWED_HOSTS admits a listed host", async () => {
+    enableJobApi();
+    vi.stubEnv("JOB_ALLOWED_HOSTS", "proxy.internal");
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), { host: "proxy.internal:3000" }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(201);
+  });
+
+  test("a host absent from JOB_ALLOWED_HOSTS is still 403", async () => {
+    enableJobApi();
+    vi.stubEnv("JOB_ALLOWED_HOSTS", "proxy.internal");
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), { host: "other.example:3000" }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(403);
+  });
+
+  test("the Host-allowlist runs on the probe route (shared gate)", async () => {
+    seedManagerWithProbe({ STUB_PROBE_STDOUT: okProbeLine() });
+    const rejected = (await handlersOf(SftpProbeRoute).POST({
+      request: jobRequest("http://localhost/api/jobs/sftp/probe", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          host: "attacker.example:3000",
+          origin: "http://attacker.example:3000",
+          "sec-fetch-site": "same-origin",
+        },
+        body: JSON.stringify({ host: "sftp.example.org" }),
+      }),
+      params: {},
+    })) as Response;
+    expect(rejected.status).toBe(403);
+  });
+
+  test("the Host-allowlist runs on a GET route (shared gate)", async () => {
+    enableJobApiWithSftpServer();
+    const response = (await handlersOf(SftpRoute).GET({
+      request: jobRequest("http://localhost/api/jobs/sftp", {
+        headers: { host: "attacker.example:3000" },
+      }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(403);
   });
 });
 
@@ -209,7 +439,7 @@ describe("GET /api/jobs/:id/events guards an already-aborted request", () => {
     const record = manager.getJob(id)!;
 
     const response = (await handlersOf(EventsRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${id}/events`, {
+      request: jobRequest(`http://localhost/api/jobs/${id}/events`, {
         signal: AbortSignal.abort(),
       }),
       params: { jobId: id },
@@ -227,39 +457,39 @@ describe("routes validate the job id before filesystem use", () => {
     enableJobApi();
     const bad = { jobId: "../../etc/passwd" };
     const statusResp = (await handlersOf(JobRoute).GET({
-      request: new Request("http://localhost/api/jobs/x"),
+      request: jobRequest("http://localhost/api/jobs/x"),
       params: bad,
     })) as Response;
     expect(statusResp.status).toBe(404);
     const eventsResp = (await handlersOf(EventsRoute).GET({
-      request: new Request("http://localhost/api/jobs/x/events"),
+      request: jobRequest("http://localhost/api/jobs/x/events"),
       params: bad,
     })) as Response;
     expect(eventsResp.status).toBe(404);
     const cancelResp = (await handlersOf(CancelRoute).POST({
-      request: new Request("http://localhost/api/jobs/x/cancel", {
+      request: jobRequest("http://localhost/api/jobs/x/cancel", {
         method: "POST",
       }),
       params: bad,
     })) as Response;
     expect(cancelResp.status).toBe(404);
     const resultResp = (await handlersOf(ResultRoute).GET({
-      request: new Request("http://localhost/api/jobs/x/result"),
+      request: jobRequest("http://localhost/api/jobs/x/result"),
       params: bad,
     })) as Response;
     expect(resultResp.status).toBe(404);
     const recordResp = (await handlersOf(RecordRoute).GET({
-      request: new Request("http://localhost/api/jobs/x/record"),
+      request: jobRequest("http://localhost/api/jobs/x/record"),
       params: bad,
     })) as Response;
     expect(recordResp.status).toBe(404);
     const keysResp = (await handlersOf(KeysRoute).GET({
-      request: new Request("http://localhost/api/jobs/x/keys"),
+      request: jobRequest("http://localhost/api/jobs/x/keys"),
       params: bad,
     })) as Response;
     expect(keysResp.status).toBe(404);
     const deleteResp = (await handlersOf(JobRoute).DELETE({
-      request: new Request("http://localhost/api/jobs/x", { method: "DELETE" }),
+      request: jobRequest("http://localhost/api/jobs/x", { method: "DELETE" }),
       params: bad,
     })) as Response;
     expect(deleteResp.status).toBe(404);
@@ -277,7 +507,7 @@ describe("result route serves only after success", () => {
     })) as Response;
     const { id } = (await created.json()) as { id: string };
     const response = (await handlersOf(ResultRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${id}/result`),
+      request: jobRequest(`http://localhost/api/jobs/${id}/result`),
       params: { jobId: id },
     })) as Response;
     expect(response.status).toBe(404);
@@ -294,7 +524,7 @@ describe("record and keys routes serve the exchange-record pair after success", 
     });
 
     const recordResp = (await handlersOf(RecordRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${id}/record`),
+      request: jobRequest(`http://localhost/api/jobs/${id}/record`),
       params: { jobId: id },
     })) as Response;
     expect(recordResp.status).toBe(200);
@@ -311,7 +541,7 @@ describe("record and keys routes serve the exchange-record pair after success", 
     });
 
     const keysResp = (await handlersOf(KeysRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${id}/keys`),
+      request: jobRequest(`http://localhost/api/jobs/${id}/keys`),
       params: { jobId: id },
     })) as Response;
     expect(keysResp.status).toBe(200);
@@ -328,12 +558,12 @@ describe("record and keys routes serve the exchange-record pair after success", 
     const id = await createSucceededJob({ STUB_OUTPUT_FILE: "id\n1\n" });
 
     const recordResp = (await handlersOf(RecordRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${id}/record`),
+      request: jobRequest(`http://localhost/api/jobs/${id}/record`),
       params: { jobId: id },
     })) as Response;
     expect(recordResp.status).toBe(404);
     const keysResp = (await handlersOf(KeysRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${id}/keys`),
+      request: jobRequest(`http://localhost/api/jobs/${id}/keys`),
       params: { jobId: id },
     })) as Response;
     expect(keysResp.status).toBe(404);
@@ -348,12 +578,12 @@ describe("record and keys routes serve the exchange-record pair after success", 
     })) as Response;
     const { id } = (await created.json()) as { id: string };
     const recordResp = (await handlersOf(RecordRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${id}/record`),
+      request: jobRequest(`http://localhost/api/jobs/${id}/record`),
       params: { jobId: id },
     })) as Response;
     expect(recordResp.status).toBe(404);
     const keysResp = (await handlersOf(KeysRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${id}/keys`),
+      request: jobRequest(`http://localhost/api/jobs/${id}/keys`),
       params: { jobId: id },
     })) as Response;
     expect(keysResp.status).toBe(404);
@@ -363,12 +593,12 @@ describe("record and keys routes serve the exchange-record pair after success", 
     vi.stubEnv("JOB_DATA_ROOT", "");
     const jobId = "00000000-0000-4000-8000-000000000000";
     const recordResp = (await handlersOf(RecordRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${jobId}/record`),
+      request: jobRequest(`http://localhost/api/jobs/${jobId}/record`),
       params: { jobId },
     })) as Response;
     expect(recordResp.status).toBe(404);
     const keysResp = (await handlersOf(KeysRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${jobId}/keys`),
+      request: jobRequest(`http://localhost/api/jobs/${jobId}/keys`),
       params: { jobId },
     })) as Response;
     expect(keysResp.status).toBe(404);
@@ -384,7 +614,7 @@ describe("status route reports record availability", () => {
       STUB_RECORD_JSON: recordJson(CREATED_AT),
     });
     const response = (await handlersOf(JobRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${id}`),
+      request: jobRequest(`http://localhost/api/jobs/${id}`),
       params: { jobId: id },
     })) as Response;
     const body = (await response.json()) as {
@@ -400,7 +630,7 @@ describe("status route reports record availability", () => {
   test("recordAvailable false and no createdAt when the record was never written", async () => {
     const id = await createSucceededJob({ STUB_OUTPUT_FILE: "id\n1\n" });
     const response = (await handlersOf(JobRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${id}`),
+      request: jobRequest(`http://localhost/api/jobs/${id}`),
       params: { jobId: id },
     })) as Response;
     const body = (await response.json()) as {
@@ -419,7 +649,7 @@ describe("status route reports record availability", () => {
       STUB_RECORD_JSON: "}{ not json",
     });
     const response = (await handlersOf(JobRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${id}`),
+      request: jobRequest(`http://localhost/api/jobs/${id}`),
       params: { jobId: id },
     })) as Response;
     expect(response.status).toBe(200);
@@ -437,7 +667,7 @@ describe("status route reports record availability", () => {
       STUB_RECORD_JSON: JSON.stringify({ summary: "no timestamp" }),
     });
     const response = (await handlersOf(JobRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${id}`),
+      request: jobRequest(`http://localhost/api/jobs/${id}`),
       params: { jobId: id },
     })) as Response;
     const body = (await response.json()) as { recordAvailable: boolean };
@@ -447,7 +677,7 @@ describe("status route reports record availability", () => {
   test("the status body carries no restored key", async () => {
     const id = await createSucceededJob({ STUB_OUTPUT_FILE: "id\n1\n" });
     const response = (await handlersOf(JobRoute).GET({
-      request: new Request(`http://localhost/api/jobs/${id}`),
+      request: jobRequest(`http://localhost/api/jobs/${id}`),
       params: { jobId: id },
     })) as Response;
     const body = (await response.json()) as Record<string, unknown>;
@@ -657,7 +887,7 @@ describe("DELETE frees the slot for a new POST", () => {
     expect(await busy.text()).toBe("");
 
     const del = (await handlersOf(JobRoute).DELETE({
-      request: new Request(`http://localhost/api/jobs/${id}`, {
+      request: jobRequest(`http://localhost/api/jobs/${id}`, {
         method: "DELETE",
       }),
       params: { jobId: id },
@@ -676,7 +906,7 @@ describe("GET /api/jobs/sftp", () => {
   test("is 404 when the API is disabled", async () => {
     vi.stubEnv("JOB_DATA_ROOT", "");
     const response = (await handlersOf(SftpRoute).GET({
-      request: new Request("http://localhost/api/jobs/sftp"),
+      request: jobRequest("http://localhost/api/jobs/sftp"),
       params: {},
     })) as Response;
     expect(response.status).toBe(404);
@@ -685,7 +915,7 @@ describe("GET /api/jobs/sftp", () => {
   test("reads configured:false when the API is enabled but no connection is authored", async () => {
     enableJobApi();
     const response = (await handlersOf(SftpRoute).GET({
-      request: new Request("http://localhost/api/jobs/sftp"),
+      request: jobRequest("http://localhost/api/jobs/sftp"),
       params: {},
     })) as Response;
     expect(response.status).toBe(200);
@@ -698,7 +928,7 @@ describe("GET /api/jobs/sftp", () => {
   test("the projection carries only {host, port, path} and no @ ref or fingerprint", async () => {
     enableJobApiWithSftpServer();
     const response = (await handlersOf(SftpRoute).GET({
-      request: new Request("http://localhost/api/jobs/sftp"),
+      request: jobRequest("http://localhost/api/jobs/sftp"),
       params: {},
     })) as Response;
     expect(response.status).toBe(200);
@@ -734,7 +964,7 @@ describe("GET /api/jobs/sftp", () => {
     expect(validateJobIdParam("sftp")).toBeNull();
     enableJobApi();
     const response = (await handlersOf(JobRoute).GET({
-      request: new Request("http://localhost/api/jobs/sftp"),
+      request: jobRequest("http://localhost/api/jobs/sftp"),
       params: { jobId: "sftp" },
     })) as Response;
     expect(response.status).toBe(404);
@@ -762,7 +992,7 @@ function authoredBody(ref: string, overrides: Record<string, unknown> = {}) {
 
 async function putSftp(body: unknown): Promise<Response> {
   return (await handlersOf(SftpRoute).PUT({
-    request: new Request("http://localhost/api/jobs/sftp", {
+    request: jobRequest("http://localhost/api/jobs/sftp", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -773,14 +1003,14 @@ async function putSftp(body: unknown): Promise<Response> {
 
 async function getSftp(): Promise<Response> {
   return (await handlersOf(SftpRoute).GET({
-    request: new Request("http://localhost/api/jobs/sftp"),
+    request: jobRequest("http://localhost/api/jobs/sftp"),
     params: {},
   })) as Response;
 }
 
 async function deleteSftp(): Promise<Response> {
   return (await handlersOf(SftpRoute).DELETE({
-    request: new Request("http://localhost/api/jobs/sftp", {
+    request: jobRequest("http://localhost/api/jobs/sftp", {
       method: "DELETE",
     }),
     params: {},
@@ -1014,6 +1244,154 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
   });
 });
 
+/** One valid probe stdout line for the stub CLI's `probe-host-key` branch. */
+function okProbeLine(keyType = "ssh-ed25519"): string {
+  return (
+    JSON.stringify({
+      fingerprint: TEST_HOST_KEY_FINGERPRINT,
+      key_type: keyType,
+    }) + "\n"
+  );
+}
+
+/** Seed the global manager with the stub CLI and a probe scenario in its childEnv
+ * (the route's sanitized child env drops ambient STUB_* vars, so the scenario must
+ * ride childEnv). Returns the manager. */
+function seedManagerWithProbe(stubEnv: NodeJS.ProcessEnv): JobManager {
+  const root = tempDataRoot("routes-probe");
+  roots.push(root);
+  vi.stubEnv("JOB_DATA_ROOT", root);
+  const manager = new JobManager({
+    dataRoot: root,
+    binaryPath: STUB_CLI_PATH,
+    jobRendezvousDir: rvzRoot(),
+    childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), ...stubEnv },
+  });
+  (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
+    manager;
+  return manager;
+}
+
+async function postProbe(body: unknown): Promise<Response> {
+  return (await handlersOf(SftpProbeRoute).POST({
+    request: jobRequest("http://localhost/api/jobs/sftp/probe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+    params: {},
+  })) as Response;
+}
+
+describe("POST /api/jobs/sftp/probe reads a host key without authoring", () => {
+  test("is 404 when the API is disabled", async () => {
+    vi.stubEnv("JOB_DATA_ROOT", "");
+    const response = await postProbe({ host: "sftp.example.org" });
+    expect(response.status).toBe(404);
+  });
+
+  test("a successful probe returns exactly the ok envelope", async () => {
+    seedManagerWithProbe({ STUB_PROBE_STDOUT: okProbeLine() });
+    const response = await postProbe({ host: "sftp.example.org", port: 2222 });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = (await response.json()) as Record<string, unknown>;
+    // Only the fingerprint and key type cross the boundary -- no banner, latency,
+    // or host list.
+    for (const key of Object.keys(body))
+      expect(["status", "fingerprint", "keyType"]).toContain(key);
+    expect(body).toEqual({
+      status: "ok",
+      fingerprint: TEST_HOST_KEY_FINGERPRINT,
+      keyType: "ssh-ed25519",
+    });
+  });
+
+  test("exit 69 is a 200 unreachable envelope (a probe that ran but read no key)", async () => {
+    seedManagerWithProbe({ STUB_EXIT_CODE: "69" });
+    const response = await postProbe({ host: "sftp.example.org" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "unreachable" });
+  });
+
+  test("a body carrying a credential-shaped field is a 400 (strict, no such field)", async () => {
+    seedManagerWithProbe({ STUB_PROBE_STDOUT: okProbeLine() });
+    const response = await postProbe({
+      host: "sftp.example.org",
+      username: "linkage",
+      password: "@/etc/shadow",
+    });
+    expect(response.status).toBe(400);
+    // The value is never echoed; the message names a field shape only.
+    expect(await response.text()).not.toContain("shadow");
+  });
+
+  test("a non-bare host is a 400 naming the field", async () => {
+    seedManagerWithProbe({ STUB_PROBE_STDOUT: okProbeLine() });
+    const response = await postProbe({ host: "sftp://user@evil/path" });
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("host");
+  });
+
+  test("a concurrent probe is a 409 (single-flight)", async () => {
+    // A slow first probe holds the single slot; the concurrent second is refused.
+    seedManagerWithProbe({
+      STUB_PROBE_STDOUT: okProbeLine(),
+      STUB_DELAY_MS: "500",
+    });
+    const first = postProbe({ host: "sftp.example.org" });
+    // Give the first request time to claim the in-flight flag (spawn the child).
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const second = await postProbe({ host: "sftp.example.org" });
+    expect(second.status).toBe(409);
+    expect(await second.text()).toBe("");
+    // Drain the first so no child outlives the test.
+    expect((await first).status).toBe(200);
+  });
+
+  test("a probe never authors: GET /api/jobs/sftp is unchanged after it (invariant)", async () => {
+    const manager = seedManagerWithProbe({ STUB_PROBE_STDOUT: okProbeLine() });
+    authorSftpOn(manager);
+    const before = await (await getSftp()).json();
+    // A successful probe of a DIFFERENT host must not touch the authored entry.
+    const probe = await postProbe({ host: "other.example" });
+    expect((await probe.json()) as { status: string }).toMatchObject({
+      status: "ok",
+    });
+    expect(await (await getSftp()).json()).toEqual(before);
+  });
+
+  test("a probe with no connection authored leaves GET at configured:false", async () => {
+    seedManagerWithProbe({ STUB_EXIT_CODE: "69" });
+    expect((await postProbe({ host: "sftp.example.org" })).status).toBe(200);
+    expect(await (await getSftp()).json()).toEqual({ configured: false });
+  });
+});
+
+describe("PUT /api/jobs/sftp keeps the mandatory-pin backstop (invariant)", () => {
+  test.each([
+    ["an empty string", ""],
+    ["an @-file reference", "@/x"],
+    ["an empty list", [] as Array<string>],
+  ])("a %s fingerprint is a 400", async (_label, value) => {
+    enableJobApi();
+    const ref = secretFileOutside();
+    const response = await putSftp(
+      authoredBody(ref, { hostKeyFingerprint: value }),
+    );
+    expect(response.status).toBe(400);
+  });
+
+  test("a missing fingerprint is a 400", async () => {
+    enableJobApi();
+    const ref = secretFileOutside();
+    const body = authoredBody(ref) as Record<string, unknown>;
+    delete body.hostKeyFingerprint;
+    const response = await putSftp(body);
+    expect(response.status).toBe(400);
+  });
+});
+
 describe("POST /api/jobs stays injection-closed to connection material", () => {
   test("a connection field on the sftp intent is rejected (strict schema)", async () => {
     enableJobApiWithSftpServer();
@@ -1068,7 +1446,7 @@ function streamingPostRequest(
       controller.enqueue(new Uint8Array(chunkBytes));
     },
   });
-  return new Request("http://localhost/api/jobs", {
+  return jobRequest("http://localhost/api/jobs", {
     method: "POST",
     headers,
     body: stream,
@@ -1100,7 +1478,7 @@ describe("readJobRequestBody caps the read, not Content-Length", () => {
         controller.close();
       },
     });
-    const request = new Request("http://localhost/api/jobs", {
+    const request = jobRequest("http://localhost/api/jobs", {
       method: "POST",
       body: stream,
       duplex: "half",
@@ -1110,7 +1488,7 @@ describe("readJobRequestBody caps the read, not Content-Length", () => {
   });
 
   test("an unparseable body is invalid", async () => {
-    const request = new Request("http://localhost/api/jobs", {
+    const request = jobRequest("http://localhost/api/jobs", {
       method: "POST",
       body: "}{ not json",
       duplex: "half",
@@ -1156,7 +1534,7 @@ describe("POST /api/jobs bounds the body before schema parse", () => {
 
   test("an unparseable body is rejected 400 by the route", async () => {
     enableJobApi();
-    const request = new Request("http://localhost/api/jobs", {
+    const request = jobRequest("http://localhost/api/jobs", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "}{ not json",

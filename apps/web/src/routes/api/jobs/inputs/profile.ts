@@ -27,7 +27,7 @@ export const Route = createFileRoute("/api/jobs/inputs/profile")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const gate = gateJobRoute();
+        const gate = gateJobRoute(request);
         if (gate.kind === "response") return gate.response;
         const resolvedDir = useJobInputDir();
         if (resolvedDir === undefined) return jobEmptyResponse(404);

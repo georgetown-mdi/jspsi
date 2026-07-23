@@ -25,11 +25,12 @@ import { Route as BenchAcceptRouteImport } from './routes/bench/accept'
 import { Route as ApiPeerjsIndexRouteImport } from './routes/api/peerjs/index'
 import { Route as ApiJobsIndexRouteImport } from './routes/api/jobs/index'
 import { Route as ApiPeerjsIdRouteImport } from './routes/api/peerjs/id'
-import { Route as ApiJobsSftpRouteImport } from './routes/api/jobs/sftp'
 import { Route as ApiJobsRendezvousRouteImport } from './routes/api/jobs/rendezvous'
+import { Route as ApiJobsSftpIndexRouteImport } from './routes/api/jobs/sftp/index'
 import { Route as ApiJobsInputsIndexRouteImport } from './routes/api/jobs/inputs/index'
 import { Route as ApiJobsJobIdIndexRouteImport } from './routes/api/jobs/$jobId/index'
 import { Route as ApiPeerjsKeyPeersRouteImport } from './routes/api/peerjs/$key/peers'
+import { Route as ApiJobsSftpProbeRouteImport } from './routes/api/jobs/sftp/probe'
 import { Route as ApiJobsInputsProfileRouteImport } from './routes/api/jobs/inputs/profile'
 import { Route as ApiJobsInputsCoverageRouteImport } from './routes/api/jobs/inputs/coverage'
 import { Route as ApiJobsJobIdResultRouteImport } from './routes/api/jobs/$jobId/result'
@@ -120,14 +121,14 @@ const ApiPeerjsIdRoute = ApiPeerjsIdRouteImport.update({
   path: '/api/peerjs/id',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiJobsSftpRoute = ApiJobsSftpRouteImport.update({
-  id: '/api/jobs/sftp',
-  path: '/api/jobs/sftp',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiJobsRendezvousRoute = ApiJobsRendezvousRouteImport.update({
   id: '/api/jobs/rendezvous',
   path: '/api/jobs/rendezvous',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiJobsSftpIndexRoute = ApiJobsSftpIndexRouteImport.update({
+  id: '/api/jobs/sftp/',
+  path: '/api/jobs/sftp/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiJobsInputsIndexRoute = ApiJobsInputsIndexRouteImport.update({
@@ -143,6 +144,11 @@ const ApiJobsJobIdIndexRoute = ApiJobsJobIdIndexRouteImport.update({
 const ApiPeerjsKeyPeersRoute = ApiPeerjsKeyPeersRouteImport.update({
   id: '/api/peerjs/$key/peers',
   path: '/api/peerjs/$key/peers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiJobsSftpProbeRoute = ApiJobsSftpProbeRouteImport.update({
+  id: '/api/jobs/sftp/probe',
+  path: '/api/jobs/sftp/probe',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiJobsInputsProfileRoute = ApiJobsInputsProfileRouteImport.update({
@@ -207,7 +213,6 @@ export interface FileRoutesByFullPath {
   '/bench/': typeof BenchIndexRoute
   '/saved/': typeof SavedIndexRoute
   '/api/jobs/rendezvous': typeof ApiJobsRendezvousRoute
-  '/api/jobs/sftp': typeof ApiJobsSftpRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
   '/api/jobs/': typeof ApiJobsIndexRoute
   '/api/peerjs/': typeof ApiPeerjsIndexRoute
@@ -219,9 +224,11 @@ export interface FileRoutesByFullPath {
   '/api/jobs/$jobId/result': typeof ApiJobsJobIdResultRoute
   '/api/jobs/inputs/coverage': typeof ApiJobsInputsCoverageRoute
   '/api/jobs/inputs/profile': typeof ApiJobsInputsProfileRoute
+  '/api/jobs/sftp/probe': typeof ApiJobsSftpProbeRoute
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
   '/api/jobs/$jobId/': typeof ApiJobsJobIdIndexRoute
   '/api/jobs/inputs/': typeof ApiJobsInputsIndexRoute
+  '/api/jobs/sftp/': typeof ApiJobsSftpIndexRoute
   '/api/jobs/mounts/secrets/entries': typeof ApiJobsMountsSecretsEntriesRoute
 }
 export interface FileRoutesByTo {
@@ -238,7 +245,6 @@ export interface FileRoutesByTo {
   '/bench': typeof BenchIndexRoute
   '/saved': typeof SavedIndexRoute
   '/api/jobs/rendezvous': typeof ApiJobsRendezvousRoute
-  '/api/jobs/sftp': typeof ApiJobsSftpRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
   '/api/jobs': typeof ApiJobsIndexRoute
   '/api/peerjs': typeof ApiPeerjsIndexRoute
@@ -250,9 +256,11 @@ export interface FileRoutesByTo {
   '/api/jobs/$jobId/result': typeof ApiJobsJobIdResultRoute
   '/api/jobs/inputs/coverage': typeof ApiJobsInputsCoverageRoute
   '/api/jobs/inputs/profile': typeof ApiJobsInputsProfileRoute
+  '/api/jobs/sftp/probe': typeof ApiJobsSftpProbeRoute
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
   '/api/jobs/$jobId': typeof ApiJobsJobIdIndexRoute
   '/api/jobs/inputs': typeof ApiJobsInputsIndexRoute
+  '/api/jobs/sftp': typeof ApiJobsSftpIndexRoute
   '/api/jobs/mounts/secrets/entries': typeof ApiJobsMountsSecretsEntriesRoute
 }
 export interface FileRoutesById {
@@ -271,7 +279,6 @@ export interface FileRoutesById {
   '/bench/': typeof BenchIndexRoute
   '/saved/': typeof SavedIndexRoute
   '/api/jobs/rendezvous': typeof ApiJobsRendezvousRoute
-  '/api/jobs/sftp': typeof ApiJobsSftpRoute
   '/api/peerjs/id': typeof ApiPeerjsIdRoute
   '/api/jobs/': typeof ApiJobsIndexRoute
   '/api/peerjs/': typeof ApiPeerjsIndexRoute
@@ -283,9 +290,11 @@ export interface FileRoutesById {
   '/api/jobs/$jobId/result': typeof ApiJobsJobIdResultRoute
   '/api/jobs/inputs/coverage': typeof ApiJobsInputsCoverageRoute
   '/api/jobs/inputs/profile': typeof ApiJobsInputsProfileRoute
+  '/api/jobs/sftp/probe': typeof ApiJobsSftpProbeRoute
   '/api/peerjs/$key/peers': typeof ApiPeerjsKeyPeersRoute
   '/api/jobs/$jobId/': typeof ApiJobsJobIdIndexRoute
   '/api/jobs/inputs/': typeof ApiJobsInputsIndexRoute
+  '/api/jobs/sftp/': typeof ApiJobsSftpIndexRoute
   '/api/jobs/mounts/secrets/entries': typeof ApiJobsMountsSecretsEntriesRoute
 }
 export interface FileRouteTypes {
@@ -305,7 +314,6 @@ export interface FileRouteTypes {
     | '/bench/'
     | '/saved/'
     | '/api/jobs/rendezvous'
-    | '/api/jobs/sftp'
     | '/api/peerjs/id'
     | '/api/jobs/'
     | '/api/peerjs/'
@@ -317,9 +325,11 @@ export interface FileRouteTypes {
     | '/api/jobs/$jobId/result'
     | '/api/jobs/inputs/coverage'
     | '/api/jobs/inputs/profile'
+    | '/api/jobs/sftp/probe'
     | '/api/peerjs/$key/peers'
     | '/api/jobs/$jobId/'
     | '/api/jobs/inputs/'
+    | '/api/jobs/sftp/'
     | '/api/jobs/mounts/secrets/entries'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -336,7 +346,6 @@ export interface FileRouteTypes {
     | '/bench'
     | '/saved'
     | '/api/jobs/rendezvous'
-    | '/api/jobs/sftp'
     | '/api/peerjs/id'
     | '/api/jobs'
     | '/api/peerjs'
@@ -348,9 +357,11 @@ export interface FileRouteTypes {
     | '/api/jobs/$jobId/result'
     | '/api/jobs/inputs/coverage'
     | '/api/jobs/inputs/profile'
+    | '/api/jobs/sftp/probe'
     | '/api/peerjs/$key/peers'
     | '/api/jobs/$jobId'
     | '/api/jobs/inputs'
+    | '/api/jobs/sftp'
     | '/api/jobs/mounts/secrets/entries'
   id:
     | '__root__'
@@ -368,7 +379,6 @@ export interface FileRouteTypes {
     | '/bench/'
     | '/saved/'
     | '/api/jobs/rendezvous'
-    | '/api/jobs/sftp'
     | '/api/peerjs/id'
     | '/api/jobs/'
     | '/api/peerjs/'
@@ -380,9 +390,11 @@ export interface FileRouteTypes {
     | '/api/jobs/$jobId/result'
     | '/api/jobs/inputs/coverage'
     | '/api/jobs/inputs/profile'
+    | '/api/jobs/sftp/probe'
     | '/api/peerjs/$key/peers'
     | '/api/jobs/$jobId/'
     | '/api/jobs/inputs/'
+    | '/api/jobs/sftp/'
     | '/api/jobs/mounts/secrets/entries'
   fileRoutesById: FileRoutesById
 }
@@ -397,7 +409,6 @@ export interface RootRouteChildren {
   SavedIdRoute: typeof SavedIdRoute
   SavedIndexRoute: typeof SavedIndexRoute
   ApiJobsRendezvousRoute: typeof ApiJobsRendezvousRoute
-  ApiJobsSftpRoute: typeof ApiJobsSftpRoute
   ApiPeerjsIdRoute: typeof ApiPeerjsIdRoute
   ApiJobsIndexRoute: typeof ApiJobsIndexRoute
   ApiPeerjsIndexRoute: typeof ApiPeerjsIndexRoute
@@ -409,9 +420,11 @@ export interface RootRouteChildren {
   ApiJobsJobIdResultRoute: typeof ApiJobsJobIdResultRoute
   ApiJobsInputsCoverageRoute: typeof ApiJobsInputsCoverageRoute
   ApiJobsInputsProfileRoute: typeof ApiJobsInputsProfileRoute
+  ApiJobsSftpProbeRoute: typeof ApiJobsSftpProbeRoute
   ApiPeerjsKeyPeersRoute: typeof ApiPeerjsKeyPeersRoute
   ApiJobsJobIdIndexRoute: typeof ApiJobsJobIdIndexRoute
   ApiJobsInputsIndexRoute: typeof ApiJobsInputsIndexRoute
+  ApiJobsSftpIndexRoute: typeof ApiJobsSftpIndexRoute
   ApiJobsMountsSecretsEntriesRoute: typeof ApiJobsMountsSecretsEntriesRoute
 }
 
@@ -529,18 +542,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPeerjsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/jobs/sftp': {
-      id: '/api/jobs/sftp'
-      path: '/api/jobs/sftp'
-      fullPath: '/api/jobs/sftp'
-      preLoaderRoute: typeof ApiJobsSftpRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/jobs/rendezvous': {
       id: '/api/jobs/rendezvous'
       path: '/api/jobs/rendezvous'
       fullPath: '/api/jobs/rendezvous'
       preLoaderRoute: typeof ApiJobsRendezvousRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/jobs/sftp/': {
+      id: '/api/jobs/sftp/'
+      path: '/api/jobs/sftp'
+      fullPath: '/api/jobs/sftp/'
+      preLoaderRoute: typeof ApiJobsSftpIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/jobs/inputs/': {
@@ -562,6 +575,13 @@ declare module '@tanstack/react-router' {
       path: '/api/peerjs/$key/peers'
       fullPath: '/api/peerjs/$key/peers'
       preLoaderRoute: typeof ApiPeerjsKeyPeersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/jobs/sftp/probe': {
+      id: '/api/jobs/sftp/probe'
+      path: '/api/jobs/sftp/probe'
+      fullPath: '/api/jobs/sftp/probe'
+      preLoaderRoute: typeof ApiJobsSftpProbeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/jobs/inputs/profile': {
@@ -659,7 +679,6 @@ const rootRouteChildren: RootRouteChildren = {
   SavedIdRoute: SavedIdRoute,
   SavedIndexRoute: SavedIndexRoute,
   ApiJobsRendezvousRoute: ApiJobsRendezvousRoute,
-  ApiJobsSftpRoute: ApiJobsSftpRoute,
   ApiPeerjsIdRoute: ApiPeerjsIdRoute,
   ApiJobsIndexRoute: ApiJobsIndexRoute,
   ApiPeerjsIndexRoute: ApiPeerjsIndexRoute,
@@ -671,9 +690,11 @@ const rootRouteChildren: RootRouteChildren = {
   ApiJobsJobIdResultRoute: ApiJobsJobIdResultRoute,
   ApiJobsInputsCoverageRoute: ApiJobsInputsCoverageRoute,
   ApiJobsInputsProfileRoute: ApiJobsInputsProfileRoute,
+  ApiJobsSftpProbeRoute: ApiJobsSftpProbeRoute,
   ApiPeerjsKeyPeersRoute: ApiPeerjsKeyPeersRoute,
   ApiJobsJobIdIndexRoute: ApiJobsJobIdIndexRoute,
   ApiJobsInputsIndexRoute: ApiJobsInputsIndexRoute,
+  ApiJobsSftpIndexRoute: ApiJobsSftpIndexRoute,
   ApiJobsMountsSecretsEntriesRoute: ApiJobsMountsSecretsEntriesRoute,
 }
 export const routeTree = rootRouteImport
