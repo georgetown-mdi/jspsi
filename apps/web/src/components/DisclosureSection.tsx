@@ -81,7 +81,7 @@ export function DisclosureSection({
       data-testid={toggleTestId}
       style={{ width: "100%" }}
     >
-      <Group gap="xs" wrap="nowrap">
+      <Group component="span" gap="xs" wrap="nowrap">
         <IconChevronRight
           size={16}
           aria-hidden
@@ -91,11 +91,11 @@ export function DisclosureSection({
             transition: reduceMotion ? undefined : "transform 150ms ease",
           }}
         />
-        <Text size="sm" fw={600}>
+        <Text span size="sm" fw={600}>
           {label}
         </Text>
         {!open && summary !== undefined && (
-          <Text size="xs" c="dimmed">
+          <Text span size="xs" c="dimmed">
             {summary}
           </Text>
         )}
