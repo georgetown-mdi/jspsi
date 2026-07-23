@@ -488,8 +488,8 @@ describe("console lobby occupancy probe (no stored attachment)", () => {
     });
     mount(createElement(InviterBench));
 
-    // The panel appears from the probe alone, with the neutral lead ("started on
-    // it") rather than the inaccurate "you started here" -- another browser may
+    // The panel appears from the probe alone, with the neutral lead ("started
+    // here") rather than the inaccurate "you started here" -- another browser may
     // have started it.
     await expect
       .element(
@@ -499,7 +499,7 @@ describe("console lobby occupancy probe (no stored attachment)", () => {
       )
       .toBeInTheDocument();
     await expect
-      .element(page.getByText("an exchange started on it", { exact: false }))
+      .element(page.getByText("an exchange started here", { exact: false }))
       .toBeInTheDocument();
     expect(
       page.getByText("an exchange you started here", { exact: false }).query(),
@@ -566,6 +566,55 @@ describe("console lobby occupancy probe (no stored attachment)", () => {
       .element(page.getByRole("heading", { level: 3, name: "Downloads" }))
       .toBeInTheDocument();
     await expect.element(page.getByText("results.csv")).toBeInTheDocument();
+  });
+
+  test("a probed slot that already stopped shows the stopped lead and only Discard", async () => {
+    // The slot probe surfaces an occupant whose run already stopped
+    // (failed/cancelled): the panel heads stopped from the initial status,
+    // promises no downloads, and offers only Discard -- the persisted stopped
+    // path, reached through the probe rather than a stored attachment.
+    const api = stubRecoveryApi({
+      jobId: "job-probe",
+      status: "failed",
+      slotOccupied: true,
+    });
+    mount(createElement(InviterBench));
+
+    await expect
+      .element(page.getByText("An exchange started from this console stopped"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("before it finished, so there are no results", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    // The neutral probe-adopted lead, not the "you started here" persisted copy.
+    await expect
+      .element(page.getByText("an exchange started here", { exact: false }))
+      .toBeInTheDocument();
+    expect(
+      page.getByText("an exchange you started here", { exact: false }).query(),
+    ).toBeNull();
+
+    // The probe drove the id, and adoption persisted nothing.
+    expect(api.captured.some((r) => r.url === "/api/jobs/slot")).toBe(true);
+    expect(window.localStorage.getItem(ATTACHMENT_KEY)).toBeNull();
+
+    // No result on a stopped run: no Downloads block, and no Stop -- only Discard.
+    expect(
+      page.getByText("Download its results below", { exact: false }).query(),
+    ).toBeNull();
+    expect(
+      page.getByRole("heading", { level: 3, name: "Downloads" }).query(),
+    ).toBeNull();
+    expect(
+      page.getByRole("button", { name: "Stop this exchange" }).query(),
+    ).toBeNull();
+    await expect
+      .element(page.getByRole("button", { name: "Discard" }))
+      .toBeInTheDocument();
   });
 
   test("a free slot with empty storage renders nothing", async () => {

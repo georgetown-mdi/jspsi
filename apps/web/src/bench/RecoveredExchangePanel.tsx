@@ -79,14 +79,15 @@ async function resolveRecoveryTarget(
  * The panel's lead paragraph. The default names the exchange as one the operator
  * started in this browser; the probe-adopted variant does not claim that -- the id
  * came from the slot probe, so another browser (or this one before its attachment
- * was lost) may have started it -- and says "started on it" instead.
+ * was lost) may have started it -- and drops the "you", saying "started here" so
+ * "it" refers only to the exchange and "here" carries the appliance.
  */
 function recoveryLead(
   state: ReattachedRunState,
   adoptedFromProbe: boolean,
 ): string {
   const origin = adoptedFromProbe
-    ? "an exchange started on it"
+    ? "an exchange started here"
     : "an exchange you started here";
   return state === "running"
     ? `This appliance is still running ${origin}. Watch it finish, stop it, or discard it and its files.`
