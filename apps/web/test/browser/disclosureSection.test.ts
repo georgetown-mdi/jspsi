@@ -24,6 +24,7 @@ import type { Root } from "react-dom/client";
 
 const LABEL = "Legal agreement";
 const PANEL_TEXT = "Attached: MOU-2025-0042";
+const COLLAPSED_SUMMARY = "None";
 
 let container: HTMLElement | undefined;
 let root: Root | undefined;
@@ -134,6 +135,36 @@ describe("DisclosureSection: aria-controls resolves under a reduced-motion prefe
     // The expanded detail is in the accessibility tree (the reference resolves to
     // content that is actually shown).
     await expect.element(page.getByText(PANEL_TEXT)).toBeVisible();
+  });
+});
+
+describe("DisclosureSection: the toggle button nests only phrasing content", () => {
+  test("the collapsed toggle button, summary shown, has no flow-content descendants", async () => {
+    setReducedMotion(false);
+    root!.render(
+      renderApp(
+        createElement(DisclosureSection, {
+          label: LABEL,
+          open: false,
+          onToggle: () => undefined,
+          headingOrder: 3,
+          summary: COLLAPSED_SUMMARY,
+          children: PANEL_BODY(),
+        }),
+      ),
+    );
+
+    await expect.element(toggle()).toBeInTheDocument();
+    const button = toggle().element();
+    // Both the label and the collapsed summary render inside the button, so the
+    // query below exercises both Text wrappers and the Group wrapper at once.
+    expect(button.textContent).toContain(LABEL);
+    expect(button.textContent).toContain(COLLAPSED_SUMMARY);
+
+    // A <button> permits only phrasing content, so no flow-content element (a <div>
+    // or <p>) may appear in its subtree. The panel <p> lives in the sibling wrapper
+    // outside the button, so scope the query to the button's own descendants.
+    expect(button.querySelector("div, p")).toBeNull();
   });
 });
 
