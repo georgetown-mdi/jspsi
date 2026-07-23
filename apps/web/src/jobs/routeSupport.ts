@@ -1,10 +1,20 @@
+import { getLogger } from "@psilink/core";
+
 import { MAX_INPUT_CSV_LENGTH } from "./intent";
 
-import { isJobApiEnabled, jobEmptyResponse, readJobApiConfig } from "./gate";
+import {
+  JOB_ALLOWED_HOSTS_ENV,
+  isJobApiEnabled,
+  jobEmptyResponse,
+  readJobApiConfig,
+} from "./gate";
 import { isValidJobId } from "./workdir";
 import { useJobManager } from "./index";
 
+import type { JobApiConfig } from "./gate";
 import type { JobManager } from "./jobManager";
+
+const log = getLogger("job-api");
 
 /**
  * The outcome of gating a job route: either a short-circuit {@link Response} the
@@ -68,15 +78,77 @@ function rejectCrossOriginBrowserRequest(request: Request): Response | null {
   return null;
 }
 
+/** The hostnames the console is reached by from the operator's own machine over
+ * host loopback -- the only ones the request `Host` may name by default, whatever
+ * the port. */
+const LOOPBACK_HOSTNAMES: ReadonlySet<string> = new Set([
+  "127.0.0.1",
+  "localhost",
+  "::1",
+]);
+
+/** Derive the hostname of a `Host` header the way {@link originOf} derives an
+ * origin -- parse it as the authority of an http URL, take the port-stripped
+ * `hostname`, strip the brackets Node leaves on an IPv6 literal (`[::1]`), and
+ * lowercase. Null when the header is absent or unparseable, so the caller fails
+ * closed. */
+function hostnameOfHostHeader(host: string | null): string | null {
+  if (host === null) return null;
+  let hostname: string;
+  try {
+    hostname = new URL(`http://${host}`).hostname;
+  } catch {
+    return null;
+  }
+  if (hostname.startsWith("[") && hostname.endsWith("]"))
+    hostname = hostname.slice(1, -1);
+  return hostname.toLowerCase();
+}
+
+/**
+ * Reject a request whose `Host` is not the appliance's own loopback name -- the
+ * DNS-rebinding defense that complements {@link rejectCrossOriginBrowserRequest}.
+ * A page the operator visits at `http://attacker.example` whose name the attacker
+ * has rebound to `127.0.0.1` reaches the API with an `Origin` and `Host` that
+ * both name `attacker.example`, so it is genuinely same-origin and the CSRF check
+ * passes; requiring the `Host` to be a loopback hostname (or an operator-listed
+ * {@link JobApiConfig.allowedHosts} entry -- the deliberate reverse-proxy or
+ * LAN-name escape hatch) is what refuses it. The match is on the hostname only,
+ * so any published-port remapping passes; an absent or unparseable `Host` is
+ * refused. A rejection is logged, naming the `Host` and the override variable, so
+ * a misconfigured operator gets a self-service diagnosis. Returns a `403`
+ * {@link Response} to short-circuit, or null to proceed.
+ */
+function rejectDisallowedHost(
+  request: Request,
+  config: JobApiConfig,
+): Response | null {
+  const host = request.headers.get("host");
+  const hostname = hostnameOfHostHeader(host);
+  if (
+    hostname !== null &&
+    (LOOPBACK_HOSTNAMES.has(hostname) || config.allowedHosts.has(hostname))
+  )
+    return null;
+  log.warn(
+    `Refused a job-API request with Host "${host ?? "(absent)"}": not a ` +
+      "loopback address. If you deliberately front the console behind a proxy " +
+      `or a LAN name, add that hostname to ${JOB_ALLOWED_HOSTS_ENV}.`,
+  );
+  return jobEmptyResponse(403);
+}
+
 /**
  * Gate a job route: read config, enforce the feature gate, resolve the manager,
- * and reject a cross-origin browser request. Every job route calls this first,
+ * and reject a browser-reachable request. Every job route calls this first,
  * before any filesystem use or spawn. The API is unauthenticated loopback-local
  * (the deployment publishes to host loopback), so there is no per-request auth
- * beyond the feature gate; the browser-CSRF check
- * ({@link rejectCrossOriginBrowserRequest}) is the one active defense, stopping a
- * page the operator visits from driving the API from their browser. It runs after
- * the feature gate, so a disabled API stays a uniform 404.
+ * beyond the feature gate; two complementary browser defenses run after it. The
+ * loopback Host-allowlist ({@link rejectDisallowedHost}) refuses a request whose
+ * `Host` is not the appliance's own loopback name, closing DNS rebinding; the
+ * browser-CSRF check ({@link rejectCrossOriginBrowserRequest}) refuses a request a
+ * browser marks as cross-origin. Both run after the feature gate, so a disabled
+ * API stays a uniform 404.
  */
 export function gateJobRoute(request: Request): GateOutcome {
   const config = readJobApiConfig();
@@ -85,7 +157,9 @@ export function gateJobRoute(request: Request): GateOutcome {
   const manager = useJobManager(config);
   if (manager === null)
     return { kind: "response", response: jobEmptyResponse(404) };
-  const rejection = rejectCrossOriginBrowserRequest(request);
+  const rejection =
+    rejectDisallowedHost(request, config) ??
+    rejectCrossOriginBrowserRequest(request);
   if (rejection !== null) return { kind: "response", response: rejection };
   return { kind: "manager", manager };
 }
