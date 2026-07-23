@@ -590,6 +590,56 @@ describe("console inviter mint and run", () => {
   });
 });
 
+describe("console inviter never renders the recurring-save offer", () => {
+  // The offer's only inviter render site is gated on the browser transport
+  // (InviterBench: `transport === "browser"` on the share surface). A console build
+  // disables the Browser card and never defaults to it, so the offer -- whose
+  // "recurring exchanges" link targets the /saved route gated out of the console
+  // build -- must never mount. Pin the mount precondition unreachable, and the panel
+  // absent at the share surface and through completion -- the panel a hosted,
+  // browser-transport build would show.
+  test("the offer stays absent from the share surface through completion", async () => {
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+    });
+    mount(createElement(InviterBench));
+    await reachReviewCreate();
+
+    // The offer's mount precondition is unreachable: SFTP is the default and the
+    // Browser card is disabled, so the transport is never browser.
+    await expect
+      .element(page.getByLabelText("Over SFTP, run here"))
+      .toBeChecked();
+    await expect
+      .element(page.getByLabelText("Live, in this browser"))
+      .toBeDisabled();
+
+    await page.getByRole("button", { name: "Create the invitation" }).click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Your invitation is ready");
+    expect(page.getByText("Save as a recurring exchange").query()).toBeNull();
+
+    await vi.waitFor(() =>
+      expect(api.captured.some((r) => r.url === "/api/jobs/job-7/events")).toBe(
+        true,
+      ),
+    );
+    api.emitEvent({ v: 1, type: "stage", id: "confirming protocol" });
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange in progress");
+    expect(page.getByText("Save as a recurring exchange").query()).toBeNull();
+
+    api.emitEvent({ v: 1, type: "result", resultWritten: true });
+    api.closeEvents();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange complete");
+    expect(page.getByText("Save as a recurring exchange").query()).toBeNull();
+  });
+});
+
 describe("console inviter run teardown and abandonment", () => {
   /** Reach a running server-job run: create the invitation (SFTP default), then
    * advance past the wait so the appliance is conducting the exchange. */
