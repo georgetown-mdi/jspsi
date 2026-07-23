@@ -36,6 +36,7 @@ import {
   runWithStages,
   stagesFor,
 } from "./exchangeRun";
+import { isExchangeBusyError, reattachOnBusy } from "./reattachOnBusy";
 import { buildRunOutputs } from "./runOutputs";
 import { invitationUsable } from "./inviterModel";
 import { selectExchangeDriver } from "./exchangeDriverSelection";
@@ -47,12 +48,13 @@ import type {
   ExchangeErrorCategory,
   GenerateOutput,
 } from "@psi/exchangeLifecycle";
+import type { ExchangeDriver, ExchangeDriverEvents } from "@psi/exchangeDriver";
 import type { ExchangeRun, ExchangeSeat } from "./exchangeRun";
 import type {
   JobInputSource,
+  JobRunStatus,
   ServerJobExchangeTransport,
 } from "@psi/serverJobExchangeDriver";
-import type { ExchangeDriver } from "@psi/exchangeDriver";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { RunOutputs } from "./runOutputs";
 import type { Transport } from "./inviterModel";
@@ -248,6 +250,16 @@ export function useInviterExchange({
    * on a browser run and before the job exists. Drives the completed-run recurring
    * hand-off panel. */
   jobId: string | undefined;
+  /** The live status of the exchange this run re-attached to on a busy (409)
+   * create, or undefined on a fresh run. Set when a start-time 409 re-attaches to
+   * the exchange holding the appliance's single slot -- the run surface then heads
+   * with recovery-style copy rather than fresh-success copy. */
+  reattached: JobRunStatus | undefined;
+  /** True from the moment a busy (409) create is detected until the liveness probe
+   * settles: the interim during which the run surface suppresses the fresh-run
+   * share block and shows a brief reconnecting notice, before it either resolves
+   * to the recovery view (`reattached`) or falls back to the run's alert. */
+  reattaching: boolean;
   tryAgain: () => void;
   abandonRun: () => void;
 } {
@@ -255,6 +267,15 @@ export function useInviterExchange({
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [failure, setFailure] = useState<RunFailure>();
   const [warnings, setWarnings] = useState<Array<string>>([]);
+  // The status of an exchange this run re-attached to on a busy (409) create,
+  // else undefined. Drives the run surface's recovery-style copy; reset when a run
+  // restarts or the invitation is discarded.
+  const [reattached, setReattached] = useState<JobRunStatus>();
+  // True while a detected busy (409) create is being resolved to a re-attachment,
+  // before the liveness probe settles. Drives the interim reconnecting notice and
+  // the fresh-run share-block suppression; reset when a run restarts or the
+  // invitation is discarded.
+  const [reattaching, setReattaching] = useState(false);
   // The current run's appliance job id as reactive state (the ref below drives the
   // synchronous discard paths). Set on create, cleared when a run restarts or the
   // invitation is discarded, so the recurring hand-off panel reads only the live run.
@@ -311,6 +332,8 @@ export function useInviterExchange({
     setFailure(undefined);
     setWarnings([]);
     setCurrentJobId(undefined);
+    setReattached(undefined);
+    setReattaching(false);
 
     // Output-generation half. The URLs the build creates are revoked when the
     // outputs are replaced or the bench unmounts (effect above); a throw
@@ -425,6 +448,68 @@ export function useInviterExchange({
       sftpConfigured,
     ).kind;
 
+    // Raise a failure's alert and freeze the run: the terminal path for every
+    // error except a busy (409) create, which re-attaches below instead.
+    const raiseFailure = (category: ExchangeErrorCategory, error: unknown) => {
+      setFailure(failureFor(category, error, inputSource, channel));
+      setRun((current) => runWithFailure(current));
+    };
+
+    // The run's lifecycle callbacks, built once so a busy (409) re-attach folds
+    // the already-running exchange's stream onto the SAME surface. A busy create
+    // at start re-attaches to the exchange holding the appliance's single slot
+    // (recovery-style copy, `reattached`) rather than dead-ending on the "already
+    // running" alert; every other failure raises its alert.
+    const runEvents: ExchangeDriverEvents<RunOutputs> = {
+      signal: controller.signal,
+      onStages: (stages) => setRun((current) => runWithStages(current, stages)),
+      onStage: (stageId) =>
+        setRun((current) => runWithStage(current, stageId, new Date())),
+      onResult: (generated) => {
+        setOutputs(generated);
+        setRun((current) => runWithCompletion(current, new Date()));
+      },
+      // Server/CLI-controlled text sanitized at this display boundary, like
+      // failureFor's alert content; accumulated so no notice displaces an
+      // earlier one.
+      onWarning: (message) =>
+        setWarnings((current) => [...current, sanitizeForDisplay(message)]),
+      onError: ({ category, error }) => {
+        // Dev-gated: the raw Error object's message/cause can embed partner-/
+        // server-controlled bytes, so a production console carries none of it,
+        // while a developer (or a deployed client with the diagnostics toggle
+        // on) keeps the full object. The user-facing alert is separately
+        // sanitized in failureFor.
+        whenDiagnostic(() => console.error(error));
+        if (isExchangeBusyError(error)) {
+          // Enter the reconnecting interim the instant the 409 is known, before
+          // the liveness probe round trip -- this suppresses the fresh-run share
+          // block (which would otherwise flash) and announces the reconnect.
+          setReattaching(true);
+          void reattachOnBusy({
+            error,
+            client: jobApiClient,
+            seat: "inviter",
+            channel,
+            events: runEvents,
+            onReattaching: (id, status) => {
+              currentJobIdRef.current = id;
+              setCurrentJobId(id);
+              setReattaching(false);
+              setReattached(status);
+            },
+          }).then((didReattach) => {
+            if (!didReattach) {
+              setReattaching(false);
+              raiseFailure(category, error);
+            }
+          });
+          return;
+        }
+        raiseFailure(category, error);
+      },
+    };
+
     void (async () => {
       let driver: ExchangeDriver<RunOutputs>;
       try {
@@ -436,32 +521,7 @@ export function useInviterExchange({
         setRun((current) => runWithFailure(current));
         return;
       }
-      await driver.run({
-        signal: controller.signal,
-        onStages: (stages) =>
-          setRun((current) => runWithStages(current, stages)),
-        onStage: (stageId) =>
-          setRun((current) => runWithStage(current, stageId, new Date())),
-        onResult: (generated) => {
-          setOutputs(generated);
-          setRun((current) => runWithCompletion(current, new Date()));
-        },
-        // Server/CLI-controlled text sanitized at this display boundary, like
-        // failureFor's alert content; accumulated so no notice displaces an
-        // earlier one.
-        onWarning: (message) =>
-          setWarnings((current) => [...current, sanitizeForDisplay(message)]),
-        onError: ({ category, error }) => {
-          // Dev-gated: the raw Error object's message/cause can embed partner-/
-          // server-controlled bytes, so a production console carries none of it,
-          // while a developer (or a deployed client with the diagnostics toggle
-          // on) keeps the full object. The user-facing alert is separately
-          // sanitized in failureFor.
-          whenDiagnostic(() => console.error(error));
-          setFailure(failureFor(category, error, inputSource, channel));
-          setRun((current) => runWithFailure(current));
-        },
-      });
+      await driver.run(runEvents);
     })();
   }
 
@@ -482,6 +542,8 @@ export function useInviterExchange({
       setFailure(undefined);
       setWarnings([]);
       setCurrentJobId(undefined);
+      setReattached(undefined);
+      setReattaching(false);
       return;
     }
     startRef.current(invitation);
@@ -546,6 +608,8 @@ export function useInviterExchange({
     failure,
     warnings,
     jobId: currentJobId,
+    reattached,
+    reattaching,
     tryAgain,
     abandonRun,
   };

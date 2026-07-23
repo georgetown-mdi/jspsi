@@ -310,14 +310,23 @@ export function InviterBench() {
   // for a saved exchange. A `server-job` run mode runs live too -- the console
   // appliance carries it out -- so it drives the hook exactly as `browser` does.
   const runsLive = chosenRunMode !== "save-file";
-  const { run, outputs, failure, warnings, jobId, tryAgain, abandonRun } =
-    useInviterExchange({
-      invitation: runsLive ? invitation : undefined,
-      inviterName: editor?.draft.identity ?? "",
-      channel: transport,
-      inputSource,
-      sftpConfigured,
-    });
+  const {
+    run,
+    outputs,
+    failure,
+    warnings,
+    jobId,
+    reattached,
+    reattaching,
+    tryAgain,
+    abandonRun,
+  } = useInviterExchange({
+    invitation: runsLive ? invitation : undefined,
+    inviterName: editor?.draft.identity ?? "",
+    channel: transport,
+    inputSource,
+    sftpConfigured,
+  });
 
   // The coverage input, unified across builds: the browser's parsed rows on the
   // hosted build, the mounted-file reference on the console (whose sweep is a fetch
@@ -1264,6 +1273,8 @@ export function InviterBench() {
               partnerAcceptsByCli={isCliTransport(transport)}
               serverJob={chosenRunMode === "server-job"}
               jobId={jobId}
+              reattached={reattached}
+              reattaching={reattaching}
               onTryAgain={tryAgain}
               onStartOver={startOver}
               onAbandon={abandonRun}

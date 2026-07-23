@@ -1117,6 +1117,23 @@ describe("zero-setup mode end-to-end via the stub CLI", () => {
 });
 
 describe("the single exchange slot", () => {
+  test("the busy rejection carries the occupying exchange's id", async () => {
+    // The slot occupant's id rides the error so the route can emit it and the
+    // browser can re-attach to the running exchange.
+    const manager = makeManager({ delayMs: 5000 });
+    const firstId = await manager.createJob(validIntent());
+    const first = manager.getJob(firstId)!;
+
+    const error = await manager
+      .createJob(validIntent())
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(ExchangeBusyError);
+    expect((error as ExchangeBusyError).activeJobId).toBe(firstId);
+
+    manager.cancelJob(first);
+    await waitForTerminal(first);
+  });
+
   test("a running filedrop job rejects a second create of either channel", async () => {
     const manager = makeManager({
       delayMs: 5000,

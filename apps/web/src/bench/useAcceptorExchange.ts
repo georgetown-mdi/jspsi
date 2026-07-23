@@ -29,6 +29,7 @@ import {
   runWithStages,
   stagesFor,
 } from "./exchangeRun";
+import { isExchangeBusyError, reattachOnBusy } from "./reattachOnBusy";
 import { buildRunOutputs } from "./runOutputs";
 import { failureFor } from "./useInviterExchange";
 import { invitationUsable } from "./inviterModel";
@@ -40,14 +41,19 @@ import type {
   AcceptableInvitation,
   AcceptorDataEdits,
 } from "@psi/acceptInvitation";
-import type { Acquire, GenerateOutput } from "@psi/exchangeLifecycle";
+import type {
+  Acquire,
+  ExchangeErrorCategory,
+  GenerateOutput,
+} from "@psi/exchangeLifecycle";
 import type { CSVRow, InvitationToken } from "@psilink/core";
+import type { ExchangeDriver, ExchangeDriverEvents } from "@psi/exchangeDriver";
 import type {
   JobInputSource,
+  JobRunStatus,
   ServerJobExchangeDriverConfig,
   ServerJobExchangeTransport,
 } from "@psi/serverJobExchangeDriver";
-import type { ExchangeDriver } from "@psi/exchangeDriver";
 import type { ExchangeRun } from "./exchangeRun";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "./runOutputs";
@@ -222,12 +228,31 @@ export function useAcceptorExchange({
    * on a browser accept and before the job exists. Drives the completed-run
    * recurring hand-off panel. */
   jobId: string | undefined;
+  /** The live status of the exchange this accept re-attached to on a busy (409)
+   * create, or undefined on a fresh run. Set when a start-time 409 re-attaches to
+   * the exchange holding the appliance's single slot -- the run surface then heads
+   * with recovery-style copy rather than fresh-success copy. */
+  reattached: JobRunStatus | undefined;
+  /** True from the moment a busy (409) create is detected until the liveness probe
+   * settles: the interim during which the run surface suppresses the fresh-run
+   * framing and shows a brief reconnecting notice, before it either resolves to the
+   * recovery view (`reattached`) or falls back to the run's alert. */
+  reattaching: boolean;
   tryAgain: () => void;
   abandonRun: () => void;
 } {
   const [run, setRun] = useState<ExchangeRun>(() => initialRun("acceptor"));
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [failure, setFailure] = useState<RunFailure>();
+  // The status of an exchange this accept re-attached to on a busy (409) create,
+  // else undefined. Drives the run surface's recovery-style copy; reset when a run
+  // restarts or the launch is discarded.
+  const [reattached, setReattached] = useState<JobRunStatus>();
+  // True while a detected busy (409) create is being resolved to a re-attachment,
+  // before the liveness probe settles. Drives the interim reconnecting notice and
+  // the fresh-run framing suppression; reset when a run restarts or the launch is
+  // discarded.
+  const [reattaching, setReattaching] = useState(false);
   // The current accept's appliance job id as reactive state (the ref below drives
   // the synchronous discard paths). Set on create, cleared when the run restarts or
   // the launch is discarded, so the recurring hand-off panel reads only the live run.
@@ -280,6 +305,8 @@ export function useAcceptorExchange({
     setOutputs(undefined);
     setFailure(undefined);
     setCurrentJobId(undefined);
+    setReattached(undefined);
+    setReattaching(false);
 
     const { invitation, acceptorName, rawRows, columns, edits, inputSource } =
       current;
@@ -421,6 +448,65 @@ export function useAcceptorExchange({
       return;
     }
 
+    // Raise a failure's alert and freeze the run: the terminal path for every
+    // error except a busy (409) create, which re-attaches below instead.
+    const raiseFailure = (category: ExchangeErrorCategory, error: unknown) => {
+      setFailure(
+        failureFor(category, error, jobInputSource, channel, "acceptor"),
+      );
+      setRun((prev) => runWithFailure(prev));
+    };
+
+    // The run's lifecycle callbacks, built once so a busy (409) re-attach folds
+    // the already-running exchange's stream onto the SAME surface. A busy create
+    // at start re-attaches to the exchange holding the appliance's single slot
+    // (recovery-style copy, `reattached`) rather than dead-ending on the "already
+    // running" alert; every other failure raises its alert.
+    const runEvents: ExchangeDriverEvents<RunOutputs> = {
+      signal: controller.signal,
+      onStages: (stages) => setRun((prev) => runWithStages(prev, stages)),
+      onStage: (stageId) =>
+        setRun((prev) => runWithStage(prev, stageId, new Date())),
+      onResult: (generated) => {
+        setOutputs(generated);
+        setRun((prev) => runWithCompletion(prev, new Date()));
+      },
+      onError: ({ category, error }) => {
+        // Dev-gated: the raw Error object's message/cause can embed partner-/
+        // server-controlled bytes, so a production console carries none of it,
+        // while a developer (or a deployed client with the diagnostics toggle
+        // on) keeps the full object. The user-facing alert is separately
+        // sanitized in failureFor.
+        whenDiagnostic(() => console.error(error));
+        if (isExchangeBusyError(error)) {
+          // Enter the reconnecting interim the instant the 409 is known, before
+          // the liveness probe round trip -- this suppresses the fresh-run framing
+          // (which would otherwise flash) and announces the reconnect.
+          setReattaching(true);
+          void reattachOnBusy({
+            error,
+            client: jobApiClient,
+            seat: "acceptor",
+            channel,
+            events: runEvents,
+            onReattaching: (id, status) => {
+              currentJobIdRef.current = id;
+              setCurrentJobId(id);
+              setReattaching(false);
+              setReattached(status);
+            },
+          }).then((didReattach) => {
+            if (!didReattach) {
+              setReattaching(false);
+              raiseFailure(category, error);
+            }
+          });
+          return;
+        }
+        raiseFailure(category, error);
+      },
+    };
+
     void (async () => {
       let driver: ExchangeDriver<RunOutputs>;
       try {
@@ -435,28 +521,7 @@ export function useAcceptorExchange({
         setRun((prev) => runWithFailure(prev));
         return;
       }
-      await driver.run({
-        signal: controller.signal,
-        onStages: (stages) => setRun((prev) => runWithStages(prev, stages)),
-        onStage: (stageId) =>
-          setRun((prev) => runWithStage(prev, stageId, new Date())),
-        onResult: (generated) => {
-          setOutputs(generated);
-          setRun((prev) => runWithCompletion(prev, new Date()));
-        },
-        onError: ({ category, error }) => {
-          // Dev-gated: the raw Error object's message/cause can embed partner-/
-          // server-controlled bytes, so a production console carries none of it,
-          // while a developer (or a deployed client with the diagnostics toggle
-          // on) keeps the full object. The user-facing alert is separately
-          // sanitized in failureFor.
-          whenDiagnostic(() => console.error(error));
-          setFailure(
-            failureFor(category, error, jobInputSource, channel, "acceptor"),
-          );
-          setRun((prev) => runWithFailure(prev));
-        },
-      });
+      await driver.run(runEvents);
     })();
   }
 
@@ -472,6 +537,8 @@ export function useAcceptorExchange({
       setOutputs(undefined);
       setFailure(undefined);
       setCurrentJobId(undefined);
+      setReattached(undefined);
+      setReattaching(false);
       return;
     }
     startRef.current(launch);
@@ -529,5 +596,14 @@ export function useAcceptorExchange({
     void discardServerJob(jobApiClient, jobId);
   }
 
-  return { run, outputs, failure, jobId: currentJobId, tryAgain, abandonRun };
+  return {
+    run,
+    outputs,
+    failure,
+    jobId: currentJobId,
+    reattached,
+    reattaching,
+    tryAgain,
+    abandonRun,
+  };
 }

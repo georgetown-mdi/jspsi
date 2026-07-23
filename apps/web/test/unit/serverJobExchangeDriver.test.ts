@@ -934,6 +934,59 @@ describe("createFetchJobApiClient over an injected fetch", () => {
     ).rejects.toBeInstanceOf(JobApiRequestError);
   });
 
+  test("a busy (409) create carries the occupying job id on the error", async () => {
+    // The single slot is occupied: the body names its occupant so the client can
+    // re-attach to the running exchange rather than dead-end on the alert.
+    const fetchImpl = (() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ id: "job-busy" }), {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )) as typeof fetch;
+    const client = createFetchJobApiClient(fetchImpl);
+
+    const error = (await client
+      .createJob(
+        {
+          channel: "filedrop",
+          linkageTerms: validLinkageTerms(),
+          sharedSecret: VALID_SHARED_SECRET,
+          inputCsv: "x\n",
+          eventStream: true,
+        },
+        new AbortController().signal,
+      )
+      .catch((thrown: unknown) => thrown)) as JobApiRequestError;
+    expect(error).toBeInstanceOf(JobApiRequestError);
+    expect(error.status).toBe(409);
+    expect(error.activeJobId).toBe("job-busy");
+  });
+
+  test("an empty-bodied 409 leaves activeJobId undefined (client falls back)", async () => {
+    // A 409 with no `{ id }` body (an older server, or an empty response): the
+    // client parses no id and falls back to its persisted attachment id.
+    const fetchImpl = (() =>
+      Promise.resolve(new Response(null, { status: 409 }))) as typeof fetch;
+    const client = createFetchJobApiClient(fetchImpl);
+
+    const error = (await client
+      .createJob(
+        {
+          channel: "filedrop",
+          linkageTerms: validLinkageTerms(),
+          sharedSecret: VALID_SHARED_SECRET,
+          inputCsv: "x\n",
+          eventStream: true,
+        },
+        new AbortController().signal,
+      )
+      .catch((thrown: unknown) => thrown)) as JobApiRequestError;
+    expect(error).toBeInstanceOf(JobApiRequestError);
+    expect(error.status).toBe(409);
+    expect(error.activeJobId).toBeUndefined();
+  });
+
   test("fetchRecordAvailability reads recordAvailable and recordCreatedAt", async () => {
     const statusResponse =
       (body: unknown): typeof fetch =>

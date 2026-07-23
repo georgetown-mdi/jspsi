@@ -24,7 +24,11 @@ import {
 } from "./exchangeRun";
 import { failureFor } from "./useInviterExchange";
 
-import { DownloadRow, WithheldResultInset } from "./BenchRunSurface";
+import {
+  DownloadRow,
+  WithheldResultInset,
+  recoveredExchangeHeading,
+} from "./BenchRunSurface";
 import { StatusPanel } from "./StatusPanel";
 import styles from "./bench.module.css";
 
@@ -183,11 +187,9 @@ export function RecoveredExchangePanel() {
   return (
     <section className={styles.callout} aria-label="Recovered exchange">
       <h2 style={{ marginTop: 0 }}>
-        {running
-          ? "An exchange started from this console is still running"
-          : finished
-            ? "An exchange started from this console has finished"
-            : "An exchange started from this console stopped"}
+        {recoveredExchangeHeading(
+          running ? "running" : finished ? "finished" : "stopped",
+        )}
       </h2>
       <p className={styles.small}>
         {running
