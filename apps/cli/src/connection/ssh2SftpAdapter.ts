@@ -6,8 +6,10 @@
 // normal-path test exercises.
 import Ssh2SftpClient from "ssh2-sftp-client";
 import {
+  DirectoryListingBoundsError,
   FileInfo,
   FileTransportClient,
+  FrameSizeExceededError,
   GetOptions,
   PutOptions,
   PutSource,
@@ -130,6 +132,30 @@ const SFTP_SESSION_CLOSED_MESSAGE =
 export class SSH2SFTPClientAdapter implements FileTransportClient {
   private client: Ssh2SftpClient;
   private options: Ssh2SftpClient.ConnectOptions | undefined;
+  // The FULL, unmodified options the last connect() was called with -- including
+  // the psilink-specific maxReconnectAttempts that connect() strips before
+  // storing this.options, plus the enforcing hostVerifier and the stored
+  // credentials. Retained so mid-exchange session recovery can re-dial through
+  // connect() with the same host-key pin, credentials, and reconnect bound,
+  // which this.options alone cannot reconstruct. Undefined until the first
+  // connect(): a server-driven op reaching the recovery path before any connect
+  // has nothing to re-dial with, and the recovery guard treats that as terminal.
+  private originalConnectOptions: Record<string, unknown> | undefined;
+  // Latched true by end() so session recovery does not launch a re-dial once
+  // teardown has begun (a re-dial's readyTimeout would slow a clean close, and a
+  // freshly-dialed session would outlive the teardown).
+  private closing = false;
+  // The in-flight recovery re-dial's connect() (settled either way), or undefined
+  // when none is running. end() awaits it before tearing down the shared
+  // Ssh2SftpClient so a re-dial's connect() -- a fresh handshake -- and end()'s
+  // client.end() never run concurrently on the one client (ssh2-sftp-client shares
+  // connection-level listeners, so two ops in flight on one client is unsafe). The
+  // op that owns the re-dial can be abandoned before it completes: core's per-op
+  // peerTimeoutMs budget (a Promise.race) rejects a stalled op to the caller while
+  // the adapter op keeps running, so the caller can reach close() -> end() while
+  // the abandoned op is still mid-re-dial. Bounded: connect() is finite (its own
+  // retry budget and readyTimeout), so the await cannot hang teardown.
+  private redialInFlight: Promise<void> | undefined;
   private log: ReturnType<typeof getLoggerForVerbosity>;
   // The raw SFTPWrapper this adapter has already attached its fatal-'error'
   // listener to, so connect() attaches exactly once per wrapper instance (see
@@ -219,9 +245,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   /**
-   * Connection re-establishment attempts over this adapter's life: the number of
-   * connect-retry re-attempts past the first. A plain operational counter, never
-   * a partner-controlled value.
+   * Connection re-establishment attempts over this adapter's life: connect-retry
+   * re-attempts past the first, plus each successful mid-exchange session-recovery
+   * re-dial (a re-dial that survived a server-side drop is itself a reconnection,
+   * and connect()'s own counter does not see one that succeeds on its first
+   * attempt). A plain operational counter, never a partner-controlled value.
    */
   get reconnectCount(): number {
     return this.reconnectAttempts;
@@ -477,7 +505,141 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     );
   }
 
+  // The outermost layer around every server-driven op: it runs the op once and,
+  // if that rejection is a CLEAN session loss, re-dials the connection ONCE and
+  // re-issues the op ONCE before giving up. This is the interim robustness floor
+  // under the persistent-session model: an SFTP server that enforces a
+  // max-session or idle cap the operator cannot change drops the one long-lived
+  // session mid-exchange (observed at ~10 min), after which the next op fails
+  // terminally and the exchange aborts. Recovery makes that drop transparent by
+  // re-dialing (reusing the pinned host key and stored credentials, no re-prompt)
+  // and re-running the operation.
+  //
+  // ONE round per op invocation, never a loop: if the re-issued op ALSO hits a
+  // clean loss it rejects terminally. There is deliberately no cumulative/lifetime
+  // reconnect cap -- each op invocation earns a fresh round -- because a partner
+  // that drops the session every ~10 min over a multi-hour exchange would exhaust
+  // any lifetime cap and defeat the whole feature. The op+re-dial is enclosed by
+  // boundTransport's per-op peerTimeoutMs budget in core (a Promise.race), which
+  // is the terminal ceiling against a pathological instant-drop server, so no
+  // bespoke total-time timer is added here. Serial op issuance (single-party
+  // appliance) guarantees no other tracked() op is in flight when the re-dial
+  // runs: the first attempt's promise has already settled by the time this catch
+  // fires, so connect()'s heartbeat re-arm never races a live op.
+  //
+  // `reissue` is applied ONLY on the re-issue, never the first attempt, so a
+  // per-op idempotency relaxation (delete-absent, rename-dest-exists,
+  // createExclusive-own-EEXIST) cannot leak into first-attempt semantics and
+  // break genuine lock-conflict or absence detection. It defaults to re-running
+  // the op verbatim.
+  private withSessionRecovery<T>(
+    op: () => Promise<T>,
+    reissue: (op: () => Promise<T>) => Promise<T> = (run) => run(),
+  ): Promise<T> {
+    return op().catch(async (error: unknown) => {
+      if (!this.shouldRecoverFromSessionLoss(error)) throw error;
+      await this.redialForRecovery();
+      // end() may have latched `closing` while the re-dial was in flight: close
+      // the freshly-dialed session so it does not outlive the teardown, and
+      // surface the original loss rather than re-issuing into a closing adapter.
+      if (this.closing) {
+        await this.end().catch(() => {});
+        throw error;
+      }
+      // The re-dial re-established the dropped session: count it as a reconnection
+      // so the operator's metrics show the exchange survived a server-side drop.
+      // connect()'s own counter only bumps on an internal retry past the first, so
+      // a re-dial that succeeds on its first attempt registers zero without this.
+      this.reconnectAttempts += 1;
+      return reissue(op);
+    });
+  }
+
+  // Decide whether an op rejection is the CLEAN session loss recovery re-dials on.
+  // Every condition is post-state, not error-message matching: ssh2-sftp-client
+  // clears its `sftp` session property on a clean close/end (its temp-op and
+  // global 'close'/'end' listeners both null it), so a cleared property is the
+  // reliable signal that the session dropped -- unifying the adapter's own
+  // `!sftp` throw in list()/createExclusive() with ssh2-sftp-client's
+  // ERR_NOT_CONNECTED ("No SFTP connection available") rejection on the high-level
+  // get/put/delete/rename/exists. Terminal (never re-dialed), in order:
+  //   - no connect has succeeded yet (nothing to re-dial with);
+  //   - the session is still live (a stall or app-level failure, not a loss);
+  //   - a fatal SFTP protocol error killed the session (the wrapper is destroyed
+  //     and cannot recover -- fatalSftpError, deadSessionError());
+  //   - a liveness stall (TransportOperationStalledError): re-dialing on a stall
+  //     would hand a withholding server a free liveness reset, so a timeout is
+  //     never a reconnect trigger;
+  //   - a memory bound (FrameSizeExceededError / DirectoryListingBoundsError).
+  // A host-key mismatch on the re-dial is terminal for free: it surfaces inside
+  // redialForRecovery -> connect(), whose retry predicate already treats "Host
+  // denied" as terminal, so the rejection propagates rather than being re-issued.
+  private shouldRecoverFromSessionLoss(error: unknown): boolean {
+    if (this.closing) return false;
+    if (this.originalConnectOptions === undefined) return false;
+    const { sftp } = this.client as unknown as Ssh2SftpClientInternals;
+    if (sftp) return false;
+    if (this.fatalSftpError !== undefined) return false;
+    if (error instanceof TransportOperationStalledError) return false;
+    if (error instanceof FrameSizeExceededError) return false;
+    if (error instanceof DirectoryListingBoundsError) return false;
+    return true;
+  }
+
+  // Re-dial the dropped session by re-invoking connect() verbatim with the full
+  // original options. It must go through connect(), never a bare
+  // client.connect(): connect() re-runs the whole post-connect sequence on the
+  // FRESH wrapper -- re-attaches the guarded fatal-'error' listener (a
+  // listener-free wrapper would turn the next malformed packet into a process
+  // crash), clears fatalSftpError, re-runs the enforcing fail-closed host-key
+  // verifier that rides the options, re-verifies the raw sftp methods, advances
+  // the heartbeat epoch, and re-applies setNoDelay/keepalive. The dead client is
+  // NOT end()'d first: recovery only runs once this.sftp is already cleared (the
+  // shouldRecoverFromSessionLoss gate), so connect()'s "already connected" guard
+  // cannot fire, and calling ssh2-sftp-client's end() would latch its endCalled
+  // flag, permanently disabling the global 'close' listener that clears this.sftp
+  // -- which would stop a LATER idle drop from being detected and defeat recovery
+  // of the repeated drops this targets.
+  private redialForRecovery(): Promise<void> {
+    if (this.originalConnectOptions === undefined)
+      throw new Error(
+        "SFTP session recovery reached the re-dial with no retained connect " +
+          "options; a server-driven operation ran before connect()",
+      );
+    // Stop the heartbeat left armed by the dropped session before re-dialing: a
+    // clean drop (unlike a fatal error) does not stop it, so its old timer could
+    // otherwise tick mid-handshake and post a realPath keepalive on the client
+    // while connect() re-establishes it -- a concurrent op. connect() re-arms a
+    // fresh heartbeat via start() at the end of its sequence.
+    this.heartbeat.stop();
+    const redial = this.connect(this.originalConnectOptions);
+    // Publish the re-dial (settled either way) so a concurrent end() serializes
+    // its client.end() behind it; clear the handle once this same re-dial settles
+    // so a later end() is never held by a stale one.
+    const tracked = redial.then(
+      () => {},
+      () => {},
+    );
+    this.redialInFlight = tracked;
+    void tracked.finally(() => {
+      if (this.redialInFlight === tracked) this.redialInFlight = undefined;
+    });
+    return redial;
+  }
+
+  // SSH_FX_NO_SUCH_FILE: the source-absent status ssh2-sftp-client surfaces as the
+  // raw numeric SFTP code 2 (through fmtError, the same passthrough createExclusive
+  // and rename read), or as the POSIX string "ENOENT" if a future version
+  // normalizes it. The recovery resolvers for delete and rename read it to tell a
+  // pre-drop attempt that already LANDED (the source is now gone) from a genuine
+  // absence.
+  private isNoSuchFileError(error: unknown): boolean {
+    const code = (error as { code?: unknown } | null | undefined)?.code;
+    return code === 2 || code === "ENOENT";
+  }
+
   async connect(options: Record<string, unknown>): Promise<void> {
+    this.originalConnectOptions = options;
     const maxReconnects =
       (options["maxReconnectAttempts"] as number | undefined) ?? 3;
     // Exclude the psilink-specific key before handing options to ssh2.
@@ -608,11 +770,20 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     this.heartbeat.start();
   }
 
-  end(): Promise<void> {
+  async end(): Promise<void> {
+    // Mark teardown so an op racing this close cannot trigger a NEW mid-exchange
+    // re-dial (see withSessionRecovery).
+    this.closing = true;
+    // A recovery re-dial may already be mid-handshake on the shared client. Its
+    // connect() and this teardown's client.end() must not overlap on the one
+    // Ssh2SftpClient, so wait the re-dial out first (bounded by connect()'s own
+    // retry/readyTimeout). withSessionRecovery's post-re-dial `closing` check then
+    // tears down whatever session it dialed, so none outlives this close.
+    await this.redialInFlight;
     // Stop the keepalive before tearing the client down so no beat races the
     // teardown, and so the unref'd timer never lingers past the session.
     this.heartbeat.stop();
-    return this.client.end().then(() => {});
+    await this.client.end();
   }
 
   /**
@@ -651,6 +822,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    * and {@link createExclusive} is bounded by {@link withSftpOperationDeadline}.
    */
   list(path: string): Promise<FileInfo[]> {
+    return this.withSessionRecovery(() => this.listOnce(path));
+  }
+
+  // The single-attempt body of list(), a pure read re-issued verbatim on recovery.
+  private listOnce(path: string): Promise<FileInfo[]> {
     const { sftp } = this.client as unknown as Ssh2SftpClientInternals;
     if (!sftp) return Promise.reject(new Error(SFTP_SESSION_CLOSED_MESSAGE));
     const dead = this.deadSessionError("directory listing", path);
@@ -822,6 +998,16 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   get(path: string, options?: GetOptions): Promise<Buffer<ArrayBufferLike>> {
+    return this.withSessionRecovery(() => this.getOnce(path, options));
+  }
+
+  // The single-attempt body of get(). Re-issued verbatim on recovery: it rebuilds
+  // its capped sink and result each call, so re-invoking the whole method (never
+  // re-awaiting the dead-session promise) is what makes the re-issue clean.
+  private getOnce(
+    path: string,
+    options?: GetOptions,
+  ): Promise<Buffer<ArrayBufferLike>> {
     const dead = this.deadSessionError("file read", path);
     if (dead) return Promise.reject(dead);
     const maxBytes = options?.maxBytes;
@@ -894,6 +1080,35 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   put(src: PutSource, dest: string, options?: PutOptions): Promise<unknown> {
+    // A Buffer, a chunk list, or a string source is re-runnable (rebuilt from the
+    // retained bytes, or a fresh fs.createReadStream, on each attempt), so a
+    // recovery re-issue re-streams the identical payload -- and every FileSync
+    // connection put in this app hands a Buffer or chunk list. A provided
+    // ReadableStream is one-shot: a first attempt half-drains it, so re-issuing
+    // would re-pipe an already-consumed stream and silently upload nothing. Do NOT
+    // wrap that case in recovery; a dropped session fails it terminally rather
+    // than half-re-issuing it. The peer never observes a partial because every
+    // message/ack/sentinel/abort write targets a temp-*.tmp then atomic-renames,
+    // and the direct hello put is tolerated by the reader's partial-sync gate.
+    //
+    // Only a truncate-overwrite put is re-issue-idempotent: append mode ("a")
+    // would double-write the payload on a recovery re-issue, so it is never
+    // recovery-wrapped even from a re-runnable source. Every caller passes "w"
+    // today; this is a check standing in for that (per the project convention),
+    // not a live guard against an existing append caller.
+    const truncateOverwrite = options?.flags !== "a";
+    const reRunnable =
+      truncateOverwrite &&
+      (Buffer.isBuffer(src) || Array.isArray(src) || typeof src === "string");
+    if (!reRunnable) return this.putOnce(src, dest, options);
+    return this.withSessionRecovery(() => this.putOnce(src, dest, options));
+  }
+
+  private putOnce(
+    src: PutSource,
+    dest: string,
+    options?: PutOptions,
+  ): Promise<unknown> {
     if (Buffer.isBuffer(src) || Array.isArray(src)) {
       // Buffer or a [header, payload] chunk list -- the two shapes this app
       // produces. Both are re-iterable, so the bounded source is rebuilt per retry
@@ -1000,6 +1215,22 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   delete(path: string): Promise<void> {
+    return this.withSessionRecovery(
+      () => this.deleteOnce(path),
+      // On the re-issue only: a pre-drop delete that actually landed leaves the
+      // source absent, so ssh2-sftp-client reports SSH_FX_NO_SUCH_FILE. Map that to
+      // success -- propagating it would stop poll()'s consume-delete poller on a
+      // delete that in fact succeeded. Never applied on the first attempt, where a
+      // genuine absence must still surface.
+      (run) =>
+        run().catch((error: unknown) => {
+          if (this.isNoSuchFileError(error)) return;
+          throw error;
+        }),
+    );
+  }
+
+  private deleteOnce(path: string): Promise<void> {
     const dead = this.deadSessionError("file delete", path);
     if (dead) return Promise.reject(dead);
     // delete is a single metadata round-trip with no payload, so a flat
@@ -1062,6 +1293,35 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   rename(fromPath: string, toPath: string): Promise<void> {
+    return this.withSessionRecovery(
+      () => this.renameOnce(fromPath, toPath),
+      // On the re-issue only: if the pre-drop rename landed, the re-issue sees the
+      // source gone (SSH_FX_NO_SUCH_FILE) or a code-4 dest-exists. Confirm via a
+      // raw existence check on the destination -- every rename destination in this
+      // app is self-prefixed (<id>-hello.json, the <id>-...json message temp->final,
+      // <myId>-<orig>-ack.json, <id>-abort.json, the joiner <id>-joining.json ->
+      // <id>-hello.json), so a present destination is unambiguously our own landed
+      // attempt, never a peer file -- and resolve as success. Any other failure, or
+      // an absent destination, propagates. The raw client.exists (not this.exists)
+      // avoids arming a second recovery/warn wrapper for this internal probe.
+      (run) =>
+        run().catch(async (error: unknown) => {
+          const code = (error as Ssh2SftpError | null | undefined)?.code;
+          if (this.isNoSuchFileError(error) || code === SSH_FX_FAILURE) {
+            // Confirm a landed pre-drop rename via a raw existence check, but if
+            // the probe itself rejects the ambiguity cannot be resolved: fall back
+            // to the ORIGINAL rename error rather than letting the probe's own
+            // failure replace it (mirrors createExclusiveOnce's SFTPv3 fallback,
+            // which keeps the original openErr when its exists() check rejects).
+            const landed = await this.client.exists(toPath).catch(() => false);
+            if (landed) return;
+          }
+          throw error;
+        }),
+    );
+  }
+
+  private renameOnce(fromPath: string, toPath: string): Promise<void> {
     // Retry a transient rename failure under put()'s bounded budget (one initial
     // attempt plus up to `retries` re-issues, 100 ms apart), but -- unlike put(),
     // which is idempotent -- only on the generic SSH_FX_FAILURE (status 4). That
@@ -1122,6 +1382,37 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   createExclusive(path: string): Promise<void> {
+    return this.withSessionRecovery(
+      () => this.createExclusiveOnce(path),
+      // On the re-issue only: if this party's pre-drop create actually landed, the
+      // re-issue sees its OWN lock file and reports EEXIST -- reusing the existing
+      // code-11 / code-4-via-exists() normalization in createExclusiveOnce, which
+      // sets code "EEXIST" -- so resolve as success rather than a spurious lock
+      // conflict.
+      //
+      // Edge case (verified plausibly benign, do NOT re-architect the rendezvous):
+      // in the narrow race where this party's create dropped AT ENTRY and the peer
+      // legitimately won the shared-named lock in the meantime, the re-issue EEXIST
+      // is the PEER's, yielding a transient "two winners" state. It is benign
+      // because roles are committed from hello-filename order BEFORE the lock is
+      // taken, the lock only gates eager coordination-file cleanup, leftover hellos
+      // are excluded from message polling, and leftover files are swept at close;
+      // and it is confined to the brief rendezvous phase, not the ~10-min mid-
+      // exchange drop this recovery targets. Resolving own-EEXIST-as-success is the
+      // implementation; the security review verifies the race rigorously.
+      (run) =>
+        run().catch((error: unknown) => {
+          if (
+            (error as NodeJS.ErrnoException | null | undefined)?.code ===
+            "EEXIST"
+          )
+            return;
+          throw error;
+        }),
+    );
+  }
+
+  private createExclusiveOnce(path: string): Promise<void> {
     // ssh2-sftp-client does not expose exclusive file creation; access the
     // underlying SFTP session (via the file-scope Ssh2SftpClientInternals
     // interface) to open with SSH_FXF_WRITE | SSH_FXF_CREAT | SSH_FXF_EXCL
@@ -1235,6 +1526,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   }
 
   exists(remotePath: string): Promise<boolean> {
+    return this.withSessionRecovery(() => this.existsOnce(remotePath));
+  }
+
+  private existsOnce(remotePath: string): Promise<boolean> {
     // Reject rather than return a boolean on a dead session: a destroyed channel
     // cannot answer the stat, and a fabricated true/false would be a guess the
     // caller could act on. (createExclusive()'s code-4 ambiguity fallback does its

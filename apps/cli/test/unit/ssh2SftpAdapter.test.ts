@@ -2487,3 +2487,617 @@ describe("out-of-band client event callbacks", () => {
     expect(error).not.toHaveBeenCalled();
   });
 });
+
+// --- session recovery (mid-exchange re-dial) ---------------------------------
+//
+// On a CLEAN session loss (the ssh2-sftp-client `sftp` property cleared, no fatal
+// protocol error, no liveness stall) the adapter transparently re-dials through
+// connect() -- reusing the retained full connect options (pinned host key, stored
+// credentials, reconnect bound) -- and re-issues the operation ONCE. A fatal
+// error, a stall, a memory bound, or a host-key mismatch on the re-dial stays
+// terminal. These pin the trigger, the bound, the per-op idempotency resolvers,
+// and the teardown suppression, all driven by a mock whose `sftp` property toggles
+// to model a server dropping the one long-lived session mid-exchange.
+
+describe("session recovery", () => {
+  // A raw SFTPWrapper stand-in carrying the four methods connect()'s presence
+  // guard checks plus the EventEmitter `on` the fatal-'error' guard attaches to.
+  function sessionWrapper(overrides: Record<string, unknown> = {}) {
+    return {
+      open: vi.fn(),
+      close: vi.fn(),
+      opendir: vi.fn(),
+      readdir: vi.fn(),
+      on: vi.fn(),
+      ...overrides,
+    };
+  }
+
+  // A mock ssh2-sftp-client whose `sftp` property is live until `state.live` is
+  // flipped false (a mid-exchange drop) and restored to `wrapper` by connect() (a
+  // re-dial). High-level ops are attached per test and read `state.live` to model
+  // ssh2-sftp-client's ERR_NOT_CONNECTED rejection on a cleared session.
+  function droppable(wrapper: ReturnType<typeof sessionWrapper>) {
+    const state = { live: true };
+    const connect = vi.fn().mockImplementation(async () => {
+      state.live = true;
+    });
+    const client = {
+      get sftp() {
+        return state.live ? wrapper : null;
+      },
+      connect,
+      client: noDelayClient(),
+      end: vi.fn().mockResolvedValue(true),
+      realPath: vi.fn().mockResolvedValue("/"),
+    };
+    return { client, connect, state };
+  }
+
+  // The exact error ssh2-sftp-client's haveConnection() raises on a cleared
+  // session: message "<name>: No SFTP connection available", code
+  // "ERR_NOT_CONNECTED" (node_modules/ssh2-sftp-client/src/utils.js +
+  // constants.js). Pinned here rather than matched by a loose string so a library
+  // bump that changes the identity is caught, per DEPENDENCY_PINS.md exact-pinning.
+  const notConnected = (name: string) =>
+    Object.assign(new Error(`${name}: No SFTP connection available`), {
+      code: "ERR_NOT_CONNECTED",
+    });
+
+  const stub = (adapter: SSH2SFTPClientAdapter) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn: vi.fn(), trace: vi.fn(), error: vi.fn() };
+  };
+  const install = (adapter: SSH2SFTPClientAdapter, client: unknown) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client = client;
+  };
+
+  test("recovers from a clean drop on list() and completes via one re-dial", async () => {
+    const wrapper = sessionWrapper({
+      // Serve a two-entry directory: one batch, then EOF on the next readdir.
+      opendir: (_p: string, cb: (e: Error | null, h: Buffer) => void) =>
+        cb(null, Buffer.from("h")),
+      readdir: (() => {
+        let served = false;
+        return (
+          _h: Buffer,
+          cb: (e: (Error & { code?: number }) | null, l?: unknown[]) => void,
+        ) => {
+          if (served) return cb(Object.assign(new Error("EOF"), { code: 1 }));
+          served = true;
+          cb(null, [
+            { filename: "a.json", attrs: { mtime: 1, size: 1 } },
+            { filename: "b.json", attrs: { mtime: 1, size: 2 } },
+          ]);
+        };
+      })(),
+      close: (_h: Buffer, cb: (e: Error | null) => void) => cb(null),
+    });
+    const { client, connect, state } = droppable(wrapper);
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    expect(connect).toHaveBeenCalledTimes(1);
+
+    // Mid-exchange clean drop: the next list() finds the session cleared.
+    state.live = false;
+    const result = await adapter.list("/remote/dir");
+
+    expect(result.map((e) => e.name)).toEqual(["a.json", "b.json"]);
+    // Exactly one recovery re-dial (initial connect + one).
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  test("recovers on createExclusive() and resolves a re-issued own-EEXIST as success", async () => {
+    // The pre-drop create landed, so the re-issue sees its OWN lock file: the
+    // server returns FILE_ALREADY_EXISTS (11), createExclusiveOnce normalizes it to
+    // code "EEXIST", and the reissue resolver treats that as success rather than a
+    // spurious lock conflict.
+    const wrapper = sessionWrapper({
+      open: vi
+        .fn()
+        .mockImplementation(
+          (
+            _p: string,
+            _f: number,
+            _a: object,
+            cb: (e: Error | null, h: Buffer) => void,
+          ) =>
+            cb(
+              Object.assign(new Error("exists"), { code: 11 }),
+              Buffer.alloc(0),
+            ),
+        ),
+      close: vi.fn((_h: Buffer, cb: (e: Error | null) => void) => cb(null)),
+    });
+    const { client, connect, state } = droppable(wrapper);
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    state.live = false;
+
+    await expect(
+      adapter.createExclusive("/remote/lock.json"),
+    ).resolves.toBeUndefined();
+    expect(connect).toHaveBeenCalledTimes(2);
+    // Only the re-issue reached open(); the first attempt short-circuited on the
+    // cleared session.
+    expect(wrapper.open).toHaveBeenCalledOnce();
+  });
+
+  test("surfaces a terminal non-zero failure when the recovery re-dial exhausts its budget", async () => {
+    // An exhausted re-dial must reject terminally (the caller maps it to a non-zero
+    // exit), never resolve silently or hang. maxReconnectAttempts: 0 makes the
+    // re-dial a single failing attempt with no retry delay.
+    const wrapper = sessionWrapper();
+    const state = { live: true };
+    let calls = 0;
+    const connect = vi.fn().mockImplementation(async () => {
+      calls += 1;
+      if (calls === 1) {
+        state.live = true;
+        return;
+      }
+      throw new Error("connection refused");
+    });
+    const client = {
+      get sftp() {
+        return state.live ? wrapper : null;
+      },
+      connect,
+      client: noDelayClient(),
+      end: vi.fn().mockResolvedValue(true),
+    };
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
+    state.live = false;
+
+    await expect(adapter.list("/remote/dir")).rejects.toThrow(
+      "connection refused",
+    );
+    // Initial connect + exactly one re-dial attempt.
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  test("fails immediately on a host-key mismatch during the recovery re-dial", async () => {
+    // A host-key mismatch on the re-dial is terminal for free via connect()'s
+    // existing "Host denied" retry predicate: it must not spend the reconnect
+    // budget re-running the key exchange against the same untrusted host.
+    const wrapper = sessionWrapper();
+    const state = { live: true };
+    let calls = 0;
+    const connect = vi.fn().mockImplementation(async () => {
+      calls += 1;
+      if (calls === 1) {
+        state.live = true;
+        return;
+      }
+      throw new Error("Host denied (verification failed)");
+    });
+    const client = {
+      get sftp() {
+        return state.live ? wrapper : null;
+      },
+      connect,
+      client: noDelayClient(),
+      end: vi.fn().mockResolvedValue(true),
+    };
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    // A non-zero reconnect budget makes the single-attempt assertion meaningful: a
+    // working predicate refuses to spend it on a host-key rejection.
+    await adapter.connect({ host: "h", maxReconnectAttempts: 3 });
+    state.live = false;
+
+    await expect(adapter.list("/remote/dir")).rejects.toThrow("Host denied");
+    // Initial connect + exactly one terminal re-dial attempt (budget untouched).
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  test("resolves a re-issued delete whose source is already absent", async () => {
+    // A pre-drop delete that landed returns SSH_FX_NO_SUCH_FILE (code 2) on the
+    // re-issue; the resolver maps it to success so poll()'s consume-delete poller
+    // is not stopped by a delete that in fact succeeded.
+    const wrapper = sessionWrapper();
+    const { client, connect, state } = droppable(wrapper);
+    let deleteCalls = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).delete = vi.fn().mockImplementation(async () => {
+      if (!state.live) throw notConnected("delete");
+      deleteCalls += 1;
+      throw Object.assign(new Error("No such file"), { code: 2 });
+    });
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    state.live = false;
+
+    await expect(adapter.delete("/remote/x.json")).resolves.toBeUndefined();
+    expect(connect).toHaveBeenCalledTimes(2);
+    // Only the re-issue reached the server; the first attempt saw the cleared
+    // session.
+    expect(deleteCalls).toBe(1);
+  });
+
+  test("resolves a re-issued rename whose destination already exists", async () => {
+    // A pre-drop rename that landed leaves the source gone (code 2) on the
+    // re-issue; because every rename destination is self-prefixed, a present
+    // destination is unambiguously our own landed attempt, so the resolver
+    // confirms it via exists(dest) and resolves as success.
+    const wrapper = sessionWrapper();
+    const { client, connect, state } = droppable(wrapper);
+    let renameCalls = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).rename = vi.fn().mockImplementation(async () => {
+      if (!state.live) throw notConnected("rename");
+      renameCalls += 1;
+      throw Object.assign(new Error("No such file From: a To: b"), { code: 2 });
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).exists = vi.fn().mockResolvedValue(true);
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    state.live = false;
+
+    await expect(
+      adapter.rename("/remote/id-joining.json", "/remote/id-hello.json"),
+    ).resolves.toBeUndefined();
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(renameCalls).toBe(1);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((client as any).exists).toHaveBeenCalledWith(
+      "/remote/id-hello.json",
+    );
+  });
+
+  test("re-dials on the exact ERR_NOT_CONNECTED clean-loss identity", async () => {
+    // Pin the trigger against ssh2-sftp-client's high-level clean-loss rejection:
+    // the first delete rejects with the exact ERR_NOT_CONNECTED identity while the
+    // session is cleared, and recovery re-dials and re-issues to success.
+    const wrapper = sessionWrapper();
+    const { client, connect, state } = droppable(wrapper);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).delete = vi.fn().mockImplementation(async () => {
+      if (!state.live) throw notConnected("delete");
+      // The re-issue succeeds cleanly (the file was still present).
+    });
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    state.live = false;
+
+    await expect(adapter.delete("/remote/x.json")).resolves.toBeUndefined();
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  test("does NOT re-dial on a liveness stall even with the session cleared", async () => {
+    // A TransportOperationStalledError is terminal, never a reconnect trigger:
+    // re-dialing on a stall would hand a withholding server a free liveness reset.
+    // Even with the session property cleared, a stall must propagate without a
+    // re-dial.
+    const wrapper = sessionWrapper();
+    const { client, connect, state } = droppable(wrapper);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).delete = vi
+      .fn()
+      .mockRejectedValue(new TransportOperationStalledError("withheld"));
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    state.live = false;
+
+    await expect(adapter.delete("/remote/x.json")).rejects.toBeInstanceOf(
+      TransportOperationStalledError,
+    );
+    // No re-dial: the stall is terminal.
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not re-dial once teardown has begun", async () => {
+    // end() latches `closing`, so an op racing a clean close fails terminally
+    // rather than launching a re-dial whose readyTimeout would slow the close and
+    // whose fresh session would outlive teardown.
+    const wrapper = sessionWrapper();
+    const { client, connect, state } = droppable(wrapper);
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    await adapter.end();
+    state.live = false;
+
+    await expect(adapter.list("/remote/dir")).rejects.toThrow(
+      "SFTP session is not open",
+    );
+    // No re-dial during teardown.
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not re-dial before any connect (no retained options)", async () => {
+    // A server-driven op reaching the recovery path before connect() ran has
+    // nothing to re-dial with; the original diagnostic must surface unchanged
+    // rather than a re-dial or the retained-options invariant error.
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    const connect = vi.fn();
+    install(adapter, { sftp: null, connect });
+
+    await expect(adapter.list("/remote/dir")).rejects.toThrow(
+      "SFTP session is not open",
+    );
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  test("recovers from a clean drop on get() via one re-dial", async () => {
+    // get() is wired to withSessionRecovery identically to list/createExclusive:
+    // the first attempt finds the session cleared, the re-dial re-establishes it,
+    // and the re-issued read returns the file (the capped sink is rebuilt per call).
+    const wrapper = sessionWrapper();
+    const { client, connect, state } = droppable(wrapper);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).get = vi
+      .fn()
+      .mockImplementation((_p: string, sink: Writable) => {
+        if (!state.live) return Promise.reject(notConnected("get"));
+        sink.write(Buffer.from("hello"));
+        return Promise.resolve(sink);
+      });
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    state.live = false;
+
+    const buf = await adapter.get("/remote/f.bin", { maxBytes: 32 });
+    expect(buf.toString()).toBe("hello");
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  test("recovers from a clean drop on exists() via one re-dial", async () => {
+    const wrapper = sessionWrapper();
+    const { client, connect, state } = droppable(wrapper);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).exists = vi.fn().mockImplementation(async () => {
+      if (!state.live) throw notConnected("exists");
+      return true;
+    });
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    state.live = false;
+
+    await expect(adapter.exists("/remote/lock.json")).resolves.toBe(true);
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  test("recovers a re-runnable put (Buffer) via one re-dial", async () => {
+    // A Buffer source is re-runnable: the re-issue rebuilds it and re-streams the
+    // identical payload. retries: 0 keeps put()'s inner retry loop from burning
+    // attempts on the dropped session before the recovery re-dial takes over.
+    const wrapper = sessionWrapper();
+    const { client, connect, state } = droppable(wrapper);
+    let putCalls = 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).put = vi.fn().mockImplementation(() => {
+      if (!state.live) return Promise.reject(notConnected("put"));
+      putCalls += 1;
+      return Promise.resolve("ok");
+    });
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", retries: 0, maxReconnectAttempts: 2 });
+    state.live = false;
+
+    await expect(
+      adapter.put(Buffer.from("payload"), "/remote/out.tmp", { flags: "w" }),
+    ).resolves.toBe("ok");
+    expect(connect).toHaveBeenCalledTimes(2);
+    // Only the re-issue reached the server; the first attempt saw the cleared
+    // session.
+    expect(putCalls).toBe(1);
+  });
+
+  test("does NOT recovery-wrap a one-shot stream put (terminal, no re-pipe)", async () => {
+    // A provided ReadableStream is one-shot: a first attempt half-drains it, so a
+    // recovery re-issue would re-pipe an already-consumed stream and silently
+    // upload nothing. put() must bypass withSessionRecovery for it, so a clean drop
+    // fails terminally with no re-dial rather than re-piping a drained stream.
+    const wrapper = sessionWrapper();
+    const { client, connect, state } = droppable(wrapper);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).put = vi
+      .fn()
+      .mockImplementation(() => Promise.reject(notConnected("put")));
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", retries: 0, maxReconnectAttempts: 2 });
+    state.live = false;
+
+    const stream = Readable.from([Buffer.from("one-shot")]);
+    await expect(adapter.put(stream, "/remote/out.tmp")).rejects.toThrow(
+      "No SFTP connection available",
+    );
+    // No re-dial: the one-shot stream path never enters recovery.
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  test("does NOT recovery-wrap an append-mode put even from a re-runnable source", async () => {
+    // flags:"a" is not re-issue-idempotent: a recovery re-issue would double-write
+    // the payload. So an append put is never recovery-wrapped even from a Buffer,
+    // and a clean drop fails it terminally with no re-dial. (Every caller passes
+    // "w" today; this pins the gate against a future append caller.)
+    const wrapper = sessionWrapper();
+    const { client, connect, state } = droppable(wrapper);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).put = vi
+      .fn()
+      .mockImplementation(() => Promise.reject(notConnected("put")));
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", retries: 0, maxReconnectAttempts: 2 });
+    state.live = false;
+
+    await expect(
+      adapter.put(Buffer.from("payload"), "/remote/out.log", { flags: "a" }),
+    ).rejects.toThrow("No SFTP connection available");
+    // No re-dial: append mode bypasses recovery, so a clean drop is terminal.
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  test("counts a successful recovery re-dial in reconnectCount", async () => {
+    // A one-shot successful recovery re-dial re-establishes the session, so it must
+    // register in the operator's reconnect metric even though connect()'s own
+    // counter (which bumps only on an internal retry past the first) stays at zero.
+    const wrapper = sessionWrapper({
+      opendir: (_p: string, cb: (e: Error | null, h: Buffer) => void) =>
+        cb(null, Buffer.from("h")),
+      readdir: (
+        _h: Buffer,
+        cb: (e: (Error & { code?: number }) | null, l?: unknown[]) => void,
+      ) => cb(Object.assign(new Error("EOF"), { code: 1 })),
+      close: (_h: Buffer, cb: (e: Error | null) => void) => cb(null),
+    });
+    const { client, state } = droppable(wrapper);
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    expect(adapter.reconnectCount).toBe(0);
+    state.live = false;
+
+    await adapter.list("/remote/dir");
+    // The recovery re-dial's connect() succeeded on its first attempt, so connect()
+    // added zero; the recovery increment is what surfaces the survived drop.
+    expect(adapter.reconnectCount).toBe(1);
+  });
+
+  test("closes a session dialed during teardown and surfaces the original loss", async () => {
+    // Latch `closing` WHILE the recovery re-dial is in flight (the entry-guard
+    // teardown test above covers `closing` latched BEFORE the op). The post-re-dial
+    // check must then tear down the freshly-dialed session so it does not outlive
+    // the close, and surface the original clean-loss error rather than re-issuing.
+    const wrapper = sessionWrapper();
+    const state = { live: true };
+    let connectCalls = 0;
+    let signalRedialStarted!: () => void;
+    const redialStarted = new Promise<void>((r) => {
+      signalRedialStarted = r;
+    });
+    let releaseRedial!: () => void;
+    const redialGate = new Promise<void>((r) => {
+      releaseRedial = r;
+    });
+    const connect = vi.fn().mockImplementation(async () => {
+      connectCalls += 1;
+      if (connectCalls === 1) {
+        state.live = true;
+        return;
+      }
+      // The recovery re-dial: signal that connect() has begun, then park until the
+      // test latches `closing`, then complete the handshake so the post-re-dial
+      // check runs against a freshly-established session.
+      signalRedialStarted();
+      await redialGate;
+      state.live = true;
+    });
+    const end = vi.fn().mockResolvedValue(true);
+    const client = {
+      get sftp() {
+        return state.live ? wrapper : null;
+      },
+      connect,
+      client: noDelayClient(),
+      end,
+      realPath: vi.fn().mockResolvedValue("/"),
+    };
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    state.live = false;
+
+    const listing = adapter.list("/remote/dir").catch((e: unknown) => e);
+    // The re-dial's connect() is now parked mid-handshake.
+    await redialStarted;
+    // Teardown begins mid-re-dial, then the handshake completes.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).closing = true;
+    releaseRedial();
+
+    const err = await listing;
+    // The original clean-loss error surfaces, not a re-issued result.
+    expect((err as Error).message).toContain("SFTP session is not open");
+    // The freshly-dialed session was torn down (its client.end() ran) and the op
+    // did not re-issue into the closing adapter.
+    expect(end).toHaveBeenCalled();
+    expect(connect).toHaveBeenCalledTimes(2);
+    // A recovery aborted by teardown is not counted as a survived reconnection.
+    expect(adapter.reconnectCount).toBe(0);
+  });
+
+  test("preserves the original rename error when the re-issue's exists() probe rejects", async () => {
+    // rename()'s re-issue confirms a landed pre-drop rename via exists(dest); if
+    // that probe itself rejects, the ambiguity is unresolved and the ORIGINAL
+    // rename error must surface, not the probe's failure (mirrors
+    // createExclusiveOnce's SFTPv3 fallback to the original openErr).
+    const wrapper = sessionWrapper();
+    const { client, connect, state } = droppable(wrapper);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).rename = vi.fn().mockImplementation(async () => {
+      if (!state.live) throw notConnected("rename");
+      // The re-issue sees the source gone (a landed pre-drop rename): code 2.
+      throw Object.assign(new Error("rename: No such file From: a To: b"), {
+        code: 2,
+      });
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).exists = vi
+      .fn()
+      .mockRejectedValue(new Error("network timeout during exists()"));
+    const adapter = new SSH2SFTPClientAdapter();
+    stub(adapter);
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    state.live = false;
+
+    const err = await adapter
+      .rename("/remote/id-joining.json", "/remote/id-hello.json")
+      .catch((e: unknown) => e);
+    // The original rename error (code 2), not the exists() rejection.
+    expect((err as NodeJS.ErrnoException).code).toBe(2);
+    expect((err as Error).message).toContain("No such file");
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+});
