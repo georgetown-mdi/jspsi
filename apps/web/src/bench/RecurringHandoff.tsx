@@ -8,6 +8,7 @@ import {
   windowsJoinCommand,
 } from "@psi/recurringHandoff";
 
+import { DisclosureSection } from "../components/DisclosureSection";
 import styles from "./bench.module.css";
 
 import type { JobHandoff } from "@jobs/handoff";
@@ -18,23 +19,32 @@ const RECURRING_EXCHANGE_DOC_URL =
 
 /**
  * The recurring-run hand-off panel, shown in the completed-run block of every
- * console server-job seat (invite, accept, and Direct). It fetches the job's
- * portable, secret-free hand-off from `GET /api/jobs/:jobId/handoff` and lays out
- * exactly what the operator carries from this prototyped run to a scheduled
- * `psilink` command line: the config or command template (the portable values from
- * this run filled in, machine-specific paths shown as placeholders), the key-file
- * copy step for an invitation run, cron and Windows Task Scheduler examples, and
- * the caveats.
+ * console server-job seat (invite, accept, and Direct) and, collapsed, on the
+ * strand-recovery panel's finished render. It fetches the job's portable,
+ * secret-free hand-off from `GET /api/jobs/:jobId/handoff` and lays out exactly
+ * what the operator carries from this prototyped run to a scheduled `psilink`
+ * command line: the config or command template (the portable values from this run
+ * filled in, machine-specific paths shown as placeholders), the key-file copy step
+ * for an invitation run, cron and Windows Task Scheduler examples, and the caveats.
  *
  * It is purely informational and never blocks anything: while the fetch is in
  * flight, or if the hand-off is unavailable (a browser run, a forgotten job, any
- * fetch failure), it renders nothing.
+ * fetch failure), it renders nothing. `collapsible` renders the same body behind an
+ * initially-collapsed disclosure whose toggle is the summary -- the null gate still
+ * fires first, so an unavailable hand-off leaves no dangling toggle.
  */
-export function RecurringHandoff({ jobId }: { jobId: string }) {
+export function RecurringHandoff({
+  jobId,
+  collapsible = false,
+}: {
+  jobId: string;
+  collapsible?: boolean;
+}) {
   // undefined = still loading; null = unavailable (render nothing).
   const [handoff, setHandoff] = useState<JobHandoff | null | undefined>(
     undefined,
   );
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,6 +58,32 @@ export function RecurringHandoff({ jobId }: { jobId: string }) {
 
   if (handoff === undefined || handoff === null) return null;
 
+  if (collapsible)
+    return (
+      <DisclosureSection
+        label="Run this on a schedule"
+        open={open}
+        onToggle={setOpen}
+      >
+        <HandoffBody handoff={handoff} />
+      </DisclosureSection>
+    );
+
+  return (
+    <section
+      className={styles.callout}
+      aria-labelledby="recurring-handoff-title"
+    >
+      <h2 id="recurring-handoff-title">Run this exchange on a schedule</h2>
+      <HandoffBody handoff={handoff} />
+    </section>
+  );
+}
+
+/** The hand-off's content -- template, schedule snippets, and caveats -- shared by
+ * the default expanded panel (under its own heading) and the collapsible
+ * disclosure (under the toggle summary). */
+function HandoffBody({ handoff }: { handoff: JobHandoff }) {
   const runCommand =
     handoff.template.kind === "command"
       ? shellJoinCommand(handoff.template.argv)
@@ -60,11 +96,7 @@ export function RecurringHandoff({ jobId }: { jobId: string }) {
       : runCommand;
 
   return (
-    <section
-      className={styles.callout}
-      aria-labelledby="recurring-handoff-title"
-    >
-      <h2 id="recurring-handoff-title">Run this exchange on a schedule</h2>
+    <>
       <p className={styles.small}>
         This exchange ran here as a prototype. To run the recurring production
         version, run it from the command line with cron (Linux/macOS) or Task
@@ -115,7 +147,7 @@ export function RecurringHandoff({ jobId }: { jobId: string }) {
         </Anchor>{" "}
         for the full command-line details.
       </p>
-    </section>
+    </>
   );
 }
 

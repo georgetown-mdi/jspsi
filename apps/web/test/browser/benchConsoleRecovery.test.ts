@@ -65,7 +65,24 @@ interface RecoveryStubOptions {
   /** Whether `GET /api/jobs/slot` reports the single slot occupied by `jobId` --
    * the signal the recovery panel probes when this browser holds no attachment. */
   slotOccupied?: boolean;
+  /** The recurring-run hand-off body served for this job's `GET /handoff`; absent
+   * leaves that route 404, keeping the graduation disclosure intrinsically gated
+   * away (the way every existing recovery test sees no affordance). */
+  handoff?: object;
 }
+
+/** A valid recurring-run hand-off body: enough for the finished render's collapsed
+ * graduation disclosure to resolve and reveal its schedule snippets. */
+const RECOVERY_HANDOFF = {
+  mode: "exchange",
+  channel: "sftp",
+  usedKeyFile: true,
+  credentialPasted: false,
+  template: {
+    kind: "config",
+    yaml: "connection:\n  channel: sftp\n",
+  },
+};
 
 /** The same-origin job API stubbed at the global fetch seam, tailored to the
  * recovery panel: the inputs/sftp/rendezvous the idle bench reads, plus the
@@ -123,6 +140,12 @@ function stubRecoveryApi(options: RecoveryStubOptions = {}): {
           json({ status: jobStatus, recordAvailable: false }),
         );
       }
+      if (url === `/api/jobs/${jobId}/handoff`)
+        return Promise.resolve(
+          options.handoff !== undefined
+            ? json(options.handoff)
+            : new Response(null, { status: 404 }),
+        );
       if (url === `/api/jobs/${jobId}/cancel`) {
         // A graceful cancel drives the job to terminal, which the discard poll
         // then observes before deleting.
@@ -474,6 +497,131 @@ describe("console strand recovery panel", () => {
         api.captured.some((r) => r.url === "/api/jobs/job-live/cancel"),
       ).toBe(true),
     );
+  });
+
+  const graduationToggle = () =>
+    page.getByRole("button", { name: /run this on a schedule/i });
+
+  test("a finished re-attach offers the collapsed graduation disclosure, revealed on click", async () => {
+    persistAttachment("job-done");
+    const api = stubRecoveryApi({
+      jobId: "job-done",
+      status: "succeeded",
+      handoff: RECOVERY_HANDOFF,
+    });
+    mount(createElement(InviterBench));
+
+    await expect
+      .element(
+        page.getByText("An exchange started from this console has finished"),
+      )
+      .toBeInTheDocument();
+
+    // Deliver the result frame so outputs are defined -- the steady state in which
+    // the graduation disclosure accompanies the delivered results.
+    await vi.waitFor(() =>
+      expect(
+        api.captured.some((r) => r.url === "/api/jobs/job-done/events"),
+      ).toBe(true),
+    );
+    api.emit({ v: 1, type: "result", resultWritten: true });
+    api.close();
+
+    // Downloads and the graduation toggle coexist.
+    await expect
+      .element(page.getByRole("heading", { level: 3, name: "Downloads" }))
+      .toBeInTheDocument();
+
+    // The disclosure is present but starts collapsed -- aria-expanded is the
+    // durable signal, and the schedule detail is not revealed yet.
+    await expect.element(graduationToggle()).toBeInTheDocument();
+    expect(graduationToggle().element().getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+
+    // Opening it reveals the hand-off body; the cron line is a stable marker that
+    // survives either template kind.
+    await graduationToggle().click();
+    expect(graduationToggle().element().getAttribute("aria-expanded")).toBe(
+      "true",
+    );
+    await expect
+      .element(page.getByText("0 2 * * *", { exact: false }))
+      .toBeVisible();
+  });
+
+  test("the running render offers no graduation disclosure", async () => {
+    persistAttachment("job-live");
+    stubRecoveryApi({
+      jobId: "job-live",
+      status: "running",
+      handoff: RECOVERY_HANDOFF,
+    });
+    mount(createElement(InviterBench));
+
+    await expect
+      .element(
+        page.getByText(
+          "An exchange started from this console is still running",
+        ),
+      )
+      .toBeInTheDocument();
+
+    // Even with a hand-off available on the appliance, graduation is a
+    // finished-only affordance: the running render never mounts the disclosure.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(graduationToggle().query()).toBeNull();
+  });
+
+  test("the stopped render offers no graduation disclosure", async () => {
+    persistAttachment("job-fail");
+    stubRecoveryApi({
+      jobId: "job-fail",
+      status: "failed",
+      handoff: RECOVERY_HANDOFF,
+    });
+    mount(createElement(InviterBench));
+
+    await expect
+      .element(page.getByText("An exchange started from this console stopped"))
+      .toBeInTheDocument();
+
+    // A stopped (failed/cancelled) run has nothing to graduate; no disclosure even
+    // when a hand-off is available.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(graduationToggle().query()).toBeNull();
+  });
+
+  test("a finished run with no hand-off shows no dangling graduation toggle", async () => {
+    persistAttachment("job-done");
+    const api = stubRecoveryApi({ jobId: "job-done", status: "succeeded" });
+    mount(createElement(InviterBench));
+
+    await expect
+      .element(
+        page.getByText("An exchange started from this console has finished"),
+      )
+      .toBeInTheDocument();
+
+    // Deliver the result so outputs are defined -- the state in which the toggle
+    // COULD show, so its absence here proves the intrinsic gate rather than a
+    // not-yet-delivered result.
+    await vi.waitFor(() =>
+      expect(
+        api.captured.some((r) => r.url === "/api/jobs/job-done/events"),
+      ).toBe(true),
+    );
+    api.emit({ v: 1, type: "result", resultWritten: true });
+    api.close();
+
+    await expect
+      .element(page.getByRole("heading", { level: 3, name: "Downloads" }))
+      .toBeInTheDocument();
+
+    // The hand-off route 404s: RecurringHandoff self-gates to null, so the
+    // disclosure toggle never appears (no empty toggle over an unavailable body).
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(graduationToggle().query()).toBeNull();
   });
 });
 
