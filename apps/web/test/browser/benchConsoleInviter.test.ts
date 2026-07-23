@@ -1006,7 +1006,9 @@ describe("console inviter re-attaches on a busy create", () => {
       )
       .toBeInTheDocument();
     expect(
-      page.getByText("This appliance is already running an exchange").query(),
+      page
+        .getByText("This appliance already holds an exchange", { exact: false })
+        .query(),
     ).toBeNull();
 
     // The one surface built for leave-and-return carries the keep-open
@@ -1083,7 +1085,9 @@ describe("console inviter re-attaches on a busy create", () => {
       const region = Array.from(
         document.querySelectorAll('[role="status"]'),
       ).find((el) =>
-        el.textContent.includes("Reconnecting to your running exchange"),
+        el.textContent.includes(
+          "Reconnecting to the exchange this appliance already holds",
+        ),
       );
       expect(region).toBeDefined();
     });

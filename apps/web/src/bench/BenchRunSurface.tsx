@@ -414,11 +414,11 @@ export function ReattachingNotice() {
   return (
     <div className={styles.callout} role="status">
       <p className={styles.calloutLead}>
-        Reconnecting to your running exchange...
+        Reconnecting to the exchange this appliance already holds...
       </p>
       <p className={styles.small}>
-        This appliance is already running an exchange. Reconnecting so you can
-        watch it here.
+        This appliance already holds an exchange. Reconnecting so you can watch
+        it here.
       </p>
     </div>
   );

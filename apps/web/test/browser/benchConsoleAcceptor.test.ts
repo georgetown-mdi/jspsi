@@ -285,28 +285,61 @@ const ACCEPT_PROFILE = {
   ],
 };
 
+interface AcceptStubOptions {
+  /** When set, `POST /api/jobs` returns a busy (409) carrying this id (the slot is
+   * occupied), and the id's status/events routes are served so the accept can
+   * re-attach to it. `holdProbe` withholds the FIRST status GET (the liveness
+   * probe) until `resolveProbe()` is called, so a test can observe the reconnecting
+   * interim before the recovery view lands. */
+  conflict?: { jobId: string; status?: string; holdProbe?: boolean };
+  /** The body `GET /api/jobs/:id/handoff` serves (the recurring-run hand-off); a
+   * 404 when unset, so the panel renders nothing. */
+  handoff?: unknown;
+}
+
 // The full same-origin job API a console server-job accept drives: a mounted
 // rendezvous and work directory, the file profile, the coverage sweep, and the job
-// POST plus event stream the appliance run reads. Unmatched URLs fall through to the
-// real fetch so the runner's own traffic is untouched.
-function stubServerJobAccept(): {
+// POST plus event stream the appliance run reads. With `conflict` the POST returns a
+// busy (409) so the accept re-attaches to the occupying exchange instead. Unmatched
+// URLs fall through to the real fetch so the runner's own traffic is untouched.
+function stubServerJobAccept(options: AcceptStubOptions = {}): {
+  captured: Array<{ url: string; method: string }>;
   emitEvent: (event: object) => void;
   closeEvents: () => void;
   hasEventStream: () => boolean;
+  resolveProbe: () => void;
 } {
+  const captured: Array<{ url: string; method: string }> = [];
   const realFetch = window.fetch.bind(window);
   const encoder = new TextEncoder();
   let sse: ReadableStreamDefaultController<Uint8Array> | undefined;
+  // The gate the held liveness probe (conflict.holdProbe) awaits; the first status
+  // GET blocks on it, later ones resolve at once.
+  let releaseProbe: (() => void) | undefined;
+  const probeGate = new Promise<void>((resolve) => {
+    releaseProbe = resolve;
+  });
+  let firstProbeHeld = false;
   const jsonResponse = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), {
       status,
       headers: { "Content-Type": "application/json" },
     });
+  const eventStream = () =>
+    new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          sse = controller;
+        },
+      }),
+      { status: 200, headers: { "Content-Type": "text/event-stream" } },
+    );
   vi.stubGlobal(
     "fetch",
     (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = String(input);
       if (!url.startsWith("/api/jobs")) return realFetch(input, init);
+      captured.push({ url, method: init?.method ?? "GET" });
       if (url === "/api/jobs/rendezvous")
         return Promise.resolve(
           jsonResponse({ configured: true, path: "/mnt/rendezvous" }),
@@ -320,18 +353,36 @@ function stubServerJobAccept(): {
       if (url === "/api/jobs/inputs/coverage")
         return Promise.resolve(jsonResponse({ rates: [] }));
       if (url === "/api/jobs")
-        return Promise.resolve(jsonResponse({ id: "job-7" }, 201));
-      if (url === "/api/jobs/job-7/events")
         return Promise.resolve(
-          new Response(
-            new ReadableStream<Uint8Array>({
-              start(controller) {
-                sse = controller;
-              },
-            }),
-            { status: 200, headers: { "Content-Type": "text/event-stream" } },
-          ),
+          options.conflict !== undefined
+            ? jsonResponse({ id: options.conflict.jobId }, 409)
+            : jsonResponse({ id: "job-7" }, 201),
         );
+      if (url.endsWith("/handoff"))
+        return Promise.resolve(
+          options.handoff !== undefined
+            ? jsonResponse(options.handoff)
+            : new Response(null, { status: 404 }),
+        );
+      if (options.conflict !== undefined) {
+        const cid = options.conflict.jobId;
+        if (url === `/api/jobs/${cid}/events`)
+          return Promise.resolve(eventStream());
+        if (url === `/api/jobs/${cid}`) {
+          const respond = () =>
+            jsonResponse({
+              status: options.conflict?.status ?? "running",
+              recordAvailable: false,
+            });
+          if (options.conflict.holdProbe === true && !firstProbeHeld) {
+            firstProbeHeld = true;
+            return probeGate.then(respond);
+          }
+          return Promise.resolve(respond());
+        }
+      }
+      if (url === "/api/jobs/job-7/events")
+        return Promise.resolve(eventStream());
       if (url === "/api/jobs/job-7")
         return Promise.resolve(jsonResponse({ recordAvailable: false }));
       if (url === "/api/jobs/job-7/cancel")
@@ -340,11 +391,31 @@ function stubServerJobAccept(): {
     },
   );
   return {
+    captured,
     emitEvent: (event) =>
       sse?.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`)),
     closeEvents: () => sse?.close(),
     hasEventStream: () => sse !== undefined,
+    resolveProbe: () => releaseProbe?.(),
   };
+}
+
+// From an already-mounted acceptor bench with a rendezvous mount: consent to the
+// terms, pick and confirm the mounted file, then start the exchange from the
+// confirm-columns step -- whose "Start the exchange" fires the appliance job create.
+async function reachAcceptStart() {
+  await page
+    .getByRole("button", { name: "Continue: consent & your file" })
+    .click();
+  await userEvent.fill(page.getByLabelText("Your name"), "Sam Alvarez");
+  await page.getByRole("checkbox").click();
+  await page.getByRole("button", { name: "Select cohort.csv" }).click();
+  await page.getByRole("button", { name: "Use this file" }).click();
+  await page.getByRole("button", { name: "Accept and continue" }).click();
+  await expect
+    .element(page.getByRole("heading", { name: "Confirm your columns" }))
+    .toBeInTheDocument();
+  await page.getByRole("button", { name: "Start the exchange" }).click();
 }
 
 describe("console acceptor server-job keep-open callout", () => {
@@ -388,5 +459,132 @@ describe("console acceptor server-job keep-open callout", () => {
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Exchange complete");
     expect(page.getByText(SERVER_JOB_KEEP_OPEN_BODY).query()).toBeNull();
+  });
+});
+
+describe("console acceptor re-attaches on a busy create", () => {
+  const REATTACH_HANDOFF = {
+    mode: "exchange",
+    channel: "filedrop",
+    usedKeyFile: true,
+    credentialPasted: false,
+    template: {
+      kind: "config",
+      yaml: "connection:\n  channel: filedrop\n  path: /mnt/rendezvous\n",
+    },
+  };
+
+  test("a 409 at accept re-attaches with recovery copy and shows completion affordances", async () => {
+    // The slot is occupied: the accept's create 409s carrying the live occupant's id.
+    const api = stubServerJobAccept({
+      conflict: { jobId: "job-live", status: "running" },
+      handoff: REATTACH_HANDOFF,
+    });
+    window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
+    mount(createElement(AcceptorBench));
+    await reachAcceptStart();
+
+    // The busy create re-attaches to the occupying exchange under recovery-style
+    // copy instead of a fresh-run screen.
+    await expect
+      .element(
+        page.getByRole("heading", {
+          level: 1,
+          name: "An exchange started from this console is still running",
+        }),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText(
+          "You are back on an exchange this appliance already holds.",
+        ),
+      )
+      .toBeInTheDocument();
+
+    // The resolved id was probed live and its event stream re-attached to.
+    await vi.waitFor(() =>
+      expect(
+        api.captured.some((r) => r.url === "/api/jobs/job-live/events"),
+      ).toBe(true),
+    );
+
+    // The replay's terminal result heads the surface finished (recovery copy, not
+    // the fresh-run "Exchange complete" title) yet still shows the completion
+    // affordances: the results summary panel AND the recurring-run hand-off.
+    api.emitEvent({ v: 1, type: "result", resultWritten: true });
+    api.closeEvents();
+    await expect
+      .element(
+        page.getByRole("heading", {
+          level: 1,
+          name: "An exchange started from this console has finished",
+        }),
+      )
+      .toBeInTheDocument();
+    // No fresh-run success heading leaks in: the only h1 is the recovery title, and
+    // the "Exchange complete" summary is the panel's text, not the page heading.
+    expect(
+      page
+        .getByRole("heading", { level: 1, name: "Exchange complete" })
+        .query(),
+    ).toBeNull();
+    await expect
+      .element(page.getByText("Exchange complete", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("heading", { name: "Run this exchange on a schedule" }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("a busy create shows an announced reconnecting interim before the recovery view", async () => {
+    // Hold the liveness probe so the reconnecting interim is observable.
+    const api = stubServerJobAccept({
+      conflict: { jobId: "job-live", status: "running", holdProbe: true },
+    });
+    window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
+    mount(createElement(AcceptorBench));
+    await reachAcceptStart();
+
+    // The moment the 409 is known -- before the probe settles -- the surface heads
+    // reconnecting and announces it in a live region, killing the fresh-run flash.
+    await expect
+      .element(
+        page.getByRole("heading", {
+          level: 1,
+          name: "Reconnecting to your exchange",
+        }),
+      )
+      .toBeInTheDocument();
+    await vi.waitFor(() => {
+      const region = Array.from(
+        document.querySelectorAll('[role="status"]'),
+      ).find((el) =>
+        el.textContent.includes(
+          "Reconnecting to the exchange this appliance already holds",
+        ),
+      );
+      expect(region).toBeDefined();
+    });
+    // No fresh-run keep-open callout flashes during the interim.
+    expect(page.getByText(SERVER_JOB_KEEP_OPEN_BODY).query()).toBeNull();
+
+    // Releasing the probe resolves the interim into the full recovery view.
+    api.resolveProbe();
+    await expect
+      .element(
+        page.getByRole("heading", {
+          level: 1,
+          name: "An exchange started from this console is still running",
+        }),
+      )
+      .toBeInTheDocument();
+    await vi.waitFor(() =>
+      expect(
+        api.captured.some((r) => r.url === "/api/jobs/job-live/events"),
+      ).toBe(true),
+    );
   });
 });
