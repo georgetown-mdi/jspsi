@@ -7,17 +7,23 @@ import {
   DonePanel,
   DownloadRow,
   FailureAlert,
+  RECONNECTING_HEADING,
+  ReattachedRunNotice,
+  ReattachingNotice,
   RunWarningsAlert,
   SERVER_JOB_KEEP_OPEN_BODY,
   SERVER_JOB_PEER_WINDOW_BODY,
   WithheldResultInset,
+  recoveredExchangeHeading,
 } from "./BenchRunSurface";
 import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
 import { awaitingPartner } from "./exchangeRun";
+import { reattachedRunState } from "./reattachedRunState";
 import styles from "./bench.module.css";
 
 import type { ExchangeRun } from "./exchangeRun";
+import type { JobRunStatus } from "@psi/serverJobExchangeDriver";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "./runOutputs";
 
@@ -42,6 +48,8 @@ export function DirectRunSection({
   failure,
   warnings,
   jobId,
+  reattached,
+  reattaching,
   onTryAgain,
   onStartOver,
   onAbandon,
@@ -53,6 +61,18 @@ export function DirectRunSection({
   /** The appliance job id of this run, once created. Threads the run's job to the
    * recurring hand-off panel; undefined before the job exists. */
   jobId: string | undefined;
+  /** The live status of the exchange this run re-attached to on a busy (409)
+   * create, or undefined on a fresh run. When set, the surface heads with
+   * recovery-style copy (it is watching an exchange the appliance already held, not
+   * a fresh one) and drops the fresh-run keep-open framing, while keeping the
+   * completion affordances -- the results summary and the recurring hand-off -- so
+   * the operator still sees their run's outcome and graduation. */
+  reattached: JobRunStatus | undefined;
+  /** True during the brief interim between a busy (409) create being detected and
+   * the liveness probe settling: the surface suppresses the fresh-run framing and
+   * shows a reconnecting notice, before it resolves to the recovery view or the
+   * run's alert. */
+  reattaching: boolean;
   onTryAgain: () => void;
   onStartOver: () => void;
   /** Discard the current server-job exchange (cancel-if-running + DELETE), fired as
@@ -69,9 +89,29 @@ export function DirectRunSection({
   const offersStartOver =
     !retryable && failure !== undefined && failure.category !== "output";
 
-  // Move focus to the heading at completion so the results are read; the failure
-  // alert owns focus while a failure shows (FailureAlert focuses itself). Skipped on
-  // mount: the bench host already sends focus to the incoming section's heading.
+  // A busy (409) create at start re-attached this surface to an exchange the
+  // appliance already held (a second tab, a navigate-away-and-back, or an orphaned
+  // job). It then heads with recovery-style copy and drops the fresh-run keep-open
+  // framing, so it never reads as a fresh success -- but the completion affordances
+  // (the results summary and the recurring hand-off) still show, since those hold
+  // however the operator reached completion.
+  const reattachedRun = reattached !== undefined;
+  const reattachState = reattachedRunState({
+    failed: failure !== undefined,
+    hasOutputs: outputs !== undefined,
+    status: reattached ?? "running",
+  });
+  // Fresh-run framing (the keep-open callout, the fresh title) is suppressed both
+  // once re-attached and during the reconnecting interim, so nothing fresh-run
+  // flashes while the 409 is being resolved.
+  const recovering = reattaching || reattachedRun;
+
+  // Move focus to the heading at completion so the results are read, and onto the
+  // recovery heading when the reconnecting/recovery swap orphans focus (the guard
+  // fires only when focus landed on <body>, so a live element the operator placed
+  // it on is not stolen). The failure alert owns focus while a failure shows
+  // (FailureAlert focuses itself). Skipped on mount: the bench host already sends
+  // focus to the incoming section's heading.
   const headingRef = useRef<HTMLHeadingElement>(null);
   const mounted = useRef(false);
   useEffect(() => {
@@ -79,20 +119,32 @@ export function DirectRunSection({
       mounted.current = true;
       return;
     }
-    if (done) headingRef.current?.focus();
-  }, [done]);
+    if (done) {
+      headingRef.current?.focus();
+      return;
+    }
+    if (failure !== undefined) return;
+    const active = document.activeElement;
+    if (!active || active === document.body) headingRef.current?.focus();
+  }, [done, failure, reattaching, reattachedRun]);
 
-  const title = done
-    ? "Exchange complete"
-    : failure !== undefined
-      ? "Exchange stopped"
-      : "Exchange in progress";
+  const title = reattachedRun
+    ? recoveredExchangeHeading(reattachState)
+    : reattaching
+      ? RECONNECTING_HEADING
+      : done
+        ? "Exchange complete"
+        : failure !== undefined
+          ? "Exchange stopped"
+          : "Exchange in progress";
 
   return (
     <>
       <h1 tabIndex={-1} ref={headingRef}>
         {title}
       </h1>
+      {reattachedRun && <ReattachedRunNotice state={reattachState} />}
+      {reattaching && !reattachedRun && <ReattachingNotice />}
       {failure !== undefined && (
         <FailureAlert failure={failure}>
           {retryable && (
@@ -112,7 +164,7 @@ export function DirectRunSection({
           the way back). The peer-window callout adds, only while the run still waits
           for the partner, that both consoles must run their halves at once. Both
           drop the moment the run finishes or fails. */}
-      {!done && failure === undefined && (
+      {!done && failure === undefined && !recovering && (
         <div className={styles.callout}>
           <p className={styles.calloutLead}>Keep this tab open.</p>
           <p className={styles.small}>{SERVER_JOB_KEEP_OPEN_BODY}</p>
