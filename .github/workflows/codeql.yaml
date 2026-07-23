@@ -1,0 +1,76 @@
+name: CodeQL
+
+# GitHub CodeQL static analysis (SAST) for the JavaScript/TypeScript sources.
+# CodeQL extracts the repo into a queryable database and runs security queries
+# with taint / data-flow tracking -- tracing untrusted input (sources) to
+# dangerous operations (sinks) across function boundaries, which the eslint and
+# format gate in static_checks.yaml cannot do. The three security workflows
+# complement rather than overlap: static_checks is style and type correctness,
+# dependency_review.yaml gates the supply-chain graph a PR adds, and this
+# analyzes first-party code.
+#
+# Free here: code scanning with CodeQL is free on public repositories
+# (georgetown-mdi/jspsi is public), so this needs no GitHub Advanced Security
+# license. Findings surface as code-scanning alerts in the repository Security
+# tab.
+#
+# Advisory, not a merge gate: alerts are informational and this is left off the
+# required-status-check list until its false-positive rate on real PRs is known.
+# Promote it to a required check later if it earns it.
+#
+# JavaScript/TypeScript needs no build step (build-mode: none): CodeQL extracts
+# the sources directly, so unlike the build/test workflows this neither runs the
+# ./.github/actions/setup prologue nor builds @psilink/core.
+
+on:
+  # Manual trigger for an on-demand full-tree scan (PR runs are diff-informed);
+  # how a maintainer re-baselines a branch without waiting for the schedule.
+  workflow_dispatch:
+  # On a PR, analyze the changes and surface new alerts on the PR itself.
+  pull_request:
+    branches: [main, staging]
+  # On merge to a base branch, refresh that branch's alert baseline so alert
+  # tracking and auto-dismissal stay correct and the Security tab reflects the
+  # merged state.
+  push:
+    branches: [main, staging]
+  # Weekly re-scan of unchanged code against an updated query pack, catching
+  # newly-published vulnerability patterns with no code change to trigger a run.
+  # Monday, to match the Dependabot cadence in .github/dependabot.yml.
+  schedule:
+    - cron: "30 5 * * 1"
+
+# Cancel a superseded run when a newer commit lands on the same PR/branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+# Least privilege at the top level; the analyze job widens to what the SARIF
+# upload needs.
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (JavaScript/TypeScript)
+    runs-on: ubuntu-latest
+    permissions:
+      # Upload SARIF results as code-scanning alerts.
+      security-events: write
+      # actions/checkout.
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          build-mode: none
+          # security-extended: broader security coverage than the default
+          # code-scanning suite, without the maintainability and style queries
+          # of security-and-quality (off-topic noise for a security control).
+          queries: security-extended
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:javascript-typescript"
