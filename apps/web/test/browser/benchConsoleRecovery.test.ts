@@ -62,6 +62,9 @@ interface RecoveryStubOptions {
   statusCode?: number;
   /** A non-2xx code for the inputs listing (404 = API disabled). */
   inputsStatus?: number;
+  /** Whether `GET /api/jobs/slot` reports the single slot occupied by `jobId` --
+   * the signal the recovery panel probes when this browser holds no attachment. */
+  slotOccupied?: boolean;
 }
 
 /** The same-origin job API stubbed at the global fetch seam, tailored to the
@@ -101,6 +104,14 @@ function stubRecoveryApi(options: RecoveryStubOptions = {}): {
         return Promise.resolve(json({ configured: false }));
       if (url === "/api/jobs/rendezvous")
         return Promise.resolve(json({ configured: false }));
+      if (url === "/api/jobs/slot")
+        return Promise.resolve(
+          json(
+            options.slotOccupied === true
+              ? { occupied: true, id: jobId }
+              : { occupied: false },
+          ),
+        );
       if (url === `/api/jobs/${jobId}`) {
         if (method === "DELETE")
           return Promise.resolve(new Response(null, { status: 204 }));
@@ -463,5 +474,164 @@ describe("console strand recovery panel", () => {
         api.captured.some((r) => r.url === "/api/jobs/job-live/cancel"),
       ).toBe(true),
     );
+  });
+});
+
+describe("console lobby occupancy probe (no stored attachment)", () => {
+  test("an occupied slot renders the panel with the neutral copy and discards the probed id", async () => {
+    // Empty localStorage: the slot-occupancy probe is the only signal that an
+    // exchange is on the appliance.
+    const api = stubRecoveryApi({
+      jobId: "job-probe",
+      status: "running",
+      slotOccupied: true,
+    });
+    mount(createElement(InviterBench));
+
+    // The panel appears from the probe alone, with the neutral lead ("started
+    // here") rather than the inaccurate "you started here" -- another browser may
+    // have started it.
+    await expect
+      .element(
+        page.getByText(
+          "An exchange started from this console is still running",
+        ),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("an exchange started here", { exact: false }))
+      .toBeInTheDocument();
+    expect(
+      page.getByText("an exchange you started here", { exact: false }).query(),
+    ).toBeNull();
+
+    // The probe drove the id, and adoption persisted nothing -- state only.
+    expect(api.captured.some((r) => r.url === "/api/jobs/slot")).toBe(true);
+    expect(window.localStorage.getItem(ATTACHMENT_KEY)).toBeNull();
+
+    // Discard rides the existing per-id path against the PROBED id: confirm, then
+    // cancel + DELETE.
+    await page.getByRole("button", { name: "Discard" }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Discard" })
+      .click();
+    await vi.waitFor(
+      () => {
+        expect(
+          api.captured.some((r) => r.url === "/api/jobs/job-probe/cancel"),
+        ).toBe(true);
+        expect(
+          api.captured.some(
+            (r) => r.url === "/api/jobs/job-probe" && r.method === "DELETE",
+          ),
+        ).toBe(true);
+      },
+      { timeout: 4000 },
+    );
+    await vi.waitFor(() =>
+      expect(
+        page
+          .getByText("An exchange started from this console", { exact: false })
+          .query(),
+      ).toBeNull(),
+    );
+  });
+
+  test("the probed slot re-attaches (pick-up) and its result renders downloads", async () => {
+    const api = stubRecoveryApi({
+      jobId: "job-probe",
+      status: "succeeded",
+      slotOccupied: true,
+    });
+    mount(createElement(InviterBench));
+
+    await expect
+      .element(
+        page.getByText("An exchange started from this console has finished"),
+      )
+      .toBeInTheDocument();
+
+    // The re-attach reads the PROBED id's event stream; its result frame renders
+    // the appliance download row.
+    await vi.waitFor(() =>
+      expect(
+        api.captured.some((r) => r.url === "/api/jobs/job-probe/events"),
+      ).toBe(true),
+    );
+    api.emit({ v: 1, type: "result", resultWritten: true });
+    api.close();
+
+    await expect
+      .element(page.getByRole("heading", { level: 3, name: "Downloads" }))
+      .toBeInTheDocument();
+    await expect.element(page.getByText("results.csv")).toBeInTheDocument();
+  });
+
+  test("a probed slot that already stopped shows the stopped lead and only Discard", async () => {
+    // The slot probe surfaces an occupant whose run already stopped
+    // (failed/cancelled): the panel heads stopped from the initial status,
+    // promises no downloads, and offers only Discard -- the persisted stopped
+    // path, reached through the probe rather than a stored attachment.
+    const api = stubRecoveryApi({
+      jobId: "job-probe",
+      status: "failed",
+      slotOccupied: true,
+    });
+    mount(createElement(InviterBench));
+
+    await expect
+      .element(page.getByText("An exchange started from this console stopped"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("before it finished, so there are no results", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    // The neutral probe-adopted lead, not the "you started here" persisted copy.
+    await expect
+      .element(page.getByText("an exchange started here", { exact: false }))
+      .toBeInTheDocument();
+    expect(
+      page.getByText("an exchange you started here", { exact: false }).query(),
+    ).toBeNull();
+
+    // The probe drove the id, and adoption persisted nothing.
+    expect(api.captured.some((r) => r.url === "/api/jobs/slot")).toBe(true);
+    expect(window.localStorage.getItem(ATTACHMENT_KEY)).toBeNull();
+
+    // No result on a stopped run: no Downloads block, and no Stop -- only Discard.
+    expect(
+      page.getByText("Download its results below", { exact: false }).query(),
+    ).toBeNull();
+    expect(
+      page.getByRole("heading", { level: 3, name: "Downloads" }).query(),
+    ).toBeNull();
+    expect(
+      page.getByRole("button", { name: "Stop this exchange" }).query(),
+    ).toBeNull();
+    await expect
+      .element(page.getByRole("button", { name: "Discard" }))
+      .toBeInTheDocument();
+  });
+
+  test("a free slot with empty storage renders nothing", async () => {
+    const api = stubRecoveryApi({ slotOccupied: false });
+    mount(createElement(InviterBench));
+
+    // The probe ran and reported free, so nothing is recovered.
+    await vi.waitFor(() =>
+      expect(api.captured.some((r) => r.url === "/api/jobs/slot")).toBe(true),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(
+      page
+        .getByText("An exchange started from this console", { exact: false })
+        .query(),
+    ).toBeNull();
+    // Nothing to re-attach to, so no event stream was opened.
+    expect(api.captured.some((r) => r.url.endsWith("/events"))).toBe(false);
   });
 });

@@ -737,6 +737,18 @@ export class JobManager {
   }
 
   /**
+   * The id of the exchange occupying the single slot, or null when it is free.
+   * Occupied is exactly the states in which a create refuses with
+   * {@link ExchangeBusyError} -- a starting or active exchange, including one
+   * deleted whose child is still dying -- so `GET /api/jobs/slot` and the busy
+   * create disclose the same occupant. Delegates to {@link slotId}, the same value
+   * `createJob` puts in the busy error, so the two signals cannot drift.
+   */
+  occupiedSlotId(): string | null {
+    return this.slotId();
+  }
+
+  /**
    * The recurring-run hand-off for a job, or null when no live record matches the
    * id (an unknown, deleted, or restart-forgotten job). Held on the record from
    * creation, so it is available across the run's whole lifetime -- the panel reads

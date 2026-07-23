@@ -316,6 +316,51 @@ function jobStatusViewOf(body: unknown): JobStatusView {
 }
 
 /**
+ * The console's single-slot occupancy as the browser reads it off
+ * `GET /api/jobs/slot`: free, or occupied by a named job. The lobby's recovery
+ * panel adopts `id` when it holds no stored attachment, so a browser that never
+ * started the exchange still finds it.
+ */
+export type SlotOccupancy =
+  { occupied: false } | { occupied: true; id: string };
+
+/**
+ * Probe the console's single exchange slot (`GET /api/jobs/slot`). Fail-safe
+ * toward "not occupied": a non-2xx (a disabled API's 404 among them), a network
+ * error, an aborted request, a `{ occupied: false }` body, or a malformed
+ * `{ occupied: true }` body missing a usable id all resolve to unoccupied, so the
+ * recovery panel behaves exactly as it does today (renders nothing) rather than
+ * adopting an id it cannot re-attach to.
+ */
+export async function fetchSlotOccupancy(
+  signal: AbortSignal,
+  fetchImpl: typeof fetch = fetch,
+): Promise<SlotOccupancy> {
+  try {
+    const response = await fetchImpl("/api/jobs/slot", {
+      method: "GET",
+      signal,
+    });
+    if (!response.ok) return { occupied: false };
+    return slotOccupancyOf(await response.json());
+  } catch {
+    return { occupied: false };
+  }
+}
+
+/** Validate the slot response body into a {@link SlotOccupancy}, failing safe to
+ * unoccupied for anything but an `{ occupied: true }` body carrying a non-empty
+ * string id. */
+function slotOccupancyOf(body: unknown): SlotOccupancy {
+  if (body === null || typeof body !== "object" || Array.isArray(body))
+    return { occupied: false };
+  const { occupied, id } = body as Record<string, unknown>;
+  if (occupied !== true || typeof id !== "string" || id.length === 0)
+    return { occupied: false };
+  return { occupied: true, id };
+}
+
+/**
  * The effective SFTP connection as the browser reads it off `GET /api/jobs/sftp`:
  * the credential-free locator (or null when none is authored).
  */

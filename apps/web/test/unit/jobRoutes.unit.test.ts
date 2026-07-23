@@ -20,6 +20,7 @@ import { Route as RecordRoute } from "../../src/routes/api/jobs/$jobId/record";
 import { Route as ResultRoute } from "../../src/routes/api/jobs/$jobId/result";
 import { Route as SftpProbeRoute } from "../../src/routes/api/jobs/sftp/probe";
 import { Route as SftpRoute } from "../../src/routes/api/jobs/sftp/index";
+import { Route as SlotRoute } from "../../src/routes/api/jobs/slot";
 
 import {
   STUB_CLI_PATH,
@@ -971,6 +972,68 @@ describe("GET /api/jobs/sftp", () => {
     const response = (await handlersOf(JobRoute).GET({
       request: jobRequest("http://localhost/api/jobs/sftp"),
       params: { jobId: "sftp" },
+    })) as Response;
+    expect(response.status).toBe(404);
+  });
+});
+
+/** GET /api/jobs/slot with a loopback Host, carrying any extra headers. */
+async function getSlot(
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  return (await handlersOf(SlotRoute).GET({
+    request: jobRequest("http://localhost/api/jobs/slot", { headers }),
+    params: {},
+  })) as Response;
+}
+
+describe("GET /api/jobs/slot reports single-slot occupancy", () => {
+  test("is 404 when the API is disabled", async () => {
+    vi.stubEnv("JOB_DATA_ROOT", "");
+    expect((await getSlot()).status).toBe(404);
+  });
+
+  test("a cross-origin browser request is 403 (shared gate)", async () => {
+    enableJobApi();
+    const response = await getSlot({ "sec-fetch-site": "cross-site" });
+    expect(response.status).toBe(403);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  test("reports occupied:false when the slot is free", async () => {
+    enableJobApi();
+    const response = await getSlot();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ occupied: false });
+  });
+
+  test("reports occupied and the occupant id, and nothing else, while occupied", async () => {
+    enableJobApi();
+    const created = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent()),
+      params: {},
+    })) as Response;
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string };
+
+    const response = await getSlot();
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    // Exactly `{ occupied, id }` crosses the boundary -- no run detail, no list.
+    for (const key of Object.keys(body))
+      expect(["occupied", "id"]).toContain(key);
+    expect(body).toEqual({ occupied: true, id });
+  });
+
+  test("'slot' can never be captured as a job id", async () => {
+    // The traversal guard every $jobId route applies rejects the static segment,
+    // so even a mis-ranked router could not reach the filesystem with "slot".
+    expect(validateJobIdParam("slot")).toBeNull();
+    enableJobApi();
+    const response = (await handlersOf(JobRoute).GET({
+      request: jobRequest("http://localhost/api/jobs/slot"),
+      params: { jobId: "slot" },
     })) as Response;
     expect(response.status).toBe(404);
   });
