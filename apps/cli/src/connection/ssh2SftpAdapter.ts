@@ -117,6 +117,16 @@ interface Ssh2SftpClientInternals {
   } | null;
 }
 
+// list() and createExclusive() both run only after connect() has already
+// verified the 'sftp' session and every method it drives (see the guard
+// there), so a falsy session at either site means the connection was closed
+// or dropped after that successful connect, never an API change. Shared here
+// so the two throw sites cannot drift apart.
+const SFTP_SESSION_CLOSED_MESSAGE =
+  "SFTP session is not open: the connection was closed or dropped after a " +
+  "successful connect (typically a server idle or session-time-limit " +
+  "policy, or a network drop), so this operation cannot run.";
+
 export class SSH2SFTPClientAdapter implements FileTransportClient {
   private client: Ssh2SftpClient;
   private options: Ssh2SftpClient.ConnectOptions | undefined;
@@ -642,15 +652,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
    */
   list(path: string): Promise<FileInfo[]> {
     const { sftp } = this.client as unknown as Ssh2SftpClientInternals;
-    if (!sftp)
-      return Promise.reject(
-        new Error(
-          "SFTP session is not open; if this occurs after a successful " +
-            "connect(), the ssh2-sftp-client internal API may have changed - " +
-            "verify that the installed version still exposes the 'sftp' " +
-            "session property",
-        ),
-      );
+    if (!sftp) return Promise.reject(new Error(SFTP_SESSION_CLOSED_MESSAGE));
     const dead = this.deadSessionError("directory listing", path);
     if (dead) return Promise.reject(dead);
     // SSH_FX_EOF: the SFTP status code ssh2 reports (as err.code) from readdir
@@ -1132,15 +1134,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // check in connect(). The open-failure status handling is at the point of use
     // below.
     const { sftp } = this.client as unknown as Ssh2SftpClientInternals;
-    if (!sftp)
-      return Promise.reject(
-        new Error(
-          "SFTP session is not open; if this occurs after a successful " +
-            "connect(), the ssh2-sftp-client internal API may have changed - " +
-            "verify that the installed version still exposes the 'sftp' " +
-            "session property",
-        ),
-      );
+    if (!sftp) return Promise.reject(new Error(SFTP_SESSION_CLOSED_MESSAGE));
     const dead = this.deadSessionError("exclusive create", path);
     if (dead) return Promise.reject(dead);
     // SSH_FXF_WRITE (0x02) | SSH_FXF_CREAT (0x08) | SSH_FXF_EXCL (0x20)
