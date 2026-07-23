@@ -255,6 +255,11 @@ export function useInviterExchange({
    * the exchange holding the appliance's single slot -- the run surface then heads
    * with recovery-style copy rather than fresh-success copy. */
   reattached: JobRunStatus | undefined;
+  /** True from the moment a busy (409) create is detected until the liveness probe
+   * settles: the interim during which the run surface suppresses the fresh-run
+   * share block and shows a brief reconnecting notice, before it either resolves
+   * to the recovery view (`reattached`) or falls back to the run's alert. */
+  reattaching: boolean;
   tryAgain: () => void;
   abandonRun: () => void;
 } {
@@ -266,6 +271,11 @@ export function useInviterExchange({
   // else undefined. Drives the run surface's recovery-style copy; reset when a run
   // restarts or the invitation is discarded.
   const [reattached, setReattached] = useState<JobRunStatus>();
+  // True while a detected busy (409) create is being resolved to a re-attachment,
+  // before the liveness probe settles. Drives the interim reconnecting notice and
+  // the fresh-run share-block suppression; reset when a run restarts or the
+  // invitation is discarded.
+  const [reattaching, setReattaching] = useState(false);
   // The current run's appliance job id as reactive state (the ref below drives the
   // synchronous discard paths). Set on create, cleared when a run restarts or the
   // invitation is discarded, so the recurring hand-off panel reads only the live run.
@@ -323,6 +333,7 @@ export function useInviterExchange({
     setWarnings([]);
     setCurrentJobId(undefined);
     setReattached(undefined);
+    setReattaching(false);
 
     // Output-generation half. The URLs the build creates are revoked when the
     // outputs are replaced or the bench unmounts (effect above); a throw
@@ -471,6 +482,10 @@ export function useInviterExchange({
         // sanitized in failureFor.
         whenDiagnostic(() => console.error(error));
         if (isExchangeBusyError(error)) {
+          // Enter the reconnecting interim the instant the 409 is known, before
+          // the liveness probe round trip -- this suppresses the fresh-run share
+          // block (which would otherwise flash) and announces the reconnect.
+          setReattaching(true);
           void reattachOnBusy({
             error,
             client: jobApiClient,
@@ -480,10 +495,14 @@ export function useInviterExchange({
             onReattaching: (id, status) => {
               currentJobIdRef.current = id;
               setCurrentJobId(id);
+              setReattaching(false);
               setReattached(status);
             },
           }).then((didReattach) => {
-            if (!didReattach) raiseFailure(category, error);
+            if (!didReattach) {
+              setReattaching(false);
+              raiseFailure(category, error);
+            }
           });
           return;
         }
@@ -524,6 +543,7 @@ export function useInviterExchange({
       setWarnings([]);
       setCurrentJobId(undefined);
       setReattached(undefined);
+      setReattaching(false);
       return;
     }
     startRef.current(invitation);
@@ -589,6 +609,7 @@ export function useInviterExchange({
     warnings,
     jobId: currentJobId,
     reattached,
+    reattaching,
     tryAgain,
     abandonRun,
   };

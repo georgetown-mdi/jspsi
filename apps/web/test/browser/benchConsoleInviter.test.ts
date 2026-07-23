@@ -90,8 +90,13 @@ interface StubOptions {
   coverageStatus?: number;
   /** When set, `POST /api/jobs` returns a busy (409) carrying this id (the slot is
    * occupied), and the id's status/events routes are served so the client can
-   * re-attach to it. */
-  conflict?: { jobId: string; status?: string };
+   * re-attach to it. `holdProbe` withholds the FIRST status GET (the liveness
+   * probe) until `resolveProbe()` is called, so a test can observe the reconnecting
+   * interim before the recovery view lands. */
+  conflict?: { jobId: string; status?: string; holdProbe?: boolean };
+  /** The body `GET /api/jobs/:id/handoff` serves (the recurring-run hand-off); a
+   * 404 when unset, so the panel renders nothing. */
+  handoff?: unknown;
 }
 
 /** The same-origin job API, stubbed at the global fetch seam. Unmatched URLs fall
@@ -103,11 +108,19 @@ function stubJobApi(options: StubOptions = {}): {
   setJobStatus: (status: string) => void;
   emitEvent: (event: object) => void;
   closeEvents: () => void;
+  resolveProbe: () => void;
 } {
   const captured: Array<CapturedRequest> = [];
   const encoder = new TextEncoder();
   let sse: ReadableStreamDefaultController<Uint8Array> | undefined;
   const realFetch = window.fetch.bind(window);
+  // The gate the held liveness probe (conflict.holdProbe) awaits; the first
+  // status GET blocks on it, later ones (record availability) resolve at once.
+  let releaseProbe: (() => void) | undefined;
+  const probeGate = new Promise<void>((resolve) => {
+    releaseProbe = resolve;
+  });
+  let firstProbeHeld = false;
   let listing: unknown = options.listing ?? {
     configured: true,
     files: [CLIENTS_FILE],
@@ -163,6 +176,12 @@ function stubJobApi(options: StubOptions = {}): {
             ? jsonResponse({ id: options.conflict.jobId }, 409)
             : jsonResponse({ id: "job-7" }, 201),
         );
+      if (url.endsWith("/handoff"))
+        return Promise.resolve(
+          options.handoff !== undefined
+            ? jsonResponse(options.handoff)
+            : new Response(null, { status: 404 }),
+        );
       if (options.conflict !== undefined) {
         const cid = options.conflict.jobId;
         if (url === `/api/jobs/${cid}/events`)
@@ -176,13 +195,18 @@ function stubJobApi(options: StubOptions = {}): {
               { status: 200, headers: { "Content-Type": "text/event-stream" } },
             ),
           );
-        if (url === `/api/jobs/${cid}`)
-          return Promise.resolve(
+        if (url === `/api/jobs/${cid}`) {
+          const respond = () =>
             jsonResponse({
-              status: options.conflict.status ?? "running",
+              status: options.conflict?.status ?? "running",
               recordAvailable: false,
-            }),
-          );
+            });
+          if (options.conflict.holdProbe === true && !firstProbeHeld) {
+            firstProbeHeld = true;
+            return probeGate.then(respond);
+          }
+          return Promise.resolve(respond());
+        }
       }
       if (url === "/api/jobs/job-7/events")
         return Promise.resolve(
@@ -222,6 +246,7 @@ function stubJobApi(options: StubOptions = {}): {
     emitEvent: (event) =>
       sse?.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`)),
     closeEvents: () => sse?.close(),
+    resolveProbe: () => releaseProbe?.(),
   };
 }
 
@@ -941,11 +966,23 @@ describe("console inviter sample-data copy", () => {
 });
 
 describe("console inviter re-attaches on a busy create", () => {
+  const REATTACH_HANDOFF = {
+    mode: "exchange",
+    channel: "sftp",
+    usedKeyFile: true,
+    credentialPasted: false,
+    template: {
+      kind: "config",
+      yaml: "connection:\n  channel: sftp\n  server:\n    host: sftp.example.gov\n",
+    },
+  };
+
   test("a 409 at create re-attaches with recovery-style copy, not the busy alert", async () => {
     // The slot is occupied: the create 409s carrying the live occupant's id.
     const api = stubJobApi({
       sftp: { configured: true, host: "dr.example.gov", port: 2222 },
       conflict: { jobId: "job-live", status: "running" },
+      handoff: REATTACH_HANDOFF,
     });
     mount(createElement(InviterBench));
     await reachReviewCreate();
@@ -972,6 +1009,18 @@ describe("console inviter re-attaches on a busy create", () => {
       page.getByText("This appliance is already running an exchange").query(),
     ).toBeNull();
 
+    // The one surface built for leave-and-return carries the keep-open
+    // reassurance -- leaving does not stop the appliance's run.
+    await expect
+      .element(
+        page.getByText("the exchange keeps running here", { exact: false }),
+      )
+      .toBeInTheDocument();
+    // A re-attached run must not re-offer sharing an invitation.
+    expect(
+      page.getByRole("heading", { name: "Share this invitation" }).query(),
+    ).toBeNull();
+
     // The resolved id was probed live and its event stream re-attached to, and the
     // strand-recovery record now names it (a server-created orphan becomes
     // recoverable).
@@ -986,8 +1035,10 @@ describe("console inviter re-attaches on a busy create", () => {
       ),
     ).toMatchObject({ jobId: "job-live", seat: "inviter" });
 
-    // The replay's terminal result heads the surface finished (still recovery
-    // copy, never "Exchange complete") and offers the appliance downloads.
+    // The replay's terminal result heads the surface finished (recovery copy, not
+    // the fresh-run "Exchange complete" title) yet still shows the completion
+    // affordances: the results summary panel AND the recurring-run hand-off, the
+    // console's graduation payoff.
     api.emitEvent({ v: 1, type: "result", resultWritten: true });
     api.closeEvents();
     await expect
@@ -998,6 +1049,63 @@ describe("console inviter re-attaches on a busy create", () => {
         }),
       )
       .toBeInTheDocument();
-    expect(page.getByText("Exchange complete").query()).toBeNull();
+    await expect
+      .element(page.getByText("Exchange complete", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("heading", { name: "Run this exchange on a schedule" }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("a busy create shows an announced reconnecting interim before the recovery view", async () => {
+    // Hold the liveness probe so the reconnecting interim is observable.
+    const api = stubJobApi({
+      sftp: { configured: true, host: "dr.example.gov", port: 2222 },
+      conflict: { jobId: "job-live", status: "running", holdProbe: true },
+    });
+    mount(createElement(InviterBench));
+    await reachReviewCreate();
+    await page.getByRole("button", { name: "Create the invitation" }).click();
+
+    // The moment the 409 is known -- before the probe settles -- the surface heads
+    // reconnecting and announces it in a live region, killing the fresh-run flash.
+    await expect
+      .element(
+        page.getByRole("heading", {
+          level: 1,
+          name: "Reconnecting to your exchange",
+        }),
+      )
+      .toBeInTheDocument();
+    await vi.waitFor(() => {
+      const region = Array.from(
+        document.querySelectorAll('[role="status"]'),
+      ).find((el) =>
+        el.textContent.includes("Reconnecting to your running exchange"),
+      );
+      expect(region).toBeDefined();
+    });
+    // No fresh-run share block flashes during the interim.
+    expect(
+      page.getByRole("heading", { name: "Share this invitation" }).query(),
+    ).toBeNull();
+
+    // Releasing the probe resolves the interim into the full recovery view.
+    api.resolveProbe();
+    await expect
+      .element(
+        page.getByRole("heading", {
+          level: 1,
+          name: "An exchange started from this console is still running",
+        }),
+      )
+      .toBeInTheDocument();
+    await vi.waitFor(() =>
+      expect(
+        api.captured.some((r) => r.url === "/api/jobs/job-live/events"),
+      ).toBe(true),
+    );
   });
 });

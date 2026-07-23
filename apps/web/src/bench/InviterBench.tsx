@@ -317,6 +317,7 @@ export function InviterBench() {
     warnings,
     jobId,
     reattached,
+    reattaching,
     tryAgain,
     abandonRun,
   } = useInviterExchange({
@@ -1273,6 +1274,7 @@ export function InviterBench() {
               serverJob={chosenRunMode === "server-job"}
               jobId={jobId}
               reattached={reattached}
+              reattaching={reattaching}
               onTryAgain={tryAgain}
               onStartOver={startOver}
               onAbandon={abandonRun}

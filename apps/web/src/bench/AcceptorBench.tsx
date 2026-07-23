@@ -694,10 +694,18 @@ export function AcceptorBench() {
     // decode, so keying the memo on it alone cannot go stale.
   }, [launched]);
 
-  const { run, outputs, failure, jobId, reattached, tryAgain, abandonRun } =
-    useAcceptorExchange({
-      launch,
-    });
+  const {
+    run,
+    outputs,
+    failure,
+    jobId,
+    reattached,
+    reattaching,
+    tryAgain,
+    abandonRun,
+  } = useAcceptorExchange({
+    launch,
+  });
 
   // The unload guard arms once the acceptor's file is chosen -- a browser drop on
   // the hosted build, or a committed mounted-file profile on the console -- and
@@ -1340,6 +1348,7 @@ export function AcceptorBench() {
               serverJob={acceptServerJob}
               jobId={jobId}
               reattached={reattached}
+              reattaching={reattaching}
               onTryAgain={tryAgain}
               onFixColumns={backToColumns}
               onAbandon={abandonRun}

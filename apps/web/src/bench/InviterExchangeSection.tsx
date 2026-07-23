@@ -11,7 +11,9 @@ import {
   DonePanel,
   DownloadRow,
   FailureAlert,
+  RECONNECTING_HEADING,
   ReattachedRunNotice,
+  ReattachingNotice,
   RunWarningsAlert,
   SERVER_JOB_KEEP_OPEN_BODY,
   SERVER_JOB_PEER_WINDOW_BODY,
@@ -49,6 +51,7 @@ export function InviterExchangeSection({
   serverJob,
   jobId,
   reattached,
+  reattaching,
   onTryAgain,
   onStartOver,
   onAbandon,
@@ -78,9 +81,15 @@ export function InviterExchangeSection({
   /** The live status of the exchange this run re-attached to on a busy (409)
    * create, or undefined on a fresh run. When set, the surface heads with
    * recovery-style copy (it is watching an exchange the appliance already held,
-   * not a fresh one) and drops the fresh-run share / keep-open / completion
-   * framing. */
+   * not a fresh one) and drops the fresh-run share / keep-open framing, while
+   * keeping the completion affordances -- the results summary and the recurring
+   * hand-off -- so the operator still sees their run's outcome and graduation. */
   reattached: JobRunStatus | undefined;
+  /** True during the brief interim between a busy (409) create being detected and
+   * the liveness probe settling: the surface suppresses the fresh-run share block
+   * and shows a reconnecting notice, before it resolves to the recovery view or
+   * the run's alert. */
+  reattaching: boolean;
   onTryAgain: () => void;
   onStartOver: () => void;
   /** Discard the current server-job exchange (cancel-if-running + DELETE), fired
@@ -93,15 +102,21 @@ export function InviterExchangeSection({
     outputs !== undefined ? "done" : awaitingPartner(run) ? "share" : "running";
 
   // A busy (409) create at start re-attached this surface to an exchange the
-  // appliance already held (a second tab, a navigate-away-and-back, or an
-  // orphaned job). It then heads with recovery-style copy and drops the fresh-run
-  // share / keep-open / completion framing, so it never reads as a fresh success.
+  // appliance already held (a second tab, a navigate-away-and-back, or an orphaned
+  // job). It then heads with recovery-style copy and drops the fresh-run share /
+  // keep-open framing, so it never reads as a fresh success -- but the completion
+  // affordances (the results summary and the recurring hand-off) still show, since
+  // those hold however the operator reached completion.
   const reattachedRun = reattached !== undefined;
   const reattachState = reattachedRunState({
     failed: failure !== undefined,
     hasOutputs: outputs !== undefined,
     status: reattached ?? "running",
   });
+  // Fresh-run framing (the share block, the keep-open callout, the fresh title) is
+  // suppressed both once re-attached and during the reconnecting interim, so the
+  // fresh block never flashes while the 409 is being resolved.
+  const recovering = reattaching || reattachedRun;
 
   // A retry is genuine only while the invitation can still be accepted:
   // re-listening on a lapsed credential cannot succeed, so an expired
@@ -121,10 +136,12 @@ export function InviterExchangeSection({
   // partner connects or a retry clears the alert -- the share block or the
   // alert (either of which may hold focus, on a copy button or the Try again
   // button) unmounts, so without this the browser drops focus to <body> --
-  // and at completion, so the results are read. The recovery moves fire only
-  // when focus was actually orphaned onto <body>, so focus the user placed on
-  // a live element is not stolen; completion always moves it. While a failure
-  // is showing, the alert-focus effect below owns the moment.
+  // and at completion, so the results are read. The reconnecting-interim and
+  // recovery swaps run through it too (via the deps) so an orphaned focus lands
+  // on the recovery heading. The recovery moves fire only when focus was
+  // actually orphaned onto <body>, so focus the user placed on a live element is
+  // not stolen; completion always moves it. While a failure is showing, the
+  // alert-focus effect below owns the moment.
   const headingRef = useRef<HTMLHeadingElement>(null);
   const mounted = useRef(false);
   useEffect(() => {
@@ -139,15 +156,17 @@ export function InviterExchangeSection({
     if (failure !== undefined) return;
     const active = document.activeElement;
     if (!active || active === document.body) headingRef.current?.focus();
-  }, [phase, failure]);
+  }, [phase, failure, reattaching, reattachedRun]);
 
   const title = reattachedRun
     ? recoveredExchangeHeading(reattachState)
-    : phase === "done"
-      ? "Exchange complete"
-      : phase === "running"
-        ? "Exchange in progress"
-        : "Your invitation is ready";
+    : reattaching
+      ? RECONNECTING_HEADING
+      : phase === "done"
+        ? "Exchange complete"
+        : phase === "running"
+          ? "Exchange in progress"
+          : "Your invitation is ready";
 
   return (
     <>
@@ -155,6 +174,7 @@ export function InviterExchangeSection({
         {title}
       </h1>
       {reattachedRun && <ReattachedRunNotice state={reattachState} />}
+      {reattaching && !reattachedRun && <ReattachingNotice />}
       {failure !== undefined && (
         <FailureAlert failure={failure}>
           {retryable && (
@@ -176,7 +196,7 @@ export function InviterExchangeSection({
           retryable failure's link stays valid for another attempt. */}
       {phase === "share" &&
         (failure === undefined || retryable) &&
-        !reattachedRun && (
+        !recovering && (
           <>
             <h2>Share this invitation</h2>
             {partnerAcceptsByCli ? (
@@ -223,7 +243,7 @@ export function InviterExchangeSection({
           still holds, so it does not extend past the share phase. */}
       {(phase === "share" || (phase === "running" && serverJob)) &&
         failure === undefined &&
-        !reattachedRun && (
+        !recovering && (
           <div className={styles.callout}>
             <p className={styles.calloutLead}>Keep this tab open.</p>
             <p className={styles.small}>
@@ -236,7 +256,7 @@ export function InviterExchangeSection({
             )}
           </div>
         )}
-      {phase === "done" && !reattachedRun && (
+      {phase === "done" && (
         <DonePanel
           matchedRecordCount={outputs?.matchedRecordCount}
           finishedAt={run.finishedAt}
@@ -277,10 +297,9 @@ export function InviterExchangeSection({
           )}
         </>
       )}
-      {phase === "done" &&
-        serverJob &&
-        jobId !== undefined &&
-        !reattachedRun && <RecurringHandoff jobId={jobId} />}
+      {phase === "done" && serverJob && jobId !== undefined && (
+        <RecurringHandoff jobId={jobId} />
+      )}
       {(phase === "done" || failure?.category === "output") && (
         <AnotherExchangeFoot
           onNavigate={onAbandon}
