@@ -206,7 +206,11 @@ export function addCommonBootstrapOptions(
     })
     .option("max-reconnect-attempts", {
       type: "number",
-      describe: "maximum reconnection attempts before giving up; default: 3",
+      describe:
+        "how many times to retry dialing the connection within a single " +
+        "connect attempt after a fast transient failure; default: 3. It bounds " +
+        "every connect, including each mid-exchange re-dial's own dialing " +
+        "retries, but not the number of mid-exchange re-dials, which is uncapped.",
     })
     .option("log-level", {
       type: "string",

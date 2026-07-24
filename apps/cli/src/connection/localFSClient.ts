@@ -101,6 +101,16 @@ export class LocalFSClient implements FileTransportClient {
   }
 
   /**
+   * Mid-exchange session-recovery re-dials over this client's life. Always 0 for
+   * the filedrop transport: it holds no long-lived session to drop mid-exchange,
+   * so there is nothing to re-dial. Present so both file-transport clients expose
+   * the same metrics surface.
+   */
+  get midExchangeReconnectCount(): number {
+    return 0;
+  }
+
+  /**
    * Verifies read/write access to the directory specified by `options.path`.
    * Enforces `options.connectTimeoutMs` (default: 30s) per attempt. A fast
    * transient failure (e.g. the share or its permissions still settling) is

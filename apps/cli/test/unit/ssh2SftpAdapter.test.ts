@@ -9,7 +9,10 @@ import {
   UsageError,
 } from "@psilink/core";
 
-import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
+import {
+  SSH2SFTPClientAdapter,
+  SFTP_REDIAL_WARN_INTERVAL,
+} from "../../src/connection/ssh2SftpAdapter";
 import {
   MAX_DIRECTORY_ENTRIES,
   MAX_FILENAME_LENGTH,
@@ -118,6 +121,9 @@ describe("connect retry", () => {
       // per-operation transport-retry counter is untouched by connect.
       expect(adapter.reconnectCount).toBe(2);
       expect(adapter.transportRetryCount).toBe(0);
+      // Connect-time retries are NOT mid-exchange re-dials, so the sub-count the
+      // summary reports apart from the total stays zero.
+      expect(adapter.midExchangeReconnectCount).toBe(0);
     } finally {
       vi.useRealTimers();
     }
@@ -2993,12 +2999,118 @@ describe("session recovery", () => {
 
     await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
     expect(adapter.reconnectCount).toBe(0);
+    expect(adapter.midExchangeReconnectCount).toBe(0);
     state.live = false;
 
     await adapter.list("/remote/dir");
     // The recovery re-dial's connect() succeeded on its first attempt, so connect()
-    // added zero; the recovery increment is what surfaces the survived drop.
+    // added zero; the recovery increment is what surfaces the survived drop. It
+    // registers in BOTH the merged reconnect total and the mid-exchange sub-count,
+    // which the end-of-run summary reports apart from connect-time retries.
     expect(adapter.reconnectCount).toBe(1);
+    expect(adapter.midExchangeReconnectCount).toBe(1);
+  });
+
+  test("warns the operator on the first mid-exchange re-dial, naming cause and remedy", async () => {
+    // A silent recovery would hide a partner whose server caps session lifetime,
+    // exactly the case this feature exists for. The first re-dial must WARN, and
+    // the line must name the drop, the likely (partner-side, unchangeable) cause,
+    // and the remedy so the operator can act.
+    const wrapper = sessionWrapper({
+      opendir: (_p: string, cb: (e: Error | null, h: Buffer) => void) =>
+        cb(null, Buffer.from("h")),
+      readdir: (
+        _h: Buffer,
+        cb: (e: (Error & { code?: number }) | null, l?: unknown[]) => void,
+      ) => cb(Object.assign(new Error("EOF"), { code: 1 })),
+      close: (_h: Buffer, cb: (e: Error | null) => void) => cb(null),
+    });
+    const { client, state } = droppable(wrapper);
+    const adapter = new SSH2SFTPClientAdapter();
+    const warn = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+    state.live = false;
+    await adapter.list("/remote/dir");
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const message = warn.mock.calls[0][0] as string;
+    // (a) states the drop was mid-exchange and transparently re-dialed, and
+    //     reassures that the exchange continues
+    expect(message).toContain("dropped mid-exchange");
+    expect(message).toContain("transparently");
+    expect(message).toContain("the exchange continues");
+    // (b) names the likely cause: a partner-side session-duration/idle cap the
+    //     operator cannot change
+    expect(message).toContain("session-duration or idle limit");
+    expect(message).toContain("cannot");
+    // (c) names the real remedy under the current single-session model -- the
+    //     planned connection-per-poll mode -- and is honest that a longer poll
+    //     interval helps only for a query-frequency reaction
+    expect(message).toContain("--polling-frequency");
+    expect(message).toContain("connection-per-poll");
+    // (d) does NOT repeat the stale, inaccurate claim that raising the poll
+    //     interval holds the session open less often (it does not: one session is
+    //     held open for the whole exchange regardless of poll cadence)
+    expect(message).not.toContain("held open less often");
+  });
+
+  test("escalates by rate, not one warn line per mid-exchange drop", async () => {
+    // A chronic capper must stay visible without spamming a warn line every poll
+    // cycle: after the first re-dial the adapter warns only every
+    // SFTP_REDIAL_WARN_INTERVAL-th, so a full interval of drops yields two lines
+    // (the first drop and the Nth), never one per drop.
+    const wrapper = sessionWrapper({
+      opendir: (_p: string, cb: (e: Error | null, h: Buffer) => void) =>
+        cb(null, Buffer.from("h")),
+      readdir: (
+        _h: Buffer,
+        cb: (e: (Error & { code?: number }) | null, l?: unknown[]) => void,
+      ) => cb(Object.assign(new Error("EOF"), { code: 1 })),
+      close: (_h: Buffer, cb: (e: Error | null) => void) => cb(null),
+    });
+    const { client, state } = droppable(wrapper);
+    const adapter = new SSH2SFTPClientAdapter();
+    const warn = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { warn, trace: vi.fn(), error: vi.fn() };
+    install(adapter, client);
+
+    await adapter.connect({ host: "h", maxReconnectAttempts: 2 });
+
+    // Drop and recover once per poll for a full escalation interval; connect()
+    // restores state.live on each re-dial.
+    for (let i = 0; i < SFTP_REDIAL_WARN_INTERVAL; i += 1) {
+      state.live = false;
+      await adapter.list("/remote/dir");
+    }
+
+    // Every drop was transparently recovered ...
+    expect(adapter.reconnectCount).toBe(SFTP_REDIAL_WARN_INTERVAL);
+    expect(adapter.midExchangeReconnectCount).toBe(SFTP_REDIAL_WARN_INTERVAL);
+    // ... but the operator saw only two warn lines (the first drop and the Nth),
+    // never one per drop.
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn.mock.calls.length).toBeLessThan(SFTP_REDIAL_WARN_INTERVAL);
+    // Both messages reassure that the exchange survives the drop and stay honest
+    // about the current single-session model (no "held open less often" claim).
+    const first = warn.mock.calls[0][0] as string;
+    expect(first).toContain("the exchange continues");
+    expect(first).not.toContain("held open less often");
+    const escalation = warn.mock.calls[1][0] as string;
+    expect(escalation).toContain(`${SFTP_REDIAL_WARN_INTERVAL} times`);
+    expect(escalation).toContain("the exchange continues");
+    // The escalation hedges the cause exactly as the first-drop message does: the
+    // adapter cannot tell a session-duration cap from an idle cap, so it names
+    // both rather than asserting one, and never claims to know it is a duration cap.
+    expect(escalation).toContain("session-duration or idle limit");
+    expect(escalation).not.toContain("capping session lifetime");
+    expect(escalation).toContain("--polling-frequency");
+    expect(escalation).toContain("connection-per-poll");
+    expect(escalation).not.toContain("held open less often");
   });
 
   test("closes a session dialed during teardown and surfaces the original loss", async () => {
