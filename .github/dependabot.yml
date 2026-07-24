@@ -118,3 +118,6 @@ updates:
       - dependency-name: "aws-actions/*"
         update-types:
           ["version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "github/*"
+        update-types:
+          ["version-update:semver-minor", "version-update:semver-patch"]
