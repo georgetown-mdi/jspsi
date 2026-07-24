@@ -1,6 +1,6 @@
 {
   "description": "Contract of the vendored @openmined/psi.js native prebuild tarball, re-derived from the committed lib/*.tgz by psiPrebuildManifest.test.ts. The .tgz.sha256 sidecar pins the exact bytes; this pins their MEANING -- which platforms ship, how the linux prebuilds are libc-tagged, that the musl builds are genuinely musl-linked, and the glibc floor the glibc builds link against -- so a silent re-vendor that drops a platform, changes tagging, corrupts the WASM fallback, or raises the glibc floor fails CI instead of degrading to WASM unnoticed. When the tarball is re-vendored (bytes change, sha256 updated), update this file to match the new artifact.",
-  "tarball": "lib/openmined-psi.js-2.0.6-seclink.2.tgz",
+  "tarball": "lib/openmined-psi.js-2.0.6-seclink.3.tgz",
   "platforms": [
     "darwin-arm64",
     "darwin-x64",
